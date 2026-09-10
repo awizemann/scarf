@@ -59,15 +59,86 @@ public extension HermesConfig {
             guard let v = scalar(key) else { return true }
             return !["false", "0", "no", "off"].contains(v.lowercased())
         }
-        // `boolTrueDefault` over an ordered key list: the FIRST key PRESENT in
-        // config.yaml decides, and only "absent at every spelling" reads as the
-        // `true` default. Used where Hermes accepts the value at several paths
-        // with a defined precedence (Slack's top-level-over-`extra:` bridge) —
-        // a plain `??` chain over raw values would pick the first NON-NIL raw
-        // string and then compare it literally, which is the bug this replaces.
-        func boolTrueDefaultAt(_ keys: [String]) -> Bool {
-            for key in keys where scalar(key) != nil { return boolTrueDefault(key) }
-            return true
+        // Raw scalar for a `_SHARED_KEYS` member of a gateway platform,
+        // resolved with Hermes's OWN precedence rather than a key list ordered
+        // by guesswork. `gateway/config_loader.py` @ v2026.9.7 decides it in
+        // two steps:
+        //
+        //  1. `platform_section` (:171-180) picks ONE section to bridge from —
+        //     "a top-level `<name>:` block wins; otherwise the block under
+        //     `gateway.platforms` / `platforms`". A top-level block therefore
+        //     does not merely out-rank the nested one key-by-key: it REPLACES
+        //     it as the bridge source, so with `slack:` present at the top
+        //     level a `platforms.slack.require_mention` is never bridged and
+        //     never reaches the adapter at all.
+        //  2. `bridge_platform_shared_keys` (:249-283) copies the chosen
+        //     section's shared keys into the platform's `extra` with
+        //     `extra.update(bridged)` (:283) — so a bridged value OVERWRITES
+        //     whatever `merge_platform_sections` (:136-147) had already merged
+        //     into `extra` from the `extra:` sub-keys, and within that merge
+        //     `platforms.<p>.extra` wins over `gateway.platforms.<p>.extra`.
+        //
+        // Hence: bridge source first, then the two `extra:` spellings. A
+        // top-level block is detected as Hermes detects it — `isinstance(…,
+        // dict)`, i.e. the block has at least one child (a bare `slack:` with
+        // no children is `None` to PyYAML and is NOT a dict, which is exactly
+        // what "no `slack.*` key in the flat parse" means here).
+        func sharedPlatformScalar(_ plat: String, _ key: String) -> String? {
+            func raw(_ section: String) -> String? {
+                // `maps[section]` covers the inline flow form
+                // (`slack: {require_mention: false}`), which the flat parse
+                // keeps as a map rather than dotted keys.
+                values["\(section).\(key)"] ?? maps[section]?[key]
+            }
+            func isBlock(_ section: String) -> Bool {
+                if maps[section]?.isEmpty == false { return true }
+                let dot = section + "."
+                return values.keys.contains { $0.hasPrefix(dot) }
+                    || lists.keys.contains { $0.hasPrefix(dot) }
+                    || maps.keys.contains { $0.hasPrefix(dot) }
+            }
+            let bridgeSource: String
+            if isBlock(plat) {
+                bridgeSource = plat
+            } else if isBlock("gateway.platforms.\(plat)") {
+                bridgeSource = "gateway.platforms.\(plat)"
+            } else {
+                bridgeSource = "platforms.\(plat)"
+            }
+            return raw(bridgeSource)
+                ?? raw("platforms.\(plat).extra")
+                ?? raw("gateway.platforms.\(plat).extra")
+        }
+        /// A `_SHARED_KEYS` boolean with a TRUE host default, read through
+        /// `sharedPlatformScalar`'s precedence and Hermes's boolish sets.
+        func sharedPlatformBool(_ plat: String, _ key: String, default def: Bool) -> Bool {
+            HermesYAML.boolishValue(sharedPlatformScalar(plat, key)) ?? def
+        }
+        // `display.busy_ack_enabled` is the ONE boolean key in config.yaml whose
+        // effective vocabulary is NOT the universal boolish set, because it
+        // reaches its reader through an env bridge that stringifies:
+        //
+        //   gateway/run.py:1813  `_DISPLAY_ENV_BRIDGE` maps it to
+        //                        HERMES_GATEWAY_BUSY_ACK_ENABLED
+        //   gateway/run.py:1818  `os.environ[env_var] = str(section[cfg_key])`
+        //   gateway/run_busy.py:727
+        //     `if os.environ.get(..., "true").lower() != "true": return True`
+        //                        (i.e. anything but the word "true" DISABLES)
+        //
+        // PyYAML has already turned the YAML scalar into a Python object, so
+        // `str()` sees `True`/`False`/`1`/`0`. `true`/`yes`/`on` all load as
+        // `True` → `"true"` → ack ENABLED; but `1` loads as the INT 1 →
+        // `str(1)` = `"1"` ≠ `"true"` → ack DISABLED, even though every other
+        // boolean key in the file reads `1` as on. `boolTrueDefault` therefore
+        // reported the ack ON for a host that had suppressed it.
+        //
+        // Absent key → the bridge never runs → `os.environ.get(…, "true")` →
+        // enabled, which is why this is still a true-by-default key.
+        func busyAckEnabled() -> Bool {
+            guard let v = scalar("display.busy_ack_enabled") else { return true }
+            // The YAML 1.1 spellings PyYAML's bool resolver loads as `True`;
+            // `str(True).lower()` is the only thing that equals "true".
+            return ["true", "yes", "on"].contains(v.lowercased())
         }
         func int(_ key: String, default def: Int) -> Int {
             Int(scalar(key) ?? "") ?? def
@@ -136,7 +207,18 @@ public extension HermesConfig {
         }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]
-        let commandAllowlist = lists["permanent_allowlist"] ?? lists["command_allowlist"] ?? []
+        // `command_allowlist` is the ONLY spelling Hermes reads or writes:
+        // `tools/approval.py::load_permanent_allowlist` does
+        // `config.get("command_allowlist")` (:327-332 @ v2026.9.7) and
+        // `save_permanent_allowlist` writes `config["command_allowlist"]`
+        // (:358-366). A whole-tree grep for `permanent_allowlist` as a CONFIG
+        // key finds nothing at any of the 32 `v2026.*` tags — the phrase only
+        // ever names the two Python functions and the in-process set they
+        // maintain. Preferring it here meant a config carrying BOTH keys
+        // showed the one Hermes ignores, and `hermes approvals suggest
+        // --apply` (which round-trips through `save_permanent_allowlist`)
+        // wrote into the other.
+        let commandAllowlist = lists["command_allowlist"] ?? []
 
         let display = DisplaySettings(
             skin: str("display.skin", default: "default"),
@@ -166,12 +248,21 @@ public extension HermesConfig {
             dockerForwardEnv: lists["terminal.docker_forward_env"] ?? [],
             dockerVolumes: lists["terminal.docker_volumes"] ?? [],
             dockerExtraArgs: lists["terminal.docker_extra_args"] ?? [],
-            containerCPU: int("terminal.container_cpu", default: 0),
-            containerMemory: int("terminal.container_memory", default: 0),
-            containerDisk: int("terminal.container_disk", default: 0),
-            containerPersistent: boolish("terminal.container_persistent", default: false),
+            // Hermes's own container limits, not zeroes. `config_defaults.py`
+            // :318-321 @ v2026.9.7 reads `container_cpu: 1`,
+            // `container_memory: 5120`, `container_disk: 51200`,
+            // `container_persistent: True`, and a tag walk of DEFAULT_CONFIG
+            // across all 32 `v2026.*` tags shows the same four values at every
+            // tag from v2026.3.30 (v0.6.0, the supported minimum) onwards — so
+            // these are literals, not sentinels. Parsing them as 0/0/0/false
+            // rendered every container-backend host as "no CPU, no memory, no
+            // disk, wiped between sessions".
+            containerCPU: int("terminal.container_cpu", default: 1),
+            containerMemory: int("terminal.container_memory", default: 5120),
+            containerDisk: int("terminal.container_disk", default: 51200),
+            containerPersistent: boolish("terminal.container_persistent", default: true),
             modalImage: str("terminal.modal_image"),
-            modalMode: str("terminal.modal_mode", default: "auto"),
+            modalMode: strEnum("terminal.modal_mode", default: "auto"),
             daytonaImage: str("terminal.daytona_image"),
             singularityImage: str("terminal.singularity_image")
         )
@@ -193,9 +284,9 @@ public extension HermesConfig {
             ttsElevenLabsVoiceID: str("tts.elevenlabs.voice_id"),
             ttsElevenLabsModelID: str("tts.elevenlabs.model_id", default: "eleven_multilingual_v2"),
             ttsOpenAIModel: str("tts.openai.model", default: "gpt-4o-mini-tts"),
-            ttsOpenAIVoice: str("tts.openai.voice", default: "alloy"),
+            ttsOpenAIVoice: strEnum("tts.openai.voice", default: "alloy"),
             ttsNeuTTSModel: str("tts.neutts.model"),
-            ttsNeuTTSDevice: str("tts.neutts.device", default: "cpu"),
+            ttsNeuTTSDevice: strEnum("tts.neutts.device", default: "cpu"),
             sttEnabled: boolTrueDefault("stt.enabled"),
             // Empty means the key is absent. Hermes v0.20.5 stopped seeding
             // `stt.provider` in config_defaults.py, so an absent key is the
@@ -204,7 +295,7 @@ public extension HermesConfig {
             // `local`, which the picker surfaces via its "Auto" label — see
             // `SettingsViewModel.sttProviders`.
             sttProvider: strEnum("stt.provider"),
-            sttLocalModel: str("stt.local.model", default: "base"),
+            sttLocalModel: strEnum("stt.local.model", default: "base"),
             sttLocalLanguage: str("stt.local.language"),
             sttOpenAIModel: str("stt.openai.model", default: "whisper-1"),
             sttMistralModel: str("stt.mistral.model", default: "voxtral-mini-latest"),
@@ -225,7 +316,7 @@ public extension HermesConfig {
             sttOpenAILanguage: str("stt.openai.language"),
             // v0.19.1 round-trip (hasSTTUnifiedLanguage).
             sttLanguage: str("stt.language", default: "en"),
-            sttGroqModel: str("stt.groq.model", default: "whisper-large-v3-turbo"),
+            sttGroqModel: strEnum("stt.groq.model", default: "whisper-large-v3-turbo"),
             sttGroqLanguage: str("stt.groq.language"),
             // v0.19.1 round-trip (hasSTTLocalVADTuning).
             sttLocalVAD: boolTrueDefault("stt.local.vad"),
@@ -239,7 +330,7 @@ public extension HermesConfig {
             sttCloudTrimSilence: boolTrueDefault("stt.cloud_trim_silence"),
             sttCloudTrimThresholdDB: double("stt.cloud_trim_threshold_db", default: -40),
             sttCloudTrimKeepMS: int("stt.cloud_trim_keep_ms", default: 300),
-            wakeWordCapture: str("wake_word.capture", default: "auto")
+            wakeWordCapture: strEnum("wake_word.capture", default: "auto")
         )
 
         func aux(_ name: String) -> AuxiliaryModel {
@@ -333,7 +424,7 @@ public extension HermesConfig {
         )
 
         let logging = LoggingSettings(
-            level: str("logging.level", default: "INFO"),
+            level: strEnum("logging.level", default: "INFO"),
             maxSizeMB: int("logging.max_size_mb", default: 5),
             backupCount: int("logging.backup_count", default: 3)
         )
@@ -364,16 +455,20 @@ public extension HermesConfig {
         )
 
         let telegram = TelegramSettings(
-            // NOT `boolTrueDefault`, and the `true` default is knowingly
-            // Scarf's rather than Hermes's: `telegram.require_mention` has no
-            // `config_defaults.py` entry and its reader defaults it to FALSE
-            // (`plugins/platforms/telegram/adapter.py:5030`
-            // `_extra_bool("require_mention", "TELEGRAM_REQUIRE_MENTION", "false")`),
-            // verified at v2026.9.7. Correcting it flips a visible toggle for
-            // every user whose config omits the key, so the DEFAULT is tracked
-            // as its own change; only the reader was folded into the boolish
-            // sweep.
-            requireMention: boolish("telegram.require_mention", default: true),
+            // FALSE by default, matching Hermes's only reader:
+            // `telegram.require_mention` has no `config_defaults.py` entry at
+            // ANY of the 32 `v2026.*` tags (so P13's "schema layer wins" rule
+            // never engages and the reader's own fallback IS the default), and
+            // the reader is `_extra_bool("require_mention",
+            // "TELEGRAM_REQUIRE_MENTION", "false")` —
+            // `plugins/platforms/telegram/adapter.py:5030` @ v2026.9.7. Scarf
+            // carried `true` deliberately as a known divergence pending this
+            // phase; it rendered "mention required" on every stock host, i.e.
+            // the opposite of the group behaviour the user actually gets.
+            //
+            // `require_mention` is a `_SHARED_KEYS` member for every platform,
+            // not just Slack, so the same bridge precedence applies here.
+            requireMention: sharedPlatformBool("telegram", "require_mention", default: false),
             reactions: boolish("telegram.reactions", default: false),
             disableTopicAutoRename: boolish("telegram.disable_topic_auto_rename", default: false),
             ignoreRootDM: boolish("platforms.telegram.extra.ignore_root_dm", default: false),
@@ -421,7 +516,15 @@ public extension HermesConfig {
             enabled: boolish("secrets.bitwarden.enabled", default: false),
             accessTokenEnv: str("secrets.bitwarden.access_token_env", default: "BWS_ACCESS_TOKEN"),
             projectID: str("secrets.bitwarden.project_id"),
-            overrideExisting: boolish("secrets.bitwarden.override_existing", default: false),
+            // TRUE upstream, and true at every tag that HAS the key:
+            // `config_defaults.py:2174` @ v2026.9.7, and the `secrets.bitwarden`
+            // block's very first appearance (v2026.5.28 = v0.15.0) already
+            // reads `"override_existing": True`. No earlier tag has a
+            // `bitwarden` section at all, so there is no host generation this
+            // could be a sentinel for. Reading it `false` told users a rotated
+            // Bitwarden secret would NOT overwrite a stale `.env` line, when it
+            // does.
+            overrideExisting: boolish("secrets.bitwarden.override_existing", default: true),
             serverURL: str("secrets.bitwarden.server_url"),
             cacheTTLSeconds: int("secrets.bitwarden.cache_ttl_seconds", default: 300),
             autoInstall: boolTrueDefault("secrets.bitwarden.auto_install"),
@@ -465,39 +568,40 @@ public extension HermesConfig {
             journalSizeLimit: intOpt("database.journal_size_limit")
         )
 
-        // Slack fields live under both `platforms.slack.*` (newer) and `slack.*`
-        // (legacy). Prefer the newer path but fall back.
         let slack = SlackSettings(
-            replyToMode: values["platforms.slack.reply_to_mode"] ?? values["slack.reply_to_mode"] ?? "first",
-            // `require_mention` is one of the SHARED keys Hermes bridges from a
-            // platform section's top level into `config.extra`
-            // (gateway/config.py:1719-1720 → `extra.update(bridged)` at :1809),
-            // and the slack plugin's `_apply_yaml_config` hook additionally
-            // exports it as SLACK_REQUIRE_MENTION. So the top-level shape Scarf
-            // writes IS live — but a hand-written `platforms.slack.extra.
-            // require_mention` is the shape the adapter reads directly
-            // (plugins/platforms/slack/adapter.py:9058), and it wins over the
-            // bridge. Precedence mirrors Hermes exactly: the bridge does
-            // `extra.update(bridged)`, so a top-level value OVERWRITES an
-            // `extra:` one — hence top-level first, `extra` only as the
-            // fallback for a config.yaml hand-written in the adapter's shape.
-            // All three read through the shared boolish helpers rather than a
-            // raw `!= "false"` / `== "true"` on the VERBATIM parse: everything
-            // after `key: ` is stored unnormalised, so `false  # for now`,
-            // `"false"`, `no` and `off` are all legal YAML for false that a
-            // literal compare reads as TRUE (and `yes`/`on` as false).
-            // Defaults verified at v2026.9.7: `slack.require_mention` True
-            // (`hermes_cli/config_defaults.py`), `reply_in_thread` True (no
-            // schema default — the adapter's own reader,
-            // `plugins/platforms/slack/adapter.py:2590,3989` and
-            // `gateway/run_turn.py:2790`, all `.get("reply_in_thread", True)`),
-            // `reply_broadcast` False (`adapter.py:2083`).
-            requireMention: boolTrueDefaultAt([
-                "platforms.slack.require_mention",
-                "slack.require_mention",
-                "platforms.slack.extra.require_mention",
-            ]),
-            replyInThread: boolTrueDefault("platforms.slack.extra.reply_in_thread"),
+            // `platforms.slack.reply_to_mode` ONLY. This is the mattermost bug
+            // P13 fixed, in the other direction: `reply_to_mode` is a field of
+            // `PlatformConfig`, read by `from_dict` off the per-platform dict
+            // `merge_platform_sections` assembles (`gateway/config.py:437`),
+            // and that merge only ever consumes `gateway.platforms.<p>`,
+            // `platforms.<p>` and `gateway.<p>` — never a BARE top-level
+            // `slack:` block (`config_loader.py:149-152`). `reply_to_mode` is
+            // also absent from `_SHARED_KEYS` (:197-215), so the bridge does
+            // not carry it either, and slack's own `_apply_yaml_config` hook
+            // (`plugins/platforms/slack/adapter.py:6449`) lists every key it
+            // translates and `reply_to_mode` is not among them. A top-level
+            // `slack.reply_to_mode` is therefore read by no Hermes version, and
+            // reading it here claimed a setting was live that the host ignores.
+            // Scarf's writer already only writes the nested spelling
+            // (`SlackSetupViewModel.swift:63`), so nothing Scarf produced is
+            // affected — only a hand-written config.
+            replyToMode: values["platforms.slack.reply_to_mode"] ?? "first",
+            // `require_mention` and `reply_in_thread` are both `_SHARED_KEYS`
+            // members (`gateway/config_loader.py:200` @ v2026.9.7), so both go
+            // through `sharedPlatformScalar`'s precedence — see its doc block.
+            // Reading `reply_in_thread` from `extra:` only was the live bug: a
+            // top-level `slack.reply_in_thread` is bridged in and OVERWRITES
+            // the `extra:` value, so Scarf showed the losing half.
+            //
+            // Defaults verified at v2026.9.7: `require_mention` True (the
+            // adapter's `_slack_require_mention`, `adapter.py:5917-5926`,
+            // treats an unrecognised or absent value as gating-on),
+            // `reply_in_thread` True (no schema default — the adapter's own
+            // reader, `gateway/relay/adapter.py:787` and
+            // `gateway/run_turn.py:2790`, both `.get("reply_in_thread", True)`),
+            // `reply_broadcast` False.
+            requireMention: sharedPlatformBool("slack", "require_mention", default: true),
+            replyInThread: sharedPlatformBool("slack", "reply_in_thread", default: true),
             replyBroadcast: boolish("platforms.slack.extra.reply_broadcast", default: false)
         )
 
@@ -623,12 +727,35 @@ public extension HermesConfig {
             // sentinel via `displayMaxTurns(capabilities:)`; nothing writes
             // the resolved value back unless the user edits it.
             maxTurns: int("agent.max_turns", default: 0),
-            personality: str("display.personality", default: "default"),
+            personality: strEnum("display.personality", default: "default"),
             terminalBackend: strEnum("terminal.backend", default: "local"),
-            memoryEnabled: boolish("memory.memory_enabled", default: false),
-            memoryCharLimit: int("memory.memory_char_limit", default: 0),
-            userCharLimit: int("memory.user_char_limit", default: 0),
-            nudgeInterval: int("memory.nudge_interval", default: 0),
+            // Hermes's real `memory` defaults, not zeroes/off. Verified in
+            // BOTH layers at v2026.9.7 and walked across all 32 `v2026.*`
+            // tags: `config_defaults.py:1194,1200,1203` reads
+            // `memory_enabled: True`, `memory_char_limit: 2200`,
+            // `user_char_limit: 1375`, and the reader agrees —
+            // `agent/agent_init.py:1263,1266` `mem_config.get("nudge_interval",
+            // 10)` / `.get("memory_char_limit", 2200)` /
+            // `.get("user_char_limit", 1375)`. The three values are IDENTICAL
+            // at every tag from v2026.3.30 (v0.6.0) on, so they are literals
+            // rather than `checkpoints.enabled`-style sentinels.
+            //
+            // `nudge_interval` is the one with a layer split: it enters
+            // `config_defaults.py` only at v2026.8.19 (v0.20.5) and is absent
+            // from the schema before that — but the reader's own fallback has
+            // been `10` since the key's first reader (v2026.5.28 / v0.15.0
+            // `agent_init.py:1078`), and no earlier tag reads the key at all.
+            // So the EFFECTIVE default is 10 on every host that has the
+            // feature, again a literal.
+            //
+            // The zeroes were not merely cosmetic: `MemoryTab`'s steppers range
+            // `500...10_000` and `1...50`, so an absent key rendered each row
+            // outside its own range and the first tap jumped to the range
+            // floor, writing 500/500/1 over host defaults of 2200/1375/10.
+            memoryEnabled: boolish("memory.memory_enabled", default: true),
+            memoryCharLimit: int("memory.memory_char_limit", default: 2200),
+            userCharLimit: int("memory.user_char_limit", default: 1375),
+            nudgeInterval: int("memory.nudge_interval", default: 10),
             // `display.streaming` defaults to **false** upstream and always
             // has: `hermes_cli/config_defaults.py:796` seeds
             // `display.streaming: False` (and did at every tag back to
@@ -642,22 +769,72 @@ public extension HermesConfig {
             // false. This is display-layer only — see `modelStreaming` for
             // the provider-request switch, which really does default true.
             streaming: boolish("display.streaming", default: false),
-            showReasoning: boolish("display.show_reasoning", default: false),
+            // Sentinel, not a default: the shipped default flipped False →
+            // TRUE at tag v2026.7.7 (v0.18.1) and has stayed true through
+            // v2026.9.7, so an absent key means different things on two host
+            // generations inside the supported window. Resolved by
+            // `HermesConfig.displayShowReasoning(capabilities:)`.
+            //
+            // Note the audit's citation was one release out: the flip is at
+            // v2026.7.7 (0.18.1) `hermes_cli/config.py`, not v2026.7.20
+            // (0.19.0) — v2026.7.7.2 (0.18.2) already ships `True`, and
+            // v2026.7.1 (0.18.0) still ships `False`. The reader agrees at the
+            // target (`cli.py:2584` @ v2026.9.7, `display.get("show_reasoning",
+            // True)`), but the schema layer is the authority here because
+            // `display.show_reasoning` is present in `DEFAULT_CONFIG` at every
+            // supported tag (P13's "the reader's fallback is unreachable for a
+            // key the schema seeds" rule).
+            showReasoning: boolishOpt("display.show_reasoning"),
             // TRUE-by-default; read through `boolTrueDefault` rather than a
             // raw `!= "false"` so `no`/`off`/`0` (and `false  # comment`)
             // turn it off the way Hermes's own boolish readers do.
-            autoTTS: boolTrueDefault("voice.auto_tts"),
+            // FALSE in both layers and at every tag in the window:
+            // `config_defaults.py:1121` @ v2026.9.7 `"auto_tts": False`, and
+            // the reader `hermes_cli/cli_voice_mixin.py:516`
+            // `_config_section("voice").get("auto_tts", False)`. A tag walk of
+            // DEFAULT_CONFIG shows `False` at every tag from v2026.3.30
+            // (v0.6.0). `boolTrueDefault` rendered the toggle ON for every user
+            // whose config omits the key — i.e. it claimed every reply would be
+            // spoken aloud.
+            autoTTS: boolish("voice.auto_tts", default: false),
             silenceThreshold: int("voice.silence_threshold", default: QueryDefaults.defaultSilenceThreshold),
-            reasoningEffort: str("agent.reasoning_effort", default: "medium"),
+            // EMPTY means absent, and absent means "whatever the provider
+            // does" — not `medium`. `agent.reasoning_effort` appears in NO
+            // schema layer at any of the 32 `v2026.*` tags (the only
+            // `reasoning_effort` entries in `config_defaults.py` are the
+            // per-`auxiliary` ones, seeded `""`), so there is no default to
+            // mirror; `hermes_constants.py:876-889` `parse_reasoning_effort`
+            // returns `None` for an empty/unrecognised value and its callers
+            // then "use the default", which is the model provider's own. The
+            // picker renders this as a distinct "Provider default" row rather
+            // than asserting a level Hermes never chose.
+            reasoningEffort: strEnum("agent.reasoning_effort"),
             showCost: boolish("display.show_cost", default: false),
-            approvalMode: strEnum("approvals.mode", default: "manual"),
+            // Sentinel (empty = absent), not `manual`: the schema default
+            // flipped `manual` → `smart` at tag v2026.7.20 (v0.19.0) and has
+            // been `smart` ever since (`config_defaults.py:1534` @ v2026.9.7;
+            // `hermes_cli/config.py` still reads `"manual"` at v2026.7.7.2 =
+            // v0.18.2). The reader's own fallback IS `manual`
+            // (`tools/approval_context.py:236`) but it is unreachable for a key
+            // the schema seeds, so reading `manual` told every stock v0.19+
+            // user that Scarf would ask before every guarded command when the
+            // guardian model was actually deciding — the dangerous direction.
+            // Resolved by `HermesConfig.displayApprovalMode(capabilities:)`.
+            approvalMode: strEnum("approvals.mode"),
             browserCloudProvider: strEnum("browser.cloud_provider"),
-            memoryProvider: str("memory.provider"),
+            memoryProvider: strEnum("memory.provider"),
             dockerEnv: dockerEnv,
             commandAllowlist: commandAllowlist,
             memoryProfile: str("memory.profile"),
             serviceTier: str("agent.service_tier", default: "normal"),
-            gatewayNotifyInterval: int("agent.gateway_notify_interval", default: 600),
+            // True optional, because `0` is a MEANINGFUL value for this key
+            // ("still working" notices off) and so cannot double as the absence
+            // sentinel the way `agent.max_turns`' 0 does. The default changed
+            // inside the window: absent from DEFAULT_CONFIG before v2026.4.13
+            // (v0.9.0), `600` at v0.9.0–v0.10.0, and `180` from v2026.4.23
+            // (v0.11.0) through v2026.9.7 (`config_defaults.py:196`). Resolved
+            // by `HermesConfig.displayGatewayNotifyInterval(capabilities:)`.
+            gatewayNotifyInterval: intOpt("agent.gateway_notify_interval"),
             forceIPv4: boolish("network.force_ipv4", default: false),
             contextEngine: str("context.engine", default: "compressor"),
             // Absent → `true`, matching the Hermes schema default that runtime
@@ -674,7 +851,7 @@ public extension HermesConfig {
             honchoInitOnSessionStart: boolish("honcho.initOnSessionStart", default: false),
             timezone: str("timezone"),
             userProfileEnabled: boolTrueDefault("memory.user_profile_enabled"),
-            toolUseEnforcement: str("agent.tool_use_enforcement", default: "auto"),
+            toolUseEnforcement: strEnum("agent.tool_use_enforcement", default: "auto"),
             gatewayTimeout: int("agent.gateway_timeout", default: 1800),
             cronDrainTimeout: int("agent.cron_drain_timeout", default: 30),
             // 0 is the "key absent" sentinel, NOT a real default — the
@@ -682,7 +859,17 @@ public extension HermesConfig {
             // surfaces resolve it via
             // `displayGatewayTurnLeaseTimeout(capabilities:)`.
             gatewayTurnLeaseTimeout: int("agent.gateway_turn_lease_timeout", default: 0),
-            approvalTimeout: int("approvals.timeout", default: 60),
+            // 0 = "key absent" sentinel. An explicit `0` IS honoured upstream
+            // and is therefore indistinguishable here — see the field's doc
+            // comment for why that is safe (Scarf's stepper floor is 5). The
+            // shipped default changed inside the window: `60` from v2026.3.30
+            // (v0.6.0) through v2026.7.20 (v0.19.0), `300` from v2026.7.30
+            // (v0.19.1) onwards — `config_defaults.py:1535` @ v2026.9.7, and
+            // the reader agrees (`tools/approval_context.py:240-249`,
+            // `.get("timeout", 300)`, whose docstring names the change: "60s
+            // failed closed before Telegram taps landed"). Resolved by
+            // `HermesConfig.displayApprovalTimeout(capabilities:)`.
+            approvalTimeout: int("approvals.timeout", default: 0),
             fileReadMaxChars: int("file_read_max_chars", default: 100_000),
             cronWrapResponse: boolTrueDefault("cron.wrap_response"),
             curatorConsolidate: boolish("curator.consolidate", default: false),
@@ -720,7 +907,7 @@ public extension HermesConfig {
             // schema: `gateway/run.py:1813` bridges `display.busy_ack_enabled`
             // to `HERMES_GATEWAY_BUSY_ACK_ENABLED`, and `run_busy.py:727`
             // reads `os.environ.get(..., "true").lower() != "true"`.
-            displayBusyAckEnabled: boolTrueDefault("display.busy_ack_enabled"),
+            displayBusyAckEnabled: busyAckEnabled(),
             gatewayPlatforms: gatewayPlatforms,
             // -- v0.13 additions -------------------------------------
             // `openrouter.response_cache` is a SCALAR bool directly under
@@ -826,14 +1013,39 @@ public extension HermesConfig {
     private static func multiplexProfileAllowlist(
         values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
     ) -> [String]? {
-        func resolve(_ key: String) -> [String]? {
-            if let list = lists[key] { return list }
-            if values[key] != nil { return [] }
+        /// Null spellings PyYAML loads as `None`. A present-but-null key is
+        /// NOT a malformed value: `pick` hands `None` straight to
+        /// `_normalize_multiplex_profile_allowlist`, whose first line is
+        /// `if value is None: return None` (`gateway/config.py:45-48` @
+        /// v2026.9.7) — i.e. serve ALL profiles, the same as an absent key.
+        /// Failing closed to `[]` there told the user their gateway was
+        /// restricted to the `default` profile when it was not. (A bare
+        /// `multiplex_profile_allowlist:` with no value never reaches this
+        /// function at all — `parseNestedYAML` treats an empty value as a
+        /// section header and records no scalar — so the explicit spellings
+        /// are the cases that need handling.)
+        func isNullScalar(_ raw: String) -> Bool {
+            // `null` / `~` only. An EMPTY scalar is deliberately not null
+            // here: a bare `key:` never reaches `values` at all (see above),
+            // so the only way to get `""` is an explicitly quoted `key: ''`,
+            // which PyYAML loads as the empty STRING — not a list, so Hermes
+            // warns and fails closed to `[]` like any other malformed value.
+            let v = HermesYAML.normalizedScalar(raw).lowercased()
+            return v == "null" || v == "~"
+        }
+        /// `.some(value)` when the key is PRESENT (the value may itself be
+        /// `nil` = serve all), `.none` when it is absent. Hermes's `pick`
+        /// (`gateway/config.py:668-670`) selects on PRESENCE — `data[key] if
+        /// key in data else nested_gateway.get(key)` — so a present top-level
+        /// key shadows the nested one even when its value is null.
+        func resolve(_ key: String) -> [String]?? {
+            if let list = lists[key] { return .some(list) }
+            if let raw = values[key] { return .some(isNullScalar(raw) ? nil : []) }
             // A mapping-valued key (section header with `key: value`
             // children but no bullet list) fails CLOSED to `[]` — Hermes
             // restricts to the default profile rather than serving all.
-            if maps[key]?.isEmpty == false { return [] }
-            return nil
+            if maps[key]?.isEmpty == false { return .some([]) }
+            return .none
         }
         if let resolved = resolve("multiplex_profile_allowlist") { return resolved }
         if let resolved = resolve("gateway.multiplex_profile_allowlist") { return resolved }

@@ -705,6 +705,45 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hasConfigUnset`).
     public var hasAuxiliaryReasoningEffort: Bool { atLeastSemver(0, 19, 0) }
 
+    // MARK: Voice provider roster floors
+    //
+    // Hermes keeps its own authoritative roster of built-in speech providers,
+    // and Scarf's two pickers mirror it. The sets are
+    // `BUILTIN_TTS_PROVIDERS` (`tools/tts_command_provider.py:269` @
+    // v2026.9.7, mirrored by `agent/tts_registry.py::_BUILTIN_NAMES`) and
+    // `BUILTIN_STT_PROVIDERS` (`tools/transcription_common.py:45`, mirrored by
+    // `agent/transcription_registry.py::_BUILTIN_NAMES`) — Hermes has a test
+    // of its own that fails when the two copies drift, so either is citable.
+    //
+    // Membership was walked across all 32 `v2026.*` tags by extracting the
+    // frozenset literal at each one, which is what these floors are:
+    //
+    //   TTS  edge/elevenlabs/openai/minimax/mistral/neutts/piper/xai/gemini/
+    //        kittentts   first set: v2026.4.23 (v0.11.0)
+    //   TTS  deepinfra   first set: v2026.7.20 (v0.19.0)   [hasDeepInfraTTS]
+    //   STT  local/local_command/groq/openai/mistral/xai
+    //                    first set: v2026.5.28 (v0.15.0)
+    //   STT  elevenlabs, deepinfra
+    //                    first set: v2026.7.20 (v0.19.0)
+    //
+    // Only the members whose registration POSTDATES the v0.6.0 supported
+    // minimum need a flag; the v0.11.0 group gets one because v0.6.0–v0.10.0
+    // hosts are supported and have no TTS roster at all.
+
+    /// `gemini` and `kittentts` as `tts.provider` values. Both appear in
+    /// `BUILTIN_TTS_PROVIDERS` from its very first tagged form —
+    /// v2026.4.23 (v0.11.0) `tools/tts_tool.py` — and at every later tag
+    /// through v2026.9.7. Neither name occurs anywhere in `tools/tts_tool.py`
+    /// at v2026.4.16 (v0.10.0) or earlier, so v0.11.0 is a real floor rather
+    /// than the artefact of the constant being introduced.
+    public var hasGeminiKittenTTS: Bool { isV011OrLater }
+
+    /// `elevenlabs` and `deepinfra` as `stt.provider` values —
+    /// `BUILTIN_STT_PROVIDERS` gains both at v2026.7.20 (v0.19.0), the same
+    /// tag as `hasDeepInfraTTS`; v2026.7.7.2 (v0.18.2) has neither. Every
+    /// later tag through v2026.9.7 keeps them.
+    public var hasElevenLabsDeepInfraSTT: Bool { atLeastSemver(0, 19, 0) }
+
     /// `tts.deepinfra.{model,voice}` — DeepInfra as a TTS backend, alongside
     /// its existing `stt.deepinfra.model` sibling (v0.19+, hermes-agent
     /// commit fe002eb124 "feat(providers): Support DeepInfra as an LLM
@@ -1381,6 +1420,21 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasPerplexityWebBackend: Bool { isV0211OrLater }
 
     // MARK: Convenience predicates
+
+    /// Whether the connected host is on the v0.11 line or newer. Convenience
+    /// for the config-default resolvers that switch on the v0.10 → v0.11
+    /// boundary — `agent.gateway_notify_interval` dropped 600 → 180 at tag
+    /// v2026.4.23, the same tag that first registers the `gemini` and
+    /// `kittentts` TTS providers.
+    public var isV011OrLater: Bool { atLeastSemver(0, 11, 0) }
+
+    /// Whether the connected host is on v0.18.1 or newer. Patch-level floor,
+    /// same shape as `isV0191OrLater` — tag **v2026.7.7**'s
+    /// `pyproject.toml` reads `version = "0.18.1"`, so it is a numbered
+    /// release a host can be running, and it is where
+    /// `display.show_reasoning`'s shipped default flipped `False` → `True`
+    /// (see `HermesConfig.displayShowReasoning(capabilities:)`).
+    public var isV0181OrLater: Bool { atLeastSemver(0, 18, 1) }
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
     /// for UI copy that needs to switch on the v0.12 → v0.13 boundary without

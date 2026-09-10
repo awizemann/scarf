@@ -168,12 +168,19 @@ struct SettingsView: View {
         switch key {
         case "model.default": return vm.config.model
         case "model.provider": return vm.config.provider
-        case "approvals.mode": return vm.config.approvalMode
+        // Empty when the key is absent — the editor sheet then offers the
+        // modes without pre-selecting one, rather than priming `manual` over a
+        // host that runs `smart`.
+        case "approvals.mode": return vm.config.storedApprovalMode?.rawValue ?? ""
         // "Unlimited" for the no-ceiling case; the sheet's `Int(...) ?? 0`
         // priming maps that straight back onto the 0 sentinel.
         case "agent.max_turns": return vm.config.displayMaxTurnsText(capabilities: caps)
         case "display.show_cost": return vm.config.showCost ? "true" : "false"
-        case "display.show_reasoning": return vm.config.showReasoning ? "true" : "false"
+        // Sentinel-aware: absent key primes the host's own default (true on
+        // v0.18.1+), so saving the sheet without touching the toggle cannot
+        // flip reasoning off.
+        case "display.show_reasoning":
+            return vm.config.displayShowReasoning(capabilities: caps) ? "true" : "false"
         case "display.streaming": return vm.config.streaming ? "true" : "false"
         default: return ""
         }
@@ -188,7 +195,12 @@ struct SettingsView: View {
             if !vm.config.provider.isEmpty, vm.config.provider != "unknown" {
                 LabeledContent("Provider", value: vm.config.provider)
             }
-            LabeledContent("Reasoning effort", value: vm.config.reasoningEffort)
+            // Absent key = the model provider's own default, not `medium`.
+            LabeledContent(
+                "Reasoning effort",
+                value: vm.config.reasoningEffort.isEmpty
+                    ? "Provider default" : vm.config.reasoningEffort
+            )
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)
             }
@@ -198,7 +210,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var agentSection: some View {
         Section("Agent") {
-            LabeledContent("Approval mode", value: vm.config.approvalMode)
+            // Sentinel-aware: absent key shows the mode the host enforces
+            // (smart on v0.19.0+, manual before, "unknown" undetected).
+            LabeledContent(
+                "Approval mode",
+                value: vm.config.storedApprovalMode?.rawValue
+                    ?? vm.config.approvalModeHostDefaultLabel(capabilities: caps)
+            )
             // Sentinel-aware: absent key shows the host's effective default
             // ("Unlimited" on v0.20.5+, 500 on v0.20.0–v0.20.4, 60 before)
             // rather than 0.
@@ -212,7 +230,7 @@ struct SettingsView: View {
     private var displaySection: some View {
         Section("Display") {
             yesNoRow("Streaming", vm.config.streaming)
-            yesNoRow("Show reasoning", vm.config.showReasoning)
+            yesNoRow("Show reasoning", vm.config.displayShowReasoning(capabilities: caps))
             yesNoRow("Show cost", vm.config.showCost)
             LabeledContent("Skin", value: vm.config.display.skin)
             yesNoRow("Compact", vm.config.display.compact)

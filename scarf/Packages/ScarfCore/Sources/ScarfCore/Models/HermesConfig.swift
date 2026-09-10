@@ -1460,6 +1460,104 @@ public struct HermesConfig: Sendable {
         return capabilities.isV0202OrLater ? 10 : 3
     }
 
+    /// Effective `display.show_reasoning` for display: the on-disk value when
+    /// the key is present, otherwise the connected host's own default —
+    /// **true** on v0.18.1+, **false** on every older supported host.
+    ///
+    /// The flip lands at tag **v2026.7.7 (v0.18.1)**: its
+    /// `hermes_cli/config.py` `DEFAULT_CONFIG` reads `"show_reasoning": True`
+    /// and its reader agrees (`cli.py` `.get("show_reasoning", True)`), while
+    /// the immediately preceding tag v2026.7.7.2's predecessor v2026.7.1
+    /// (v0.18.0) still reads `False` in both. Every later tag through
+    /// v2026.9.7 (`config_defaults.py:784`, `cli.py:2584`) keeps `True`. The
+    /// audit report cited v2026.7.20 (v0.19.0) for this flip; walking all 32
+    /// `v2026.*` tags puts it two releases earlier.
+    ///
+    /// Display-only; callers must never write the resolved value back. An
+    /// unknown host version resolves to the OLDER `false`, matching the
+    /// `displayGatewayTurnLeaseTimeout` / `displayCheckpointsMaxSnapshots`
+    /// convention (an undetected host is more likely an old one, and claiming
+    /// reasoning is hidden when it is shown is the benign direction).
+    public func displayShowReasoning(capabilities: HermesCapabilities) -> Bool {
+        if let value = showReasoning { return value }
+        return capabilities.isV0181OrLater
+    }
+
+    /// Effective `approvals.timeout` for display: the on-disk value when the
+    /// key is present, otherwise the host's own default — **300** on v0.19.1+,
+    /// **60** on older supported hosts.
+    ///
+    /// The 60 → 300 change lands at tag **v2026.7.30 (v0.19.1)**, the first
+    /// tag with `hermes_cli/config_defaults.py`, whose `"timeout": 300` the
+    /// reader repeats (`tools/approval_context.py:240` @ v2026.9.7, with the
+    /// reason in its docstring: gateway push notifications "may not be seen
+    /// for minutes; 60s failed closed before Telegram taps landed"). The
+    /// preceding tag v2026.7.20 (v0.19.0) still ships `60`, as does every tag
+    /// back to v2026.3.30 (v0.6.0, the supported minimum) — the key does not
+    /// exist before that.
+    ///
+    /// Display-only. Unknown host version resolves to the older 60.
+    public func displayApprovalTimeout(capabilities: HermesCapabilities) -> Int {
+        if approvalTimeout > 0 { return approvalTimeout }
+        return capabilities.isV0191OrLater ? 300 : 60
+    }
+
+    /// Effective `agent.gateway_notify_interval` for display: the on-disk
+    /// value when the key is present (including an explicit `0`, which means
+    /// "no still-working notices"), otherwise the host's own default —
+    /// **180** on v0.11.0+, **600** on older supported hosts.
+    ///
+    /// The 600 → 180 change lands at tag **v2026.4.23 (v0.11.0)** and holds
+    /// through v2026.9.7 (`config_defaults.py:196`, whose comment gives the
+    /// reason: "180 catches spinning weak-model runs before users /restart").
+    /// v2026.4.13 (v0.9.0) and v2026.4.16 (v0.10.0) ship `600`; the key is in
+    /// no earlier `DEFAULT_CONFIG` and has no reader before v0.9.0, so
+    /// pre-v0.9 hosts simply have no such notice — 600 is the honest thing to
+    /// show them and the row is inert there either way.
+    ///
+    /// Display-only. Unknown host version resolves to the older 600.
+    public func displayGatewayNotifyInterval(capabilities: HermesCapabilities) -> Int {
+        if let value = gatewayNotifyInterval { return value }
+        return capabilities.isV011OrLater ? 180 : 600
+    }
+
+    /// Effective `approvals.mode` for display when the key IS present —
+    /// normalised the way Hermes reads it. `nil` when the key is absent, which
+    /// is a distinct UI state ("Host default (…)") rather than a mode.
+    ///
+    /// The shipped default flipped `manual` → `smart` at tag **v2026.7.20
+    /// (v0.19.0)** (`hermes_cli/config.py` `DEFAULT_CONFIG`; `config_defaults
+    /// .py:1534` @ v2026.9.7) and was `manual` at every tag from v2026.3.17
+    /// (v0.3.0) through v2026.7.7.2 (v0.18.2). Baking either literal into the
+    /// parse renders one host generation's approval posture backwards — and in
+    /// the direction that matters, since "manual" claims Scarf will ask before
+    /// every guarded command while a stock v0.19+ host lets the guardian model
+    /// decide.
+    public var storedApprovalMode: HermesApprovalMode? {
+        let raw = approvalMode.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : HermesApprovalMode.normalize(raw)
+    }
+
+    /// The mode the connected host is actually enforcing: the stored value
+    /// when there is one, otherwise the host's own default — **smart** on
+    /// v0.19.0+, **manual** on older supported hosts, and `nil` for an
+    /// UNDETECTED host, where Scarf must not guess in either direction.
+    ///
+    /// Display-only; the host-default state writes nothing.
+    public func displayApprovalMode(capabilities: HermesCapabilities) -> HermesApprovalMode? {
+        if let stored = storedApprovalMode { return stored }
+        guard capabilities.detected else { return nil }
+        return capabilities.isV019OrLater ? .smart : .manual
+    }
+
+    /// Label for the picker's host-default row — "Host default (smart)",
+    /// "Host default (manual)", or "Host default (unknown)" when the host
+    /// version could not be detected.
+    public func approvalModeHostDefaultLabel(capabilities: HermesCapabilities) -> String {
+        guard capabilities.detected else { return "Host default (unknown)" }
+        return capabilities.isV019OrLater ? "Host default (smart)" : "Host default (manual)"
+    }
+
     /// Human-readable form of `displayMaxTurns(capabilities:)` — "Unlimited"
     /// for the no-ceiling case, the plain number otherwise.
     public func displayMaxTurnsText(capabilities: HermesCapabilities) -> String {
@@ -1472,11 +1570,25 @@ public struct HermesConfig: Sendable {
     public var userCharLimit: Int
     public var nudgeInterval: Int
     public var streaming: Bool
-    public var showReasoning: Bool
+    /// `display.show_reasoning` — `nil` means the key is ABSENT, not `false`.
+    /// The shipped default flipped `False` → `True` at tag v2026.7.7 (v0.18.1),
+    /// so an absent key means different things on two host generations inside
+    /// the supported window; resolve it with
+    /// `displayShowReasoning(capabilities:)` rather than reading this directly.
+    public var showReasoning: Bool?
     public var autoTTS: Bool
     public var silenceThreshold: Int
+    /// `agent.reasoning_effort` — EMPTY means the key is absent, which means
+    /// "the model provider's own default", not `medium`. The key is in no
+    /// schema layer at any supported tag, so there is no Hermes default to
+    /// mirror; `parse_reasoning_effort` returns `None` for an empty value and
+    /// its callers fall through to the provider.
     public var reasoningEffort: String
     public var showCost: Bool
+    /// `approvals.mode` — EMPTY means the key is absent. The shipped default
+    /// flipped `manual` → `smart` at tag v2026.7.20 (v0.19.0), so resolve it
+    /// with `displayApprovalMode(capabilities:)`; reading this directly as
+    /// "manual" understates what a stock v0.19+ host will run unattended.
     public var approvalMode: String
     /// `browser.cloud_provider` — the browser automation provider Hermes
     /// dispatches to. Valid ids: `local`, `camofox`, and the plugin-provided
@@ -1510,7 +1622,13 @@ public struct HermesConfig: Sendable {
     /// session's first turn only). Default 60. Inert unless the tier is a
     /// bounded mode; ignored entirely by pre-v0.21.1 hosts.
     public var agentFastAutoSeconds: Int
-    public var gatewayNotifyInterval: Int
+    /// `agent.gateway_notify_interval` — `nil` means the key is ABSENT. A
+    /// TRUE optional rather than a 0 sentinel, because `0` is a meaningful
+    /// value for this key (it turns the "still working" notices off), so it
+    /// cannot double as the absence marker the way `agent.max_turns`' 0 does.
+    /// The shipped default changed inside the window (600 → 180 at v0.11.0);
+    /// resolve with `displayGatewayNotifyInterval(capabilities:)`.
+    public var gatewayNotifyInterval: Int?
     public var forceIPv4: Bool
     /// `gateway.trust_env` (Hermes v0.21.1+,
     /// `hermes_cli/config_defaults.py`). Lets gateway adapters read
@@ -1570,6 +1688,17 @@ public struct HermesConfig: Sendable {
     /// `displayGatewayTurnLeaseTimeout(capabilities:)`; nothing writes the
     /// resolved value back unless the user edits the stepper.
     public var gatewayTurnLeaseTimeout: Int
+    /// `approvals.timeout` — `0` is the "key absent" sentinel. The shipped
+    /// default changed inside the window (60 → 300 at v0.19.1), so a literal
+    /// would render one host generation's wait backwards; resolve with
+    /// `displayApprovalTimeout(capabilities:)`.
+    ///
+    /// The sentinel carries the same deliberate ambiguity `displayMaxTurns`
+    /// documents: an explicit `approvals.timeout: 0` IS honoured upstream
+    /// (`_get_approval_timeout` returns `min(0, safe_cap)` = 0, i.e. an
+    /// instant fail-closed) and is indistinguishable from an absent key here.
+    /// Scarf can never produce that state — its stepper range is `5...600` —
+    /// so reaching it takes a hand-edited config asking for a timeout of zero.
     public var approvalTimeout: Int
     public var fileReadMaxChars: Int
     public var cronWrapResponse: Bool
@@ -1765,7 +1894,7 @@ public struct HermesConfig: Sendable {
         userCharLimit: Int,
         nudgeInterval: Int,
         streaming: Bool,
-        showReasoning: Bool,
+        showReasoning: Bool?,
         autoTTS: Bool,
         silenceThreshold: Int,
         reasoningEffort: String,
@@ -1777,7 +1906,7 @@ public struct HermesConfig: Sendable {
         commandAllowlist: [String],
         memoryProfile: String,
         serviceTier: String,
-        gatewayNotifyInterval: Int,
+        gatewayNotifyInterval: Int?,
         forceIPv4: Bool,
         contextEngine: String,
         interimAssistantMessages: Bool,
@@ -1946,19 +2075,19 @@ public struct HermesConfig: Sendable {
         userCharLimit: 0,
         nudgeInterval: 0,
         streaming: true,
-        showReasoning: false,
+        showReasoning: nil,
         autoTTS: true,
         silenceThreshold: 200,
-        reasoningEffort: "medium",
+        reasoningEffort: "",
         showCost: false,
-        approvalMode: "manual",
+        approvalMode: "",
         browserCloudProvider: "",
         memoryProvider: "",
         dockerEnv: [:],
         commandAllowlist: [],
         memoryProfile: "",
         serviceTier: "normal",
-        gatewayNotifyInterval: 600,
+        gatewayNotifyInterval: nil,
         forceIPv4: false,
         contextEngine: "compressor",
         interimAssistantMessages: true,
@@ -1967,7 +2096,7 @@ public struct HermesConfig: Sendable {
         userProfileEnabled: true,
         toolUseEnforcement: "auto",
         gatewayTimeout: 1800,
-        approvalTimeout: 60,
+        approvalTimeout: 0,
         fileReadMaxChars: 100_000,
         cronWrapResponse: true,
         prefillMessagesFile: "",

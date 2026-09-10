@@ -21,8 +21,8 @@ struct HermesP17RemediationTests {
     /// remaining false-default readers across every settings section.
     @Test(arguments: [
         "display.compact", "display.bell_on_complete", "display.timestamps",
-        "display.show_reasoning", "display.show_cost", "display.streaming",
-        "network.force_ipv4", "privacy.redact_pii", "memory.memory_enabled",
+        "display.show_cost", "display.streaming",
+        "network.force_ipv4", "privacy.redact_pii",
         "telemetry.shared_metrics.enabled", "browser.record_sessions",
         "platforms.telegram.extra.status_indicator",
         "platforms.signal.extra.require_mention",
@@ -47,16 +47,31 @@ struct HermesP17RemediationTests {
         #expect(Self.flag(HermesConfig(yaml: "model:\n  default: x\n"), forKey: key) == false)
     }
 
-    /// The one false-default key that is NOT false-defaulted in Scarf:
-    /// `telegram.require_mention` keeps its deliberately-Scarf `true`
-    /// default (the upstream reader defaults it to false —
-    /// `plugins/platforms/telegram/adapter.py:5030` at v2026.9.7 — and
-    /// correcting that is tracked separately), but its READER is boolish
-    /// like every other.
-    @Test func telegramRequireMentionIsBoolishWhilstKeepingScarfsTrueDefault() {
+    /// `telegram.require_mention`'s reader is boolish like every other. Its
+    /// DEFAULT was P17's deliberate divergence (Scarf said `true`, Hermes's
+    /// only reader says `false`) and P20 corrected it — see
+    /// `HermesP20ConfigDefaultsTests`. What this test still pins is the
+    /// boolish vocabulary.
+    @Test func telegramRequireMentionIsBoolish() {
         #expect(HermesConfig(yaml: yamlLine(key: "telegram.require_mention", value: "no")).telegram.requireMention == false)
         #expect(HermesConfig(yaml: yamlLine(key: "telegram.require_mention", value: "yes")).telegram.requireMention == true)
-        #expect(HermesConfig(yaml: "model:\n  default: x\n").telegram.requireMention == true)
+        #expect(HermesConfig(yaml: yamlLine(key: "telegram.require_mention", value: "1")).telegram.requireMention == true)
+        #expect(HermesConfig(yaml: yamlLine(key: "telegram.require_mention", value: "off")).telegram.requireMention == false)
+    }
+
+    /// The two keys this suite used to sweep as FALSE-default and P20 moved:
+    /// `memory.memory_enabled` is `True` in the schema at every supported tag,
+    /// and `display.show_reasoning` became a sentinel (its shipped default
+    /// flipped at v0.18.1). Both keep the boolish reader.
+    @Test func showReasoningAndMemoryEnabledStayBoolish() {
+        for truthy in ["yes", "on", "1", "True", "true  # for now", "\"yes\""] {
+            #expect(HermesConfig(yaml: yamlLine(key: "display.show_reasoning", value: truthy)).showReasoning == true)
+            #expect(HermesConfig(yaml: yamlLine(key: "memory.memory_enabled", value: truthy)).memoryEnabled == true)
+        }
+        for falsy in ["no", "off", "0", "False", "false  # for now"] {
+            #expect(HermesConfig(yaml: yamlLine(key: "display.show_reasoning", value: falsy)).showReasoning == false)
+            #expect(HermesConfig(yaml: yamlLine(key: "memory.memory_enabled", value: falsy)).memoryEnabled == false)
+        }
     }
 
     /// Build a config.yaml carrying exactly one dotted key.
@@ -77,12 +92,10 @@ struct HermesP17RemediationTests {
         case "display.compact": return c.display.compact
         case "display.bell_on_complete": return c.display.bellOnComplete
         case "display.timestamps": return c.display.timestamps
-        case "display.show_reasoning": return c.showReasoning
         case "display.show_cost": return c.showCost
         case "display.streaming": return c.streaming
         case "network.force_ipv4": return c.forceIPv4
         case "privacy.redact_pii": return c.security.redactPII
-        case "memory.memory_enabled": return c.memoryEnabled
         case "telemetry.shared_metrics.enabled": return c.telemetry.sharedMetricsEnabled
         case "browser.record_sessions": return c.browser.recordSessions
         case "platforms.telegram.extra.status_indicator": return c.telegram.statusIndicator

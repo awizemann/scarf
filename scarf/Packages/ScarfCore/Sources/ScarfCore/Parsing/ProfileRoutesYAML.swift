@@ -75,7 +75,27 @@ public enum ProfileRoutesYAML {
     /// matching gateway/config.py:1345-1352.
     private static func parseMultiplex(_ yaml: String) -> (value: Bool, isTopLevel: Bool) {
         let values = HermesYAML.parseNestedYAML(yaml).values
-        let topLevel = values["multiplex_profiles"]
+        // Top-level wins only when it is NOT null: Hermes does
+        // `multiplex_profiles = data.get("multiplex_profiles"); if
+        // multiplex_profiles is None: multiplex_profiles =
+        // nested_gateway.get("multiplex_profiles")`
+        // (`gateway/config.py:708-710` @ v2026.9.7) — a presence test would
+        // let `multiplex_profiles: null` shadow a live `gateway.` value that
+        // Hermes actually reads. (A bare `multiplex_profiles:` with no value
+        // never reaches `values` at all: `parseNestedYAML` treats an empty
+        // value as a section header, which lands on the same answer.)
+        //
+        // `isTopLevel` is therefore "the top-level spelling is the one in
+        // effect", which is what both consumers need — the explanatory banner
+        // AND `SettingsViewModel.setMultiplexProfiles`, which writes to the
+        // key in effect rather than always to `gateway.`.
+        let topLevel = values["multiplex_profiles"].flatMap { raw -> String? in
+            let v = HermesYAML.normalizedScalar(raw).lowercased()
+            // `null` / `~` only — an explicitly quoted `key: ''` is the empty
+            // STRING to PyYAML, which is not None, so the top-level spelling
+            // still wins (and `_coerce_bool("", False)` reads it as off).
+            return (v == "null" || v == "~") ? nil : raw
+        }
         let raw = topLevel ?? values["gateway.multiplex_profiles"]
         // Hermes coerces this with `_coerce_bool(multiplex_profiles, False)`
         // (`gateway/config.py:733`), i.e. the boolish token sets at :25-26 —

@@ -172,7 +172,10 @@ struct HermesConfigReadCorrectnessP13Tests {
         #expect(c.userProfileEnabled)
         #expect(c.cronWrapResponse)
         #expect(c.displayBusyAckEnabled)
-        #expect(c.autoTTS)
+        // `voice.auto_tts` LEFT this list at P20: it is `False` in both layers
+        // at every tag in the window (`config_defaults.py:1121`,
+        // `cli_voice_mixin.py:516` @ v2026.9.7).
+        #expect(!c.autoTTS)
         #expect(c.interimAssistantMessages)
     }
 
@@ -215,6 +218,27 @@ struct HermesConfigReadCorrectnessP13Tests {
               require_mention: true
         """)
         #expect(!c.slack.requireMention)
+    }
+
+    /// P20 refined the above: the bridge SOURCE is chosen by
+    /// `platform_section` before any key is looked at, and a top-level
+    /// `slack:` block wins OUTRIGHT — so with one present, a nested
+    /// `platforms.slack.require_mention` is never bridged and never reaches
+    /// the adapter, whichever key "came first". Fails before P20, which
+    /// walked a fixed key list and picked the nested key here.
+    @Test func topLevelSlackBlockReplacesTheNestedBridgeSource() {
+        let c = HermesConfig(yaml: """
+        slack:
+          reply_prefix: hi
+        platforms:
+          slack:
+            require_mention: false
+            extra:
+              require_mention: true
+        """)
+        // Top-level block present but carrying no `require_mention`, so
+        // nothing is bridged and the merged `extra:` value survives.
+        #expect(c.slack.requireMention)
     }
 
     // MARK: - Closed-enum normalisation (finding 4)
