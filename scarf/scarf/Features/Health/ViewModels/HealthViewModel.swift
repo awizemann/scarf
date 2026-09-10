@@ -85,11 +85,11 @@ final class HealthViewModel {
     var diagnosticsOutput: String = ""
     var isSharingDebug = false
 
-    // MARK: - Supply-chain audit (`hermes audit`, v0.15)
+    // MARK: - Supply-chain audit (`hermes security audit`, v0.15)
 
-    /// True while `hermes audit` is shelling out so the header button can show
-    /// a spinner. The OSV.dev lookup is a network round-trip — easily a couple
-    /// seconds — so this runs off MainActor and never blocks the UI.
+    /// True while `hermes security audit` is shelling out so the header button
+    /// can show a spinner. The OSV.dev lookup is a network round-trip — easily
+    /// a couple seconds — so this runs off MainActor and never blocks the UI.
     var isRunningAudit = false
     /// Inline result strip for the last audit run. Nil before the first run.
     /// Mirrors the `--setup-browser` inline-status pattern in `HealthView` —

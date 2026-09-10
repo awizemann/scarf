@@ -1,8 +1,9 @@
 import Foundation
 
 /// Hermes v0.20 reasoning-effort vocabulary — verbatim mirror of
-/// `VALID_REASONING_EFFORTS` in hermes_constants.py:942 plus the "none"
-/// disable alias `parse_reasoning_effort` accepts (hermes_constants.py:967).
+/// `VALID_REASONING_EFFORTS` (`hermes_constants.py:873` at `v2026.9.7`)
+/// plus the disable aliases `parse_reasoning_effort` accepts (function at
+/// `:876`, alias set `{"none", "false", "disabled"}` at `:885`).
 /// `max` and `ultra` are the v0.20 additions (#62650).
 public enum HermesReasoningEffort {
     /// Levels valid on every supported host (pre-v0.20 vocabulary).
@@ -10,10 +11,12 @@ public enum HermesReasoningEffort {
     /// v0.20 additions.
     public static let v020Levels = ["max", "ultra"]
 
-    /// Disable aliases `parse_reasoning_effort` treats identically to
-    /// "none" (hermes_constants.py:967): a hand-edited `disabled` / `false`
-    /// / `off` row is Hermes-valid and must pass validation verbatim — the
-    /// UI never offers these, but it must not reject (or rewrite) them.
+    /// Spellings validation must accept for a hand-edited row, beyond
+    /// `VALID_REASONING_EFFORTS` + "none". `disabled` and `false` are in
+    /// `parse_reasoning_effort`'s own alias set (`hermes_constants.py:885`);
+    /// `off` is NOT — it only disables by way of YAML bool coercion, so the
+    /// writer canonicalises it (see `canonicalDisableSpelling`). The UI never
+    /// offers any of the three, but must not reject a row that uses them.
     public static let disableAliases = ["disabled", "false", "off"]
 
     /// Effort options to offer for the given host generation.

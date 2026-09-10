@@ -165,9 +165,10 @@ public enum HermesProfileName {
 /// The `profile_routes` block as it exists in a given `config.yaml`, plus
 /// the surrounding facts the editor needs.
 public struct HermesProfileRoutes: Sendable, Equatable {
-    /// Where Hermes reads the list from. `gateway/config.py:1356-1360`
-    /// prefers the **top-level** `profile_routes:` and only falls back to
-    /// `gateway.profile_routes:` when the top-level key is absent — so an
+    /// Where Hermes reads the list from. `gateway/config_loader.py:76`
+    /// bridges it in `"none"` mode (`_bridge_lookup:100-104` at `v2026.9.7`),
+    /// which prefers the **top-level** `profile_routes:` and only falls back
+    /// to `gateway.profile_routes:` when the top-level key is null/absent — so an
     /// editor must write back to whichever form is live, or its edits are
     /// shadowed.
     public enum Location: String, Sendable, Equatable {
@@ -190,10 +191,10 @@ public struct HermesProfileRoutes: Sendable, Equatable {
     /// Which form the routes were read from.
     public var location: Location
     /// `multiplex_profiles` (top-level or `gateway.multiplex_profiles`, same
-    /// top-level-wins precedence — gateway/config.py:1345-1352). Routing is
+    /// top-level-wins precedence — `gateway/config.py:708-710`). Routing is
     /// gated on it: with multiplexing off, `_profile_name_for_source`
-    /// returns `None` before matching (gateway/run.py:23923) and the whole
-    /// route list is inert.
+    /// returns `None` before matching (`gateway/run.py:4211-4212` @
+    /// `v2026.9.7`) and the whole route list is inert.
     public var multiplexProfiles: Bool
     /// Whether `multiplex_profiles` was found in the **top-level** form. When
     /// it is, `hermes config set gateway.multiplex_profiles …` is shadowed —

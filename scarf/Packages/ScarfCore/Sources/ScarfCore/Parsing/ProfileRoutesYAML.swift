@@ -6,9 +6,11 @@ import Foundation
 /// mappings, this scanner walks the block directly and hands back typed
 /// rules plus every unmodeled line verbatim.
 ///
-/// Source of truth: hermes-agent tag v2026.8.3 —
-/// `gateway/config.py:1356-1360` (which form wins), `gateway/config.py:1345-1352`
-/// (`multiplex_profiles` precedence), `gateway/profile_routing.py`
+/// Source of truth at tag `v2026.9.7`: `gateway/config_loader.py:76` with
+/// `_bridge_lookup`'s `"none"` arm at `:100-104` (which form wins — top-level
+/// unless it is null, then `gateway.profile_routes`), consumed by
+/// `gateway/config.py:745`; `gateway/config.py:708-710`
+/// (`multiplex_profiles` precedence); `gateway/profile_routing.py`
 /// (rule fields).
 public enum ProfileRoutesYAML {
 
@@ -72,7 +74,7 @@ public enum ProfileRoutesYAML {
     }
 
     /// `multiplex_profiles` — top-level form wins over `gateway.multiplex_profiles`,
-    /// matching gateway/config.py:1345-1352.
+    /// matching `gateway/config.py:708-710` at `v2026.9.7`.
     private static func parseMultiplex(_ yaml: String) -> (value: Bool, isTopLevel: Bool) {
         let values = HermesYAML.parseNestedYAML(yaml).values
         // Top-level wins only when it is NOT null: Hermes does

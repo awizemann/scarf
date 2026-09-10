@@ -676,9 +676,12 @@ import Foundation
     /// past `next_run_at` behind. Hermes's scheduler would read it as
     /// "overdue", fire a catch-up run on the very next tick, and that fire
     /// flows through `mark_job_run` — consuming one of the job's
-    /// `repeat.times` (cron/jobs.py:3019-3032). Clearing the key hands the
-    /// recompute to Hermes's own loader (cron/jobs.py:3210-3231), which is
-    /// what `resume_job` would have written.
+    /// `repeat.times` (`mark_job_run` at `cron/jobs.py:2239` calls
+    /// `_advance_after_run` at `:2266`, which bumps `repeat.completed` at
+    /// `:2203-2217` @ `v2026.9.7`). Clearing the key hands the recompute to
+    /// Hermes: `_evaluate_due_job:2925` falls through to
+    /// `_recover_missing_next_run` (`:2690-2705`), which writes exactly the
+    /// "next future run from now" `resume_job` would have written.
     @Test @MainActor func cronResumeFallbackClearsStaleNextRunAt() async throws {
         try await withLocalTransportFactory { [self] in
             let (ctx, home) = try makeFakeHermes()

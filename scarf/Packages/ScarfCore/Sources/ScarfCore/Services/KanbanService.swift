@@ -157,8 +157,9 @@ public actor KanbanService {
     /// active signal, so ONE call feeds a whole board load.
     /// `hermes_cli/kanban_parser.py:251-256` (v2026.9.7); the same
     /// subcommand + `--json` shape has existed unchanged since v2026.5.7
-    /// (`hermes_cli/kanban.py:350-370`), which is the `hasKanbanDiagnostics`
-    /// floor — callers MUST gate on that flag.
+    /// (`hermes_cli/kanban.py:1365-1375` there, `:678-681` at v2026.9.7),
+    /// and v0.13 is the `hasKanbanDiagnostics` floor — callers MUST gate on
+    /// that flag.
     nonisolated static func diagnosticsArgv(board: String? = nil, taskId: String? = nil) -> [String] {
         var args = ["diagnostics", "--json"]
         if let taskId, !taskId.isEmpty {

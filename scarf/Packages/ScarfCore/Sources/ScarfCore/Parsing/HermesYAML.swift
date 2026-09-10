@@ -297,7 +297,14 @@ public enum HermesYAML {
     /// Index of the `key: value` separator colon in a trimmed plain-key
     /// line: the first colon followed by whitespace or end-of-line. Colons
     /// with a non-space successor are part of the key (`llama3:8b: high`).
-    private static func plainKeySeparatorIndex(in trimmed: String) -> String.Index? {
+    ///
+    /// Public so every reader that has to decide "is this line a `key:`
+    /// row, and where does the key end?" uses ONE rule — the parser here,
+    /// `GatewayConfigWriter.flowPairSeparatorIndex`'s block-style sibling,
+    /// and `PlatformsViewModel.computeConfiguredPlatforms`. A plain
+    /// `firstIndex(of: ":")` disagrees with all three on a key that
+    /// contains a colon.
+    public static func plainKeySeparatorIndex(in trimmed: String) -> String.Index? {
         var i = trimmed.startIndex
         while i < trimmed.endIndex {
             if trimmed[i] == ":" {

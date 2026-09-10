@@ -248,10 +248,11 @@ final class MCPLoginController {
     /// (`SSHTransport.swift:693-716`). `-T` allocates no pty, so terminating
     /// the local `ssh` closes the channel but leaves the remote `hermes`
     /// running: it is in `_authorize`'s polling loop
-    /// (`tools/mcp_oauth_device.py:131-140`), writes nothing until it is
-    /// done, and so never takes a SIGPIPE. It keeps hitting the provider's
-    /// token endpoint until its own deadline — `min(expires_in, timeout)`,
-    /// default 300 s (`:123-124`) — long after the user dismissed the sheet.
+    /// (`tools/mcp_oauth_device.py:132-144` at `v2026.9.7`), writes nothing
+    /// until it is done, and so never takes a SIGPIPE. It keeps hitting the
+    /// provider's token endpoint until its own deadline —
+    /// `min(expires_in, timeout)`, default 300 s (`:124-125`) — long after the
+    /// user dismissed the sheet.
     ///
     /// Two fixes were considered and rejected before this one:
     ///

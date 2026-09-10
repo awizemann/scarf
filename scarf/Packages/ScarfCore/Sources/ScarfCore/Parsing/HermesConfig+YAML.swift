@@ -188,14 +188,13 @@ public extension HermesConfig {
         // reporting "absent" so the display layer resolves it against the
         // host exactly as it would for a missing key.
         //
-        // This is ALSO the reader for a key whose server-side default CHANGED
-        // across Hermes releases (`checkpoints.enabled`, false since v0.21):
-        // the absent case has to stay distinguishable so the display layer
-        // resolves it against the host's capabilities instead of the parse
-        // baking in one release's default (`HermesConfig.displayCheckpointsEnabled`).
-        // A literal-`true` variant of this reader existed for exactly that
-        // key and got `checkpoints.enabled: yes` wrong in the one direction
-        // the sentinel exists to protect.
+        // This is ALSO the reader for `checkpoints.enabled`, where absent
+        // must stay distinguishable from an explicit `false` so the display
+        // layer owns the host default rather than the parse baking one in
+        // (`HermesConfig.displayCheckpointsEnabled`). A literal-`true`
+        // variant of this reader existed for exactly that key and got
+        // `checkpoints.enabled: yes` wrong in the one direction the sentinel
+        // exists to protect.
         func boolishOpt(_ key: String) -> Bool? {
             HermesYAML.boolishValue(values[key])
         }
@@ -415,9 +414,13 @@ public extension HermesConfig {
             progressNotices: boolish("compression.progress_notices", default: false)
         )
 
-        // Sentinels, not defaults: v0.21 flipped both server-side defaults
-        // (enabled true→false, max_snapshots 50→20), so an absent key must
-        // resolve against the host — `HermesConfig.displayCheckpoints*`.
+        // Sentinels, not defaults: an absent key must resolve against the
+        // host in the display layer, never here — `HermesConfig
+        // .displayCheckpointsEnabled` / `…MaxSnapshots`. Only
+        // `max_snapshots` ever moved in the supported window (50 → 20 at
+        // v0.13.0); `enabled` has read `cp_cfg.get("enabled", False)`
+        // continuously since before the v0.6.0 minimum. Both resolvers carry
+        // the per-tag walk.
         let checkpoints = CheckpointSettings(
             enabled: boolishOpt("checkpoints.enabled"),
             maxSnapshots: int("checkpoints.max_snapshots", default: 0)
@@ -974,8 +977,10 @@ public extension HermesConfig {
             // would actually read (v0.19+, gateway/profile_routing.py).
             profileRoutes: ProfileRoutesYAML.parse(yaml),
             // `multiplex_profile_allowlist` (v0.20.4+) — true-optional list.
-            // A top-level key takes PRECEDENCE over `gateway.*` (gateway/
-            // config.py:1190-1195, 1413-1423) — mirrors the top-level-wins
+            // A top-level key takes PRECEDENCE over `gateway.*` by PRESENCE
+            // (`gateway/config_loader.py:75` presence bridge;
+            // `gateway/config.py:668-670` `pick()`, consumed at `:734`
+            // @ `v2026.9.7`) — mirrors the top-level-wins
             // pattern `ProfileRoutesYAML.parse` uses for `multiplex_profiles`.
             // `nil` = key absent from config.yaml at either spelling
             // (serve-all). A malformed value — present as a scalar, or as a

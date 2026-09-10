@@ -173,10 +173,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// mid-turn without confusing UX.
     public var hasACPSteerOnIdle: Bool { atLeastSemver(0, 13, 0) }
 
-    /// Kanban v0.13 reliability surface: hallucination gate on worker-created
-    /// cards, generic diagnostics engine, per-task `max_retries`, multiline
-    /// title/body create, `auto_blocked_reason` on blocked tasks, darwin
-    /// zombie detection. All read through the `kanban show` JSON surface.
+    /// Kanban v0.13 reliability surface, as it actually exists at v2026.9.7:
+    /// the `kanban diagnostics [--json]` subcommand over the rule engine
+    /// (`hermes_cli/kanban_parser.py:251-256`, emitter
+    /// `hermes_cli/kanban.py:627-695`, JSON at `:678-681`) and
+    /// `kanban create --max-retries N`, the per-task failure limit
+    /// (`hermes_cli/kanban_parser.py:176-181`, inside the `create`
+    /// subcommand at `:148-204`). Neither `hallucination_gate`
+    /// nor `auto_blocked_reason` appears anywhere at `v2026.9.7`, and the
+    /// only "zombie" machinery is `reap_worker_zombies`
+    /// (`hermes_cli/kanban_db_dispatch.py:190`), an internal child-process
+    /// reap with no wire surface — P14 removed the Scarf surfaces that
+    /// claimed all three. Nothing here is read through `kanban show`.
     public var hasKanbanDiagnostics: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes curator archive`, `prune`, and `list-archived` subcommands

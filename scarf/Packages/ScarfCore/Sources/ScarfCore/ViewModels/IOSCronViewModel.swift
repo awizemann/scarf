@@ -177,7 +177,10 @@ public final class IOSCronViewModel {
                 // A stale past `next_run_at` would make the scheduler fire a
                 // spurious catch-up run on the very next tick — and that fire
                 // flows through `mark_job_run`, consuming one of the job's
-                // `repeat.times` (cron/jobs.py:3019-3032). Clear it and let
+                // `repeat.times` (`mark_job_run` at `cron/jobs.py:2239`
+                // calls `_advance_after_run` at `:2266`, which bumps
+                // `repeat.completed` at `:2203-2217` @ `v2026.9.7`).
+                // Clear it and let
                 // Hermes's own loader recompute (see `clearingNextRunAt`).
                 next = next.clearingNextRunAt()
             }

@@ -65,7 +65,8 @@ import ScarfCore
     /// liveness signal: a crash or `kill -9` leaves it behind because
     /// nothing rewrites the file on an unclean exit. `hermes gateway
     /// status` derives its answer from `get_gateway_runtime_snapshot()`,
-    /// so when it says "✗ Gateway is not running" (gateway.py:8958) the
+    /// so when it says "✗ Gateway is not running"
+    /// (`hermes_cli/gateway.py:6133` @ `v2026.9.7`) the
     /// stale pid must lose — otherwise Scarf badges a dead gateway
     /// "Loaded" and the user has no reason to restart it.
     @Test func aStalePIDLosesToNotRunningStatusOutput() {

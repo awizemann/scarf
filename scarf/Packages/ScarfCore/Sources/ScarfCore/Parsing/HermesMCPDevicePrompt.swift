@@ -37,7 +37,7 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
 
     /// The last line of Hermes's single-`print` block. Its arrival is the
     /// only proof that the two lines above it are COMPLETE — see `parse`.
-    /// Verbatim from `mcp_oauth_device.py:125-126`.
+    /// Verbatim from `tools/mcp_oauth_device.py:126-127` at `v2026.9.7`.
     public static let completionSentinel = "Waiting for approval..."
 
     /// Parse the prompt out of accumulated CLI output, or `nil` while it is
@@ -47,7 +47,7 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
     /// as arrived only once `Waiting for approval...` has.** Both rules exist
     /// for the same reason: a `readabilityHandler` chunk boundary falls on a
     /// byte count, not a line. Hermes writes the whole block in one
-    /// `print(..., flush=True)` (`tools/mcp_oauth_device.py:125-126`), but the
+    /// `print(..., flush=True)` (`tools/mcp_oauth_device.py:126-127`), but the
     /// pipe can still hand Scarf `…\n  Code: WDJB-MJ` — and `WDJB-MJ` is a
     /// perfectly non-empty string. The old parser latched it, the sheet
     /// rendered a truncated code, and re-parsing was skipped forever after

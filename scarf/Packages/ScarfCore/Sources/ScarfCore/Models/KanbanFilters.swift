@@ -5,8 +5,12 @@ import Foundation
 public struct KanbanListFilter: Sendable, Equatable {
     public var status: KanbanStatus?
     public var assignee: String?
-    /// `nil` = all tenants. Empty string → "untagged" (NULL tenant)
-    /// — Hermes treats `--tenant ""` as "no tenant".
+    /// `nil` = all tenants — the flag is omitted entirely. Any non-nil
+    /// value, `""` included, becomes a literal `AND tenant = ?` equality
+    /// (`hermes_cli/kanban_db.py:1472-1479` at `v2026.9.7`), so there is no
+    /// spelling of `--tenant` that means "untagged"/NULL: `--tenant ""`
+    /// matches only rows whose tenant is the empty string. Callers wanting
+    /// every tenant must pass `nil`.
     public var tenant: String?
     /// `nil` = all sessions. Filters by the originating ACP chat
     /// `session_id` stamped on tasks created inside an agent loop

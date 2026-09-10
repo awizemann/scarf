@@ -103,9 +103,14 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // `_strip_default_values` preserve_keys) and hand-written configs
         // carry trailing comments (`slack:  # work`). The old
         // `hasSuffix(":")` test saw neither, so a configured platform
-        // rendered as unconfigured. Split at the first `key: value`
-        // separator colon instead. (`.whitespacesAndNewlines` so a CRLF
-        // config.yaml doesn't leave a `\r` glued to every section name.)
+        // rendered as unconfigured. Split at the `key: value` separator
+        // colon instead — `HermesYAML.plainKeySeparatorIndex`, the same rule
+        // the parser and the writers use: the first colon followed by
+        // whitespace or end-of-line, so a colon inside the key
+        // (`slack:dev: {}`) stays part of the key rather than truncating it
+        // to a platform name the file never mentioned.
+        // (`.whitespacesAndNewlines` so a CRLF config.yaml doesn't leave a
+        // `\r` glued to every section name.)
         let topLevel = Set(
             yaml.components(separatedBy: "\n")
                 .filter { !$0.hasPrefix(" ") && !$0.hasPrefix("\t") }
@@ -120,7 +125,8 @@ final class PlatformsViewModel: OutcomeMessageHosting {
                         line.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                     guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
-                    guard let colon = trimmed.firstIndex(of: ":") else { return nil }
+                    guard let colon = HermesYAML.plainKeySeparatorIndex(in: trimmed)
+                    else { return nil }
                     let name = String(trimmed[trimmed.startIndex..<colon])
                         .trimmingCharacters(in: .whitespaces)
                     guard !name.isEmpty else { return nil }

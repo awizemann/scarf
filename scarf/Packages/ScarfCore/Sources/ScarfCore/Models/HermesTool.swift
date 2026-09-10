@@ -168,7 +168,7 @@ public enum KnownPlatforms {
         // v0.21.1 surface, and no capability flag applies. Platforms without
         // a per-field setup view fall to `PlatformsView`'s default panel
         // ("No setup form for this platform yet"), which is the same
-        // degradation `buzz` has had since v0.20.
+        // degradation `buzz` has had since v0.19.1.
         //
         // DELIBERATELY EXCLUDED, verified at v2026.9.7:
         //  - `local` (Platform.LOCAL), `relay` (marked EXPERIMENTAL in the

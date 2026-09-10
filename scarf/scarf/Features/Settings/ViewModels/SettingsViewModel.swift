@@ -956,7 +956,8 @@ final class SettingsViewModel {
     ///
     /// `location` must come from the freshly-read config so the write lands
     /// in whichever of the two accepted forms Hermes actually reads
-    /// (top-level wins over `gateway.` — gateway/config.py:1356).
+    /// (top-level wins over `gateway.` — `gateway/config_loader.py:76`,
+    /// `_bridge_lookup:100-104` @ `v2026.9.7`).
     func saveProfileRoutes(
         _ routes: [HermesProfileRoute],
         location: HermesProfileRoutes.Location,

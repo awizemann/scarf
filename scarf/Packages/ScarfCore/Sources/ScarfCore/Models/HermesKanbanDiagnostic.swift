@@ -200,7 +200,7 @@ public enum KanbanDiagnosticSeverity: String, Sendable, CaseIterable {
 
 /// One element of `hermes kanban diagnostics --json`:
 /// `{"task_id": …, "title": …, "status": …, "assignee": …,
-///   "diagnostics": [Diagnostic, …]}` (`hermes_cli/kanban.py:676-678`,
+///   "diagnostics": [Diagnostic, …]}` (`hermes_cli/kanban.py:678-681`,
 /// v2026.9.7). `title` / `status` / `assignee` are absent when the task row
 /// vanished between the two queries, hence all-optional.
 public struct HermesKanbanDiagnosticsEntry: Sendable, Equatable, Decodable {

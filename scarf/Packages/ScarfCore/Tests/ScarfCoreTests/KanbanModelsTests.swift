@@ -613,7 +613,7 @@ import Foundation
 
     @Test func decodeDiagnosticsEnvelopeVerbatimFixture() throws {
         // Verbatim shape of `hermes kanban diagnostics --json`
-        // (`hermes_cli/kanban.py:676-678` composing
+        // (`hermes_cli/kanban.py:678-681` composing
         // `Diagnostic.to_dict()` = `dataclasses.asdict` of
         // `kanban_diagnostics.py:48-64`, v2026.9.7). Timestamps are Unix
         // integer seconds; `actions` / `data` are present and deliberately

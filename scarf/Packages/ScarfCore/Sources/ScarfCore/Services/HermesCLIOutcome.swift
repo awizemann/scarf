@@ -12,7 +12,7 @@ import Foundation
 ///
 /// - `hermes_cli/skills_hub.py:645-648` — `def do_install(...) -> None`, with
 ///   nine bare `return`s after printing (`:659`, `:662`, `:667`, `:669`,
-///   `:684-685`, `:691`, `:696`, `:711`, `:715`).
+///   `:685`, `:693`, `:701`, `:712`, `:718`).
 /// - `hermes_cli/sessions_cmd.py:46-48` — `_not_found()` prints
 ///   `Session '<id>' not found.` **to stdout** and returns 1, but its callers
 ///   (`:319`, `:392`, `:488`) discard that and return `None`.
@@ -169,8 +169,8 @@ public enum HermesCLIMarkers {
     /// - `Error:` — `_print_error` (skills_hub.py:134-135), reached from
     ///   `_pinned_sources` (:582) and `_print_fetch_failure` (:592).
     /// - `Installation blocked:` — `_install_blocked` (:498), reached from the
-    ///   scan verdict (:707) and `_invalid_path` (:506).
-    /// - `is already installed at` / `Use --force to reinstall.` — :683-686.
+    ///   scan verdict (:699) and `_invalid_path` (:506).
+    /// - `is already installed at` (:682) / `Use --force to reinstall.` (:684).
     /// - `Cannot install from URL:` / `Invalid --name:` —
     ///   `_resolve_url_bundle_name` (:520, :525).
     /// - `Installation cancelled.` — `_confirm_install` (:642) and :537.

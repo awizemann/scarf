@@ -1371,23 +1371,6 @@ public struct HermesConfig: Sendable {
         return capabilities.isV021OrLater ? 5 : 1800
     }
 
-    /// Effective `checkpoints.enabled` for display: the on-disk value when
-    /// the key is present, otherwise the connected host's own default —
-    /// **false** on every supported host.
-    ///
-    /// The default is NOT a v0.21 flip. `cli.py` has read
-    /// `cp_cfg.get("enabled", False)` continuously since well before the
-    /// v0.6.0 minimum: v2026.3.30 (v0.6.0) `cli.py:1163`, v2026.5.7
-    /// (v0.13.0) `cli.py:2310`, v2026.8.3 (v0.20.0) `cli.py:4474`,
-    /// v2026.8.31 (v0.21.0) `cli.py:5501` — all `False`. The
-    /// `hermes_cli/config_defaults.py` dict agrees from the moment it exists
-    /// (v2026.7.30 / v0.19.1 `:398`, v2026.8.31 / v0.21.0 `:688`). The
-    /// "v2 flipped True → False" line in the v0.21 `config_defaults.py`
-    /// comment block describes the checkpoint engine's own pre-history, not
-    /// any version Scarf supports, so there is no host-version branch here
-    /// and no capability gate to consult.
-    ///
-    /// Display-only; callers must never write the resolved value back.
     /// Effective `platforms.telegram.extra.rich_messages` for display: the
     /// on-disk value when set, otherwise the host's own default — **false**
     /// on v0.18.0+, **true** on the one release that shipped it on (v0.17.x).
@@ -1407,6 +1390,25 @@ public struct HermesConfig: Sendable {
         return capabilities.isV018OrLater ? false : capabilities.isV017OrLater
     }
 
+    /// Effective `checkpoints.enabled` for display: the on-disk value when
+    /// the key is present, otherwise the connected host's own default —
+    /// **false** on every supported host, which is why `capabilities` is
+    /// unused here.
+    ///
+    /// The default is NOT a v0.21 flip. `cli.py` has read
+    /// `cp_cfg.get("enabled", False)` continuously since well before the
+    /// v0.6.0 minimum: v2026.3.30 (v0.6.0) `cli.py:1163`, v2026.5.7
+    /// (v0.13.0) `cli.py:2310`, v2026.8.3 (v0.20.0) `cli.py:4474`,
+    /// v2026.8.31 (v0.21.0) `cli.py:5501`, v2026.9.7 (v0.21.1)
+    /// `cli.py:2755` — all `False`. The
+    /// `hermes_cli/config_defaults.py` dict agrees from the moment it exists
+    /// (v2026.7.30 / v0.19.1 `:398`, v2026.8.31 / v0.21.0 `:688`). The
+    /// "v2 flipped True → False" line in the v0.21 `config_defaults.py`
+    /// comment block describes the checkpoint engine's own pre-history, not
+    /// any version Scarf supports, so there is no host-version branch here
+    /// and no capability gate to consult.
+    ///
+    /// Display-only; callers must never write the resolved value back.
     public func displayCheckpointsEnabled(capabilities: HermesCapabilities) -> Bool {
         if let enabled = checkpoints.enabled { return enabled }
         return false
@@ -1419,7 +1421,7 @@ public struct HermesConfig: Sendable {
     /// The 50 → 20 change lands at tag v2026.5.7 (v0.13.0) `cli.py:2311`;
     /// the immediately preceding tag v2026.4.30 (v0.12.0) `cli.py:2070`
     /// still reads `cp_cfg.get("max_snapshots", 50)`. Every later tag
-    /// through v2026.8.31 (v0.21.0) `cli.py:5502` keeps 20, so this is a
+    /// through v2026.9.7 (v0.21.1) `cli.py:2756` keeps 20, so this is a
     /// v0.13 floor, not a v0.21 one. The pre-floor branch stays live because
     /// the supported minimum is v0.6.0 (v2026.3.30 `cli.py:1164` = 50).
     ///

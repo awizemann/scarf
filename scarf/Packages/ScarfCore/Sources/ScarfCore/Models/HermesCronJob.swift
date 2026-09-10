@@ -77,9 +77,18 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             } else if let single = try? c.decode(String.self, forKey: .skills) {
                 raw = [single]                    // `isinstance(skills, str)`
             } else {
-                // Neither a list nor a string (a number, an object): Hermes's
-                // `list(skills)` raises and the record is treated as
-                // skill-less rather than failing the whole file.
+                // Neither a list nor a string. Hermes does NOT degrade here:
+                // `_normalize_skill_list` falls through to `list(skills)`
+                // (`cron/jobs.py:391` @ `v2026.9.7`), which raises TypeError
+                // on a number or bool and returns the KEYS of a mapping. That
+                // raise is unguarded all the way out — `_apply_skill_fields`
+                // (`:403`) → `_normalize_job_record` (`:456`) → `list_jobs`
+                // (`:1851`) — so `hermes cron list` fails outright on such a
+                // record. Scarf deliberately diverges and degrades to
+                // skill-less instead of failing the whole file: Scarf is a
+                // read-only viewer and a hand-edited jobs.json must not blank
+                // the board. The skills it shows for that one job are wrong in
+                // the mapping case; nothing Scarf writes back invents them.
                 raw = []
             }
         } else if let legacy = try? l.decodeIfPresent(String.self, forKey: .skill) {
@@ -244,8 +253,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// noAgent were dropped this way until the v0.18 audit caught it).
     ///
     /// Flipping `enabled` alone is NOT enough. Since v0.20.4
-    /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7 :482-485;
-    /// claim gate `_evaluate_due_job` :2910, roster filter :3009) refuses
+    /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7
+    /// :482-485; its one in-file call site is the claim gate at :2509, and
+    /// the scheduler's own scan filter is
+    /// `cron/scheduler_provider.py:261`) refuses
     /// to fire whenever `state == "paused"` OR `paused_at` is set —
     /// regardless of `enabled` — so an enable-toggle that forwards the old
     /// pause markers produces a job that looks enabled and never runs.
@@ -1013,9 +1024,12 @@ public struct CronDispatchStamp: Sendable, Equatable {
     /// (`hermes_cli/cron.py::_format_lateness`, v2026.9.7 :88-91): it
     /// TRUNCATES (Python `int()`), it does not round, and it CLAMPS. Scarf
     /// rounded and never clamped, so `59.7s` read `1m` where the CLI says
-    /// `59s`, and an EARLY dispatch — a scheduler that fires a second
-    /// ahead of `scheduled_at`, which the catch-up path can produce —
-    /// rendered `-1s late` where the CLI says `0s`.
+    /// `59s`. The clamp is belt-and-braces against a hand-edited
+    /// `jobs.json`, not against Hermes: the writer already does
+    /// `max(0.0, (now - d.next_run_dt).total_seconds())` before stamping
+    /// `lateness_seconds` (`cron/jobs.py:2972` @ `v2026.9.7`), so no
+    /// Hermes-authored record carries a negative value. Without the clamp a
+    /// negative one would render `-1s late` where the CLI says `0s`.
     public var latenessDisplay: String {
         // `Int(_: Double)` TRAPS on NaN/±inf, and `lateness_seconds` is
         // whatever the JSON carried. Hermes's own `except (TypeError,

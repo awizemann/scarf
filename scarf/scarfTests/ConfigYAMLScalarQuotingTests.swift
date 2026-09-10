@@ -276,4 +276,25 @@ struct ConfigYAMLScalarQuotingTests {
         try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
         #expect(!PlatformsViewModel.computeConfiguredPlatforms(context: home.context).contains("slack"))
     }
+
+    /// P26 — the comment above the split claimed it cut at the `key: value`
+    /// separator colon; the code cut at `firstIndex(of: ":")`. On a top-level
+    /// key that CONTAINS a colon those disagree, and the plain-first-colon
+    /// version invented a platform the file never configured. Neither line
+    /// below is a `slack` / `teams` section.
+    @Test func colonInsideATopLevelKeyDoesNotInventAPlatform() throws {
+        let home = try TempHermesHome()
+        let yaml = """
+        slack:dev: {}
+        teams:staging:
+          reply_to_mode: first
+        discord: {}
+        """
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let configured = PlatformsViewModel.computeConfiguredPlatforms(context: home.context)
+        #expect(!configured.contains("slack"), "`slack:dev:` is not a `slack` section")
+        #expect(!configured.contains("teams"), "`teams:staging:` is not a `teams` section")
+        // The separator rule still finds an ordinary section in the same file.
+        #expect(configured.contains("discord"))
+    }
 }

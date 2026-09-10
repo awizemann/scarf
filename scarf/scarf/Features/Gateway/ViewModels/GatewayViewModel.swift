@@ -350,7 +350,8 @@ final class MessagingGatewayViewModel {
     /// it on an unclean exit), so a pid-only test badges a dead gateway as
     /// "Loaded". `hermes gateway status` is the live probe — it derives
     /// pids from `get_gateway_runtime_snapshot()` — so its verdict wins:
-    ///  - `✗ Gateway is not running` (manual branch, gateway.py:8958) →
+    ///  - `✗ Gateway is not running` (manual branch,
+    ///    `hermes_cli/gateway.py:6133` at `v2026.9.7`) →
     ///    never loaded, whatever the stale pid says.
     ///  - `✓ Gateway is running (PID: …)` + `(Running manually, …)` →
     ///    running, but not service-managed.

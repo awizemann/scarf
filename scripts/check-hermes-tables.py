@@ -136,7 +136,7 @@ def parse_models_dev_map(hermes_src):
 
 
 # auth_type values models_catalog_static.py refuses to auto-append (they need
-# bespoke picker UX). Mirrored verbatim from its skip set at v2026.9.7:365.
+# bespoke picker UX). Mirrored verbatim from its skip set at v2026.9.7:360-362.
 PLUGIN_PROVIDER_SKIP_AUTH = {
     "oauth_device_code", "oauth_external", "external_process", "aws_sdk",
     "copilot", "vertex",
@@ -219,7 +219,7 @@ def parse_static_catalog(hermes_src):
     Two things lane 4 cannot get right without this file:
 
     * A plugin whose provider name is ALREADY a static ``CANONICAL_PROVIDERS``
-      slug is NOT auto-appended — `models_catalog_static.py:357` skips any name
+      slug is NOT auto-appended — `models_catalog_static.py:360` skips any name
       already in ``_canonical_slugs``. ``gemini`` is exactly that case: the
       static row ("gemini", "Google AI Studio") predates the plugin, so
       reporting it as an unreachable *plugin* provider is simply wrong.
@@ -419,7 +419,7 @@ def main():
         unreachable = {
             pid for pid in registered
             # A name already in the static CANONICAL_PROVIDERS list is not
-            # auto-appended at all (models_catalog_static.py:357 skips it), so
+            # auto-appended at all (models_catalog_static.py:360 skips it), so
             # it is not this lane's subject.
             if pid not in static_slugs and not is_reachable(pid)
         }

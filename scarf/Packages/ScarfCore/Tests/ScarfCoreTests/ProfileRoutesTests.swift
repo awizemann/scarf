@@ -55,7 +55,8 @@ final class ProfileRoutesTests: XCTestCase {
     }
 
     func testTopLevelFormWinsOverNested() {
-        // gateway/config.py:1356-1360 — top-level is read first; the nested
+        // gateway/config_loader.py:76 + _bridge_lookup:100-104 @ v2026.9.7 —
+        // top-level is read first; the nested
         // form is only consulted when the top-level key is absent.
         let yaml = """
         profile_routes:
