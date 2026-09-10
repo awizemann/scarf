@@ -35,6 +35,13 @@ struct HermesFileServiceConfigParityTests {
     max_concurrent_sessions: 5
     display:
       personality: kawaii
+      # Set EXPLICITLY (and to the opposite of `model.streaming` below) so the
+      # "these two keys are not the same key" assertion stays meaningful
+      # without leaning on either one's default. `display.streaming` in fact
+      # defaults to FALSE upstream — `hermes_cli/config_defaults.py:796` and
+      # its reader `cli.py:2598` at v2026.9.7, `hermes_cli/config.py:220` at
+      # v2026.3.17 (v0.3.0) — which this fixture used to assert backwards.
+      streaming: true
       resume_display: minimal
       busy_input_mode: queue
       timestamps: true
@@ -119,6 +126,9 @@ struct HermesFileServiceConfigParityTests {
         #expect(config.openrouterResponseCacheEnabled == true)
         #expect(config.display.timestamps == true)
         #expect(config.terminal.dockerExtraArgs == ["--privileged", "--network=host"])
+        // `rich_messages` is a SENTINEL now (the shipped default flipped
+        // true -> false at v0.18), so the fixture's explicit `false` must
+        // arrive as `.some(false)`, not as "absent".
         #expect(config.telegram.richMessages == false)
         #expect(config.telegram.statusIndicator == true)
         #expect(config.whatsappCloud.phoneNumberID == "123456")
@@ -151,8 +161,9 @@ struct HermesFileServiceConfigParityTests {
         #expect(config.display.bellOnPrompt == true)
         #expect(config.delegation.independentCompletions == true)
         #expect(config.delegation.compressionThresholdTokens == 200_000)
-        // `model.streaming` must not have been mistaken for
-        // `display.streaming`, which this fixture leaves absent (→ true).
+        // `model.streaming` (false above) must not have been mistaken for
+        // `display.streaming` (true in the fixture) — the two are read from
+        // different blocks and mean different things.
         #expect(config.streaming == true)
     }
 
@@ -1037,5 +1048,105 @@ struct AllConfigWritersParityTests {
                 knownWriters with the site count AND the concrete keys it produces.
                 """)
         }
+    }
+}
+
+/// Whole-surface audit P13 — the three config DEFAULTS that were wrong, read
+/// through the Mac app's real `HermesFileService.loadConfig()` path (not the
+/// ScarfCore parser directly), plus the two Settings controls whose option
+/// list / seed value came from those reads.
+///
+/// The fixture is a config.yaml that omits all three keys, which is the only
+/// case a default can be observed in — the suite above pins the
+/// explicitly-set values.
+struct HermesConfigDefaultsP13ParityTests {
+
+    /// A config.yaml with none of the audited keys present.
+    private static let bareYAML = """
+    model:
+      default: llama3.1:8b
+      provider: ollama
+    display:
+      personality: default
+    """
+
+    private func loadBare() throws -> (config: HermesConfig, cleanup: () -> Void) {
+        let home = try TempHermesHome()
+        try Self.bareYAML.write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        return (HermesFileService(context: home.context).loadConfig(), home.cleanup)
+    }
+
+    /// `openrouter.response_cache` -> true (`config_defaults.py:649` at
+    /// v2026.9.7; `config.py:686` at the key's floor v2026.5.7 = v0.13.0).
+    /// `display.streaming` -> false (`config_defaults.py:796` and its reader
+    /// `cli.py:2598`; `config.py:220` at v2026.3.17 = v0.3.0, the floor).
+    /// `platforms.telegram.extra.rich_messages` -> nil, a sentinel, because
+    /// the shipped value flipped True (v0.17.0 `config.py:2144`) -> False
+    /// (v0.18.0 `config.py:2367`, still False at v2026.9.7
+    /// `config_defaults.py:1492`).
+    @Test func auditedDefaultsMatchHermes() throws {
+        let (config, cleanup) = try loadBare()
+        defer { cleanup() }
+        #expect(config.openrouterResponseCacheEnabled == true)
+        #expect(config.streaming == false)
+        #expect(config.telegram.richMessages == nil)
+        // …and the sentinel resolves per host generation.
+        #expect(config.displayTelegramRichMessages(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)")))
+        #expect(!config.displayTelegramRichMessages(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")))
+    }
+
+    /// The Approval Mode picker's options ARE `_VALID_MODES`
+    /// (`tools/approval_context.py:197` @ v2026.9.7) — no `auto`, which
+    /// Hermes has warned-and-discarded at every tag back to v0.3.0.
+    @Test func approvalModePickerOffersOnlyValidModes() {
+        #expect(HermesApprovalMode.options == ["manual", "smart", "off"])
+        // And a config still carrying the invalid value renders as the mode
+        // the host enforces, so the picker is never blank.
+        #expect(HermesApprovalMode.normalize("auto").rawValue == "manual")
+    }
+
+    /// The Busy Input Mode picker gains `steer` only where Hermes reads it
+    /// (`cli.py:2592` @ v2026.9.7; the reader's floor is v2026.4.30 =
+    /// v0.12.0), and never renders a blank selection over a value Scarf did
+    /// not expect.
+    @Test func busyInputModePickerOptionsFollowTheHost() {
+        let v0211 = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        let v011 = HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)")
+        #expect(DisplayTab.busyInputModeOptions(current: "interrupt", capabilities: v0211)
+            == ["interrupt", "queue", "steer"])
+        #expect(DisplayTab.busyInputModeOptions(current: "interrupt", capabilities: v011)
+            == ["interrupt", "queue"])
+        // Unknown version keeps today's rendering (C1).
+        #expect(DisplayTab.busyInputModeOptions(current: "interrupt", capabilities: .empty)
+            == ["interrupt", "queue"])
+        // A stored value the host does not offer is still selectable rather
+        // than leaving the control blank.
+        #expect(DisplayTab.busyInputModeOptions(current: "steer", capabilities: v011)
+            == ["interrupt", "queue", "steer"])
+        #expect(DisplayTab.busyInputModeOptions(current: "wat", capabilities: v0211)
+            == ["interrupt", "queue", "steer", "wat"])
+    }
+
+    /// The WAL Autocheckpoint "Custom" toggle must seed SQLite's own default
+    /// (1000 pages), not the range's lower bound. `hermes_state_wal.py:466-487`
+    /// passes the configured int straight into `PRAGMA
+    /// wal_autocheckpoint=<n>`, where 0 DISABLES automatic checkpointing —
+    /// so the old seed turned "let me set a value" into "let the WAL grow
+    /// without bound".
+    @Test func walAutocheckpointCustomSeedsSQLiteDefault() {
+        #expect(AdvancedTab.walAutocheckpointSQLiteDefault == 1000)
+        #expect(AdvancedTab.customToggleValue(
+            current: nil, seed: AdvancedTab.walAutocheckpointSQLiteDefault,
+            lowerBound: 0) == 1000)
+        // An already-set value always wins over the seed…
+        #expect(AdvancedTab.customToggleValue(
+            current: 0, seed: AdvancedTab.walAutocheckpointSQLiteDefault,
+            lowerBound: 0) == 0)
+        // …and a row with no explicit seed keeps the old lower-bound
+        // behaviour (Journal Size Limit, where 0 is a legitimate setting).
+        #expect(AdvancedTab.customToggleValue(current: nil, seed: nil, lowerBound: 0) == 0)
     }
 }

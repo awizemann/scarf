@@ -24,6 +24,7 @@ import ScarfCore
         canGrant: Bool = true,
         accessibility: Bool? = true,
         screenRecording: Bool? = true,
+        capturable: Bool?? = nil,
         checks: [HermesComputerUseCheck] = [],
         error: String? = nil
     ) -> HermesComputerUseStatus {
@@ -31,8 +32,61 @@ import ScarfCore
             platform: platform, platformSupported: supported, installed: installed,
             version: version, ready: ready, canGrant: canGrant,
             accessibility: accessibility, screenRecording: screenRecording,
-            screenRecordingCapturable: screenRecording, checks: checks, error: error
+            // Default: mirror the grant, which is what the driver reports in
+            // the ordinary case. `capturable:` overrides it, including with
+            // an explicit nil.
+            screenRecordingCapturable: capturable ?? screenRecording,
+            checks: checks, error: error
         )
+    }
+
+    // MARK: - `screen_recording_capturable` (tri-state, like the grant rows)
+
+    /// Granted-but-not-capturable: a stale TCC entry records the grant while
+    /// capture still fails. Hermes's own doctor makes this row outrank the
+    /// plain pass (`tools/computer_use/doctor.py:204-207` @ v2026.9.7); the
+    /// card said "Screen Recording granted" and stopped, which is the exact
+    /// wrong answer for a user whose screenshots are black.
+    @Test func grantedButNotCapturableIsAnError() {
+        let section = HealthViewModel.computerUseSection(
+            status(screenRecording: true, capturable: .some(false)))
+        let row = section.checks.first { $0.label == "Screen Recording granted but not capturable" }
+        #expect(row?.status == .error)
+        #expect(row?.detail?.contains("re-grant") == true)
+        // The plain grant row is still there — this one is additional.
+        #expect(section.checks.contains { $0.label == "Screen Recording granted" })
+    }
+
+    @Test func capturableTrueIsAnOKRow() {
+        let section = HealthViewModel.computerUseSection(
+            status(screenRecording: true, capturable: .some(true)))
+        #expect(section.checks.first { $0.label == "Screen Recording capturable" }?.status == .ok)
+    }
+
+    /// nil means Scarf could not ask — a warning carrying the probe's own
+    /// reason, never a denial. Same tri-state rule as the two grant rows.
+    @Test func capturableNilIsUnknownNotDenied() {
+        let section = HealthViewModel.computerUseSection(
+            status(screenRecording: true, capturable: .some(nil),
+                   error: "cua-driver permissions status timed out"))
+        let row = section.checks.first { $0.label == "Screen Recording capture unknown" }
+        #expect(row?.status == .warning)
+        #expect(row?.detail == "cua-driver permissions status timed out")
+        #expect(!section.checks.contains { $0.label.contains("not capturable") })
+    }
+
+    /// With no Screen Recording grant, the grant row is the whole story —
+    /// a second unknown row underneath it is noise, and on a denied grant
+    /// the capturable field is meaningless.
+    @Test func capturableRowIsAbsentWhenScreenRecordingIsNotGranted() {
+        for grant: Bool? in [false, nil] {
+            let section = HealthViewModel.computerUseSection(
+                status(ready: false, screenRecording: grant, capturable: .some(nil)))
+            #expect(!section.checks.contains { $0.label.contains("capturable") },
+                    "grant=\(String(describing: grant))")
+            #expect(!section.checks.contains { $0.label.contains("capture unknown") },
+                    "grant=\(String(describing: grant))")
+        }
     }
 
     @Test func grantedMacHostReadsAllOK() {

@@ -21,15 +21,22 @@ public struct KanbanCreateRequest: Sendable, Equatable {
     /// passed verbatim as `--branch <name>`. Only meaningful with a
     /// `.worktree` / `.worktreePath` workspace. `nil`/empty → omitted.
     public var branch: String?
-    /// v0.13: per-task retry budget. `--max-retries N` is write-once at
-    /// create time — no `set_max_retries` verb. Pass `nil` to let Hermes
-    /// pick its built-in default (3 as of v0.13.0). Capability-gated in
-    /// the create sheet on `hasKanbanDiagnostics`.
-    // TODO(WS-3-Q6): Confirm Hermes's global default for `max_retries`
-    // (v0.13 release notes don't enumerate it). The create sheet defaults
-    // the field to 3; if Hermes config exposes a different default, mirror
-    // it.
+    /// v0.13: per-task FAILURE budget. `--max-retries N` is write-once at
+    /// create time — no `set_max_retries` verb. Despite the flag's name it
+    /// is a ceiling on *consecutive failures*, not on extra attempts:
+    /// `record_failure` trips the breaker when `failures >= effective_limit`
+    /// and parks the card in `blocked` (`hermes_cli/kanban_db_dispatch.py:1026-1034`
+    /// at v2026.9.7), so `1` means "no retries — block on the first failure"
+    /// and `2` (Hermes's own `DEFAULT_FAILURE_LIMIT`, same file:33) means
+    /// one retry. Pass `nil` to let Hermes apply that default.
+    /// Capability-gated in the create sheet on `hasKanbanDiagnostics`.
     public var maxRetries: Int?
+
+    /// Hermes's `DEFAULT_FAILURE_LIMIT` (`hermes_cli/kanban_db_dispatch.py:33`,
+    /// v2026.9.7) — the value the dispatcher uses when neither the per-task
+    /// `max_retries` nor `kanban.failure_limit` is set. Mirrored so the create
+    /// sheet seeds the stepper at Hermes's real default instead of inventing one.
+    public static let hermesDefaultFailureLimit = 2
     /// v0.21.1: `--completion-contract <contract>` — `local-only` (Hermes's
     /// own default), `OWNER/REPO` to require publication, or an exact GitHub
     /// PR URL whose CI gates `kanban complete`

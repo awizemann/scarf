@@ -95,7 +95,18 @@ final class CronViewModel {
                 ScarfMon.event(.diskIO, "cron.load.jobs", count: jobs.count)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
+                    let previousIDs = Set(self.jobs.map(\.id))
                     self.jobs = jobs
+                    // The doctor parse resolves headers against the id
+                    // roster (an id may contain spaces), so a roster that
+                    // arrives AFTER the doctor run — the cold-launch order,
+                    // since both probes start from `onAppear` — leaves the
+                    // findings parsed by the weaker fallback. Re-run only
+                    // when the doctor has already answered once, so a host
+                    // without `cron doctor` never gains a spawn.
+                    if self.hasLoadedDoctorFindings, previousIDs != Set(jobs.map(\.id)) {
+                        self.loadDoctor(force: true)
+                    }
                     self.loadDecodeFailed = decodeFailed
                     self.availableSkills = skills
                     if let refreshed { self.selectedJob = refreshed }
@@ -163,6 +174,10 @@ final class CronViewModel {
     /// blank with no way back short of an app restart.
     @ObservationIgnored private var hasLoadedIncidents = false
 
+    /// Whether `cron incidents` has ever answered on this host. Same
+    /// gate rationale as `hasLoadedDoctorFindings`.
+    var hasLoadedIncidentList: Bool { hasLoadedIncidents }
+
     /// Open (un-acked) incidents for one job — drives the row badge.
     func openIncidentCount(jobID: String) -> Int {
         incidents.filter { $0.jobID == jobID && $0.isOpen }.count
@@ -198,7 +213,9 @@ final class CronViewModel {
     /// `hermes cron incidents ack <id>` **exits 0 on the miss path**: when
     /// `ack_incident` returns falsy the CLI prints "Incident <id> not found
     /// or already closed." in yellow and still returns 0
-    /// (`hermes_cli/cron.py:322-335`). Exit code alone would report a
+    /// (`hermes_cli/cron.py::cron_incidents`, v2026.9.7 :272-290 — the miss
+    /// branch prints at :287 and still falls through to `return 0`).
+    /// Exit code alone would report a
     /// no-op as a success, so the output text is the discriminator.
     static func ackOutcomeMessage(exitCode: Int32, output: String) -> String {
         guard exitCode == 0 else { return "Couldn't acknowledge: \(output.prefix(160))" }
@@ -229,7 +246,12 @@ final class CronViewModel {
     /// instead of pushing the user into a separate pane.
     var doctorFindings: [String: HermesCronDoctorFinding] = [:]
     @ObservationIgnored private var hasLoadedDoctor = false
-    @ObservationIgnored private var isLoadingDoctor = false
+
+    /// Whether `cron doctor` has ever answered on this host. Gates the
+    /// post-mutation refresh: a host without the verb must not gain a
+    /// spawn it never made before (C1).
+    var hasLoadedDoctorFindings: Bool { hasLoadedDoctor }
+    @ObservationIgnored private(set) var isLoadingDoctor = false
 
     func loadDoctor(force: Bool = false) {
         if !force, hasLoadedDoctor { return }
@@ -237,6 +259,10 @@ final class CronViewModel {
         isLoadingDoctor = true
         let svc = fileService
         let log = logger
+        // The doctor header is `  {id} {name}` and a job id may itself
+        // contain spaces, so the parse needs the roster to know where the
+        // id ends. Snapshot it here, on the main actor, before hopping off.
+        let knownJobIDs = Set(jobs.map(\.id))
         Task.detached { [weak self] in
             // `cron doctor` exits 1 when it FINDS issues — that's the
             // normal path, not a failure, so the exit code can't be the
@@ -246,7 +272,7 @@ final class CronViewModel {
             // retryable rather than being memoized as "no findings".
             let result = svc.runHermesCLISplit(args: HermesCronDoctorParser.args(), timeout: 30)
             let ok = HermesCronDoctorParser.looksLikeDoctorOutput(result.stdout)
-            let parsed = ok ? HermesCronDoctorParser.parse(text: result.stdout) : [:]
+            let parsed = ok ? HermesCronDoctorParser.parse(text: result.stdout, knownJobIDs: knownJobIDs) : [:]
             if !ok {
                 log.warning("cron doctor produced unrecognized output (exit \(result.exitCode)): \(result.stderr.prefix(300))")
             }
@@ -283,7 +309,8 @@ final class CronViewModel {
 
     /// Set by `CronView` from `hasCronCreatePaused` (v0.21.1). Gates the
     /// one-shot pre-check below: only a v0.21.1 host REJECTS a past one-shot
-    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`) — an older one
+    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`, v2026.9.7 :1669,
+    /// reached from `create_job` :1758) — an older one
     /// stores it, and refusing locally there would deny a write the host
     /// would have accepted. Same rule as `isV0206OrLater`.
     var isV0211OrLater = false
@@ -299,7 +326,9 @@ final class CronViewModel {
     func resumeJob(_ job: HermesCronJob) {
         // Since v0.20.6 `update_job` refuses to re-activate a
         // completed/error job ("Cannot activate terminal cron job …",
-        // cron/jobs.py:2593/2694), and `resume_job` funnels through it.
+        // `cron/jobs.py::_reject_terminal_activation`, v2026.9.7 :1865-1878,
+        // armed from `update_job` :1941/:1965), and `resume_job` (:1986)
+        // funnels through it.
         // Catch it before the CLI round-trip so the user gets the
         // actionable sentence instead of a Python ValueError tail.
         if refusesTerminalJobLocally(job) {
@@ -323,6 +352,26 @@ final class CronViewModel {
     private func terminalRefusalMessage(_ job: HermesCronJob) -> String {
         let state = job.effectiveState == "error" ? "failed" : "finished"
         return "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
+    }
+
+    /// The verdict on `hermes cron run <id>`, judged by what it printed.
+    ///
+    /// `_job_action` (hermes_cli/cron.py:635-663 at v2026.9.7) returns 0 for a
+    /// run that FAILED: it prints the green `Triggered job: <name> (<id>)`
+    /// line (:658, verb from `_JOB_ACTIONS`, :763) and then `_run_outcome`'s
+    /// verdict (:662), which for a synchronous failure is
+    /// `  Ran now: failed.` (:677) — and still `return 0`. So this is the one
+    /// site where a failure marker must beat a success marker that is also
+    /// present. `Ran now:` first appears at v2026.7.1:411, so on a v0.17 host
+    /// the marker never fires and the verdict is unchanged (charter C1).
+    static func runOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.cronRunSuccess,
+            failureMarkers: HermesCLIMarkers.cronRunFailure,
+            failureWins: true
+        )
     }
 
     /// Translate the Hermes terminal-job refusals into one plain sentence.
@@ -357,7 +406,8 @@ final class CronViewModel {
     /// The full `Blocked: …` sentence Hermes printed, verbatim, or `nil`.
     ///
     /// The CLI prints it as `Failed to create job: Blocked: …` on STDOUT
-    /// (`hermes_cli/cron.py::cron_create`) — not stderr — because the guard's
+    /// (`hermes_cli/cron.py::cron_create`, v2026.9.7 :578-580) — not stderr —
+    /// because the guard's
     /// `ValueError` is caught by `tools/cronjob_tools.py::cronjob` and
     /// returned as a JSON `error` payload. `runHermesCLI` merges both
     /// streams, so matching on the text is what works either way.
@@ -387,7 +437,8 @@ final class CronViewModel {
         // The app's HermesFileWatcher picks up the dashboard.json
         // rewrite that the agent lands at the end — that's what the
         // user actually watches for, not this toast.
-        // `trigger_job` refuses terminal jobs outright (cron/jobs.py:2760)
+        // `trigger_job` refuses terminal jobs outright
+        // (`cron/jobs.py::trigger_job`, v2026.9.7 :2012-2017)
         // — but only from v0.20.6 on; see `refusesTerminalJobLocally`.
         if refusesTerminalJobLocally(job) {
             post(terminalRefusalMessage(job), outcome: .failure)
@@ -399,9 +450,14 @@ final class CronViewModel {
             let runResult = svc.runHermesCLI(args: ["cron", "run", jobID], timeout: 30)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if runResult.exitCode != 0 {
+                let outcome = Self.runOutcome(
+                    exitCode: runResult.exitCode,
+                    output: runResult.output
+                )
+                if !outcome.succeeded {
                     self.post(
                         Self.friendlyCronFailure(runResult.output)
+                            ?? outcome.detail
                             ?? "Run failed to queue: \(runResult.output.prefix(200))",
                         outcome: .failure
                     )
@@ -501,7 +557,56 @@ final class CronViewModel {
         return args
     }
 
-    func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
+    /// The `--clear-skills` / `--add-skill` / `--remove-skill` tail of a
+    /// `cron edit`, given the job's stored skills and the set the editor
+    /// is saving.
+    ///
+    /// **Why a diff and not just `--skill`.** `cron edit`'s skill flags are
+    /// resolved by `hermes_cli/cron.py::cron_edit` (v2026.9.7 :606-618):
+    /// `_normalize_skills` returns **None** for an empty/absent `--skill`
+    /// list, and `final_skills` stays `None` unless `--clear-skills`, a
+    /// non-empty replacement, or an add/remove pair is present — a `None`
+    /// is then passed straight through to `update_job`, which leaves the
+    /// field untouched. So "the user unticked every skill" and "the user
+    /// didn't touch skills" were the SAME argv: sending zero `--skill`
+    /// flags silently kept the job's existing skills.
+    ///
+    /// An empty target set therefore has to be spelled `--clear-skills`.
+    /// For a non-empty one we send the DIFF rather than a full `--skill`
+    /// replacement: replacement is computed against the form's snapshot,
+    /// so a skill added to the job between load and save would be wiped,
+    /// while `--add-skill`/`--remove-skill` are applied against the
+    /// `existing_skills` Hermes reads at edit time (:606).
+    ///
+    /// Ungated. All three flags are `cron edit` arguments from **v0.3.0**
+    /// (`hermes_cli/main.py:2854-2857` at tag `v2026.3.17`; absent at
+    /// `v2026.3.12`/v0.2.0), moved to `hermes_cli/subcommands/cron.py:98-104`
+    /// by the v0.17 modularisation and unchanged at `v2026.9.7`. That is
+    /// below Scarf's minimum supported Hermes (v0.6.0), so there is no
+    /// host generation that could reject them and nothing to gate on.
+    nonisolated static func skillEditArguments(
+        existing: [String], newSkills: [String]?, clearSkills: Bool
+    ) -> [String] {
+        let existingSet = existing.filter { !$0.isEmpty }
+        guard !clearSkills else { return ["--clear-skills"] }
+        guard let newSkills else { return [] }   // caller didn't touch skills
+        let target = newSkills.filter { !$0.isEmpty }
+        if target.isEmpty {
+            // Nothing to clear on a job that already has none — sending
+            // the flag would be a no-op write.
+            return existingSet.isEmpty ? [] : ["--clear-skills"]
+        }
+        var args: [String] = []
+        for skill in existingSet where !target.contains(skill) {
+            args += ["--remove-skill", skill]
+        }
+        for skill in target where !existingSet.contains(skill) {
+            args += ["--add-skill", skill]
+        }
+        return args
+    }
+
+    func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
         // `job_id` is `cron edit`'s only positional, so it moves to the very
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
@@ -515,11 +620,9 @@ final class CronViewModel {
         // through rather than dropped like an empty create value.
         if let failureDeliver { args += ["--failure-deliver", failureDeliver] }
         if let repeatCount, !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
-        if clearSkills {
-            args.append("--clear-skills")
-        } else if let newSkills {
-            for skill in newSkills where !skill.isEmpty { args += ["--skill", skill] }
-        }
+        args += Self.skillEditArguments(
+            existing: existingSkills, newSkills: newSkills, clearSkills: clearSkills
+        )
         if let script { args += ["--script", script] }
         // `nil` = caller didn't touch the field (omit the flag). Empty string
         // = user cleared an existing workdir; Hermes documents `--workdir ""`
@@ -534,6 +637,25 @@ final class CronViewModel {
     }
 
     // MARK: - Private
+
+    /// Re-run the two diagnostic verbs after a job mutation.
+    ///
+    /// `load(force:)` only re-reads `jobs.json`, so before this the
+    /// doctor findings and incident badges kept describing the job as it
+    /// was BEFORE the edit — a user who fixed the very thing `cron doctor`
+    /// flagged still saw the warning until they left the section.
+    ///
+    /// Deliberately conditional on each verb having already ANSWERED once
+    /// (`hasLoadedDoctorFindings` / `hasLoadedIncidentList`): those are the
+    /// capability-gated probes, and a pre-v0.20.6 / pre-v0.21 host that
+    /// never ran them must not start spawning them here (C1). It also runs
+    /// on the FAILURE path on purpose — a refused edit can still have
+    /// changed run state (`cron run` prints a green line and then
+    /// `Ran now: failed.`).
+    func refreshDiagnosticsAfterMutation() {
+        if hasLoadedIncidentList { loadIncidents(force: true) }
+        if hasLoadedDoctorFindings { loadDoctor(force: true) }
+    }
 
     /// `onOutcome` (main-actor, success flag only) exists so a wrapper like
     /// `BotRoutinesViewModel` can observe whether the verb landed — e.g. to
@@ -565,6 +687,7 @@ final class CronViewModel {
                     )
                 }
                 self.load(force: true)
+                self.refreshDiagnosticsAfterMutation()
             }
         }
     }

@@ -70,14 +70,30 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
 
     /// Which control the Settings row renders (C1).
     ///
-    /// Only a host with the bounded modes gets the four-way picker. A
-    /// pre-target host — and an UNDETECTED one — renders the Bool toggle it
-    /// rendered before this cycle: swapping in a picker there changes what
-    /// an unchanged host looks like, and offers nothing, since the two
-    /// values the toggle wrote are the only two such a host's parser
-    /// accepts.
-    public static func editorStyle(capabilities: HermesCapabilities) -> EditorStyle {
-        capabilities.hasServiceTierBoundedModes ? .picker : .toggle
+    /// A host with the bounded modes gets the four-way picker. A pre-target
+    /// host — and an UNDETECTED one — renders the Bool toggle it rendered
+    /// before this cycle: swapping in a picker there changes what an
+    /// unchanged host looks like, and offers nothing, since the two values
+    /// the toggle wrote are the only two such a host's parser accepts.
+    ///
+    /// The one exception is `current` already being a BOUNDED mode. That
+    /// happens on an undetected host (a failed `hermes --version` probe
+    /// reads as `.empty`, so every floor is false) whose config genuinely
+    /// says `auto`/`cold`, and on a host someone downgraded. The toggle is
+    /// LOSSY there: it renders `auto` as "off" and rewrites the key to
+    /// `normal` on the first tap, destroying a setting Scarf never had
+    /// grounds to believe was invalid. Routing that one state to the picker
+    /// keeps the value visible and selectable — and it is the only thing
+    /// that makes ``options(capabilities:current:)``'s widening branch
+    /// reachable at all. No config Scarf itself could have written on a
+    /// pre-target host reaches this branch, so C1 holds for every host that
+    /// rendered a toggle before.
+    public static func editorStyle(
+        capabilities: HermesCapabilities,
+        current: HermesServiceTier = .off
+    ) -> EditorStyle {
+        if capabilities.hasServiceTierBoundedModes { return .picker }
+        return current.isBounded ? .picker : .toggle
     }
 
     public enum EditorStyle: Sendable, Equatable {

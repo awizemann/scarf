@@ -241,7 +241,9 @@ struct MCPServersView: View {
     @ViewBuilder
     private func serverRow(_ server: HermesMCPServer) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: server.transport == .http ? "network" : "terminal")
+            // stdio is the only local-process transport; http and SSE are
+            // both network transports and must not wear the terminal glyph.
+            Image(systemName: server.transport == .stdio ? "terminal" : "network")
                 .foregroundStyle(server.enabled ? ScarfColor.accent : ScarfColor.foregroundMuted)
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name)

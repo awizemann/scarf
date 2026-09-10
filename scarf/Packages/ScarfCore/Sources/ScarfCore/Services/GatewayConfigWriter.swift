@@ -34,6 +34,31 @@ import Foundation
 /// the full grammar — only "find this block, replace it, preserve the rest".
 public enum GatewayConfigWriter {
 
+    /// Result of a surgical YAML edit.
+    ///
+    /// `.refused` is the load-bearing case: the file holds a shape this
+    /// line-oriented editor cannot rewrite without risking data loss (a
+    /// non-empty inline flow mapping for the section, or an item carrying a
+    /// literal newline). Refusing beats the old behaviour, which fell
+    /// through to "section missing" and appended a DUPLICATE top-level key
+    /// — PyYAML resolves duplicates last-wins, so the original section's
+    /// siblings were silently discarded.
+    public enum WriteOutcome: Sendable, Equatable {
+        /// The edit applied; payload is the new file text.
+        case updated(String)
+        /// The file already says what the caller asked for.
+        case unchanged
+        /// The editor declined; payload is a human-readable reason. The
+        /// file must NOT be written.
+        case refused(String)
+
+        /// The text to write, or nil when there is nothing to write.
+        public var text: String? {
+            if case .updated(let s) = self { return s }
+            return nil
+        }
+    }
+
     /// Insert or replace the top-level `<platform>.<key>:` block in the YAML,
     /// preserving everything else byte-for-byte.
     ///
@@ -49,24 +74,40 @@ public enum GatewayConfigWriter {
     ///   the new block is appended rather than spliced into the middle of
     ///   the file — preserving the surrounding YAML byte-for-byte.
     /// - When the block is present, its bullet rows are replaced with the
-    ///   new items at the same indent. Items containing YAML-special
-    ///   characters (`:` `#` `@` or leading whitespace) are single-quoted
+    ///   new items at the block's OWN indent (derived from the file, not
+    ///   assumed to be 2/4 — a 4-space-indented config used to get an
+    ///   indent-2 key spliced into it, which PyYAML rejects outright, and a
+    ///   PyYAML failure makes Hermes discard the whole config.yaml layer).
+    ///   Items containing YAML-special characters are single-quoted
     ///   defensively.
+    ///
+    /// Refusal (see ``WriteOutcome``) is reported as the unchanged input by
+    /// this String-returning entry point; callers that must distinguish
+    /// "declined" from "already correct" use ``setListChecked``.
     public static func setList(
         in yaml: String,
         platform: String,
         key: String,
         items: [String]
     ) -> String {
+        setListChecked(in: yaml, platform: platform, key: key, items: items).text ?? yaml
+    }
+
+    /// ``setList`` with the refusal case visible to the caller.
+    public static func setListChecked(
+        in yaml: String,
+        platform: String,
+        key: String,
+        items: [String]
+    ) -> WriteOutcome {
         // Preserve the file's line-ending flavor: work on LF internally,
         // re-emit CRLF on output when the input used CRLF (a CRLF file
         // previously failed every `trimmed ==` match, so the section was
         // "missing" and a DUPLICATE top-level section was appended — which
         // PyYAML resolves last-wins, clobbering the original section).
-        let usesCRLF = yaml.contains("\r\n")
-        let normalized = usesCRLF ? yaml.replacingOccurrences(of: "\r\n", with: "\n") : yaml
-        let result = setListLF(in: normalized, platform: platform, key: key, items: items)
-        return usesCRLF ? result.replacingOccurrences(of: "\n", with: "\r\n") : result
+        crlfRoundTrip(yaml) { normalized in
+            setListLF(in: normalized, platform: platform, key: key, items: items)
+        }
     }
 
     private static func setListLF(
@@ -74,80 +115,90 @@ public enum GatewayConfigWriter {
         platform: String,
         key: String,
         items: [String]
-    ) -> String {
-        let keyIndent = 2   // `<platform>:\n  <key>:`
-        let itemIndent = 4  // `<platform>:\n  <key>:\n    - item`
-
-        let lines = yaml.components(separatedBy: "\n")
+    ) -> WriteOutcome {
         let trimmedItems = items.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        if let bad = trimmedItems.first(where: containsLineBreak) {
+            return .refused(
+                "\(platform).\(key): entry contains a line break, which cannot be written "
+                + "as a single YAML row (\(debugSnippet(bad)))."
+            )
+        }
 
-        // Locate `  <key>:` whose parent is the top-level `<platform>:` section.
-        let location = locateBlock(
-            in: lines,
-            platform: platform,
-            key: key
-        )
+        var lines = yaml.components(separatedBy: "\n")
+        switch expandTopLevelFlowMapping(&lines, section: platform) {
+        case .refused(let why):
+            return .refused(why)
+        case .none, .expanded:
+            break
+        }
 
+        // Locate `<key>:` whose parent is the top-level `<platform>:` section.
+        let location = locateBlock(in: lines, platform: platform, key: key)
+
+        let updated: String
         switch location {
-        case .found(let blockRange):
-            return replaceBlock(
+        case .found(let blockRange, let indents):
+            updated = replaceBlock(
                 in: lines,
                 blockRange: blockRange,
                 key: key,
                 items: trimmedItems,
-                keyIndent: keyIndent,
-                itemIndent: itemIndent
+                keyIndent: indents.key,
+                itemIndent: indents.item
             )
-        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt):
-            if trimmedItems.isEmpty {
-                // No-op: empty target, no existing block.
-                return yaml
-            }
-            var lines = lines
+        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt, let indents):
+            if trimmedItems.isEmpty { return .unchanged }
             if let rewriteHeaderAt {
                 lines[rewriteHeaderAt] = rewriteFlowEmptyHeaderToBlock(lines[rewriteHeaderAt])
             }
-            return spliceNewKey(
+            updated = spliceNewKey(
                 lines: lines,
                 insertAfterLineIndex: insertAfter,
                 key: key,
                 items: trimmedItems,
-                keyIndent: keyIndent,
-                itemIndent: itemIndent
+                keyIndent: indents.key,
+                itemIndent: indents.item
             )
         case .platformMissing:
-            if trimmedItems.isEmpty {
-                // Nothing to write, no existing block.
-                return yaml
-            }
-            return appendScaffold(
-                yaml: yaml,
+            if trimmedItems.isEmpty { return .unchanged }
+            updated = appendScaffold(
+                yaml: lines.joined(separator: "\n"),
                 platform: platform,
                 key: key,
                 items: trimmedItems
             )
         }
+        return updated == yaml ? .unchanged : .updated(updated)
     }
 
     /// Insert or replace a nested `key: value` MAP block under a top-level
     /// section — same surgical contract as `setList` (byte-for-byte outside
     /// the block, key removed entirely when `pairs` is empty), but the block
-    /// body is `    <mapKey>: <value>` rows instead of bullets. Used by the
-    /// v0.20 `agent.reasoning_overrides` editor (`hermes config set` cannot
-    /// write dicts). Map keys containing YAML structure characters (`:`,
-    /// `#`, leading specials) are single-quoted; pair order is preserved as
-    /// given.
+    /// body is `<mapKey>: <value>` rows instead of bullets, at the block's
+    /// own derived indent. Used by the v0.20 `agent.reasoning_overrides`
+    /// editor (`hermes config set` cannot write dicts). Map keys containing
+    /// YAML structure characters are single-quoted; pair order is preserved
+    /// as given.
     public static func setMap(
         in yaml: String,
         section: String,
         key: String,
         pairs: [(key: String, value: String)]
     ) -> String {
+        setMapChecked(in: yaml, section: section, key: key, pairs: pairs).text ?? yaml
+    }
+
+    /// ``setMap`` with the refusal case visible to the caller.
+    public static func setMapChecked(
+        in yaml: String,
+        section: String,
+        key: String,
+        pairs: [(key: String, value: String)]
+    ) -> WriteOutcome {
         // Same CRLF round-trip contract as `setList` — see the comment there.
-        let usesCRLF = yaml.contains("\r\n")
-        let normalized = usesCRLF ? yaml.replacingOccurrences(of: "\r\n", with: "\n") : yaml
-        let result = setMapLF(in: normalized, section: section, key: key, pairs: pairs)
-        return usesCRLF ? result.replacingOccurrences(of: "\n", with: "\r\n") : result
+        crlfRoundTrip(yaml) { normalized in
+            setMapLF(in: normalized, section: section, key: key, pairs: pairs)
+        }
     }
 
     private static func setMapLF(
@@ -155,70 +206,84 @@ public enum GatewayConfigWriter {
         section: String,
         key: String,
         pairs: [(key: String, value: String)]
-    ) -> String {
-        let keyIndent = 2
-        let entryIndent = 4
-
-        let lines = yaml.components(separatedBy: "\n")
+    ) -> WriteOutcome {
         let trimmedPairs = pairs.filter {
             !$0.key.trimmingCharacters(in: .whitespaces).isEmpty
                 && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty
         }
+        if let bad = trimmedPairs.first(where: { containsLineBreak($0.key) || containsLineBreak($0.value) }) {
+            return .refused(
+                "\(section).\(key): entry contains a line break, which cannot be written "
+                + "as a single YAML row (\(debugSnippet(bad.key + ": " + bad.value)))."
+            )
+        }
 
-        func entryRows() -> [String] {
+        var lines = yaml.components(separatedBy: "\n")
+        switch expandTopLevelFlowMapping(&lines, section: section) {
+        case .refused(let why):
+            return .refused(why)
+        case .none, .expanded:
+            break
+        }
+
+        func entryRows(_ indent: Int) -> [String] {
             trimmedPairs.map {
-                "\(spaces(entryIndent))\(yamlQuoteIfNeeded($0.key)): \(yamlQuoteIfNeeded($0.value))"
+                "\(spaces(indent))\(yamlQuoteIfNeeded($0.key)): \(yamlQuoteIfNeeded($0.value))"
             }
         }
 
+        let updated: String
         switch locateBlock(in: lines, platform: section, key: key) {
-        case .found(let blockRange):
+        case .found(let blockRange, let indents):
             var newLines = Array(lines.prefix(blockRange.lowerBound))
             if !trimmedPairs.isEmpty {
-                newLines.append("\(spaces(keyIndent))\(key):")
-                newLines.append(contentsOf: entryRows())
+                newLines.append("\(spaces(indents.key))\(key):")
+                newLines.append(contentsOf: entryRows(indents.item))
             }
             let tailStart = blockRange.upperBound + 1
             if tailStart < lines.count {
                 newLines.append(contentsOf: lines.suffix(from: tailStart))
             }
-            return newLines.joined(separator: "\n")
-        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt):
-            if trimmedPairs.isEmpty { return yaml }
-            var lines = lines
+            updated = newLines.joined(separator: "\n")
+        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt, let indents):
+            if trimmedPairs.isEmpty { return .unchanged }
             if let rewriteHeaderAt {
                 lines[rewriteHeaderAt] = rewriteFlowEmptyHeaderToBlock(lines[rewriteHeaderAt])
             }
             var newLines = Array(lines.prefix(insertAfter + 1))
-            newLines.append("\(spaces(keyIndent))\(key):")
-            newLines.append(contentsOf: entryRows())
+            newLines.append("\(spaces(indents.key))\(key):")
+            newLines.append(contentsOf: entryRows(indents.item))
             if insertAfter + 1 < lines.count {
                 newLines.append(contentsOf: lines.suffix(from: insertAfter + 1))
             }
-            return newLines.joined(separator: "\n")
+            updated = newLines.joined(separator: "\n")
         case .platformMissing:
-            if trimmedPairs.isEmpty { return yaml }
-            var trimmed = yaml
+            if trimmedPairs.isEmpty { return .unchanged }
+            var trimmed = lines.joined(separator: "\n")
             while trimmed.hasSuffix("\n\n") { trimmed.removeLast() }
             if !trimmed.isEmpty && !trimmed.hasSuffix("\n") { trimmed.append("\n") }
             var newLines: [String] = []
             if !trimmed.isEmpty { newLines.append("") }
             newLines.append("\(section):")
             newLines.append("  \(key):")
-            newLines.append(contentsOf: entryRows())
+            newLines.append(contentsOf: entryRows(4))
             newLines.append("")
-            return trimmed + newLines.joined(separator: "\n")
+            updated = trimmed + newLines.joined(separator: "\n")
         }
+        return updated == yaml ? .unchanged : .updated(updated)
     }
 
     /// Async wrapper that reads, mutates, writes via the given context.
-    /// Returns `false` on read or write failure.
+    /// Returns `false` on read failure, write failure, or an editor refusal
+    /// (a config.yaml shape this line editor cannot rewrite safely).
     ///
-    /// The actual I/O happens via `ServerContext.readText` / `writeText`,
-    /// which are `nonisolated` — safe to call from `MainActor` for the
-    /// short config.yaml writes the platform setup forms run. For remote
-    /// hosts the call rounds through SCP under `Task.detached` upstream
-    /// (per Swift 6 concurrency rules in `~/.claude/CLAUDE.md`).
+    /// **Call this off the main actor.** `ServerContext.readText` /
+    /// `writeText` are `nonisolated` but genuinely blocking: on an `.ssh`
+    /// server they are a synchronous SCP round-trip, and `GuardedTextFile`
+    /// additionally waits on config.yaml's cross-process write lock. Callers
+    /// (e.g. `GatewayBehaviorViewModel`) wrap it in `Task.detached` for
+    /// exactly that reason — charter C10 forbids blocking the main actor on
+    /// process spawns and remote I/O.
     public static func saveList(
         context: ServerContext,
         platform: String,
@@ -240,9 +305,11 @@ public enum GatewayConfigWriter {
         let file = GuardedTextFile(context: context, label: "config.yaml")
         do {
             try file.mutate(path) { loaded in
-                let existing = loaded.text
-                let updated = setList(in: existing, platform: platform, key: key, items: items)
-                return updated == existing ? nil : updated   // nil: already correct
+                switch setListChecked(in: loaded.text, platform: platform, key: key, items: items) {
+                case .updated(let text): return text
+                case .unchanged: return nil          // already correct
+                case .refused(let why): throw WriteRefusal(reason: why)
+                }
             }
             return true
         } catch {
@@ -250,22 +317,68 @@ public enum GatewayConfigWriter {
         }
     }
 
+    /// Thrown by ``saveList`` when the editor declines the edit, so a
+    /// refusal cannot be mistaken for "already correct".
+    struct WriteRefusal: Error {
+        let reason: String
+    }
+
     // MARK: - Internals
+
+    /// Run `body` on an LF-normalized copy and re-emit CRLF when the input
+    /// used it, so a CRLF config.yaml survives the write byte-for-byte
+    /// outside the edited key.
+    private static func crlfRoundTrip(
+        _ yaml: String,
+        _ body: (String) -> WriteOutcome
+    ) -> WriteOutcome {
+        let usesCRLF = yaml.contains("\r\n")
+        guard usesCRLF else { return body(yaml) }
+        let normalized = yaml.replacingOccurrences(of: "\r\n", with: "\n")
+        switch body(normalized) {
+        case .updated(let text):
+            return .updated(text.replacingOccurrences(of: "\n", with: "\r\n"))
+        case .unchanged:
+            return .unchanged
+        case .refused(let why):
+            return .refused(why)
+        }
+    }
+
+    /// True when `s` carries a CR or LF anywhere.
+    ///
+    /// Scanned over unicode SCALARS on purpose: Swift's `String.contains`
+    /// works on grapheme clusters, and `"\r\n"` is a SINGLE cluster — so
+    /// `"a\r\nb".contains("\n")` is `false`, and the naive check waved a
+    /// Windows-style line break straight through into a YAML row.
+    private static func containsLineBreak(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
+    }
+
+    private static func debugSnippet(_ s: String) -> String {
+        let flat = s.replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return flat.count > 60 ? String(flat.prefix(60)) + "…" : flat
+    }
+
+    /// Indents derived from the file being edited — never assumed.
+    private struct BlockIndents {
+        let key: Int
+        let item: Int
+    }
 
     /// Result of locating the targeted block in the YAML line array.
     private enum BlockLocation {
         /// Block found; the closed range covers the header line + all bullet
         /// rows attributed to it. Replacing this slice with the new block
         /// completes the edit.
-        case found(ClosedRange<Int>)
+        case found(ClosedRange<Int>, BlockIndents)
         /// The top-level `<platform>:` section exists, but the leaf `<key>:`
-        /// is absent under it. The associated value is the line index after
-        /// which the new key should be inserted (last line in the platform's
-        /// block, or the platform header itself if the platform's body is
-        /// empty).
-        case platformPresentKeyMissing(insertAfter: Int, rewriteHeaderAt: Int?)
-        /// The top-level `<platform>:` section is missing entirely. The whole
-        /// scaffold needs to be appended.
+        /// is absent under it. `insertAfter` is the line index after which
+        /// the new key should be inserted (last line in the platform's
+        /// block, or the platform header itself if the body is empty).
+        case platformPresentKeyMissing(insertAfter: Int, rewriteHeaderAt: Int?, indents: BlockIndents)
+        /// The top-level `<platform>:` section is missing entirely.
         case platformMissing
     }
 
@@ -287,14 +400,23 @@ public enum GatewayConfigWriter {
             // leaves the file malformed for stricter parsers. Treat it as
             // an existing empty section; the write replaces the inline `{}`
             // with a block body (see `rewriteFlowEmptyHeaderToBlock`).
+            // (A NON-empty inline mapping is expanded to block rows before
+            // we get here — see `expandTopLevelFlowMapping`.)
             if let flowIdx = firstIndex(of: lines, flowEmptyHeaderFor: platform) {
-                return .platformPresentKeyMissing(insertAfter: flowIdx, rewriteHeaderAt: flowIdx)
+                return .platformPresentKeyMissing(
+                    insertAfter: flowIdx,
+                    rewriteHeaderAt: flowIdx,
+                    indents: BlockIndents(key: 2, item: 4)
+                )
             }
             return .platformMissing
         }
 
-        // Inside the platform block, find `<key>:` at indent 2, OR the end
-        // of the platform's body if the key is missing.
+        // Inside the platform block, find `<key>:` at the section's OWN body
+        // indent (a 4-space-indented section is legal YAML and common in
+        // hand-written configs), OR the end of the platform's body if the
+        // key is missing.
+        var bodyIndent: Int?
         var keyIdx: Int?
         var i = platformIdx + 1
         var lastBodyIdx = platformIdx
@@ -306,11 +428,12 @@ public enum GatewayConfigWriter {
                 i += 1
                 continue
             }
-            if indent < 2 {
+            if indent == 0 {
                 // Out of the platform's block (next top-level section).
                 break
             }
-            if indent == 2, let kind = keyLineKind(trimmed: trimmed, key: key) {
+            if bodyIndent == nil { bodyIndent = indent }
+            if indent == bodyIndent, let kind = keyLineKind(trimmed: trimmed, key: key) {
                 switch kind {
                 case .blockHeader:
                     keyIdx = i
@@ -320,7 +443,7 @@ public enum GatewayConfigWriter {
                     // edit. (Stock cli-config.yaml.example ships
                     // `reasoning_overrides: {}` uncommented — treating this
                     // as key-missing used to splice a DUPLICATE key.)
-                    return .found(i...i)
+                    return .found(i...i, BlockIndents(key: indent, item: indent * 2))
                 }
                 break
             }
@@ -328,13 +451,28 @@ public enum GatewayConfigWriter {
             i += 1
         }
 
+        // The file's own indent STEP is its section body indent, so a
+        // 2-space file keeps `  key:` / `    - item` (byte-identical to the
+        // previous release) and a 4-space file gets `    key:` /
+        // `        - item` instead of a mixed 4/6 shape.
+        let step = bodyIndent ?? 2
         guard let keyIdx else {
-            return .platformPresentKeyMissing(insertAfter: lastBodyIdx, rewriteHeaderAt: nil)
+            return .platformPresentKeyMissing(
+                insertAfter: lastBodyIdx,
+                rewriteHeaderAt: nil,
+                indents: BlockIndents(key: step, item: step * 2)
+            )
         }
 
-        // Walk down the bullet rows until we leave the block (indent shrinks
-        // below the bullet indent OR we hit a sibling key at indent 2).
+        let keyIndent = leadingSpaces(lines[keyIdx])
+
+        // Walk down the bullet rows until we leave the block (a non-bullet
+        // at or above the key's indent). Block-style YAML allows bullets at
+        // the same indent as their parent key, so `indent >= keyIndent` is
+        // the membership test — and the FIRST bullet's indent is what we
+        // re-emit at, so a file using 2- or 8-space item indents keeps it.
         var endIdx = keyIdx
+        var itemIndent: Int?
         var j = keyIdx + 1
         while j < lines.count {
             let line = lines[j]
@@ -344,26 +482,25 @@ public enum GatewayConfigWriter {
                 continue
             }
             let indent = leadingSpaces(line)
-            // Block-style YAML allows bullets at the same indent as their
-            // parent key; tolerate 2-space `- item` rows alongside the
-            // canonical 4-space ones.
-            let isBullet = trimmed.hasPrefix("- ")
-            if isBullet && (indent == 4 || indent == 2) {
+            let isBullet = trimmed.hasPrefix("- ") || trimmed == "-"
+            if isBullet && indent >= keyIndent {
+                if itemIndent == nil { itemIndent = indent }
                 endIdx = j
                 j += 1
                 continue
             }
-            // Anything not a bullet at indent ≤ 2 ends the block.
-            if indent <= 2 {
-                break
-            }
-            // Indent > 4 with no bullet — unusual but tolerate (e.g. inline
-            // continuation). Treat as still in the block and advance.
+            // Anything not a bullet at indent <= the key ends the block.
+            if indent <= keyIndent { break }
+            // Deeper non-bullet content (e.g. a folded scalar continuation)
+            // is still part of this key's value — absorb it.
             endIdx = j
             j += 1
         }
 
-        return .found(keyIdx...endIdx)
+        return .found(
+            keyIdx...endIdx,
+            BlockIndents(key: keyIndent, item: itemIndent ?? (keyIndent + step))
+        )
     }
 
     /// Classify a trimmed line against `<key>:`.
@@ -387,6 +524,130 @@ public enum GatewayConfigWriter {
         if rest.isEmpty || rest.hasPrefix("#") { return .blockHeader }
         return .inlineValue
     }
+
+    // MARK: - Inline flow mapping expansion
+
+    private enum FlowExpansion {
+        case none
+        case expanded
+        case refused(String)
+    }
+
+    /// Rewrite a top-level `section: {a: b, c: d}` line into an equivalent
+    /// block mapping so the rest of the editor can splice into it:
+    ///
+    ///     slack: {reply_to_mode: first}   ->   slack:
+    ///                                            reply_to_mode: first
+    ///
+    /// Without this, `locateBlock` reported `.platformMissing` and the write
+    /// appended a SECOND top-level `slack:` — PyYAML takes the last one, so
+    /// `reply_to_mode` was silently lost. Empty `{}` is left alone (handled
+    /// by `rewriteFlowEmptyHeaderToBlock`). Content this parser cannot read
+    /// back verbatim (nesting, an entry without a `key: value` split) is
+    /// REFUSED rather than guessed at.
+    private static func expandTopLevelFlowMapping(
+        _ lines: inout [String],
+        section: String
+    ) -> FlowExpansion {
+        let header = "\(section):"
+        for (i, line) in lines.enumerated() {
+            guard leadingSpaces(line) == 0 else { continue }
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard trimmed.hasPrefix(header) else { continue }
+            let rest = trimmed.dropFirst(header.count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard rest.hasPrefix("{") else { continue }
+            guard let close = rest.lastIndex(of: "}") else {
+                return .refused(
+                    "\(section): inline mapping is not closed on one line; refusing to edit "
+                    + "config.yaml rather than risk clobbering it."
+                )
+            }
+            let after = rest[rest.index(after: close)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard after.isEmpty || after.hasPrefix("#") else { continue }
+            let inner = String(rest[rest.index(after: rest.startIndex)..<close])
+                .trimmingCharacters(in: .whitespaces)
+            if inner.isEmpty { return .none }   // `{}` — the empty-section path
+            guard let pairs = parseOrderedFlowPairs(inner) else {
+                return .refused(
+                    "\(section): inline mapping uses a shape this editor cannot rewrite "
+                    + "(\(debugSnippet(inner))); refusing rather than clobbering it."
+                )
+            }
+            var replacement = [header + (after.isEmpty ? "" : "  " + after)]
+            replacement.append(contentsOf: pairs.map { "  \($0.key): \($0.value)" })
+            lines.replaceSubrange(i...i, with: replacement)
+            return .expanded
+        }
+        return .none
+    }
+
+    /// Split the body of a single-line flow mapping into ORDERED verbatim
+    /// `key: value` pairs. Quote-aware so `{a: 'x, y'}` is one entry.
+    /// Returns nil for anything nested or not splittable — callers refuse.
+    private static func parseOrderedFlowPairs(_ inner: String) -> [(key: String, value: String)]? {
+        var entries: [String] = []
+        var current = ""
+        var quote: Character?
+        for ch in inner {
+            if let q = quote {
+                current.append(ch)
+                if ch == q { quote = nil }
+                continue
+            }
+            switch ch {
+            case "'", "\"":
+                quote = ch
+                current.append(ch)
+            case "{", "[", "}", "]":
+                return nil          // nested flow collection — out of scope
+            case ",":
+                entries.append(current)
+                current = ""
+            default:
+                current.append(ch)
+            }
+        }
+        if quote != nil { return nil }
+        entries.append(current)
+
+        var pairs: [(key: String, value: String)] = []
+        for entry in entries {
+            let e = entry.trimmingCharacters(in: .whitespaces)
+            if e.isEmpty { continue }
+            guard let sep = flowPairSeparatorIndex(in: e) else { return nil }
+            let k = String(e[e.startIndex..<sep]).trimmingCharacters(in: .whitespaces)
+            let v = String(e[e.index(after: sep)...]).trimmingCharacters(in: .whitespaces)
+            guard !k.isEmpty, !v.isEmpty else { return nil }
+            pairs.append((key: k, value: v))
+        }
+        return pairs.isEmpty ? nil : pairs
+    }
+
+    /// First `: ` (or trailing `:`) outside quotes — the flow-mapping
+    /// key/value separator. A colon with a non-space successor belongs to
+    /// the key (`llama3:8b: high`), matching `HermesYAML`.
+    private static func flowPairSeparatorIndex(in s: String) -> String.Index? {
+        var quote: Character?
+        var i = s.startIndex
+        while i < s.endIndex {
+            let ch = s[i]
+            if let q = quote {
+                if ch == q { quote = nil }
+            } else if ch == "'" || ch == "\"" {
+                quote = ch
+            } else if ch == ":" {
+                let next = s.index(after: i)
+                if next == s.endIndex || s[next] == " " || s[next] == "\t" { return i }
+            }
+            i = s.index(after: i)
+        }
+        return nil
+    }
+
+    // MARK: - Splicing
 
     private static func replaceBlock(
         in lines: [String],
@@ -531,27 +792,54 @@ public enum GatewayConfigWriter {
         String(repeating: " ", count: n)
     }
 
-    /// Quote a YAML scalar if it contains characters that the parser would
-    /// otherwise interpret as structure (colon, hash, leading at-sign, etc.).
-    /// Plain alphanumeric IDs (the common case for Slack channel IDs and
-    /// Telegram numeric chat IDs) are emitted unquoted.
-    private static func yamlQuoteIfNeeded(_ raw: String) -> String {
+    /// Quote a YAML scalar if it contains characters the parser would
+    /// otherwise read as structure. Beyond `:` `#` and the block indicators,
+    /// this covers the YAML 1.2 flow indicators (`[ ] { } ,`) and the
+    /// leading-position indicators (`! % \` ? & * @ -`) — an unquoted
+    /// `#general, #random` or `{a}` used to make PyYAML raise, and one
+    /// PyYAML error makes Hermes discard the WHOLE config.yaml layer
+    /// (gateway/config.py:776-791 at v2026.9.7). Plain alphanumeric IDs (the
+    /// common case for Slack channel IDs and Telegram numeric chat IDs) are
+    /// still emitted unquoted.
+    ///
+    /// A value carrying a literal newline cannot be represented on one row
+    /// at all; callers reject those before reaching here (see
+    /// ``WriteOutcome/refused(_:)``), and as a last resort this escapes the
+    /// value double-quoted rather than emitting a broken document.
+    static func yamlQuoteIfNeeded(_ raw: String) -> String {
         if raw.isEmpty { return "''" }
-        let needsQuoting = raw.contains(":")
-            || raw.contains("#")
-            || raw.contains("&")
-            || raw.contains("*")
-            || raw.contains(">")
-            || raw.contains("|")
-            || raw.first == "@"
-            || raw.first == "-"
-            || raw.first == " "
+        if containsLineBreak(raw) {
+            // Double quotes are the only YAML style that can carry an
+            // escaped line break inline.
+            let escaped = raw
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\r", with: "\\r")
+                .replacingOccurrences(of: "\n", with: "\\n")
+            return "\"\(escaped)\""
+        }
+        let anywhere: Set<Character> = [":", "#", "&", "*", ">", "|", "[", "]", "{", "}", ","]
+        let leading: Set<Character> = ["@", "-", " ", "\"", "'", "!", "%", "`", "?", "="]
+        let needsQuoting = raw.contains(where: { anywhere.contains($0) })
+            || raw.first.map { leading.contains($0) } ?? false
             || raw.last == " "
-            || raw.first == "\""
-            || raw.first == "'"
+            || raw.contains("\t")
         if !needsQuoting { return raw }
         // Single-quote, escaping any embedded single quotes by doubling.
         let escaped = raw.replacingOccurrences(of: "'", with: "''")
         return "'\(escaped)'"
+    }
+}
+
+extension GatewayConfigWriter.WriteOutcome {
+    /// The text to write when the edit applied, `unchanged` (the caller's
+    /// own input) when there was nothing to do, and `nil` ONLY when the
+    /// editor refused — so a refusal can never be mistaken for a no-op.
+    public func appliedText(orUnchanged unchanged: String) -> String? {
+        switch self {
+        case .updated(let text): return text
+        case .unchanged: return unchanged
+        case .refused: return nil
+        }
     }
 }

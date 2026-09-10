@@ -124,7 +124,7 @@ struct CredentialPoolsView: View {
         ) {
             Button("Remove", role: .destructive) {
                 if let target = pendingRemove {
-                    viewModel.removeCredential(provider: target.provider, index: target.index)
+                    viewModel.removeCredential(provider: target.provider, index: target.index, internalID: target.internalID)
                 }
                 pendingRemove = nil
             }
@@ -519,23 +519,23 @@ struct CredentialPoolsView: View {
     private func credentialActionsMenu(pool: HermesCredentialPool, cred: HermesCredential) -> some View {
         Menu {
             Button("Move Up") {
-                viewModel.setPriority(provider: pool.provider, index: cred.index, to: cred.index - 1)
+                viewModel.setPriority(provider: pool.provider, index: cred.index, internalID: cred.internalID, to: cred.index - 1)
             }
             .disabled(cred.index == 0)
             Button("Move Down") {
-                viewModel.setPriority(provider: pool.provider, index: cred.index, to: cred.index + 1)
+                viewModel.setPriority(provider: pool.provider, index: cred.index, internalID: cred.internalID, to: cred.index + 1)
             }
             .disabled(cred.index >= pool.credentials.count - 1)
             Divider()
             Button("Clear Cooldown") {
-                viewModel.resetCredential(provider: pool.provider, index: cred.index)
+                viewModel.resetCredential(provider: pool.provider, index: cred.index, internalID: cred.internalID)
             }
             // `auth refresh` rotates the stored tokens and clears the block,
             // but only for a refreshable OAuth grant — offering it on an
             // api-key row would only ever produce a refusal.
             if cred.authType == "oauth" {
                 Button("Refresh Tokens") {
-                    viewModel.refreshCredential(provider: pool.provider, index: cred.index)
+                    viewModel.refreshCredential(provider: pool.provider, index: cred.index, internalID: cred.internalID)
                 }
             }
         } label: {

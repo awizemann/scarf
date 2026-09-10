@@ -39,9 +39,10 @@ struct KanbanBoardView: View {
     }
 
     /// Convenience read for the v0.13 diagnostics flag — gates the
-    /// max_retries field, hallucination banner, diagnostics rendering,
-    /// and the auto-blocked reason banner. Pre-v0.13 hosts get the
-    /// v2.7.5 surface unchanged. Treats a missing store as "off" so
+    /// max_retries field and the `kanban diagnostics --json` fetch plus
+    /// everything it renders. Pre-v0.13 hosts get the v2.7.5 surface
+    /// unchanged AND never spawn the extra call (the subcommand doesn't
+    /// exist there; charter C5). Treats a missing store as "off" so
     /// harness contexts (Previews) don't accidentally surface gated UI.
     private var supportsKanbanDiagnostics: Bool {
         capabilitiesStore?.capabilities.hasKanbanDiagnostics ?? false
@@ -53,12 +54,6 @@ struct KanbanBoardView: View {
     /// these surfaces. Missing store treated as "off" (Previews).
     private var supportsKanbanV015: Bool {
         capabilitiesStore?.capabilities.hasKanbanV015 ?? false
-    }
-
-    /// v0.16+ gate for the goal-mode badge on each card. Pre-v0.16 hosts
-    /// never see the "Goal" pill. Missing store treated as "off" (Previews).
-    private var supportsKanbanGoalMode: Bool {
-        capabilitiesStore?.capabilities.hasKanbanGoalMode ?? false
     }
 
     /// v0.21.1+ gate for the completion-contract field on the create sheet and
@@ -123,11 +118,19 @@ struct KanbanBoardView: View {
             AccessibilityNotification.Announcement(AttributedString(new)).post()
         }
         .onAppear {
+            // Must be set BEFORE the first poll: the VM only spawns
+            // `kanban diagnostics --json` when the connected host is v0.13+.
+            viewModel.supportsDiagnostics = supportsKanbanDiagnostics
             viewModel.startPolling()
             Task { await viewModel.refreshAssignees() }
             Task { await refreshToolsetState() }
         }
         .onDisappear { viewModel.stopPolling() }
+        // Capability probes land asynchronously — a store that resolves
+        // after first paint must still enable (or disable) the fetch.
+        .onChange(of: supportsKanbanDiagnostics) { _, isOn in
+            viewModel.supportsDiagnostics = isOn
+        }
         // Pause every poll loop while the window is not the active scene.
         // A backgrounded Scarf window kept spawning `hermes kanban list`
         // (plus `stats`) every five seconds against a possibly-remote host,
@@ -392,9 +395,8 @@ struct KanbanBoardView: View {
                         },
                         canCreate: column == .upNext || column == .triage,
                         supportsKanbanDiagnostics: supportsKanbanDiagnostics,
-                        effectiveHallucinationGate: { viewModel.effectiveHallucinationGate($0) },
+                        diagnostics: { viewModel.diagnostics(for: $0) },
                         supportsKanbanV015: supportsKanbanV015,
-                        supportsKanbanGoalMode: supportsKanbanGoalMode,
                         supportsKanbanCompletionContract: supportsKanbanCompletionContract,
                         onPromote: { viewModel.promote($0.id) },
                         onSchedule: { viewModel.schedule($0.id) },
@@ -421,7 +423,7 @@ struct KanbanBoardView: View {
                 supportsKanbanDiagnostics: supportsKanbanDiagnostics,
                 supportsKanbanV015: supportsKanbanV015,
                 supportsKanbanCompletionContract: supportsKanbanCompletionContract,
-                effectiveHallucinationGate: { viewModel.effectiveHallucinationGate($0) },
+                diagnostics: viewModel.diagnostics(for: task),
                 onClose: { inspectorTaskId = nil },
                 onClaim: {
                     viewModel.attemptMove(taskId: taskId, to: .running)
@@ -446,12 +448,6 @@ struct KanbanBoardView: View {
                 },
                 onReassign: { profile in
                     viewModel.reassignTask(taskId: taskId, to: profile)
-                },
-                onRejectHallucination: {
-                    viewModel.rejectHallucination(taskId: taskId)
-                    // Card vanishes from active board after archive — close
-                    // the inspector so it doesn't dangle on a deleted task.
-                    inspectorTaskId = nil
                 }
             )
         }

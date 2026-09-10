@@ -159,13 +159,23 @@ struct AdvancedTab: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 160, alignment: .trailing)
                 Button("Check") {
-                    diagnosticsOutput = viewModel.runConfigCheck()
+                    // Both verbs spawn `hermes` (an SSH round-trip on a
+                    // remote host); running them from the Button action
+                    // froze the window until the CLI returned. The output
+                    // panel opens immediately and fills in when it lands.
+                    diagnosticsOutput = String(localized: "Running…")
                     showDiagnostics = true
+                    Task { diagnosticsOutput = await viewModel.runConfigCheck() }
                 }
                 .controlSize(.small)
                 Button("Migrate") {
-                    diagnosticsOutput = viewModel.runConfigMigrate()
+                    // Both verbs spawn `hermes` (an SSH round-trip on a
+                    // remote host); running them from the Button action
+                    // froze the window until the CLI returned. The output
+                    // panel opens immediately and fills in when it lands.
+                    diagnosticsOutput = String(localized: "Running…")
                     showDiagnostics = true
+                    Task { diagnosticsOutput = await viewModel.runConfigMigrate() }
                 }
                 .controlSize(.small)
                 Spacer()
@@ -358,12 +368,20 @@ struct AdvancedTab: View {
                 options: ["wal", "delete"]
             ) { viewModel.setDatabaseJournalMode($0) }
 
+            // `customSeed: 1000` — SQLite's own default autocheckpoint
+            // threshold, and the value the footnote below promises. Seeding
+            // `range.lowerBound` instead meant flipping "Custom" on wrote
+            // `wal_autocheckpoint: 0`, which DISABLES automatic checkpointing
+            // outright (`hermes_state_wal.py:466-487` passes the int straight
+            // into `PRAGMA wal_autocheckpoint=<n>`) — an unbounded WAL on a
+            // gesture the user reads as "let me set a value".
             optionalIntRow(
                 label: "WAL Autocheckpoint (pages)",
                 customLabel: "WAL Autocheckpoint (pages) — Custom",
                 value: viewModel.config.database.walAutocheckpoint,
                 range: 0...1_000_000,
                 step: 100,
+                customSeed: Self.walAutocheckpointSQLiteDefault,
                 onChange: { viewModel.setDatabaseWalAutocheckpoint($0) }
             )
             optionalIntRow(
@@ -388,6 +406,22 @@ struct AdvancedTab: View {
         .padding(.vertical, 4)
     }
 
+    /// SQLite's own `wal_autocheckpoint` threshold, in pages — the value the
+    /// database section's footnote promises and the one the "Custom" toggle
+    /// seeds. Named rather than inlined because the WRONG seed here (0) is
+    /// not a cosmetic default: `hermes_state_wal.py:466-487` passes the
+    /// configured int straight into `PRAGMA wal_autocheckpoint=<n>`, and 0
+    /// DISABLES automatic checkpointing, leaving the WAL to grow unbounded.
+    static let walAutocheckpointSQLiteDefault = 1000
+
+    /// The value the "Custom" toggle writes when switched ON: the current
+    /// one if the key is already set, else the row's explicit seed, else the
+    /// range's lower bound. Extracted from `optionalIntRow` so the seed is
+    /// assertable — the bug it replaces was invisible in a View body.
+    static func customToggleValue(current: Int?, seed: Int?, lowerBound: Int) -> Int {
+        current ?? seed ?? lowerBound
+    }
+
     /// A true-optional integer row: a "Custom" toggle gates a Stepper.
     /// Turning the toggle off calls `onChange(nil)`, which the caller
     /// wires to `unsetSetting` rather than writing an empty/zero scalar —
@@ -400,10 +434,17 @@ struct AdvancedTab: View {
         value: Int?,
         range: ClosedRange<Int>,
         step: Int,
+        customSeed: Int? = nil,
         onChange: @escaping (Int?) -> Void
     ) -> some View {
+        // `customSeed` is the value the toggle writes when it is switched ON
+        // and the key was absent. It defaults to `range.lowerBound` only where
+        // that bound is a harmless starting point; pass an explicit seed
+        // wherever 0 is a REAL setting with its own meaning (see the WAL
+        // autocheckpoint caller).
         ToggleRow(label: customLabel, isOn: value != nil) { isOn in
-            onChange(isOn ? (value ?? range.lowerBound) : nil)
+            onChange(isOn ? Self.customToggleValue(
+                current: value, seed: customSeed, lowerBound: range.lowerBound) : nil)
         }
         if let value {
             StepperRow(label: label, value: value, range: range, step: step) { onChange($0) }
@@ -425,9 +466,11 @@ struct AdvancedTab: View {
             ) { viewModel.setSetting("prompt_caching.cache_ttl", value: $0) }
 
             // `redaction.enabled` had no reader in Hermes at any version
-            // Scarf supports — verified at v0.21: the only redaction switch
-            // is `security.redact_secrets` (config_defaults.py:2660, read at
-            // cli.py:765 / main.py:802), which the Security tab already
+            // Scarf supports — re-verified at v2026.9.7 (v0.21.1): the only
+            // redaction switch is `security.redact_secrets`
+            // (`hermes_cli/config_defaults.py:1591`, default `True`, bridged
+            // to `HERMES_REDACT_SECRETS` at `cli.py:368-371`), which the
+            // Security tab already
             // surfaces. The row wrote a key nobody reads and its "default
             // flipped in v0.13" hint described the OTHER key's history
             // (go/no-go blocking condition 8, A5). Removed with its parse:

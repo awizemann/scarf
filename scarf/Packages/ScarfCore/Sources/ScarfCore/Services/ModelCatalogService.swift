@@ -199,12 +199,45 @@ public struct ModelCatalogService: Sendable {
         }.value
     }
 
+    /// The key under which `providerID`'s catalog actually lives.
+    ///
+    /// **Raw spelling wins, always.** A stored `model.provider` that already
+    /// names a catalog entry resolves to itself and nothing about what the
+    /// user sees changes — which matters most for `openai`: Hermes's
+    /// `providers.py` ALIASES maps bare `openai` onto `openrouter` for
+    /// *inference routing*, so canonicalising unconditionally would swap an
+    /// `openai` user's whole model list for OpenRouter's. Only when the raw
+    /// id is absent from the catalog is the alias table consulted, which is
+    /// exactly the case that used to return an empty list: `grok`, `claude`,
+    /// `kimi`, `ai-gateway`, `hf`, … are all legal `model.provider` values
+    /// Hermes resolves and Scarf's picker silently could not.
+    ///
+    /// Returns the raw id when neither spelling is in the catalog, so
+    /// overlay-only providers keep reaching their own lookup path.
+    private static func catalogKey(
+        _ providerID: String, in catalog: [String: ProviderEntry]
+    ) -> String {
+        if catalog[providerID] != nil { return providerID }
+        let canonical = canonicalProviderID(providerID)
+        return catalog[canonical] != nil ? canonical : providerID
+    }
+
+    /// Display name for a resolved catalog key, with Scarf's rename
+    /// overrides applied. Every path that hands a `HermesProviderInfo` /
+    /// `HermesModelInfo` to the UI goes through this — before, only
+    /// `loadProviders()` and `loadModels(for:)` did, so the same provider
+    /// read "Qwen Cloud" in the provider list and "alibaba" in the detail
+    /// row it opened.
+    private static func displayName(for key: String, entry: ProviderEntry?) -> String {
+        providerDisplayNameOverrides[key] ?? entry?.name ?? key
+    }
+
     /// Models for one provider, sorted by release date (newest first), then name.
     public func loadModels(for providerID: String) -> [HermesModelInfo] {
-        guard let catalog = loadCatalog(), let provider = catalog[providerID] else { return [] }
-        let providerName = Self.providerDisplayNameOverrides[providerID]
-            ?? provider.name
-            ?? providerID
+        guard let catalog = loadCatalog() else { return [] }
+        let key = Self.catalogKey(providerID, in: catalog)
+        guard let provider = catalog[key] else { return [] }
+        let providerName = Self.displayName(for: key, entry: provider)
         let models = (provider.models ?? [:]).map { (id, m) in
             HermesModelInfo(
                 providerID: providerID,
@@ -256,7 +289,7 @@ public struct ModelCatalogService: Sendable {
             if p.models?[resolved] != nil {
                 return HermesProviderInfo(
                     providerID: providerID,
-                    providerName: p.name ?? providerID,
+                    providerName: Self.displayName(for: providerID, entry: p),
                     envVars: p.env ?? [],
                     docURL: p.doc,
                     modelCount: p.models?.count ?? 0,
@@ -268,11 +301,14 @@ public struct ModelCatalogService: Sendable {
         // Handle provider-prefixed IDs like "openai/gpt-4o" — look up the
         // prefix before the slash.
         if let slash = modelID.firstIndex(of: "/") {
-            let prefix = String(modelID[modelID.startIndex..<slash])
+            // `x-ai/grok-4.20` names its provider by an ALIAS; resolve the
+            // prefix the same raw-wins way a stored `model.provider` is
+            // resolved (see `catalogKey`).
+            let prefix = Self.catalogKey(String(modelID[modelID.startIndex..<slash]), in: catalog)
             if let p = catalog[prefix] {
                 return HermesProviderInfo(
                     providerID: prefix,
-                    providerName: p.name ?? prefix,
+                    providerName: Self.displayName(for: prefix, entry: p),
                     envVars: p.env ?? [],
                     docURL: p.doc,
                     modelCount: p.models?.count ?? 0,
@@ -289,10 +325,12 @@ public struct ModelCatalogService: Sendable {
     /// metadata — `nous` and other overlay-only IDs never appear in the
     /// cache, so a plain catalog lookup returns nil for them.
     public func providerByID(_ providerID: String) -> HermesProviderInfo? {
-        if let catalog = loadCatalog(), let p = catalog[providerID] {
+        let catalog = loadCatalog()
+        let key = catalog.map { Self.catalogKey(providerID, in: $0) } ?? providerID
+        if let p = catalog?[key] {
             return HermesProviderInfo(
                 providerID: providerID,
-                providerName: p.name ?? providerID,
+                providerName: Self.displayName(for: key, entry: p),
                 envVars: p.env ?? [],
                 docURL: p.doc,
                 modelCount: p.models?.count ?? 0,
@@ -300,10 +338,16 @@ public struct ModelCatalogService: Sendable {
                 subscriptionGated: false
             )
         }
-        if let overlay = Self.overlayOnlyProviders[providerID] {
+        // Overlay lookup resolves the alias too, raw first — `kilocode`,
+        // `ai-gateway` and friends are spellings Hermes accepts for providers
+        // whose overlay is registered under the canonical id.
+        let overlayKey = Self.overlayOnlyProviders[providerID] != nil
+            ? providerID
+            : Self.canonicalProviderID(providerID)
+        if let overlay = Self.overlayOnlyProviders[overlayKey] {
             return HermesProviderInfo(
                 providerID: providerID,
-                providerName: overlay.displayName,
+                providerName: Self.providerDisplayNameOverrides[overlayKey] ?? overlay.displayName,
                 envVars: [],
                 docURL: overlay.docURL,
                 modelCount: 0,
@@ -320,12 +364,13 @@ public struct ModelCatalogService: Sendable {
         // Resolve any model-rename alias for this provider before
         // checking the catalog — see `modelAliases` for rationale.
         let resolved = resolveModelAlias(providerID: providerID, modelID: modelID)
-        guard let catalog = loadCatalog(),
-              let provider = catalog[providerID],
+        guard let catalog = loadCatalog() else { return nil }
+        let key = Self.catalogKey(providerID, in: catalog)
+        guard let provider = catalog[key],
               let raw = provider.models?[resolved] else { return nil }
         return HermesModelInfo(
             providerID: providerID,
-            providerName: provider.name ?? providerID,
+            providerName: Self.displayName(for: key, entry: provider),
             modelID: resolved,
             modelName: raw.name ?? resolved,
             contextWindow: raw.limit?.context,
@@ -489,6 +534,21 @@ public struct ModelCatalogService: Sendable {
         // fireworks-ai).
         "novita": "novita-ai",
         "fireworks": "fireworks-ai",
+        // Wire IDs that are NOT `providers.py` aliases, so
+        // `canonicalProviderID` leaves them alone and only an explicit entry
+        // reaches their catalog (`agent/models_dev.py:120,129` @ v2026.9.7):
+        //   "meta-ai": "meta"       Meta Model API (Muse Spark, api.meta.ai);
+        //                           without it muse-spark-* resolved to the
+        //                           generic 256K default instead of its real
+        //                           1M window, and never reported vision.
+        //   "opencode-free": "opencode"
+        //                           the zero-auth OpenCode tier is Zen-hosted
+        //                           and its *-contributor-free SKUs live in
+        //                           models.dev's "opencode" catalog. The
+        //                           `opencode-zen` spelling gets there through
+        //                           ALIASES; the `free` tier does not.
+        "meta-ai": "meta",
+        "opencode-free": "opencode",
     ]
 
     /// Result of validating a user-entered model ID against the
@@ -540,7 +600,8 @@ public struct ModelCatalogService: Sendable {
             // we fall through to the real check below.
             let models = loadModels(for: providerID)
             if models.isEmpty {
-                if Self.overlayOnlyProviders[providerID] != nil {
+                if Self.overlayOnlyProviders[providerID] != nil
+                    || Self.overlayOnlyProviders[Self.canonicalProviderID(providerID)] != nil {
                     return .valid
                 }
                 return .unknownProvider(providerID: providerID)
@@ -682,8 +743,15 @@ public struct ModelCatalogService: Sendable {
     /// read time everywhere a config'd model ID is rendered, validated,
     /// or sent to Hermes.
     public func resolveModelAlias(providerID: String, modelID: String) -> String {
-        let composite = "\(providerID)/\(modelID)"
-        return Self.modelAliases[composite] ?? modelID
+        if let hit = Self.modelAliases["\(providerID)/\(modelID)"] { return hit }
+        // The alias table is keyed by CANONICAL provider ids (`xai/...`,
+        // `xai-oauth/...`), so a config that spells the provider `grok` or
+        // `x-ai` — both legal, both resolved by Hermes — missed every entry.
+        // Raw spelling is tried first so a table entry can never be
+        // reinterpreted by aliasing (see `catalogKey`).
+        let canonical = Self.canonicalProviderID(providerID)
+        guard canonical != providerID else { return modelID }
+        return Self.modelAliases["\(canonical)/\(modelID)"] ?? modelID
     }
 
     // MARK: - Demoted providers (sort tail)

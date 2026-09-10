@@ -88,7 +88,7 @@ struct HealthView: View {
                     }
                     .buttonStyle(ScarfGhostButton())
                     .disabled(viewModel.isRunningAudit)
-                    .help("Runs `hermes audit` to check installed packages against the OSV.dev advisory database.")
+                    .help("Runs `hermes security audit` to check installed packages against the OSV.dev advisory database.")
                 }
                 if capabilitiesStore?.capabilities.hasSessionsOptimize == true {
                     Button {

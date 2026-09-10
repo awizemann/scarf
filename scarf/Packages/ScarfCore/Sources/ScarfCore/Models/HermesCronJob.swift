@@ -50,6 +50,52 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// class (workdir/contextFrom/noAgent in v0.18, run_claim in v0.18.2).
     public nonisolated let extra: [String: JSONValue]
 
+    /// `_normalize_skill_list(job.get("skill"), job.get("skills"))` in Swift:
+    /// trims, drops blanks, de-duplicates preserving order. Returns `nil`
+    /// only when NEITHER key is present, so "no skills key at all" stays
+    /// distinguishable from "explicitly empty".
+    ///
+    /// The legacy `skill` key is read through its OWN key type rather than
+    /// being added to `CodingKeys`: `CodingKeys.allCases` is what decides
+    /// which keys get swept into `extra` and re-emitted verbatim, so listing
+    /// it there would silently STRIP `skill` from every jobs.json Scarf
+    /// writes back. Left in `extra` it round-trips, and Hermes re-derives it
+    /// from `skills` on its next load anyway (`_apply_skill_fields`).
+    private enum LegacySkillKey: String, CodingKey { case skill }
+
+    private nonisolated static func decodeSkills(
+        from c: KeyedDecodingContainer<CodingKeys>,
+        legacy l: KeyedDecodingContainer<LegacySkillKey>
+    ) throws -> [String]? {
+        let raw: [String]?
+        // `skills: null` is `skills is None` in Python, which is the arm that
+        // falls back to `skill` — so it counts as ABSENT here, not as empty.
+        let skillsPresent = c.contains(.skills) && !((try? c.decodeNil(forKey: .skills)) ?? true)
+        if skillsPresent {
+            if let list = try? c.decode([String].self, forKey: .skills) {
+                raw = list
+            } else if let single = try? c.decode(String.self, forKey: .skills) {
+                raw = [single]                    // `isinstance(skills, str)`
+            } else {
+                // Neither a list nor a string (a number, an object): Hermes's
+                // `list(skills)` raises and the record is treated as
+                // skill-less rather than failing the whole file.
+                raw = []
+            }
+        } else if let legacy = try? l.decodeIfPresent(String.self, forKey: .skill) {
+            raw = [legacy]
+        } else {
+            raw = nil
+        }
+        guard let raw else { return nil }
+        var out: [String] = []
+        for item in raw {
+            let text = item.trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty, !out.contains(text) { out.append(text) }
+        }
+        return out
+    }
+
     public enum CodingKeys: String, CodingKey, CaseIterable {
         case id, name, prompt, skills, model, schedule, enabled, state, deliver, silent
         case nextRunAt = "next_run_at"
@@ -134,7 +180,23 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         // every other job's list entry down with it. Default instead.
         self.name              = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.prompt            = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
-        self.skills            = try c.decodeIfPresent([String].self, forKey: .skills)
+        // `skills` mirrors `cron/jobs.py::_normalize_skill_list` (v2026.9.7
+        // :384-397), because Scarf reads `cron/jobs.json` DIRECTLY — the
+        // normalisation `list_jobs` applies (`_normalize_job_record` →
+        // `_apply_skill_fields`, :456/:400) never runs on this path, so the
+        // record arrives raw:
+        //   * `skills` PRESENT wins outright, even when empty;
+        //   * a bare STRING `skills` is a one-element list (`isinstance(
+        //     skills, str)`), not a decode failure — and a decode failure
+        //     here fails the WHOLE file;
+        //   * `skills` ABSENT falls back to the legacy singular `skill`,
+        //     which is what every pre-multi-skill job still carries and what
+        //     `cron edit` will compute its own `existing_skills` from.
+        // Getting the last one wrong meant the skill-edit diff saw no
+        // existing skills, emitted no `--remove-skill`, and the job kept a
+        // skill the user had just unticked.
+        self.skills            = try Self.decodeSkills(
+            from: c, legacy: decoder.container(keyedBy: HermesCronJob.LegacySkillKey.self))
         self.model             = try c.decodeIfPresent(String.self, forKey: .model)
         // Hermes's own reader is tolerant here (`cron/jobs.py`):
         // `(job.get("schedule") or {})` — schedule may be null or absent —
@@ -182,12 +244,14 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// noAgent were dropped this way until the v0.18 audit caught it).
     ///
     /// Flipping `enabled` alone is NOT enough. Since v0.20.4
-    /// `is_job_runnable()` (cron/jobs.py:571–582, claim gate :2862) refuses
+    /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7 :482-485;
+    /// claim gate `_evaluate_due_job` :2910, roster filter :3009) refuses
     /// to fire whenever `state == "paused"` OR `paused_at` is set —
     /// regardless of `enabled` — so an enable-toggle that forwards the old
     /// pause markers produces a job that looks enabled and never runs.
     /// We therefore mirror Hermes's own `pause_job`/`resume_job`
-    /// (cron/jobs.py:2196–2233): disable sets `state = "paused"` +
+    /// (`cron/jobs.py::pause_job` / `::resume_job`, v2026.9.7 :1973-2003):
+    /// disable sets `state = "paused"` +
     /// `paused_at`; enable sets `state = "scheduled"` and clears
     /// `paused_at`/`paused_reason`.
     ///
@@ -286,35 +350,60 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         }
     }
 
-    /// Hermes's `ONESHOT_GRACE_SECONDS` (cron/jobs.py:118) — how late a
+    /// Hermes's `ONESHOT_GRACE_SECONDS` (`cron/jobs.py`, v2026.9.7 :96) — how late a
     /// one-shot may be and still be eligible to fire.
     public static let oneShotGraceSeconds: TimeInterval = 120
 
     /// Whether re-enabling this job would produce a state Hermes's own CLI
     /// refuses to write.
     ///
-    /// `resume_job` (cron/jobs.py:2212-2233) recomputes `next_run_at` via
+    /// `resume_job` (`cron/jobs.py::resume_job`, v2026.9.7 :1986-2003)
+    /// recomputes `next_run_at` via
     /// `compute_next_run` and RAISES when the result is `None` for a
     /// `kind == "once"` schedule — i.e. the deadline has passed (beyond the
     /// grace window) or the one-shot already ran. Resuming such a job would
     /// leave an `enabled` record that can never fire; Scarf refuses at the
     /// UI instead of writing it.
     ///
-    /// Mirrors `_recoverable_oneshot_run_at` (cron/jobs.py:838-865), which
+    /// Mirrors `_recoverable_oneshot_run_at` (`cron/jobs.py::_recoverable_oneshot_run_at`, v2026.9.7 :841-853), which
     /// is what `compute_next_run` delegates to for `kind == "once"`.
     public nonisolated func oneShotIsUnresumable(now: Date = Date()) -> Bool {
         guard schedule.kind == "once" else { return false }
         // `last_run_at` set → "already run, never eligible again".
         if let lastRunAt, !lastRunAt.isEmpty { return true }
         guard let runAt = schedule.runAt, !runAt.isEmpty else { return true }
-        guard let deadline = Self.parseHermesTimestamp(runAt) else { return true }
-        return deadline < now.addingTimeInterval(-Self.oneShotGraceSeconds)
+        // An offset-bearing `run_at` names one instant — compare directly.
+        if let exact = CronScheduleFormatter.isoDate(runAt) {
+            return exact < now.addingTimeInterval(-Self.oneShotGraceSeconds)
+        }
+        // A naive `run_at` is resolved by Hermes in the configured zone
+        // (`cron/jobs.py::_ensure_aware`, v2026.9.7 :807-814), which Scarf
+        // cannot know; `parseHermesTimestamp` reads it as UTC. The latest
+        // instant it can actually denote is `T + 12h` (UTC−12), so refuse
+        // only when it is past-grace in EVERY zone — the same conservative
+        // window `oneShotScheduleIsPastGrace` uses. Without it, a job whose
+        // deadline is still in the future for the host was refused locally
+        // with a message the host would never have produced.
+        guard let naive = Self.parseHermesTimestamp(runAt) else { return true }
+        return naive.addingTimeInterval(12 * 3600) < now.addingTimeInterval(-Self.oneShotGraceSeconds)
     }
 
     /// Lenient parse of a Hermes `datetime.isoformat()` string. Handles the
     /// offset-bearing spellings via `CronScheduleFormatter.isoDate`, plus the
-    /// naive (offset-less) spelling older Hermes builds persisted — read as
-    /// UTC, matching `_ensure_aware`.
+    /// naive (offset-less) spelling older Hermes builds persisted.
+    ///
+    /// **A naive value is read as UTC here, and that is NOT what Hermes
+    /// does.** `cron/jobs.py::_ensure_aware` (v2026.9.7 :807-814) stamps a
+    /// naive datetime with the *system-local* zone of the process reading
+    /// it and then converts to the *configured Hermes* zone — it never
+    /// treats one as UTC. Scarf cannot reproduce either zone: the system
+    /// zone is the HOST's (which for an SSH server is not this Mac's) and
+    /// the configured zone is not exposed. UTC is therefore a deliberate
+    /// stand-in, and every caller must be tolerant of being off by up to
+    /// ±12h — `oneShotScheduleIsPastGrace` and `oneShotIsUnresumable` each
+    /// widen their window by 12h for exactly that reason. Do not "fix"
+    /// this to `.current`: that would make the answer depend on the Mac's
+    /// zone rather than being uniformly conservative.
     nonisolated static func parseHermesTimestamp(_ iso: String) -> Date? {
         if let d = CronScheduleFormatter.isoDate(iso) { return d }
         let naive = DateFormatter()
@@ -332,7 +421,8 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// Scarf can't evaluate a cron expression, so it can't reproduce
     /// `resume_job`'s recomputed `next_run_at` locally. It doesn't have to:
-    /// `_get_due_jobs_locked` (cron/jobs.py:3210-3231) treats a missing
+    /// `_get_due_jobs_locked` (`cron/jobs.py::_get_due_jobs_locked`,
+    /// v2026.9.7 :2985, via `_evaluate_due_job` :2910-2926) treats a missing
     /// `next_run_at` as a recovery case and recomputes it from the schedule
     /// via `compute_next_run(schedule, now)` for `cron`/`interval` kinds
     /// (and `_recoverable_oneshot_run_at` for one-shots), then persists it.
@@ -354,7 +444,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     }
 
     /// Operator-facing state, ported from Hermes's `effective_job_state`
-    /// (cron/jobs.py:585–602).
+    /// (`cron/jobs.py::effective_job_state`, v2026.9.7 :488-503).
     ///
     /// The scheduler honours `enabled`, not `state` — so a job with
     /// `enabled == true` must NEVER display as paused. That divergence was
@@ -387,7 +477,9 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
 
     /// Terminal per Hermes's `is_terminal_job` — the states from which
     /// `update_job` refuses re-activation ("Cannot activate terminal cron
-    /// job …", cron/jobs.py:2593/2694). `cron resume --run-now` / `--at`
+    /// job …", `cron/jobs.py::_reject_terminal_activation` v2026.9.7 :1865-1878,
+    /// armed from `update_job` :1941 and :1965; the predicate itself is
+    /// `::is_terminal_job` :504-506). `cron resume --run-now` / `--at`
     /// is the documented escape hatch.
     public nonisolated var isTerminal: Bool {
         let s = effectiveState
@@ -400,7 +492,8 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// Hermes persists `{"times": n|null, "completed": n}`, but as of
     /// **v0.21.0** every entry point funnels user/agent input through
-    /// `normalize_repeat_value` (cron/jobs.py:798-825), so a hand-edited
+    /// `normalize_repeat_value` (`cron/jobs.py::normalize_repeat_value`,
+    /// v2026.9.7 :591-617), so a hand-edited
     /// or tool-written `jobs.json` legitimately carries a BARE value:
     /// `"forever"`/`"infinite"`/`"inf"`/`"none"`/`""` → infinite (nil),
     /// `"once"`/`"one"`/`"1x"` → 1, a number (or numeric string) → itself,
@@ -418,6 +511,20 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             return (Self.normalizeRepeatValue(o["times"]), completed)
         }
         return (Self.normalizeRepeatValue(raw), 0)
+    }
+
+    /// `repeat` as the edit form's "Repeat" field should be seeded — the
+    /// read-side sibling of `CronSchedule.editValue`.
+    ///
+    /// `nil` times means "run forever" (`cron/jobs.py::create_job`,
+    /// v2026.9.7 :1779 — `"repeat": {"times": repeat, "completed": 0}`,
+    /// `times None = forever`), and the empty field is exactly how the
+    /// editor spells that, so both map to `""`. `completed` is Hermes's
+    /// counter and is never edited: `_normalize_job_updates`
+    /// (`cron/jobs.py` :1887-1896) carries the existing `completed` across a
+    /// scalar `--repeat`, so re-sending the seeded value is idempotent.
+    public nonisolated var repeatEditValue: String {
+        repeatSpec.times.map(String.init) ?? ""
     }
 
     /// Port of `cron/jobs.py::normalize_repeat_value`. Returns `nil` for
@@ -450,7 +557,8 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         case "running": return "play.circle"
         case "completed": return "checkmark.circle"
         // `error` is the live terminal state Hermes persists and that
-        // effective_job_state() preserves (cron/jobs.py:585–602); `failed`
+        // effective_job_state() preserves
+        // (`cron/jobs.py::effective_job_state`, v2026.9.7 :488-503); `failed`
         // is Scarf-era legacy kept for older jobs.json files.
         case "error", "failed": return "xmark.circle"
         case "paused": return "pause.circle"
@@ -465,15 +573,19 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     // responsible for re-encoding them on every `withEnabled` rewrite, and
     // two of the three have shapes Scarf cannot faithfully round-trip: the
     // dispatch stamp grows keys per release, and `last_delivery_unverified`
-    // is a list in Hermes's writer (`cron/scheduler_delivery.py:1003`) but
+    // is a list in Hermes's writer (`cron/scheduler_delivery.py::_record_unverified_delivery`, v2026.9.7
+    // :1000-1008) but
     // is rendered scalar-tolerantly by the CLI (`_unverified_targets`,
-    // `hermes_cli/cron.py:133`). Reading through `extra` gives the UI every
+    // `hermes_cli/cron.py::_unverified_targets`, v2026.9.7 :133). Reading
+    // through `extra` gives the UI every
     // field while the generic passthrough keeps the bytes verbatim — the
     // same rule `repeatSpec` already follows.
 
     /// `failure_deliver` — the v0.21.1 override target for FAILURE notices
     /// only (`cron/jobs.py::_normalize_failure_deliver`, resolved at
-    /// `cron/scheduler_delivery.py:790-793`). Absent means failures follow
+    /// `cron/scheduler_delivery.py`; normalised at
+    /// `cron/jobs.py::_normalize_failure_deliver` v2026.9.7 :1546, wired into
+    /// the update normalisers at :1589). Absent means failures follow
     /// `deliver`; `local` suppresses failure notices entirely while run
     /// state stays visible in `cron list`.
     public nonisolated var failureDeliver: String? {
@@ -483,7 +595,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     }
 
     /// `last_dispatch` — scheduled-vs-actual timing for the last fire
-    /// (`cron/jobs.py:2974-2980`). Recurring jobs only; a manual trigger and
+    /// (`cron/jobs.py::_evaluate_due_job`, v2026.9.7 :2971-2981). Recurring jobs only; a manual trigger and
     /// an expired one-shot never write one.
     public nonisolated var lastDispatch: CronDispatchStamp? {
         CronDispatchStamp(extra["last_dispatch"])
@@ -528,11 +640,12 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
 
     /// Whether `schedule` — as typed into the create form — is an absolute
     /// one-shot Hermes v0.21.1 would REJECT outright
-    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`: a `kind == "once"`
+    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`, v2026.9.7 :1669,
+    /// armed on edit at :1908: a `kind == "once"`
     /// whose `run_at` is more than `ONESHOT_GRACE_SECONDS` in the past exits
     /// non-zero instead of storing a ghost job).
     ///
-    /// Only the ISO-timestamp form of `parse_schedule` (cron/jobs.py:762-780)
+    /// Only the ISO-timestamp form of `parse_schedule` (`cron/jobs.py::parse_schedule`, v2026.9.7 :765-778)
     /// can be in the past — `in 30m` is computed from now, and intervals and
     /// cron expressions always have a future occurrence — so nothing else is
     /// inspected.
@@ -625,7 +738,7 @@ public struct CronSchedule: Sendable, Codable, Equatable {
     ///
     /// Hermes stores a one-shot as
     /// `{"kind": "once", "run_at": "<ISO>", "display": "once at 2026-02-03 14:00"}`
-    /// (`cron/jobs.py::parse_schedule`, verified at tag `v2026.8.31`).
+    /// (`cron/jobs.py::parse_schedule`, v2026.9.7 :733-802).
     /// `parse_schedule` can read the `run_at` ISO timestamp back, but it has
     /// no branch that understands `"once at 2026-02-03 14:00"`: the phrase is
     /// not an `every …` form, not a 5-field cron expression, does not start
@@ -706,7 +819,7 @@ public struct CronJobsFile: Sendable, Codable {
     }
 
     public nonisolated init(from decoder: any Decoder) throws {
-        // Hermes v0.20.6+ `load_jobs()` (cron/jobs.py:1648-1727) tolerates
+        // Hermes v0.20.6+ `load_jobs()` (`cron/jobs.py::load_jobs`, v2026.9.7 :1237-1285) tolerates
         // three on-disk shapes and auto-repairs the two odd ones back to
         // `{"jobs": [...]}` on the next save. Scarf must READ all three or
         // it renders an empty board (and, worse, its own rewrite would
@@ -814,7 +927,7 @@ public struct CronJobsFile: Sendable, Codable {
 }
 
 /// `last_dispatch` — Hermes v0.21.1's scheduled-vs-actual stamp for a
-/// recurring job's last fire (`cron/jobs.py:2974-2980`, issue #99879).
+/// recurring job's last fire (`cron/jobs.py::_evaluate_due_job`, v2026.9.7 :2971-2981, issue #99879).
 ///
 /// Read-only diagnostics, decoded by FIELD PRESENCE rather than by version
 /// (charter C4): a host that doesn't write the stamp simply has no key, and
@@ -825,7 +938,7 @@ public struct CronDispatchStamp: Sendable, Equatable {
     /// `on_time` (within ticker slack), `late` (> 300s but within the
     /// catch-up grace window), or `catch_up` (beyond grace — accumulated
     /// misses were skipped and the job executed once now).
-    /// `cron/jobs.py::_classify_dispatch_lateness`.
+    /// `cron/jobs.py::_classify_dispatch_lateness` (v2026.9.7 :874).
     public enum Kind: String, Sendable, Equatable {
         case onTime = "on_time"
         case late
@@ -881,8 +994,23 @@ public struct CronDispatchStamp: Sendable, Equatable {
 
     /// Port of `hermes_cli/cron.py::_format_lateness` (`45s`, `2h 5m`,
     /// `1d 3h`, `0m`) so the number Scarf shows matches `cron list`.
+    ///
+    /// `max(0, int(seconds))` is Hermes's own first line
+    /// (`hermes_cli/cron.py::_format_lateness`, v2026.9.7 :88-91): it
+    /// TRUNCATES (Python `int()`), it does not round, and it CLAMPS. Scarf
+    /// rounded and never clamped, so `59.7s` read `1m` where the CLI says
+    /// `59s`, and an EARLY dispatch — a scheduler that fires a second
+    /// ahead of `scheduled_at`, which the catch-up path can produce —
+    /// rendered `-1s late` where the CLI says `0s`.
     public var latenessDisplay: String {
-        let seconds = Int(latenessSeconds.rounded())
+        // `Int(_: Double)` TRAPS on NaN/±inf, and `lateness_seconds` is
+        // whatever the JSON carried. Hermes's own `except (TypeError,
+        // ValueError): return "?"` arm is the same admission that the field
+        // is not trusted; a hand-edited `jobs.json` must not crash the UI.
+        guard latenessSeconds.isFinite,
+              latenessSeconds < Double(Int.max), latenessSeconds > Double(Int.min)
+        else { return "?" }
+        let seconds = max(0, Int(latenessSeconds))
         if seconds < 60 { return "\(seconds)s" }
         let totalMinutes = seconds / 60
         let days = totalMinutes / 1440

@@ -36,10 +36,15 @@ public extension HermesConfig {
         func scalar(_ key: String) -> String? {
             values[key].map(HermesYAML.normalizedScalar)
         }
-        func bool(_ key: String, default def: Bool) -> Bool {
-            guard let v = scalar(key) else { return def }
-            return v.lowercased() == "true"
-        }
+        // There is deliberately NO literal `== "true"` bool reader here any
+        // more. config.yaml is read by PyYAML, so `yes` / `on` / `no` / `off`
+        // are already Python bools by the time ANY Hermes reader sees them and
+        // `1` / `0` are truthy/falsy ints — the coercion happens in the LOADER,
+        // not in the per-key reader, so it applies to every boolean key
+        // regardless of which module reads it. A literal comparison therefore
+        // rendered `compact: yes` (and 38 other keys) as OFF while the host had
+        // it ON. Every boolean key goes through `boolish` / `boolTrueDefault` /
+        // `boolishOpt`; the only thing a key still chooses is its DEFAULT.
         // TRUE-by-default key: absent means the host is doing the thing, and
         // only an explicit falsy scalar turns it off. `bool(_:default: true)`
         // would be wrong here — it reads any spelling other than the literal
@@ -54,6 +59,16 @@ public extension HermesConfig {
             guard let v = scalar(key) else { return true }
             return !["false", "0", "no", "off"].contains(v.lowercased())
         }
+        // `boolTrueDefault` over an ordered key list: the FIRST key PRESENT in
+        // config.yaml decides, and only "absent at every spelling" reads as the
+        // `true` default. Used where Hermes accepts the value at several paths
+        // with a defined precedence (Slack's top-level-over-`extra:` bridge) —
+        // a plain `??` chain over raw values would pick the first NON-NIL raw
+        // string and then compare it literally, which is the bug this replaces.
+        func boolTrueDefaultAt(_ keys: [String]) -> Bool {
+            for key in keys where scalar(key) != nil { return boolTrueDefault(key) }
+            return true
+        }
         func int(_ key: String, default def: Int) -> Int {
             Int(scalar(key) ?? "") ?? def
         }
@@ -63,6 +78,25 @@ public extension HermesConfig {
         func str(_ key: String, default def: String = "") -> String {
             let raw = values[key] ?? def
             return HermesYAML.stripYAMLQuotes(raw)
+        }
+        // Closed-enum string key: the value drives a `PickerRow`, so it has to
+        // be the bare token. `str` only strips a surrounding quote pair, which
+        // leaves `wal  # weak-fsync FS` (legal YAML for `wal`) as a selection
+        // no picker option matches — the control renders blank and the next
+        // save writes whatever the user then picks over a value they never
+        // saw. `HermesYAML.normalizedScalar` strips the quotes AND the
+        // whitespace-preceded trailing comment, exactly as the bool/int
+        // readers above already do.
+        //
+        // Deliberately NOT validated against a fixed member set: Hermes adds
+        // members to these enums between releases (`display.busy_input_mode`
+        // grew `steer`, `agent.service_tier` grew `auto`/`cold`), and a client
+        // that snapped an unknown member back to its default would hide a
+        // value the host honours — and overwrite it on the next save. Hermes
+        // itself normalises out-of-set values at READ time in its own reader
+        // and leaves config.yaml alone; so does Scarf.
+        func strEnum(_ key: String, default def: String = "") -> String {
+            scalar(key) ?? def
         }
         // True-optional int: `nil` means "key absent from config.yaml",
         // distinct from any concrete int including 0. Used for
@@ -83,25 +117,45 @@ public extension HermesConfig {
             guard let v = scalar(key) else { return nil }
             return v.lowercased() == "true"
         }
+        // Boolish true-optional: `nil` means "key absent OR unrecognised",
+        // and a PRESENT value is read with Hermes's own boolish sets rather
+        // than a literal `== "true"`. Mirrors `_coerce_bool_extra`
+        // (`plugins/platforms/telegram/adapter.py:1176-1186`): truthy
+        // {true,1,yes,on}, falsy {false,0,no,off}, anything else falls back to
+        // the host default — which for Scarf means reporting "absent" so the
+        // display layer resolves it against the host exactly as it would for
+        // a missing key.
+        func boolishOpt(_ key: String) -> Bool? {
+            guard let v = scalar(key)?.lowercased() else { return nil }
+            if ["true", "1", "yes", "on"].contains(v) { return true }
+            if ["false", "0", "no", "off"].contains(v) { return false }
+            return nil
+        }
+        // The boolean reader for a key with a KNOWN default (either polarity).
+        // `def` is used only when the key is absent or carries a scalar in
+        // neither boolish set; a present, recognised value always decides.
+        func boolish(_ key: String, default def: Bool) -> Bool {
+            boolishOpt(key) ?? def
+        }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]
         let commandAllowlist = lists["permanent_allowlist"] ?? lists["command_allowlist"] ?? []
 
         let display = DisplaySettings(
             skin: str("display.skin", default: "default"),
-            compact: bool("display.compact", default: false),
-            resumeDisplay: str("display.resume_display", default: "full"),
-            bellOnComplete: bool("display.bell_on_complete", default: false),
-            inlineDiffs: bool("display.inline_diffs", default: true),
-            toolProgressCommand: bool("display.tool_progress_command", default: false),
+            compact: boolish("display.compact", default: false),
+            resumeDisplay: strEnum("display.resume_display", default: "full"),
+            bellOnComplete: boolish("display.bell_on_complete", default: false),
+            inlineDiffs: boolTrueDefault("display.inline_diffs"),
+            toolProgressCommand: boolish("display.tool_progress_command", default: false),
             toolPreviewLength: int("display.tool_preview_length", default: 0),
-            busyInputMode: str("display.busy_input_mode", default: "interrupt"),
+            busyInputMode: strEnum("display.busy_input_mode", default: "interrupt"),
             language: str("display.language"),
-            timestamps: bool("display.timestamps", default: false),
+            timestamps: boolish("display.timestamps", default: false),
             // v0.21.1 keys. `resume_last_session` defaults TRUE upstream, so
             // an absent key must read `true` — reading it as `false` would
             // render the toggle off while the host resumes anyway.
-            bellOnPrompt: bool("display.bell_on_prompt", default: false),
+            bellOnPrompt: boolish("display.bell_on_prompt", default: false),
             resumeLastSession: boolTrueDefault("display.resume_last_session")
         )
 
@@ -109,16 +163,16 @@ public extension HermesConfig {
             cwd: str("terminal.cwd", default: "."),
             timeout: int("terminal.timeout", default: 180),
             envPassthrough: lists["terminal.env_passthrough"] ?? [],
-            persistentShell: bool("terminal.persistent_shell", default: true),
+            persistentShell: boolTrueDefault("terminal.persistent_shell"),
             dockerImage: str("terminal.docker_image"),
-            dockerMountCwdToWorkspace: bool("terminal.docker_mount_cwd_to_workspace", default: false),
+            dockerMountCwdToWorkspace: boolish("terminal.docker_mount_cwd_to_workspace", default: false),
             dockerForwardEnv: lists["terminal.docker_forward_env"] ?? [],
             dockerVolumes: lists["terminal.docker_volumes"] ?? [],
             dockerExtraArgs: lists["terminal.docker_extra_args"] ?? [],
             containerCPU: int("terminal.container_cpu", default: 0),
             containerMemory: int("terminal.container_memory", default: 0),
             containerDisk: int("terminal.container_disk", default: 0),
-            containerPersistent: bool("terminal.container_persistent", default: false),
+            containerPersistent: boolish("terminal.container_persistent", default: false),
             modalImage: str("terminal.modal_image"),
             modalMode: str("terminal.modal_mode", default: "auto"),
             daytonaImage: str("terminal.daytona_image"),
@@ -128,16 +182,16 @@ public extension HermesConfig {
         let browser = BrowserSettings(
             inactivityTimeout: int("browser.inactivity_timeout", default: 120),
             commandTimeout: int("browser.command_timeout", default: 30),
-            recordSessions: bool("browser.record_sessions", default: false),
-            allowPrivateURLs: bool("browser.allow_private_urls", default: false),
-            camofoxManagedPersistence: bool("browser.camofox.managed_persistence", default: false)
+            recordSessions: boolish("browser.record_sessions", default: false),
+            allowPrivateURLs: boolish("browser.allow_private_urls", default: false),
+            camofoxManagedPersistence: boolish("browser.camofox.managed_persistence", default: false)
         )
 
         let voice = VoiceSettings(
             recordKey: str("voice.record_key", default: "ctrl+b"),
             maxRecordingSeconds: int("voice.max_recording_seconds", default: 120),
             silenceDuration: double("voice.silence_duration", default: 3.0),
-            ttsProvider: str("tts.provider", default: "edge"),
+            ttsProvider: strEnum("tts.provider", default: "edge"),
             ttsEdgeVoice: str("tts.edge.voice", default: "en-US-AriaNeural"),
             ttsElevenLabsVoiceID: str("tts.elevenlabs.voice_id"),
             ttsElevenLabsModelID: str("tts.elevenlabs.model_id", default: "eleven_multilingual_v2"),
@@ -145,21 +199,21 @@ public extension HermesConfig {
             ttsOpenAIVoice: str("tts.openai.voice", default: "alloy"),
             ttsNeuTTSModel: str("tts.neutts.model"),
             ttsNeuTTSDevice: str("tts.neutts.device", default: "cpu"),
-            sttEnabled: bool("stt.enabled", default: true),
+            sttEnabled: boolTrueDefault("stt.enabled"),
             // Empty means the key is absent. Hermes v0.20.5 stopped seeding
             // `stt.provider` in config_defaults.py, so an absent key is the
             // autodetect ladder rather than `local`; defaulting to "local"
             // here would render an unset key as a pin. Older hosts seeded
             // `local`, which the picker surfaces via its "Auto" label — see
             // `SettingsViewModel.sttProviders`.
-            sttProvider: str("stt.provider"),
+            sttProvider: strEnum("stt.provider"),
             sttLocalModel: str("stt.local.model", default: "base"),
             sttLocalLanguage: str("stt.local.language"),
             sttOpenAIModel: str("stt.openai.model", default: "whisper-1"),
             sttMistralModel: str("stt.mistral.model", default: "voxtral-mini-latest"),
             ttsXAIVoiceID: str("tts.xai.voice_id"),
             // v0.15 round-trip — read the auto-speech-tags toggle back.
-            ttsXAIAutoSpeechTags: bool("tts.xai.auto_speech_tags", default: false),
+            ttsXAIAutoSpeechTags: boolish("tts.xai.auto_speech_tags", default: false),
             // v0.19 round-trip (hasXAITTSAdvancedParams) — read back even on
             // pre-v0.19 hosts where the keys are simply absent (defaults win).
             ttsXAILanguage: str("tts.xai.language", default: "en"),
@@ -172,12 +226,12 @@ public extension HermesConfig {
             ttsDeepInfraVoice: str("tts.deepinfra.voice", default: "default"),
             // Predates version tracking, like sttOpenAIModel; ungated.
             sttOpenAILanguage: str("stt.openai.language"),
-            // v0.20 round-trip (hasSTTUnifiedLanguage).
+            // v0.19.1 round-trip (hasSTTUnifiedLanguage).
             sttLanguage: str("stt.language", default: "en"),
             sttGroqModel: str("stt.groq.model", default: "whisper-large-v3-turbo"),
             sttGroqLanguage: str("stt.groq.language"),
-            // v0.20 round-trip (hasSTTLocalVADTuning).
-            sttLocalVAD: bool("stt.local.vad", default: true),
+            // v0.19.1 round-trip (hasSTTLocalVADTuning).
+            sttLocalVAD: boolTrueDefault("stt.local.vad"),
             sttLocalVADMinSilenceMS: int("stt.local.vad_min_silence_ms", default: 500),
             sttLocalNoSpeechProbThreshold: double("stt.local.no_speech_prob_threshold", default: 0.6),
             sttLocalLogprobThreshold: double("stt.local.logprob_threshold", default: -1.0),
@@ -185,7 +239,7 @@ public extension HermesConfig {
             sttLocalUnloadAfterIdleSeconds: int("stt.local.unload_after_idle_seconds", default: 0),
             // Top-level `stt.cloud_trim_*` — siblings of `stt.local.*`, NOT
             // nested under it.
-            sttCloudTrimSilence: bool("stt.cloud_trim_silence", default: true),
+            sttCloudTrimSilence: boolTrueDefault("stt.cloud_trim_silence"),
             sttCloudTrimThresholdDB: double("stt.cloud_trim_threshold_db", default: -40),
             sttCloudTrimKeepMS: int("stt.cloud_trim_keep_ms", default: 300),
             wakeWordCapture: str("wake_word.capture", default: "auto")
@@ -208,7 +262,7 @@ public extension HermesConfig {
             )
         }
         let titleGeneration = TitleGenerationSettings(
-            enabled: bool("auxiliary.title_generation.enabled", default: true),
+            enabled: boolTrueDefault("auxiliary.title_generation.enabled"),
             provider: str("auxiliary.title_generation.provider", default: "auto"),
             model: str("auxiliary.title_generation.model"),
             baseURL: str("auxiliary.title_generation.base_url"),
@@ -238,28 +292,28 @@ public extension HermesConfig {
             titleGeneration: titleGeneration,
             // v0.20.4+ — NOT `agent.background_review.enabled`; nested under
             // the top-level `auxiliary:` block (source-verified).
-            backgroundReviewEnabled: bool("auxiliary.background_review.enabled", default: true)
+            backgroundReviewEnabled: boolTrueDefault("auxiliary.background_review.enabled")
         )
 
         let security = SecuritySettings(
-            redactSecrets: bool("security.redact_secrets", default: true),
-            redactPII: bool("privacy.redact_pii", default: false),
-            tirithEnabled: bool("security.tirith_enabled", default: true),
+            redactSecrets: boolTrueDefault("security.redact_secrets"),
+            redactPII: boolish("privacy.redact_pii", default: false),
+            tirithEnabled: boolTrueDefault("security.tirith_enabled"),
             tirithPath: str("security.tirith_path", default: "tirith"),
             tirithTimeout: int("security.tirith_timeout", default: 5),
-            tirithFailOpen: bool("security.tirith_fail_open", default: true),
-            blocklistEnabled: bool("security.website_blocklist.enabled", default: false),
+            tirithFailOpen: boolTrueDefault("security.tirith_fail_open"),
+            blocklistEnabled: boolish("security.website_blocklist.enabled", default: false),
             blocklistDomains: lists["security.website_blocklist.domains"] ?? []
         )
 
         let humanDelay = HumanDelaySettings(
-            mode: str("human_delay.mode", default: "off"),
+            mode: strEnum("human_delay.mode", default: "off"),
             minMS: int("human_delay.min_ms", default: 800),
             maxMS: int("human_delay.max_ms", default: 2500)
         )
 
         let compression = CompressionSettings(
-            enabled: bool("compression.enabled", default: true),
+            enabled: boolTrueDefault("compression.enabled"),
             threshold: double("compression.threshold", default: 0.5),
             targetRatio: double("compression.target_ratio", default: 0.2),
             protectLastN: int("compression.protect_last_n", default: 20),
@@ -270,7 +324,7 @@ public extension HermesConfig {
             thresholdTokens: int("compression.threshold_tokens", default: 0),
             minTailUserMessages: int("compression.min_tail_user_messages", default: 1),
             idleCompactAfterSeconds: int("compression.idle_compact_after_seconds", default: 0),
-            progressNotices: bool("compression.progress_notices", default: false)
+            progressNotices: boolish("compression.progress_notices", default: false)
         )
 
         // Sentinels, not defaults: v0.21 flipped both server-side defaults
@@ -299,31 +353,44 @@ public extension HermesConfig {
             maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0),
             // v0.21.1 keys. Here Hermes's own default (0 = no subagent cap)
             // and the "absent" reading coincide, so no sentinel is needed.
-            independentCompletions: bool("delegation.independent_completions", default: false),
+            independentCompletions: boolish("delegation.independent_completions", default: false),
             compressionThresholdTokens: int("delegation.compression_threshold_tokens", default: 0)
         )
 
         let discord = DiscordSettings(
-            requireMention: bool("discord.require_mention", default: true),
+            requireMention: boolTrueDefault("discord.require_mention"),
             freeResponseChannels: str("discord.free_response_channels"),
-            autoThread: bool("discord.auto_thread", default: true),
-            reactions: bool("discord.reactions", default: true),
-            historyBackfill: bool("discord.history_backfill", default: true),
-            allowAnyAttachment: bool("platforms.discord.extra.allow_any_attachment", default: false)
+            autoThread: boolTrueDefault("discord.auto_thread"),
+            reactions: boolTrueDefault("discord.reactions"),
+            historyBackfill: boolTrueDefault("discord.history_backfill"),
+            allowAnyAttachment: boolish("platforms.discord.extra.allow_any_attachment", default: false)
         )
 
         let telegram = TelegramSettings(
-            requireMention: bool("telegram.require_mention", default: true),
-            reactions: bool("telegram.reactions", default: false),
-            disableTopicAutoRename: bool("telegram.disable_topic_auto_rename", default: false),
-            ignoreRootDM: bool("platforms.telegram.extra.ignore_root_dm", default: false),
-            richMessages: bool("platforms.telegram.extra.rich_messages", default: true),
-            statusIndicator: bool("platforms.telegram.extra.status_indicator", default: false)
+            // NOT `boolTrueDefault`, and the `true` default is knowingly
+            // Scarf's rather than Hermes's: `telegram.require_mention` has no
+            // `config_defaults.py` entry and its reader defaults it to FALSE
+            // (`plugins/platforms/telegram/adapter.py:5030`
+            // `_extra_bool("require_mention", "TELEGRAM_REQUIRE_MENTION", "false")`),
+            // verified at v2026.9.7. Correcting it flips a visible toggle for
+            // every user whose config omits the key, so the DEFAULT is tracked
+            // as its own change; only the reader was folded into the boolish
+            // sweep.
+            requireMention: boolish("telegram.require_mention", default: true),
+            reactions: boolish("telegram.reactions", default: false),
+            disableTopicAutoRename: boolish("telegram.disable_topic_auto_rename", default: false),
+            ignoreRootDM: boolish("platforms.telegram.extra.ignore_root_dm", default: false),
+            // Sentinel, not a default: Hermes flipped the shipped default
+            // true -> false at v0.18.0, one release after the key landed. See
+            // `TelegramSettings.richMessages` and
+            // `HermesConfig.displayTelegramRichMessages(capabilities:)`.
+            richMessages: boolishOpt("platforms.telegram.extra.rich_messages"),
+            statusIndicator: boolish("platforms.telegram.extra.status_indicator", default: false)
         )
 
         // -- v0.15: Signal group-only require_mention + ntfy (23rd platform).
         let signal = SignalSettings(
-            requireMention: bool("platforms.signal.extra.require_mention", default: false)
+            requireMention: boolish("platforms.signal.extra.require_mention", default: false)
         )
 
         let ntfy = NtfySettings(
@@ -331,7 +398,7 @@ public extension HermesConfig {
             server: str("platforms.ntfy.extra.server", default: "https://ntfy.sh"),
             publishTopic: str("platforms.ntfy.extra.publish_topic"),
             token: str("platforms.ntfy.extra.token"),
-            markdown: bool("platforms.ntfy.extra.markdown", default: false)
+            markdown: boolish("platforms.ntfy.extra.markdown", default: false)
         )
 
         // -- v0.17: WhatsApp Business Cloud API (`platforms.whatsapp_cloud.extra.*`).
@@ -354,19 +421,19 @@ public extension HermesConfig {
         // named here; only its NAME (+ the routing knobs) round-trips through
         // config.yaml. Every field is read back so the Secrets tab persists.
         let bitwarden = BitwardenSettings(
-            enabled: bool("secrets.bitwarden.enabled", default: false),
+            enabled: boolish("secrets.bitwarden.enabled", default: false),
             accessTokenEnv: str("secrets.bitwarden.access_token_env", default: "BWS_ACCESS_TOKEN"),
             projectID: str("secrets.bitwarden.project_id"),
-            overrideExisting: bool("secrets.bitwarden.override_existing", default: false),
+            overrideExisting: boolish("secrets.bitwarden.override_existing", default: false),
             serverURL: str("secrets.bitwarden.server_url"),
             cacheTTLSeconds: int("secrets.bitwarden.cache_ttl_seconds", default: 300),
-            autoInstall: bool("secrets.bitwarden.auto_install", default: true),
+            autoInstall: boolTrueDefault("secrets.bitwarden.auto_install"),
             // `secrets.bitwarden.encrypted_cache` — v0.20+ (commit
             // 1384087729, first released v2026.7.30). `max_stale_seconds`
             // defaults to 0 ("no stale fallback"), a real value distinct
             // from unset.
             encryptedCache: BitwardenEncryptedCacheSettings(
-                enabled: bool("secrets.bitwarden.encrypted_cache.enabled", default: false),
+                enabled: boolish("secrets.bitwarden.encrypted_cache.enabled", default: false),
                 maxStaleSeconds: int("secrets.bitwarden.encrypted_cache.max_stale_seconds", default: 0)
             )
         )
@@ -375,20 +442,20 @@ public extension HermesConfig {
         // (commit 3d5dd8efa5, first released v2026.7.30). See
         // `CommandSecretsSettings` for the trust-model note on `command`.
         let commandSecrets = CommandSecretsSettings(
-            enabled: bool("secrets.command.enabled", default: false),
+            enabled: boolish("secrets.command.enabled", default: false),
             command: str("secrets.command.command"),
             helperTimeoutSeconds: double("secrets.command.helper_timeout_seconds", default: 3.0),
-            overrideExisting: bool("secrets.command.override_existing", default: false)
+            overrideExisting: boolish("secrets.command.override_existing", default: false)
         )
 
         // `telemetry.shared_metrics` — v0.20+ opt-in local aggregate
         // metrics (Relay pipeline, first released v2026.7.30).
         let telemetry = TelemetrySettings(
-            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false),
+            sharedMetricsEnabled: boolish("telemetry.shared_metrics.enabled", default: false),
             // v0.21.1 transmission opt-in + its endpoint. `send` is read
             // independently of `enabled` so the UI can show the true stored
             // state; Hermes itself refuses to transmit without `enabled`.
-            sharedMetricsSend: bool("telemetry.shared_metrics.send", default: false),
+            sharedMetricsSend: boolish("telemetry.shared_metrics.send", default: false),
             sharedMetricsEndpoint: str("telemetry.shared_metrics.endpoint")
         )
 
@@ -396,7 +463,7 @@ public extension HermesConfig {
         // released v2026.7.30). `wal_autocheckpoint` / `journal_size_limit`
         // are true optionals: absent key != 0.
         let database = DatabaseSettings(
-            journalMode: str("database.journal_mode", default: "wal"),
+            journalMode: strEnum("database.journal_mode", default: "wal"),
             walAutocheckpoint: intOpt("database.wal_autocheckpoint"),
             journalSizeLimit: intOpt("database.journal_size_limit")
         )
@@ -417,22 +484,50 @@ public extension HermesConfig {
             // `extra.update(bridged)`, so a top-level value OVERWRITES an
             // `extra:` one — hence top-level first, `extra` only as the
             // fallback for a config.yaml hand-written in the adapter's shape.
-            requireMention: (values["platforms.slack.require_mention"]
-                             ?? values["slack.require_mention"]
-                             ?? values["platforms.slack.extra.require_mention"]) != "false",
-            replyInThread: (values["platforms.slack.extra.reply_in_thread"] ?? "true") != "false",
-            replyBroadcast: (values["platforms.slack.extra.reply_broadcast"] ?? "false") == "true"
+            // All three read through the shared boolish helpers rather than a
+            // raw `!= "false"` / `== "true"` on the VERBATIM parse: everything
+            // after `key: ` is stored unnormalised, so `false  # for now`,
+            // `"false"`, `no` and `off` are all legal YAML for false that a
+            // literal compare reads as TRUE (and `yes`/`on` as false).
+            // Defaults verified at v2026.9.7: `slack.require_mention` True
+            // (`hermes_cli/config_defaults.py`), `reply_in_thread` True (no
+            // schema default — the adapter's own reader,
+            // `plugins/platforms/slack/adapter.py:2590,3989` and
+            // `gateway/run_turn.py:2790`, all `.get("reply_in_thread", True)`),
+            // `reply_broadcast` False (`adapter.py:2083`).
+            requireMention: boolTrueDefaultAt([
+                "platforms.slack.require_mention",
+                "slack.require_mention",
+                "platforms.slack.extra.require_mention",
+            ]),
+            replyInThread: boolTrueDefault("platforms.slack.extra.reply_in_thread"),
+            replyBroadcast: boolish("platforms.slack.extra.reply_broadcast", default: false)
         )
 
         let matrix = MatrixSettings(
-            requireMention: bool("matrix.require_mention", default: true),
-            autoThread: bool("matrix.auto_thread", default: true),
-            dmMentionThreads: bool("matrix.dm_mention_threads", default: false)
+            requireMention: boolTrueDefault("matrix.require_mention"),
+            // Default TRUE upstream — no `config_defaults.py` entry, the
+            // default lives in the reader:
+            // `plugins/platforms/matrix/adapter.py:799`
+            // `_env_truthy("MATRIX_AUTO_THREAD", "true")`.
+            autoThread: boolTrueDefault("matrix.auto_thread"),
+            dmMentionThreads: boolish("matrix.dm_mention_threads", default: false)
         )
 
         let mattermost = MattermostSettings(
-            requireMention: bool("mattermost.require_mention", default: true),
-            replyMode: str("mattermost.reply_mode", default: "off")
+            requireMention: boolTrueDefault("mattermost.require_mention"),
+            // `platforms.mattermost.extra.reply_mode`, NOT the top-level
+            // `mattermost.reply_mode` Scarf used to read. The adapter reads
+            // `config.extra` only —
+            // `plugins/platforms/mattermost/adapter.py:120-121`
+            // `config.extra.get("reply_mode", "") or _get_scoped_secret("MATTERMOST_REPLY_MODE", "off")`
+            // — and `reply_mode` is not one of `gateway/config_loader.py`'s
+            // `_SHARED_KEYS`, so a top-level spelling is never bridged into
+            // `extra` and Hermes never sees it. The env fallback
+            // (`MATTERMOST_REPLY_MODE`, which is what `MattermostSetupView`
+            // actually edits) lives in `.env`, outside this parse; an absent
+            // YAML key reads as the same `off` it always did.
+            replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off")
         )
 
         let whatsapp = WhatsAppSettings(
@@ -454,7 +549,7 @@ public extension HermesConfig {
         let homeAssistant = HomeAssistantSettings(
             watchDomains: lists["platforms.homeassistant.extra.watch_domains"] ?? [],
             watchEntities: lists["platforms.homeassistant.extra.watch_entities"] ?? [],
-            watchAll: bool("platforms.homeassistant.extra.watch_all", default: false),
+            watchAll: boolish("platforms.homeassistant.extra.watch_all", default: false),
             ignoreEntities: lists["platforms.homeassistant.extra.ignore_entities"] ?? [],
             cooldownSeconds: int("platforms.homeassistant.extra.cooldown_seconds", default: 30)
         )
@@ -496,7 +591,7 @@ public extension HermesConfig {
             let allowedChannels = lists[prefix + "allowed_channels"] ?? []
             let allowedChats    = lists[prefix + "allowed_chats"]    ?? []
             let allowedRooms    = lists[prefix + "allowed_rooms"]    ?? []
-            let busy            = bool(prefix + "busy_ack_enabled", default: true)
+            let busy            = boolTrueDefault(prefix + "busy_ack_enabled")
             // Upstream default is TRUE (`gateway/config.py` PlatformConfig),
             // so an absent key — and any non-`true` spelling of a truthy
             // value — must NOT read as off. See `boolTrueDefault`.
@@ -532,26 +627,41 @@ public extension HermesConfig {
             // the resolved value back unless the user edits it.
             maxTurns: int("agent.max_turns", default: 0),
             personality: str("display.personality", default: "default"),
-            terminalBackend: str("terminal.backend", default: "local"),
-            memoryEnabled: bool("memory.memory_enabled", default: false),
+            terminalBackend: strEnum("terminal.backend", default: "local"),
+            memoryEnabled: boolish("memory.memory_enabled", default: false),
             memoryCharLimit: int("memory.memory_char_limit", default: 0),
             userCharLimit: int("memory.user_char_limit", default: 0),
             nudgeInterval: int("memory.nudge_interval", default: 0),
-            streaming: values["display.streaming"] != "false",
-            showReasoning: bool("display.show_reasoning", default: false),
-            autoTTS: values["voice.auto_tts"] != "false",
+            // `display.streaming` defaults to **false** upstream and always
+            // has: `hermes_cli/config_defaults.py:796` seeds
+            // `display.streaming: False` (and did at every tag back to
+            // v2026.3.17 = v0.3, under the old `hermes_cli/config.py`
+            // DEFAULT_CONFIG), and its only reader agrees —
+            // `cli.py:2598  self.streaming_enabled = display.get("streaming", False)`.
+            // Scarf read it as `!= "false"`, which is BOTH a wrong default
+            // (absent key rendered the toggle ON while the host streams
+            // nothing) and a raw compare that bypasses
+            // `HermesYAML.normalizedScalar`, so `true  # for now` read as
+            // false. This is display-layer only — see `modelStreaming` for
+            // the provider-request switch, which really does default true.
+            streaming: boolish("display.streaming", default: false),
+            showReasoning: boolish("display.show_reasoning", default: false),
+            // TRUE-by-default; read through `boolTrueDefault` rather than a
+            // raw `!= "false"` so `no`/`off`/`0` (and `false  # comment`)
+            // turn it off the way Hermes's own boolish readers do.
+            autoTTS: boolTrueDefault("voice.auto_tts"),
             silenceThreshold: int("voice.silence_threshold", default: QueryDefaults.defaultSilenceThreshold),
             reasoningEffort: str("agent.reasoning_effort", default: "medium"),
-            showCost: bool("display.show_cost", default: false),
-            approvalMode: str("approvals.mode", default: "manual"),
-            browserCloudProvider: str("browser.cloud_provider"),
+            showCost: boolish("display.show_cost", default: false),
+            approvalMode: strEnum("approvals.mode", default: "manual"),
+            browserCloudProvider: strEnum("browser.cloud_provider"),
             memoryProvider: str("memory.provider"),
             dockerEnv: dockerEnv,
             commandAllowlist: commandAllowlist,
             memoryProfile: str("memory.profile"),
             serviceTier: str("agent.service_tier", default: "normal"),
             gatewayNotifyInterval: int("agent.gateway_notify_interval", default: 600),
-            forceIPv4: bool("network.force_ipv4", default: false),
+            forceIPv4: boolish("network.force_ipv4", default: false),
             contextEngine: str("context.engine", default: "compressor"),
             // Absent → `true`, matching the Hermes schema default that runtime
             // merging supplies. Deliberately NOT inferred from absence: the
@@ -563,10 +673,10 @@ public extension HermesConfig {
             // falsely report or materialise it." So on v0.20.6+ hosts an
             // absent key is the normal, expected state and must still read as
             // enabled. Only an explicit `false` turns it off.
-            interimAssistantMessages: values["display.interim_assistant_messages"] != "false",
-            honchoInitOnSessionStart: bool("honcho.initOnSessionStart", default: false),
+            interimAssistantMessages: boolTrueDefault("display.interim_assistant_messages"),
+            honchoInitOnSessionStart: boolish("honcho.initOnSessionStart", default: false),
             timezone: str("timezone"),
-            userProfileEnabled: bool("memory.user_profile_enabled", default: true),
+            userProfileEnabled: boolTrueDefault("memory.user_profile_enabled"),
             toolUseEnforcement: str("agent.tool_use_enforcement", default: "auto"),
             gatewayTimeout: int("agent.gateway_timeout", default: 1800),
             cronDrainTimeout: int("agent.cron_drain_timeout", default: 30),
@@ -577,8 +687,8 @@ public extension HermesConfig {
             gatewayTurnLeaseTimeout: int("agent.gateway_turn_lease_timeout", default: 0),
             approvalTimeout: int("approvals.timeout", default: 60),
             fileReadMaxChars: int("file_read_max_chars", default: 100_000),
-            cronWrapResponse: bool("cron.wrap_response", default: true),
-            curatorConsolidate: bool("curator.consolidate", default: false),
+            cronWrapResponse: boolTrueDefault("cron.wrap_response"),
+            curatorConsolidate: boolish("curator.consolidate", default: false),
             maxConcurrentSessions: int("max_concurrent_sessions", default: 0),
             prefillMessagesFile: str("prefill_messages_file"),
             skillsExternalDirs: lists["skills.external_dirs"] ?? [],
@@ -608,21 +718,37 @@ public extension HermesConfig {
             // to sit here; that key exists in NO supported Hermes version
             // (only some long-obsolete Scarf build ever wrote it), so it was
             // removed rather than carried forward.
-            runtimeMetadataFooter: bool("display.runtime_footer.enabled", default: false),
-            displayBusyAckEnabled: bool("display.busy_ack_enabled", default: true),
+            runtimeMetadataFooter: boolish("display.runtime_footer.enabled", default: false),
+            // Default TRUE upstream, again from the reader rather than the
+            // schema: `gateway/run.py:1813` bridges `display.busy_ack_enabled`
+            // to `HERMES_GATEWAY_BUSY_ACK_ENABLED`, and `run_busy.py:727`
+            // reads `os.environ.get(..., "true").lower() != "true"`.
+            displayBusyAckEnabled: boolTrueDefault("display.busy_ack_enabled"),
             gatewayPlatforms: gatewayPlatforms,
             // -- v0.13 additions -------------------------------------
-            // Hermes v0.16: `openrouter.response_cache` is a SCALAR bool
-            // directly under `openrouter:` (default `true` in Hermes).
-            // Read it as the scalar. A legacy nested value
-            // (`openrouter.response_cache.enabled: …`) flattens to a
-            // different dotted key, so it has no scalar entry here and
-            // decodes to the default `false` — the next save writes the
-            // scalar, healing the shape. Keep in lockstep with the
-            // matching `setSetting` key in
+            // `openrouter.response_cache` is a SCALAR bool directly under
+            // `openrouter:` and its upstream default is **true** — verified at
+            // `hermes_cli/config_defaults.py:649` (v2026.9.7) and, at the key's
+            // FLOOR, `hermes_cli/config.py:686` at v2026.5.7 (v0.13.0, where
+            // the key first appears); True at every tag in between. The
+            // reader's own fallback reads False
+            // (`agent/auxiliary_client.py:860`
+            // `or_config.get("response_cache", False)`), but that arm is
+            // unreachable for an absent key: `_load_config_impl`
+            // (`hermes_cli/config.py:2197,2211`) starts from
+            // `deepcopy(DEFAULT_CONFIG)` and deep-merges the user's file over
+            // it, so `openrouter.response_cache` is always present by the time
+            // any reader sees it. Scarf's `false` therefore rendered the
+            // toggle OFF on a host that was caching, and one save wrote the
+            // `false` the user never chose — the `gateway_restart_notification`
+            // trap again. A legacy nested value
+            // (`openrouter.response_cache.enabled: …`) flattens to a different
+            // dotted key, so it has no scalar entry here and now decodes to
+            // the correct `true`; the next save writes the scalar, healing the
+            // shape. Keep in lockstep with the matching `setSetting` key in
             // `SettingsViewModel.setOpenRouterResponseCache`.
             imageGenModel: str("image_gen.model", default: ""),
-            openrouterResponseCacheEnabled: bool("openrouter.response_cache", default: false),
+            openrouterResponseCacheEnabled: boolTrueDefault("openrouter.response_cache"),
             // Hermes reads the `web:` block: `web.backend` is the shared
             // fallback (all supported hosts), `web.search_backend` /
             // `web.extract_backend` are v0.13+ per-capability overrides

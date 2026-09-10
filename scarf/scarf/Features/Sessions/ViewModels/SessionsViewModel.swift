@@ -470,6 +470,18 @@ final class SessionsViewModel {
         performRename()
     }
 
+    /// argv for `hermes sessions rename`. The `--` separator is REQUIRED:
+    /// `title` is `nargs="+"` on Hermes's parser
+    /// (`hermes_cli/subcommands/sessions.py:210-213` at v2026.9.7), so a
+    /// title that begins with a dash ("-- draft", "-v2 notes") is consumed
+    /// as an option and argparse exits 2 instead of renaming. Everything
+    /// after `--` is positional. Title stays ONE argv element — Hermes
+    /// re-joins the list with a single space (`sessions_cmd.py:681`), so
+    /// splitting here would collapse the user's internal spacing.
+    static func renameArgv(sessionId: String, title: String) -> [String] {
+        ["sessions", "rename", "--", sessionId, title]
+    }
+
     private func performRename() {
         guard let sessionId = renameSessionId else { return }
         let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -486,7 +498,7 @@ final class SessionsViewModel {
             // freezing the sheet (and the whole window) for the round-trip.
             // Detached, matching `loadImpl()`'s attribution batch.
             let result = await Task.detached {
-                ctx.runHermes(["sessions", "rename", sessionId, title])
+                ctx.runHermes(SessionsViewModel.renameArgv(sessionId: sessionId, title: title))
             }.value
             guard let self else { return }
             self.isRenaming = false
@@ -725,9 +737,9 @@ final class SessionsViewModel {
         // `-` is the CLI's "write to stdout" sentinel — only valid for
         // stdout-capable formats (jsonl/trace).
         let args = Self.exportArguments(output: "-", sessionId: sessionId, format: format, redact: redact)
-        Task.detached { [sessionExportRunner, context, args, url, self] in
+        Task.detached { [sessionExportRunner, context, args, url, format, self] in
             let result = sessionExportRunner(context, args)
-            let outcome = Self.writeExport(result: result, to: url)
+            let outcome = Self.writeExport(result: result, to: url, format: format)
             await MainActor.run {
                 self.exportMessage = outcome.message
                 guard outcome.succeeded else { return }
@@ -749,8 +761,9 @@ final class SessionsViewModel {
         let args = Self.exportArguments(output: url.path, sessionId: sessionId, format: format, redact: redact)
         Task.detached { [sessionExportRunner, context, args, url, self] in
             let result = sessionExportRunner(context, args)
+            let outcome = Self.pathExportOutcome(result: result)
             await MainActor.run {
-                if result.exitCode == 0 {
+                if outcome.succeeded {
                     let banner = "Exported to \(url.path)"
                     self.exportMessage = banner
                     Task { @MainActor [weak self] in
@@ -758,27 +771,95 @@ final class SessionsViewModel {
                         if self?.exportMessage == banner { self?.exportMessage = nil }
                     }
                 } else {
-                    let detail = Self.errorSummary(from: result.stderr)
-                    self.exportMessage = detail.isEmpty
-                        ? "Export failed (exit \(result.exitCode))."
-                        : "Export failed: \(detail)"
+                    self.exportMessage = outcome.detail.map { "Export failed: \($0)" }
+                        ?? "Export failed (exit \(result.exitCode))."
                 }
             }
         }
     }
 
+    /// Verdict for a real-`--output`-path export (`html`/`md`/`qmd`).
+    ///
+    /// `hermes sessions export` never signals a refusal through its exit code:
+    /// `_cmd_export` and every renderer under it are `-> None` and simply
+    /// `print()` the reason to **stdout** — `_not_found` prints
+    /// `Session '<id>' not found.` and returns 1, but its three callers
+    /// (hermes_cli/sessions_cmd.py:319, :392, :488 at v2026.9.7) discard that
+    /// and fall out of the function, which Python exits 0. Every success path,
+    /// by contrast, ends in an `Exported …` summary (`_write_output`, :83,
+    /// carrying :344 / :352 / :357, plus :424, :434, :480, :508) — stable
+    /// since v2026.6.19 (main.py:12279), so this does not change what a
+    /// pre-target host renders (charter C1, C5).
+    nonisolated static func pathExportOutcome(
+        result: (stdout: Data, stderr: String, exitCode: Int32)
+    ) -> HermesCLIOutcome {
+        let stdout = String(data: result.stdout, encoding: .utf8) ?? ""
+        return HermesCLIVerdict.judge(
+            output: stdout + "\n" + result.stderr,
+            exitCode: result.exitCode,
+            successMarkers: HermesCLIMarkers.sessionsExportSuccess,
+            failureMarkers: HermesCLIMarkers.sessionsExportFailure
+        )
+    }
+
+    /// Whether a stdout payload is plausibly the format we asked for.
+    ///
+    /// The `-` (stdout) path has no `Exported …` summary to judge by:
+    /// `_write_output` (sessions_cmd.py:78-80) writes the payload and returns
+    /// without printing one. What it CAN receive instead is a refusal, because
+    /// those go to stdout too — so `Session 'abc' not found.` was written
+    /// verbatim into the user's `.jsonl` file and reported as a successful
+    /// export. Both stdout formats are JSON Lines
+    /// (`_render_jsonl`, :355-357; `build_trace_jsonl` for `trace`, :417), so
+    /// requiring the first non-empty line to parse as a JSON object rejects
+    /// every refusal sentence while accepting any real payload.
+    nonisolated static func payloadIsValid(_ data: Data, format: SessionExportFormat) -> Bool {
+        guard format.usesStdout else { return true }
+        // Only the FIRST LINE is decoded and checked. A refusal is the ENTIRE
+        // stdout (the handler prints one line and returns), so the first line
+        // settles it — while a real export can be hundreds of MB, and decoding
+        // all of it to a String just to validate it would double the payload in
+        // memory. Slicing at a newline BYTE also can't cut a UTF-8 codepoint.
+        let window = data.prefix(64 * 1024)
+        let isBlank: (UInt8) -> Bool = { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D || $0 == 0x0A }
+        let body = window.drop(while: isBlank)
+        // An all-whitespace export is a real outcome (no sessions matched the
+        // filters), not a refusal — rejecting it would be the regression.
+        guard !body.isEmpty else { return true }
+        let firstLine = body.firstIndex(of: 0x0A).map { body[..<$0] } ?? body
+        let trimmed = Data(firstLine)
+        // Both stdout formats are JSON Lines: `_render_jsonl`
+        // (sessions_cmd.py:355-357) and `build_trace_jsonl` for `trace`
+        // (:417). `JSONSerialization` without `.fragmentsAllowed` accepts only
+        // an object or an array, so `Session 'abc' not found.` — and every
+        // other refusal sentence — is rejected.
+        return (try? JSONSerialization.jsonObject(with: trimmed)) != nil
+    }
+
     /// Turns a CLI result into a written file + a user-facing banner.
     /// `nonisolated` so `performExport`'s detached task can do the disk
     /// write off the main actor.
-    nonisolated private static func writeExport(
+    nonisolated static func writeExport(
         result: (stdout: Data, stderr: String, exitCode: Int32),
-        to url: URL
+        to url: URL,
+        format: SessionExportFormat = .jsonl
     ) -> (succeeded: Bool, message: String) {
         guard result.exitCode == 0 else {
             let detail = Self.errorSummary(from: result.stderr)
             return (false, detail.isEmpty
                 ? "Export failed (exit \(result.exitCode))."
                 : "Export failed: \(detail)")
+        }
+        // Never write a refusal into the user's file (charter C5).
+        guard Self.payloadIsValid(result.stdout, format: format) else {
+            let refusal = HermesCLIVerdict.judge(
+                output: String(data: result.stdout, encoding: .utf8) ?? "",
+                exitCode: 0,
+                successMarkers: [],
+                failureMarkers: HermesCLIMarkers.sessionsExportFailure
+            )
+            return (false, refusal.detail.map { "Export failed: \($0)" }
+                ?? "Export failed: the CLI produced no \(format.displayName) payload.")
         }
         do {
             try result.stdout.write(to: url, options: .atomic)

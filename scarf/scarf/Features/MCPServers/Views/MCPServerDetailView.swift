@@ -53,7 +53,9 @@ struct MCPServerDetailView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(ScarfColor.accentTint)
-                Image(systemName: server.transport == .http ? "network" : "terminal")
+                // Only stdio is a local process; SSE is a network transport
+                // like http and shares its glyph.
+                Image(systemName: server.transport == .stdio ? "terminal" : "network")
                     .font(.system(size: 22))
                     .foregroundStyle(ScarfColor.accent)
             }

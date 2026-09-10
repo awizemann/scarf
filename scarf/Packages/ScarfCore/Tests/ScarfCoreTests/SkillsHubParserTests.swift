@@ -9,65 +9,73 @@ import Testing
 @Suite("HermesSkillsHubParser")
 struct SkillsHubParserTests {
 
-    // MARK: - parseHubList
+    // MARK: - parseHubList (browse)
 
-    @Test func parsesSingleRowFromBrowseOutput() {
-        let output = """
-        ┏━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
-        ┃    # ┃ Name           ┃ Description                                            ┃ Source       ┃ Trust      ┃
-        ┡━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
-        │    1 │ 1password      │ Set up and use 1Password integration.                  │ official     │ ★ official │
-        └──────┴────────────────┴────────────────────────────────────────────────────────┴──────────────┴────────────┘
-        """
-        let result = HermesSkillsHubParser.parseHubList(output)
-        #expect(result.count == 1)
-        #expect(result[0].identifier == "1password")
-        #expect(result[0].name == "1password")
-        #expect(result[0].description == "Set up and use 1Password integration.")
-        #expect(result[0].source == "official")
+    /// **Verbatim `hermes skills browse` output.** Rendered by Hermes's own
+    /// Rich table code at tag `v2026.9.7` — the column specs of
+    /// `_render_browse_page` (`hermes_cli/skills_hub.py:393-399`) plus
+    /// `_ident_col` / `_table` / `_truncate` / `_trust_cell` — through a
+    /// non-tty `Console(width: 80)`, which is what Hermes's module-level
+    /// `_console` becomes when Scarf pipes it.
+    ///
+    /// Note the second row: at 80 columns the Identifier column FOLDS
+    /// (`overflow="fold"`), so `pdf-tools-a1b2c3` arrives as
+    /// `pdf-tools-a1b` + `2c3` on two lines.
+    static let browseFixture = """
+    ┏━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+    ┃    # ┃ Name      ┃ Description   ┃ Source       ┃ Trust      ┃ Identifier    ┃
+    ┡━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+    │    1 │ 1password │ Set up and    │ official     │ ★ official │ 1password     │
+    │      │           │ use the       │              │            │               │
+    │      │           │ 1Password CLI │              │            │               │
+    │      │           │ to read       │              │            │               │
+    │      │           │ sec...        │              │            │               │
+    │    2 │ pdf-tools │ Split, merge  │ skills-sh    │ community  │ pdf-tools-a1b │
+    │      │           │ and OCR PDF   │              │            │ 2c3           │
+    │      │           │ documents     │              │            │               │
+    │      │           │ from the ...  │              │            │               │
+    │    3 │ nv-rag    │ NVIDIA        │ github       │ unknown    │ nvidia/skills │
+    │      │           │ retrieval     │              │            │ /nv-rag       │
+    │      │           │ augmented     │              │            │               │
+    │      │           │ generation    │              │            │               │
+    │      │           │ helper        │              │            │               │
+    └──────┴───────────┴───────────────┴──────────────┴────────────┴───────────────┘
+    """
+
+    /// The install target is the Identifier cell, never the Name. Fails
+    /// without the fix: the old parser returned `identifier == name` for
+    /// every row, so `pdf-tools` (no hash) and `nv-rag` (no owner path)
+    /// installed nothing or installed the wrong skill.
+    @Test func browseUsesTheIdentifierColumnAsTheInstallTarget() {
+        let result = HermesSkillsHubParser.parseHubList(Self.browseFixture)
+        #expect(result.count == 3)
+        #expect(result.map(\.identifier) == ["1password", "pdf-tools-a1b2c3", "nvidia/skills/nv-rag"])
+        // Name stays the display string.
+        #expect(result.map(\.name) == ["1password", "pdf-tools", "nv-rag"])
+        #expect(result.map(\.source) == ["official", "skills-sh", "github"])
     }
 
-    @Test func mergesContinuationRowsIntoDescription() {
-        // Continuation rows have an empty `#` cell — the parser should
-        // append their description to the previous skill rather than
-        // emit a blank entry.
-        let output = """
-        │    1 │ skill-creator  │ Create new skills, modify and improve existing skills, │ official     │ ★ official │
-        │      │                │ and measure skill performance.                         │              │            │
-        """
-        let result = HermesSkillsHubParser.parseHubList(output)
-        #expect(result.count == 1)
-        #expect(result[0].identifier == "skill-creator")
-        #expect(result[0].description.contains("Create new skills"))
-        #expect(result[0].description.contains("measure skill performance"))
+    /// A folded identifier is CONCATENATED, not space-joined: `overflow="fold"`
+    /// is a hard character wrap. A space would make the slug uninstallable.
+    @Test func foldedIdentifierContinuationRowsAreConcatenatedNotSpaceJoined() {
+        let result = HermesSkillsHubParser.parseHubList(Self.browseFixture)
+        #expect(result[1].identifier == "pdf-tools-a1b2c3")
+        #expect(!result[1].identifier.contains(" "))
+        #expect(result[2].identifier == "nvidia/skills/nv-rag")
     }
 
-    @Test func skipsHeaderAndBorderRows() {
-        let output = """
-        ┏━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
-        ┃    # ┃ Name   ┃ Description   ┃ Source    ┃ Trust      ┃
-        ┡━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━┩
-        │    1 │ alpha  │ alpha skill   │ official  │ ★ official │
-        │    2 │ beta   │ beta skill    │ skills-sh │            │
-        └──────┴────────┴───────────────┴───────────┴────────────┘
-        """
-        let result = HermesSkillsHubParser.parseHubList(output)
-        #expect(result.count == 2)
-        #expect(result[0].name == "alpha")
-        #expect(result[1].name == "beta")
+    /// Description continuation rows keep the space join — Rich word-wraps
+    /// that column, so the words either side of the break are separate.
+    @Test func descriptionContinuationRowsAreSpaceJoined() {
+        let result = HermesSkillsHubParser.parseHubList(Self.browseFixture)
+        #expect(result[0].description == "Set up and use the 1Password CLI to read sec...")
+        #expect(result[2].description == "NVIDIA retrieval augmented generation helper")
     }
 
-    @Test func stripsStarFromSourceCell() {
-        // The Trust column shows `★ official` for trusted sources;
-        // the Source column itself doesn't, but if the layout shifts
-        // and we end up with the star in our captured cell we should
-        // strip it.
-        let output = """
-        │    1 │ widget │ a widget │ ★ official │ official │
-        """
-        let result = HermesSkillsHubParser.parseHubList(output)
-        #expect(result.count == 1)
-        #expect(result[0].source == "official")
+    @Test func browseSkipsHeaderAndBorderRows() {
+        // Three data rows out of a fixture with a header row, three border
+        // rows and eleven continuation rows.
+        #expect(HermesSkillsHubParser.parseHubList(Self.browseFixture).count == 3)
     }
 
     @Test func returnsEmptyOnNoTable() {
@@ -75,43 +83,76 @@ struct SkillsHubParserTests {
         #expect(result.isEmpty)
     }
 
-    // MARK: - parseUpdateList
+    // MARK: - parseUpdateList (skills check)
 
-    @Test func parsesArrowVersionMarker() {
-        let output = """
-        Checking for updates…
-        skill-creator   1.0.0 → 1.1.0
-        another-skill   2.3.4 → 2.3.5
-        """
-        let result = HermesSkillsHubParser.parseUpdateList(output)
-        #expect(result.count == 2)
-        #expect(result[0].identifier == "skill-creator")
-        #expect(result[0].currentVersion == "1.0.0")
-        #expect(result[0].availableVersion == "1.1.0")
-        #expect(result[1].identifier == "another-skill")
-        #expect(result[1].currentVersion == "2.3.4")
-        #expect(result[1].availableVersion == "2.3.5")
+    /// **Verbatim `hermes skills check` output**, rendered from `do_check`'s
+    /// own table spec (`hermes_cli/skills_hub.py:806-808` at `v2026.9.7`)
+    /// with one row per status `check_for_skill_updates` can produce
+    /// (`tools/skills_hub_install.py:277-302`).
+    static let checkFixture = """
+                     Skill Updates                  
+    ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
+    ┃ Name          ┃ Source    ┃ Status           ┃
+    ┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
+    │ 1password     │ official  │ update_available │
+    │ pdf-tools     │ skills-sh │ up_to_date       │
+    │ gone-skill    │ github    │ orphaned         │
+    │ dead-registry │ clawhub   │ unavailable      │
+    │ bad-path      │ official  │ invalid_install  │
+    └───────────────┴───────────┴──────────────────┘
+    """
+
+    /// **The drift alarm for the Updates tab.** Fails without the fix: the
+    /// old parser hunted for `→` between two version strings, which
+    /// `skills check` has never printed, so this fixture yielded zero rows
+    /// and the tab could never show an update.
+    @Test func parsesEveryStatusFromTheCheckTable() {
+        let result = HermesSkillsHubParser.parseUpdateList(Self.checkFixture)
+        #expect(result.count == 5)
+        #expect(result.map(\.identifier)
+            == ["1password", "pdf-tools", "gone-skill", "dead-registry", "bad-path"])
+        #expect(result.map(\.source)
+            == ["official", "skills-sh", "github", "clawhub", "official"])
+        #expect(result.map(\.status) == [
+            .updateAvailable, .upToDate, .orphaned, .unavailable, .invalidInstall,
+        ])
     }
 
-    @Test func parsesAsciiArrowMarker() {
-        // Some terminals or older Hermes versions emit `->` instead of
-        // the unicode `→`. Both should parse identically.
-        let output = "skill-creator   1.0.0 -> 1.1.0"
-        let result = HermesSkillsHubParser.parseUpdateList(output)
-        #expect(result.count == 1)
-        #expect(result[0].identifier == "skill-creator")
-        #expect(result[0].availableVersion == "1.1.0")
+    /// Only `update_available` is something `hermes skills update` acts on
+    /// (`skills_hub.py:843` filters on exactly that word).
+    @Test func onlyUpdateAvailableIsActionable() {
+        let statuses = HermesSkillUpdateStatus.allCases.filter(\.isActionable)
+        #expect(statuses == [.updateAvailable])
+        // …and the three fault statuses each carry a remedy to show.
+        #expect(HermesSkillUpdateStatus.allCases.filter { $0.faultDescription != nil }
+            == [.orphaned, .unavailable, .invalidInstall])
     }
 
-    @Test func updateListIgnoresLinesWithoutArrow() {
-        let output = """
-        Checking for updates…
-        Skill named foo is up to date.
-        skill-creator   1.0.0 → 1.1.0
+    /// A status word Scarf does not know must be DROPPED, never badged as an
+    /// available update — the C5 rule applied to a table cell.
+    @Test func unknownStatusWordIsDropped() {
+        let table = """
+        │ future-skill │ official │ needs_migration │
+        │ 1password    │ official │ update_available │
         """
-        let result = HermesSkillsHubParser.parseUpdateList(output)
+        let result = HermesSkillsHubParser.parseUpdateList(table)
         #expect(result.count == 1)
-        #expect(result[0].identifier == "skill-creator")
+        #expect(result[0].identifier == "1password")
+    }
+
+    /// The Status cell is what keys a data row, so a row that merely LOOKS
+    /// like one — the header, a title line, a Name-column continuation —
+    /// is rejected. Rich draws the header with `┃`, but this must not depend
+    /// on the box glyph: the same row with the data separator `│` is still
+    /// not an update.
+    @Test func checkTableHeaderRowIsNotAnUpdate() {
+        #expect(HermesSkillsHubParser.parseUpdateList(
+            "┃ Name          ┃ Source    ┃ Status           ┃").isEmpty)
+        #expect(HermesSkillsHubParser.parseUpdateList(
+            "│ Name          │ Source    │ Status           │").isEmpty)
+        // A wrapped Name continuation carries an EMPTY status cell.
+        #expect(HermesSkillsHubParser.parseUpdateList(
+            "│ a-very-long-n │           │                  │").isEmpty)
     }
 
     // MARK: - parseSearchJSON (B1)

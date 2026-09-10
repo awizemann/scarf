@@ -10,9 +10,21 @@ final class SettingsViewModel {
     let context: ServerContext
     private let fileService: HermesFileService
 
-    init(context: ServerContext = .local) {
+    /// How `hermes config set/unset/check/migrate` is invoked. Production is
+    /// `context.cliRunner`; tests inject a fake so the "this never blocks the
+    /// main actor" invariant is provable (see `HermesCLIRunner`).
+    @ObservationIgnored nonisolated let cliRunner: HermesCLIRunner
+
+    /// Cap on a single `hermes config …` invocation. Same value as
+    /// `runHermes`'s own default, stated here so charter C10's "every
+    /// subprocess has a timeout" is visible at the call site rather than
+    /// inherited silently.
+    static let configCommandTimeout: TimeInterval = 60
+
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.context = context
         self.fileService = HermesFileService(context: context)
+        self.cliRunner = cliRunner ?? context.cliRunner
     }
 
 
@@ -164,15 +176,71 @@ final class SettingsViewModel {
         applyConfigWrite(key, arguments: ["config", "unset", key])
     }
 
+    /// Tail of the serialised config-write chain. Every write hops off the
+    /// main actor (charter C10 — `hermes config set` is a process spawn, an
+    /// SSH round-trip on a remote context, and it ran inline on the main
+    /// actor for every toggle, stepper and picker in Settings), and every
+    /// write waits for the previous one to finish.
+    ///
+    /// The serialisation is not incidental: a write is `run CLI` followed by
+    /// `re-read config.yaml`, so two quick toggles run concurrently would let
+    /// the second write land between the first's write and the first's
+    /// re-read — committing a `config` snapshot that already contains the
+    /// second change under the first toggle's banner, or (worse, when the
+    /// second write is slower) a snapshot missing it entirely and a control
+    /// that visibly snaps back.
+    @ObservationIgnored private var writeChain: Task<Void, Never>?
+
     private func applyConfigWrite(_ key: String, arguments: [String]) {
-        let result = runHermes(arguments)
+        enqueueConfigWrite(key: key, arguments: arguments)
+    }
+
+    /// Append one `hermes …` write to the serialised chain. `arguments` need
+    /// not be a `config set` — `memory off` rides this too — but the outcome
+    /// contract is the same: analytics, a banner, and (on success only, as
+    /// before) a config re-read.
+    private func enqueueConfigWrite(key: String, arguments: [String]) {
+        let run = cliRunner
+        let svc = fileService
+        let ctx = context
+        let timeout = Self.configCommandTimeout
+        let previous = writeChain
+        writeChain = Task { [weak self] in
+            _ = await previous?.value
+            let result = await Task.detached { run(arguments, timeout) }.value
+            // Re-read only on success, exactly as the synchronous version
+            // did: a refused write left `config` untouched, and reloading it
+            // would repaint the same values while claiming a failure.
+            let refreshed: (config: HermesConfig, raw: String)? = result.exitCode == 0
+                ? await Task.detached {
+                    (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
+                }.value
+                : nil
+            guard let self else { return }
+            self.commitConfigWrite(key: key, arguments: arguments, result: result, refreshed: refreshed)
+        }
+    }
+
+    /// Main-actor tail of a config write: analytics, state, banner.
+    private func commitConfigWrite(
+        key: String,
+        arguments: [String],
+        result: (output: String, exitCode: Int32),
+        refreshed: (config: HermesConfig, raw: String)?
+    ) {
         Analytics.record(.settingChanged(
             key: .init(rawKey: key),
             outcome: .init(succeeded: result.exitCode == 0)
         ))
-        if result.exitCode == 0 {
+        if let refreshed {
             showSuccess(String(localized: "Saved \(key)"))
-            config = fileService.loadConfig()
+            config = refreshed.config
+            // The raw YAML view and the personality picker are both derived
+            // from config.yaml's text, and neither was refreshed after a
+            // write — so the Advanced tab's raw editor and the personality
+            // list kept showing pre-write content until a manual Reload.
+            rawConfigYAML = refreshed.raw
+            personalities = parsePersonalities()
         } else {
             // `arguments` is a `hermes config set <key> <value>` — the value
             // is whatever the user typed into a settings field, which
@@ -493,8 +561,10 @@ final class SettingsViewModel {
     func setTTSOpenAIVoice(_ value: String) { setSetting("tts.openai.voice", value: value) }
     func setTTSNeuTTSModel(_ value: String) { setSetting("tts.neutts.model", value: value) }
     func setTTSNeuTTSDevice(_ value: String) { setSetting("tts.neutts.device", value: value) }
-    // v0.13: xAI TTS / Custom Voices. TODO(WS-8-Q2): grep-verify key
-    // names against `~/.hermes/hermes-agent/hermes_cli/voice/tts.py`.
+    // v0.13: xAI TTS / Custom Voices. Key confirmed at v2026.9.7 —
+    // `hermes_cli/config_defaults.py:1023` seeds `tts.xai.voice_id: "eve"`
+    // (the alternatives WS-8-Q2 listed, `tts.xai.voice` and a top-level
+    // `tts.xai_voice`, exist in no Hermes version).
     func setTTSXAIVoiceID(_ value: String) { setSetting("tts.xai.voice_id", value: value) }
     // v0.15: auto-insert speech-control tags into xAI TTS output.
     func setTTSXAIAutoSpeechTags(_ value: Bool) { setSetting("tts.xai.auto_speech_tags", value: value ? "true" : "false") }
@@ -523,11 +593,11 @@ final class SettingsViewModel {
     func setSTTOpenAIModel(_ value: String) { setSetting("stt.openai.model", value: value) }
     func setSTTOpenAILanguage(_ value: String) { setSetting("stt.openai.language", value: value) }
     func setSTTMistralModel(_ value: String) { setSetting("stt.mistral.model", value: value) }
-    // -- Global STT language hint + Groq knobs (v0.20+, hasSTTUnifiedLanguage).
+    // -- Global STT language hint + Groq knobs (v0.19.1+, hasSTTUnifiedLanguage).
     func setSTTLanguage(_ value: String) { setSetting("stt.language", value: value) }
     func setSTTGroqModel(_ value: String) { setSetting("stt.groq.model", value: value) }
     func setSTTGroqLanguage(_ value: String) { setSetting("stt.groq.language", value: value) }
-    // -- Local STT VAD anti-hallucination tuning (v0.20+, hasSTTLocalVADTuning).
+    // -- Local STT VAD anti-hallucination tuning (v0.19.1+, hasSTTLocalVADTuning).
     func setSTTLocalVAD(_ value: Bool) { setSetting("stt.local.vad", value: value ? "true" : "false") }
     func setSTTLocalVADMinSilenceMS(_ value: Int) { setSetting("stt.local.vad_min_silence_ms", value: String(value)) }
     func setSTTLocalNoSpeechProbThreshold(_ value: Double) { setSetting("stt.local.no_speech_prob_threshold", value: String(value)) }
@@ -563,19 +633,10 @@ final class SettingsViewModel {
             setSetting("memory.provider", value: value)
             return
         }
-        let key = "memory.provider"
-        let result = runHermes(["memory", "off"])
-        Analytics.record(.settingChanged(
-            key: .init(rawKey: key),
-            outcome: .init(succeeded: result.exitCode == 0)
-        ))
-        config = fileService.loadConfig()
-        if result.exitCode == 0 {
-            showSuccess(String(localized: "Saved \(key)"))
-        } else {
-            logger.warning("hermes memory off failed (exit \(result.exitCode)): \(result.output)")
-            showSaveFailure(Self.saveFailureMessage(key: key, output: result.output))
-        }
+        // Rides the same serialised, off-main write chain as every other
+        // Settings write (charter C10): `hermes memory off` runs a provider
+        // teardown, which is the slowest spawn on this screen.
+        enqueueConfigWrite(key: "memory.provider", arguments: ["memory", "off"])
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
     func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }
@@ -984,15 +1045,39 @@ final class SettingsViewModel {
 
     // MARK: - Config diagnostics
 
-    func runConfigCheck() -> String {
-        let result = runHermes(["config", "check"])
-        return result.output
+    /// `hermes config check`. `async` because it spawns a process (an SSH
+    /// round-trip on a remote host) and used to do so inline from the
+    /// Advanced tab's Button action — freezing the window for the duration.
+    func runConfigCheck() async -> String {
+        let run = cliRunner
+        let timeout = Self.configCommandTimeout
+        return await Task.detached { run(["config", "check"], timeout) }.value.output
     }
 
-    func runConfigMigrate() -> String {
-        let result = runHermes(["config", "migrate"])
-        config = fileService.loadConfig()
-        return result.output
+    /// `hermes config migrate`. Rewrites config.yaml, so it joins the same
+    /// serialised write chain as the toggles — a migrate interleaved with a
+    /// toggle's write/re-read pair is exactly the race `writeChain` exists
+    /// to prevent — and refreshes the derived raw YAML/personality state.
+    func runConfigMigrate() async -> String {
+        let run = cliRunner
+        let svc = fileService
+        let ctx = context
+        let timeout = Self.configCommandTimeout
+        let previous = writeChain
+        let migrate = Task { [weak self] () -> String in
+            _ = await previous?.value
+            let result = await Task.detached { run(["config", "migrate"], timeout) }.value
+            let refreshed = await Task.detached {
+                (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
+            }.value
+            guard let self else { return result.output }
+            self.config = refreshed.config
+            self.rawConfigYAML = refreshed.raw
+            self.personalities = self.parsePersonalities()
+            return result.output
+        }
+        writeChain = Task { _ = await migrate.value }
+        return await migrate.value
     }
 
     // MARK: - Backup & Restore (v0.9.0)
@@ -1086,10 +1171,6 @@ final class SettingsViewModel {
         )
     }
 
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
-    }
 
     // MARK: - Allowlist suggestions (Hermes v0.20+, `hermes approvals suggest`)
 

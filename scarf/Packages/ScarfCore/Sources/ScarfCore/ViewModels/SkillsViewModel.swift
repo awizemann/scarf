@@ -83,7 +83,14 @@ public final class SkillsViewModel {
 
     public var hubQuery = ""
     public var hubResults: [HermesHubSkill] = []
+    /// Rows `hermes skills check` reported as `update_available` — the
+    /// only ones `hermes skills update` acts on.
     public var updates: [HermesSkillUpdate] = []
+    /// Rows the same check reported as `orphaned` / `unavailable` /
+    /// `invalid_install`. These are faults the user has to fix by hand;
+    /// "Update All" cannot help them, and counting them as updates was
+    /// the reason the tab promised work it could never do.
+    public internal(set) var updateFaults: [HermesSkillUpdate] = []
     /// Skills the last `updateAll()` left untouched because they carry
     /// local edits (Hermes v0.20.4+). Always empty on older hosts — they
     /// never skip — so the UI section stays hidden and Updates renders
@@ -549,14 +556,17 @@ public final class SkillsViewModel {
         let xport = transport
         let identifier = skill.identifier
         Task.detached { [weak self] in
-            // --yes skips confirmation since we're running non-interactively.
             let result = Self.runHermes(
                 executable: bin,
-                args: ["skills", "install", identifier, "--yes"],
+                args: Self.installArgs(identifier),
                 transport: xport,
                 timeout: 120
             )
-            await self?.finishInstall(identifier: identifier, exitCode: result.exitCode)
+            await self?.finishInstall(
+                identifier: identifier,
+                exitCode: result.exitCode,
+                output: result.output
+            )
         }
     }
 
@@ -579,20 +589,19 @@ public final class SkillsViewModel {
         let bin = context.paths.hermesBinary
         let xport = transport
         Task.detached { [weak self] in
-            var args = ["skills", "install", url, "--yes"]
-            if let category = categoryOverride, !category.isEmpty {
-                args += ["--category", category]
-            }
-            if let name = nameOverride, !name.isEmpty {
-                args += ["--name", name]
-            }
+            let args = Self.installArgs(
+                url, category: categoryOverride, name: nameOverride)
             let result = Self.runHermes(
                 executable: bin,
                 args: args,
                 transport: xport,
                 timeout: 180
             )
-            await self?.finishInstall(identifier: url, exitCode: result.exitCode)
+            await self?.finishInstall(
+                identifier: url,
+                exitCode: result.exitCode,
+                output: result.output
+            )
         }
     }
 
@@ -645,6 +654,31 @@ public final class SkillsViewModel {
         capabilities.hasSkillsUninstallYes ? nil : "y\n"
     }
 
+    /// argv for `hermes skills install`.
+    ///
+    /// **Flags first, then `--`, then the positional.** The identifier is
+    /// registry text Scarf does not control — a browse.sh slug, a GitHub
+    /// `owner/skills/name` path, or a user-pasted URL — and argparse reads a
+    /// leading `-` as a flag and exits 2 before `do_install` ever runs.
+    /// `skills install` takes exactly one positional (`identifier`,
+    /// `hermes_cli/subcommands/skills.py:54-63` at `v2026.9.7`), so
+    /// everything after `--` is unambiguous.
+    ///
+    /// `--yes` (`add_yes_flag`, `:63`) skips the confirmation prompt Scarf
+    /// has no TTY to answer; `--category` / `--name` are the direct-URL
+    /// overrides (`:58-61`).
+    nonisolated static func installArgs(
+        _ identifier: String,
+        category: String? = nil,
+        name: String? = nil
+    ) -> [String] {
+        var args = ["skills", "install", "--yes"]
+        if let category, !category.isEmpty { args += ["--category", category] }
+        if let name, !name.isEmpty { args += ["--name", name] }
+        args += ["--", identifier]
+        return args
+    }
+
     /// `skills update` has no `--yes` flag (argparse exits 2 if passed) and
     /// never prompts — `do_update` in hermes_cli/skills_hub.py runs straight
     /// through. Omitting the optional `name` positional updates all outdated
@@ -673,17 +707,27 @@ public final class SkillsViewModel {
     /// "Error: 'x' is not a hub-installed skill" comes back with exit 0
     /// (verified at v0.21.0) — so the exit code alone cannot be the
     /// verdict (charter C5). A rejection is an `Error:` line in the output.
+    /// `do_uninstall` (skills_hub.py:909-918) is also `-> None`: a declined
+    /// confirmation returns silently, and `_report_pair` (:144-150) prints
+    /// `Error: …` for a refusal — both at exit 0. Success is the green
+    /// `Uninstalled '<name>' from <path>` line
+    /// (tools/skills_hub_install.py:220).
+    nonisolated static func uninstallOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsUninstallSuccess,
+            failureMarkers: HermesCLIMarkers.skillsUninstallFailure
+        )
+    }
+
     nonisolated static func uninstallSucceeded(exitCode: Int32, output: String) -> Bool {
-        guard exitCode == 0 else { return false }
-        return !output.contains("Error:")
+        uninstallOutcome(exitCode: exitCode, output: output).succeeded
     }
 
     /// The CLI's own one-line reason for a refused uninstall, for the banner.
     nonisolated static func uninstallFailureReason(output: String) -> String? {
-        output
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { $0.hasPrefix("Error:") }
+        uninstallOutcome(exitCode: 0, output: output).detail
     }
 
     public func checkForUpdates() {
@@ -820,10 +864,31 @@ public final class SkillsViewModel {
         return ""
     }
 
+    /// `hermes skills install` is `do_install(...) -> None`
+    /// (hermes_cli/skills_hub.py:645-648 at v2026.9.7): a pinned-source
+    /// refusal, an unresolved short name, a fetch failure, an
+    /// already-installed skill, an invalid path, a blocked security scan and a
+    /// declined confirmation all `print()` and `return`, which Python exits 0.
+    /// Every one of those rendered as "Installed <x>" until this judged the
+    /// emitter's output instead (charter C5).
+    nonisolated static func installOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsInstallSuccess,
+            failureMarkers: HermesCLIMarkers.skillsInstallFailure
+        )
+    }
+
     @MainActor
-    private func finishInstall(identifier: String, exitCode: Int32) async {
+    private func finishInstall(identifier: String, exitCode: Int32, output: String) async {
         isHubLoading = false
-        hubMessage = exitCode == 0 ? "Installed \(identifier)" : "Install failed"
+        let outcome = Self.installOutcome(exitCode: exitCode, output: output)
+        if outcome.succeeded {
+            hubMessage = "Installed \(identifier)"
+        } else {
+            hubMessage = outcome.detail.map { "Install failed — \($0)" } ?? "Install failed"
+        }
         await load()
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil
@@ -831,10 +896,11 @@ public final class SkillsViewModel {
 
     @MainActor
     private func finishUninstall(exitCode: Int32, output: String) async {
-        if Self.uninstallSucceeded(exitCode: exitCode, output: output) {
+        let outcome = Self.uninstallOutcome(exitCode: exitCode, output: output)
+        if outcome.succeeded {
             hubMessage = "Uninstalled"
         } else {
-            hubMessage = Self.uninstallFailureReason(output: output).map { "Uninstall failed — \($0)" }
+            hubMessage = outcome.detail.map { "Uninstall failed — \($0)" }
                 ?? "Uninstall failed (exit \(exitCode))"
         }
         await load()
@@ -843,9 +909,10 @@ public final class SkillsViewModel {
     }
 
     @MainActor
-    private func finishCheckForUpdates(updates: [HermesSkillUpdate]) async {
+    private func finishCheckForUpdates(updates rows: [HermesSkillUpdate]) async {
         isHubLoading = false
-        self.updates = updates
+        self.updates = rows.filter { $0.status.isActionable }
+        self.updateFaults = rows.filter { $0.status.faultDescription != nil }
         hubMessage = updates.isEmpty ? "No updates available" : "\(updates.count) update(s)"
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil

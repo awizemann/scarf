@@ -24,24 +24,20 @@ struct KanbanTaskRef: Transferable {
 /// - **Running** gets a blue left-edge accent + live shimmer
 /// - **Blocked** gets a warning left-edge accent + ⚠ glyph
 /// - **Done** dims to 0.7 opacity (0.55 in dark mode)
-/// - **Hallucination-gate pending** (v0.13+) dims to 0.6 + ⚠ glyph and
-///   shows a one-line auto-blocked reason in the footer when present.
 struct KanbanCardView: View {
     let task: HermesKanbanTask
     let onTap: () -> Void
     /// True when the connected Hermes is on v0.13+ — gates the
-    /// hallucination dim/glyph, auto-block sub-line, and diagnostics
-    /// dot on the card. Pre-v0.13 hosts see the v2.7.5 chrome unchanged.
+    /// diagnostics dot on the card. Pre-v0.13 hosts see the v2.7.5
+    /// chrome unchanged.
     let supportsKanbanDiagnostics: Bool
-    /// Optimistic-aware accessor. Pre-v0.13 always nil. Otherwise delegates
-    /// to the board VM so a Verify click un-dims the card immediately.
-    let effectiveHallucinationGate: (HermesKanbanTask) -> KanbanHallucinationGate?
+    /// Active diagnostics for this card, resolved by the board VM from the
+    /// per-load `hermes kanban diagnostics --json`. Empty on pre-v0.13
+    /// hosts and on a healthy board.
+    let diagnostics: [HermesKanbanDiagnostic]
     /// v0.15+ gate for the Promote / Schedule / Delete context actions.
     /// Pre-v0.15 hosts get no context menu beyond what older builds had.
     let supportsKanbanV015: Bool
-    /// v0.16+ gate for the goal-mode badge. Pre-v0.16 hosts never see the
-    /// "Goal" pill even if a future `goal_mode` field somehow appears.
-    let supportsKanbanGoalMode: Bool
     let supportsKanbanCompletionContract: Bool
     /// Context-menu callbacks. The board wires these to the VM's
     /// `promote` / `schedule` / `purge` (delete-permanently after a
@@ -53,9 +49,8 @@ struct KanbanCardView: View {
     init(
         task: HermesKanbanTask,
         supportsKanbanDiagnostics: Bool = false,
-        effectiveHallucinationGate: @escaping (HermesKanbanTask) -> KanbanHallucinationGate? = { _ in nil },
+        diagnostics: [HermesKanbanDiagnostic] = [],
         supportsKanbanV015: Bool = false,
-        supportsKanbanGoalMode: Bool = false,
         supportsKanbanCompletionContract: Bool = false,
         onPromote: @escaping () -> Void = {},
         onSchedule: @escaping () -> Void = {},
@@ -64,9 +59,8 @@ struct KanbanCardView: View {
     ) {
         self.task = task
         self.supportsKanbanDiagnostics = supportsKanbanDiagnostics
-        self.effectiveHallucinationGate = effectiveHallucinationGate
+        self.diagnostics = diagnostics
         self.supportsKanbanV015 = supportsKanbanV015
-        self.supportsKanbanGoalMode = supportsKanbanGoalMode
         self.supportsKanbanCompletionContract = supportsKanbanCompletionContract
         self.onPromote = onPromote
         self.onSchedule = onSchedule
@@ -76,11 +70,9 @@ struct KanbanCardView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Cached gate read — derived once per body eval rather than recomputed
-    /// in each subview helper.
-    private var hallucinationGate: KanbanHallucinationGate? {
-        guard supportsKanbanDiagnostics else { return nil }
-        return effectiveHallucinationGate(task)
+    /// Diagnostics actually rendered — the capability gate applied once.
+    private var activeDiagnostics: [HermesKanbanDiagnostic] {
+        supportsKanbanDiagnostics ? diagnostics : []
     }
 
     var body: some View {
@@ -119,9 +111,6 @@ struct KanbanCardView: View {
         }
         .buttonStyle(.plain)
         .scarfShadow(.sm)
-        // v0.13: hallucination-pending cards dim to 0.6 to signal "needs
-        // verification before running" without making them unreadable.
-        // Done cards stay at the established doneOpacity (0.7 / 0.55).
         .opacity(cardOpacity)
         .draggable(KanbanTaskRef(id: task.id)) {
             // Drag preview — the live card with a heavier shadow.
@@ -149,9 +138,7 @@ struct KanbanCardView: View {
         var parts: [String] = [task.title]
         parts.append(String(localized: "status \(task.status)"))
 
-        if hallucinationGate == .pending {
-            parts.append(String(localized: "Worker-created — verify before running"))
-        } else if needsAssignmentWarning {
+        if needsAssignmentWarning {
             // The zombie warning is the most consequential thing on the
             // card: an unassigned todo/ready task is silently skipped by
             // Hermes's dispatcher and will never run.
@@ -166,24 +153,12 @@ struct KanbanCardView: View {
         if let workspace = task.workspaceKind {
             parts.append(workspace)
         }
-        if showsGoalBadge {
-            if let turns = task.goalMaxTurns {
-                parts.append(String(localized: "goal mode, \(turns) turns"))
-            } else {
-                parts.append(String(localized: "goal mode"))
-            }
-        }
         if !task.skills.isEmpty {
             parts.append(String(localized: "skills \(task.skills.joined(separator: ", "))"))
         }
-        if supportsKanbanDiagnostics,
-           KanbanStatus.from(task.status) == .blocked,
-           let reason = task.autoBlockedReason, !reason.isEmpty {
-            parts.append(reason)
-        }
         parts.append(relativeTimeLabel)
-        if supportsKanbanDiagnostics, !task.diagnostics.isEmpty {
-            parts.append(String(localized: "^[\(task.diagnostics.count) diagnostic signal](inflect: true)"))
+        if !activeDiagnostics.isEmpty {
+            parts.append(String(localized: "^[\(activeDiagnostics.count) diagnostic signal](inflect: true)"))
         }
         if let priority = task.priority, priority >= 70 {
             parts.append(String(localized: "priority \(priority)"))
@@ -226,7 +201,6 @@ struct KanbanCardView: View {
 
     private var cardOpacity: Double {
         if task.isDone { return doneOpacity }
-        if hallucinationGate == .pending { return 0.6 }
         return 1.0
     }
 
@@ -239,15 +213,7 @@ struct KanbanCardView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
-            // v0.13 hallucination glyph takes precedence over the
-            // unassigned glyph — the hallucination state is the more
-            // specific signal (a worker created this card; verify it).
-            if hallucinationGate == .pending {
-                Image(systemName: "questionmark.diamond.fill")
-                    .foregroundStyle(ScarfColor.warning)
-                    .font(.system(size: 11, weight: .semibold))
-                    .help("Worker-created — verify before running")
-            } else if needsAssignmentWarning {
+            if needsAssignmentWarning {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(ScarfColor.warning)
                     .font(.system(size: 11, weight: .semibold))
@@ -290,15 +256,8 @@ struct KanbanCardView: View {
         }
     }
 
-    /// v0.16: render the goal-mode pill only on v0.16+ hosts when the task
-    /// is actually flagged as a goal loop. Pre-v0.16 hosts always have
-    /// `task.goalMode == nil`, so this stays false.
-    private var showsGoalBadge: Bool {
-        supportsKanbanGoalMode && task.goalMode == true
-    }
-
     private var hasMetaRow1: Bool {
-        task.assignee?.isEmpty == false || task.workspaceKind != nil || showsGoalBadge
+        task.assignee?.isEmpty == false || task.workspaceKind != nil
     }
 
     private var metaRow1: some View {
@@ -310,14 +269,6 @@ struct KanbanCardView: View {
             }
             if let workspace = task.workspaceKind {
                 ScarfBadge(verbatim: workspace, kind: .neutral)
-            }
-            // v0.16 goal-mode pill — shows the turn budget when one is set.
-            if showsGoalBadge {
-                if let turns = task.goalMaxTurns {
-                    ScarfBadge("Goal · \(turns)", kind: .info)
-                } else {
-                    ScarfBadge("Goal", kind: .info)
-                }
             }
             Spacer(minLength: 0)
         }
@@ -371,28 +322,15 @@ struct KanbanCardView: View {
 
     private var footerRow: some View {
         VStack(alignment: .leading, spacing: 2) {
-            // v0.13: server-supplied auto-blocked reason. Renders verbatim
-            // (truncated to one line; full reason in the inspector).
-            // Pre-v0.13 hosts always have task.autoBlockedReason == nil.
-            if supportsKanbanDiagnostics,
-               KanbanStatus.from(task.status) == .blocked,
-               let reason = task.autoBlockedReason, !reason.isEmpty {
-                Text(reason)
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.danger)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(reason)
-            } else if supportsKanbanCompletionContract,
-                      let failure = task.lastFailureError, !failure.isEmpty,
-                      KanbanStatus.from(task.status) != .done {
+            if supportsKanbanCompletionContract,
+               let failure = task.lastFailureError, !failure.isEmpty,
+               KanbanStatus.from(task.status) != .done {
                 // v0.21.1: the real reason the last dispatch failed, straight
-                // off `list --json` — no second `kanban show`. Second to the
-                // auto-blocked reason, which is the more specific verdict when
-                // Hermes has one; and hidden on `done`, where the failure is
-                // history the card has moved past. Pre-v0.21.1 hosts never
-                // emit the key, so `lastFailureError` is nil and this whole
-                // branch is unreachable.
+                // off `list --json` — no second `kanban show`. Hidden on
+                // `done`, where the failure is history the card has moved
+                // past. Pre-v0.21.1 hosts never emit the key, so
+                // `lastFailureError` is nil and this whole branch is
+                // unreachable.
                 Text(failure)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.danger)
@@ -406,13 +344,13 @@ struct KanbanCardView: View {
                     .foregroundStyle(ScarfColor.foregroundFaint)
                 Spacer(minLength: 0)
                 // v0.13: diagnostics dot — small stethoscope glyph when
-                // any cross-run distress signal is attached. Matches the
-                // chip count in the inspector.
-                if supportsKanbanDiagnostics, !task.diagnostics.isEmpty {
+                // `kanban diagnostics --json` reported a live signal for this
+                // card. Matches the chip count in the inspector.
+                if !activeDiagnostics.isEmpty {
                     Image(systemName: "stethoscope")
                         .font(.system(size: 9))
                         .foregroundStyle(ScarfColor.warning)
-                        .help("\(task.diagnostics.count) diagnostic signal\(task.diagnostics.count == 1 ? "" : "s")")
+                        .help("\(activeDiagnostics.count) diagnostic signal\(activeDiagnostics.count == 1 ? "" : "s")")
                 }
                 if let priority = task.priority, priority >= 70 {
                     priorityIndicator(priority)

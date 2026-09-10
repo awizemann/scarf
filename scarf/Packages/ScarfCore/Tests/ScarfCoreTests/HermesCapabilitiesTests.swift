@@ -638,22 +638,26 @@ import Foundation
     }
 
     @Test func v019HostHidesV020Flags() {
-        // Every v0.20 flag must stay off on a pristine v0.19 host so the UI
-        // degrades silently; v0.18 flags themselves remain on.
+        // Every genuinely-v0.20 flag must stay off on a pristine v0.19 host
+        // so the UI degrades silently; v0.18 flags themselves remain on.
+        // The seven re-floored surfaces are deliberately NOT in this list —
+        // they ship in v2026.7.30 = 0.19.1 and are asserted on below.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")
         #expect(!caps.hasCompressCommand)
         #expect(!caps.hasCuratorAdopt)
         #expect(!caps.hasApprovalsSuggest)
         #expect(!caps.hasCronRuns)
         #expect(!caps.hasSessionsExportFormats)
-        #expect(!caps.hasApprovalSmartPolicy)
-        #expect(!caps.hasBitwardenEncryptedCache)
-        #expect(!caps.hasCommandSecretSource)
-        #expect(!caps.hasSharedMetricsTelemetry)
-        #expect(!caps.hasDatabaseJournalSettings)
-        #expect(!caps.hasSTTUnifiedLanguage)
-        #expect(!caps.hasSTTLocalVADTuning)
         #expect(!caps.isV020OrLater)
+        // Re-floored to v0.19.1 (v2026.7.30's pyproject.toml says 0.19.1),
+        // so a 0.19.2 host keeps them.
+        #expect(caps.hasApprovalSmartPolicy)
+        #expect(caps.hasBitwardenEncryptedCache)
+        #expect(caps.hasCommandSecretSource)
+        #expect(caps.hasSharedMetricsTelemetry)
+        #expect(caps.hasDatabaseJournalSettings)
+        #expect(caps.hasSTTUnifiedLanguage)
+        #expect(caps.hasSTTLocalVADTuning)
         // v0.18 surfaces stay alive on a v0.19 host.
         #expect(caps.hasCronAttachToSession)
         #expect(caps.hasMCPReauth)
@@ -692,6 +696,69 @@ import Foundation
 
     @Test func isV020OrLater_emptyFalse() {
         #expect(!HermesCapabilities.empty.isV020OrLater)
+    }
+
+    // MARK: - v0.19.1 (v2026.7.30) re-floored capability flags
+    //
+    // v2026.7.30's `pyproject.toml:5` reads `version = "0.19.1"` — a
+    // numbered release, not a pre-release — so seven surfaces the v0.20
+    // audit floored at v0.20 belong at v0.19.1. Same four-shape pattern as
+    // every other cluster: parse, all-on, prior-host degradation, patch.
+
+    @Test func parseV0191ReleaseLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)")
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 19, patch: 1))
+        #expect(caps.isV0191OrLater)
+        #expect(caps.isV019OrLater)
+        #expect(!caps.isV020OrLater)
+    }
+
+    @Test func v0191FlagsAllOnForV0191Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)")
+        #expect(caps.hasApprovalSmartPolicy)
+        #expect(caps.hasBitwardenEncryptedCache)
+        #expect(caps.hasCommandSecretSource)
+        #expect(caps.hasSharedMetricsTelemetry)
+        #expect(caps.hasDatabaseJournalSettings)
+        #expect(caps.hasSTTUnifiedLanguage)
+        #expect(caps.hasSTTLocalVADTuning)
+    }
+
+    @Test func v0190HostHidesV0191Flags() {
+        // v2026.7.20 = 0.19.0 predates every one of the seven, so a 0.19.0
+        // host must still degrade silently.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        #expect(!caps.isV0191OrLater)
+        #expect(!caps.hasApprovalSmartPolicy)
+        #expect(!caps.hasBitwardenEncryptedCache)
+        #expect(!caps.hasCommandSecretSource)
+        #expect(!caps.hasSharedMetricsTelemetry)
+        #expect(!caps.hasDatabaseJournalSettings)
+        #expect(!caps.hasSTTUnifiedLanguage)
+        #expect(!caps.hasSTTLocalVADTuning)
+        // v0.19.0's own surfaces stay on.
+        #expect(caps.hasDeepInfraTTS)
+        #expect(caps.hasXAITTSAdvancedParams)
+        #expect(caps.hasGatewayProfileRoutes)
+    }
+
+    @Test func v0_19_1_patchAndMinorReleasesStillEnableAllFlags() {
+        for line in ["Hermes Agent v0.19.2 (2026.7.31)",
+                     "Hermes Agent v0.20.0 (2026.8.3)",
+                     "Hermes Agent v0.21.1 (2026.9.7)"] {
+            let caps = HermesCapabilities.parseLine(line)
+            #expect(caps.hasApprovalSmartPolicy, "\(line)")
+            #expect(caps.hasBitwardenEncryptedCache, "\(line)")
+            #expect(caps.hasCommandSecretSource, "\(line)")
+            #expect(caps.hasSharedMetricsTelemetry, "\(line)")
+            #expect(caps.hasDatabaseJournalSettings, "\(line)")
+            #expect(caps.hasSTTUnifiedLanguage, "\(line)")
+            #expect(caps.hasSTTLocalVADTuning, "\(line)")
+        }
+    }
+
+    @Test func isV0191OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV0191OrLater)
     }
 
     // MARK: - v0.20.4 capability flags
@@ -1079,6 +1146,56 @@ import Foundation
     /// `hasWebExtractAux`, and deliberately so: hiding a list entry a
     /// pre-v0.21 user is actively using would strand them on an invisible
     /// selection, whereas the aux row is a whole sub-editor.
+    /// `platforms.telegram.extra.ignore_root_dm` lost its READER at v0.21.1.
+    /// Walked over every tag and both file locations the reader has had:
+    /// `gateway/platforms/telegram.py:4879` from v2026.5.28 (0.15.0), then
+    /// `plugins/platforms/telegram/adapter.py` after the v0.18 plugin split
+    /// (`:9835` at v2026.8.31 = 0.21.0, its last appearance). A WHOLE-TREE
+    /// `git grep ignore_root_dm v2026.9.7` returns only
+    /// `scripts/release.py:798` (a contributor-attribution comment) and the
+    /// website docs — no reader anywhere in the shipped code.
+    ///
+    /// This is the assertion that fails if the flag is ever rewritten as a
+    /// plain floor (`isV015OrLater`), which would leave the row rendered on
+    /// every v0.21.1+ host.
+    @Test func hasTelegramIgnoreRootDM_windowIsV015ThroughV0210() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.15.0 (2026.5.28)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasTelegramIgnoreRootDM)
+        // Ceiling: the reader is gone at 0.21.1 and stays gone.
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasTelegramIgnoreRootDM)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.20)").hasTelegramIgnoreRootDM)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.22.0 (2026.10.1)").hasTelegramIgnoreRootDM)
+    }
+
+    /// Unknown version KEEPS the row (charter C1): before this flag existed
+    /// the toggle was unconditional, so a host whose `--version` probe has
+    /// not answered must go on rendering it.
+    @Test func hasTelegramIgnoreRootDM_unknownVersionKeeps() {
+        #expect(HermesCapabilities.empty.hasTelegramIgnoreRootDM)
+    }
+
+    /// `display.busy_input_mode: steer` — floor v0.12.0, found by walking the
+    /// READER across every tag: `elif _bim == "steer":` first appears at
+    /// v2026.4.30 (0.12.0) `cli.py:1946` and is unbroken to v2026.9.7, whose
+    /// modularised reader states the member set outright (`cli.py:2592`
+    /// `_bim if _bim in ("queue", "steer") else "interrupt"`). v2026.4.23's
+    /// `"steer"` hits are the `/steer` slash command, a different surface.
+    @Test func hasBusyInputSteerMode_floorIsV012() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.12.0 (2026.4.30)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasBusyInputSteerMode)
+    }
+
+    /// Unknown version HIDES it: `steer` is absent from the picker today, so
+    /// an unanswered version probe must keep that rendering.
+    @Test func hasBusyInputSteerMode_unknownVersionHides() {
+        #expect(!HermesCapabilities.empty.hasBusyInputSteerMode)
+    }
+
     @Test func hasTavilyWebBackend_unknownVersionKeeps() {
         #expect(HermesCapabilities.empty.hasTavilyWebBackend)
     }

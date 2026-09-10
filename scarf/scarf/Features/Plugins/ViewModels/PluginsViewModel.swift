@@ -31,10 +31,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PluginsViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
+    /// Injectable CLI seam so `enable` / `disable` can be exercised through
+    /// their real production entry points in tests (the verdict rules —
+    /// markers and `failureWins` — live at those call sites, so a test that
+    /// re-states them itself proves nothing about the shipped behaviour).
+    private let cliRunner: HermesCLIRunner
 
-    init(context: ServerContext = .local) {
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.context = context
         self.fileService = HermesFileService(context: context)
+        self.cliRunner = cliRunner ?? context.cliRunner
     }
 
     var plugins: [HermesPlugin] = []
@@ -322,7 +328,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
         if let allowToolOverride, supportsToolOverrideFlags {
             args.append(allowToolOverride ? "--allow-tool-override" : "--no-allow-tool-override")
         }
-        runAndReload(args, success: "Enabled")
+        runAndReload(
+            args,
+            success: "Enabled",
+            successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
+            // `cmd_enable` prints the green "enabled." line (:1023) BEFORE it
+            // runs the consent screen (:1033), so both markers are present by
+            // design and the refusal has to win.
+            failureWins: true
+        )
     }
 
     /// True when this host's `plugins enable` understands the
@@ -333,18 +348,78 @@ final class PluginsViewModel: OutcomeMessageHosting {
     }
 
     func disable(_ plugin: HermesPlugin) {
-        runAndReload(["plugins", "disable", plugin.name], success: "Disabled")
+        runAndReload(
+            ["plugins", "disable", plugin.name],
+            success: "Disabled",
+            successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsDisableFailure
+        )
     }
 
-    private func runAndReload(_ args: [String], success: String) {
-        Task.detached { [weak self, fileService] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+    /// Runs a `plugins` verb and judges it by what the CLI printed.
+    ///
+    /// `hermes plugins enable` exits 0 even when the enable did not fully
+    /// happen: `cmd_enable` (hermes_cli/plugins_cmd.py:1033 at v2026.9.7)
+    /// calls `_run_capability_consent(...)` and discards its `bool`, and that
+    /// function's non-TTY arm (:1092-1098) prints
+    /// `Non-interactive session: capabilities NOT granted (fail closed).` and
+    /// returns False. Scarf has NO tty, so for any plugin whose manifest
+    /// declares `capabilities:` that is the arm it always takes — the plugin
+    /// is on the allow-list but runs without the host surfaces it asked for,
+    /// which is not what a plain "Enabled" toast says (charter C5).
+    ///
+    /// The success markers are the CLI's own confirmations —
+    /// `Plugin <key> enabled. Takes effect on next session.` (:1023) /
+    /// `disabled.` (:1198), and the `is already enabled/disabled.` idempotent
+    /// lines (:1012, :1191). Both `Takes effect on next session.` spellings go
+    /// back to v2026.6.19:801,833 (charter C1).
+    /// One plain sentence for the refusal Scarf hits most, and a bounded quote
+    /// of the CLI's own line otherwise.
+    ///
+    /// The consent refusal (plugins_cmd.py:1092-1098) is ~230 characters whose
+    /// ACTIONABLE half is its last clause, so a leading truncation would cut
+    /// off exactly the part the user needs — the same trap the v0.21.1 cron
+    /// lifecycle-guard message set. It gets its own sentence instead.
+    nonisolated static func friendlyPluginFailure(_ detail: String?) -> String? {
+        guard let detail, !detail.isEmpty else { return nil }
+        if detail.contains("capabilities NOT granted") {
+            return String(localized: "Enabled, but its requested capabilities were NOT granted — Hermes fails closed without a terminal. Grant them with `hermes plugins enable` in a terminal; the plugin should otherwise degrade gracefully.")
+        }
+        return String(detail.prefix(200))
+    }
+
+    /// `successMarkers: nil` keeps the exit code as the verdict, for the verbs
+    /// that genuinely report through it: `cmd_update` (:808-809) and
+    /// `cmd_remove` (:895) refuse via `_fail` (:80-83), which `sys.exit(1)`s.
+    /// Only `enable`/`disable` route through the discarded-bool consent screen,
+    /// so only they need output judging — narrowing this to the sites the
+    /// finding names keeps update/remove byte-identical.
+    private func runAndReload(
+        _ args: [String],
+        success: String,
+        successMarkers: [String]? = nil,
+        failureMarkers: [String] = [],
+        failureWins: Bool = false
+    ) {
+        let run = cliRunner
+        Task.detached { [weak self] in
+            let result = run(args, 60)
+            let outcome: HermesCLIOutcome = successMarkers.map { markers in
+                HermesCLIVerdict.judge(
+                    output: result.output,
+                    exitCode: result.exitCode,
+                    successMarkers: markers,
+                    failureMarkers: failureMarkers,
+                    failureWins: failureWins
+                )
+            } ?? HermesCLIOutcome(succeeded: result.exitCode == 0, detail: nil)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.applySaveOutcome(
-                    result.exitCode == 0
+                    outcome.succeeded
                         ? .success(success)
-                        : .failure(String(localized: "Failed"))
+                        : .failure(Self.friendlyPluginFailure(outcome.detail)
+                            ?? String(localized: "Failed"))
                 )
                 self.load(force: true)
             }

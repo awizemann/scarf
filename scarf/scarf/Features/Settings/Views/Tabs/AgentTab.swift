@@ -38,7 +38,18 @@ struct AgentTab: View {
         }
 
         SettingsSection(title: "Approvals", icon: "checkmark.shield") {
-            PickerRow(label: "Approval Mode", selection: viewModel.config.approvalMode, options: ["auto", "manual", "smart", "off"]) { viewModel.setApprovalMode($0) }
+            // `auto` was never a valid `approvals.mode` at ANY tag — Hermes
+            // warns and falls back to `manual` (`tools/approval_context.py`
+            // `_VALID_MODES = ("manual", "smart", "off")` @ v2026.9.7; the same
+            // three-member set back to v0.3). The selection is normalised the
+            // way Hermes reads it, so a config still carrying `auto` shows the
+            // `manual` the host is actually enforcing instead of a blank
+            // picker. See `HermesApprovalMode`.
+            PickerRow(
+                label: "Approval Mode",
+                selection: HermesApprovalMode.normalize(viewModel.config.approvalMode).rawValue,
+                options: HermesApprovalMode.options
+            ) { viewModel.setApprovalMode($0) }
             StepperRow(label: "Approval Timeout (s)", value: viewModel.config.approvalTimeout, range: 5...600, step: 5) { viewModel.setApprovalTimeout($0) }
         }
 
@@ -98,7 +109,13 @@ struct AgentTab: View {
     /// host can't use visible instead of silently rewriting it.
     @ViewBuilder
     private var fastModeRows: some View {
-        if HermesServiceTier.editorStyle(capabilities: capabilities) == .picker {
+        // `current:` matters: when the probe failed (`capabilities` is
+        // `.empty`, every floor false) but the config already holds a bounded
+        // `auto`/`cold`, the toggle would render it as "off" and overwrite it
+        // with `normal` on the first tap. Pass the stored value so that one
+        // state falls through to the picker instead.
+        let storedTier = HermesServiceTier.normalize(viewModel.config.serviceTier)
+        if HermesServiceTier.editorStyle(capabilities: capabilities, current: storedTier) == .picker {
             boundedFastModeRows
         } else {
             // C1: a pre-target host (and an undetected one) renders exactly

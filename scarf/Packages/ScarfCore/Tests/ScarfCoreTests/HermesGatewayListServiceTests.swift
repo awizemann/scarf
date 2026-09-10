@@ -20,8 +20,7 @@ import Foundation
         #expect(snap?.profiles[0].profile == "default")
         #expect(snap?.profiles[0].isRunning == true)
         #expect(snap?.profiles[0].pid == 44417)
-        #expect(snap?.profiles[0].platforms.isEmpty == true)
-
+        
         #expect(snap?.profiles[1].profile == "scarfbox-smoke")
         #expect(snap?.profiles[1].isRunning == false)
         #expect(snap?.profiles[1].pid == nil)
@@ -41,8 +40,7 @@ import Foundation
         #expect(snap?.profiles[0].profile == "default")
         #expect(snap?.profiles[0].pid == 1234)
         #expect(snap?.profiles[0].isRunning == true)
-        #expect(snap?.profiles[0].platforms.isEmpty == true)
-    }
+            }
 
     @Test func parsesSingleStoppedProfile() {
         let text = """
@@ -93,36 +91,34 @@ import Foundation
 
     @Test func headerDigestSingleProfileRunning() {
         let snap = GatewayListSnapshot(profiles: [
-            .init(profile: "default", isRunning: true, pid: 100,
-                  platforms: ["slack", "telegram"])
+            .init(profile: "default", isRunning: true, pid: 100)
         ])
-        #expect(snap.headerDigest == "default profile · running · slack, telegram")
+        #expect(snap.headerDigest == "default profile · running")
     }
 
     @Test func headerDigestSingleProfileStopped() {
         let snap = GatewayListSnapshot(profiles: [
-            .init(profile: "default", isRunning: false, pid: nil, platforms: [])
+            .init(profile: "default", isRunning: false, pid: nil)
         ])
         #expect(snap.headerDigest == "default profile · stopped")
     }
 
     @Test func headerDigestMultipleProfilesSomeRunning() {
         let snap = GatewayListSnapshot(profiles: [
-            .init(profile: "work", isRunning: true, pid: 1, platforms: ["slack"]),
-            .init(profile: "home", isRunning: false, pid: nil, platforms: ["matrix"]),
-            .init(profile: "extra", isRunning: true, pid: 2, platforms: [])
+            .init(profile: "work", isRunning: true, pid: 1),
+            .init(profile: "home", isRunning: false, pid: nil),
+            .init(profile: "extra", isRunning: true, pid: 2)
         ])
-        // 3 profiles total, 2 running, surface first running profile's
-        // platform list as the highlight.
-        #expect(snap.headerDigest == "3 profiles (2 running) · work: slack")
+        // 3 profiles total, 2 running. No platform clause: `gateway list`
+        // prints no platform column and has no `--json` form.
+        #expect(snap.headerDigest == "3 profiles (2 running)")
     }
 
     @Test func headerDigestMultipleProfilesNoneRunning() {
         let snap = GatewayListSnapshot(profiles: [
-            .init(profile: "a", isRunning: false, pid: nil, platforms: ["slack"]),
-            .init(profile: "b", isRunning: false, pid: nil, platforms: ["matrix"])
+            .init(profile: "a", isRunning: false, pid: nil),
+            .init(profile: "b", isRunning: false, pid: nil)
         ])
-        // No running profile — fall back to the first profile's platforms.
-        #expect(snap.headerDigest == "2 profiles (0 running) · a: slack")
+        #expect(snap.headerDigest == "2 profiles (0 running)")
     }
 }

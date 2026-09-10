@@ -152,6 +152,94 @@ struct HermesMCPServerV0204RegressionTests {
 
         #expect(service.loadMCPServers().first?.identityHeader == nil)
     }
+
+    // MARK: - boolish scalars (P12)
+
+    private static let boolishYAML = """
+    mcp_servers:
+      yes_server:
+        url: https://a.example.com/mcp
+        enabled: yes
+      off_server:
+        url: https://b.example.com/mcp
+        enabled: "OFF"
+      quoted_false_server:
+        url: https://c.example.com/mcp
+        enabled: false  # turned off last week
+      one_server:
+        url: https://d.example.com/mcp
+        enabled: 1
+      bare_server:
+        url: https://e.example.com/mcp
+      filtered:
+        url: https://f.example.com/mcp
+        tools:
+          resources: no
+          prompts: "1"
+      unfiltered:
+        url: https://g.example.com/mcp
+    """
+
+    /// Hermes reads `enabled` through `_parse_boolish`
+    /// (`tools/mcp_tool_common.py:120-137` at `v2026.9.7`; the same word sets
+    /// at `v2026.6.19:tools/mcp_tool.py:3754-3767`), so `yes` / `on` / `1`
+    /// are enabled and `no` / `off` / `0` are not. Fails without the fix: the
+    /// exact `!= "false"` test showed `off_server` as live, and the
+    /// comment-carrying `false` as live too.
+    @Test func enabledIsReadWithHermesBoolishWords() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        try Self.boolishYAML.write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let byName = Dictionary(
+            uniqueKeysWithValues: HermesFileService(context: home.context)
+                .loadMCPServers().map { ($0.name, $0) })
+        #expect(byName["yes_server"]?.enabled == true)
+        #expect(byName["one_server"]?.enabled == true)
+        #expect(byName["off_server"]?.enabled == false)
+        #expect(byName["quoted_false_server"]?.enabled == false)
+        // Absent key: `_parse_boolish(cfg.get("enabled", True), default=True)`
+        // (`tools/mcp_tool_discovery.py:44`).
+        #expect(byName["bare_server"]?.enabled == true)
+    }
+
+    /// `tools.resources` / `tools.prompts` default to TRUE when absent
+    /// (`_parse_boolish(tools_filter.get(f), default=True)`,
+    /// `tools/mcp_tool_registration.py:77`) and take the same word sets.
+    /// Fails without the fix: both defaulted to false, so the editor showed
+    /// two toggles off for every server that had never set them — and one
+    /// save then wrote the `false` the user never chose.
+    @Test func toolsResourcesAndPromptsAreBoolishAndDefaultTrue() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        try Self.boolishYAML.write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let byName = Dictionary(
+            uniqueKeysWithValues: HermesFileService(context: home.context)
+                .loadMCPServers().map { ($0.name, $0) })
+        #expect(byName["filtered"]?.resourcesEnabled == false)
+        #expect(byName["filtered"]?.promptsEnabled == true)
+        #expect(byName["unfiltered"]?.resourcesEnabled == true)
+        #expect(byName["unfiltered"]?.promptsEnabled == true)
+    }
+
+    /// The shared helper, exercised directly on the shapes YAML makes legal.
+    @Test func boolishHelperMirrorsHermesWordSets() {
+        for word in ["true", "TRUE", "1", "yes", "On", " yes ", "\"yes\""] {
+            #expect(HermesFileService.boolish(word, default: false) == true, "\(word)")
+        }
+        for word in ["false", "0", "no", "OFF", "'off'", "false  # note"] {
+            #expect(HermesFileService.boolish(word, default: true) == false, "\(word)")
+        }
+        // Unrecognised and absent both fall back to the caller's default,
+        // which is what Hermes does after its logger.warning.
+        #expect(HermesFileService.boolish("maybe", default: true) == true)
+        #expect(HermesFileService.boolish(nil, default: true) == true)
+        #expect(HermesFileService.boolish(nil, default: false) == false)
+        #expect(HermesFileService.boolishOptional("maybe") == nil)
+        #expect(HermesFileService.boolishOptional(nil) == nil)
+    }
+
 }
 
 /// Behavioral cover for the `identity_header` / `strict_redirect_headers`

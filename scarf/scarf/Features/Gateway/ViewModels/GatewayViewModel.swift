@@ -80,9 +80,27 @@ final class MessagingGatewayViewModel {
     /// `ContextBoundRoot` (Previews, smoke tests).
     let capabilities: HermesCapabilities
 
-    init(context: ServerContext = .local, capabilities: HermesCapabilities = .empty) {
+    /// How `hermes gateway status` / `pairing …` are invoked. Production is
+    /// `context.cliRunner`; tests inject a fake so the off-main and
+    /// coalescing invariants are provable (see `HermesCLIRunner`).
+    @ObservationIgnored nonisolated let cliRunner: HermesCLIRunner
+
+    /// Cap on each read probe in `load()`. `gateway status` and `pairing
+    /// list` answer in well under a second on a healthy host; the point of
+    /// naming a shorter cap than `runHermes`'s 60 s default is charter C10 —
+    /// a wedged SSH host must not pin a load task for a full minute while
+    /// file-watcher ticks pile up behind it. Nothing user-visible changes on
+    /// a healthy host: only the spinner's worst case moves.
+    static let probeTimeout: TimeInterval = 30
+
+    init(
+        context: ServerContext = .local,
+        capabilities: HermesCapabilities = .empty,
+        cliRunner: HermesCLIRunner? = nil
+    ) {
         self.context = context
         self.capabilities = capabilities
+        self.cliRunner = cliRunner ?? context.cliRunner
     }
 
     var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isServedByMultiplexer: false, isRunning: false)
@@ -90,7 +108,10 @@ final class MessagingGatewayViewModel {
     var pendingPairings: [PendingPairing] = []
     var isLoading = false
     var actionMessage: String?
-    /// `hermes gateway list --json` snapshot. `nil` when the verb fails
+    /// `hermes gateway list` snapshot, parsed from its TEXT table — the verb
+    /// has no `--json` flag at any supported tag (`hermes_cli/subcommands/
+    /// gateway.py:108` at v2026.9.7 registers `list` with no arguments).
+    /// `nil` when the verb fails
     /// (pre-v0.13 host or no profiles registered yet) — the digest row
     /// hides itself in that case.
     var gatewayList: GatewayListSnapshot?
@@ -111,34 +132,79 @@ final class MessagingGatewayViewModel {
         loadGeneration &+= 1
     }
 
-    func load() {
+    /// The file-watcher change token this VM last loaded (or is currently
+    /// loading) for. `GatewayView` re-loads on every `lastChangeDate` tick,
+    /// and the gateway writes `gateway_state.json` far more often than it
+    /// changes anything Scarf renders — so without a token every rewrite
+    /// spawned three fresh CLI invocations (`gateway status`, `pairing
+    /// list`, `gateway list`) against a possibly-remote host. Same shape as
+    /// `PlatformsViewModel.load(changeToken:force:)`.
+    @ObservationIgnored private var loadedChangeToken: Date?
+    @ObservationIgnored private var inFlightChangeToken: Date?
+    @ObservationIgnored private var hasLoaded = false
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+
+    /// - Parameters:
+    ///   - changeToken: the file-watcher tick this load answers. A repeat of
+    ///     the token already loaded, or already in flight, is a no-op — that
+    ///     is the coalescing: N rapid ticks carrying one token produce one
+    ///     in-flight load, not N.
+    ///   - force: bypass the token check. Every internal reload (after a
+    ///     start/stop/restart, approve, revoke) passes this, because those
+    ///     change the very state a load reads and must never be coalesced
+    ///     away against a stale token.
+    func load(changeToken: Date? = nil, force: Bool = false) {
+        if !force, hasLoaded, changeToken == (isLoading ? inFlightChangeToken : loadedChangeToken) {
+            return
+        }
+        hasLoaded = true
         isLoading = true
+        inFlightChangeToken = changeToken
         loadGeneration &+= 1
         let generation = loadGeneration
         let ctx = context
         let caps = capabilities
-        Task.detached { [weak self] in
-            // Two sync transport calls + two CLI invocations — substantial
-            // remote latency. Detach the whole load and commit at the end.
-            let status = Self.fetchGatewayStatus(context: ctx)
-            let pairing = Self.fetchPairing(context: ctx)
+        let run = cliRunner
+        // Cancel-prior so a superseded load stops between its probes rather
+        // than running all three to completion just to have its result
+        // dropped by the generation guard.
+        //
+        // The load task is DETACHED, not a `Task { … }` wrapping an inner
+        // `Task.detached { … }.value`. That shape looked identical but could
+        // not be cancelled: cancelling the outer task does not propagate into
+        // a detached child, so the `Task.isCancelled` checks between the
+        // probes were dead and every superseded load still ran all three CLI
+        // invocations to completion. Detaching the whole body is also what
+        // keeps the two sync transport calls and three CLI invocations off
+        // the main actor (C10); the commit hops back explicitly.
+        loadTask?.cancel()
+        loadTask = Task.detached { [weak self] in
+            let status = Self.fetchGatewayStatus(context: ctx, run: run)
+            if Task.isCancelled { return }
+            let pairing = Self.fetchPairing(context: ctx, run: run)
+            if Task.isCancelled { return }
             let listSnap = caps.hasGatewayList
                 ? HermesGatewayListService.fetch(context: ctx)
                 : nil
-            await MainActor.run { [weak self] in
+            if Task.isCancelled { return }
+            await MainActor.run {
                 guard let self, self.loadGeneration == generation else { return }
                 self.gateway = status
                 self.approvedUsers = pairing.approved
                 self.pendingPairings = pairing.pending
                 self.gatewayList = listSnap
                 self.isLoading = false
+                self.loadedChangeToken = changeToken
             }
         }
     }
 
     /// Static form of the gateway-status walk so the detached load can call
     /// it without bouncing back to MainActor.
-    nonisolated private static func fetchGatewayStatus(context: ServerContext) -> MessagingGatewayInfo {
+    nonisolated private static func fetchGatewayStatus(
+        context: ServerContext,
+        run: HermesCLIRunner
+    ) -> MessagingGatewayInfo {
         let stateJSON = context.readData(context.paths.gatewayStateJSON)
         var pid: Int?
         var state = "unknown"
@@ -166,7 +232,7 @@ final class MessagingGatewayViewModel {
             }
         }
 
-        let statusOutput = context.runHermes(["gateway", "status"]).output
+        let statusOutput = run(["gateway", "status"], probeTimeout).output
         let isLoaded = isServiceLoaded(pid: pid, statusOutput: statusOutput)
 
         return MessagingGatewayInfo(
@@ -259,8 +325,11 @@ final class MessagingGatewayViewModel {
         return pid != nil
     }
 
-    nonisolated private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {
-        let output = context.runHermes(["pairing", "list"]).output
+    nonisolated private static func fetchPairing(
+        context: ServerContext,
+        run: HermesCLIRunner
+    ) -> (approved: [PairedUser], pending: [PendingPairing]) {
+        let output = run(["pairing", "list"], probeTimeout).output
         var approved: [PairedUser] = []
         var pending: [PendingPairing] = []
 
@@ -348,7 +417,7 @@ final class MessagingGatewayViewModel {
                 // Reload anyway (the host may have moved), but never clear a
                 // failure message on a timer — the user dismisses it by taking
                 // the next action.
-                self.load()
+                self.load(force: true)
                 return
             }
 
@@ -357,7 +426,7 @@ final class MessagingGatewayViewModel {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(settleSeconds))
                 guard let self, self.actionGeneration == generation else { return }
-                self.load()
+                self.load(force: true)
                 self.actionMessage = nil
             }
         }
@@ -382,7 +451,7 @@ final class MessagingGatewayViewModel {
             } else {
                 self.actionFailed = false
             }
-            self.load()
+            self.load(force: true)
         }
     }
 
@@ -409,7 +478,7 @@ final class MessagingGatewayViewModel {
                     .map { String(localized: "Revoke failed: \($0)") }
                     ?? String(localized: "Revoke failed")
             }
-            self.load()
+            self.load(force: true)
         }
     }
 

@@ -77,15 +77,29 @@ final class MCPServerEditorViewModel {
         self.parallelToolCallsDraft = server.supportsParallelToolCalls
         self.clientCertDraft = server.clientCert ?? ""
         self.clientKeyDraft = server.clientKey ?? ""
-        // Hydrate the split SSL-verify controls from the single stored value:
-        //   nil/empty → verify on, no custom CA
-        //   "false"   → verify off
-        //   <path>    → verify on, custom CA bundle
+        // Hydrate the split SSL-verify controls from the single stored value.
+        // The scalar is bool-OR-path, and the bool half is BOOLISH, not just
+        // `false`: PyYAML resolves bare `no` / `off` to False and `0` is a
+        // falsy int, all of which reach httpx as `verify=False`
+        // (`tools/mcp_tool_transport.py:410` at v2026.9.7 passes
+        // `config.get("ssl_verify", True)` straight through). Reading only
+        // `"false"` rendered `ssl_verify: no` as "Verify TLS peer" ON with
+        // `no` sitting in the CA-path field, and the next save quoted it into
+        // a CA bundle literally named `no` — the exact downgrade the writer's
+        // bare-bool rule exists to prevent.
+        //   nil/empty      → verify on, no custom CA
+        //   boolish false  → verify off
+        //   boolish true   → verify on, no custom CA
+        //   <path>         → verify on, custom CA bundle
         let storedVerify = (server.sslVerify ?? "").trimmingCharacters(in: .whitespaces)
-        if storedVerify.lowercased() == "false" {
+        switch Self.boolishSSLVerify(storedVerify) {
+        case .some(false):
             self.sslVerifyPeer = false
             self.sslCAPathDraft = ""
-        } else {
+        case .some(true):
+            self.sslVerifyPeer = true
+            self.sslCAPathDraft = ""
+        case nil:
             self.sslVerifyPeer = true
             self.sslCAPathDraft = storedVerify  // "" for plain default-on
         }
@@ -96,6 +110,19 @@ final class MCPServerEditorViewModel {
         self.strictRedirectHeadersDraft = server.strictRedirectHeaders
         self.oauthFlowDraft = server.oauthFlow ?? ""
         self.cwdDraft = server.cwd ?? ""
+    }
+
+    /// The boolish half of the bool-or-path `ssl_verify` scalar, or `nil`
+    /// when the value is a CA-bundle path (or absent). Mirrors PyYAML's bool
+    /// resolution plus the `0`/`1` ints, which is what actually reaches
+    /// httpx's `verify=`; anything else is a path.
+    static func boolishSSLVerify(_ raw: String) -> Bool? {
+        let value = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        // Verified against PyYAML: bare `y` / `n` are NOT bools (they stay
+        // strings), so they are paths here, same as Hermes sees them.
+        if ["true", "yes", "on", "1"].contains(value) { return true }
+        if ["false", "no", "off", "0"].contains(value) { return false }
+        return nil
     }
 
     /// Collapse the two SSL-verify controls back into the single

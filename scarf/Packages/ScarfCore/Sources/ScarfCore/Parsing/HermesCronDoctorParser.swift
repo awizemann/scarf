@@ -81,8 +81,13 @@ public struct HermesCronDoctorFinding: Sendable, Equatable, Identifiable {
 /// own indentation (often 0 or 2 columns).
 ///
 /// The parse is therefore indent-based, not prefix-based:
-///  - **indent 2** (`  <job_id> <name>`) — a job header, but only when it
-///    can't be a traceback line (see `isPlausibleJobHeader`).
+///  - **indent 2** (`  <job_id> <name>`) — a job header. The id is
+///    whichever id in `knownJobIDs` is the longest prefix of the line at a
+///    token boundary, because a job id may itself CONTAIN SPACES (an
+///    id-keyed `jobs.json` contributes its map key verbatim,
+///    `cron/jobs.py::load_jobs` v2026.9.7 :1271). Without a roster — or for
+///    an id Scarf hasn't loaded — it falls back to the first token, guarded
+///    so it can't be a traceback line (see `isPlausibleJobID`).
 ///  - **indent 4 + `- `** — the start of a new issue.
 ///  - **anything else** — a continuation of the issue in progress, joined
 ///    back onto it with a newline (verbatim, so the traceback stays
@@ -114,7 +119,13 @@ public enum HermesCronDoctorParser {
     /// Parse the findings block into `jobID → finding`. Chrome lines
     /// (summary header, `Next:` hint, the clean-run sentinel) are
     /// skipped; an issue bullet with no preceding job header is dropped.
-    public static func parse(text: String) -> [String: HermesCronDoctorFinding] {
+    public static func parse(
+        text: String,
+        knownJobIDs: Set<String> = []
+    ) -> [String: HermesCronDoctorFinding] {
+        // Longest first, so `nightly backup` wins over a hypothetical
+        // `nightly` when both are real ids and the header is ambiguous.
+        let candidates = knownJobIDs.sorted { $0.count > $1.count }
         var findings: [String: HermesCronDoctorFinding] = [:]
         var currentID: String?
         var currentName = ""
@@ -156,9 +167,25 @@ public enum HermesCronDoctorParser {
             // `Next:` hint is exactly that case).
             if indent <= 2, isChrome(trimmed, strict: !currentIssues.isEmpty) { continue }
 
-            // Job header candidate: indent exactly 2, and either nothing
-            // is in progress (so it can't be a continuation) or the first
-            // token looks like a Hermes job id.
+            // Job header, decided against the ids Scarf already holds:
+            // the id is whichever KNOWN id is the longest prefix of the
+            // header followed by a space or end-of-line. This is the only
+            // way to read an id that CONTAINS a space — an id-keyed
+            // `jobs.json` from an external tool contributes its map KEY as
+            // the id (`cron/jobs.py::load_jobs`, v2026.9.7 :1271), and
+            // nothing sanitizes it, so `nightly backup` is a legal id that
+            // splitting on the first space attributes to a job called
+            // `nightly` with the name `backup`.
+            if indent == 2, let id = knownIDPrefix(of: trimmed, candidates: candidates) {
+                flush()
+                currentID = id
+                currentName = String(trimmed.dropFirst(id.count))
+                    .trimmingCharacters(in: .whitespaces)
+                continue
+            }
+
+            // No id roster to match against (or an id Scarf hasn't loaded):
+            // fall back to the shape heuristic on the first token.
             if indent == 2, currentIssues.isEmpty || isPlausibleJobID(firstToken(trimmed)) {
                 flush()
                 let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
@@ -201,6 +228,18 @@ public enum HermesCronDoctorParser {
         return lower.hasPrefix("next:")
             || lower.hasPrefix("checked ")
             || lower.hasPrefix("no active jobs")
+    }
+
+    /// The longest id in `candidates` that `trimmed` starts with at a
+    /// token boundary (end-of-line, or a space before the job name).
+    /// `candidates` must already be sorted longest-first.
+    static func knownIDPrefix(of trimmed: String, candidates: [String]) -> String? {
+        for id in candidates where !id.isEmpty {
+            guard trimmed.hasPrefix(id) else { continue }
+            let rest = trimmed.dropFirst(id.count)
+            if rest.isEmpty || rest.first == " " { return id }
+        }
+        return nil
     }
 
     private static func firstToken(_ trimmed: String) -> String {

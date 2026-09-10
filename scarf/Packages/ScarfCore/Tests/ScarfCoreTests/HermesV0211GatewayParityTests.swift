@@ -63,14 +63,13 @@ import Foundation
 
     @Test func digestNamesTheMultiplexerForASingleServedProfile() {
         let served = GatewayListSnapshot(profiles: [
-            .init(profile: "work", isRunning: true, pid: nil, platforms: [],
-                  servedByMultiplexer: true)
+            .init(profile: "work", isRunning: true, pid: nil, servedByMultiplexer: true)
         ])
         #expect(served.headerDigest == "work profile · served by the default multiplexer")
 
         // Unchanged for every pre-v0.21.1 shape.
         let plain = GatewayListSnapshot(profiles: [
-            .init(profile: "default", isRunning: true, pid: 1, platforms: [])
+            .init(profile: "default", isRunning: true, pid: 1)
         ])
         #expect(plain.headerDigest == "default profile · running")
     }

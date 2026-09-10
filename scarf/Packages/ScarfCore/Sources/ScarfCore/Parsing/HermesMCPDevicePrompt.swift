@@ -21,10 +21,8 @@ import Foundation
 ///   verification URI is useless on its own — the code has to be readable, and
 ///   copyable, in the UI.
 ///
-/// Parsing is deliberately tolerant of the surrounding decoration (leading
-/// whitespace, interleaved log lines) but anchored on the two literal labels,
-/// so a change in Hermes's wording is a parse failure — visible — rather than
-/// a wrong URL. `HermesMCPDevicePromptTests` pins the verbatim v2026.9.7 text.
+/// See `parse` for the streaming rules the block's single-`print` shape
+/// imposes. `HermesMCPOAuthFlowTests` pins the verbatim v2026.9.7 text.
 public struct HermesMCPDevicePrompt: Sendable, Equatable {
     /// The verification URI the user opens on any device.
     public let verificationURL: String
@@ -37,15 +35,47 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
         self.userCode = userCode
     }
 
-    /// Parse the prompt out of accumulated CLI output, or `nil` when it isn't
-    /// (yet) there. Safe to call on every chunk: the block is only complete
-    /// once BOTH lines have arrived, and a partial read returns nil rather
-    /// than a half-built prompt.
+    /// The last line of Hermes's single-`print` block. Its arrival is the
+    /// only proof that the two lines above it are COMPLETE — see `parse`.
+    /// Verbatim from `mcp_oauth_device.py:125-126`.
+    public static let completionSentinel = "Waiting for approval..."
+
+    /// Parse the prompt out of accumulated CLI output, or `nil` while it is
+    /// not (yet) fully there.
+    ///
+    /// **Only newline-terminated lines are considered, and the block counts
+    /// as arrived only once `Waiting for approval...` has.** Both rules exist
+    /// for the same reason: a `readabilityHandler` chunk boundary falls on a
+    /// byte count, not a line. Hermes writes the whole block in one
+    /// `print(..., flush=True)` (`tools/mcp_oauth_device.py:125-126`), but the
+    /// pipe can still hand Scarf `…\n  Code: WDJB-MJ` — and `WDJB-MJ` is a
+    /// perfectly non-empty string. The old parser latched it, the sheet
+    /// rendered a truncated code, and re-parsing was skipped forever after
+    /// because the caller only re-parsed while `devicePrompt == nil`. A code
+    /// the user cannot use, with no way to notice it is wrong, is worse than
+    /// a spinner.
+    ///
+    /// The trailing sentinel makes the whole block atomic: the URL and the
+    /// code are both above it in the same `print`, so once it is present in
+    /// a newline-terminated line, every line before it is complete.
+    ///
+    /// Parsing stays tolerant of the surrounding decoration (leading
+    /// whitespace, interleaved log lines) but anchored on the literal labels,
+    /// so a change in Hermes's wording is a parse failure — visible — rather
+    /// than a wrong URL. `HermesMCPOAuthFlowTests` pins the verbatim
+    /// v2026.9.7 text.
     public static func parse(_ output: String) -> HermesMCPDevicePrompt? {
         var url: String?
         var code: String?
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
+        var sawSentinel = false
+        // Drop the trailing fragment: everything after the LAST newline has
+        // not been terminated yet and may be half a line.
+        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 1 else { return nil }
+        lines.removeLast()
+        for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.contains(Self.completionSentinel) { sawSentinel = true }
             if url == nil, let range = line.range(of: "MCP OAuth: open ") {
                 // "…open <url> on any device." — take the URL token, which
                 // cannot contain a space, rather than assuming the trailing
@@ -62,9 +92,9 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
                     .trimmingCharacters(in: .whitespaces)
                 if !candidate.isEmpty { code = candidate }
             }
-            if url != nil && code != nil { break }
+            if url != nil && code != nil && sawSentinel { break }
         }
-        guard let url, let code else { return nil }
+        guard sawSentinel, let url, let code else { return nil }
         return HermesMCPDevicePrompt(verificationURL: url, userCode: code)
     }
 }

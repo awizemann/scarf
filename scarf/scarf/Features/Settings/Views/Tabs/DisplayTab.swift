@@ -37,6 +37,21 @@ struct DisplayTab: View {
     @AppStorage(ChatDensityKeys.loadHistoricalToolResults)
     private var loadHistoricalToolResults: Bool = false
 
+    /// `display.busy_input_mode` picker options: `interrupt` / `queue`
+    /// always, `steer` when the host reads it (v0.12.0+,
+    /// `HermesCapabilities.hasBusyInputSteerMode`). A stored value outside
+    /// that set is APPENDED rather than dropped, so the picker never renders
+    /// a blank selection over a config.yaml Scarf did not expect — the same
+    /// rule `HermesApprovalMode.normalize` enforces on the Approvals picker.
+    static func busyInputModeOptions(
+        current: String, capabilities: HermesCapabilities
+    ) -> [String] {
+        var options = ["interrupt", "queue"]
+        if capabilities.hasBusyInputSteerMode { options.append("steer") }
+        if !current.isEmpty, !options.contains(current) { options.append(current) }
+        return options
+    }
+
     var body: some View {
         SettingsSection(title: "Chat density", icon: "rectangle.compress.vertical") {
             DensityPickerRow(
@@ -68,14 +83,16 @@ struct DisplayTab: View {
             ToggleRow(label: "Show Reasoning", isOn: viewModel.config.showReasoning) { viewModel.setShowReasoning($0) }
             ToggleRow(label: "Show Cost", isOn: viewModel.config.showCost) { viewModel.setShowCost($0) }
             ToggleRow(label: "Interim Messages", isOn: viewModel.config.interimAssistantMessages) { viewModel.setInterimAssistantMessages($0) }
-            // No "Verbose" row: `agent.verbose` is not a config key. Verified
-            // at v0.21 — it is absent from the `"agent"` block in
-            // `hermes_cli/config_defaults.py`, and the only thing that sets
-            // the runtime flag is argparse: `main.py:3429` passes
-            // `getattr(args, "verbose", None)` into the CLI, which stores it
-            // at `cli.py:5285` and hands it to the agent as `verbose_logging`
-            // (`cli_agent_setup_mixin.py:534`). Nothing reads config for it.
-            // (go/no-go blocking condition 8, A5.)
+            // No "Verbose" row: `agent.verbose` is not a config key.
+            // Re-verified at v2026.9.7 (v0.21.1) — absent from the `"agent"`
+            // block in `hermes_cli/config_defaults.py`, and the only thing
+            // that sets the runtime flag is argparse:
+            // `hermes_cli/_parser.py:224` declares `-v/--verbose`,
+            // `hermes_cli/main.py:2867` defaults it for unparsed chat,
+            // `cli.py:2596` stores it (`bool(verbose) if verbose is not None
+            // else False` — no config lookup at all), and
+            // `hermes_cli/cli_agent_setup_mixin.py:524` hands it to the agent
+            // as `verbose_logging`. (go/no-go blocking condition 8, A5.)
             ToggleRow(label: "Inline Diffs", isOn: viewModel.config.display.inlineDiffs) { viewModel.setInlineDiffs($0) }
             // v0.14 — per-message timestamps in TUI output. ACP chat
             // renders timestamps independently (the streaming chip
@@ -99,7 +116,18 @@ struct DisplayTab: View {
             EditableTextField(label: "Skin", value: viewModel.config.display.skin) { viewModel.setSkin($0) }
             ToggleRow(label: "Compact", isOn: viewModel.config.display.compact) { viewModel.setDisplayCompact($0) }
             PickerRow(label: "Resume Display", selection: viewModel.config.display.resumeDisplay, options: ["full", "minimal"]) { viewModel.setResumeDisplay($0) }
-            PickerRow(label: "Busy Input Mode", selection: viewModel.config.display.busyInputMode, options: ["interrupt", "queue"]) { viewModel.setBusyInputMode($0) }
+            // `steer` (Enter injects the typed text into the RUNNING turn) is
+            // the third member Hermes has read since v0.12.0 — `cli.py:2592`
+            // @ v2026.9.7 reads `_bim if _bim in ("queue", "steer") else
+            // "interrupt"`. Gated so a pre-v0.12 host can't be given a mode it
+            // silently downgrades to `interrupt`.
+            PickerRow(
+                label: "Busy Input Mode",
+                selection: viewModel.config.display.busyInputMode,
+                options: Self.busyInputModeOptions(
+                    current: viewModel.config.display.busyInputMode,
+                    capabilities: capabilitiesStore?.capabilities ?? .empty)
+            ) { viewModel.setBusyInputMode($0) }
             // v0.21.1 — Hermes Desktop's own cold-start restore. Default ON
             // upstream. Scarf's chat pane restores nothing across launches,
             // so this row is purely the host's preference.

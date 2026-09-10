@@ -321,6 +321,38 @@ final class HealthViewModel {
                 }
                 checks.append(tcc("Accessibility", status.accessibility))
                 checks.append(tcc("Screen Recording", status.screenRecording))
+                // `screen_recording_capturable` — a SECOND, distinct signal:
+                // the grant can be recorded as given while capture still
+                // fails (a stale TCC entry after an app update; the driver
+                // needs a restart or a re-grant). Hermes's own doctor treats
+                // granted-but-not-capturable as a failing row that outranks
+                // the plain pass (`tools/computer_use/doctor.py:204-207` at
+                // v2026.9.7), so Scarf must not report "granted" and stop.
+                //
+                // Tri-state exactly like the two rows above: nil means Scarf
+                // could not ask (driver missing, probe failed), never
+                // "cannot capture". Only rendered when Screen Recording is
+                // actually granted — below that the grant row is the whole
+                // story and a second unknown row is noise.
+                if status.screenRecording == true {
+                    switch status.screenRecordingCapturable {
+                    case .some(true):
+                        checks.append(HealthCheck(
+                            label: "Screen Recording capturable", status: .ok, detail: nil))
+                    case .some(false):
+                        checks.append(HealthCheck(
+                            label: "Screen Recording granted but not capturable",
+                            status: .error,
+                            detail: "The permission may need a re-grant in System Settings, or cua-driver needs a restart."
+                        ))
+                    case nil:
+                        checks.append(HealthCheck(
+                            label: "Screen Recording capture unknown",
+                            status: .warning,
+                            detail: status.error ?? "cua-driver did not report whether capture actually works."
+                        ))
+                    }
+                }
             } else {
                 checks.append(HealthCheck(
                     label: status.ready == true ? "Driver healthy" : "Driver not ready",
@@ -525,18 +557,9 @@ final class HealthViewModel {
         }
     }
 
-    private func loadVersion() {
-        let output = Self.probeVersion(context)
-        let lines = output.components(separatedBy: "\n")
-        version = lines.first ?? ""
-        let updateStatus = Self.parseUpdateStatus(lines: lines)
-        hasUpdate = updateStatus.hasUpdate
-        updateInfo = updateStatus.updateInfo
-        updateStatusUnknown = updateStatus.unknown
-    }
-
-    /// Static-callable form for the detached load() task. The instance
-    /// `parseOutput` below delegates here so existing call sites still work.
+    /// Parses `hermes status` / `hermes doctor` section output. `nonisolated
+    /// static` so `load()`'s detached probe task can call it off the main
+    /// actor (charter C10).
     nonisolated static func parseOutputStatic(_ output: String) -> [HealthSection] {
         var sections: [HealthSection] = []
         var currentTitle = ""
@@ -625,108 +648,11 @@ final class HealthViewModel {
         return "circle"
     }
 
-    private func parseOutput(_ output: String) -> [HealthSection] {
-        var sections: [HealthSection] = []
-        var currentTitle = ""
-        var currentChecks: [HealthCheck] = []
-
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("◆ ") {
-                if !currentTitle.isEmpty {
-                    sections.append(HealthSection(
-                        title: currentTitle,
-                        icon: iconForSection(currentTitle),
-                        checks: currentChecks
-                    ))
-                }
-                currentTitle = String(trimmed.dropFirst(2))
-                currentChecks = []
-                continue
-            }
-
-            if trimmed.hasPrefix("✓ ") {
-                let text = String(trimmed.dropFirst(2))
-                let (label, detail) = splitCheck(text)
-                currentChecks.append(HealthCheck(label: label, status: .ok, detail: detail))
-            } else if trimmed.hasPrefix("⚠ ") || trimmed.hasPrefix("⚠") {
-                let text = trimmed.replacingOccurrences(of: "⚠ ", with: "").replacingOccurrences(of: "⚠", with: "")
-                let (label, detail) = splitCheck(text)
-                currentChecks.append(HealthCheck(label: label, status: .warning, detail: detail))
-            } else if trimmed.hasPrefix("✗ ") {
-                let text = String(trimmed.dropFirst(2))
-                let (label, detail) = splitCheck(text)
-                currentChecks.append(HealthCheck(label: label, status: .error, detail: detail))
-            } else if trimmed.hasPrefix("→ ") || trimmed.hasPrefix("Error:") {
-                if !currentChecks.isEmpty {
-                    let last = currentChecks.removeLast()
-                    let extra = trimmed.replacingOccurrences(of: "→ ", with: "").replacingOccurrences(of: "Error:", with: "").trimmingCharacters(in: .whitespaces)
-                    let combined = [last.detail, extra].compactMap { $0 }.joined(separator: " ")
-                    currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
-                }
-            } else if !trimmed.isEmpty && trimmed.contains(":") && !trimmed.hasPrefix("┌") && !trimmed.hasPrefix("│") && !trimmed.hasPrefix("└") && !trimmed.hasPrefix("─") && !trimmed.hasPrefix("Run ") && !trimmed.hasPrefix("Found ") && !trimmed.hasPrefix("Tip:") {
-                let parts = trimmed.split(separator: ":", maxSplits: 1)
-                if parts.count == 2 {
-                    let key = parts[0].trimmingCharacters(in: .whitespaces)
-                    let val = parts[1].trimmingCharacters(in: .whitespaces)
-                    if !key.isEmpty && key.count < 30 {
-                        currentChecks.append(HealthCheck(label: key, status: .ok, detail: val))
-                    }
-                }
-            }
-        }
-
-        if !currentTitle.isEmpty {
-            sections.append(HealthSection(
-                title: currentTitle,
-                icon: iconForSection(currentTitle),
-                checks: currentChecks
-            ))
-        }
-
-        return sections
-    }
-
-    private func splitCheck(_ text: String) -> (String, String?) {
-        if let parenStart = text.firstIndex(of: "(") {
-            let label = text[text.startIndex..<parenStart].trimmingCharacters(in: .whitespaces)
-            let detail = String(text[parenStart...]).trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-            return (label, detail)
-        }
-        return (text, nil)
-    }
-
     private func computeCounts() {
         let allChecks = (statusSections + doctorSections).flatMap(\.checks)
         okCount = allChecks.filter { $0.status == .ok }.count
         warningCount = allChecks.filter { $0.status == .warning }.count
         issueCount = allChecks.filter { $0.status == .error }.count
-    }
-
-    private func iconForSection(_ title: String) -> String {
-        switch title {
-        case "Environment": return "gearshape.2"
-        case "API Keys": return "key"
-        case "Auth Providers": return "person.badge.key"
-        case "API-Key Providers": return "key.horizontal"
-        case "Terminal Backend": return "terminal"
-        case "Messaging Platforms": return "bubble.left.and.bubble.right"
-        case "Gateway Service": return "antenna.radiowaves.left.and.right"
-        case "Scheduled Jobs": return "clock.arrow.2.circlepath"
-        case "Sessions": return "text.bubble"
-        case "Python Environment": return "chevron.left.forwardslash.chevron.right"
-        case "Required Packages": return "shippingbox"
-        case "Configuration Files": return "doc.text"
-        case "Directory Structure": return "folder"
-        case "External Tools": return "wrench"
-        case "API Connectivity": return "wifi"
-        case "Submodules": return "arrow.triangle.branch"
-        case "Tool Availability": return "wrench.and.screwdriver"
-        case "Skills Hub": return "lightbulb"
-        case "Honcho Memory": return "brain"
-        default: return "circle"
-        }
     }
 
     /// Capture `hermes dump` output — a setup summary used for debugging / support.
@@ -810,29 +736,61 @@ final class HealthViewModel {
         return args
     }
 
+    /// argv for the supply-chain audit. NB the verb is `security audit`; bare
+    /// `hermes audit` is not a CLI verb and routes to an agent chat turn
+    /// instead of running the scan (charter C5).
+    ///
+    /// `--fail-on critical` is passed EXPLICITLY even though it is also the
+    /// parser default (hermes_cli/subcommands/security.py:26 at v2026.9.7, and
+    /// the same default, and the same 0/1/2 exit contract, back at
+    /// v2026.5.29:12384-12389 — the release `security audit` first shipped in,
+    /// which is exactly the `hasHermesAudit` floor gating this button). The
+    /// exit code is the only
+    /// thing distinguishing "found advisories" from "the scan broke", so the
+    /// threshold that produces it must be Scarf's choice, not whatever a
+    /// future Hermes changes the default to.
+    static let auditArgs = ["security", "audit", "--fail-on", "critical"]
+
     /// Run `hermes security audit` (v0.15 OSV.dev supply-chain scan) off
-    /// MainActor. NB the verb is `security audit`; bare `hermes audit` is not a
-    /// CLI verb and routes to an agent chat turn instead of running the scan.
-    /// Non-destructive read-only verb. On success we surface a one-line summary;
-    /// on failure we surface the tail of the advisory list / stderr so the user
-    /// can see which packages tripped the scan without leaving the view.
+    /// MainActor. Non-destructive read-only verb.
+    ///
+    /// The exit code here has THREE meanings, not two
+    /// (`hermes_cli/security_audit.py::cmd_security_audit`, v2026.9.7:286-312,
+    /// forwarded verbatim by `hermes_cli/main.py:2074-2075`):
+    /// 0 = scan ran clean, 1 = scan ran and FOUND advisories at or above
+    /// `--fail-on` (`return int(any(...))`, :311-312), 2 = the scan itself
+    /// failed (a bad `--fail-on`, :293, or an OSV `RuntimeError`, :307, both
+    /// printed to stderr). Rendering exit 1 as "Audit failed" told the user the
+    /// scan broke exactly when it had worked and had something to say. The
+    /// contract is identical at v2026.6.19:562-576, so this does not change
+    /// what a pre-target host renders (charter C1).
     func runAudit() {
         guard !isRunningAudit else { return }
         isRunningAudit = true
         auditMessage = String(localized: "Running supply-chain audit…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["security", "audit"], timeout: 180)
+            let result = fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
             await MainActor.run {
                 self.isRunningAudit = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if result.exitCode == 0 {
+                switch HermesSecurityAuditVerdict(exitCode: result.exitCode) {
+                case .clean:
                     // Prefer a concise tail of the output (the summary line)
                     // over the full report — the panel-less inline strip is short.
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
                     self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
-                } else {
+                case .findings:
+                    // The report IS the answer here; `_render_human` leads with
+                    // `Found N known vulnerability finding(s) across M
+                    // component(s):` (security_audit.py:257) and the highest
+                    // severities sort first (:247-249), so show the head.
+                    let head = trimmed.split(separator: "\n").prefix(4).joined(separator: " · ")
+                    self.auditMessage = head.isEmpty
+                        ? String(localized: "Advisories found.")
+                        : String(localized: "Advisories found. \(head)")
+                case .failed(let code):
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.auditMessage = String(localized: "Audit failed (exit \(result.exitCode)). \(tail)")
+                    self.auditMessage = String(localized: "Audit failed (exit \(code)). \(tail)")
                 }
             }
         }
@@ -900,11 +858,6 @@ final class HealthViewModel {
         }
     }
 
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
-    }
-
     // MARK: - Version probe (capability-gated argv, Hermes v0.20.5)
     //
     // At v0.20.5 the bare `hermes version` subcommand was removed
@@ -912,7 +865,7 @@ final class HealthViewModel {
     // token falls through to plugin discovery and spawns a chat-agent turn
     // instead of printing a version line. `hermes --version` on v0.20.5+
     // now carries the full banner including the "Update available…" (or
-    // "Up to date") line the `load()`/`loadVersion()` update-status parsing
+    // "Up to date") line `load()`'s update-status parsing
     // greps for; below v0.20.5, `--version` prints only the short banner
     // ("Run 'hermes version' for update status") and the update-status line
     // is only obtainable via the bare `version` subcommand.
@@ -990,9 +943,9 @@ final class HealthViewModel {
         var hasUpdateStatusSection: Bool { hasUpdate || !unknown }
     }
 
-    /// Shared update-status parse for both `load()` and `loadVersion()`, and
-    /// for `shouldFallBackToBareVersionSubcommand`'s "does this output
-    /// already carry the section" check.
+    /// Shared update-status parse for `load()` and for
+    /// `shouldFallBackToBareVersionSubcommand`'s "does this output already
+    /// carry the section" check.
     ///
     /// Hermes prints exactly one of three "Update available" shapes
     /// (`_startup_fast.py:238-249`): plural "N commits behind", singular "1
