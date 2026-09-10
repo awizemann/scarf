@@ -255,50 +255,12 @@ public enum HermesBotProfileYAML {
         return restoreLineEndings(result, matching: yaml)
     }
 
-    /// Re-attach the source file's per-line terminators to the rewritten text.
-    ///
-    /// The old code flipped the WHOLE file to CRLF whenever a single `\r\n`
-    /// appeared anywhere, which rewrote every untouched line in a
-    /// mixed-ending file (and showed up as a whole-file diff to anything
-    /// watching it). Lines that survive the edit keep the ending they had;
-    /// lines Scarf actually wrote get the file's dominant ending. A pure-LF
-    /// file — the overwhelmingly common case — takes the fast path and is
-    /// byte-identical to before.
+    /// Re-attach the source file's per-line terminators to the rewritten
+    /// text. Lifted into ``YAMLLineEndings`` in P19 so `GatewayConfigWriter`
+    /// could stop flipping mixed-ending files wholesale; the behaviour (and
+    /// the tests pinning it) are unchanged.
     private static func restoreLineEndings(_ result: String, matching original: String) -> String {
-        guard original.contains("\r\n") else { return result }
-        let rawLines = original.components(separatedBy: "\n")
-        var content: [String] = []
-        var endings: [String] = []
-        content.reserveCapacity(rawLines.count)
-        for raw in rawLines {
-            if raw.hasSuffix("\r") {
-                content.append(String(raw.dropLast()))
-                endings.append("\r\n")
-            } else {
-                content.append(raw)
-                endings.append("\n")
-            }
-        }
-        let dominant = endings.filter { $0 == "\r\n" }.count * 2 >= endings.count ? "\r\n" : "\n"
-
-        let outLines = result.components(separatedBy: "\n")
-        var out = ""
-        var cursor = 0
-        for (index, line) in outLines.enumerated() {
-            out += line
-            guard index < outLines.count - 1 else { break }
-            // Greedy re-sync: the writer only ever replaces contiguous
-            // regions, so the next occurrence of this line at or after the
-            // cursor is the line it came from.
-            var matched: String?
-            var probe = cursor
-            while probe < content.count {
-                if content[probe] == line { matched = endings[probe]; cursor = probe + 1; break }
-                probe += 1
-            }
-            out += matched ?? dominant
-        }
-        return out
+        YAMLLineEndings.restore(result, matching: original)
     }
 
     private static func writeLF(identity: HermesBotIdentity, into yaml: String) -> String? {

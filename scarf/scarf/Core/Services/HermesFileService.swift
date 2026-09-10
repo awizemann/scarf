@@ -962,14 +962,28 @@ struct HermesFileService: Sendable {
 
     @discardableResult
     nonisolated func setMCPServerEnv(name: String, env: [String: String]) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
+        // `expecting` is what makes this write fail CLOSED. The structural
+        // half of `verifyPatchedConfig` cannot see this damage: a key that
+        // commented its own mapping out leaves the `mcp_servers` entry list
+        // untouched (`entryNames` only reads indent 0/2) and leaves a shape
+        // `unpatchableReason` accepts (it skips `#` lines). Naming the rows
+        // we wrote turns "the file still looks like a file" into "the rows
+        // we wrote are in it" — and a missing row restores the original.
+        patchMCPServerField(
+            name: name,
+            expecting: env.isEmpty ? [] : Self.subMapRows(header: "env", map: env)
+        ) { entryLines in
             Self.replaceOrInsertSubMap(header: "env", map: env, in: &entryLines)
         }
     }
 
     @discardableResult
     nonisolated func setMCPServerHeaders(name: String, headers: [String: String]) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
+        // Read-back proof for the rows we wrote — see `setMCPServerEnv`.
+        patchMCPServerField(
+            name: name,
+            expecting: headers.isEmpty ? [] : Self.subMapRows(header: "headers", map: headers)
+        ) { entryLines in
             Self.replaceOrInsertSubMap(header: "headers", map: headers, in: &entryLines)
         }
     }
@@ -1555,8 +1569,15 @@ struct HermesFileService: Sendable {
     /// file silently failed on a CRLF `config.yaml` — the entry became
     /// invisible and the registrar re-ran a 90-second `hermes mcp add` on
     /// every launch, forever.
+    /// A leading U+FEFF is framing too, and in NEITHER `.whitespaces` nor
+    /// `.whitespacesAndNewlines` — so on a BOM'd config.yaml the very first
+    /// line read as `"\u{FEFF}mcp_servers:"`, `extractMCPBlock` found no
+    /// block, and every MCP edit refused forever. Stripped here, after the
+    /// trim, so every comparison in this file sees the same bytes; the line
+    /// itself is never rewritten, so the BOM survives on disk.
     nonisolated static func trimYAMLLine(_ line: String) -> String {
-        line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return YAMLScalar.strippingBOM(trimmed)
     }
 
     /// Drop an unquoted trailing `# comment` from a scalar value.
@@ -1643,6 +1664,7 @@ struct HermesFileService: Sendable {
             guard let colon = trimmed.firstIndex(of: ":") else {
                 return "line is not a key"
             }
+            if let why = badKeyReason(trimmed: trimmed, colon: colon) { return why }
             let value = trimmed[trimmed.index(after: colon)...]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if value.hasPrefix("&") || value.hasPrefix("*") {
@@ -1657,6 +1679,33 @@ struct HermesFileService: Sendable {
                     return "block scalar"
                 }
             }
+        }
+        return nil
+    }
+
+    /// Why the KEY half of an entry's `key: value` line is a shape the
+    /// line mutators cannot round-trip, or `nil` when it is fine.
+    ///
+    /// `unpatchableReason` used to accept any indent-4-or-deeper line with a
+    /// colon in it, which meant a key carrying a YAML flow indicator — the
+    /// exact damage the pre-P19 unquoted map-key writer produced — passed
+    /// the post-write verification that exists to catch it. A quoted key is
+    /// always fine; a bare one must not open a flow collection.
+    nonisolated private static func badKeyReason(
+        trimmed: String,
+        colon: String.Index
+    ) -> String? {
+        guard let first = trimmed.first, first != "'", first != "\"" else { return nil }
+        let key = String(trimmed[trimmed.startIndex..<colon])
+        // A tab anywhere in a plain scalar makes PyYAML raise a ScannerError.
+        if key.contains("\t") { return "tab inside the key `\(key)`" }
+        // Only a LEADING `{` / `[` is a hazard — it opens a flow collection,
+        // and PyYAML then raises a ConstructorError on the unhashable key.
+        // Verified against PyYAML 6: `a,b`, `a}b`, `a]b`, `a{b` and `a[b` all
+        // load fine as plain keys, so rejecting those would refuse to edit
+        // configs Hermes reads perfectly well.
+        if let first = key.first, first == "{" || first == "[" {
+            return "YAML flow indicator opens the unquoted key `\(key)`"
         }
         return nil
     }
@@ -1933,6 +1982,30 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// The exact rows `replaceOrInsertSubMap` emits for a nested
+    /// `env:` / `headers:` mapping — shared with the callers so they can
+    /// hand them to `patchMCPServerField(expecting:)` and have the
+    /// post-write reader PROVE they landed.
+    ///
+    /// **Keys are quoted, not just values.** P10 routed the values through
+    /// `yamlScalar` and left the keys bare, so a user-typed key was spliced
+    /// in raw. Verified against PyYAML 6 at indent 6 under `headers:`:
+    /// `{a}` / `[x]` raise `ConstructorError`, `a: b` and a key containing a
+    /// TAB raise `ScannerError`, `*z` raises `ComposerError` (undefined
+    /// alias), a leading `#` turns the whole `headers` mapping into `None`,
+    /// and `on` becomes the key `True`. Hermes swallows a PyYAML error and
+    /// discards the ENTIRE config.yaml layer (`gateway/config.py:775-791`
+    /// at `v2026.9.7`), so none of those fail loudly. Keys go through the
+    /// same `YAMLScalar.quoteIfNeeded` as `GatewayConfigWriter.setMap`'s —
+    /// the two writers no longer disagree.
+    nonisolated static func subMapRows(header: String, map: [String: String]) -> [String] {
+        var rows = ["    \(header):"]
+        for key in map.keys.sorted() {
+            rows.append("      \(YAMLScalar.quoteIfNeeded(key)): \(yamlScalar(map[key] ?? ""))")
+        }
+        return rows
+    }
+
     nonisolated private static func replaceOrInsertSubMap(header: String, map: [String: String], in lines: inout [String]) {
         var headerIndex: Int?
         var removeEnd: Int?
@@ -1966,11 +2039,7 @@ struct HermesFileService: Sendable {
             return
         }
 
-        newLines.append("    \(header):")
-        for key in map.keys.sorted() {
-            let value = map[key] ?? ""
-            newLines.append("      \(key): \(yamlScalar(value))")
-        }
+        newLines.append(contentsOf: subMapRows(header: header, map: map))
 
         if let headerIndex {
             let end = removeEnd ?? lines.count
@@ -2115,10 +2184,23 @@ struct HermesFileService: Sendable {
             "@", "*", "&", "?", "|", ">", "!", "%", ",",
             "[", "]", "{", "}", "<", "`", "'", "\""
         ]
+        // A value carrying a line break cannot sit on one row at all:
+        // emitted bare it produced a column-0 fragment, and
+        // `verifyPatchedConfig` only noticed when the damaged entry was not
+        // the LAST in `mcp_servers`. `GatewayConfigWriter` has had this
+        // guard since P10 (`containsLineBreak`); this twin never did. The
+        // double-quoted form is the only YAML style that can carry the
+        // break inline, and `unquote` decodes `\\n` / `\\r` back, so the
+        // value round-trips instead of being refused or truncated.
+        if YAMLScalar.containsLineBreak(value) { return YAMLScalar.doubleQuoted(value) }
         let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
         let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
             || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
-            || ["true", "false", "null", "yes", "no"].contains(value.lowercased())
+            // Every plain spelling PyYAML's implicit resolvers would RETYPE
+            // — `~`, `null`, `on`, `007`, `0x1F`, `.inf`, `2026-09-09` —
+            // not just the five bool/null words this used to list. An env
+            // value of `007` loaded as the int 7.
+            || YAMLScalar.resolvesToNonString(value)
             || firstCharNeedsQuoting
         if needsQuoting {
             let escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
@@ -2171,16 +2253,23 @@ struct HermesFileService: Sendable {
     nonisolated static func unquote(_ value: String) -> String {
         let v = value
         if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {
-            // Double-quoted YAML: `\\` and `\"` are the escapes we emit.
-            // Other escape sequences are left as written rather than
-            // half-decoded — we never produce them, and inventing a partial
-            // decoder for `\n`/`\uXXXX` would be a new way to be wrong.
+            // Double-quoted YAML: `\\`, `\"`, `\n` and `\r` are the escapes
+            // we emit (the last two since P19 gave `yamlScalar` a
+            // line-break guard). Anything else is left as written rather
+            // than half-decoded — we never produce it, and inventing a
+            // partial decoder for `\uXXXX` would be a new way to be wrong.
             var out = ""
             var escaped = false
             for char in v.dropFirst().dropLast() {
                 if escaped {
-                    if char != "\\" && char != "\"" { out.append("\\") }
-                    out.append(char)
+                    switch char {
+                    case "\\", "\"": out.append(char)
+                    case "n": out.append("\n")
+                    case "r": out.append("\r")
+                    default:
+                        out.append("\\")
+                        out.append(char)
+                    }
                     escaped = false
                 } else if char == "\\" {
                     escaped = true

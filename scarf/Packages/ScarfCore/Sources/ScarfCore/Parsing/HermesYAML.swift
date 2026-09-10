@@ -41,7 +41,14 @@ public struct ParsedYAML: Sendable {
 /// functions — no Foundation types that differ cross-platform.
 public enum HermesYAML {
     /// Parse a YAML string into a `ParsedYAML` bundle.
-    public static func parseNestedYAML(_ yaml: String) -> ParsedYAML {
+    public static func parseNestedYAML(_ rawYAML: String) -> ParsedYAML {
+        // A leading U+FEFF is in NEITHER `.whitespaces` nor
+        // `.whitespacesAndNewlines` (exactly as `\r` was not), so it stayed
+        // glued to the first line and the file's FIRST top-level section —
+        // `agent:`, `slack:`, whatever sorts first — parsed as a key named
+        // "\u{FEFF}agent" whose whole subtree was then invisible. Strip it
+        // once, here, at the reader boundary.
+        let yaml = YAMLScalar.strippingBOM(rawYAML)
         var values: [String: String] = [:]
         var lists: [String: [String]] = [:]
         var maps: [String: [String: String]] = [:]
@@ -193,6 +200,13 @@ public enum HermesYAML {
                 // back as the literal string "|- role: assistant tone: dry".
                 // Children legitimately sit deeper, so the continuation
                 // guard is disarmed until the next scalar.
+                // PyYAML is LAST-WINS on a duplicate key, so a file that
+                // already carries the same block twice (which is exactly
+                // what the pre-P19 writers produced on a BOM'd config) must
+                // render the SECOND block's list, not the two concatenated.
+                // Scalars were already last-wins by assignment; bullets
+                // appended. Drop the earlier block's items as this one opens.
+                lists.removeValue(forKey: path)
                 stack.append((indent: indent, name: key))
                 lastScalarIndent = nil
                 continue
@@ -384,9 +398,19 @@ public enum HermesYAML {
     /// discarded.
     public static func normalizedScalar(_ s: String) -> String {
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let quote = trimmed.first, quote == "'" || quote == "\"",
-           let close = trimmed[trimmed.index(after: trimmed.startIndex)...].firstIndex(of: quote) {
-            return String(trimmed[trimmed.index(after: trimmed.startIndex)..<close])
+        if let quote = trimmed.first, quote == "'" || quote == "\"" {
+            // `closingQuoteIndex` skips a DOUBLED `''`, which is YAML's only
+            // escape inside a single-quoted scalar and the one the writers
+            // emit. `firstIndex(of:)` stopped at the first half of the pair,
+            // so `'it''s'` read back as `it` — and the surviving half then
+            // re-doubled on the next save.
+            let body = trimmed.dropFirst()
+            if let close = closingQuoteIndex(in: body, quote: quote) {
+                let inner = String(body[body.startIndex..<close])
+                return quote == "'"
+                    ? inner.replacingOccurrences(of: "''", with: "'")
+                    : inner
+            }
         }
         var out = trimmed
         var i = out.startIndex
@@ -426,11 +450,24 @@ public enum HermesYAML {
         return nil
     }
 
+    /// Strip one layer of surrounding quotes, reversing the writers' escape.
+    ///
+    /// The single-quoted un-doubling is load-bearing: the writers escape an
+    /// embedded `'` by doubling it (YAML's only single-quote escape), and a
+    /// reader that does not undo that grows one quote per save —
+    /// `#it's` → `'#it''s'` → read back as `#it''s` → `'#it''''s'`, at which
+    /// point PyYAML genuinely loads `#it''s` and the value on disk has
+    /// CHANGED. `splitFlowEntry` and the quoted-key scan already un-doubled;
+    /// these two readers were the asymmetric pair.
     public static func stripYAMLQuotes(_ s: String) -> String {
         guard s.count >= 2 else { return s }
         let first = s.first!
         let last = s.last!
-        if (first == "'" && last == "'") || (first == "\"" && last == "\"") {
+        if first == "'" && last == "'" {
+            return String(s.dropFirst().dropLast())
+                .replacingOccurrences(of: "''", with: "'")
+        }
+        if first == "\"" && last == "\"" {
             return String(s.dropFirst().dropLast())
         }
         return s

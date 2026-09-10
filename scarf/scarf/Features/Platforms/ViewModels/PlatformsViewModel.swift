@@ -110,7 +110,15 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             yaml.components(separatedBy: "\n")
                 .filter { !$0.hasPrefix(" ") && !$0.hasPrefix("\t") }
                 .compactMap { line -> String? in
-                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // A leading U+FEFF is in neither `.whitespaces` nor
+                    // `.whitespacesAndNewlines`, so on a BOM'd config.yaml
+                    // the file's FIRST top-level section came back named
+                    // "\u{FEFF}slack" and that platform rendered as
+                    // unconfigured. Same root cause, same strip, as the
+                    // parser and the writers.
+                    let trimmed = YAMLScalar.strippingBOM(
+                        line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
                     guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
                     guard let colon = trimmed.firstIndex(of: ":") else { return nil }
                     let name = String(trimmed[trimmed.startIndex..<colon])
