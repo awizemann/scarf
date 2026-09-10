@@ -369,19 +369,33 @@ struct HermesP28CrossPhaseRemediationTests {
     /// Fails on the literal compare: the toggle reads OFF for `yes`/`on`/`1`/
     /// `True`, and a Save from that form writes the user's live setting away.
     @Test func theEmailFormReadsEveryYAMLBoolSpellingForSkipAttachments() async throws {
-        for (scalar, expected) in [("true", true), ("yes", true), ("on", true), ("1", true),
-                                   ("True", true), ("false", false), ("no", false),
-                                   ("off", false), ("0", false)] {
+        let spellings = [("true", true), ("yes", true), ("on", true), ("1", true),
+                         ("True", true), ("false", false), ("no", false),
+                         ("off", false), ("0", false)]
+        // The rule itself, with no I/O in the way.
+        for (scalar, expected) in spellings {
+            #expect(HermesYAML.boolishValue(scalar) == expected, "boolishValue(\(scalar))")
+        }
+        // …and the form's own read of a config.yaml carrying each spelling.
+        for (scalar, expected) in spellings {
             let home = try TempHermesHome()
             defer { home.cleanup() }
-            try "platforms:\n  email:\n    extra:\n      skip_attachments: \(scalar)\n"
-                .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+            let yaml = "platforms:\n  email:\n    extra:\n      skip_attachments: \(scalar)\n"
+            try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
 
             let vm = EmailSetupViewModel(context: home.context)
             vm.load()
             let deadline = Date().addingTimeInterval(120)
             while vm.isLoading, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
-            #expect(vm.skipAttachments == expected, "skip_attachments: \(scalar)")
+            // The parsed raw value is reported on failure: a read that came
+            // back nil is a file/fixture problem, a read that came back with
+            // the scalar is a boolish problem, and the two want different
+            // fixes.
+            let raw = HermesFileService.parseNestedYAML(
+                home.context.readText(home.context.paths.configYAML) ?? ""
+            ).values["platforms.email.extra.skip_attachments"]
+            #expect(vm.skipAttachments == expected,
+                    "skip_attachments: \(scalar) (parsed raw: \(raw ?? "<nil>"))")
         }
     }
 }
