@@ -17,6 +17,12 @@ import os
 ///    op the installer will perform, given a parent directory the user
 ///    picked.
 struct ProjectTemplateService: Sendable {
+
+    /// C10 budget for the `unzip` spawn. Generous: a template bundle is a
+    /// handful of megabytes and this runs off the main actor, so the cap is a
+    /// bound on a WEDGED child (a stuck mount, a full pipe), not a
+    /// performance knob.
+    static let unzipTimeout: TimeInterval = 120
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateService")
 
     let context: ServerContext
@@ -398,25 +404,39 @@ struct ProjectTemplateService: Sendable {
         // Foundation dup()s these handles into the child on `run()`, but the
         // parent copies stay open until explicitly released. Both ends must
         // be closed or each Process spawn leaks 4 fds.
-        func closePipes() {
-            try? outPipe.fileHandleForReading.close()
+        // The READ ends belong to `waitDraining` once the process has
+        // launched — see that method. On the launch-failure path below
+        // nothing is draining them, so they are closed there explicitly.
+        func closePipes(includingReadEnds: Bool = false) {
+            if includingReadEnds {
+                try? outPipe.fileHandleForReading.close()
+                try? errPipe.fileHandleForReading.close()
+            }
             try? outPipe.fileHandleForWriting.close()
-            try? errPipe.fileHandleForReading.close()
             try? errPipe.fileHandleForWriting.close()
         }
 
         do {
             try process.run()
         } catch {
-            closePipes()
+            closePipes(includingReadEnds: true)
             throw ProjectTemplateError.unzipFailed(error.localizedDescription)
         }
-        process.waitUntilExit()
-        let errData = try? errPipe.fileHandleForReading.readToEnd()
+        // C10: bounded, and drained CONCURRENTLY with the wait. `unzip`
+        // prints a line per problem entry, so a corrupt or hostile archive
+        // can fill the 64 KB pipe buffer and deadlock a parent that reads
+        // only after the wait — see ``Process.waitDraining(timeout:pipes:)``.
+        let (exited, drained) = process.waitDraining(
+            timeout: Self.unzipTimeout, pipes: [errPipe, outPipe])
+        let errData = drained.first
         closePipes()
 
+        guard exited else {
+            throw ProjectTemplateError.unzipFailed(
+                "unzip did not finish within \(Int(Self.unzipTimeout))s and was stopped")
+        }
         guard process.terminationStatus == 0 else {
-            let err = errData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let err = String(data: errData ?? Data(), encoding: .utf8) ?? ""
             throw ProjectTemplateError.unzipFailed(err.isEmpty ? "exit \(process.terminationStatus)" : err)
         }
     }

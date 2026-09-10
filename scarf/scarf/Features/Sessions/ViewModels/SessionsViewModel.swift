@@ -1045,10 +1045,4 @@ final class SessionsViewModel {
     /// stat-less `computeStats()` path.
     @ObservationIgnored private var lastKnownDBSize: String?
 
-    // MARK: - Hermes CLI
-
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
-    }
 }
