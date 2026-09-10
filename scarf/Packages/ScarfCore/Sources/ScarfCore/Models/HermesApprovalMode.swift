@@ -29,11 +29,29 @@ import Foundation
 /// wrote a scalar Hermes logs and discards, leaving the user on `manual`
 /// while the picker claimed otherwise. It is gone from the options.
 ///
-/// The bool arm is not decoration: YAML 1.1 parses a bare `off` as `False`,
-/// so `mode: off` reaches Hermes as a boolean and still means the `off`
-/// mode. Scarf's parse is string-based (`HermesYAML` never coerces), so the
-/// bare word arrives as the text `"off"` and lands on ``off`` directly —
-/// but `mode: false` (which Hermes also reads as `off`) is handled here too.
+/// The bool arm is not decoration, and it is not just `false`. Hermes branches
+/// on `isinstance(mode, bool)` → `"off" if mode is False else "manual"`
+/// (`:200,205-206`), and PyYAML's YAML 1.1 bool resolver matches the whole
+/// word set on both sides: `false`/`False`/`FALSE`, `no`/`No`/`NO`,
+/// `off`/`Off`/`OFF` all load as Python `False`, and `true`/`yes`/`on` (with
+/// the same case variants) as `True`. So upstream `approvals.mode: no` is the
+/// `off` mode, not `manual` — and the single-spelling version of this arm read
+/// it as `manual`, rendering "Manual (ask before every guarded command)" on a
+/// host that never asks.
+///
+/// Scarf's parse is string-based (`HermesYAML` never coerces), so every one of
+/// those spellings arrives here as text and ``normalize`` has to resolve the
+/// bool itself. It uses the one boolish helper (`HermesYAML.boolishValue`)
+/// rather than a hand-rolled word list — with ONE documented subtraction.
+///
+/// **`0` and `1` are NOT bools here.** Round-tripped through the real PyYAML,
+/// `mode: 0` loads as the *int* `0` and `mode: 1` as the int `1`, so neither
+/// `isinstance(mode, bool)` nor `isinstance(mode, str)` matches and Hermes
+/// falls straight through to `return "manual"` (`:214`). `boolishValue`'s set
+/// is Scarf's own liberal boolish set, which is right for the keys Hermes
+/// coerces and wrong for this one key it type-switches on, so the numeric
+/// spellings are excluded below. `~` / `null` are not bools either, and they
+/// reach `manual` the same way.
 public enum HermesApprovalMode: String, CaseIterable, Sendable {
     /// Ask before every guarded command.
     case manual
@@ -52,8 +70,17 @@ public enum HermesApprovalMode: String, CaseIterable, Sendable {
     /// when the agent has discarded it.
     public static func normalize(_ raw: String) -> HermesApprovalMode {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if value == "false" { return .off }          // YAML 1.1 `mode: off`
-        return HermesApprovalMode(rawValue: value) ?? .manual
+        // A real mode name wins, so `off` reads as the mode and not via the
+        // bool route (the two agree, but the intent is clearer).
+        if let mode = HermesApprovalMode(rawValue: value) { return mode }
+        // Otherwise: anything PyYAML would have loaded as a BOOL, resolved the
+        // way Hermes resolves it — `"off" if mode is False else "manual"`
+        // (`tools/approval_context.py:205-206`). `0` / `1` load as ints, not
+        // bools, so Hermes gives them `manual`; see the type note above.
+        if value != "0", value != "1", let boolish = HermesYAML.boolishValue(value) {
+            return boolish ? .manual : .off
+        }
+        return .manual
     }
 
     /// Picker options, in Hermes's own `_VALID_MODES` order.

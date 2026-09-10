@@ -304,6 +304,46 @@ struct MCPYAMLMapKeyP19Tests {
         #expect(HermesFileService.yamlScalar("abc123") == "abc123")
     }
 
+    /// P29 · The tab guard the line-break arm shipped without. A tab anywhere
+    /// in a scalar makes PyYAML's scanner reject the row ("found character
+    /// '\\t' that cannot start any token"), which discards the WHOLE
+    /// config.yaml layer. `YAMLScalar.quoteIfNeeded` has had this arm all
+    /// along (`YAMLScalar.swift:119`) and the KEY on the same emitted row goes
+    /// through it, so before this fix one row quoted its key for a tab and not
+    /// its value.
+    ///
+    /// The value is the only unsanitised half:
+    /// `MCPServerEditorViewModel.swift:195,201` trims the key and passes the
+    /// value raw, so leading, trailing and interior tabs all reach the writer.
+    @Test(arguments: ["A\tB", "\ttrailing", "trailing\t"])
+    func yamlScalarQuotesATabbedValue(_ value: String) throws {
+        // Pure half: never emitted bare.
+        let emitted = HermesFileService.yamlScalar(value)
+        #expect(emitted != value, "a tabbed value was emitted bare")
+        #expect(HermesFileService.unquote(emitted) == value, "the tab must round-trip")
+
+        // Through the real writer, as an MCP `env:` VALUE — the reachable
+        // path, and the one `MCPYAMLMapKeyP19Tests` only ever tested as a key.
+        let (service, home) = try loadFixture()
+        #expect(service.setMCPServerEnv(name: "remote_api", env: ["TOKEN": value]))
+        let written = try readConfig(home)
+        #expect(!written.contains("TOKEN: \(value)"))
+
+        guard Self.pyYAMLAvailable else { return }
+        #expect(Self.parses(written), "Hermes would discard the whole config.yaml layer")
+        let readBack = Self.run(
+            """
+            import sys,yaml
+            print(repr(yaml.safe_load(sys.stdin.read())['mcp_servers']['remote_api']['env']['TOKEN']))
+            """,
+            stdin: written
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // PyYAML gives back exactly the string the user typed, tab included.
+        // Python's `repr` escapes the tab, so the expectation does too.
+        let expected = "'" + value.replacingOccurrences(of: "\t", with: "\\t") + "'"
+        #expect(readBack == expected, "PyYAML read back \(readBack ?? "nil")")
+    }
+
     // MARK: - Finding 3: BOM — the audit's consequence is NOT reachable here
 
     /// **NO-OP, with evidence.** The round-2 audit derived the BOM finding

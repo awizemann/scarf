@@ -343,6 +343,51 @@ struct HermesConfigReadCorrectnessP13Tests {
         }
     }
 
+    /// P29 · `false` was only ONE of PyYAML's falsy bool spellings. Hermes
+    /// branches on `isinstance(mode, bool)` → `"off" if mode is False else
+    /// "manual"` (`tools/approval_context.py:200,205-206` @ v2026.9.7), and
+    /// PyYAML's YAML 1.1 resolver loads `no`/`No`/`NO` and `off`/`Off`/`OFF`
+    /// as Python `False` exactly as it does `false`. So `approvals.mode: no`
+    /// is the `off` mode upstream; Scarf's single-spelling arm read it as
+    /// `manual` and the row announced "ask before every guarded command" on a
+    /// host that never asks.
+    ///
+    /// Every spelling below was round-tripped through the real PyYAML, which
+    /// is also how the `0`/`1` carve-out was found: those load as INTS, so
+    /// neither of Hermes's `isinstance` arms matches and they fall through to
+    /// `manual`.
+    @Test func approvalModeResolvesEveryYAMLBoolSpellingLikePyYAML() {
+        // Falsy bools → the `off` mode.
+        for raw in ["false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF",
+                    " no ", "\tno"] {
+            #expect(HermesApprovalMode.normalize(raw) == .off,
+                    "`approvals.mode: \(raw)` is PyYAML-false, i.e. the `off` mode")
+        }
+        // Truthy bools → `manual`, which is what `"manual" if mode is True` says.
+        for raw in ["true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON",
+                    " yes "] {
+            #expect(HermesApprovalMode.normalize(raw) == .manual,
+                    "`approvals.mode: \(raw)` is PyYAML-true, i.e. `manual`")
+        }
+        // NOT bools: `0`/`1` are ints and `~`/`null` is None, so Hermes's
+        // type-switch misses all of them and returns `manual` — a liberal
+        // boolish read of `0` as the `off` mode would be wrong here.
+        for raw in ["0", "1", "~", "null", "Null", "NULL"] {
+            #expect(HermesApprovalMode.normalize(raw) == .manual,
+                    "`\(raw)` is not a YAML bool, so Hermes gives it `manual`")
+        }
+        // Near-misses are plain strings, so Hermes warns and falls back.
+        for raw in ["nope", "offf", "00", "2", "y", "n", "t", "f"] {
+            #expect(HermesApprovalMode.normalize(raw) == .manual,
+                    "`\(raw)` is not a YAML bool")
+        }
+        // And every answer is still a pickable option.
+        for raw in ["no", "on", "0", "1", "~", "nope"] {
+            #expect(HermesApprovalMode.options.contains(
+                HermesApprovalMode.normalize(raw).rawValue))
+        }
+    }
+
     // MARK: - Non-finite doubles (finding 10)
 
     /// `%.17g` spells a non-finite Double as the bare words `nan` / `inf`,

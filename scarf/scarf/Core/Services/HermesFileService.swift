@@ -2211,6 +2211,20 @@ struct HermesFileService: Sendable {
         let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
         let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
             || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
+            // A TAB anywhere in the scalar. YAML forbids the tab as
+            // indentation and PyYAML's scanner rejects the row outright
+            // ("found character '\t' that cannot start any token"), which
+            // discards the WHOLE config.yaml layer, not just this value.
+            // `YAMLScalar.quoteIfNeeded` — which the KEY on the very same
+            // emitted row goes through — has had this arm all along
+            // (`YAMLScalar.swift:119`); the value half never did, so one row
+            // would quote its key for a tab and not its value.
+            //
+            // `patchMCPServerField(expecting:)` cannot catch it either: the
+            // expected rows are built by the same `subMapRows`, so the literal
+            // match succeeds on a file PyYAML rejects. A structural verifier
+            // cannot see damage that leaves the structure intact.
+            || value.contains("\t")
             // Every plain spelling PyYAML's implicit resolvers would RETYPE
             // — `~`, `null`, `on`, `007`, `0x1F`, `.inf`, `2026-09-09` —
             // not just the five bool/null words this used to list. An env
