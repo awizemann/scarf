@@ -222,8 +222,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
             let name = HermesFileService.stripYAMLQuotes(parsed.values["name"] ?? "")
             let source = HermesFileService.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
             let version = HermesFileService.stripYAMLQuotes(parsed.values["version"] ?? "")
-            let toolOverrideRaw = HermesFileService.stripYAMLQuotes(parsed.values["tool_override"] ?? "").lowercased()
-            return (name, source, version, toolOverrideRaw == "true", true)
+            // Same boolish helper as every other YAML flag read (P18): a
+            // manifest author writing `tool_override: yes` meant the same
+            // thing as `true`, and the literal comparison read it as false.
+            // (Scarf's own display read — Hermes gates an override on
+            // `plugins.entries.<id>.allow_tool_override` in config.yaml,
+            // `hermes_cli/plugins.py:568-578` @ v2026.9.7 — so this decides a
+            // badge, not behaviour. It should still agree with the `plugin.json`
+            // arm below, which uses a real `Bool`.)
+            let toolOverride = HermesYAML.boolishValue(parsed.values["tool_override"]) ?? false
+            return (name, source, version, toolOverride, true)
         }
         let jsonPath = path + "/plugin.json"
         if let data = context.readData(jsonPath),

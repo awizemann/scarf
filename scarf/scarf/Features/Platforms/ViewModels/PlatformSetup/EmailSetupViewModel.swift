@@ -90,7 +90,13 @@ final class EmailSetupViewModel: PlatformSetupForm {
             let raw = parsed.values["platforms.email.extra.skip_attachments"]
                 ?? parsed.values["platforms.email.skip_attachments"]
                 ?? "false"
-            skipAttachments = HermesFileService.stripYAMLQuotes(raw) == "true"
+            // Hermes reads this as plain Python truthiness over the
+            // PyYAML-TYPED value (`extra.get("skip_attachments", False)`,
+            // `plugins/platforms/email/adapter.py:354` @ v2026.9.7), so a
+            // YAML bool written `yes` / `on` / `1` is ON on the host. The
+            // literal `== "true"` read it as OFF — the exact class P18 closed
+            // by giving Scarf ONE boolish helper.
+            skipAttachments = HermesYAML.boolishValue(raw) ?? false
         }
     }
 

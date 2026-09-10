@@ -207,8 +207,10 @@ struct SettingSpec: Identifiable, Hashable {
         func primedScalar(currentValue: String) -> String {
             switch self {
             case .toggle:
-                let v = currentValue.lowercased()
-                return (v == "true" || v == "yes") ? "true" : "false"
+                // One boolish helper, as everywhere else (P18) — `currentValue`
+                // is normally a rendered `Bool`, but accepting the YAML
+                // spellings costs nothing and cannot read one as OFF.
+                return (HermesYAML.boolishValue(currentValue) ?? false) ? "true" : "false"
             case .enumPicker(let options, _):
                 if options.contains(currentValue) { return currentValue }
                 return currentValue.isEmpty ? "" : (options.first ?? "")
