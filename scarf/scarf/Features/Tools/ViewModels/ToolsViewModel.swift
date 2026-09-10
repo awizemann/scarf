@@ -45,6 +45,18 @@ final class ToolsViewModel {
         await loadTools(for: platform)
     }
 
+    /// Snap `selectedPlatform` back to `cli` once the post-load roster no
+    /// longer offers it (round-3 decision 8), and reload the tool list for
+    /// the platform we landed on so no toggle in the pane still writes
+    /// `--platform <sub-floor name>`.
+    @MainActor
+    func reconcileSelection(visible: [HermesToolPlatform]) async {
+        let reconciled = KnownPlatforms.reconcile(selection: selectedPlatform, against: visible)
+        guard reconciled.name != selectedPlatform.name else { return }
+        logger.info("selection \(self.selectedPlatform.name, privacy: .public) left the roster; snapping to \(reconciled.name, privacy: .public)")
+        await switchPlatform(reconciled)
+    }
+
     @MainActor
     func toggleTool(_ tool: HermesToolset) async {
         guard let idx = toolsets.firstIndex(where: { $0.name == tool.name }) else { return }

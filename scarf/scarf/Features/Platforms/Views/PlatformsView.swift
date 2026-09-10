@@ -71,6 +71,13 @@ struct PlatformsView: View {
         .onChange(of: fileWatcher.lastChangeDate) { _, newValue in
             viewModel.load(changeToken: newValue)
         }
+        // The roster NARROWS after the fact — every row renders until the
+        // detached read lands, so a sub-floor row can be selected in that
+        // window and the selection binding above can only ever SET from the
+        // visible list. Snap it back when it leaves (round-3 decision 8).
+        .onChange(of: visiblePlatforms.map(\.name)) { _, _ in
+            viewModel.reconcileSelection(visible: visiblePlatforms)
+        }
     }
 
     private var platformList: some View {

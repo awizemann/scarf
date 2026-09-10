@@ -57,6 +57,13 @@ struct ToolsView: View {
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Tools")
         .task { await viewModel.load() }
+        // Same narrowing window as `PlatformsView`, and worse here: the
+        // selection is what `toggleTool` passes to
+        // `hermes tools enable … --platform <name>` (charter C5).
+        .onChange(of: visiblePlatforms.map(\.name)) { _, _ in
+            let visible = visiblePlatforms
+            Task { await viewModel.reconcileSelection(visible: visible) }
+        }
     }
 
     private var pageHeader: some View {

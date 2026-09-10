@@ -223,6 +223,28 @@ public enum KnownPlatforms {
         all.filter { $0.isVisible(on: capabilities, isConfigured: isConfigured($0.name)) }
     }
 
+    /// Snap a selection back when the visible roster no longer contains it.
+    ///
+    /// The roster NARROWS after the fact: both surfaces deliberately render
+    /// every row until the detached read has told them which platforms are
+    /// configured (`hasLoadedConfiguredPlatforms` / `hasLoadedPlatforms`), so
+    /// a user can select a sub-floor row in that window and keep it — the
+    /// Platforms detail pane switches on the selected NAME with no visibility
+    /// check, and the Tools picker's selection is what `toggleTool` passes to
+    /// `hermes tools enable … --platform <name>` (charter C5). Neither
+    /// selection binding can CLEAR itself: both can only ever be set from the
+    /// visible list.
+    ///
+    /// Round-3 decision 8 is "snap back", and the snap target is `cli` — the
+    /// one row that is unfloored, always configured, and already both
+    /// surfaces' initial selection.
+    public static func reconcile(
+        selection: HermesToolPlatform,
+        against visible: [HermesToolPlatform]
+    ) -> HermesToolPlatform {
+        visible.contains { $0.name == selection.name } ? selection : cli
+    }
+
     public static func icon(for platform: String) -> String {
         switch platform {
         case "cli": return "terminal"
