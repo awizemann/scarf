@@ -201,7 +201,7 @@ public enum HermesSkillsHubParser: Sendable {
     /// content hash (`bundle_content_hash`, `:300`), so there is nothing
     /// to render as "1.0.0 → 1.1.0". Every row is returned, status and
     /// all; `SkillsViewModel` splits the actionable `update_available`
-    /// rows (the only ones `do_update` acts on, `skills_hub.py:843`) from
+    /// rows (the only ones `do_update` acts on, `skills_hub.py:847`) from
     /// the three fault statuses, which are diagnostics the user has to fix
     /// by hand.
     ///
@@ -270,14 +270,14 @@ public enum HermesSkillsHubParser: Sendable {
         for line in HermesCLIVerdict.significantLines(output) {
 
             // `do_update` prints this and returns when nothing is actionable
-            // (skills_hub.py:831). Exit 0 with nothing else is then correct,
+            // (skills_hub.py:849). Exit 0 with nothing else is then correct,
             // not a silent refusal.
             if line.hasPrefix(Self.noUpdatesLine) {
                 noUpdatesAvailable = true
                 continue
             }
 
-            // `Updating: <name>` (:834) is an ATTEMPT — it is printed before
+            // `Updating: <name>` (:864) is an ATTEMPT — it is printed before
             // `do_install` runs, so it proves intent, never success.
             if line.hasPrefix(Self.attemptPrefix) {
                 attemptedCount += 1
@@ -356,17 +356,17 @@ public enum HermesSkillsHubParser: Sendable {
 /// skills it left alone because the user edited them on disk. On
 /// pre-v0.20.4 hosts `skipped` is always empty.
 public struct HermesSkillsUpdateReport: Sendable, Equatable {
-    /// `N` from `Updated N skill(s).` (`skills_hub.py:871`). This counts
+    /// `N` from `Updated N skill(s).` (`skills_hub.py:872`). This counts
     /// ATTEMPTS, not successes: it is `len(updates) - len(skipped_local)`,
     /// computed from the list `do_update` decided to walk and printed
     /// unconditionally after the loop, whatever each `do_install` did. Kept
     /// for continuity; prefer `installedCount` for a verdict.
     public let updatedCount: Int
     public let skipped: [String]
-    /// `do_update` printed `No updates available.` (`:831`) — a legitimate
+    /// `do_update` printed `No updates available.` (`:849`) — a legitimate
     /// no-op, distinct from "it printed nothing we recognise".
     public let noUpdatesAvailable: Bool
-    /// `Updating: <name>` lines (`:834`) — one per skill it tried.
+    /// `Updating: <name>` lines (`:864`) — one per skill it tried.
     public let attemptedCount: Int
     /// `Installed: <path>` lines (`:720`) — one per skill `do_install`
     /// actually landed. The honest success count.
@@ -416,7 +416,7 @@ public struct HermesHubSkill: Identifiable, Sendable, Equatable {
 /// One row of `hermes skills check`.
 ///
 /// `identifier` is the lock-file skill NAME — which is what
-/// `hermes skills update <name>` takes (`skills_hub.py:843`, keyed off
+/// `hermes skills update <name>` takes (`skills_hub.py:847`, keyed off
 /// `entry["name"]`). It is deliberately NOT the hub identifier: the update
 /// path resolves through the lock file, not through a registry slug.
 public struct HermesSkillUpdate: Identifiable, Sendable, Equatable {

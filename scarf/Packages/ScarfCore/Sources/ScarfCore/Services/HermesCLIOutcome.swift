@@ -334,13 +334,23 @@ public enum HermesCLIMarkers {
 
     /// `cmd_update` (plugins_cmd.py:822) calls `_run_capability_consent(...)`
     /// and DISCARDS its bool exactly as `cmd_enable` does, so the non-TTY arm
-    /// (:1092-1098) fires and the update still announces success. Its other
-    /// refusals go through `_fail` (`[red]Error:[/red] …`, :809, :80-83) and
-    /// exit 1, so they are caught by the exit code too. (`Error:` is also what
-    /// `cmd_remove` prints on its only refusal, :895.)
+    /// (:1092-1098) fires and the update still announces success. That
+    /// ungranted-capability case is the ONLY failure `update` can reach at
+    /// exit 0, which is why it is the only marker here.
+    ///
+    /// **A bare `Error:` does not belong in this set.** Every other refusal
+    /// `cmd_update` can reach goes through `_fail` → `sys.exit(1)`
+    /// (`:80-83`, call site `:809`), so the exit code already catches it —
+    /// while the same run prints text it does NOT control: the post-pull
+    /// `format_scan_report(scan_result)` over the freshly pulled tree
+    /// (`:844`, via `_rescan_after_update` at `:819`) and the raw `git pull`
+    /// output (`:829`). A scan finding that quotes `Error:` out of a plugin's
+    /// own source, or a commit message containing it, would be matched as a
+    /// bare substring — and this set is consumed with `failureWins: true`, so
+    /// that turns a completed update into a reported failure. Same asymmetry
+    /// the success side fixed by anchoring.
     public static let pluginsUpdateFailure = [
         "capabilities NOT granted",
-        "Error:",
     ]
 
     /// `cmd_install` (plugins_cmd.py:764) discards the same bool. Unlike
@@ -350,9 +360,9 @@ public enum HermesCLIMarkers {
 
     // MARK: skills audit / update — hermes_cli/skills_hub.py
 
-    /// `do_audit` is `-> None` (skills_hub.py:878) and exits 0 on its refusal
-    /// too. `Auditing <n> skill(s)...` (:891) is the only line that says the
-    /// scan actually ran; `No hub-installed skills to audit.` (:886) is a
+    /// `do_audit` is `-> None` (skills_hub.py:879-880) and exits 0 on its
+    /// refusal too. `Auditing <n> skill(s)...` (:893) is the only line that says
+    /// the scan actually ran; `No hub-installed skills to audit.` (:887) is a
     /// legitimate empty run, not a failure. Both byte-identical back to
     /// v2026.6.19.
     public static let skillsAuditSuccess = [
@@ -360,14 +370,14 @@ public enum HermesCLIMarkers {
         "No hub-installed skills to audit.",
     ]
 
-    /// `_print_error` (skills_hub.py:134-135) via the unknown-name arm (:890).
+    /// `_print_error` (skills_hub.py:134-135) via the unknown-name arm (:891).
     public static let skillsAuditFailure = ["Error:"]
 
-    /// `do_update`'s nothing-to-do line (skills_hub.py:831), verbatim and
+    /// `do_update`'s nothing-to-do line (skills_hub.py:849), verbatim and
     /// byte-identical back to v2026.6.19.
     public static let skillsUpdateNoUpdates = "No updates available."
 
-    /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:834). It is printed
+    /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:864). It is printed
     /// before `do_install` runs, so it proves an attempt and nothing more.
     public static let skillsUpdateAttempt = "Updating:"
 }

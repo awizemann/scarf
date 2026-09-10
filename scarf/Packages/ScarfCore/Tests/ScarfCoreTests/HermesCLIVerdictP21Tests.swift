@@ -240,4 +240,134 @@ struct HermesCLIVerdictP21Tests {
         """)
         #expect(outcome.succeeded)
     }
+    // MARK: - P29: `skills update <name> --force` is judged by its output too
+
+    /// The twin the round-2 pass left behind. `finishUpdateAll` stopped
+    /// trusting the exit code; `finishForceUpdate` kept an
+    /// `if exitCode == 0 { "Updated … (local edits discarded)" }`.
+    ///
+    /// `do_update(name, force=True)` is `-> None`
+    /// (`hermes_cli/skills_hub.py:857-858`) and so is the
+    /// `do_install(..., force=True)` it nests (`:894`), so a blocked scan
+    /// verdict prints `Installation blocked: …` (`:701`) and RETURNS at exit 0.
+    /// The one action that destroys the user's local edits therefore announced
+    /// that it had succeeded while nothing was written (C5).
+    @MainActor
+    @Test func aBlockedForceUpdateAtExitZeroIsNotAnUpdate() {
+        let report = HermesSkillsHubParser.parseUpdateReport("""
+        Updating: reddit
+        Quarantined to quarantine/reddit-a1b2c3
+        Installation blocked: dangerous verdict (3 findings)
+        Updated 1 skill(s).
+        """)
+        let verdict = SkillsViewModel.forceUpdateVerdict(
+            name: "reddit", exitCode: 0, report: report
+        )
+        #expect(!verdict.message.hasPrefix("Updated reddit"),
+                "a blocked force update reported success: \(verdict.message)")
+        #expect(verdict.message == "Update attempted — Installation blocked: dangerous verdict (3 findings)")
+        // The skill keeps its "local edits kept" badge: nothing overwrote them.
+        #expect(!verdict.clearSkipped)
+    }
+
+    /// A force update that really landed still says so, and releases the
+    /// local-edits badge. Without this the fix could be a blanket refusal.
+    @MainActor
+    @Test func aForceUpdateThatInstalledIsStillReportedAsUpdated() {
+        let report = HermesSkillsHubParser.parseUpdateReport("""
+        Updating: reddit
+        Warning: 'reddit' is already installed at research/reddit
+        Installed: research/reddit
+        Updated 1 skill(s).
+        """)
+        let verdict = SkillsViewModel.forceUpdateVerdict(
+            name: "reddit", exitCode: 0, report: report
+        )
+        #expect(verdict.message == "Updated reddit (local edits discarded)")
+        #expect(verdict.clearSkipped)
+    }
+
+    /// Nothing to update is a truthful, non-destructive answer — not a
+    /// success claim, and not a failure.
+    @MainActor
+    @Test func aForceUpdateWithNothingToDoSaysSo() {
+        let verdict = SkillsViewModel.forceUpdateVerdict(
+            name: "reddit", exitCode: 0,
+            report: HermesSkillsHubParser.parseUpdateReport("No updates available.\n")
+        )
+        #expect(verdict.message == "No updates available for reddit")
+        #expect(verdict.clearSkipped)
+    }
+
+    /// Exit 0 with none of `do_update`'s lines — an unknown verb, or a
+    /// refusal with no marker — is never a success (C5).
+    @MainActor
+    @Test func aForceUpdateThatPrintedNothingRecognisableIsNotASuccess() {
+        let verdict = SkillsViewModel.forceUpdateVerdict(
+            name: "reddit", exitCode: 0,
+            report: HermesSkillsHubParser.parseUpdateReport("usage: hermes skills [-h] ...\n")
+        )
+        #expect(verdict.message == "Update reported nothing for reddit")
+        #expect(!verdict.clearSkipped)
+    }
+
+    // MARK: - P29: `plugins update`'s failure set must not match plugin text
+
+    /// `cmd_update` prints `format_scan_report(scan_result)` over the freshly
+    /// pulled tree (`hermes_cli/plugins_cmd.py:844`, via `_rescan_after_update`
+    /// at `:819`) and echoes the raw `git pull` output (`:829`) — neither of
+    /// which it controls the text of. Meanwhile every refusal it can reach goes
+    /// through `_fail` → `sys.exit(1)` (`:80-83`, `:809`), so the exit code
+    /// already catches those. With a bare `Error:` in the failure set and
+    /// `failureWins: true`, a finding quoting a plugin's own source flipped a
+    /// completed update into a reported failure.
+    @Test func aQuotedErrorInAPluginScanReportDoesNotFailTheUpdate() {
+        let outcome = HermesCLIVerdict.judge(
+            output: """
+            Updating acme-tools...
+            ⚠ Security scan flagged the updated plugin: 2 findings
+            acme-tools  hooks/post.py:31  raise RuntimeError("Error: token missing")
+            From github.com/acme/acme-tools
+               a1b2c3d..e4f5g6h  main -> origin/main
+            ✓ Plugin acme-tools updated.
+            """,
+            exitCode: 0,
+            successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
+            failureWins: true
+        )
+        #expect(outcome.succeeded, "a quoted `Error:` flipped a completed update: \(outcome.detail ?? "-")")
+    }
+
+    /// ...while the one refusal `update` CAN reach at exit 0 still wins, which
+    /// is why `failureWins: true` stays.
+    @Test func anUngrantedCapabilityStillFailsTheUpdateAtExitZero() {
+        let outcome = HermesCLIVerdict.judge(
+            output: """
+            Updating acme-tools...
+            Plugin capabilities NOT granted (non-interactive); leaving them pending.
+            ✓ Plugin acme-tools updated.
+            """,
+            exitCode: 0,
+            successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
+            failureWins: true
+        )
+        #expect(!outcome.succeeded)
+        #expect(outcome.detail?.contains("capabilities NOT granted") == true)
+    }
+
+    /// A real `_fail` refusal is still a failure — it exits 1, which is the
+    /// path that catches it now that `Error:` is out of the marker set.
+    @Test func aFailRefusalIsCaughtByItsExitCode() {
+        let outcome = HermesCLIVerdict.judge(
+            output: "Error: Plugin 'acme-tools' was not installed from git (no .git directory). Cannot update.\n",
+            exitCode: 1,
+            successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
+            failureWins: true
+        )
+        #expect(!outcome.succeeded)
+        #expect(outcome.detail?.contains("not installed from git") == true)
+    }
 }
