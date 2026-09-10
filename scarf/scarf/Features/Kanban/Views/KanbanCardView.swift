@@ -407,27 +407,48 @@ struct KanbanCardView: View {
     /// reference depends on status — running tasks show how long
     /// they've been running; blocked show how long blocked, etc.
     private var relativeTimeLabel: String {
-        switch KanbanStatus.from(task.status) {
+        Self.relativeTimeLabel(
+            status: KanbanStatus.from(task.status),
+            startedAt: task.startedAt,
+            createdAt: task.createdAt,
+            completedAt: task.completedAt
+        )
+    }
+
+    /// Pure form of `relativeTimeLabel`, so the composition can be pinned by
+    /// a test without standing up a view. `RelativeDateTimeFormatter` already
+    /// emits a full localized phrase ("3 min. ago"), so NO arm may append its
+    /// own " ago" — the `.done` and default arms used to, and every
+    /// non-running card read "3 min. ago ago", in the footer and in the
+    /// accessibility label that reuses this string.
+    static func relativeTimeLabel(
+        status: KanbanStatus,
+        startedAt: String?,
+        createdAt: String?,
+        completedAt: String?,
+        now: Date = Date()
+    ) -> String {
+        switch status {
         case .running:
-            if let started = task.startedAt, let label = relativeShort(from: started) {
-                return "running \(label)"
+            if let started = startedAt, let label = relativeShort(from: started, now: now) {
+                return String(localized: "running \(label)")
             }
-            return "running"
+            return String(localized: "running")
         case .blocked:
             // Hermes doesn't expose blocked-since separately; fall
             // back to created_at as a coarse signal.
-            if let created = task.createdAt, let label = relativeShort(from: created) {
-                return "blocked \(label)"
+            if let created = createdAt, let label = relativeShort(from: created, now: now) {
+                return String(localized: "blocked \(label)")
             }
-            return "blocked"
+            return String(localized: "blocked")
         case .done:
-            if let completed = task.completedAt, let label = relativeShort(from: completed) {
-                return "done \(label) ago"
+            if let completed = completedAt, let label = relativeShort(from: completed, now: now) {
+                return String(localized: "done \(label)")
             }
-            return "done"
+            return String(localized: "done")
         default:
-            if let created = task.createdAt, let label = relativeShort(from: created) {
-                return "\(label) ago"
+            if let created = createdAt, let label = relativeShort(from: created, now: now) {
+                return label
             }
             return ""
         }
@@ -446,12 +467,12 @@ struct KanbanCardView: View {
         return f
     }()
 
-    private func relativeShort(from iso: String) -> String? {
-        if let date = Self.isoFractional.date(from: iso) {
-            return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+    static func relativeShort(from iso: String, now: Date = Date()) -> String? {
+        if let date = isoFractional.date(from: iso) {
+            return relativeFormatter.localizedString(for: date, relativeTo: now)
         }
-        if let date = Self.isoPlain.date(from: iso) {
-            return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+        if let date = isoPlain.date(from: iso) {
+            return relativeFormatter.localizedString(for: date, relativeTo: now)
         }
         return nil
     }

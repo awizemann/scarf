@@ -499,8 +499,9 @@ struct KanbanInspectorPane: View {
             // worker touched the card, and `AttributedString(markdown:)`
             // renders links with no scheme allowlist — a worker could plant
             // `[Approve](javascript:…)`-shaped bait in the inspector. Comment
-            // bodies right below render as plain `Text` for the same reason;
-            // the two must not diverge. Rendered markdown in this app goes
+            // bodies right below render as plain `Text` for the same reason,
+            // and so does the iOS twin (`ScarfGoKanbanDetailSheet`'s body
+            // block) — the three must not diverge. Rendered markdown goes
             // through `MarkdownContentView`, which carries the allowlist.
             Text(body)
                 .scarfStyle(.body)

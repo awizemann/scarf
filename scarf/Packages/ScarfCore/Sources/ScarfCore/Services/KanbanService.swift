@@ -15,8 +15,9 @@ import os
 ///
 /// **Hermes constraints surfaced as Swift constraints:**
 /// - There is no `update` verb, so there's no `update(taskId:title:body:)`.
-///   Mutations after create are state transitions (assign / claim /
-///   complete / block / unblock / archive / comment) or new comments.
+///   Mutations after create are state transitions (assign / dispatch /
+///   complete / block / unblock / archive) or new comments. `claim` is
+///   deliberately not wrapped — see `KanbanTransitionStep`'s doc.
 /// - The board is global with optional `tenant` namespacing — pass a
 ///   tenant via `KanbanListFilter.tenant` for project-scoped views.
 /// - The CLI prints `"no matching tasks"` instead of `[]` when nothing
@@ -328,15 +329,6 @@ public actor KanbanService {
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "assign")
     }
 
-    @discardableResult
-    public func claim(taskId: String, ttlSeconds: Int = 900) async throws -> String {
-        let args = prefix("claim", taskId, "--ttl", String(ttlSeconds))
-        let (code, stdout, stderr) = await runHermes(args: args, timeout: 20)
-        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "claim")
-        // claim prints the resolved workspace path on stdout.
-        return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     public func comment(taskId: String, text: String, author: String? = nil) async throws {
         var args = prefix("comment")
         if let author, !author.isEmpty {
@@ -431,18 +423,6 @@ public actor KanbanService {
         }
     }
 
-    public func link(parent: String, child: String) async throws {
-        let args = prefix("link", parent, child)
-        let (code, _, stderr) = await runHermes(args: args, timeout: 15)
-        try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "link")
-    }
-
-    public func unlink(parent: String, child: String) async throws {
-        let args = prefix("unlink", parent, child)
-        let (code, _, stderr) = await runHermes(args: args, timeout: 15)
-        try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "unlink")
-    }
-
     // MARK: - v0.15 verbs
 
     /// Promote `todo`/`blocked` tasks to `ready` so the dispatcher can
@@ -506,48 +486,6 @@ public actor KanbanService {
         args.append(contentsOf: taskIds)
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "purge")
-    }
-
-    /// Spawn a swarm of workers against a single goal — `hermes kanban
-    /// swarm <goal> --worker … --verifier … --synthesizer …`. Each
-    /// `worker` string is passed verbatim in `PROFILE:TITLE[:SKILL,SKILL]`
-    /// format. The verifier checks worker output; the synthesizer merges
-    /// it. Optional tenant / priority / created-by / idempotency-key.
-    public func swarm(
-        goal: String,
-        workers: [String],
-        verifier: String,
-        synthesizer: String,
-        tenant: String? = nil,
-        priority: Int? = nil,
-        createdBy: String? = nil,
-        idempotencyKey: String? = nil
-    ) async throws {
-        var args = prefix("swarm")
-        for worker in workers {
-            args.append(contentsOf: ["--worker", worker])
-        }
-        args.append(contentsOf: ["--verifier", verifier, "--synthesizer", synthesizer])
-        if let tenant, !tenant.isEmpty {
-            args.append(contentsOf: ["--tenant", tenant])
-        }
-        if let priority {
-            args.append(contentsOf: ["--priority", String(priority)])
-        }
-        if let createdBy, !createdBy.isEmpty {
-            args.append(contentsOf: ["--created-by", createdBy])
-        }
-        if let idempotencyKey, !idempotencyKey.isEmpty {
-            args.append(contentsOf: ["--idempotency-key", idempotencyKey])
-        }
-        args.append("--json")
-        // `goal` is argparse's positional and moves to the very end behind
-        // `--`, so a goal that legitimately opens with a dash ("--json is
-        // broken") is text rather than a flag. It cannot stay next to the
-        // verb: every token after `--` is a positional.
-        args.append(contentsOf: ["--", goal])
-        let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
-        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "swarm")
     }
 
     // MARK: - Drag-drop transition mapper

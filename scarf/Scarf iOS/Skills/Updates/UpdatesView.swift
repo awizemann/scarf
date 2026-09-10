@@ -23,6 +23,16 @@ struct UpdatesView: View {
                 keptLocalEditsSection
                 Divider()
             }
+            // Rows `skills check` returned as orphaned / unavailable /
+            // invalid_install. "Update All" cannot act on any of them, so
+            // they are listed as faults rather than counted as updates —
+            // same three-state shape as the Mac pane's
+            // `updateFaultsSection`. Empty unless Hermes reported a fault,
+            // so the tab renders exactly as before on a clean host.
+            if !vm.updateFaults.isEmpty {
+                updateFaultsSection
+                Divider()
+            }
             content
         }
         .alert(
@@ -67,6 +77,38 @@ struct UpdatesView: View {
             }
             Spacer()
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    /// Skills whose `skills check` row reported a fault the user has to fix
+    /// by hand: a missing install directory, an unreachable registry, or an
+    /// unresolvable recorded path. Each carries Hermes's own remedy. Mirrors
+    /// the Mac pane's `updateFaultsSection`.
+    @ViewBuilder
+    private var updateFaultsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                "\(vm.updateFaults.count) skill(s) could not be checked",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.orange)
+            ForEach(vm.updateFaults) { fault in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fault.identifier)
+                        .font(.callout.monospaced())
+                    if let detail = fault.status.faultDescription {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }

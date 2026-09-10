@@ -65,7 +65,7 @@ struct DiagnosticDetailSheet: View {
                 }
 
                 Section {
-                    Label("Recovery actions live on the Mac app — open this task there to verify, reject, or unblock.", systemImage: "info.circle")
+                    Label("Recovery actions live on the Mac app — open this task there to unblock, complete, or archive it.", systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
