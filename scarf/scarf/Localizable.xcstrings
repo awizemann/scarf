@@ -50,6 +50,510 @@
         }
       }
     },
+    "%lld monitor skipped — source doesn't travel" : {
+      "comment" : "Fleet-apply result note: N monitor cron jobs were not copied because their monitored script path or URL hash state is host-local.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Monitor übersprungen — Quelle ist hostgebunden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld monitor omitido: el origen no se traslada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld moniteur ignoré — la source ne suit pas"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モニター %lld 件をスキップ — ソースは移行できません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld monitor ignorado — a origem não acompanha"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过 %lld 个监控任务——来源无法迁移"
+          }
+        }
+      }
+    },
+    "%lld w/o run-to-run continuity" : {
+      "comment" : "Fleet-apply result note: N copied cron jobs lost run-to-run continuity because the copy starts its own run history.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ohne Lauf-zu-Lauf-Kontinuität"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sin continuidad entre ejecuciones"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sans continuité entre exécutions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件は実行間の継続なし"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sem continuidade entre execuções"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个不含运行间连续性"
+          }
+        }
+      }
+    },
+    "Create a new job pre-filled from this one — the only thing Hermes accepts for a job it won't re-activate." : {
+      "comment" : "Tooltip on the Duplicate button in the cron detail pane; explains that duplicating is the only remedy Hermes accepts for a finished job.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einen neuen Job erstellen, vorausgefüllt aus diesem — das Einzige, was Hermes bei einem Job akzeptiert, den es nicht reaktiviert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crea una tarea nueva rellenada a partir de esta: lo único que Hermes acepta para una tarea que no reactivará."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Créer une tâche pré-remplie à partir de celle-ci — la seule chose qu’Hermes accepte pour une tâche qu’il ne réactivera pas."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブの内容を引き継いだ新しいジョブを作成します。Hermes が再有効化を拒否するジョブに対して受け付ける唯一の操作です。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cria uma tarefa nova preenchida a partir desta — a única coisa que o Hermes aceita para uma tarefa que não vai reativar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基于此任务预填内容新建一个任务——这是 Hermes 对拒绝重新激活的任务唯一接受的操作。"
+          }
+        }
+      }
+    },
+    "Duplicate %@" : {
+      "comment" : "Title of the sheet that creates a new cron job pre-filled from an existing one; %@ is the source job's name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ duplizieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dupliquer %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を複製"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制 %@"
+          }
+        }
+      }
+    },
+    "Duplicate cron job" : {
+      "comment" : "Title of the iOS sheet that creates a new cron job pre-filled from an existing one.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cron-Job duplizieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar tarea cron"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dupliquer la tâche cron"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron ジョブを複製"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar tarefa cron"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制 cron 任务"
+          }
+        }
+      }
+    },
+    "Duplicate…" : {
+      "comment" : "Menu item that opens a pre-filled create form seeded from the selected cron job; the ellipsis marks that a sheet follows.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplizieren…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dupliquer…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製…"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicar…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制…"
+          }
+        }
+      }
+    },
+    "This copy won't carry: %@. Set those with `hermes cron edit` on the host." : {
+      "comment" : "Warning in the Duplicate sheet listing the settings the create form cannot express (model pin, monitor source, continuity); %@ is the comma-separated list.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Kopie übernimmt nicht: %@. Setze diese mit `hermes cron edit` auf dem Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta copia no incluirá: %@. Configúralos con `hermes cron edit` en el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette copie ne reprendra pas : %@. Définissez-les avec `hermes cron edit` sur l’hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このコピーには次が引き継がれません: %@。ホスト上で `hermes cron edit` を使って設定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta cópia não vai incluir: %@. Defina esses itens com `hermes cron edit` no host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此副本不会保留：%@。请在主机上用 `hermes cron edit` 设置这些项。"
+          }
+        }
+      }
+    },
+    "model pin (%@)" : {
+      "comment" : "Item in the list of settings a duplicated cron job will not carry; %@ is the pinned model name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modell-Pin (%@)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "modelo fijado (%@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "modèle épinglé (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデル指定 (%@)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "modelo fixado (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁定模型 (%@)"
+          }
+        }
+      }
+    },
+    "monitor source (%@)" : {
+      "comment" : "Item in the list of settings a duplicated cron job will not carry; %@ is the monitored script path or URL.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monitor-Quelle (%@)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "origen del monitor (%@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "source du moniteur (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モニターのソース (%@)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "origem do monitor (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "监控来源 (%@)"
+          }
+        }
+      }
+    },
+    "provider (%@)" : {
+      "comment" : "Item in the list of settings a duplicated cron job will not carry; %@ is the inference provider name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anbieter (%@)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "proveedor (%@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "fournisseur (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダー (%@)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "provedor (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供方 (%@)"
+          }
+        }
+      }
+    },
+    "reasoning effort (%@)" : {
+      "comment" : "Item in the list of settings a duplicated cron job will not carry; %@ is the pinned reasoning effort level.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reasoning-Aufwand (%@)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "esfuerzo de razonamiento (%@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "effort de raisonnement (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推論の強度 (%@)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "esforço de raciocínio (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推理强度 (%@)"
+          }
+        }
+      }
+    },
+    "run-to-run continuity" : {
+      "comment" : "Item in the list of settings a duplicated cron job will not carry: each run seeing the previous run's output.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lauf-zu-Lauf-Kontinuität"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "continuidad entre ejecuciones"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "continuité entre exécutions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行間の継続"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "continuidade entre execuções"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行间连续性"
+          }
+        }
+      }
+    },
     "—" : {
       "comment" : "A placeholder for a project name.",
       "isCommentAutoGenerated" : true

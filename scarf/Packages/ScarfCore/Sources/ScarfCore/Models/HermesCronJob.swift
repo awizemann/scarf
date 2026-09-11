@@ -464,6 +464,47 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         return nil
     }
 
+    /// A fresh record seeded from this one, for iOS's Duplicate (round-4
+    /// decision 5). iOS creates by rewriting `cron/jobs.json` rather than by
+    /// shelling `cron create`, so its "ordinary create" is a NEW record —
+    /// hence a new `id` and a clean run history.
+    ///
+    /// Everything that describes the job's CONFIG is carried, including the
+    /// keys `extra` holds verbatim (`monitor_script`, `monitor_url`, the
+    /// `repeat` spec) — a JSON write has no create-form to squeeze through,
+    /// so unlike the Mac's duplicate it loses nothing. Everything that
+    /// describes a RUN is dropped: `state` returns to `scheduled`,
+    /// `next_run_at`/`last_run_at`/`last_error` and the delivery counters go,
+    /// and the pause marker with them, or the copy would be born carrying the
+    /// dead job's terminal state (`effective_job_state` preserves
+    /// `completed`/`error` regardless of `enabled`, `cron/jobs.py:488-503` @
+    /// `v2026.9.7`) and be just as unrunnable as its source.
+    public nonisolated func duplicatedAsNewJob(id newID: String) -> HermesCronJob {
+        var carried = extra
+        for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
+                           "last_status", "last_dispatch", "last_delivery_unverified",
+                           "latest_execution"] {
+            carried.removeValue(forKey: runtimeKey)
+        }
+        // `repeat.completed` is a run counter on a config field — reset the
+        // count, keep the limit, so a duplicate of a job that ran all 3 of
+        // its times is a job that will run 3 more.
+        if case .object(var repeatObject)? = carried["repeat"] {
+            repeatObject["completed"] = .int(0)
+            carried["repeat"] = .object(repeatObject)
+        }
+        return HermesCronJob(
+            id: newID, name: name, prompt: prompt, skills: skills, model: model,
+            schedule: schedule, enabled: true, state: "scheduled", deliver: deliver,
+            nextRunAt: nil, lastRunAt: nil, lastError: nil,
+            preRunScript: preRunScript, deliveryFailures: nil,
+            lastDeliveryError: nil, timeoutType: timeoutType,
+            timeoutSeconds: timeoutSeconds, silent: silent, workdir: workdir,
+            contextFrom: contextFrom, noAgent: noAgent,
+            attachToSession: attachToSession, extra: carried
+        )
+    }
+
     /// Copy of this job with `next_run_at` cleared, for the JSON-write
     /// fallback path when the `hermes cron resume` CLI is unreachable.
     ///
@@ -534,13 +575,14 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// `_coerce_job_text(job.get("state")).strip() == "paused" or
     /// bool(job.get("paused_at"))` (`cron/jobs.py:477-479` @ `v2026.9.7`).
     /// This helper ports the SECOND arm only — Python truthiness over
-    /// `paused_at` — because `effectiveState` already carries the `paused`
-    /// arm, so the two together reproduce the whole predicate. So `""`, `0`,
-    /// `false`, `[]` and `{}` are NOT markers, only
-    /// `null` used to be read that way by Scarf. A record carrying
-    /// `paused_at: ""` therefore renders "paused" in Scarf while the host
-    /// keeps firing it, which is exactly the divergence `effective_job_state`
-    /// exists to prevent.
+    /// `paused_at` — because `effectiveState` already carries the `state ==
+    /// "paused"` arm, so the two together reproduce the whole predicate.
+    ///
+    /// Under Python truthiness `""`, `0`, `0.0`, `false`, `[]` and `{}` are
+    /// NOT markers, and neither is `null`. Scarf used to read any non-`null`
+    /// value as one, so a record carrying `paused_at: ""` rendered "paused"
+    /// while the host kept firing it — exactly the divergence
+    /// `effective_job_state` exists to prevent.
     static nonisolated func isTruthyPauseMarker(_ value: JSONValue?) -> Bool {
         switch value {
         case nil, .null:            return false
@@ -757,6 +799,95 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         guard case .string(let s)? = extra["failure_deliver"] else { return nil }
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// `monitor_script` — monitor mode's cheap source SCRIPT, run each tick
+    /// BEFORE the agent; unchanged output (exact-bytes hash) suppresses the
+    /// agent run entirely (`hermes cron create --monitor-script`,
+    /// `hermes_cli/subcommands/cron.py:51-58` @ `v2026.9.7`). Persisted as a
+    /// top-level key on the job record (`cron/jobs.py:1773`).
+    public nonisolated var monitorScript: String? {
+        Self.nonEmptyString(extra["monitor_script"])
+    }
+
+    /// `monitor_url` — the http(s) sibling of `monitorScript`, same
+    /// hash-suppression semantics (`hermes_cli/subcommands/cron.py:59-62`,
+    /// record key at `cron/jobs.py:1774` @ `v2026.9.7`). Mutually exclusive
+    /// with `monitorScript`.
+    public nonisolated var monitorURL: String? {
+        Self.nonEmptyString(extra["monitor_url"])
+    }
+
+    /// The monitor SOURCE, whichever of the two the record carries — Hermes's
+    /// own `monitor_source = job.get("monitor_script") or job.get("monitor_url")`
+    /// (`hermes_cli/cron.py:190` @ `v2026.9.7`).
+    public nonisolated var monitorSource: String? { monitorScript ?? monitorURL }
+
+    /// A monitor job: the agent runs only when the source's output CHANGED.
+    /// Recreating one without its source turns it into an ordinary agent job
+    /// that runs — and bills — every single tick, which is why the fleet
+    /// copier skips these rather than degrading them silently.
+    public nonisolated var isMonitorJob: Bool { monitorSource != nil }
+
+    /// `--continuity` — each run wakes with the job's OWN previous output in
+    /// its prompt. It is not a field: Hermes stores it by putting `"self"`
+    /// into `context_from` (`_apply_continuity`,
+    /// `tools/cronjob_job_args.py:313-321` @ `v2026.9.7`), which
+    /// `build_prompt` resolves to the job's own id
+    /// (`cron/scheduler_prompt.py:77-79`). So read it the same way, and
+    /// accept the already-resolved id as well as the literal sentinel.
+    public nonisolated var hasRunToRunContinuity: Bool {
+        (contextFrom ?? []).contains { ref in
+            let trimmed = ref.trimmingCharacters(in: .whitespaces)
+            return trimmed.lowercased() == "self" || trimmed == id
+        }
+    }
+
+    /// `extra[key]` as a trimmed non-empty string, or `nil`. Hermes writes
+    /// these optional text fields as `None` OR `""` depending on the path
+    /// (`_normalize_job_optional_text`, `cron/jobs.py:1583-1584`), and an
+    /// empty string means "not set", not "set to nothing".
+    nonisolated static func nonEmptyString(_ value: JSONValue?) -> String? {
+        guard case .string(let s)? = value else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The `cron create` settings this record carries that Scarf's create
+    /// form has no field for — so a Duplicate would silently drop them.
+    ///
+    /// Round-4 decision 5 makes Duplicate an ORDINARY create pre-filled from
+    /// the record, and a create can only carry what the form can express:
+    /// name, schedule, prompt, deliver, failure-deliver, repeat, skills,
+    /// script, workdir, no-agent. Everything else `hermes cron create` accepts
+    /// — `--model`/`--provider` (`hermes_cli/subcommands/cron.py:66-72` @
+    /// `v2026.9.7`, record keys `cron/jobs.py:1766-1767`),
+    /// `--reasoning-effort` (`:73-77`, record `:1802`), `--monitor-script` /
+    /// `--monitor-url` (`:51-62`, record `:1773-1774`) and `--continuity`
+    /// (`:76-84`, stored as `"self"` in `context_from`) — has no field, and a
+    /// duplicate that quietly loses a model pin or a monitor source is the
+    /// same silent degradation the fleet copier was just fixed for.
+    ///
+    /// So NAME them. The sheet shows this list; it does not pretend the copy
+    /// is faithful.
+    public nonisolated var settingsACreateFormCannotCarry: [String] {
+        var out: [String] = []
+        if let model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
+            out.append(String(localized: "model pin (\(model))"))
+        }
+        if let provider = Self.nonEmptyString(extra["provider"]) {
+            out.append(String(localized: "provider (\(provider))"))
+        }
+        if let effort = Self.nonEmptyString(extra["reasoning_effort"]) {
+            out.append(String(localized: "reasoning effort (\(effort))"))
+        }
+        if let source = monitorSource {
+            out.append(String(localized: "monitor source (\(source))"))
+        }
+        if hasRunToRunContinuity {
+            out.append(String(localized: "run-to-run continuity"))
+        }
+        return out
     }
 
     /// `last_dispatch` — scheduled-vs-actual timing for the last fire

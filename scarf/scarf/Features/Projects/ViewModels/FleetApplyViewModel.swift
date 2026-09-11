@@ -148,6 +148,14 @@ final class FleetApplyViewModel {
             if !cronCopySet.scriptOnly.isEmpty {
                 out.append("\(cronCopySet.scriptOnly.count) script-only cron job\(cronCopySet.scriptOnly.count == 1 ? "" : "s") can't be copied (their script file lives on this host only).")
             }
+            // Round-4 decision 8. Same caveat shape as `scriptOnly`: the
+            // monitor SOURCE doesn't travel (a `--monitor-script` path is on
+            // this host only; a `--monitor-url`'s hash state is per-host), so
+            // a copy would run the agent on every tick instead of only on a
+            // change.
+            if !cronCopySet.monitor.isEmpty {
+                out.append("\(cronCopySet.monitor.count) monitor cron job\(cronCopySet.monitor.count == 1 ? "" : "s") can't be copied (the monitored script or URL state lives on this host only).")
+            }
             if !cronCopySet.unsupportedSchedule.isEmpty {
                 out.append("\(cronCopySet.unsupportedSchedule.count) cron job\(cronCopySet.unsupportedSchedule.count == 1 ? "" : "s") have a schedule that can't be recreated from the CLI.")
             }
