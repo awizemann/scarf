@@ -1187,11 +1187,10 @@ final class HealthViewModel {
     /// filter silently misses every standard install.
     private static let lsofTimeout: TimeInterval = 3
 
-    /// How long to wait for the drained pipe to hit EOF after the child has
-    /// gone. Short: the data is already written, this only covers the close.
-    private static let drainGrace: TimeInterval = 1
-
-    private static func dashboardListenerPID(port: Int) -> pid_t? {
+    /// `nonisolated`: the only caller is inside `Task.detached` (see
+    /// `stopDashboard`), so this must not be main-actor work — and now that the
+    /// body is four lines there is nothing left to justify an isolation hop.
+    private nonisolated static func dashboardListenerPID(port: Int) -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN"]
@@ -1202,33 +1201,12 @@ final class HealthViewModel {
 
         do {
             try lsof.run()
-            // Drain the pipe CONCURRENTLY with the wait, never after it.
-            // `run` → `waitUntilExit` → `readDataToEndOfFile` is the classic
-            // pipe deadlock shape: a child that fills the 64 KB buffer blocks
-            // in `write()` while the parent waits for an exit that can no
-            // longer come. `lsof -t` prints a handful of bytes so it could
-            // not actually deadlock here — but the overrun path made the old
-            // order wrong for a second reason too: after SIGTERM/SIGKILL the
-            // read collected whatever a killed writer had flushed.
-            let reader = output.fileHandleForReading
-            let drained = OSAllocatedUnfairLock(initialState: Data())
-            let readerFinished = DispatchSemaphore(value: 0)
-            DispatchQueue.global(qos: .utility).async {
-                let data = reader.readDataToEndOfFile()
-                drained.withLock { $0 = data }
-                readerFinished.signal()
-            }
-            // C10: every subprocess gets a timeout. `waitUntilExit()` alone
-            // waits forever, and lsof CAN hang — a stuck NFS/FUSE mount or an
-            // unresponsive socket makes it block in the kernel. An overrun is
-            // reported as "no listener", the same answer a failed lsof has
-            // always given.
-            let exited = lsof.waitUntilExit(timeout: lsofTimeout)
-            // Bounded, like every other wait on this path: EOF arrives once
-            // the last write end closes, which is at exit — but a fd
-            // inherited by a grandchild would otherwise hold the read open
-            // forever.
-            _ = readerFinished.wait(timeout: .now() + Self.drainGrace)
+            // `Process.waitDraining` WAS hoisted out of this function in P33
+            // and this copy was left behind: bounded wait, concurrent drain,
+            // bounded drain grace — plus the read-end close this version never
+            // did. An overrun is reported as "no listener", the same answer a
+            // failed lsof has always given.
+            let (exited, data) = lsof.waitDraining(timeout: Self.lsofTimeout, pipes: [output])
             guard exited else {
                 Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
                 return nil
@@ -1237,8 +1215,7 @@ final class HealthViewModel {
             // not an error. Anything else is something we can't recover
             // from in this code path; log and bail.
             guard lsof.terminationStatus == 0 else { return nil }
-            let data = drained.withLock { $0 }
-            let text = String(data: data, encoding: .utf8) ?? ""
+            let text = String(data: data[0], encoding: .utf8) ?? ""
             return text
                 .split(whereSeparator: \.isNewline)
                 .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }

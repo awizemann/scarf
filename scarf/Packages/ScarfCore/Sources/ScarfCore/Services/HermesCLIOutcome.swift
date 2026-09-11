@@ -453,8 +453,10 @@ public enum HermesCLIMarkers {
     /// `_cmd_approve` and `pairing_command` are plain `-> None`
     /// (pairing.py:56, :3-19):
     /// - the unknown/expired arm (:80). Its wording gained a prefix at
-    ///   v2026.8.3 (`Code '<code>' not found or expired…` →
-    ///   `Pairing request or code '<code>' not found or expired…`), so the
+    ///   **v2026.7.30** — NOT v2026.8.3, as this doc and the memory note both
+    ///   said: `Code '<code>' not found or expired…` at `v2026.7.20:95` →
+    ///   `Pairing request or code '<code>' not found or expired…` at
+    ///   `v2026.7.30:100`, and still that spelling at `v2026.9.7:80`. So the
     ///   marker is the tail both spellings share.
     /// - the rate-limit lockout (:76). First tag: **v2026.5.7**; below that
     ///   `_cmd_approve` has no lockout branch at all, so the marker is
@@ -465,9 +467,17 @@ public enum HermesCLIMarkers {
         pairingLockoutRefusal,
     ]
 
-    /// The lockout refusal itself (pairing.py:76), named because the detail
-    /// composer has to recognise it — it is the one refusal whose reason
-    /// spans two printed lines.
+    /// The lockout refusal itself (pairing.py:76 @ v2026.9.7), named because
+    /// the detail composer has to recognise it — it is the one refusal whose
+    /// reason spans two printed lines.
+    ///
+    /// **A grep for this string says "absent" on every tag below v2026.9.7,
+    /// and that is a false negative.** Until v2026.9.7 the sentence was built
+    /// from two adjacent f-string literals — `f"\n  Platform '{platform}' is
+    /// locked out after too many failed "` + `f"approval attempts."`
+    /// (`v2026.8.31:91-93`) — so the source never contains the marker as one
+    /// run of bytes while the PRINTED text is byte-identical. Judge this
+    /// floor by the emitted line, not by `git grep`.
     public static let pairingLockoutRefusal = "is locked out after too many failed approval attempts."
 
     /// The lockout's remediation line, `  Lockout clears in ~{mins}
