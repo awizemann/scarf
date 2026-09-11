@@ -405,12 +405,12 @@ public struct FleetApplyPlan: Sendable, Equatable {
         caps: HermesCapabilities,
         paused: Bool = false
     ) -> (args: [String], droppedDeliverAll: Bool) {
-        var args = ["cron", "create", "--name", name]
+        var args = ["cron", "create", HermesCLIOption.joined("--name", name)]
         var droppedDeliverAll = false
 
         if let deliver, !deliver.isEmpty {
             if caps.supportsCronDeliver(deliver) {
-                args += ["--deliver", deliver]
+                args.append(HermesCLIOption.joined("--deliver", deliver))
             } else {
                 droppedDeliverAll = true
             }
@@ -425,16 +425,16 @@ public struct FleetApplyPlan: Sendable, Equatable {
         if caps.hasCronFailureDeliver,
            let failureDeliver, !failureDeliver.isEmpty,
            caps.supportsCronDeliver(failureDeliver) {
-            args += ["--failure-deliver", failureDeliver]
+            args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver))
         }
-        if let repeatCount { args += ["--repeat", String(repeatCount)] }
+        if let repeatCount { args.append(HermesCLIOption.joined("--repeat", String(repeatCount))) }
         // v0.21.1 `--paused`: create disabled in ONE write. Callers that pass
         // `true` keep a create-then-`cron pause` fallback for older hosts —
         // the flag itself is fatal to argparse there.
         if paused, caps.hasCronCreatePaused { args.append("--paused") }
-        for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
+        for skill in skills where !skill.isEmpty { args.append(HermesCLIOption.joined("--skill", skill)) }
         if let workdir, !workdir.isEmpty, caps.hasCronWorkdir {
-            args += ["--workdir", workdir]
+            args.append(HermesCLIOption.joined("--workdir", workdir))
         }
         // `--` ends the options: the positionals below are user text, and a
         // prompt or schedule beginning with `-` would otherwise be read as

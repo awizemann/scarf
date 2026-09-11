@@ -54,7 +54,7 @@ public actor KanbanService {
     nonisolated static func prefix(board: String?, _ verbAndArgs: [String]) -> [String] {
         var args = ["kanban"]
         if let board, !board.isEmpty {
-            args.append(contentsOf: ["--board", board])
+            args.append(HermesCLIOption.joined("--board", board))
         }
         args.append(contentsOf: verbAndArgs)
         return args
@@ -163,7 +163,7 @@ public actor KanbanService {
     nonisolated static func diagnosticsArgv(board: String? = nil, taskId: String? = nil) -> [String] {
         var args = ["diagnostics", "--json"]
         if let taskId, !taskId.isEmpty {
-            args.append(contentsOf: ["--task", taskId])
+            args.append(HermesCLIOption.joined("--task", taskId))
         }
         return prefix(board: board, args)
     }
@@ -247,7 +247,7 @@ public actor KanbanService {
     public func log(taskId: String, tailBytes: Int? = nil) async throws -> String {
         var args = prefix("log")
         if let tailBytes {
-            args.append(contentsOf: ["--tail", String(tailBytes)])
+            args.append(HermesCLIOption.joined("--tail", String(tailBytes)))
         }
         args.append(taskId)
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 15)
@@ -333,7 +333,7 @@ public actor KanbanService {
     public func comment(taskId: String, text: String, author: String? = nil) async throws {
         var args = prefix("comment")
         if let author, !author.isEmpty {
-            args.append(contentsOf: ["--author", author])
+            args.append(HermesCLIOption.joined("--author", author))
         }
         // `--` last, after every flag: argparse treats EVERY token after the
         // first `--` as a positional, so a flag behind it would be eaten as
@@ -344,6 +344,42 @@ public actor KanbanService {
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "comment")
     }
 
+    /// The exact argv `complete` runs. `static`, like `listArgv` /
+    /// `promoteArgv` / `diagnosticsArgv`, so a test asserts the PRODUCTION
+    /// command line rather than a parallel builder that can drift from it.
+    nonisolated static func completeArgv(
+        board: String? = nil,
+        taskIds: [String],
+        result: String? = nil,
+        summary: String? = nil,
+        metadataJSON: String? = nil
+    ) -> [String] {
+        var args = prefix(board: board, ["complete"])
+        // Every option value goes over as ONE `--flag=value` token: `--result`
+        // and `--summary` are free-text fields a user fills in
+        // (`hermes_cli/kanban_parser.py:280-283` @ `v2026.9.7`, plain
+        // `add_argument`s), and a value beginning with `-` handed over as a
+        // separate token is `error: expected one argument`, exit 2.
+        if let result, !result.isEmpty {
+            args.append(HermesCLIOption.joined("--result", result))
+        }
+        if let summary, !summary.isEmpty {
+            args.append(HermesCLIOption.joined("--summary", summary))
+        }
+        if let metadataJSON, !metadataJSON.isEmpty {
+            args.append(HermesCLIOption.joined("--metadata", metadataJSON))
+        }
+        // `--` before the ids, exactly as `unblock` does. `task_ids` is a
+        // `nargs="+"` POSITIONAL (`hermes_cli/kanban_parser.py:279` @
+        // `v2026.9.7`), so an id that begins with a dash is read as an
+        // unknown option and argparse exits 2 on the whole verb. Nothing that
+        // must stay an option can be stranded behind the marker, because
+        // every option above is now a single token.
+        args.append("--")
+        args.append(contentsOf: taskIds)
+        return args
+    }
+
     public func complete(
         taskIds: [String],
         result: String? = nil,
@@ -351,17 +387,9 @@ public actor KanbanService {
         metadataJSON: String? = nil
     ) async throws {
         guard !taskIds.isEmpty else { return }
-        var args = prefix("complete")
-        if let result, !result.isEmpty {
-            args.append(contentsOf: ["--result", result])
-        }
-        if let summary, !summary.isEmpty {
-            args.append(contentsOf: ["--summary", summary])
-        }
-        if let metadataJSON, !metadataJSON.isEmpty {
-            args.append(contentsOf: ["--metadata", metadataJSON])
-        }
-        args.append(contentsOf: taskIds)
+        let args = Self.completeArgv(
+            board: board, taskIds: taskIds, result: result,
+            summary: summary, metadataJSON: metadataJSON)
         let (code, _, stderr) = await runHermes(args: args, timeout: 30)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "complete")
     }
@@ -394,10 +422,15 @@ public actor KanbanService {
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "unblock")
     }
 
+    /// Same `--` guard as `complete`/`unblock`: `task_ids` is `nargs="*"`
+    /// here (`hermes_cli/kanban_parser.py:336` @ `v2026.9.7`).
+    nonisolated static func archiveArgv(board: String? = nil, taskIds: [String]) -> [String] {
+        prefix(board: board, ["archive"]) + ["--"] + taskIds
+    }
+
     public func archive(taskIds: [String]) async throws {
         guard !taskIds.isEmpty else { return }
-        var args = prefix("archive")
-        args.append(contentsOf: taskIds)
+        let args = Self.archiveArgv(board: board, taskIds: taskIds)
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "archive")
     }
@@ -406,7 +439,7 @@ public actor KanbanService {
     public func dispatch(maxTasks: Int? = nil, dryRun: Bool = false) async throws -> KanbanDispatchSummary {
         var args = prefix("dispatch", "--json")
         if dryRun { args.append("--dry-run") }
-        if let maxTasks { args.append(contentsOf: ["--max", String(maxTasks)]) }
+        if let maxTasks { args.append(HermesCLIOption.joined("--max", String(maxTasks))) }
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "dispatch")
         guard let data = stdout.data(using: .utf8) else {

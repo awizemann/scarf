@@ -214,19 +214,18 @@ import Foundation
         let new = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(new.contains("--failure-deliver"))
-        #expect(new.firstIndex(of: "local") == new.firstIndex(of: "--failure-deliver").map { $0 + 1 })
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: new) == "local")
 
         // A v0.21.0 target would die at argparse on the unknown flag.
         let old = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v021, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(old.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: old) == false)
         // ...and an unprobed host is treated as the oldest one.
         let unknown = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: .empty, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(unknown.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: unknown) == false)
     }
 
     /// `failure_deliver` shares `deliver`'s grammar, so a value the target
@@ -241,14 +240,14 @@ import Foundation
         let result = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         )
-        #expect(result.args.contains("bot-chat:coder"))
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: result.args) == "bot-chat:coder")
         #expect(result.droppedDeliverAll == false)
 
         let noOverride = try copyJob(failureDeliver: nil)
         let plain = FleetApplyPlan.cronCreateArgs(
             copying: noOverride, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(plain.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: plain) == false)
     }
 
     @Test func fleetCopyPausesInOneWriteOnlyOnV0211Hosts() throws {
@@ -370,7 +369,7 @@ import Foundation
         let end = try #require(args.firstIndex(of: "--"))
         #expect(Array(args[end...]) == ["--", "@daily", "--summarize the inbox"])
         // …and nothing option-shaped follows the marker.
-        #expect(args.firstIndex(of: "--name")! < end)
+        #expect(HermesCLIOption.index(of: "--name", in: args)! < end)
     }
 
     /// The template installer used to hand-roll this argv; both callers now
@@ -384,7 +383,7 @@ import Foundation
         #expect(!dropped)
         #expect(args.contains("--paused"))
         #expect(Array(args.suffix(3)) == ["--", "0 9 * * *", "go"])
-        #expect(args.firstIndex(of: "--repeat").map { args[$0 + 1] } == "3")
+        #expect(HermesCLIOption.value(of: "--repeat", in: args) == "3")
 
         // A pre-v0.14 host can parse neither `--deliver all` nor `--paused`:
         // the deliver value is dropped (reported), the flag is omitted, and
@@ -394,7 +393,7 @@ import Foundation
             name: "nightly", deliver: "all", schedule: "0 9 * * *", prompt: "go",
             caps: old, paused: true)
         #expect(oldDropped)
-        #expect(!oldArgs.contains("--deliver"))
+        #expect(!HermesCLIOption.contains("--deliver", in: oldArgs))
         #expect(!oldArgs.contains("--paused"))
     }
 

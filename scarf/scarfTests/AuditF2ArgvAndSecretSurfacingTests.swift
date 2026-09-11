@@ -1,4 +1,5 @@
 import Testing
+import ScarfCore
 import Foundation
 @testable import scarf
 
@@ -22,8 +23,8 @@ import Foundation
         // Every flag stays AHEAD of the marker — argparse reads each token
         // after it as a positional, so a flag behind it would be rejected
         // as an unrecognized extra argument.
-        #expect(argv.firstIndex(of: "--name")! < marker)
-        #expect(argv.firstIndex(of: "--deliver")! < marker)
+        #expect(HermesCLIOption.index(of: "--name", in: argv)! < marker)
+        #expect(HermesCLIOption.index(of: "--deliver", in: argv)! < marker)
     }
 
     @Test("the no-agent form still sends its empty prompt positional")

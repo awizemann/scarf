@@ -681,20 +681,20 @@ final class CronViewModel {
     /// can drift from it.
     nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "") -> [String] {
         var args = ["cron", "create"]
-        if !name.isEmpty { args += ["--name", name] }
-        if !deliver.isEmpty { args += ["--deliver", deliver] }
+        if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
+        if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
         // v0.21.1 `--failure-deliver`. The caller (CronView) clears the form
         // value on a host without `hasCronFailureDeliver`, so the unknown flag
         // is never emitted — argparse would fail the whole create.
-        if !failureDeliver.isEmpty { args += ["--failure-deliver", failureDeliver] }
-        if !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
-        for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
-        if !script.isEmpty { args += ["--script", script] }
+        if !failureDeliver.isEmpty { args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver)) }
+        if !repeatCount.isEmpty { args.append(HermesCLIOption.joined("--repeat", repeatCount)) }
+        for skill in skills where !skill.isEmpty { args.append(HermesCLIOption.joined("--skill", skill)) }
+        if !script.isEmpty { args.append(HermesCLIOption.joined("--script", script)) }
         // v0.12+: --workdir injects AGENTS.md/CLAUDE.md context and pins
         // cwd for terminal/file/code_exec tools. Hermes pre-v0.12 doesn't
         // know the flag — argparse rejects unknown args, so the form
         // omits the flag when the field is empty.
-        if !workdir.isEmpty { args += ["--workdir", workdir] }
+        if !workdir.isEmpty { args.append(HermesCLIOption.joined("--workdir", workdir)) }
         // v0.13+: --no-agent runs the pre-run script and skips the AI turn.
         // Caller (CronView) strips this on pre-v0.13 hosts so the flag is
         // never emitted to a Hermes that can't parse it.
@@ -756,10 +756,10 @@ final class CronViewModel {
         }
         var args: [String] = []
         for skill in existingSet where !target.contains(skill) {
-            args += ["--remove-skill", skill]
+            args.append(HermesCLIOption.joined("--remove-skill", skill))
         }
         for skill in target where !existingSet.contains(skill) {
-            args += ["--add-skill", skill]
+            args.append(HermesCLIOption.joined("--add-skill", skill))
         }
         return args
     }
@@ -789,9 +789,9 @@ final class CronViewModel {
     nonisolated static func promptEditArguments(existing: String, newValue: String?) -> [String] {
         guard let newValue else { return [] }   // caller didn't touch the prompt
         if newValue.isEmpty {
-            return existing.isEmpty ? [] : ["--prompt", ""]
+            return existing.isEmpty ? [] : [HermesCLIOption.joined("--prompt", "")]
         }
-        return ["--prompt", newValue]
+        return [HermesCLIOption.joined("--prompt", newValue)]
     }
 
     /// The `--repeat` tail of a `cron edit`.
@@ -818,9 +818,9 @@ final class CronViewModel {
         guard let newValue else { return [] }   // caller didn't touch the field
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            return existing.isEmpty ? [] : ["--repeat", "0"]
+            return existing.isEmpty ? [] : [HermesCLIOption.joined("--repeat", "0")]
         }
-        return ["--repeat", trimmed]
+        return [HermesCLIOption.joined("--repeat", trimmed)]
     }
 
     func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
@@ -828,23 +828,23 @@ final class CronViewModel {
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
         var args = ["cron", "edit"]
-        if let schedule, !schedule.isEmpty { args += ["--schedule", schedule] }
+        if let schedule, !schedule.isEmpty { args.append(HermesCLIOption.joined("--schedule", schedule)) }
         args += Self.promptEditArguments(existing: existingPrompt, newValue: prompt)
-        if let name, !name.isEmpty { args += ["--name", name] }
-        if let deliver { args += ["--deliver", deliver] }
+        if let name, !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
+        if let deliver { args.append(HermesCLIOption.joined("--deliver", deliver)) }
         // v0.21.1: `nil` = untouched (omit the flag); `""` is Hermes's own
         // documented "clear the override" gesture on edit, so it is passed
         // through rather than dropped like an empty create value.
-        if let failureDeliver { args += ["--failure-deliver", failureDeliver] }
+        if let failureDeliver { args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver)) }
         args += Self.repeatEditArguments(existing: existingRepeatCount, newValue: repeatCount)
         args += Self.skillEditArguments(
             existing: existingSkills, newSkills: newSkills, clearSkills: clearSkills
         )
-        if let script { args += ["--script", script] }
+        if let script { args.append(HermesCLIOption.joined("--script", script)) }
         // `nil` = caller didn't touch the field (omit the flag). Empty string
         // = user cleared an existing workdir; Hermes documents `--workdir ""`
         // on edit as the explicit clear gesture, mirroring the `--script` shape.
-        if let workdir { args += ["--workdir", workdir] }
+        if let workdir { args.append(HermesCLIOption.joined("--workdir", workdir)) }
         if let noAgent {
             if noAgent { args.append("--no-agent") }
             else { args.append("--agent") }

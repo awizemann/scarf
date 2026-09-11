@@ -54,22 +54,22 @@ public struct KanbanListFilter: Sendable, Equatable {
             args.append("--mine")
         }
         if let status, status != .unknown {
-            args.append(contentsOf: ["--status", status.rawValue])
+            args.append(HermesCLIOption.joined("--status", status.rawValue))
         }
         if let assignee, !assignee.isEmpty {
-            args.append(contentsOf: ["--assignee", assignee])
+            args.append(HermesCLIOption.joined("--assignee", assignee))
         }
         if let tenant {
-            args.append(contentsOf: ["--tenant", tenant])
+            args.append(HermesCLIOption.joined("--tenant", tenant))
         }
         if let session, !session.isEmpty {
-            args.append(contentsOf: ["--session", session])
+            args.append(HermesCLIOption.joined("--session", session))
         }
         if includeArchived {
             args.append("--archived")
         }
         if let sort, !sort.isEmpty {
-            args.append(contentsOf: ["--sort", sort])
+            args.append(HermesCLIOption.joined("--sort", sort))
         }
         return args
     }
@@ -99,17 +99,17 @@ public struct KanbanWatchFilter: Sendable, Equatable {
     public func argv() -> [String] {
         var args: [String] = []
         if let assignee, !assignee.isEmpty {
-            args.append(contentsOf: ["--assignee", assignee])
+            args.append(HermesCLIOption.joined("--assignee", assignee))
         }
         if let tenant, !tenant.isEmpty {
-            args.append(contentsOf: ["--tenant", tenant])
+            args.append(HermesCLIOption.joined("--tenant", tenant))
         }
         if !kinds.isEmpty {
             let joined = kinds.map(\.rawValue).joined(separator: ",")
-            args.append(contentsOf: ["--kinds", joined])
+            args.append(HermesCLIOption.joined("--kinds", joined))
         }
         if intervalSeconds > 0 && intervalSeconds != 0.5 {
-            args.append(contentsOf: ["--interval", String(format: "%.2f", intervalSeconds)])
+            args.append(HermesCLIOption.joined("--interval", String(format: "%.2f", intervalSeconds)))
         }
         return args
     }

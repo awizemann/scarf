@@ -227,17 +227,17 @@ import ScarfCore
             schedule: "30m", prompt: "p", name: "n", deliver: "telegram:1", skills: [],
             script: "", repeatCount: "", failureDeliver: "local"
         )
-        #expect(withOverride.contains("--failure-deliver"))
-        #expect(withOverride.firstIndex(of: "local") == withOverride.firstIndex(of: "--failure-deliver").map { $0 + 1 })
+        #expect(HermesCLIOption.contains("--failure-deliver", in: withOverride))
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: withOverride) == "local")
         // Every flag still precedes the `--` end-of-options marker.
         let marker = try? #require(withOverride.firstIndex(of: "--"))
-        #expect((withOverride.firstIndex(of: "--failure-deliver") ?? .max) < (marker ?? 0))
+        #expect((HermesCLIOption.index(of: "--failure-deliver", in: withOverride) ?? .max) < (marker ?? 0))
 
         let without = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "p", name: "n", deliver: "", skills: [],
             script: "", repeatCount: ""
         )
-        #expect(without.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: without) == false)
     }
 
     // MARK: - Fixtures
