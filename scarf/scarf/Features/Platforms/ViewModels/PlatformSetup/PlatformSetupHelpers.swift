@@ -341,7 +341,20 @@ extension PlatformSetupForm {
             // comments the live keys out — or, for a config-only form like
             // whatsapp_cloud, writes `""` over the access token.
             self.loadRefusal = snapshot.loadFailure
-            if let failure = snapshot.loadFailure { self.showSaveFailure(failure) }
+            if let failure = snapshot.loadFailure {
+                self.showSaveFailure(failure)
+                // P37 finding 5: do NOT apply. `apply` assigns every field
+                // from the snapshot, and on a refusal the snapshot's `env`
+                // is `[:]` and its `config` is nil — so every
+                // `env["…"] ?? ""` overwrote a live credential with a blank.
+                // The latched refusal already stops the blanks reaching disk
+                // (`commitSave` refuses while it is set), but the user still
+                // watched their token disappear with no way to know it was
+                // safe on the host. Nothing was proven, so nothing changes:
+                // the form keeps exactly what the last proven load put
+                // there, and the message names Reload.
+                return
+            }
             apply(snapshot)
         }
     }
