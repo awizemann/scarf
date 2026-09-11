@@ -20,7 +20,9 @@ import Foundation
 /// The Hermes **desktop** does not write this file directly either — it goes
 /// through the gateway RPC `profiles.configure`, which keeps a per-key
 /// revision counter in `_ui_meta_revisions` and rejects a stale write
-/// (`tui_gateway/methods_profiles.py:780-863`; compare-and-swap semantics
+/// (`tui_gateway/methods_profiles.py:436-477` @ `v2026.9.7` —
+/// `_configure_ui_meta`, CAS check at `:445-460`, revision bump at `:468`
+/// and write-back at `:473`; compare-and-swap semantics
 /// pinned by `tests/tui_gateway/test_profiles_ui_meta_cas.py`). Scarf's direct
 /// write has **no such interlock**: if Hermes Desktop edits the same bot
 /// between Scarf's read and Scarf's write, Scarf wins and the desktop's edit
@@ -69,11 +71,11 @@ public enum HermesBotProfileYAML {
 
     /// Conservative ceiling on the rendered `hermes-bots` block, mirroring the
     /// gateway's own guard: `profiles.configure` rejects a `ui_meta` payload
-    /// whose `json.dumps` exceeds 65536 bytes (`methods_profiles.py:789-791`),
-    /// because the block rides `profiles.list` on every roster paint. Scarf
-    /// measures the YAML it is about to write instead of a JSON encoding it
-    /// cannot reconstruct for verbatim-preserved lines — a proxy, but one that
-    /// errs on the side of writing less.
+    /// whose `json.dumps` exceeds 65536 bytes (`methods_profiles.py:443` @
+    /// `v2026.9.7`), because the block rides `profiles.list` on every roster
+    /// paint. Scarf measures the YAML it is about to write instead of a JSON
+    /// encoding it cannot reconstruct for verbatim-preserved lines — a proxy,
+    /// but one that errs on the side of writing less.
     public static let maxBotMetaBytes = 65_536
 
     /// Keys inside `hermes-bots` that ``HermesBotIdentity`` models. Everything
@@ -278,7 +280,8 @@ public enum HermesBotProfileYAML {
 
         // Top-level scalars. `display_name` is cleared by REMOVING the key —
         // Hermes pops it rather than writing an empty string
-        // (profiles.py:980-986), and the label formatter falls back to the id.
+        // (`hermes_cli/profiles.py:635-640` @ `v2026.9.7`, in
+        // `write_profile_meta`), and the label formatter falls back to the id.
         guard let a = setScalar(
             "display_name",
             to: identity.displayName.isEmpty ? nil : YAMLScalar.quoteIfNeeded(identity.displayName),

@@ -52,7 +52,8 @@ public struct HermesBotIdentity: Sendable, Equatable {
 
     /// `display_name` — presentation-only; the canonical id never changes.
     /// Hermes clears the key rather than writing an empty string
-    /// (`hermes_cli/profiles.py:980-986`), and so does Scarf's writer.
+    /// (`hermes_cli/profiles.py:635-640` @ `v2026.9.7`, in
+    /// `write_profile_meta`), and so does Scarf's writer.
     public var displayName: String
 
     /// `description` — the one/two-sentence role blurb the kanban decomposer

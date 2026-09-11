@@ -5,7 +5,7 @@ import Foundation
 /// P30 — cron recovery semantics. Scarf's port of the two Hermes predicates
 /// that decide what a wedged job may be offered:
 ///
-/// * `_is_recoverable_error_job` (`cron/jobs.py:504-522` @ `v2026.9.7`) —
+/// * `_is_recoverable_error_job` (`cron/jobs.py:509-522` @ `v2026.9.7`) —
 ///   `state == "error"` AND `schedule.kind in {"cron","interval"}`. Exempted
 ///   from `_reject_terminal_activation` (`:1865-1878`), so plain
 ///   `hermes cron resume` genuinely recovers such a job.

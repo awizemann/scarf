@@ -107,7 +107,8 @@ struct HermesP32YAMLUnificationTests {
         ))
         #expect(out.contains("- name: server-default"))
         // Ids stay quoted — Discord ids are digit strings compared with `!=`
-        // against string source ids (`profile_routing.py:96-101`).
+        // against string source ids (`ProfileRoute.matches`,
+        // `gateway/profile_routing.py:76-87` @ `v2026.9.7`).
         #expect(out.contains("guild_id: '123'"))
     }
 

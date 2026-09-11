@@ -46,7 +46,7 @@ public struct CronRecoveryOffer: Sendable, Equatable {
 
     /// A recurring job in `error` on a host older than v0.21.0, where
     /// `_reject_terminal_activation` has no `_is_recoverable_error_job`
-    /// exemption yet (`cron/jobs.py:2369-2375` @ `v2026.8.27` vs
+    /// exemption yet (`cron/jobs.py:2367-2375` @ `v2026.8.27` vs
     /// `:2583-2595` @ `v2026.8.31`).
     public static let errorNeedsNewerHermesHint =
         "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it."

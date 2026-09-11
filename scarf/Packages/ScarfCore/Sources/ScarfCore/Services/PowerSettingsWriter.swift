@@ -107,7 +107,8 @@ public enum PowerSettingsWriter {
         capabilities: HermesCapabilities
     ) -> String? {
         guard capabilities.isV020OrLater else { return nil }
-        // Hermes lowercases at consumption (model_switch.py:2007); keep the
+        // Hermes lowercases at consumption
+        // (`hermes_cli/model_switch_providers.py:1063` @ `v2026.9.7`); keep the
         // user's spelling but trim.
         let cleaned = providers
             .map { $0.trimmingCharacters(in: .whitespaces) }

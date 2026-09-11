@@ -108,8 +108,9 @@ public enum ProfileRoutesWriter {
             rows.append("platform: \(YAMLScalar.quoteIfNeeded(route.platform))")
             // Ids are ALWAYS quoted: Discord/Telegram ids are digit strings
             // and Hermes compares them with `!=` against string source ids
-            // (profile_routing.py:96-101) — an unquoted `123` would load as
-            // an int and never match.
+            // (`ProfileRoute.matches`, `gateway/profile_routing.py:76-87` @
+            // `v2026.9.7`) — see ``quotedID(_:)`` for why the load-time
+            // `_coerce_route_id` rescue is not enough.
             if !route.guildID.isEmpty { rows.append("guild_id: \(quotedID(route.guildID))") }
             if !route.chatID.isEmpty { rows.append("chat_id: \(quotedID(route.chatID))") }
             if !route.threadID.isEmpty { rows.append("thread_id: \(quotedID(route.threadID))") }
@@ -203,10 +204,16 @@ public enum ProfileRoutesWriter {
     /// Ids are quoted UNCONDITIONALLY on top of the shared rule.
     ///
     /// Discord/Telegram ids are digit strings and Hermes compares them with
-    /// `!=` against string source ids (`gateway/profile_routing.py:96-101`
-    /// @ `v2026.9.7`), so an unquoted `123` would load as an int and never
-    /// match. That is a POLICY on top of ``YAMLScalar/quoteIfNeeded(_:)``,
-    /// not a second quoting rule: when the shared rule already quoted (or
+    /// `!=` against string source ids (`ProfileRoute.matches`,
+    /// `gateway/profile_routing.py:76-87` @ `v2026.9.7`), so an unquoted
+    /// `123` loads as an int that can never equal one. Hermes rescues the
+    /// plain-`int` case at load (`_coerce_route_id`, `:90-110`, applied at
+    /// `:138-140`) but only that case — a float or a bool is passed through
+    /// with a warning and still never matches — so quoting is Scarf writing
+    /// a shape that needs no rescue.
+    ///
+    /// That is a POLICY on top of ``YAMLScalar/quoteIfNeeded(_:)``, not a
+    /// second quoting rule: when the shared rule already quoted (or
     /// escaped) the value, its emission is used verbatim; only a value it
     /// would have left bare gets wrapped, through
     /// ``YAMLScalar/singleQuoted(_:)`` so an embedded `'` is still doubled.

@@ -7,7 +7,7 @@ import Testing
 @Suite("P35 — `config unset` argv and verdict")
 struct HermesConfigUnsetP35Tests {
 
-    /// `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7 and `:51-55` @
+    /// `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7 and `:51-54` @
     /// v2026.7.20 (the `hasConfigUnset` floor): `unset` takes exactly one
     /// positional `key` and no flags.
     @Test func argvIsTheTaggedSubparserShape() {
@@ -15,7 +15,7 @@ struct HermesConfigUnsetP35Tests {
     }
 
     @Test func successIsTheEmittersOwnLine() {
-        // `print(f"✓ Unset {key} from {config_path}")` — config.py:3581.
+        // `print(f"✓ Unset {key} from {config_path}")` — config.py:3582.
         let out = HermesConfigUnset.judge(
             output: "✓ Unset approvals.mode from /Users/a/.hermes/config.yaml\n", exitCode: 0)
         #expect(out.succeeded)
@@ -24,7 +24,7 @@ struct HermesConfigUnsetP35Tests {
 
     /// The reason this write cannot be judged by exit code: `is_managed()` →
     /// `managed_error(...)` prints to stderr and RETURNS, so Python exits 0
-    /// (`hermes_cli/config.py:3550-3552` @ v2026.9.7, `:8870-8872` @
+    /// (`hermes_cli/config.py:3549-3551` @ v2026.9.7, `:8870-8872` @
     /// v2026.7.20). Judged by exit code this is "Saved approvals.mode".
     @Test func theManagedInstallRefusalExitsZeroAndIsStillAFailure() {
         let out = HermesConfigUnset.judge(

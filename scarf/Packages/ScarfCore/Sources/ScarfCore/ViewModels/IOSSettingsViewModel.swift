@@ -165,7 +165,7 @@ public final class IOSSettingsViewModel {
     /// actually clears the key (round-3 decision 10).
     ///
     /// Judged by OUTPUT, not exit code: `unset_config_value`'s managed-install
-    /// arm prints its refusal and `return`s (`hermes_cli/config.py:3550-3552`),
+    /// arm prints its refusal and `return`s (`hermes_cli/config.py:3549-3551`),
     /// i.e. exits 0. Callers must gate on `HermesCapabilities.hasConfigUnset`;
     /// the verb does not exist below v0.19.0.
     public func unsetValue(key: String) async throws {

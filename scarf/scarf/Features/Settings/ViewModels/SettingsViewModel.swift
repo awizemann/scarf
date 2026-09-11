@@ -223,7 +223,7 @@ final class SettingsViewModel {
     /// Judged by OUTPUT, unlike `setSetting`. Every `config set` refusal
     /// `sys.exit(1)`s, so the exit code is the truth there; `config unset`'s
     /// managed-install arm calls `managed_error(...)`, which PRINTS to stderr
-    /// and `return`s (`hermes_cli/config.py:3550-3552` @ v2026.9.7,
+    /// and `return`s (`hermes_cli/config.py:3549-3551` @ v2026.9.7,
     /// `:8870-8872` @ v2026.7.20), and Python makes that exit 0 — so a
     /// refused clear was banner'd "Saved <key>" over a key still on disk, for
     /// all six call sites. See ``HermesConfigUnset`` (charter C5).

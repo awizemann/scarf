@@ -99,11 +99,14 @@ struct ProfileRoutesSection: View {
                     route: row.route,
                     // v0.20.4+ — `gateway.multiplex_profile_allowlist`. The
                     // allowlist is inert without multiplexing actually
-                    // enabled (gateway/profiles.py:987), so only surface the
-                    // warning once `multiplex_profiles` is on — otherwise a
-                    // route just never runs, and that's already covered by
-                    // `multiplexPrerequisite` above. `nil` allowlist (key
-                    // absent) means "no warning" either way.
+                    // enabled — `profiles_to_serve` returns the active
+                    // profile and never looks at the allowlist when
+                    // `multiplex=False` (`hermes_cli/profiles.py:712-713`,
+                    // function at `:703-713`, @ `v2026.9.7`) — so only
+                    // surface the warning once `multiplex_profiles` is on;
+                    // otherwise a route just never runs, and that's already
+                    // covered by `multiplexPrerequisite` above. `nil`
+                    // allowlist (key absent) means "no warning" either way.
                     allowlistWarning: (capabilities.isV0204OrLater && block.multiplexProfiles)
                         ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
                         : nil,
@@ -161,7 +164,9 @@ struct ProfileRoutesSection: View {
     }
 
     /// Routing is gated on `gateway.multiplex_profiles`; without it Hermes
-    /// never even runs the matcher (gateway/run.py:23923).
+    /// never even runs the matcher (`gateway/run.py:4211` in
+    /// `_profile_name_for_source`, matcher call at `:4218-4221`, @
+    /// `v2026.9.7`).
     @ViewBuilder
     private var multiplexPrerequisite: some View {
         HStack(spacing: 8) {

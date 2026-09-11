@@ -529,7 +529,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         }
     }
 
-    /// Hermes's `_is_recoverable_error_job` (`cron/jobs.py:504-522` @
+    /// Hermes's `_is_recoverable_error_job` (`cron/jobs.py:509-522` @
     /// `v2026.9.7`): `state == "error"` AND `schedule.kind` in
     /// `{"cron", "interval"}`.
     ///
@@ -563,10 +563,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// **No flag needed.** The guard is present verbatim inside
     /// `rearm_oneshot` at the function's FIRST tag, `v2026.8.27` (0.20.6,
-    /// `cron/jobs.py:2467-2471` + `:2469` inside the loop) and at
-    /// `v2026.8.31` — i.e. re-arm has never accepted a recurring job on any
-    /// host that has re-arm at all, and that is exactly
-    /// `hasCronResumeRunNow`'s floor.
+    /// `cron/jobs.py:2467-2471` on the parsed schedule, `:2490-2494` on the
+    /// job's own schedule inside `apply`) and at `v2026.8.31` — i.e. re-arm
+    /// has never accepted a recurring job on any host that has re-arm at
+    /// all, and that is exactly `hasCronResumeRunNow`'s floor.
     public nonisolated var isRearmableOneShot: Bool { schedule.kind == "once" }
 
     /// What Scarf may offer this job, given the host's floors. The single

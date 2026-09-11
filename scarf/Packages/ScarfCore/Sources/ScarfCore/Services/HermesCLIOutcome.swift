@@ -198,8 +198,8 @@ public enum HermesCLIMarkers {
 
     /// `print(f"✓ Unset {key} from {config_path}")` — the ONLY line
     /// `unset_config_value` prints on the success path, both for the
-    /// config.yaml arm (`hermes_cli/config.py:3581` @ v2026.9.7,
-    /// `:8922` @ v2026.7.20) and the `.env` arm (`:3562` / `:8896`).
+    /// config.yaml arm (`hermes_cli/config.py:3582` @ v2026.9.7,
+    /// `:8923` @ v2026.7.20) and the `.env` arm (`:3562` / `:8896`).
     /// Judged anchored, so the leading `✓` is stripped by `unglyphed`.
     public static let configUnsetSuccess = ["Unset "]
 
@@ -209,15 +209,15 @@ public enum HermesCLIMarkers {
     /// - `is_managed()` → `managed_error("unset configuration values")` →
     ///   `format_managed_message` prints `Cannot unset configuration values:
     ///   this Hermes installation is managed by …` to stderr and the function
-    ///   RETURNS (`hermes_cli/config.py:3550-3552`, `:445-455` @ v2026.9.7;
+    ///   RETURNS (`hermes_cli/config.py:3549-3551`, `:445-455` @ v2026.9.7;
     ///   `:8870-8872`, `:659` @ v2026.7.20) — Python turns that into **exit
     ///   0**.
     /// - `_exit_if_key_managed(key, "unset")` prints `Cannot unset '<key>':
     ///   it is managed by your administrator (…)` and `sys.exit(1)`
-    ///   (`:3363-3371` @ v2026.9.7; inlined at `:8874-8886` @ v2026.7.20).
+    ///   (`:3363-3371` @ v2026.9.7; inlined at `:8873-8885` @ v2026.7.20).
     /// - `_exit_invalid(f"Config key not set: {key}")` → the same text and
     ///   `sys.exit(1)` (`:3579`, `:3422-3424` @ v2026.9.7; printed inline at
-    ///   `:8915-8917` @ v2026.7.20).
+    ///   `:8916-8918` @ v2026.7.20).
     ///
     /// Both `Cannot …` spellings share the `Cannot unset` prefix, so one
     /// marker quotes either.
@@ -646,7 +646,7 @@ public struct HermesSecurityAuditReport: Sendable, Equatable {
 /// **argv** (charter C5): `config unset <key>`, one positional. Verified at
 /// the target tag — `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7,
 /// `add_parser("unset", …)` + `add_argument("key", nargs="?")` — and at the
-/// `hasConfigUnset` floor, `hermes_cli/subcommands/config.py:51-55` @
+/// `hasConfigUnset` floor, `hermes_cli/subcommands/config.py:51-54` @
 /// v2026.7.20 (0.19.0), where it is byte-equivalent. There are no flags, so
 /// there is nothing here that a 0.19 host would reject.
 ///
