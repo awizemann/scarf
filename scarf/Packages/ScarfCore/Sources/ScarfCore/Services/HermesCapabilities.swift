@@ -1671,6 +1671,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// a second `kanban show` round-trip. v0.21.1+.
     public var hasKanbanCompletionContract: Bool { isV0211OrLater }
 
+    /// `provider_override` in the `--json` task envelope. Walked across every
+    /// `v2026.*` tag: the key first appears in `_TASK_DICT_FIELDS` at
+    /// `v2026.9.7` (= v0.21.1) and is absent from `v2026.8.31` (0.21.0) and
+    /// every earlier tag (`hermes_cli/kanban_output.py:18-24`). Gates the
+    /// inspector's `Provider:` chip so a pre-target host renders exactly as
+    /// the prior Scarf release did (C1).
+    public var hasKanbanProviderOverride: Bool { isV0211OrLater }
+
     /// `hermes auth priority <provider> <target> <n>` and `auth refresh
     /// <provider> [target]` — reorder a credential pool and clear one
     /// credential's cooldown (v0.21.1+,

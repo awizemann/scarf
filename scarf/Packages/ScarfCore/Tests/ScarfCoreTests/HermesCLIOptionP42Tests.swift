@@ -145,3 +145,46 @@ import Foundation
         #expect(!HermesCLIOption.contains("--skill", in: ["--skills=a"]))
     }
 }
+
+/// P42 · the kanban half of `t-dafcc4a5` and the round-4 LOWs it carried.
+@Suite struct KanbanEnvelopeP42Tests {
+
+    private func task(_ extraKeys: String) throws -> HermesKanbanTask {
+        let json = """
+            {"id":"t_1","title":"T","status":"todo"\(extraKeys.isEmpty ? "" : ",\(extraKeys)")}
+            """
+        return try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
+    }
+
+    /// Both keys ride in `_TASK_DICT_FIELDS`, so every `--json` task envelope
+    /// carries them (`hermes_cli/kanban_output.py:18-24` @ `v2026.9.7`).
+    /// Decoded now, so a linked task and a provider pin are visible instead
+    /// of being silently thrown away by the decoder.
+    @Test func providerOverrideAndProjectIDAreDecoded() throws {
+        let full = try task(#""provider_override":"nous","project_id":"p_42","model_override":"kimi-k2""#)
+        #expect(full.providerOverride == "nous")
+        #expect(full.projectId == "p_42")
+        #expect(full.modelOverride == "kimi-k2")
+    }
+
+    /// C1 / the tolerant-decode contract: a pre-v0.21.1 row carries neither
+    /// key and must still decode, with both nil — the UI chip is what the
+    /// capability flag gates, never the decode.
+    @Test func aPreTargetRowStillDecodesWithBothNil() throws {
+        let bare = try task("")
+        #expect(bare.providerOverride == nil)
+        #expect(bare.projectId == nil)
+        #expect(bare.id == "t_1")
+    }
+
+    /// The floor behind the `Provider:` chip, walked rather than asserted:
+    /// `provider_override` first appears in `_TASK_DICT_FIELDS` at
+    /// `v2026.9.7`; `v2026.8.31` (0.21.0) has `model_override` and not it.
+    @Test func theProviderChipIsGatedAtV0211() {
+        #expect(HermesCapabilities.parse("Hermes Agent v0.21.1 (2026.9.7)").hasKanbanProviderOverride)
+        #expect(!HermesCapabilities.parse("Hermes Agent v0.21.0 (2026.8.31)").hasKanbanProviderOverride)
+        #expect(!HermesCapabilities.empty.hasKanbanProviderOverride)
+        // `model_override`'s own gate is older and must not move with it.
+        #expect(HermesCapabilities.parse("Hermes Agent v0.21.0 (2026.8.31)").hasKanbanV015)
+    }
+}

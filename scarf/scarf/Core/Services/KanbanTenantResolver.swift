@@ -4,11 +4,34 @@ import ScarfCore
 
 /// Resolves and mints per-project Kanban tenant slugs.
 ///
-/// Hermes Kanban has no `project_id` column — the closest namespace
-/// primitive is the optional `tenant TEXT` column on `tasks`. Scarf
-/// uses it as a surrogate project key: each Scarf project gets a
-/// stable `scarf:<slug>` tenant minted on first kanban interaction
-/// and persisted to `<project>/.scarf/manifest.json`.
+/// Scarf namespaces a project's Kanban tasks with the optional `tenant TEXT`
+/// column on `tasks`: each Scarf project gets a stable `scarf:<slug>` tenant
+/// minted on first kanban interaction and persisted to
+/// `<project>/.scarf/manifest.json`.
+///
+/// **Why not `project_id`.** This comment used to justify that by claiming
+/// Hermes Kanban has no `project_id` column. That is false, and was false at
+/// the target tag: the `tasks` DDL declares `project_id TEXT`
+/// (`hermes_cli/kanban_db.py:866-869` @ `v2026.9.7`), `create_task` has full
+/// project plumbing (`:1096-1176`), and `_TASK_DICT_FIELDS` emits the key on
+/// every `--json` task (`hermes_cli/kanban_output.py:18-24`).
+///
+/// The column is nonetheless the wrong key for a SCARF project, for a reason
+/// the DDL states in its own comment: it is an "Optional link to a
+/// first-class Project (hermes_cli/projects_db)". `_resolve_project_link`
+/// looks the id up in the CREATOR's per-profile `projects.db`
+/// (`kanban_db.py:1110-1117`) and, when it does not resolve, **silently drops
+/// the link and creates an ordinary scratch task** (`:1124-1127`). A Scarf
+/// project is a folder with a `.scarf/manifest.json`, not a row in Hermes's
+/// projects DB, so a Scarf-minted id would be discarded on every create — a
+/// namespace that quietly evaporates is worse than none. Linking for real
+/// would mean Scarf creating and owning rows in `projects.db`, which is a
+/// different feature (and a write to a store Scarf does not own).
+///
+/// `tenant` has none of that: it is free text Hermes stores and filters on
+/// verbatim, which is exactly what a surrogate key needs. The `project_id`
+/// Hermes emits IS decoded (`HermesKanbanTask.projectId`) so a task linked to
+/// a real Hermes project can be seen for what it is.
 ///
 /// **Invariants:**
 /// - Once minted, the tenant is immutable across renames. Tasks
