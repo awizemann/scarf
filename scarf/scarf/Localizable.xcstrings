@@ -84024,6 +84024,47 @@
         }
       }
     },
+    "Scarf couldn't read this template's table of contents, so it can't check the file for a decompression bomb. Refusing to open it." : {
+      "comment" : "Refusal shown when listing a .scarftemplate archive fails, times out, or comes back unparseable, so the size and entry-count ceilings could not be checked.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte das Inhaltsverzeichnis dieser Vorlage nicht lesen und die Datei daher nicht auf eine Dekomprimierungsbombe prüfen. Sie wird nicht geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no ha podido leer el índice de esta plantilla, así que no puede comprobar si el archivo es una bomba de descompresión. No se abrirá."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu lire le sommaire de ce modèle et ne peut donc pas vérifier s’il s’agit d’une bombe de décompression. Refus de l’ouvrir."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf はこのテンプレートの目次を読み取れなかったため、解凍爆弾かどうかを確認できません。開かずに中止します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu ler o índice deste modelo e, portanto, não pode verificar se o arquivo é uma bomba de descompressão. Não será aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法读取此模板的内容清单，因而无法检查该文件是否为解压炸弹。已拒绝打开。"
+          }
+        }
+      }
+    },
     "saved" : {
       "localizations" : {
         "de" : {
@@ -91224,6 +91265,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Signal 设置文档"
+          }
+        }
+      }
+    },
+    "Spotify sign-in didn't finish within %lld minutes, so Scarf stopped it. Try again, or run `hermes auth spotify` in a terminal on the host." : {
+      "comment" : "Failure shown when the hermes auth spotify subprocess passes Scarf's deadline. The argument is the deadline in whole minutes.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Spotify-Anmeldung wurde nicht innerhalb von %lld Minuten abgeschlossen, daher hat Scarf sie beendet. Versuche es erneut oder führe `hermes auth spotify` in einem Terminal auf dem Host aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El inicio de sesión de Spotify no terminó en %lld minutos, así que Scarf lo detuvo. Inténtalo de nuevo o ejecuta `hermes auth spotify` en un terminal del host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La connexion à Spotify ne s’est pas terminée en %lld minutes ; Scarf l’a donc interrompue. Réessayez, ou lancez `hermes auth spotify` dans un terminal sur l’hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify のサインインが %lld 分以内に完了しなかったため、Scarf が中止しました。もう一度試すか、ホストのターミナルで `hermes auth spotify` を実行してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O login do Spotify não terminou em %lld minutos, então o Scarf o interrompeu. Tente novamente ou execute `hermes auth spotify` em um terminal no host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify 登录未在 %lld 分钟内完成，Scarf 已将其停止。请重试，或在主机的终端中运行 `hermes auth spotify`。"
           }
         }
       }
@@ -100679,6 +100761,88 @@
         }
       }
     },
+    "This template declares %lld files. Templates hold a handful; refusing to open it." : {
+      "comment" : "Refusal shown when a .scarftemplate archive declares far more entries than any real template. The argument is the declared entry count.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Vorlage gibt %lld Dateien an. Vorlagen enthalten nur eine Handvoll – sie wird nicht geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta plantilla declara %lld archivos. Las plantillas contienen unos pocos; no se abrirá."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce modèle déclare %lld fichiers. Les modèles en contiennent une poignée ; refus de l’ouvrir."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテンプレートは %lld 個のファイルを宣言しています。テンプレートに含まれるのは数個です。開かずに中止します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este modelo declara %lld arquivos. Modelos contêm poucos; não será aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模板声明了 %lld 个文件。模板通常只有寥寥几个，已拒绝打开。"
+          }
+        }
+      }
+    },
+    "This template file is %lld MB. Templates are a few kilobytes; refusing to open it." : {
+      "comment" : "Refusal shown when a .scarftemplate file is far larger than any real template. The argument is the file's size in megabytes.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Vorlagendatei ist %lld MB groß. Vorlagen umfassen nur wenige Kilobyte – sie wird nicht geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este archivo de plantilla ocupa %lld MB. Las plantillas son de unos pocos kilobytes; no se abrirá."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce fichier de modèle fait %lld Mo. Les modèles pèsent quelques kilo-octets ; refus de l’ouvrir."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテンプレートファイルは %lld MB あります。テンプレートは数キロバイトです。開かずに中止します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este arquivo de modelo tem %lld MB. Modelos têm alguns kilobytes; não será aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模板文件为 %lld MB。模板通常只有几 KB，已拒绝打开。"
+          }
+        }
+      }
+    },
     "This template has no configuration fields." : {
       "comment" : "A description of a template with no configuration fields.",
       "isCommentAutoGenerated" : true,
@@ -100717,6 +100881,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此模板没有配置字段。"
+          }
+        }
+      }
+    },
+    "This template would expand to %lld MB. Templates are a few kilobytes; refusing to open it." : {
+      "comment" : "Refusal shown when a .scarftemplate archive's declared uncompressed size is far larger than any real template. The argument is that size in megabytes.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Vorlage würde auf %lld MB entpackt. Vorlagen umfassen nur wenige Kilobyte – sie wird nicht geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta plantilla se expandiría a %lld MB. Las plantillas son de unos pocos kilobytes; no se abrirá."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce modèle se décompresserait en %lld Mo. Les modèles pèsent quelques kilo-octets ; refus de l’ouvrir."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテンプレートは展開すると %lld MB になります。テンプレートは数キロバイトです。開かずに中止します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este modelo se expandiria para %lld MB. Modelos têm alguns kilobytes; não será aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模板解压后将达到 %lld MB。模板通常只有几 KB，已拒绝打开。"
           }
         }
       }
