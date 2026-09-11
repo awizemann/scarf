@@ -882,52 +882,40 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Remove one MCP server, judged by what `hermes mcp remove` PRINTED.
+    ///
+    /// P40: `cmd_mcp_remove` is a `-> None` whose not-found arm prints
+    /// `✗ Server '<name>' not found in config.` and returns at exit 0
+    /// (`hermes_cli/mcp_config.py:104`, `:518-519` @ v2026.9.7), and on a
+    /// managed install `save_config` refuses underneath it while `:524` prints
+    /// `✓ Removed …` anyway. See ``HermesMCPRemoveVerdict``.
     @discardableResult
-    nonisolated func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
-        runHermesCLI(args: ["mcp", "remove", name], timeout: 30)
+    nonisolated func removeMCPServer(name: String) -> HermesCLIOutcome {
+        let result = runHermesCLI(args: HermesMCPRemoveVerdict.argv(name: name), timeout: 30)
+        return HermesMCPRemoveVerdict.judge(output: result.output, exitCode: result.exitCode)
     }
 
     nonisolated func testMCPServer(name: String) async -> MCPTestResult {
         let started = Date()
         let service = self
         let result = await Task.detached { () -> (Int32, String) in
-            service.runHermesCLI(args: ["mcp", "test", name], timeout: 30)
+            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: 30)
         }.value
         let elapsed = Date().timeIntervalSince(started)
         let tools = Self.parseToolListFromTestOutput(result.1)
         // hermes mcp test exits 0 even when the inner connection fails — it
-        // reports the failure on stdout instead. Look for explicit failure
-        // markers so the UI doesn't show a green check on a broken server.
+        // reports the failure on stdout instead. Judged by the emitter's own
+        // anchored lines; see ``HermesMCPTestVerdict``.
         let output = result.1
         return MCPTestResult(
             serverName: name,
-            succeeded: result.0 == 0 && !Self.mcpTestReportsFailure(output),
+            succeeded: HermesMCPTestVerdict.judge(output: output, exitCode: result.0).succeeded,
             output: output,
             tools: tools,
             elapsed: elapsed
         )
     }
 
-    /// Did `hermes mcp test` report a failure?
-    ///
-    /// `mcp test` exits 0 even when the inner connection fails — it reports
-    /// on stdout — so the exit code alone can't decide. But every failure
-    /// path goes through `hermes_cli/mcp_config.py::_error`, which prints
-    /// `  ✗ {text}` (`hermes_cli/mcp_config.py:36`, verified at tag `v2026.9.7`): the ✗ marker
-    /// covers `Connection failed …`, `Server '…' not found …`, and every
-    /// other error the command can emit.
-    ///
-    /// The three prose substrings this used to also match ("Connection
-    /// failed", "No such file or directory", "Error:", all case-insensitive)
-    /// were therefore redundant AND false-positive generators: on a healthy
-    /// server the same output continues with one line per discovered tool,
-    /// `    {tool_name:36s} {description}` — so a filesystem server with a
-    /// tool documented "… returns Error: ENOENT / No such file or directory"
-    /// turned a fully successful probe red. CLI prose is not a protocol; the
-    /// ✗ marker is.
-    nonisolated static func mcpTestReportsFailure(_ output: String) -> Bool {
-        output.contains("✗")
-    }
 
     /// Tool names out of `hermes mcp test` output.
     ///
@@ -2488,14 +2476,33 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Stop the gateway, judged by what `hermes gateway stop` PRINTED.
+    ///
+    /// P40: the exit code was the whole verdict here, and `_cmd_stop` is a
+    /// `-> None` whose "nothing to stop" arms print `✗ …` and return at exit 0
+    /// (`hermes_cli/gateway.py:5993`, `:5998` @ v2026.9.7) — so every caller
+    /// (two of which report to Analytics) recorded a stop that never happened
+    /// as a success. See ``HermesGatewayServiceVerdict`` for the full walk.
+    ///
+    /// Round-4 decision 2: "nothing was running" is a SUCCESS carrying
+    /// ``HermesCLIOutcome/warning``, not a failure — so the `pgrep`/`kill`
+    /// fallback below is reached only when the CLI genuinely could not stop a
+    /// gateway, which is what it was always for.
     @discardableResult
-    nonisolated func stopHermes() -> Bool {
+    nonisolated func stopHermes() -> HermesCLIOutcome {
         // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
         // waits for exit. Use the CLI to avoid racing launchd's KeepAlive respawn.
-        if runHermesCLI(args: ["gateway", "stop"]).exitCode == 0 {
-            return true
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.stop))
+        let outcome = HermesGatewayServiceVerdict.judge(
+            verb: .stop, output: result.output, exitCode: result.exitCode
+        )
+        if outcome.succeeded { return outcome }
+        // The fallback SIGTERM is a real stop when it lands; when it does not,
+        // Hermes's own refusal line is still the better message.
+        func fallback(_ ok: Bool) -> HermesCLIOutcome {
+            ok ? HermesCLIOutcome(succeeded: true, detail: nil) : outcome
         }
-        guard let pid = hermesPID() else { return false }
+        guard let pid = hermesPID() else { return fallback(false) }
         // For remote we can't issue a raw `kill(2)` — route through `kill(1)`
         // via the transport. Local uses the syscall for its minimal overhead.
         if context.isRemote {
@@ -2505,9 +2512,9 @@ struct HermesFileService: Sendable {
                 stdin: nil,
                 timeout: 5
             )
-            return (result?.exitCode ?? -1) == 0
+            return fallback((result?.exitCode ?? -1) == 0)
         }
-        return kill(pid, SIGTERM) == 0
+        return fallback(kill(pid, SIGTERM) == 0)
     }
 
     nonisolated func hermesBinaryPath() -> String? {

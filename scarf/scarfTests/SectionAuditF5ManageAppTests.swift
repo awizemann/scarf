@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ScarfCore
 @testable import scarf
 
 /// Fix package F5 — MANAGE sub-cluster (section audit 2026-09), app-level
@@ -25,20 +26,22 @@ struct SectionAuditF5ManageAppTests {
             read_file                            Read a file; returns Error: ENOENT when missing
             list_dir                             Fails with No such file or directory on a bad path
         """
-        #expect(HermesFileService.mcpTestReportsFailure(output) == false)
+        #expect(HermesMCPTestVerdict.judge(output: output, exitCode: 0).succeeded)
     }
 
-    @Test func theCrossMarkIsStillTheFailureSignal() {
+    @Test func aConnectionFailureIsStillTheFailureSignal() {
         let output = """
           Testing 'flaky'...
             Transport: HTTP → https://example.invalid/mcp
           ✗ Connection failed (5001ms): timed out
         """
-        #expect(HermesFileService.mcpTestReportsFailure(output))
+        #expect(!HermesMCPTestVerdict.judge(output: output, exitCode: 0).succeeded)
     }
 
     @Test func serverNotFoundIsAFailure() {
-        #expect(HermesFileService.mcpTestReportsFailure("  ✗ Server 'nope' not found in config."))
+        #expect(!HermesMCPTestVerdict.judge(
+            output: "  ✗ Server 'nope' not found in config.", exitCode: 0
+        ).succeeded)
     }
 
     // MARK: - `hermes mcp test` tool rows (P12)

@@ -177,7 +177,13 @@ struct MainActorSpawnDisciplineP22Tests {
     @Test func gatewayMutationsGoThroughTheRunnerWithANamedTimeout() async {
         let log = TimedCLILog()
         let vm = MessagingGatewayViewModel(
-            context: Self.scratchContext(), capabilities: .empty, cliRunner: log.runner())
+            context: Self.scratchContext(), capabilities: .empty,
+            // P40: the mutation verdict is judged by OUTPUT now, so a fake
+            // that answers `("", 0)` is a refusal — and a refused start
+            // reloads immediately instead of on the settle timer. Give the
+            // fake `launchd_start`'s own success line
+            // (`hermes_cli/gateway.py:3940` @ v2026.9.7).
+            cliRunner: log.runner(output: "✓ Service started"))
 
         vm.startGateway()
         await Self.until(timeout: 10) { log.calls.count == 1 }

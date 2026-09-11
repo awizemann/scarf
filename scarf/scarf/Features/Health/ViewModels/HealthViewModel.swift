@@ -494,11 +494,19 @@ final class HealthViewModel {
             // `stopHermes()` signals a process (an SSH round-trip on remote);
             // it never belonged on the MainActor. Detached, matching the
             // `runDebugShare` / `runAudit` precedent below.
-            let stopped = await Task.detached { svc.stopHermes() }.value
+            let outcome = await Task.detached { svc.stopHermes() }.value
             guard let self else { return }
             self.isControlBusy = false
-            Self.recordControlAction(.stop, succeeded: stopped)
-            self.actionMessage = stopped ? "Stop signal sent" : "Stop failed"
+            // P40: `stopHermes()` returns the OUTPUT verdict now, so the
+            // Analytics `succeeded:` this feeds is no longer an exit code
+            // that `_cmd_stop` returns whatever happened
+            // (`hermes_cli/gateway.py:5974-6000` @ v2026.9.7).
+            Self.recordControlAction(.stop, succeeded: outcome.succeeded)
+            self.actionMessage = Self.controlMessage(
+                done: String(localized: "Gateway stopped"),
+                failed: String(localized: "Stop failed"),
+                outcome: outcome
+            )
             self.settleAndRefresh(after: 2)
         }
     }
@@ -509,18 +517,19 @@ final class HealthViewModel {
         actionMessage = "Starting…"
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
+            let outcome = await Task.detached { Self.runGateway(.start, ctx) }.value
             guard let self else { return }
             self.isControlBusy = false
-            let started = result.exitCode == 0
-            Self.recordControlAction(.start, succeeded: started)
-            // Surface the exit code the way the neighbouring diagnostics
-            // actions do; the old code announced "Start requested" whether or
-            // not the CLI had refused.
-            self.actionMessage = started
-                ? "Start requested"
-                : (SettingsViewModel.failureReason(from: result.output).map { "Start failed: \($0)" }
-                    ?? "Start failed (exit \(result.exitCode))")
+            Self.recordControlAction(.start, succeeded: outcome.succeeded)
+            // P40: judged by the backend's own success line, not the exit
+            // code — `launchd_start` returns WITHOUT `✓ Service started` when
+            // the bootstrap degrades (`hermes_cli/gateway.py:3926-3928`,
+            // `:3938-3939` @ v2026.9.7) and still exits 0.
+            self.actionMessage = Self.controlMessage(
+                done: String(localized: "Gateway started"),
+                failed: String(localized: "Start failed"),
+                outcome: outcome
+            )
             self.settleAndRefresh(after: 3)
         }
     }
@@ -532,21 +541,47 @@ final class HealthViewModel {
         let svc = fileService
         let ctx = context
         Task { [weak self] in
-            let stopped = await Task.detached { svc.stopHermes() }.value
+            let stop = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
+            let start = await Task.detached { Self.runGateway(.start, ctx) }.value
             guard let self else { return }
             self.isControlBusy = false
-            let started = result.exitCode == 0
             // A restart only succeeded if both halves did; a stop that found
-            // nothing running still has to bring the gateway back.
-            Self.recordControlAction(.restart, succeeded: stopped && started)
-            self.actionMessage = started
-                ? "Restart requested"
-                : (SettingsViewModel.failureReason(from: result.output).map { "Restart failed: \($0)" }
-                    ?? "Restart failed (exit \(result.exitCode))")
+            // nothing running still has to bring the gateway back — and under
+            // round-4 decision 2 that stop is itself a success, so this
+            // conjunction now means what it says.
+            Self.recordControlAction(.restart, succeeded: stop.succeeded && start.succeeded)
+            self.actionMessage = Self.controlMessage(
+                done: String(localized: "Gateway restarted"),
+                failed: String(localized: "Restart failed"),
+                outcome: start
+            )
             self.settleAndRefresh(after: 3)
         }
+    }
+
+    /// Run one gateway service verb and judge it by output (P40). Static and
+    /// `nonisolated` so it can be called from the detached hop the three
+    /// control actions share (charter C10).
+    private nonisolated static func runGateway(
+        _ verb: HermesGatewayServiceVerdict.Verb, _ context: ServerContext
+    ) -> HermesCLIOutcome {
+        let result = context.runHermes(HermesGatewayServiceVerdict.argv(verb), timeout: 60)
+        return HermesGatewayServiceVerdict.judge(
+            verb: verb, output: result.output, exitCode: result.exitCode
+        )
+    }
+
+    /// The banner for one control action. Round-4 decision 2: the success
+    /// wording claims the state, and a Stop that found nothing running says
+    /// so in a neutral note instead of being reported either way.
+    private nonisolated static func controlMessage(
+        done: String, failed: String, outcome: HermesCLIOutcome
+    ) -> String {
+        guard outcome.succeeded else {
+            return outcome.detail.map { "\(failed): \($0)" } ?? failed
+        }
+        return outcome.warning.map { "\(done) — \($0)" } ?? done
     }
 
     /// Give the process time to settle, re-probe, then clear the transient

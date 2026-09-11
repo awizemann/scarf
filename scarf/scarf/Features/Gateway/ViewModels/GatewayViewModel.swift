@@ -432,11 +432,11 @@ final class MessagingGatewayViewModel {
         "The code the bot DM'd the user also works if they relay it.",
     ]
 
-    func startGateway() { runServiceAction("start", label: "start", settleSeconds: 2) }
+    func startGateway() { runServiceAction(.start, label: "start", settleSeconds: 2) }
 
-    func stopGateway() { runServiceAction("stop", label: "stop", settleSeconds: 2) }
+    func stopGateway() { runServiceAction(.stop, label: "stop", settleSeconds: 2) }
 
-    func restartGateway() { runServiceAction("restart", label: "restart", settleSeconds: 3) }
+    func restartGateway() { runServiceAction(.restart, label: "restart", settleSeconds: 3) }
 
     /// Generation token for the deferred settle-and-reload. Every service
     /// action bumps it; the pending block from an earlier action sees a
@@ -469,11 +469,17 @@ final class MessagingGatewayViewModel {
     /// seconds later, showed the badge built from the pre-existing
     /// `gateway_state.json`.
     ///
-    /// The exit code is the only signal read here: `gateway stop` prints
-    /// "✗ No gateway running for this profile" and still exits 0, so a
-    /// no-op stop reports as requested — the reload that follows tells the
-    /// truth. Substring-matching that prose is not a protocol.
-    private func runServiceAction(_ verb: String, label: String, settleSeconds: Double) {
+    /// P40: judged by what the backend PRINTED, never by the exit code.
+    /// `cmd_gateway` discards `gateway_command`'s return
+    /// (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and every one of these
+    /// three verbs has an exit-0 refusal arm — see
+    /// ``HermesGatewayServiceVerdict`` for the walk of all of them. Round-4
+    /// decision 2: the banner now claims the real state ("Gateway stopped"),
+    /// and a Stop that found nothing running is a success carrying a neutral
+    /// note rather than a lie in either direction.
+    private func runServiceAction(
+        _ verb: HermesGatewayServiceVerdict.Verb, label: String, settleSeconds: Double
+    ) {
         guard !isBusy else { return }
         isBusy = true
         // Bump BOTH tokens before the CLI runs: `actionGeneration` cancels an
@@ -488,16 +494,21 @@ final class MessagingGatewayViewModel {
             // `hermes gateway start|stop|restart` is a process spawn against a
             // possibly-remote host; running it inline froze the whole app for
             // the duration. Detached, exactly like `load()` above.
-            let result = await Task.detached { run(["gateway", verb], Self.mutationTimeout) }.value
+            let result = await Task.detached {
+                run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+            }.value
+            let outcome = HermesGatewayServiceVerdict.judge(
+                verb: verb, output: result.output, exitCode: result.exitCode
+            )
             guard let self else { return }
             self.isBusy = false
             // A newer action superseded this one while the CLI ran — its
             // message and its reload own the UI now.
             guard self.actionGeneration == generation else { return }
 
-            guard result.exitCode == 0 else {
+            guard outcome.succeeded else {
                 self.actionFailed = true
-                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
+                self.actionMessage = outcome.detail
                     .map { String(localized: "Gateway \(label) failed: \($0)") }
                     ?? String(localized: "Gateway \(label) failed")
                 // Reload anyway (the host may have moved), but never clear a
@@ -508,7 +519,15 @@ final class MessagingGatewayViewModel {
             }
 
             self.actionFailed = false
-            self.actionMessage = String(localized: "Gateway \(label) requested")
+            // Decision 2: claim the state, not the request. The CLI's success
+            // line is proof the backend acted; `warning` carries the neutral
+            // "nothing was running" note a no-op Stop earns.
+            let done: String = switch verb {
+            case .start: String(localized: "Gateway started")
+            case .stop: String(localized: "Gateway stopped")
+            case .restart: String(localized: "Gateway restarted")
+            }
+            self.actionMessage = outcome.warning.map { "\(done) — \($0)" } ?? done
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(settleSeconds))
                 guard let self, self.actionGeneration == generation else { return }

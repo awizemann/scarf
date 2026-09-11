@@ -808,6 +808,140 @@ public enum HermesCLIMarkers {
     /// list for {platform}.` (pairing.py:90), printed when `store.revoke`
     /// returned falsey, and still exit 0. Byte-identical at all 32 tags.
     public static let pairingRevokeFailure = ["not found in approved list for"]
+
+    // MARK: gateway start / stop / restart — hermes_cli/gateway.py
+
+    /// Every success line `gateway start` can print, matched ANCHORED at
+    /// column 0 after the glyph. `✓ Service started` (`gateway.py:3927`,
+    /// `:3940`, `launchd_start`), `✓ {User|System} service started`
+    /// (`:3171`, `systemd_start` — the scope word comes from
+    /// `_service_scope_label(system).capitalize()`, `:2179-2180`, so exactly
+    /// these two spellings exist), and the two Windows lines
+    /// (`hermes_cli/gateway_windows.py:971`, `:698`).
+    public static let gatewayStartSuccess = [
+        "Service started",
+        "User service started",
+        "System service started",
+        "Gateway started via",
+        "Gateway already running",
+    ]
+
+    /// `gateway stop`'s success lines. The `_cmd_stop` trio all open
+    /// `Stopped ` (`gateway.py:5991`, `:5996`, `:6000`), as does the s6
+    /// summary (`:5653`); the backends add their own
+    /// (`launchd_stop` `:3978`, `systemd_stop` `:3186`).
+    public static let gatewayStopSuccess = [
+        "Stopped ",
+        "Service stopped",
+        "User service stopped",
+        "System service stopped",
+    ]
+
+    /// `gateway restart`'s success lines: launchd's two spellings
+    /// (`gateway.py:4041`/`:4059` and `:4065`/`:4081`), systemd's
+    /// `✓ {User|System} service restarted (PID {n})` (`:1218`), and the s6
+    /// summary (`:5653`).
+    public static let gatewayRestartSuccess = [
+        "Service restarted",
+        "Service restart requested",
+        "User service restarted",
+        "System service restarted",
+        "Restarted ",
+    ]
+
+    /// The "there was nothing to stop" lines. Round-4 decision 2 makes these
+    /// a SUCCESS with a neutral note rather than a failure — the user asked
+    /// for the gateway to be down, and it is. Matched anchored; each is
+    /// printed at column 0 behind a `✗` glyph.
+    /// `gateway.py:5993` (`--all`), `:5998` (this profile), `:5644` (s6).
+    public static let gatewayNothingRunning = [
+        "No gateway processes found",
+        "No gateway running for this profile",
+        "No profile gateways registered under s6",
+    ]
+
+    /// Gateway refusals that are NOT at column 0 — mid-line clauses inside a
+    /// sentence that leads with a scope label.
+    /// `⚠ {scope} service process restarted (PID {n}), but gateway startup
+    /// failed: {reason}` (`gateway.py:1223`),
+    /// `⚠ {scope} service did not become active within {n}s.` (`:1242`), and
+    /// `⏳ {scope} service is temporarily rate-limited by systemd.` (`:1284`).
+    /// All three return at exit 0 having printed no success line, so the
+    /// no-marker rule would already fail the run; these markers exist to put
+    /// Hermes's own reason in the banner instead of the last stray line.
+    public static let gatewayServiceFailure = [
+        "but gateway startup failed:",
+        "did not become active within",
+        "is temporarily rate-limited by systemd.",
+    ]
+
+    /// The column-0 gateway refusals. `Cannot ` rides along from
+    /// ``managedRefusalAnchored`` — here it is NOT a managed-install claim
+    /// but `⚠ Cannot restart gateway as a service — linger is not enabled.`
+    /// (`gateway.py:6047`), a plain `return` at exit 0; the anchor is what
+    /// keeps it from matching a gateway log line quoted into the output.
+    /// `✗ Gateway service restart failed.` (`:6056`) and
+    /// `✗ Gateway start via {via} FAILED …`
+    /// (`hermes_cli/gateway_windows.py:977`) both exit non-zero already, and
+    /// `✗ Refusing to {verb} the gateway from inside the gateway process.`
+    /// (`gateway.py:5776-5781` via `print_error`,
+    /// `hermes_cli/cli_output.py:21-22`) `sys.exit(1)`s — they are listed so
+    /// the banner quotes the reason rather than the exit code.
+    public static let gatewayServiceFailureAnchored = managedRefusalAnchored + [
+        "Gateway service restart failed.",
+        "Gateway start via",
+        "Refusing to ",
+    ]
+
+    // MARK: mcp remove / mcp test — hermes_cli/mcp_config.py
+
+    /// `  ✓ Removed '<name>' from config` (`mcp_config.py:524` @ v2026.9.7),
+    /// through `_success` (`:34`). Anchored; the name follows the marker.
+    public static let mcpRemoveSuccess = ["Removed '"]
+
+    /// `  ✗ Server '<name>' not found in config.` (`:104`) and the
+    /// non-TTY-unreachable `  Cancelled.` (`:521`), plus the managed
+    /// `save_config` refusal underneath `_remove_mcp_server` (`:110-121` →
+    /// `hermes_cli/config.py:2316-2318`). Anchored, because the success line
+    /// echoes the server name.
+    public static let mcpRemoveFailure = managedRefusalAnchored + [
+        "Server '",
+        "Cancelled.",
+    ]
+
+    /// `  ✓ Connected ({ms}ms)` (`:615`) and `  ✓ Tools discovered: {n}`
+    /// (`:616`). Either alone proves the probe reached the server.
+    public static let mcpTestSuccess = [
+        "Connected (",
+        "Tools discovered:",
+    ]
+
+    /// `  ✗ Connection failed ({ms}ms): {exc}` (`:613`) and `_lookup_server`'s
+    /// `  ✗ Server '<name>' not found in config.` (`:104`). ANCHORED, and
+    /// that is the whole point of this set: the success path prints one line
+    /// per discovered tool carrying the tool's OWN description
+    /// (`_print_tools`, `:49-52`), and a stdio server's stderr is merged into
+    /// the same stream. A tool documented "… returns Connection failed (…)"
+    /// must not turn a healthy probe red, and at column 0 it cannot.
+    public static let mcpTestFailure = [
+        "Connection failed (",
+        "Server '",
+    ]
+
+    // MARK: plugins update — the security-disable third state
+
+    /// `[red]Plugin '<name>' has been disabled.[/red]` (`plugins_cmd.py:849`,
+    /// inside `_rescan_after_update`'s `dangerous` arm `:845-851`). Printed
+    /// BEFORE `cmd_update`'s `✓ Plugin <name> updated.` (`:828`), both at
+    /// exit 0. Matched as a SUBSTRING, not anchored: `rich` wraps at its
+    /// 80-column non-TTY default, so this clause can start mid-line after a
+    /// wrap of the sentence it opens.
+    public static let pluginsUpdateSecurityDisabled = "has been disabled."
+
+    /// `[yellow]⚠ Security scan flagged the updated plugin:[/yellow] {reason}`
+    /// (`plugins_cmd.py:843`) — the line round-4 decision 3 quotes into the
+    /// banner so the user learns WHY the plugin is off.
+    public static let pluginsUpdateScanFlagged = "Security scan flagged the updated plugin:"
 }
 
 /// `hermes pairing approve` / `revoke`, judged by what the emitter printed.
@@ -1155,5 +1289,277 @@ public enum HermesConfigUnset {
     /// does not have (C5), so it names the one gesture that does work there.
     public static func belowFloorHint(key: String) -> String {
         String(localized: "This Hermes is older than v0.19, which added `hermes config unset`. To go back to the host default, remove the `\(key)` line from config.yaml on the host.")
+    }
+}
+
+// MARK: - gateway start / stop / restart — hermes_cli/gateway.py
+
+/// The verdict on `hermes gateway start|stop|restart`, judged by what the
+/// service backend PRINTED.
+///
+/// ## Why the exit code was never enough
+///
+/// `cmd_gateway` (`hermes_cli/main.py:1736-1742` @ v2026.9.7) discards what
+/// `gateway_command` returns, and `gateway_command` (`gateway.py:5659-5667`)
+/// returns `None` for every one of these three verbs — so the whole family
+/// lands at exit 0 whatever happened. The exit-0 refusal is a FAMILY here,
+/// not one handler; every arm on each verb's path was walked at the tag:
+///
+/// **stop** (`_cmd_stop`, `gateway.py:5974-6000`)
+/// - `✗ No gateway processes found` (`:5993`, the `--all` arm) and
+///   `✗ No gateway running for this profile` (`:5998`) — plain `return`s.
+/// - `_dispatch_all_via_service_manager_if_s6` prints
+///   `✗ No profile gateways registered under s6` and returns True (`:5644`).
+/// - successes: `✓ Stopped {n} gateway process(es) across all profiles`
+///   (`:5991`), `✓ Stopped gateway for this profile` (`:5996`),
+///   `✓ Stopped {service} service` (`:6000`), plus the backend's own line —
+///   `✓ Service stopped` (`launchd_stop`, `:3978`) or
+///   `✓ {User|System} service stopped` (`systemd_stop`, `:3186`).
+///
+/// **start** (`_cmd_start`, `gateway.py:5955-5972`)
+/// - `_no_backend_exit` (`:5870-5874`): of the four `start` rows only
+///   `("start", "container")` carries an exit code of `0` (`:5854-5860`), and
+///   it prints no success line at all — the no-marker rule covers it. The
+///   other three `sys.exit(1)`.
+/// - `launchd_start` (`:3914-3940`) returns WITHOUT `✓ Service started` when
+///   `_launchd_bootstrap_and_kickstart` degrades (`:3926-3928`, `:3938-3939`).
+/// - successes: `✓ Service started` (`:3927`, `:3940`),
+///   `✓ {User|System} service started` (`systemd_start`, `:3171`), and on
+///   Windows `✓ Gateway started via {via} (PID: …)` /
+///   `✓ Gateway already running (PID: …)`
+///   (`hermes_cli/gateway_windows.py:971`, `:698`) against
+///   `✗ Gateway start via {via} FAILED …` (`:977`).
+///
+/// **restart** (`_cmd_restart`, `gateway.py:6019-6067`)
+/// - `⚠ Cannot restart gateway as a service — linger is not enabled.`
+///   (`:6047`) is a plain `return` at exit 0 — caught by
+///   ``HermesCLIMarkers/managedRefusalAnchored``'s `Cannot ` anchor, which is
+///   a column-0 anchor and not a managed-install claim.
+/// - `✗ Gateway service restart failed.` (`:6056`) does `sys.exit(1)`.
+/// - `_wait_for_systemd_service_restart` can end with
+///   `⚠ … but gateway startup failed: {reason}` (`:1223`),
+///   `⚠ … did not become active within {n}s.` (`:1242`) or
+///   `_print_systemd_start_limit_wait`'s
+///   `⏳ … is temporarily rate-limited by systemd.` (`:1284`) — all exit 0
+///   with no success line.
+/// - successes: `✓ Service restart requested` (`:4041`, `:4059`),
+///   `✓ Service restarted` (`:4065`, `:4081`),
+///   `✓ {User|System} service restarted (PID {n})` (`:1218`), and
+///   `✓ {Stopped|Restarted} {n} profile gateway(s) under s6` (`:5653`).
+///
+/// ## Known blind spot: a bare s6 dispatch
+///
+/// `_dispatch_via_service_manager_if_s6` (`:5608-5629`) hands the verb to the
+/// s6 service manager and prints NOTHING on the success path
+/// (`hermes_cli/service_manager.py:529-566` prints nothing either). On such a
+/// host — a container whose gateway Scarf drives over SSH — a real
+/// start/stop/restart reports "could not confirm". That is the C5 answer
+/// (never read silence as success) and the call sites all reload the real
+/// state afterwards, so the banner is corrected within seconds. It is called
+/// out here rather than papered over.
+///
+/// ## Round-4 product decision 2
+///
+/// The banner claims the real state ("Gateway started" / "Gateway stopped"),
+/// not "requested". A Stop that found nothing running is a **success**
+/// carrying a neutral note, not a failure — the user asked for the gateway to
+/// be down and it is down. That rides on ``HermesCLIOutcome/warning``, the
+/// same channel the partial-write case uses.
+public enum HermesGatewayServiceVerdict {
+    public enum Verb: String, Sendable, CaseIterable {
+        case start, stop, restart
+    }
+
+    /// `hermes gateway <verb>`. No positional and no flag, so there is
+    /// nothing here for a `--` to guard.
+    public static func argv(_ verb: Verb) -> [String] { ["gateway", verb.rawValue] }
+
+    /// The neutral note decision 2 asks for on a Stop with nothing running.
+    public static let nothingWasRunningNote = String(
+        localized: "Nothing was running on this profile."
+    )
+
+    public static func judge(verb: Verb, output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let successMarkers: [String]
+        switch verb {
+        case .start: successMarkers = HermesCLIMarkers.gatewayStartSuccess
+        case .stop: successMarkers = HermesCLIMarkers.gatewayStopSuccess
+        case .restart: successMarkers = HermesCLIMarkers.gatewayRestartSuccess
+        }
+        let verdict = HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: successMarkers,
+            failureMarkers: HermesCLIMarkers.gatewayServiceFailure,
+            anchoredFailureMarkers: HermesCLIMarkers.gatewayServiceFailureAnchored,
+            successAnchored: true
+        )
+        guard verb == .stop, !verdict.succeeded, exitCode == 0 else { return verdict }
+        // Decision 2: "nothing was running" is the state the user asked for.
+        // Only ever reached when no success line printed — `_cmd_stop`'s ✓/✗
+        // arms are mutually exclusive branches (`gateway.py:5989-6000`).
+        //
+        // `verdict.detail == nil` when no failure marker matched, because
+        // `fallbackDetail` is on and `judge` quotes the last line otherwise.
+        // A run that ALSO printed a real refusal (`Refusing to stop the
+        // gateway from inside the gateway process.`, `:5776-5781`) keeps that
+        // refusal: "nothing was running" must never launder a genuine one.
+        let lines = HermesCLIVerdict.significantLines(output)
+        let sawRefusal = lines.contains { line in
+            HermesCLIMarkers.gatewayServiceFailure.contains { line.contains($0) }
+                || HermesCLIMarkers.gatewayServiceFailureAnchored.contains {
+                    HermesCLIVerdict.unglyphed(line).hasPrefix($0)
+                }
+        }
+        let sawNothingRunning = !sawRefusal && lines.contains { line in
+            let head = HermesCLIVerdict.unglyphed(line)
+            return HermesCLIMarkers.gatewayNothingRunning.contains { head.hasPrefix($0) }
+        }
+        guard sawNothingRunning else { return verdict }
+        return HermesCLIOutcome(succeeded: true, detail: nil, warning: nothingWasRunningNote)
+    }
+}
+
+// MARK: - mcp remove / mcp test — hermes_cli/mcp_config.py
+
+/// `hermes mcp remove <name>`, judged by output.
+///
+/// `cmd_mcp_remove` (`hermes_cli/mcp_config.py:515-532` @ v2026.9.7) is a
+/// `-> None` with two exit-0 refusals and one exit-0 partial:
+///
+/// - `_lookup_server` prints `  ✗ Server '<name>' not found in config.`
+///   (`:104`) and returns None; `cmd_mcp_remove` returns (`:518-519`).
+/// - the `_confirm` "Cancelled." arm (`:520-522`). Scarf gives the CLI no
+///   TTY, and `_confirm`'s `input()` raises `EOFError`, which it catches and
+///   answers with its `default=True` (`:39-45`) — so Scarf never takes that
+///   arm. The marker is here anyway because the arm is one line away from
+///   the one Scarf does take.
+/// - on a managed install `_remove_mcp_server` (`:110-121`) calls
+///   `save_config`, whose managed arm prints `Cannot save configuration: …`
+///   and returns (`hermes_cli/config.py:2316-2318`) — and `:524` prints
+///   `  ✓ Removed '<name>' from config` regardless. Hence `failureWins`.
+///
+/// The success line echoes the SERVER NAME, so the refusal side is matched
+/// ANCHORED (the P39b rule); `Removed '` can never be mistaken for `Cannot `
+/// at column 0.
+public enum HermesMCPRemoveVerdict {
+    /// `mcp remove -- <name>`. `name` is the subparser's only positional and
+    /// there is no flag after it (`hermes_cli/subcommands/mcp.py:44-45` @
+    /// v2026.9.7), so `--` is both safe and necessary: a server name is
+    /// user-chosen text from `mcp_servers` and one starting with `-` exits 2.
+    public static func argv(name: String) -> [String] { ["mcp", "remove", "--", name] }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.mcpRemoveSuccess,
+            anchoredFailureMarkers: HermesCLIMarkers.mcpRemoveFailure,
+            failureWins: true,
+            successAnchored: true
+        )
+    }
+}
+
+/// `hermes mcp test <name>`, judged by output.
+///
+/// `cmd_mcp_test` (`hermes_cli/mcp_config.py:583-620` @ v2026.9.7) is a
+/// `-> None`: an unknown name returns after `_lookup_server`'s
+/// `✗ Server '<name>' not found in config.` (`:104`), and a failed probe
+/// returns after `✗ Connection failed ({ms}ms): {exc}` (`:613`). Success is
+/// `✓ Connected ({ms}ms)` (`:615`) followed by `✓ Tools discovered: {n}`
+/// (`:616`).
+///
+/// The previous verdict was a bare `output.contains("✗")` over text Hermes
+/// does not author: `_print_tools` (`:49-52`) prints every discovered tool's
+/// own DESCRIPTION on the SUCCESS path, and a stdio server's stderr is merged
+/// into the same stream. One tool documented with a `✗` turned a healthy
+/// server red. Both sides are anchored — every line here comes from
+/// `_success`/`_error` (`:34-36`), which print at a two-space indent with one
+/// glyph, exactly what ``HermesCLIVerdict/unglyphed(_:)`` strips.
+public enum HermesMCPTestVerdict {
+    /// `mcp test -- <name>` — same reasoning as ``HermesMCPRemoveVerdict``
+    /// (`hermes_cli/subcommands/mcp.py:49-50` @ v2026.9.7).
+    public static func argv(name: String) -> [String] { ["mcp", "test", "--", name] }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.mcpTestSuccess,
+            anchoredFailureMarkers: HermesCLIMarkers.mcpTestFailure,
+            failureWins: true,
+            successAnchored: true
+        )
+    }
+}
+
+// MARK: - plugins update — hermes_cli/plugins_cmd.py
+
+/// `hermes plugins update <name>`, which has THREE outcomes rather than two.
+///
+/// `cmd_update` calls `_rescan_after_update` (`hermes_cli/plugins_cmd.py:810`
+/// @ v2026.9.7) BEFORE it announces anything. When the post-pull security scan
+/// returns a `dangerous` verdict that rescan DISABLES the plugin and prints
+///
+/// ```
+/// ⚠ Security scan flagged the updated plugin: {reason}
+/// …the scan report…
+/// Plugin '<name>' has been disabled. Review the findings, then re-enable
+/// with `hermes plugins enable <name>` if you trust them.
+/// ```
+///
+/// (`:842-851`) — and then `:828` prints `✓ Plugin <name> updated.` anyway.
+/// Both at exit 0. The tree really was pulled, so this is not a failure; the
+/// plugin really is off, so it is not the plain success Scarf used to report.
+/// Round-4 product decision 3 makes it a third state carried on
+/// ``HermesCLIOutcome/warning``, quoting Hermes's own reason line (`:843`).
+///
+/// **Why the success side needed anchoring.** `pluginsUpdateSuccess`'s
+/// `"updated."` was a bare substring over output Hermes does not author — the
+/// raw `git pull` body (`:829`) and the scan report (`:844`). A commit message
+/// reading "docs updated." in a run that printed no success line of its own
+/// was a false success. The real line is `✓ Plugin <name> updated.`, so this
+/// requires the column-0 `Plugin ` prefix AND one of the two tails, which no
+/// pull body or scan finding satisfies by accident.
+public enum HermesPluginsUpdateVerdict {
+    public static func argv(name: String) -> [String] { ["plugins", "update", "--", name] }
+
+    /// `✓ Plugin <name> updated.` (`:828`) /
+    /// `✓ Plugin <name> is already up to date.` (`:826`), matched as the whole
+    /// shape rather than either half.
+    static func isSuccessLine(_ line: String) -> Bool {
+        let head = HermesCLIVerdict.unglyphed(line)
+        guard head.hasPrefix("Plugin ") else { return false }
+        return HermesCLIMarkers.pluginsUpdateSuccess.contains { head.hasSuffix($0) }
+    }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        let succeeded = lines.contains(where: isSuccessLine)
+        let refusal = lines.first { line in
+            HermesCLIMarkers.pluginsUpdateFailure.contains { line.contains($0) }
+                || HermesCLIMarkers.managedRefusalAnchored.contains {
+                    HermesCLIVerdict.unglyphed(line).hasPrefix($0)
+                }
+        }
+        // `failureWins`, as before: the consent refusal and the managed
+        // refusal both print BEFORE the success line by design.
+        if exitCode != 0 || refusal != nil || !succeeded {
+            return HermesCLIOutcome(succeeded: false, detail: refusal ?? lines.last)
+        }
+        guard let disabled = lines.first(where: {
+            $0.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled)
+        }) else {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        let reason = lines.first {
+            $0.contains(HermesCLIMarkers.pluginsUpdateScanFlagged)
+        } ?? disabled
+        return HermesCLIOutcome(
+            succeeded: true,
+            detail: nil,
+            warning: String(localized: "Updated, then disabled by the security scan. \(reason)")
+        )
     }
 }

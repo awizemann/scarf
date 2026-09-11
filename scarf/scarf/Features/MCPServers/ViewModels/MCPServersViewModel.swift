@@ -144,13 +144,18 @@ final class MCPServersViewModel {
         }
     }
 
+    /// P40: judged by what `hermes mcp remove` PRINTED. `cmd_mcp_remove`
+    /// returns after `_lookup_server`'s `✗ Server '<name>' not found in
+    /// config.` (`hermes_cli/mcp_config.py:104`, `:518-519` @ v2026.9.7) at
+    /// exit 0, so the row flashed "Removed", vanished from the list, and came
+    /// back on the reload — the shape P31 fixed for `pairing revoke`.
     func deleteServer(name: String) {
         let fileService = self.fileService
         Task.detached { [weak self] in
-            let result = fileService.removeMCPServer(name: name)
+            let outcome = fileService.removeMCPServer(name: name)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
+                if outcome.succeeded {
                     self.flashStatus("Removed \(name)")
                     if self.selectedServerName == name {
                         self.selectedServerName = nil
@@ -159,7 +164,8 @@ final class MCPServersViewModel {
                     self.load(force: true)
                     self.showRestartBanner = true
                 } else {
-                    self.activeError = "Remove failed: \(result.output)"
+                    self.activeError = outcome.detail
+                        .map { "Remove failed: \($0)" } ?? "Remove failed"
                 }
             }
         }

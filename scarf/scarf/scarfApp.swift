@@ -609,9 +609,17 @@ final class ServerLiveStatus: Identifiable {
     // only two sources; `source` is what separates them, so neither may
     // report the other's.
 
-    /// Fire the gateway start and report whether the CLI accepted it.
+    /// Fire the gateway start and report whether the backend PRINTED its own
+    /// success line (P40). `cmd_gateway` discards `gateway_command`'s return
+    /// (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `launchd_start`
+    /// returns without `✓ Service started` when the bootstrap degrades
+    /// (`hermes_cli/gateway.py:3926-3928`, `:3938-3939`), so the exit code
+    /// this used to read was 0 either way — and it feeds Analytics.
     private nonisolated static func performStart(_ context: ServerContext) -> Bool {
-        context.runHermes(["gateway", "start"]).exitCode == 0
+        let result = context.runHermes(HermesGatewayServiceVerdict.argv(.start))
+        return HermesGatewayServiceVerdict.judge(
+            verb: .start, output: result.output, exitCode: result.exitCode
+        ).succeeded
     }
 
     func startHermes() {
@@ -630,7 +638,7 @@ final class ServerLiveStatus: Identifiable {
 
     func stopHermes() {
         Task { [fileService] in
-            let ok = await Task.detached { fileService.stopHermes() }.value
+            let ok = await Task.detached { fileService.stopHermes().succeeded }.value
             Analytics.record(.hermesControlAction(
                 action: .stop, source: .menuBar, outcome: .init(succeeded: ok)
             ))
@@ -643,7 +651,7 @@ final class ServerLiveStatus: Identifiable {
 
     func restartHermes() {
         Task { [weak self, fileService, context] in
-            let stopped = await Task.detached { fileService.stopHermes() }.value
+            let stopped = await Task.detached { fileService.stopHermes().succeeded }.value
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let started = await Task.detached { Self.performStart(context) }.value
             // A restart only succeeded if both halves did; a stop that
