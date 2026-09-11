@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/badge/macOS-14.6+-blue" alt="macOS 14.6+">
   <img src="https://img.shields.io/badge/iOS-18+-blue" alt="iOS 18+">
   <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift 6">
-  <img src="https://img.shields.io/badge/Hermes-v0.20-purple" alt="Hermes v0.20">
+  <img src="https://img.shields.io/badge/Hermes-v0.21-purple" alt="Hermes v0.21">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
@@ -43,7 +43,7 @@ Hermes is a terminal-and-messaging agent — powerful, but invisible. Scarf give
 - **Full control.** Chat with rich streaming (ACP) or a real terminal, edit memory and skills, manage cron, gateways, MCP servers, and every config key — from a GUI instead of YAML.
 - **Your servers, no middleman.** Local `~/.hermes/` or any number of remote hosts over plain SSH (your existing `~/.ssh/config`, agent, ProxyJump). There is no companion service in the middle — nothing between your device and your Hermes host.
 - **Native and safe.** Pure Swift 6 / SwiftUI — no Electron. Hermes state is opened read-only; management actions go through the `hermes` CLI, so Scarf can't corrupt your agent's data.
-- **Version-adaptive.** Scarf detects each host's Hermes version and capability-gates its UI: Hermes v0.6 through v0.20 all work, and newer-only surfaces simply hide on older hosts.
+- **Version-adaptive.** Scarf detects each host's Hermes version and capability-gates its UI: Hermes v0.6 through v0.21 all work, and newer-only surfaces simply hide on older hosts.
 
 Available in English, 简体中文, Deutsch, Français, Español, 日本語, and Português (Brasil).
 
@@ -129,15 +129,19 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.20.4 "Herald"** (v2026.8.18) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.1** (v2026.9.7) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
 | v0.6.0 – v0.17.0 (2026-03 → 2026-06) | Verified — full feature history in the [wiki compatibility page](https://github.com/awizemann/scarf/wiki/Hermes-Version-Compatibility) |
 | v0.18.x (2026-07) | Verified — `messages.compacted` schema detection, MoA + Vertex providers |
-| v0.19.x "Quicksilver" | Verified — audited as part of the v0.18.2 → v0.20.0 source delta |
-| v0.20.0 "Herald" (2026-08-03) | Verified — pinned sessions, per-model cost, new exports, `/compress`, cron run history, profile routing |
-| v0.20.4 "Herald" (2026-08-18) | **Verified — current target** — curator ledger/purge, project skills, unread sessions, MCP catalog + identity headers, personalities-in-code |
+| v0.19.x "Quicksilver" | Verified — audited as part of the v0.18.2 → v0.20.0 source delta; the ACP chat composer's `/compact` becomes `/compress` at v0.19.1 (the CLI table has said `compress` since v0.3.0), so Scarf sends the spelling each host actually understands |
+| v0.20.0 "Herald" (2026-08-03) | Verified — pinned sessions, per-model cost, new exports, cron run history, profile routing |
+| v0.20.4 "Herald" (2026-08-18) | Verified — curator ledger/purge, project skills, unread sessions, MCP catalog + identity headers, personalities-in-code |
+| v0.20.5 (2026-08-19) | Verified — full-output `--version` probe, unlimited max turns, unseeded `stt.provider`, profile display names, OpenCode Free |
+| v0.20.6 (2026-08-27) | Verified — cron incidents/doctor/Run Now, bot-chat delivery, `browser close-profile`, curator pin/unpin diagnostics, essential `hermes-agent` skill |
+| v0.21.0 "Pantheon" (2026-08-31) | Verified — Peers (`hermes peer`), dotted-key escaping, MCP catalog 20 → 65 servers, turn-lease default 1800 → 5s, two new providers |
+| v0.21.1 (2026-09-07) | **Verified — current target** — Tavily back, `perplexity` web backend, bounded `service_tier` modes, shared-metrics telemetry, `plugins compat --json`, cron `--paused`/`--failure-deliver`, MCP device-code OAuth, `messages_fts` 8 KB tool-content prefix |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 
