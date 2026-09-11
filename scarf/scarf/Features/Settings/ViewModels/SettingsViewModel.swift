@@ -219,8 +219,20 @@ final class SettingsViewModel {
     /// visibly `browser.cloud_provider`, where a present-but-empty value
     /// normalizes to `local` (cloud dispatch off) while an absent key means
     /// auto-detect. Use this whenever a picker offers a "not set" row.
+    ///
+    /// Judged by OUTPUT, unlike `setSetting`. Every `config set` refusal
+    /// `sys.exit(1)`s, so the exit code is the truth there; `config unset`'s
+    /// managed-install arm calls `managed_error(...)`, which PRINTS to stderr
+    /// and `return`s (`hermes_cli/config.py:3550-3552` @ v2026.9.7,
+    /// `:8870-8872` @ v2026.7.20), and Python makes that exit 0 — so a
+    /// refused clear was banner'd "Saved <key>" over a key still on disk, for
+    /// all six call sites. See ``HermesConfigUnset`` (charter C5).
     func unsetSetting(_ key: String) {
-        applyConfigWrite(key, arguments: ["config", "unset", key])
+        enqueueConfigWrite(
+            key: key,
+            arguments: HermesConfigUnset.argv(key: key),
+            verdict: HermesConfigUnset.judge(output:exitCode:)
+        )
     }
 
     /// Tail of the serialised config-write chain. Every write hops off the
@@ -297,7 +309,7 @@ final class SettingsViewModel {
         ))
         if let refreshed {
             showSuccess(
-                arguments.contains("unset")
+                Self.isUnset(arguments)
                     ? String(localized: "Cleared \(key) — the host default applies")
                     : String(localized: "Saved \(key)")
             )
@@ -321,8 +333,8 @@ final class SettingsViewModel {
                 "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
             )
             showSaveFailure(
-                arguments.contains("unset")
-                    ? Self.clearFailureMessage(key: key, output: result.output)
+                Self.isUnset(arguments)
+                    ? Self.clearFailureMessage(key: key, output: result.output, exitCode: result.exitCode)
                     : Self.saveFailureMessage(key: key, output: result.output)
             )
         }
@@ -344,22 +356,30 @@ final class SettingsViewModel {
     ///
     /// `static` and `internal` so tests can drive it with fixture output
     /// without standing up a SettingsViewModel.
-    /// The `config unset` twin of ``saveFailureMessage``. Quotes Hermes's own
-    /// refusal — including the managed-install one, which arrives at exit 0.
-    static func clearFailureMessage(key: String, output: String) -> String {
-        let reason = HermesConfigUnset.judge(output: output, exitCode: 0).detail
-            ?? Self.failureReason(from: output)
-            ?? ""
-        return reason.isEmpty
-            ? String(localized: "Couldn’t clear \(key)")
-            : String(localized: "Couldn’t clear \(key): \(reason)")
-    }
-
     static func saveFailureMessage(key: String, output: String) -> String {
         let reason = Self.failureReason(from: output) ?? ""
         return reason.isEmpty
             ? String(localized: "Failed to save \(key)")
             : String(localized: "Couldn’t save \(key): \(reason)")
+    }
+
+    /// Is this queued write a `hermes config unset`? Positional, not a
+    /// substring search: `config set <key> unset` is a legitimate `set`.
+    static func isUnset(_ arguments: [String]) -> Bool {
+        arguments.count >= 2 && arguments[0] == "config" && arguments[1] == "unset"
+    }
+
+    /// The `config unset` twin of ``saveFailureMessage``. Quotes Hermes's own
+    /// refusal — including the managed-install one, which arrives at exit 0
+    /// and is therefore invisible to `saveFailureMessage`'s last-line scan
+    /// being reached at all.
+    static func clearFailureMessage(key: String, output: String, exitCode: Int32) -> String {
+        let reason = HermesConfigUnset.judge(output: output, exitCode: exitCode).detail
+            ?? Self.failureReason(from: output)
+            ?? ""
+        return reason.isEmpty
+            ? String(localized: "Couldn’t clear \(key)")
+            : String(localized: "Couldn’t clear \(key): \(reason)")
     }
 
     /// The extraction half of `saveFailureMessage`, without the "save"
@@ -584,22 +604,7 @@ final class SettingsViewModel {
             showSaveFailure(HermesConfigUnset.belowFloorHint(key: "approvals.mode"))
             return
         }
-        unsetApprovalMode()
-    }
-
-    /// `hermes config unset approvals.mode`, judged by OUTPUT.
-    ///
-    /// The generic `unsetSetting` judges by exit code, which is wrong for this
-    /// verb: `unset_config_value`'s managed-install arm prints its refusal and
-    /// `return`s (`hermes_cli/config.py:3550-3552` @ v2026.9.7), so a refused
-    /// clear arrives as exit 0 and would be banner'd "Saved approvals.mode"
-    /// over a mode that is still set — the P9/P21 class exactly.
-    func unsetApprovalMode() {
-        enqueueConfigWrite(
-            key: "approvals.mode",
-            arguments: HermesConfigUnset.argv(key: "approvals.mode"),
-            verdict: HermesConfigUnset.judge(output:exitCode:)
-        )
+        unsetSetting("approvals.mode")
     }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the

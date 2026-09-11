@@ -217,6 +217,31 @@ struct HermesP35ApprovalsHostDefaultTests {
         #expect(vm.message?.contains("managed by NixOS") == true)
     }
 
+    /// `isUnset` is positional, so a `config set` whose VALUE is the word
+    /// `unset` is still reported as a save.
+    @Test func theUnsetTestIsPositionalNotASubstringSearch() {
+        #expect(SettingsViewModel.isUnset(["config", "unset", "approvals.mode"]))
+        #expect(!SettingsViewModel.isUnset(["config", "set", "model.default", "unset"]))
+        #expect(!SettingsViewModel.isUnset(["memory", "off"]))
+        #expect(!SettingsViewModel.isUnset(["config"]))
+    }
+
+    /// Every other `unsetSetting` caller gets the output verdict too — the
+    /// exit-0 managed refusal was banner'd as a save at all six sites.
+    @Test func theGenericUnsetIsAlsoOutputJudged() async {
+        let log = CLILog(
+            output: "Cannot unset configuration values: this Hermes installation is managed by NixOS.",
+            exitCode: 0
+        )
+        let vm = Self.viewModel(log, storedMode: nil)
+
+        vm.unsetSetting("browser.cloud_provider")
+        await Self.settle(log)
+
+        #expect(log.calls == [["config", "unset", "browser.cloud_provider"]])
+        #expect(vm.messageIsFailure, "an exit-0 `config unset` refusal was reported as a save")
+    }
+
     /// An explicit mode still goes through `config set`, unchanged.
     @Test func anExplicitModeStillWrites() async {
         let log = CLILog(output: "")
