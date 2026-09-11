@@ -132,6 +132,20 @@ public enum HermesMCPOAuthPaths {
         basenames(for: serverName).map { "\(tokensDir)/\($0).json" }
     }
 
+    /// Does this server have an OAuth token, given ONE listing of
+    /// `mcp-tokens/`?
+    ///
+    /// The per-server ``tokenPaths(serverName:tokensDir:)`` probe answers the
+    /// same question with up to two `fileExists` calls EACH — a serialized SSH
+    /// round trip apiece on a remote context, so a dozen MCP servers cost up
+    /// to two dozen of them inside one load. `listDirectory` answers every
+    /// server at once, and the entries are bare filenames on both transports
+    /// (`LocalTransport.swift:191-197` is `contentsOfDirectory`,
+    /// `SSHTransport.swift:613-626` is `ls -A`).
+    public static func hasToken(serverName: String, tokenDirEntries: Set<String>) -> Bool {
+        basenames(for: serverName).contains { tokenDirEntries.contains("\($0).json") }
+    }
+
     /// Every file `remove_oauth_tokens` would delete, for every spelling
     /// Scarf accepts — what "Clear Token" must unlink.
     public static func statePaths(serverName: String, tokensDir: String) -> [String] {

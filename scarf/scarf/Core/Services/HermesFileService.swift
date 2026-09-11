@@ -14,6 +14,15 @@ struct HermesFileService: Sendable {
         self.transport = context.makeTransport()
     }
 
+    /// Test seam: run against a supplied transport instead of the context's
+    /// own. Used to COUNT round trips — the per-server `fileExists` probing in
+    /// `loadMCPServers` was only visible as a cost once something could count
+    /// it (P35).
+    nonisolated init(context: ServerContext, transport: any ServerTransport) {
+        self.context = context
+        self.transport = transport
+    }
+
     // MARK: - Config
 
     nonisolated func loadConfig() -> HermesConfig {
@@ -381,13 +390,18 @@ struct HermesFileService: Sendable {
     nonisolated func loadMCPServers() -> [HermesMCPServer] {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
+        // ONE listing of `mcp-tokens/` for the whole roster. The per-server
+        // probe this replaces asked `fileExists` once per candidate spelling
+        // — up to 2N serialized SSH round trips inside a single load. An
+        // unreadable or absent directory is an empty set, which is exactly
+        // "no server has a token" and the same answer the per-path probe gave.
+        let tokenEntries = Set((try? transport.listDirectory(context.paths.mcpTokensDir)) ?? [])
         return parsed.map { server in
             // NOT `<name>.json`: Hermes files OAuth state under
             // `_safe_filename(name)`, so `github.com` is `github_com.json`.
             // See `HermesMCPOAuthPaths` for the port and the tag walk.
             let hasToken = HermesMCPOAuthPaths
-                .tokenPaths(serverName: server.name, tokensDir: context.paths.mcpTokensDir)
-                .contains { transport.fileExists($0) }
+                .hasToken(serverName: server.name, tokenDirEntries: tokenEntries)
             guard hasToken != server.hasOAuthToken else { return server }
             return HermesMCPServer(
                 name: server.name,
@@ -406,7 +420,6 @@ struct HermesFileService: Sendable {
                 resourcesEnabled: server.resourcesEnabled,
                 promptsEnabled: server.promptsEnabled,
                 hasOAuthToken: hasToken,
-                sseReadTimeout: server.sseReadTimeout,
                 supportsParallelToolCalls: server.supportsParallelToolCalls,
                 clientCert: server.clientCert,
                 clientKey: server.clientKey,
@@ -1226,7 +1239,6 @@ struct HermesFileService: Sendable {
             let enabled = Self.boolish(fields["enabled"], default: true)
             let timeout = fields["timeout"].flatMap(Int.init)
             let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
-            let sseReadTimeout = fields["sse_read_timeout"].flatMap(Int.init)
             // v0.14 — supports_parallel_tool_calls is an optional bool;
             // absent means "use Hermes's default" and stays nil.
             // Absent stays nil ("use Hermes's default"); a present value is
@@ -1317,7 +1329,6 @@ struct HermesFileService: Sendable {
                 resourcesEnabled: resources,
                 promptsEnabled: prompts,
                 hasOAuthToken: false,
-                sseReadTimeout: sseReadTimeout,
                 supportsParallelToolCalls: parallel,
                 clientCert: clientCert,
                 clientKey: clientKey,

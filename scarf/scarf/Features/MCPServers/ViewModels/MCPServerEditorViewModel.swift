@@ -265,8 +265,8 @@ final class MCPServerEditorViewModel {
                     // SSE servers carry headers exactly like .http does.
                     // There is no SSE-only scalar to write: `sse_read_timeout`
                     // is a literal 300.0 on every supported Hermes, so Scarf
-                    // neither offers it nor touches it (see
-                    // `HermesMCPServer.sseReadTimeout`).
+                    // neither offers it nor touches it (see the note in
+                    // `HermesMCPServer`).
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
                 }
                 if !service.updateMCPToolFilters(
