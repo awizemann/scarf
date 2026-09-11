@@ -31,6 +31,27 @@ public final class IOSCronViewModel {
     /// rule `saveRegistry` enforces for `projects.json`.
     private var baseline: Data?
 
+    /// Mirrored from the capability store by `CronListView`, exactly as the
+    /// Mac's `CronView` mirrors them onto `CronViewModel`. Defaults are the
+    /// pre-floor posture: refuse nothing locally, offer no re-arm, let the
+    /// CLI decide — the same default the Mac VM carries.
+    public var isV0206OrLater = false
+    public var isV021OrLater = false
+    public var isV0181OrLater = false
+
+    /// What Scarf may offer this job. Delegates to the SAME model function
+    /// the Mac's `CronViewModel.recoveryOffer(for:)` calls, so both
+    /// platforms make an identical offer for an identical job and host
+    /// (`HermesCronJob.recoveryOffer(hostRefusesTerminalJobs:hostRecoversErrorRecurring:hostRefusesPastOneShotResume:now:)`).
+    public func recoveryOffer(for job: HermesCronJob, now: Date = Date()) -> CronRecoveryOffer {
+        job.recoveryOffer(
+            hostRefusesTerminalJobs: isV0206OrLater,
+            hostRecoversErrorRecurring: isV021OrLater,
+            hostRefusesPastOneShotResume: isV0181OrLater,
+            now: now
+        )
+    }
+
     public init(context: ServerContext) {
         self.context = context
     }
@@ -136,13 +157,26 @@ public final class IOSCronViewModel {
         let prev = jobs[idx]
         lastError = nil
 
-        // Scarf-side port of `resume_job`'s precondition. Checked BEFORE
-        // either route so the refusal reads the same whether or not the
-        // host's CLI is reachable.
-        if enabled, prev.oneShotIsUnresumable(now: now) {
-            lastToggleRoute = .refused
-            lastError = Self.oneShotRefusalMessage(prev)
-            return false
+        // ONE gate, the shared offer — nothing ahead of it. Until P38 a
+        // `oneShotIsUnresumable` pre-check ran FIRST, and because that
+        // predicate is true for every terminal one-shot it swallowed the
+        // whole `offer.canRearm` branch below: iOS said "duplicate it" where
+        // the Mac said "Resume & Run Now" for the same job on the same host.
+        // The past-deadline rule now lives inside
+        // `HermesCronJob.recoveryOffer` as its third door, so both platforms
+        // (and Bots) inherit it from one place.
+        //
+        // `refusesResume`, not `!canResume`: a healthy ENABLED job gets
+        // `CronRecoveryOffer.none`, which carries no resume door either, and
+        // `setEnabled` is documented to round-trip such a call rather than
+        // refuse it.
+        if enabled {
+            let offer = recoveryOffer(for: prev, now: now)
+            if offer.refusesResume {
+                lastToggleRoute = .refused
+                lastError = Self.resumeRefusalMessage(prev, offer: offer)
+                return false
+            }
         }
 
         // The CLI route is remote-only. On iOS every real context is
@@ -189,7 +223,32 @@ public final class IOSCronViewModel {
         }
     }
 
-    static func oneShotRefusalMessage(_ job: HermesCronJob) -> String {
+    /// The sentence for a terminal job whose only doors are shut. Mirrors
+    /// the Mac's `CronViewModel.terminalRefusalMessage` — it names
+    /// "Resume & Run Now" only where `rearm_oneshot` would actually accept
+    /// the job, and otherwise quotes the offer's hint.
+    static func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+        let state = job.effectiveState == "error" ? "failed" : "finished"
+        let lead = "\"\(job.name)\" has \(state) and can't just be resumed"
+        if offer.canRearm {
+            return lead + " — re-arm it from the Mac app (Resume & Run Now)."
+        }
+        return lead + ". " + (offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint)
+    }
+
+    /// The sentence for any job whose Resume door the offer just shut —
+    /// terminal or merely past its one-shot deadline. One entry point so the
+    /// two shapes cannot be wired to the wrong wording again.
+    public static func resumeRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+        job.isTerminal
+            ? terminalRefusalMessage(job, offer: offer)
+            : oneShotRefusalMessage(job, offer: offer)
+    }
+
+    static func oneShotRefusalMessage(
+        _ job: HermesCronJob,
+        offer: CronRecoveryOffer = .none
+    ) -> String {
         // Keyed on the same predicate `oneShotIsUnresumable` now uses: a
         // spent one-shot is refused because its record is TERMINAL (Hermes's
         // `_reject_terminal_activation`), not merely because `last_run_at` is
@@ -198,7 +257,15 @@ public final class IOSCronViewModel {
             return "\"\(job.name)\" has already finished — a completed one-shot can't be resumed. Duplicate it to schedule a new run."
         }
         let when = job.schedule.runAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "its scheduled time"
-        return "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire. Duplicate it with a new time instead."
+        let lead = "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire"
+        // Reachable now that the past-deadline rule is a door in the shared
+        // offer: `rearm_oneshot` DOES accept this job on a v0.20.6+ host, and
+        // `--run-now` is a Mac affordance, so point there rather than telling
+        // the user to duplicate a job Hermes can still re-arm.
+        if offer.canRearm {
+            return lead + " — re-arm it from the Mac app (Resume & Run Now)."
+        }
+        return lead + ". Duplicate it with a new time instead."
     }
 
     // MARK: - CLI route

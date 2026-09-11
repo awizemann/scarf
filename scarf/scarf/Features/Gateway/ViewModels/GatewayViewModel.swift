@@ -450,6 +450,17 @@ final class MessagingGatewayViewModel {
     /// as an error and it is never auto-cleared.
     private(set) var actionFailed = false
 
+    /// Hermes's own refusal line for the last `pairing approve` / `revoke`,
+    /// quoted verbatim. Rendered as a sticky banner in the pairing section
+    /// and cleared only by `dismissPairingError()` or by the next pairing
+    /// action — a refusal the user did not read is a refusal that did not
+    /// happen, and both verbs refuse at exit 0 (see `HermesPairingVerdict`).
+    private(set) var pairingError: String?
+
+    /// Dismisses the pairing banner. The only way it clears other than
+    /// starting another pairing action.
+    func dismissPairingError() { pairingError = nil }
+
     /// One code path for start/stop/restart so the exit code can't be
     /// dropped on one of them. `hermes gateway start` exits 1 on its real
     /// failure paths (`hermes_cli/gateway.py`, verified at v2026.8.31), and
@@ -507,24 +518,34 @@ final class MessagingGatewayViewModel {
         }
     }
 
+    /// Approves a pending pairing, judged by what Hermes PRINTED.
+    ///
+    /// `_cmd_approve` is a plain `-> None` (`hermes_cli/pairing.py:56-81` @
+    /// `v2026.9.7`): an expired/unknown code (`:80`) and a rate-limit lockout
+    /// (`:76-78`) both print their refusal and exit 0. Judging by exit code
+    /// meant the user clicked Approve, saw nothing at all, and the pending row
+    /// simply stayed — the C5 shape exactly. The refusal is now quoted
+    /// verbatim into a sticky banner, lockout countdown included.
     func approvePairing(platform: String, code: String) {
         guard !isBusy else { return }
         isBusy = true
+        pairingError = nil
         invalidateInFlightLoads()
         let run = cliRunner
         Task { [weak self] in
             let result = await Task.detached {
-                run(["pairing", "approve", platform, code], Self.mutationTimeout)
+                run(["pairing", "approve", "--", platform, code], Self.mutationTimeout)
             }.value
             guard let self else { return }
             self.isBusy = false
-            if result.exitCode != 0 {
-                self.actionFailed = true
-                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
-                    .map { String(localized: "Approve failed: \($0)") }
-                    ?? String(localized: "Approve failed")
-            } else {
-                self.actionFailed = false
+            // Pairing feedback goes to `pairingError` alone, never to
+            // `actionMessage`/`actionFailed`: those belong to the service
+            // start/stop/restart row, and flipping `actionFailed` here
+            // repainted whatever that row was still showing ("Gateway start
+            // requested") in red.
+            let outcome = HermesPairingVerdict.approve(output: result.output, exitCode: result.exitCode)
+            if !outcome.succeeded {
+                self.pairingError = outcome.detail ?? String(localized: "Approve failed")
             }
             self.load(force: true)
         }
@@ -533,25 +554,29 @@ final class MessagingGatewayViewModel {
     func revokeUser(_ user: PairedUser) {
         guard !isBusy else { return }
         isBusy = true
+        pairingError = nil
         invalidateInFlightLoads()
         let run = cliRunner
         Task { [weak self] in
             let result = await Task.detached {
-                run(["pairing", "revoke", user.platform, user.userId], Self.mutationTimeout)
+                run(["pairing", "revoke", "--", user.platform, user.userId], Self.mutationTimeout)
             }.value
             guard let self else { return }
             self.isBusy = false
-            // Only drop the row when the CLI agreed — the optimistic removal
-            // it replaced hid a failed revoke behind a vanished row until the
-            // next load put it back.
-            if result.exitCode == 0 {
-                self.actionFailed = false
+            // Only drop the row when the CLI agreed — and "agreed" is the
+            // `Revoked access for user …` line (`hermes_cli/pairing.py:88`),
+            // not the exit code. `_cmd_revoke` is a `-> None` that prints
+            // `User <id> not found in approved list for <platform>.` (`:90`)
+            // and returns, so exit 0 covers the refusal too: the row vanished
+            // from a revoke Hermes had declined, until the following
+            // `load(force: true)` put it back with no error in between.
+            let outcome = HermesPairingVerdict.revoke(output: result.output, exitCode: result.exitCode)
+            if outcome.succeeded {
                 self.approvedUsers.removeAll { $0.id == user.id }
             } else {
-                self.actionFailed = true
-                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
-                    .map { String(localized: "Revoke failed: \($0)") }
-                    ?? String(localized: "Revoke failed")
+                // Same rule as `approvePairing`: the banner owns pairing
+                // feedback, the service row keeps its own message.
+                self.pairingError = outcome.detail ?? String(localized: "Revoke failed")
             }
             self.load(force: true)
         }

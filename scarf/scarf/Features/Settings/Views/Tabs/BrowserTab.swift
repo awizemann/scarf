@@ -5,6 +5,7 @@ import ScarfCore
 struct BrowserTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     /// Selecting the empty "Auto-detect" row removes the key via
     /// `hermes config unset`, which only exists on v0.19+. On older hosts the
@@ -33,7 +34,7 @@ struct BrowserTab: View {
                 optionLabel: { id in
                     providerOptions.first { $0.id == id }?.label ?? id
                 }
-            ) { viewModel.setBrowserCloudProvider($0) }
+            ) { viewModel.setBrowserCloudProvider($0, capabilities: capabilities) }
         }
 
         SettingsSection(title: "Timeouts", icon: "hourglass") {

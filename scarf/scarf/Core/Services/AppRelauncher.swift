@@ -25,6 +25,11 @@ import os
 /// surfaces a "restart manually" toast in that case.
 @MainActor
 enum AppRelauncher {
+
+    /// C10 budget for the `open(1)` dispatch. There is no `-W`, so this is a
+    /// LaunchServices hand-off that returns immediately in every healthy
+    /// case; 20s is "the world is broken", not "the app is slow to start".
+    static let openTimeout: TimeInterval = 20
     static let logger = Logger(subsystem: "com.scarf.app", category: "AppRelauncher")
 
     enum RelaunchError: Error, LocalizedError {
@@ -79,14 +84,20 @@ enum AppRelauncher {
             throw RelaunchError.openFailed(exitCode: -1, stderr: error.localizedDescription)
         }
 
-        proc.waitUntilExit()
+        // C10: bounded, and drained CONCURRENTLY with the wait. `open(1)`
+        // is normally instant, but it talks to LaunchServices — which can
+        // block on a wedged `lsd`/`launchservicesd`, and an unbounded wait
+        // here freezes the relaunch gesture with no way out.
+        let (exited, drained) = proc.waitDraining(
+            timeout: Self.openTimeout, pipes: [stderrPipe, stdoutPipe])
+        let errData = drained.first ?? Data()
 
-        // Drain both streams BEFORE inspecting exit code so we don't leak fds.
-        let errData = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-        _ = try? stdoutPipe.fileHandleForReading.readToEnd()
-        try? stderrPipe.fileHandleForReading.close()
-        try? stdoutPipe.fileHandleForReading.close()
-
+        guard exited else {
+            logger.warning("open(1) did not finish within \(Int(Self.openTimeout))s")
+            throw RelaunchError.openFailed(
+                exitCode: -1,
+                stderr: "open(1) did not finish within \(Int(Self.openTimeout))s and was stopped")
+        }
         guard proc.terminationStatus == 0 else {
             let stderr = String(data: errData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

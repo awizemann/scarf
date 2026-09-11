@@ -659,8 +659,8 @@ struct AllConfigWritersParityTests {
 
     private static var knownWriters: [Writer] {
         [
-            // 8 non-literal sites: `applyConfigWrite`'s two
-            // `["config", "set"/"unset", key, …]` argv (keys come from the
+            // 7 non-literal sites: `setSetting`'s
+            // `["config", "set", key, value]` argv (keys come from the
             // scanned `setSetting(` literals) plus the six interpolated
             // `setSetting("auxiliary.\(task)…")` writers, which
             // `SettingsWriteReadParityTests` already pins by template and
@@ -668,10 +668,23 @@ struct AllConfigWritersParityTests {
             // …plus 1 direct-YAML site (`saveDirectYAML`'s shared guarded
             // `file.write(updated, to: path, …)`), whose three callers name
             // the key they splice in their `label:`.
+            // The `unset` argv used to be the ninth, spelled inline here; it
+            // moved to `HermesConfigUnset.argv(key:)` in P35 so both platforms
+            // build (and judge) it the same way. The KEYS are unchanged — they
+            // are still this file's own `unsetSetting("…")` literals, which
+            // the scan sees.
             Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
-                   nonLiteralKeySites: 9,
+                   nonLiteralKeySites: 8,
                    computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()
                     + directYAMLKeys),
+            // The shared `hermes config unset <key>` argv builder. One
+            // non-literal site by construction — the key is its PARAMETER —
+            // and no keys of its own: every caller (`SettingsViewModel`'s
+            // `unsetSetting` literals and iOS's `SettingEditorSheet`, whose
+            // key is a `SettingSpec.key` already in the manifest below) is
+            // itself registered, so the readability gate still sees them.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift",
+                   nonLiteralKeySites: 1, computedKeys: []),
             Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Core/Services/HermesFileService.swift",

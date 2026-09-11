@@ -3,17 +3,24 @@ import Foundation
 /// A plugin's activation state as Hermes itself reports it.
 ///
 /// Verified against `hermes_cli/plugins_cmd.py::_plugin_status` at
-/// v2026.8.31 (v0.21.0) — the CLI reports exactly three states, derived
+/// **v2026.9.7** (v0.21.1) — the CLI reports exactly three states, derived
 /// from the `plugins.enabled` / `plugins.disabled` **lists in
 /// config.yaml**. There is no `.disabled` marker file anywhere in the
 /// Hermes tree; Scarf used to invent one.
 ///
+/// Verbatim at `:1290-1293`:
+///
 /// ```python
-/// def _plugin_status(name, enabled, disabled, key=""):
-///     if name in disabled or key in disabled: return "disabled"
-///     if name in enabled or key in enabled:   return "enabled"
-///     return "not enabled"
+/// def _plugin_status(name: str, enabled: set, disabled: set, key: str = "") -> str:
+///     """User-facing activation state for a plugin name or key."""
+///     names = {name, key}
+///     return "disabled" if names & disabled else "enabled" if names & enabled else "not enabled"
 /// ```
+///
+/// (The three-branch `if` chain this comment used to quote was the
+/// v2026.8.31 shape; the set-intersection ternary above replaced it with
+/// no change in behaviour or in the three strings — but a paraphrase
+/// presented as a quote is exactly what C2 forbids.)
 ///
 /// `notEnabled` is a real, distinct state: the plugin is installed on
 /// disk but absent from both lists, so the runtime never loads it.
@@ -41,15 +48,19 @@ public enum HermesPluginActivation: String, Sendable, Equatable, CaseIterable {
 
 /// One row of `hermes plugins list --json`.
 ///
-/// Schema verified against `plugins_cmd.py::cmd_list` at v2026.8.31 —
+/// Schema verified against `plugins_cmd.py::cmd_list` at v2026.9.7
+/// (`:1324-1331`) —
 /// the payload is a top-level JSON **array** of objects with exactly
 /// these five string keys:
 ///
 /// ```python
-/// payload = [{"name": name, "status": _plugin_status(...),
-///             "version": str(version), "description": description,
-///             "source": source} for ... in entries]
-/// print(json.dumps(payload, indent=2))
+/// rows = [
+///     (name, _plugin_status(name, enabled, disabled, key=key), str(version), description, source)
+///     for name, version, description, source, _dir, key in entries
+/// ]
+/// if getattr(args, "json", False):
+///     keys = ("name", "status", "version", "description", "source")
+///     print(json.dumps([dict(zip(keys, row)) for row in rows], indent=2))
 /// ```
 ///
 /// `version` is `str(version)` CLI-side, so it is always a JSON string

@@ -91,6 +91,11 @@ public enum ProfileRoutesYAML {
         // effect", which is what both consumers need — the explanatory banner
         // AND `SettingsViewModel.setMultiplexProfiles`, which writes to the
         // key in effect rather than always to `gateway.`.
+        // `normalizedScalar` (not `YAMLScalar.unquote`) on purpose: this is
+        // a boolish/null TOKEN written by `hermes config set` as much as by
+        // Scarf, and no token that can resolve to a bool or to null carries
+        // an escape — so the full decoder would answer identically while
+        // widening the rule for a value Hermes also writes.
         let topLevel = values["multiplex_profiles"].flatMap { raw -> String? in
             let v = HermesYAML.normalizedScalar(raw).lowercased()
             // `null` / `~` only — an explicitly quoted `key: ''` is the empty
@@ -323,7 +328,16 @@ public enum ProfileRoutesYAML {
                 continue
             }
 
-            let value = HermesYAML.stripYAMLQuotes(
+            // The full decoder, not `HermesYAML.stripYAMLQuotes`: every
+            // scalar in this block is emitted by `ProfileRoutesWriter.render`
+            // through `YAMLScalar.quoteIfNeeded`, whose double-quoted arm
+            // escapes `\\`, `\"`, `\n`, `\t` and `\xNN` (ids additionally go
+            // through `singleQuoted`, which escapes only `''`). And
+            // `stripYAMLQuotes` returns a double-quoted BODY verbatim, so a
+            // route name with a backslash came back doubled and grew one `\`
+            // per save (P19's writer-and-reader rule, missed when P32 moved
+            // the writer).
+            let value = YAMLScalar.unquote(
                 rawValue.hasPrefix("#") ? "" : rawValue
             )
             switch key {

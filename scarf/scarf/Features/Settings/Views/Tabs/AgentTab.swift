@@ -25,8 +25,12 @@ struct AgentTab: View {
                 range: capabilities.isV0205OrLater ? 0...1000 : 1...1000,
                 valueLabel: { $0 == HermesConfig.maxTurnsUnlimited ? String(localized: "Unlimited") : $0.formatted() }
             ) { viewModel.setMaxTurns($0) }
-            // v0.20 added the `max` and `ultra` tiers (hermes_constants.py
-            // VALID_REASONING_EFFORTS); older hosts keep the shorter list.
+            // `max` and `ultra` are NOT v0.20 — they arrived a release apart
+            // and both well before it. Walked: `VALID_REASONING_EFFORTS`
+            // gains `"max"` at v2026.7.7 (0.18.1, `hermes_constants.py:794`)
+            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`). Those are the
+            // floors `HermesReasoningEffort.levels(capabilities:)` uses;
+            // older hosts keep the shorter list.
             //
             // The leading empty row is the ABSENT key, and absent is not
             // `medium`: `agent.reasoning_effort` is in no schema layer at any
@@ -65,7 +69,11 @@ struct AgentTab: View {
             // absent key as a flat `manual` told every stock v0.19+ user that
             // Scarf would ask before each guarded command while the guardian
             // model was actually deciding. Selecting any explicit mode writes
-            // it; selecting the host-default row writes nothing.
+            // it; selecting the host-default row CLEARS the key with
+            // `hermes config unset approvals.mode` on a v0.19+ host
+            // (round-3 decision 10) and, below that floor, stays inert with
+            // a hint — it never writes an empty scalar, which Hermes reads
+            // as `manual`.
             PickerRow(
                 label: "Approval Mode",
                 selection: viewModel.config.storedApprovalMode?.rawValue ?? "",
@@ -75,7 +83,7 @@ struct AgentTab: View {
                         ? viewModel.config.approvalModeHostDefaultLabel(capabilities: capabilities)
                         : $0
                 }
-            ) { viewModel.setApprovalMode($0) }
+            ) { viewModel.setApprovalMode($0, capabilities: capabilities) }
             // Absent key (sentinel 0) shows the host's own default — 300 on
             // v0.19.1+, 60 before — without writing it back, so the first
             // stepper tap steps from the resolved default rather than from 0.

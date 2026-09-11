@@ -99,11 +99,14 @@ struct ProfileRoutesSection: View {
                     route: row.route,
                     // v0.20.4+ — `gateway.multiplex_profile_allowlist`. The
                     // allowlist is inert without multiplexing actually
-                    // enabled (gateway/profiles.py:987), so only surface the
-                    // warning once `multiplex_profiles` is on — otherwise a
-                    // route just never runs, and that's already covered by
-                    // `multiplexPrerequisite` above. `nil` allowlist (key
-                    // absent) means "no warning" either way.
+                    // enabled — `profiles_to_serve` returns the active
+                    // profile and never looks at the allowlist when
+                    // `multiplex=False` (`hermes_cli/profiles.py:712-713`,
+                    // function at `:703-713`, @ `v2026.9.7`) — so only
+                    // surface the warning once `multiplex_profiles` is on;
+                    // otherwise a route just never runs, and that's already
+                    // covered by `multiplexPrerequisite` above. `nil`
+                    // allowlist (key absent) means "no warning" either way.
                     allowlistWarning: (capabilities.isV0204OrLater && block.multiplexProfiles)
                         ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
                         : nil,
@@ -161,7 +164,9 @@ struct ProfileRoutesSection: View {
     }
 
     /// Routing is gated on `gateway.multiplex_profiles`; without it Hermes
-    /// never even runs the matcher (gateway/run.py:23923).
+    /// never even runs the matcher (`gateway/run.py:4211` in
+    /// `_profile_name_for_source`, matcher call at `:4218-4221`, @
+    /// `v2026.9.7`).
     @ViewBuilder
     private var multiplexPrerequisite: some View {
         HStack(spacing: 8) {
@@ -318,7 +323,29 @@ private struct ProfileRouteEditorSheet: View {
     }
 
     private var canSave: Bool {
-        !route.platform.trimmingCharacters(in: .whitespaces).isEmpty && !trimmedProfile.isEmpty
+        !route.platform.trimmingCharacters(in: .whitespaces).isEmpty
+            && !trimmedProfile.isEmpty
+            && controlCharacterField == nil
+    }
+
+    /// The field carrying a pasted control character, or `nil`.
+    ///
+    /// Round-3 decision 6: a tab, line break or other C0/C1 control in a
+    /// user-typed scalar is a visible validation error that blocks Save —
+    /// the shape `MCPServerEditorViewModel.duplicateKey` established — not a
+    /// silent reshape. Every field here is a single-line scalar, and an
+    /// unquotable one costs the user their entire config.yaml layer:
+    /// `load_gateway_config` wraps the load in a bare `except Exception`
+    /// that logs and CONTINUES (`gateway/config.py:773-792` @ `v2026.9.7`).
+    /// Checked on the NORMALIZED route, because `.whitespaces` trimming
+    /// removes a leading/trailing tab but nothing removes an interior one —
+    /// except for `profile`, where `HermesProfileName.normalized` turns any
+    /// invalid name into `""` and would swallow the very character we want
+    /// to name. That field is probed in its trimmed, un-slugged form.
+    private var controlCharacterField: String? {
+        var probe = normalizedRoute()
+        probe.profile = route.profile.trimmingCharacters(in: .whitespaces)
+        return probe.controlCharacterFieldLabel
     }
 
     var body: some View {
@@ -360,6 +387,14 @@ private struct ProfileRouteEditorSheet: View {
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let field = controlCharacterField {
+                Text("“\(field)” contains a tab or a control character. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Validation error: \(field) contains a tab or a control character. Remove it, then save.")
+            }
 
             if !trimmedProfile.isEmpty, !HermesProfileName.isValid(trimmedProfile) {
                 Text("Hermes would ignore this route: profile names must be lowercase [a-z0-9][a-z0-9_-] (up to 64 chars) and not one of hermes/test/tmp/root/sudo.")

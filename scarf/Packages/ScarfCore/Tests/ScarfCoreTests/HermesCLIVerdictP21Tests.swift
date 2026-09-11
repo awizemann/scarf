@@ -11,7 +11,7 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - Anchored success markers
 
-    /// `do_install` runs `_print_tier1_advisory` (skills_hub.py:704) BEFORE
+    /// `do_install` runs `_print_tier1_advisory` (hermes_cli/skills_hub.py:704) BEFORE
     /// `install_from_quarantine` can raise (:714-720), and that advisory
     /// quotes the skill's OWN SKILL.md text into the report. With the default
     /// `failureWins: false`, a bare-substring success marker let that quoted
@@ -147,7 +147,7 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - skills update: `Updated N skill(s).` counts attempts
 
-    /// `do_update` (skills_hub.py:848-872) prints
+    /// `do_update` (hermes_cli/skills_hub.py:848-872) prints
     /// `Updated {len(updates) - len(skipped_local)} skill(s).` after the loop
     /// no matter what each nested `do_install` did — and `do_install` is
     /// itself `-> None`, so a blocked scan prints its refusal and returns at
@@ -210,10 +210,11 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - skills audit (the Skills "Reload" button)
 
-    /// `do_audit` is `-> None` (skills_hub.py:878): the unknown-name refusal
-    /// (:890) exits 0 too, so the exit code cannot be the verdict. Judged by
-    /// `Auditing <n> skill(s)...` (:891) / `No hub-installed skills to audit.`
-    /// (:886), both byte-identical back to v2026.6.19.
+    /// `do_audit` is `-> None` (`hermes_cli/skills_hub.py:879-880` @
+    /// `v2026.9.7`): the unknown-name `_print_error` refusal (`:891`) exits 0
+    /// too, so the exit code cannot be the verdict. Judged by
+    /// `Auditing <n> skill(s)...` (`:893`) / `No hub-installed skills to
+    /// audit.` (`:887`), both byte-identical back to v2026.6.19.
     @Test func skillsAuditRefusalAtExitZeroIsAFailure() {
         let outcome = SkillsViewModel.auditOutcome(
             exitCode: 0, output: "Error: 'nope' is not a hub-installed skill.\n")
@@ -247,9 +248,10 @@ struct HermesCLIVerdictP21Tests {
     /// `if exitCode == 0 { "Updated … (local edits discarded)" }`.
     ///
     /// `do_update(name, force=True)` is `-> None`
-    /// (`hermes_cli/skills_hub.py:857-858`) and so is the
-    /// `do_install(..., force=True)` it nests (`:894`), so a blocked scan
-    /// verdict prints `Installation blocked: …` (`:701`) and RETURNS at exit 0.
+    /// (`hermes_cli/skills_hub.py:831-832` @ `v2026.9.7`) and so is the
+    /// `do_install(..., force=True)` it nests (`:868`), so a blocked scan
+    /// verdict calls `_install_blocked` (`:699-700`), which prints
+    /// `Installation blocked: …` (`:498`), and RETURNS at exit 0.
     /// The one action that destroys the user's local edits therefore announced
     /// that it had succeeded while nothing was written (C5).
     @MainActor

@@ -1,15 +1,26 @@
 import Foundation
 
-/// Hermes v0.20 reasoning-effort vocabulary — verbatim mirror of
+/// Hermes reasoning-effort vocabulary — verbatim mirror of
 /// `VALID_REASONING_EFFORTS` (`hermes_constants.py:873` at `v2026.9.7`)
 /// plus the disable aliases `parse_reasoning_effort` accepts (function at
 /// `:876`, alias set `{"none", "false", "disabled"}` at `:885`).
-/// `max` and `ultra` are the v0.20 additions (#62650).
+///
+/// `max` and `ultra` are NOT both v0.20 additions, as this type asserted
+/// until P35. Walking `VALID_REASONING_EFFORTS` across every `v2026.*` tag:
+/// v2026.6.19 and v2026.7.1 (0.18.0) carry the five-level tuple
+/// `("minimal","low","medium","high","xhigh")`; **v2026.7.7 (0.18.1)**
+/// appends `"max"` (`hermes_constants.py:794`), which v2026.7.7.2 (0.18.2)
+/// still has alone; **v2026.7.20 (0.19.0)** appends `"ultra"`
+/// (`hermes_constants.py:835-837`). Hence two floors, not one — see
+/// ``HermesCapabilities/hasReasoningEffortMax`` and
+/// ``HermesCapabilities/hasReasoningEffortUltra``.
 public enum HermesReasoningEffort {
-    /// Levels valid on every supported host (pre-v0.20 vocabulary).
+    /// Levels valid on every supported host (the pre-0.18.1 vocabulary).
     public static let baseLevels = ["none", "minimal", "low", "medium", "high", "xhigh"]
-    /// v0.20 additions.
-    public static let v020Levels = ["max", "ultra"]
+    /// Levels gated behind their own floors, in picker order.
+    public static let maxLevel = "max"
+    /// See ``maxLevel``.
+    public static let ultraLevel = "ultra"
 
     /// Spellings validation must accept for a hand-edited row, beyond
     /// `VALID_REASONING_EFFORTS` + "none". `disabled` and `false` are in
@@ -21,13 +32,16 @@ public enum HermesReasoningEffort {
 
     /// Effort options to offer for the given host generation.
     public static func levels(capabilities: HermesCapabilities) -> [String] {
-        capabilities.isV020OrLater ? baseLevels + v020Levels : baseLevels
+        var levels = baseLevels
+        if capabilities.hasReasoningEffortMax { levels.append(maxLevel) }
+        if capabilities.hasReasoningEffortUltra { levels.append(ultraLevel) }
+        return levels
     }
 
     /// Whether Hermes's `parse_reasoning_effort` would accept this value.
     public static func isValid(_ effort: String) -> Bool {
         let normalized = effort.trimmingCharacters(in: .whitespaces).lowercased()
-        return (baseLevels + v020Levels + disableAliases).contains(normalized)
+        return (baseLevels + [maxLevel, ultraLevel] + disableAliases).contains(normalized)
     }
 }
 
@@ -93,7 +107,8 @@ public enum PowerSettingsWriter {
         capabilities: HermesCapabilities
     ) -> String? {
         guard capabilities.isV020OrLater else { return nil }
-        // Hermes lowercases at consumption (model_switch.py:2007); keep the
+        // Hermes lowercases at consumption
+        // (`hermes_cli/model_switch_providers.py:1063` @ `v2026.9.7`); keep the
         // user's spelling but trim.
         let cleaned = providers
             .map { $0.trimmingCharacters(in: .whitespaces) }

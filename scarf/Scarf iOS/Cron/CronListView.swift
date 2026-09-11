@@ -11,6 +11,34 @@ struct CronListView: View {
     @State private var editingJob: HermesCronJob?
     @State private var showingNewJob = false
 
+    /// Same mirror the Mac's `CronView` performs onto `CronViewModel`: the
+    /// two recovery floors that decide what a wedged job may be offered
+    /// (`hasCronResumeRunNow` = v0.20.6, `hasCronRecoverableErrorResume` =
+    /// v0.21.0). Without them iOS and the Mac made different offers for the
+    /// same job — the P30 finding.
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    private var hasCronResumeRunNow: Bool {
+        capabilitiesStore?.capabilities.hasCronResumeRunNow ?? false
+    }
+
+    private var hasCronRecoverableErrorResume: Bool {
+        capabilitiesStore?.capabilities.hasCronRecoverableErrorResume ?? false
+    }
+
+    /// v0.18.1 — `resume_job`'s past-one-shot refusal. iOS used to apply this
+    /// rule unflagged and BEFORE the offer; it is now the offer's third door,
+    /// so the Mac inherits it too and both platforms gate it on the floor.
+    private var hasCronPastOneShotResumeRefusal: Bool {
+        capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
+    }
+
+    private func mirrorCapabilities() {
+        vm.isV0206OrLater = hasCronResumeRunNow
+        vm.isV021OrLater = hasCronRecoverableErrorResume
+        vm.isV0181OrLater = hasCronPastOneShotResumeRefusal
+    }
+
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
     )!
@@ -85,7 +113,15 @@ struct CronListView: View {
             }
         }
         .refreshable { await vm.load() }
-        .task { await vm.load() }
+        .task {
+            mirrorCapabilities()
+            await vm.load()
+        }
+        // The store probes `hermes --version` asynchronously, so `.task`
+        // can run before the answer lands (same reasoning as `CronView`).
+        .onChange(of: hasCronResumeRunNow) { _, _ in mirrorCapabilities() }
+        .onChange(of: hasCronRecoverableErrorResume) { _, _ in mirrorCapabilities() }
+        .onChange(of: hasCronPastOneShotResumeRefusal) { _, _ in mirrorCapabilities() }
         .sheet(item: $editingJob) { job in
             CronEditorView(initial: job, title: "Edit cron job") { edited in
                 Task { await vm.upsert(edited) }

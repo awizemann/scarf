@@ -52,6 +52,25 @@ public enum HermesYAML {
         var values: [String: String] = [:]
         var lists: [String: [String]] = [:]
         var maps: [String: [String: String]] = [:]
+        /// Every path this walk has already WRITTEN — a section header it
+        /// opened, a flow map or flow list it parsed, or a scalar it assigned.
+        /// The last-wins purge below fires only on a path already in here,
+        /// which is what "this key appears twice" actually means. Recording
+        /// only the HEADERS was P37's own bug: the flow-list branch wrote
+        /// `lists[path]` and `continue`d without recording, so a later block
+        /// header at the same path read as a first open, the purge was
+        /// skipped, and `toolsets: [a]` + `toolsets:\n  - b` concatenated.
+        var writtenPaths: Set<String> = []
+        /// Paths whose LEAF key literally contains a `.` — a flat dotted key
+        /// (`gateway.enabled: true`) rather than a nesting of `gateway:` +
+        /// `enabled:`. PyYAML keeps such a key as an INDEPENDENT top-level
+        /// key alongside a `gateway:` mapping (probed:
+        /// `{"gateway": {"port": 2}, "gateway.enabled": true}` for a file with
+        /// two `gateway:` blocks and a `gateway.enabled` line between them),
+        /// so the last-wins purge must never sweep it just because it shares
+        /// the `gateway.` prefix. P37 already caught the FIRST-open case; the
+        /// re-open case was still wrong.
+        var dottedLiteralPaths: Set<String> = []
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
         // Indent of the most recent scalar `key: value` line at the current
@@ -180,6 +199,7 @@ public enum HermesYAML {
             }
 
             let path = currentPath(joinedWith: key)
+            if key.contains(".") { dottedLiteralPaths.insert(path) }
             lastScalarIndent = indent
             lastScalarPath = nil
             lastScalarParent = nil
@@ -206,7 +226,48 @@ public enum HermesYAML {
                 // render the SECOND block's list, not the two concatenated.
                 // Scalars were already last-wins by assignment; bullets
                 // appended. Drop the earlier block's items as this one opens.
-                lists.removeValue(forKey: path)
+                //
+                // P32: last-wins is a property of the whole MAPPING, not of
+                // the keys that happen to be repeated. PyYAML replaces the
+                // first block outright, so a sibling that appears ONLY in
+                // the first block is gone on the host — Scarf kept it and
+                // rendered a value Hermes does not have. Purge the earlier
+                // block's descendants (`values` and `maps` as well as
+                // `lists`) as the second one opens.
+                //
+                // P37: only on a path already WRITTEN, which `writtenPaths`
+                // decides — the purge used to run on EVERY header, and the
+                // comment said it was a no-op on a fresh one. It was not: a
+                // flat dotted key (`gateway.enabled: true`, which PyYAML
+                // keeps as a key of its own ALONGSIDE a `gateway:` mapping)
+                // matches the `gateway.` descendant prefix, so the FIRST
+                // opening of `gateway:` deleted it.
+                //
+                // P38: the purge dropped the earlier block's DESCENDANTS but
+                // not the block's own `values[path]` / `maps[path]`, so
+                // `HermesConfig+YAML.sharedPlatformScalar`'s
+                // `maps[section]?[key]` fallback still read the FIRST
+                // `slack:` block's `require_mention` on a file with two of
+                // them. And the descendant sweep still ate a flat dotted
+                // sibling on the re-open — see `dottedLiteralPaths`.
+                if !writtenPaths.insert(path).inserted {
+                    lists.removeValue(forKey: path)
+                    values.removeValue(forKey: path)
+                    maps.removeValue(forKey: path)
+                    let staleDescendant = path + "."
+                    for key in values.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
+                        values.removeValue(forKey: key)
+                    }
+                    for key in maps.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
+                        maps.removeValue(forKey: key)
+                    }
+                    for key in lists.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
+                        lists.removeValue(forKey: key)
+                    }
+                }
                 stack.append((indent: indent, name: key))
                 lastScalarIndent = nil
                 continue
@@ -229,6 +290,7 @@ public enum HermesYAML {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
                 maps[path] = parseFlatFlowMap(inner) ?? [:]
+                writtenPaths.insert(path)
                 continue
             }
             // Inline flow list `[...]` (`["work", "personal"]`, `[]`) →
@@ -249,10 +311,12 @@ public enum HermesYAML {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
                 lists[path] = parseFlatFlowList(inner)
+                writtenPaths.insert(path)
                 continue
             }
 
             values[path] = afterColon
+            writtenPaths.insert(path)
             lastScalarPath = path
 
             // Also record as a map entry under the parent so blocks like

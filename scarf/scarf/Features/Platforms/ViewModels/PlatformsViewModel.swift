@@ -78,6 +78,17 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         }
     }
 
+    /// Snap `selected` back to `cli` once the post-load roster no longer
+    /// offers it (round-3 decision 8). Called by `PlatformsView` whenever the
+    /// visible list changes — which is the moment `hasLoadedConfiguredPlatforms`
+    /// flips and the moment capabilities land.
+    func reconcileSelection(visible: [HermesToolPlatform]) {
+        let reconciled = KnownPlatforms.reconcile(selection: selected, against: visible)
+        guard reconciled.name != selected.name else { return }
+        logger.info("selection \(self.selected.name, privacy: .public) left the roster; snapping to \(reconciled.name, privacy: .public)")
+        selected = reconciled
+    }
+
     func connectivity(for platform: HermesToolPlatform) -> PlatformConnectivity {
         if let pState = gatewayState?.platforms?[platform.name] {
             if let err = pState.error, !err.isEmpty { return .error(err) }

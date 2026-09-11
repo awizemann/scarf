@@ -127,7 +127,7 @@ import ScarfCore
 
     /// With neither `--session-id` nor a filter, `_export_trace` resolves ONE
     /// session — `list_sessions_rich(limit=1, order_by_last_active=True)`
-    /// (`hermes_cli/sessions_cmd.py:383-388`) — while Scarf's banner claimed
+    /// (`hermes_cli/sessions_cmd.py:385-389`) — while Scarf's banner claimed
     /// the whole board. The CLI's multi-session trace path writes a directory
     /// of files and can't stream to the save panel's single file either, so
     /// the format is withheld from this flow instead.

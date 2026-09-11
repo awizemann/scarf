@@ -119,7 +119,7 @@ public enum HermesCLIVerdict {
     ///     A bare substring is not safe there: with the usual
     ///     `failureWins: false`, a success PHRASE quoted inside a report body
     ///     outranks a real refusal. `do_install` is the live case —
-    ///     `_print_tier1_advisory` (skills_hub.py:704, 726-747) prints
+    ///     `_print_tier1_advisory` (hermes_cli/skills_hub.py:704, 726-747) prints
     ///     SKILL.md-derived findings BEFORE `install_from_quarantine` can
     ///     raise (:714-720), so a skill whose own text contains
     ///     `Installed: …` used to be reported installed after it was refused.
@@ -161,12 +161,12 @@ public enum HermesCLIVerdict {
 public enum HermesCLIMarkers {
     // MARK: skills install / uninstall — hermes_cli/skills_hub.py
 
-    /// `c.print(f"[bold green]Installed:[/] {…}")` — skills_hub.py:720.
+    /// `c.print(f"[bold green]Installed:[/] {…}")` — hermes_cli/skills_hub.py:720.
     /// (Same line, same prefix, at v2026.6.19:691 through v2026.8.31:799.)
     public static let skillsInstallSuccess = ["Installed:"]
 
     /// Every refusal `do_install` can print, in source order:
-    /// - `Error:` — `_print_error` (skills_hub.py:134-135), reached from
+    /// - `Error:` — `_print_error` (hermes_cli/skills_hub.py:134-135), reached from
     ///   `_pinned_sources` (:582) and `_print_fetch_failure` (:592).
     /// - `Installation blocked:` — `_install_blocked` (:498), reached from the
     ///   scan verdict (:699) and `_invalid_path` (:506).
@@ -186,13 +186,45 @@ public enum HermesCLIMarkers {
 
     /// `_report_pair` prints `uninstall_skill`'s message green on success —
     /// `Uninstalled '<name>' from <path>` (tools/skills_hub_install.py:220),
-    /// via skills_hub.py:917,144-150.
+    /// via hermes_cli/skills_hub.py:917,144-150.
     public static let skillsUninstallSuccess = ["Uninstalled"]
 
     /// `_report_pair`'s failure arm is `_print_error` → `Error: …`
-    /// (skills_hub.py:149, 134-135). `Uninstall '<name>'?` cancelled prints
+    /// (hermes_cli/skills_hub.py:149, 134-135). `Uninstall '<name>'?` cancelled prints
     /// nothing at all, which the "no success marker" rule already catches.
     public static let skillsUninstallFailure = ["Error:"]
+
+    // MARK: config unset — hermes_cli/config.py
+
+    /// `print(f"✓ Unset {key} from {config_path}")` — the ONLY line
+    /// `unset_config_value` prints on the success path, both for the
+    /// config.yaml arm (`hermes_cli/config.py:3582` @ v2026.9.7,
+    /// `:8923` @ v2026.7.20) and the `.env` arm (`:3562` / `:8896`).
+    /// Judged anchored, so the leading `✓` is stripped by `unglyphed`.
+    public static let configUnsetSuccess = ["Unset "]
+
+    /// `config unset` has ONE refusal that exits non-zero and one that does
+    /// NOT, which is exactly why this write cannot be judged by exit code:
+    ///
+    /// - `is_managed()` → `managed_error("unset configuration values")` →
+    ///   `format_managed_message` prints `Cannot unset configuration values:
+    ///   this Hermes installation is managed by …` to stderr and the function
+    ///   RETURNS (`hermes_cli/config.py:3549-3551`, `:445-455` @ v2026.9.7;
+    ///   `:8870-8872`, `:659` @ v2026.7.20) — Python turns that into **exit
+    ///   0**.
+    /// - `_exit_if_key_managed(key, "unset")` prints `Cannot unset '<key>':
+    ///   it is managed by your administrator (…)` and `sys.exit(1)`
+    ///   (`:3363-3371` @ v2026.9.7; inlined at `:8873-8885` @ v2026.7.20).
+    /// - `_exit_invalid(f"Config key not set: {key}")` → the same text and
+    ///   `sys.exit(1)` (`:3579`, `:3422-3424` @ v2026.9.7; printed inline at
+    ///   `:8916-8918` @ v2026.7.20).
+    ///
+    /// Both `Cannot …` spellings share the `Cannot unset` prefix, so one
+    /// marker quotes either.
+    public static let configUnsetFailure = [
+        "Cannot unset",
+        "Config key not set:",
+    ]
 
     // MARK: sessions export — hermes_cli/sessions_cmd.py
 
@@ -360,7 +392,7 @@ public enum HermesCLIMarkers {
 
     // MARK: skills audit / update — hermes_cli/skills_hub.py
 
-    /// `do_audit` is `-> None` (skills_hub.py:879-880) and exits 0 on its
+    /// `do_audit` is `-> None` (hermes_cli/skills_hub.py:879-880) and exits 0 on its
     /// refusal too. `Auditing <n> skill(s)...` (:893) is the only line that says
     /// the scan actually ran; `No hub-installed skills to audit.` (:887) is a
     /// legitimate empty run, not a failure. Both byte-identical back to
@@ -370,16 +402,149 @@ public enum HermesCLIMarkers {
         "No hub-installed skills to audit.",
     ]
 
-    /// `_print_error` (skills_hub.py:134-135) via the unknown-name arm (:891).
+    /// `_print_error` (hermes_cli/skills_hub.py:134-135) via the unknown-name arm (:891).
     public static let skillsAuditFailure = ["Error:"]
 
-    /// `do_update`'s nothing-to-do line (skills_hub.py:849), verbatim and
+    /// `do_update`'s nothing-to-do line (hermes_cli/skills_hub.py:849), verbatim and
     /// byte-identical back to v2026.6.19.
     public static let skillsUpdateNoUpdates = "No updates available."
 
-    /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:864). It is printed
+    /// `do_update`'s per-skill ATTEMPT line (hermes_cli/skills_hub.py:864). It is printed
     /// before `do_install` runs, so it proves an attempt and nothing more.
     public static let skillsUpdateAttempt = "Updating:"
+
+    /// The refusals reachable on the **update** path — `skillsInstallFailure`
+    /// minus the two lines `do_install` can only print for a *plain* install.
+    ///
+    /// `do_update` always calls `do_install(..., force=True)`
+    /// (hermes_cli/skills_hub.py:868), and `do_install` prints
+    /// `Warning: '<name>' is already installed at <path>` (:682)
+    /// **unconditionally** whenever the lock has an entry — which, for an
+    /// update, it always does — and only THEN checks `if not force` (:683).
+    /// So on this path the warning is printed on every single skill,
+    /// including the ones that update perfectly, and taking it as the
+    /// refusal made "Update attempted — …" quote a benign warning instead of
+    /// the `Installation blocked:` line that actually stopped the install.
+    /// `Use --force to reinstall.` (:684) sits inside that `if not force`
+    /// and is therefore unreachable under `force=True`; it is dropped here
+    /// too rather than carried as a marker that can only ever misfire.
+    ///
+    /// Both lines stay in `skillsInstallFailure`, where they are load-bearing:
+    /// a plain `skills install` of an already-installed skill IS refused by
+    /// exactly that pair. This is why the two sets are no longer one list.
+    public static let skillsUpdateFailure = skillsInstallFailure.filter {
+        $0 != "is already installed at" && $0 != "Use --force to reinstall."
+    }
+
+    // MARK: pairing approve / revoke — hermes_cli/pairing.py
+
+    /// `_cmd_approve`'s only success line —
+    /// `\n  Approved! User {display} on {platform} can now use the bot~`
+    /// (pairing.py:68 @ v2026.9.7). Anchored after the trim, since the
+    /// emitter indents it by two spaces.
+    ///
+    /// Walked across every `v2026.*` tag: `hermes_cli/pairing.py` exists at
+    /// all 32 of them and the line is byte-identical at each (v2026.3.12:74
+    /// … v2026.9.7:68), so this judgement is the same on every host Scarf
+    /// supports (C1).
+    public static let pairingApproveSuccess = ["Approved! User "]
+
+    /// `_cmd_approve`'s two refusal shapes, both at exit 0 because
+    /// `_cmd_approve` and `pairing_command` are plain `-> None`
+    /// (pairing.py:56, :3-19):
+    /// - the unknown/expired arm (:80). Its wording gained a prefix at
+    ///   **v2026.7.30** — NOT v2026.8.3, as this doc and the memory note both
+    ///   said: `Code '<code>' not found or expired…` at `v2026.7.20:95` →
+    ///   `Pairing request or code '<code>' not found or expired…` at
+    ///   `v2026.7.30:100`, and still that spelling at `v2026.9.7:80`. So the
+    ///   marker is the tail both spellings share.
+    /// - the rate-limit lockout (:76). First tag: **v2026.5.7**; below that
+    ///   `_cmd_approve` has no lockout branch at all, so the marker is
+    ///   simply never printed there and the older host is judged by the
+    ///   other two lines exactly as a newer one is.
+    public static let pairingApproveFailure = [
+        "not found or expired for platform",
+        pairingLockoutRefusal,
+    ]
+
+    /// The lockout refusal itself (pairing.py:76 @ v2026.9.7), named because
+    /// the detail composer has to recognise it — it is the one refusal whose
+    /// reason spans two printed lines.
+    ///
+    /// **A grep for this string says "absent" on every tag below v2026.9.7,
+    /// and that is a false negative.** Until v2026.9.7 the sentence was built
+    /// from two adjacent f-string literals — `f"\n  Platform '{platform}' is
+    /// locked out after too many failed "` + `f"approval attempts."`
+    /// (`v2026.8.31:91-93`) — so the source never contains the marker as one
+    /// run of bytes while the PRINTED text is byte-identical. Judge this
+    /// floor by the emitted line, not by `git grep`.
+    public static let pairingLockoutRefusal = "is locked out after too many failed approval attempts."
+
+    /// The lockout's remediation line, `  Lockout clears in ~{mins}
+    /// minute(s).` (pairing.py:77), printed immediately after the lockout
+    /// refusal and byte-identical since v2026.5.7. It is quoted verbatim
+    /// alongside the refusal — the countdown IS the answer to "what do I do
+    /// now", and summarising it away leaves the operator with nothing.
+    public static let pairingLockoutClears = "Lockout clears in ~"
+
+    /// `_cmd_revoke`'s success line — `\n  Revoked access for user
+    /// {user_id} on {platform}.\n` (pairing.py:88). Byte-identical at all
+    /// 32 `v2026.*` tags.
+    public static let pairingRevokeSuccess = ["Revoked access for user "]
+
+    /// `_cmd_revoke`'s only refusal — `User {user_id} not found in approved
+    /// list for {platform}.` (pairing.py:90), printed when `store.revoke`
+    /// returned falsey, and still exit 0. Byte-identical at all 32 tags.
+    public static let pairingRevokeFailure = ["not found in approved list for"]
+}
+
+/// `hermes pairing approve` / `revoke`, judged by what the emitter printed.
+///
+/// Both handlers are `-> None` (`hermes_cli/pairing.py:56`, `:84`) reached
+/// through a `pairing_command` that is itself `-> None` (`:3-19`), so every
+/// refusal — an expired code, an unknown user, a rate-limit lockout — arrives
+/// as exit 0. Judging by exit code made a refused revoke delete the row from
+/// the list (until the next load put it back) and a refused approve report
+/// nothing at all.
+public enum HermesPairingVerdict {
+    /// `fallbackDetail` is deliberately OFF for both verbs: each refusal is
+    /// followed by a next-step hint (`Run 'hermes pairing list' …` :81, and
+    /// the `To reset sooner, delete the '_lockout:…' entry` line :78), so the
+    /// last significant line is chatter, not the reason.
+    public static func approve(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let outcome = HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.pairingApproveSuccess,
+            failureMarkers: HermesCLIMarkers.pairingApproveFailure,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+        guard !outcome.succeeded, let detail = outcome.detail else { return outcome }
+        return HermesCLIOutcome(succeeded: false, detail: withLockoutCountdown(detail, in: output))
+    }
+
+    public static func revoke(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.pairingRevokeSuccess,
+            failureMarkers: HermesCLIMarkers.pairingRevokeFailure,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+    }
+
+    /// The lockout refusal is TWO lines in the emitter and only the first
+    /// carries the marker; quoting one leaves the user without the countdown.
+    private static func withLockoutCountdown(_ detail: String, in output: String) -> String {
+        guard detail.contains(HermesCLIMarkers.pairingLockoutRefusal) else { return detail }
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard let i = lines.firstIndex(of: detail), i + 1 < lines.count,
+              lines[i + 1].hasPrefix(HermesCLIMarkers.pairingLockoutClears)
+        else { return detail }
+        return "\(detail) \(lines[i + 1])"
+    }
 }
 
 /// `hermes security audit`'s three-way exit contract — the one site in this
@@ -482,4 +647,38 @@ public struct HermesSecurityAuditReport: Sendable, Equatable {
     }
 
     private static let foundPrefix = "Found "
+}
+
+/// `hermes config unset <key>` — argv and verdict in one place, because both
+/// platforms drive it from their "Host default" approvals row (round-3
+/// decision 10) and neither may judge it by exit code.
+///
+/// **argv** (charter C5): `config unset <key>`, one positional. Verified at
+/// the target tag — `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7,
+/// `add_parser("unset", …)` + `add_argument("key", nargs="?")` — and at the
+/// `hasConfigUnset` floor, `hermes_cli/subcommands/config.py:51-54` @
+/// v2026.7.20 (0.19.0), where it is byte-equivalent. There are no flags, so
+/// there is nothing here that a 0.19 host would reject.
+///
+/// **Verdict**: by output (see ``HermesCLIMarkers/configUnsetFailure``) — the
+/// managed-install refusal prints and returns, i.e. exits 0.
+public enum HermesConfigUnset {
+    public static func argv(key: String) -> [String] { ["config", "unset", key] }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.configUnsetSuccess,
+            failureMarkers: HermesCLIMarkers.configUnsetFailure,
+            successAnchored: true
+        )
+    }
+
+    /// What a host-default row says on a host below the `hasConfigUnset`
+    /// floor, where the row stays inert: Scarf will not shell a verb the host
+    /// does not have (C5), so it names the one gesture that does work there.
+    public static func belowFloorHint(key: String) -> String {
+        String(localized: "This Hermes is older than v0.19, which added `hermes config unset`. To go back to the host default, remove the `\(key)` line from config.yaml on the host.")
+    }
 }

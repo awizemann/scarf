@@ -365,12 +365,19 @@ import Foundation
         #expect(t.reasoningEffort == "")
     }
 
+    /// P37 finding 6: this used to pin `AuxiliaryReasoningEffort`, a second
+    /// hard-coded copy of the vocabulary. That enum is retired; the one list
+    /// is `HermesReasoningEffort`, whose `max`/`ultra` floors P35 walked
+    /// (`hermes_constants.VALID_REASONING_EFFORTS` @ v2026.7.7 / v2026.7.20).
     @Test func auxiliaryReasoningEffortValidValues() {
-        // Source-verified against hermes_constants.VALID_REASONING_EFFORTS
-        // + parse_reasoning_effort's "none" alias (hermes-agent HEAD ==
-        // v2026.8.3).
         let expected: Set<String> = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-        #expect(AuxiliaryReasoningEffort.validRawValues == expected)
+        let target = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(Set(HermesReasoningEffort.levels(capabilities: target)) == expected)
+        // `parse_reasoning_effort`'s disable aliases are accepted for a
+        // hand-edited row but never offered.
+        for alias in expected.union(HermesReasoningEffort.disableAliases) {
+            #expect(HermesReasoningEffort.isValid(alias), Comment(rawValue: alias))
+        }
     }
 
     @Test func parsesApprovalSmartPolicy() {

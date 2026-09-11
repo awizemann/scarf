@@ -166,6 +166,15 @@ nonisolated struct BotDraft: Equatable {
     var pinned: Bool
     var hidden: Bool
 
+    /// Carried, never edited. `apply(to:)` leaves both alone — but the WRITER
+    /// emits them through `YAMLScalar.quoteIfNeeded`
+    /// (`HermesBotProfileYAML.swift:437` `group`, `:441` each `groups` item),
+    /// so a control character already sitting in either one reaches
+    /// `profile.yaml` on the next save of ANY field. The refusal has to see
+    /// them or decision 6's guarantee has a hole the editor cannot show.
+    let carriedLegacyGroup: String?
+    let carriedGroups: [String]
+
     init(identity: HermesBotIdentity) {
         profileName = identity.profileName
         title = identity.title ?? identity.displayName
@@ -174,6 +183,8 @@ nonisolated struct BotDraft: Equatable {
         shape = identity.shape ?? ""
         pinned = identity.pinned ?? false
         hidden = identity.hidden ?? false
+        carriedLegacyGroup = identity.legacyGroup
+        carriedGroups = identity.groups
     }
 
     /// Stamp the edited fields onto `identity`, leaving every other key alone.
@@ -189,11 +200,49 @@ nonisolated struct BotDraft: Equatable {
     /// it. NOT applied to `description`: Hermes stores that through
     /// `yaml.safe_dump` and round-trips real newlines, so flattening it would
     /// destroy user content to work around a writer bug that
-    /// `HermesBotProfileYAML.quoted` now handles correctly at the YAML layer.
+    /// `YAMLScalar.quoteIfNeeded` handles correctly at the YAML layer (P32 deleted
+    /// `HermesBotProfileYAML.quoted` and routed the bot writer through the
+    /// shared routine).
     static func singleLine(_ raw: String) -> String {
         raw.split(whereSeparator: \.isNewline)
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Label of the first field whose value would reach `profile.yaml`
+    /// carrying a control character, or `nil`.
+    ///
+    /// Round-3 decision 6: refuse in the editor with a visible message
+    /// rather than reshape silently at the writer. Checked on the values as
+    /// ``apply(to:)`` will WRITE them — `singleLine` has already flattened a
+    /// pasted newline out of Name / Color / Shape, so the only thing left to
+    /// refuse there is a tab or another control, and the multi-line Role
+    /// field keeps its line breaks (Hermes round-trips them through
+    /// `yaml.safe_dump`; `YAMLScalar.doubleQuoted` represents them
+    /// losslessly). Anything else makes PyYAML refuse the file, which
+    /// `read_profile_meta` turns into empty defaults and the bot drops out
+    /// of the roster (`hermes_cli/profiles.py:471-480`, `:609-618` @
+    /// `v2026.9.7`).
+    var controlCharacterFieldLabel: String? {
+        if YAMLScalar.containsControlCharacter(profileName) { return "Profile id" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(title)) { return "Name" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(color)) { return "Color" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(shape)) { return "Shape" }
+        if YAMLScalar.containsControlCharacter(
+            description.trimmingCharacters(in: .whitespacesAndNewlines),
+            allowingLineBreaks: true
+        ) { return "Role" }
+        // Not editable here, but on the write path all the same — see
+        // `carriedGroups`. A file whose `group:`/`groups:` already carries a
+        // control character would otherwise be made unloadable by a save of
+        // the Name field, and `read_profile_meta` turns an unloadable
+        // profile.yaml into empty defaults: the bot drops out of the roster.
+        if let legacy = carriedLegacyGroup,
+           YAMLScalar.containsControlCharacter(legacy) { return "Group" }
+        if carriedGroups.contains(where: { YAMLScalar.containsControlCharacter($0) }) {
+            return "Groups"
+        }
+        return nil
     }
 
     func apply(to identity: inout HermesBotIdentity) {

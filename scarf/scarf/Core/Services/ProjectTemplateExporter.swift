@@ -7,6 +7,9 @@ import os
 /// `ProjectTemplateService` + `ProjectTemplateInstaller` pair — the output
 /// of this exporter can be fed straight back to `inspect()` + `install()`.
 struct ProjectTemplateExporter: Sendable {
+
+    /// C10 budget for the `zip` spawn. See ``ProjectTemplateService/unzipTimeout``.
+    static let zipTimeout: TimeInterval = 120
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateExporter")
 
     let context: ServerContext
@@ -348,25 +351,39 @@ struct ProjectTemplateExporter: Sendable {
         process.standardError = errPipe
 
         // Close both ends of each Pipe so we don't leak 4 fds per zip call.
-        func closePipes() {
-            try? outPipe.fileHandleForReading.close()
+        // The READ ends belong to `waitDraining` once the process has
+        // launched — see that method. On the launch-failure path below
+        // nothing is draining them, so they are closed there explicitly.
+        func closePipes(includingReadEnds: Bool = false) {
+            if includingReadEnds {
+                try? outPipe.fileHandleForReading.close()
+                try? errPipe.fileHandleForReading.close()
+            }
             try? outPipe.fileHandleForWriting.close()
-            try? errPipe.fileHandleForReading.close()
             try? errPipe.fileHandleForWriting.close()
         }
 
         do {
             try process.run()
         } catch {
-            closePipes()
+            closePipes(includingReadEnds: true)
             throw ProjectTemplateError.unzipFailed("zip failed to launch: \(error.localizedDescription)")
         }
-        process.waitUntilExit()
-        let errData = try? errPipe.fileHandleForReading.readToEnd()
+        // C10: bounded, and drained CONCURRENTLY with the wait — see
+        // ``Process.waitDraining(timeout:pipes:)`` for why the old
+        // run → wait → readToEnd order is a deadlock waiting for a chatty
+        // child. A template with thousands of files is exactly that child.
+        let (exited, drained) = process.waitDraining(
+            timeout: Self.zipTimeout, pipes: [errPipe, outPipe])
+        let errData = drained.first
         closePipes()
 
+        guard exited else {
+            throw ProjectTemplateError.unzipFailed(
+                "zip did not finish within \(Int(Self.zipTimeout))s and was stopped")
+        }
         guard process.terminationStatus == 0 else {
-            let err = errData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let err = String(data: errData ?? Data(), encoding: .utf8) ?? ""
             throw ProjectTemplateError.unzipFailed(err.isEmpty ? "exit \(process.terminationStatus)" : err)
         }
     }

@@ -20,7 +20,9 @@ import Foundation
 /// The Hermes **desktop** does not write this file directly either — it goes
 /// through the gateway RPC `profiles.configure`, which keeps a per-key
 /// revision counter in `_ui_meta_revisions` and rejects a stale write
-/// (`tui_gateway/methods_profiles.py:780-863`; compare-and-swap semantics
+/// (`tui_gateway/methods_profiles.py:436-477` @ `v2026.9.7` —
+/// `_configure_ui_meta`, CAS check at `:445-460`, revision bump at `:468`
+/// and write-back at `:473`; compare-and-swap semantics
 /// pinned by `tests/tui_gateway/test_profiles_ui_meta_cas.py`). Scarf's direct
 /// write has **no such interlock**: if Hermes Desktop edits the same bot
 /// between Scarf's read and Scarf's write, Scarf wins and the desktop's edit
@@ -69,11 +71,11 @@ public enum HermesBotProfileYAML {
 
     /// Conservative ceiling on the rendered `hermes-bots` block, mirroring the
     /// gateway's own guard: `profiles.configure` rejects a `ui_meta` payload
-    /// whose `json.dumps` exceeds 65536 bytes (`methods_profiles.py:789-791`),
-    /// because the block rides `profiles.list` on every roster paint. Scarf
-    /// measures the YAML it is about to write instead of a JSON encoding it
-    /// cannot reconstruct for verbatim-preserved lines — a proxy, but one that
-    /// errs on the side of writing less.
+    /// whose `json.dumps` exceeds 65536 bytes (`methods_profiles.py:443` @
+    /// `v2026.9.7`), because the block rides `profiles.list` on every roster
+    /// paint. Scarf measures the YAML it is about to write instead of a JSON
+    /// encoding it cannot reconstruct for verbatim-preserved lines — a proxy,
+    /// but one that errs on the side of writing less.
     public static let maxBotMetaBytes = 65_536
 
     /// Keys inside `hermes-bots` that ``HermesBotIdentity`` models. Everything
@@ -278,16 +280,17 @@ public enum HermesBotProfileYAML {
 
         // Top-level scalars. `display_name` is cleared by REMOVING the key —
         // Hermes pops it rather than writing an empty string
-        // (profiles.py:980-986), and the label formatter falls back to the id.
+        // (`hermes_cli/profiles.py:635-640` @ `v2026.9.7`, in
+        // `write_profile_meta`), and the label formatter falls back to the id.
         guard let a = setScalar(
             "display_name",
-            to: identity.displayName.isEmpty ? nil : quoted(identity.displayName),
+            to: identity.displayName.isEmpty ? nil : YAMLScalar.quoteIfNeeded(identity.displayName),
             in: lines
         ) else { return nil }
         lines = a
         guard let b = setScalar(
             "description",
-            to: identity.profileDescription.isEmpty ? nil : quoted(identity.profileDescription),
+            to: identity.profileDescription.isEmpty ? nil : YAMLScalar.quoteIfNeeded(identity.profileDescription),
             in: lines
         ) else { return nil }
         lines = b
@@ -423,19 +426,19 @@ public enum HermesBotProfileYAML {
         var out = ["\(spaces(keyIndent))\(botMetaKey):"]
         func put(_ key: String, _ value: String) { out.append("\(spaces(content))\(key): \(value)") }
 
-        if let v = identity.title { put("title", quoted(v)) }
-        if let v = identity.botDescription { put("description", quoted(v)) }
-        if let v = identity.color { put("color", quoted(v)) }
-        if let v = identity.shape { put("shape", quoted(v)) }
-        if let v = identity.imageKind { put("imageKind", quoted(v.rawValue)) }
+        if let v = identity.title { put("title", YAMLScalar.quoteIfNeeded(v)) }
+        if let v = identity.botDescription { put("description", YAMLScalar.quoteIfNeeded(v)) }
+        if let v = identity.color { put("color", YAMLScalar.quoteIfNeeded(v)) }
+        if let v = identity.shape { put("shape", YAMLScalar.quoteIfNeeded(v)) }
+        if let v = identity.imageKind { put("imageKind", YAMLScalar.quoteIfNeeded(v.rawValue)) }
         if let v = identity.custom { put("custom", v ? "true" : "false") }
         if let v = identity.hidden { put("hidden", v ? "true" : "false") }
         if let v = identity.pinned { put("pinned", v ? "true" : "false") }
-        if let v = identity.legacyGroup { put("group", quoted(v)) }
+        if let v = identity.legacyGroup { put("group", YAMLScalar.quoteIfNeeded(v)) }
         if !identity.groups.isEmpty {
             out.append("\(spaces(content))groups:")
             for group in identity.groups {
-                out.append("\(spaces(content + 2))- \(quoted(group))")
+                out.append("\(spaces(content + 2))- \(YAMLScalar.quoteIfNeeded(group))")
             }
         }
         if let v = identity.created { put("created", String(v)) }
@@ -740,155 +743,18 @@ public enum HermesBotProfileYAML {
         return !falsyScalars.contains(value)
     }
 
-    /// Characters that a **single-quoted** YAML scalar cannot carry on one
-    /// line: every C0 control (newline included), DEL, and the three extra
-    /// Unicode line breaks YAML 1.1 recognizes (NEL, LS, PS).
+    /// The inverse of ``YAMLScalar/quoteIfNeeded(_:)`` — decode a flow
+    /// scalar the way PyYAML does.
     ///
-    /// This set is the whole reason `quoted` has two arms. A single-quoted
-    /// scalar escapes exactly one thing — `''` for a literal quote — and has
-    /// no escape for a line break at all, so emitting `'line1\nline2'` with a
-    /// REAL newline produces a *multi-line flow scalar*. Verified against
-    /// PyYAML 6.0.3, that fails in two distinct ways, both reachable from the
-    /// editor's multi-line description field:
-    ///
-    /// 1. **Silent value destruction (the common case).** YAML line-folding
-    ///    turns every interior newline into a space and every blank line into
-    ///    a single newline. The user's paragraphs come back as one run-on
-    ///    line — and because Scarf re-reads the file before the next save,
-    ///    the mangled form is what gets persisted. Cumulative, and invisible.
-    /// 2. **Total metadata loss (the sharp case).** A line that is exactly
-    ///    `---` or `...` — ordinary in pasted prose or markdown — terminates
-    ///    the document mid-scalar and PyYAML raises on the whole file.
-    ///    Hermes' `read_profile_meta` swallows any exception and returns
-    ///    empty defaults, and `_is_bot_managed` then returns False: the
-    ///    profile loses `display_name`, `description`, the entire
-    ///    `hermes-bots` block, and drops out of the bot roster entirely.
-    private static func requiresDoubleQuoting(_ raw: String) -> Bool {
-        raw.unicodeScalars.contains { scalar in
-            scalar.value < 0x20 || scalar.value == 0x7F
-                || scalar.value == 0x85 || scalar.value == 0x2028 || scalar.value == 0x2029
-        }
-    }
-
-    /// A YAML **double-quoted** scalar — the one flow style with escapes, and
-    /// therefore the only single-line form that can carry a newline. PyYAML
-    /// decodes `\n` / `\t` / `\xNN` / `\uNNNN` here exactly as written, so a
-    /// value round-trips to the same Swift string it came from. Hermes' own
-    /// writer would have chosen a block or double-quoted scalar for the same
-    /// input (`atomic_yaml_write` → `yaml.safe_dump`), so nothing downstream
-    /// is surprised by the style; this is just the form a line-oriented
-    /// writer can own.
-    private static func doubleQuoted(_ raw: String) -> String {
-        var out = "\""
-        for scalar in raw.unicodeScalars {
-            switch scalar {
-            case "\\": out += "\\\\"
-            case "\"": out += "\\\""
-            case "\n": out += "\\n"
-            case "\r": out += "\\r"
-            case "\t": out += "\\t"
-            default:
-                if scalar.value < 0x20 || scalar.value == 0x7F {
-                    out += String(format: "\\x%02x", scalar.value)
-                } else if scalar.value == 0x85 || scalar.value == 0x2028 || scalar.value == 0x2029 {
-                    out += String(format: "\\u%04x", scalar.value)
-                } else {
-                    out.unicodeScalars.append(scalar)
-                }
-            }
-        }
-        return out + "\""
-    }
-
-    /// The inverse of ``quoted`` — decode a flow scalar the way PyYAML does.
-    ///
-    /// Kept local to this type rather than folded into
-    /// `unquote` (which every other parser shares and
-    /// which only strips the outer pair): `hermes-bots` is the one block
-    /// Scarf both reads AND writes, so it is the one block that has to
-    /// round-trip escapes exactly, and widening the shared helper would
-    /// change the meaning of every unrelated `\` in a Hermes config.
+    /// P37: this WAS a local copy of the escape table, kept out of the
+    /// shared helper because `HermesYAML.stripYAMLQuotes` (which every other
+    /// parser shares) only strips the outer pair and widening it would
+    /// change the meaning of every unrelated `\` in a Hermes config. That
+    /// reasoning stands for `stripYAMLQuotes`; the copy does not. The table
+    /// now lives once, on ``YAMLScalar/unquote(_:)``, beside the writers it
+    /// reverses — `hermes-bots` and `profile_routes` are the blocks Scarf
+    /// both reads AND writes, and they read through the same function.
     static func unquote(_ raw: String) -> String {
-        guard raw.count >= 2 else { return raw }
-        if raw.first == "'" && raw.last == "'" {
-            return String(raw.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
-        }
-        guard raw.first == "\"" && raw.last == "\"" else { return raw }
-        var out = ""
-        var it = Array(raw.dropFirst().dropLast())
-        var i = 0
-        func hex(_ count: Int) -> String? {
-            guard i + count <= it.count else { return nil }
-            let digits = String(it[i..<(i + count)])
-            guard digits.allSatisfy(\.isHexDigit),
-                  let value = UInt32(digits, radix: 16),
-                  let scalar = Unicode.Scalar(value) else { return nil }
-            i += count
-            return String(Character(scalar))
-        }
-        while i < it.count {
-            let c = it[i]
-            i += 1
-            guard c == "\\", i < it.count else { out.append(c); continue }
-            let esc = it[i]
-            i += 1
-            switch esc {
-            case "n": out.append("\n")
-            case "r": out.append("\r")
-            case "t": out.append("\t")
-            case "0": out.append("\0")
-            case "a": out.append("\u{07}")
-            case "b": out.append("\u{08}")
-            case "f": out.append("\u{0C}")
-            case "v": out.append("\u{0B}")
-            case "e": out.append("\u{1B}")
-            case "\\": out.append("\\")
-            case "\"": out.append("\"")
-            case "/": out.append("/")
-            case "x": out.append(hex(2) ?? "\\x")
-            case "u": out.append(hex(4) ?? "\\u")
-            case "U": out.append(hex(8) ?? "\\U")
-            default: out.append(esc)
-            }
-        }
-        it = []
-        return out
-    }
-
-    /// Quote only when the value would otherwise change meaning — same rule as
-    /// `ProfileRoutesWriter.quoted`, so ordinary titles stay readable — with
-    /// one hard rule layered on top: a value carrying a line break or any
-    /// other control character is emitted as a **double-quoted** scalar,
-    /// never a single-quoted one. See ``requiresDoubleQuoting``.
-    ///
-    /// Post-condition, and the invariant every caller relies on: for ANY
-    /// input string this returns a single line of valid YAML that PyYAML
-    /// loads back as that exact string.
-    static func quoted(_ raw: String) -> String {
-        if raw.isEmpty { return "''" }
-        if requiresDoubleQuoting(raw) { return doubleQuoted(raw) }
-        let needsQuoting = raw.contains(":")
-            || raw.contains("#")
-            || raw.contains("&")
-            || raw.contains("*")
-            || raw.contains(">")
-            || raw.contains("|")
-            || raw.contains("{")
-            || raw.contains("[")
-            || raw.contains(",")
-            || raw.contains("\n")
-            || raw.first == "@"
-            || raw.first == "-"
-            || raw.first == "?"
-            || raw.first == "!"
-            || raw.first == "%"
-            || raw.first == " "
-            || raw.last == " "
-            || raw.first == "\""
-            || raw.first == "'"
-            || Double(raw) != nil
-            || ["true", "false", "null", "yes", "no", "on", "off", "~"].contains(raw.lowercased())
-        if !needsQuoting { return raw }
-        return "'\(raw.replacingOccurrences(of: "'", with: "''"))'"
+        YAMLScalar.unquote(raw)
     }
 }

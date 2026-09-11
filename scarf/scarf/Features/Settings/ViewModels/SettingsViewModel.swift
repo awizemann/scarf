@@ -219,8 +219,60 @@ final class SettingsViewModel {
     /// visibly `browser.cloud_provider`, where a present-but-empty value
     /// normalizes to `local` (cloud dispatch off) while an absent key means
     /// auto-detect. Use this whenever a picker offers a "not set" row.
-    func unsetSetting(_ key: String) {
-        applyConfigWrite(key, arguments: ["config", "unset", key])
+    ///
+    /// Judged by OUTPUT, unlike `setSetting`: `config unset`'s
+    /// managed-install arm calls `managed_error(...)`, which PRINTS to stderr
+    /// and `return`s (`hermes_cli/config.py:3549-3551` @ v2026.9.7,
+    /// `:8870-8872` @ v2026.7.20), and Python makes that exit 0 — so a
+    /// refused clear was banner'd "Saved <key>" over a key still on disk, for
+    /// all six call sites. See ``HermesConfigUnset`` (charter C5).
+    ///
+    /// **`config set` is NOT exit-1-on-every-refusal.** This doc claimed it
+    /// was, and that is false: `set_config_value` opens with the SAME
+    /// managed-install arm — `if is_managed(): managed_error(...); return`
+    /// (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error` at
+    /// `:453-455`) — so a managed host refuses every `config set` at exit 0
+    /// and `setSetting` banners "Saved". That is a real defect on the `set`
+    /// side too, deliberately NOT fixed here: it is the pending product
+    /// decision tracked by the board task "Audit P39: managed-install
+    /// refusals — config set / save_config exit-0 verdicts". Every OTHER
+    /// `config set` refusal does `sys.exit(1)`.
+    ///
+    /// P38: the "nothing stored → no-op" guard lives here too, not just in
+    /// `setApprovalMode`. `unset_config_value` prints `Config key not set:
+    /// <key>` for an absent key, which `HermesConfigUnset.judge` correctly
+    /// reads as a failure — so six rows showed a red "Couldn't clear" for a
+    /// button that had nothing to do. `isStored` is REQUIRED for the same
+    /// reason `capabilities` is: a seventh clear row cannot forget it.
+    ///
+    /// P37: `capabilities` is REQUIRED, and the `hasConfigUnset` floor
+    /// (v0.19.0) is checked HERE rather than at each caller. P35 gated only
+    /// `setApprovalMode` and left six rows shelling a verb a v0.18 host does
+    /// not have (C5): `browser.cloud_provider`, `stt.provider`, two
+    /// `auxiliary.*.max_concurrency` and two `database.*`. With the gate in
+    /// the one helper, a seventh row cannot forget it — the compiler asks
+    /// for capabilities before it can clear anything.
+    func unsetSetting(_ key: String, capabilities: HermesCapabilities, isStored: Bool) {
+        guard capabilities.hasConfigUnset else {
+            showSaveFailure(HermesConfigUnset.belowFloorHint(key: key))
+            return
+        }
+        // Nothing on disk to remove: the row is already in the state the
+        // click asks for. Shelling `config unset` here only ever produced
+        // `Config key not set: <key>` and a red banner.
+        //
+        // Every caller derives `isStored` from `config`, which is `.empty`
+        // until the first load lands — so a clear pressed before then is a
+        // no-op. That is the same posture `setApprovalMode` has had since
+        // P35, and it is harmless because the row RENDERS from that same
+        // `config`: a pre-load form already shows "not set", so there is no
+        // stored value on screen for the user to be clearing.
+        guard isStored else { return }
+        enqueueConfigWrite(
+            key: key,
+            arguments: HermesConfigUnset.argv(key: key),
+            verdict: HermesConfigUnset.judge(output:exitCode:)
+        )
     }
 
     /// Tail of the serialised config-write chain. Every write hops off the
@@ -242,11 +294,31 @@ final class SettingsViewModel {
         enqueueConfigWrite(key: key, arguments: arguments)
     }
 
+    /// How a queued write's outcome is decided. `nil` is the historical
+    /// exit-code rule; a verb with an exit-0 refusal path passes its own
+    /// output judge — see ``unsetSetting``.
+    ///
+    /// The exit-code rule is correct for EVERY `config set` refusal but one:
+    /// `set_config_value` opens with `if is_managed(): managed_error(...);
+    /// return` (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error`
+    /// printing to stderr and returning at `:453-455`), which Python exits 0
+    /// — so on a managed install every `setSetting` banners "Saved" over a
+    /// key the host never wrote. This doc used to claim `config set` always
+    /// exits 1; it does not. Giving `config set` its own output verdict is the
+    /// pending product decision tracked by the board task "Audit P39:
+    /// managed-install refusals — config set / save_config exit-0 verdicts",
+    /// deliberately not implemented here.
+    typealias WriteVerdict = @Sendable (String, Int32) -> HermesCLIOutcome
+
     /// Append one `hermes …` write to the serialised chain. `arguments` need
     /// not be a `config set` — `memory off` rides this too — but the outcome
     /// contract is the same: analytics, a banner, and (on success only, as
     /// before) a config re-read.
-    private func enqueueConfigWrite(key: String, arguments: [String]) {
+    private func enqueueConfigWrite(
+        key: String,
+        arguments: [String],
+        verdict: WriteVerdict? = nil
+    ) {
         let run = cliRunner
         let svc = fileService
         let ctx = context
@@ -258,13 +330,18 @@ final class SettingsViewModel {
             // Re-read only on success, exactly as the synchronous version
             // did: a refused write left `config` untouched, and reloading it
             // would repaint the same values while claiming a failure.
-            let refreshed: (config: HermesConfig, raw: String)? = result.exitCode == 0
+            let succeeded = verdict.map { $0(result.output, result.exitCode).succeeded }
+                ?? (result.exitCode == 0)
+            let refreshed: (config: HermesConfig, raw: String)? = succeeded
                 ? await Task.detached {
                     (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
                 }.value
                 : nil
             guard let self else { return }
-            self.commitConfigWrite(key: key, arguments: arguments, result: result, refreshed: refreshed)
+            self.commitConfigWrite(
+                key: key, arguments: arguments, result: result,
+                succeeded: succeeded, refreshed: refreshed
+            )
         }
     }
 
@@ -273,14 +350,19 @@ final class SettingsViewModel {
         key: String,
         arguments: [String],
         result: (output: String, exitCode: Int32),
+        succeeded: Bool,
         refreshed: (config: HermesConfig, raw: String)?
     ) {
         Analytics.record(.settingChanged(
             key: .init(rawKey: key),
-            outcome: .init(succeeded: result.exitCode == 0)
+            outcome: .init(succeeded: succeeded)
         ))
         if let refreshed {
-            showSuccess(String(localized: "Saved \(key)"))
+            showSuccess(
+                Self.isUnset(arguments)
+                    ? String(localized: "Cleared \(key) — the host default applies")
+                    : String(localized: "Saved \(key)")
+            )
             config = refreshed.config
             // The raw YAML view and the personality picker are both derived
             // from config.yaml's text, and neither was refreshed after a
@@ -300,7 +382,11 @@ final class SettingsViewModel {
             logger.warning(
                 "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
             )
-            showSaveFailure(Self.saveFailureMessage(key: key, output: result.output))
+            showSaveFailure(
+                Self.isUnset(arguments)
+                    ? Self.clearFailureMessage(key: key, output: result.output, exitCode: result.exitCode)
+                    : Self.saveFailureMessage(key: key, output: result.output)
+            )
         }
     }
 
@@ -325,6 +411,25 @@ final class SettingsViewModel {
         return reason.isEmpty
             ? String(localized: "Failed to save \(key)")
             : String(localized: "Couldn’t save \(key): \(reason)")
+    }
+
+    /// Is this queued write a `hermes config unset`? Positional, not a
+    /// substring search: `config set <key> unset` is a legitimate `set`.
+    static func isUnset(_ arguments: [String]) -> Bool {
+        arguments.count >= 2 && arguments[0] == "config" && arguments[1] == "unset"
+    }
+
+    /// The `config unset` twin of ``saveFailureMessage``. Quotes Hermes's own
+    /// refusal — including the managed-install one, which arrives at exit 0
+    /// and is therefore invisible to `saveFailureMessage`'s last-line scan
+    /// being reached at all.
+    static func clearFailureMessage(key: String, output: String, exitCode: Int32) -> String {
+        let reason = HermesConfigUnset.judge(output: output, exitCode: exitCode).detail
+            ?? Self.failureReason(from: output)
+            ?? ""
+        return reason.isEmpty
+            ? String(localized: "Couldn’t clear \(key)")
+            : String(localized: "Couldn’t clear \(key): \(reason)")
     }
 
     /// The extraction half of `saveFailureMessage`, without the "save"
@@ -526,17 +631,29 @@ final class SettingsViewModel {
     func setCronDrainTimeout(_ value: Int) { setSetting("agent.cron_drain_timeout", value: String(value)) }
     func setGatewayTurnLeaseTimeout(_ value: Int) { setSetting("agent.gateway_turn_lease_timeout", value: String(value)) }
     func setToolUseEnforcement(_ value: String) { setSetting("agent.tool_use_enforcement", value: value) }
-    /// Empty is the picker's "Host default (…)" row, which by decision writes
-    /// NOTHING: the point of that row is that the key is absent and the host
-    /// decides. Writing an empty scalar would persist `approvals.mode: ''`,
-    /// which `_normalize_approval_mode` warns about and reads as `manual` —
-    /// i.e. selecting "host default" would pin the mode that row exists to
-    /// avoid claiming. Getting back OUT of an explicit mode needs `hermes
-    /// config unset`, which is `hasConfigUnset`-gated; that is a separate row,
-    /// not this one.
-    func setApprovalMode(_ value: String) {
-        guard !value.isEmpty else { return }
-        setSetting("approvals.mode", value: value)
+    /// Empty is the picker's "Host default (…)" row. It never writes an empty
+    /// SCALAR: `_coerce_config_set_value` keeps `''` verbatim for a str-typed
+    /// key (`hermes_cli/config.py:3306-3312` @ v2026.9.7) and
+    /// `_normalize_approval_mode("")` resolves it to `manual`
+    /// (`tools/approval_context.py:197-214`), so `config set approvals.mode ''`
+    /// would pin the very mode that row exists to avoid claiming — while
+    /// Scarf's own reader dropped it and went on rendering "Host default".
+    ///
+    /// Getting back OUT of an explicit mode is `hermes config unset`, which
+    /// this row now issues (round-3 decision 10) when the host has it. Below
+    /// the `hasConfigUnset` floor the row stays inert and says how to clear
+    /// the key on the host — Scarf does not shell a verb the host lacks (C5).
+    /// With no mode stored there is nothing to clear, so it is a plain no-op.
+    func setApprovalMode(_ value: String, capabilities: HermesCapabilities) {
+        guard value.isEmpty else {
+            setSetting("approvals.mode", value: value)
+            return
+        }
+        // The floor gate AND the nothing-stored no-op both live in
+        // `unsetSetting` since P37/P38 — every clear row gets them, not just
+        // this one.
+        unsetSetting("approvals.mode", capabilities: capabilities,
+                     isStored: config.storedApprovalMode != nil)
     }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the
@@ -583,9 +700,13 @@ final class SettingsViewModel {
     /// `"cloud_provider" in browser_cfg`, so a present-but-empty value
     /// normalizes to `local` and silently disables cloud dispatch, which is
     /// not what "auto-detect" means.
-    func setBrowserCloudProvider(_ value: String) {
+    func setBrowserCloudProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("browser.cloud_provider")
+            // Empty is exactly how an absent `browser.cloud_provider`
+            // parses (`HermesConfig.browserCloudProvider`'s doc), and Scarf
+            // never writes the present-but-empty form.
+            unsetSetting("browser.cloud_provider", capabilities: capabilities,
+                         isStored: !config.browserCloudProvider.isEmpty)
         } else {
             setSetting("browser.cloud_provider", value: value)
         }
@@ -646,9 +767,10 @@ final class SettingsViewModel {
     /// Writes `stt.provider`. The empty selection removes the key rather than
     /// writing `""` — on v0.20.5+ an absent key is the autodetect ladder while
     /// a present value (empty included) is an explicit pin.
-    func setSTTProvider(_ value: String) {
+    func setSTTProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("stt.provider")
+            unsetSetting("stt.provider", capabilities: capabilities,
+                         isStored: !config.voice.sttProvider.isEmpty)
         } else {
             setSetting("stt.provider", value: value)
         }
@@ -720,18 +842,28 @@ final class SettingsViewModel {
     /// field (config_defaults.py has every task default to `""`), so
     /// writing an empty scalar here is safe and behaves the same as an
     /// absent key — this is NOT one of the empty-vs-unset hazard keys.
-    /// Valid non-empty values: `AuxiliaryReasoningEffort.allCases`.
+    /// Valid non-empty values: `HermesReasoningEffort.levels(capabilities:)`.
     func setAuxiliaryReasoningEffort(_ task: String, value: String) {
         setSetting("auxiliary.\(task).reasoning_effort", value: value)
     }
     /// `auxiliary.<task>.max_concurrency` (v0.20.4+, isV0204OrLater) —
     /// true-optional cap on simultaneous calls for that task. Currently
     /// only surfaced for `compression`. Empty clears back to unlimited.
-    func setAuxiliaryMaxConcurrency(_ task: String, value: Int?) {
+    /// `stored` is the value the config currently holds for this task —
+    /// the view has the `AuxiliaryModel` in hand and `AuxiliarySettings` has
+    /// no keyed accessor, so the caller passes it rather than this VM
+    /// re-deriving it from a string task name.
+    func setAuxiliaryMaxConcurrency(
+        _ task: String,
+        value: Int?,
+        stored: Int?,
+        capabilities: HermesCapabilities
+    ) {
         if let value {
             setSetting("auxiliary.\(task).max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.\(task).max_concurrency")
+            unsetSetting("auxiliary.\(task).max_concurrency", capabilities: capabilities,
+                         isStored: stored != nil)
         }
     }
     /// `auxiliary.background_review.enabled` (v0.20.4+, isV0204OrLater) —
@@ -770,11 +902,12 @@ final class SettingsViewModel {
     }
     /// `auxiliary.title_generation.max_concurrency` (v0.20.4+,
     /// isV0204OrLater) — true-optional cap on simultaneous title calls.
-    func setTitleGenerationMaxConcurrency(_ value: Int?) {
+    func setTitleGenerationMaxConcurrency(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("auxiliary.title_generation.max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.title_generation.max_concurrency")
+            unsetSetting("auxiliary.title_generation.max_concurrency", capabilities: capabilities,
+                         isStored: config.auxiliary.titleGeneration.maxConcurrency != nil)
         }
     }
 
@@ -868,22 +1001,24 @@ final class SettingsViewModel {
     /// autocheckpoint); a concrete value, including `0`, writes a scalar.
     /// Do NOT collapse this to an empty-string write — `0` and "absent"
     /// are different Hermes behaviors here.
-    func setDatabaseWalAutocheckpoint(_ value: Int?) {
+    func setDatabaseWalAutocheckpoint(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("database.wal_autocheckpoint", value: String(value))
         } else {
-            unsetSetting("database.wal_autocheckpoint")
+            unsetSetting("database.wal_autocheckpoint", capabilities: capabilities,
+                         isStored: config.database.walAutocheckpoint != nil)
         }
     }
 
     /// `database.journal_size_limit` (bytes) — true optional, same
     /// unset-vs-empty hazard as `setDatabaseWalAutocheckpoint`. `nil`
     /// clears the key (SQLite default: no limit).
-    func setDatabaseJournalSizeLimit(_ value: Int?) {
+    func setDatabaseJournalSizeLimit(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("database.journal_size_limit", value: String(value))
         } else {
-            unsetSetting("database.journal_size_limit")
+            unsetSetting("database.journal_size_limit", capabilities: capabilities,
+                         isStored: config.database.journalSizeLimit != nil)
         }
     }
 
@@ -1010,6 +1145,30 @@ final class SettingsViewModel {
     /// writers, mirroring `GatewayConfigWriter.saveList`'s no-op-on-equal
     /// behavior and `setSetting`'s save toast.
     private func saveDirectYAML(
+        label: String, transform: @escaping @Sendable (String) -> String?
+    ) async {
+        // SERIALISED on the same chain as every `hermes config set`
+        // (round-3 P33). These writers are a read-modify-write of the WHOLE
+        // config.yaml, so they are the most damaging thing that can
+        // interleave with a toggle's write/re-read pair: a `config set` that
+        // lands between this frame's guarded load and its publish is
+        // overwritten by the splice, and the toggle then visibly snaps back
+        // — the exact race `writeChain` was built for, which `runConfigMigrate`
+        // already joins and this one did not. The guarded lock underneath
+        // protects the BYTES from a second process; the chain is what orders
+        // this process's own writes against each other.
+        let previous = writeChain
+        let save = Task { [weak self] in
+            _ = await previous?.value
+            await self?.performDirectYAMLSave(label: label, transform: transform)
+        }
+        writeChain = Task { _ = await save.value }
+        await save.value
+    }
+
+    /// The body of ``saveDirectYAML(label:transform:)``, split out so the
+    /// chain hop above stays legible.
+    private func performDirectYAMLSave(
         label: String, transform: @escaping @Sendable (String) -> String?
     ) async {
         let path = context.paths.configYAML

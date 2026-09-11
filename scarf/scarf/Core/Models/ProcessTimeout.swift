@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension Process {
     /// Wait for this process to exit, giving up after `timeout` seconds.
@@ -61,4 +62,67 @@ extension Process {
     /// How long to wait for a signal to take effect before escalating (or
     /// giving up). Small on purpose — the caller's own budget is already gone.
     private static let signalGrace: TimeInterval = 2
+
+    /// Wait for a piped child within `timeout`, draining its pipes
+    /// CONCURRENTLY with the wait, and hand back what they held.
+    ///
+    /// Charter C10 has two halves at a piped spawn and the ad-hoc call sites
+    /// kept getting one of them:
+    ///
+    /// 1. **The wait must be bounded.** `waitUntilExit()` alone waits forever.
+    /// 2. **The drain must not come AFTER the wait.** `run` → `waitUntilExit`
+    ///    → `readToEnd` is the classic pipe deadlock: a child that fills the
+    ///    64 KB pipe buffer blocks in `write()` while the parent waits for an
+    ///    exit that can no longer come — so the "bounded" wait in (1) is the
+    ///    only thing that saves it, and it saves it by killing a child that
+    ///    was working fine. Reading after an overrun's SIGTERM/SIGKILL also
+    ///    collects only what a killed writer happened to flush.
+    ///
+    /// `unzip`/`zip` are the real exposure: a corrupt or adversarial archive
+    /// makes them print a warning per entry, and a big enough one fills the
+    /// buffer. This is `HealthViewModel.dashboardListenerPID`'s shape, hoisted
+    /// so the three remaining ad-hoc spawns share it instead of each growing a
+    /// third of it (round-3 P33).
+    ///
+    /// **This owns the READ ends' lifetime.** Each reading handle is closed
+    /// by the reader that drained it, immediately after its own
+    /// `readDataToEndOfFile` returned — never by the caller. Closing a
+    /// `FileHandle` while another thread is blocked reading it is a raised
+    /// `NSFileHandleOperationException`, and on the drain-overrun path (a
+    /// grandchild inherited the fd and holds the pipe open) that is exactly
+    /// what a caller-side `close()` after this returns would do. The caller's
+    /// own `closePipes()` keeps the WRITE ends, which nobody else touches.
+    ///
+    /// - Returns: `exited` is false after an overrun (the child has been
+    ///   SIGTERMed and then SIGKILLed); the drained data is whatever arrived
+    ///   either way.
+    func waitDraining(
+        timeout: TimeInterval,
+        pipes: [Pipe],
+        drainGrace: TimeInterval = Process.drainGrace
+    ) -> (exited: Bool, data: [Data]) {
+        let box = OSAllocatedUnfairLock(initialState: [Int: Data]())
+        let group = DispatchGroup()
+        for (index, pipe) in pipes.enumerated() {
+            let reader = pipe.fileHandleForReading
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let data = reader.readDataToEndOfFile()
+                try? reader.close()
+                box.withLock { $0[index] = data }
+                group.leave()
+            }
+        }
+        let exited = waitUntilExit(timeout: timeout)
+        // Bounded, like every other wait here: EOF arrives when the last
+        // write end closes, which is at exit — but a fd inherited by a
+        // grandchild would otherwise hold the read open forever.
+        _ = group.wait(timeout: .now() + drainGrace)
+        let collected = box.withLock { $0 }
+        return (exited, (0..<pipes.count).map { collected[$0] ?? Data() })
+    }
+
+    /// How long to wait for a drained pipe to reach EOF after the child has
+    /// gone. See ``waitDraining(timeout:pipes:drainGrace:)``.
+    fileprivate static let drainGrace: TimeInterval = 1
 }

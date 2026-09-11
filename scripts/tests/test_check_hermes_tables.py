@@ -99,6 +99,57 @@ class LaneFiveFailsClosed(unittest.TestCase):
         self.assertIsNone(cht.parse_models_dev_map(FakeSource({})))
 
 
+class AliasesShapeFailsClosed(unittest.TestCase):
+    """Lane 1's `ALIASES` arm has the hole lane 5's was hardened against.
+
+    Through v0.21.0 `ALIASES` is a dict literal; at v0.21.1 it is a dict
+    comprehension inverting `_ALIAS_GROUPS`. A THIRD shape used to fall
+    through the `elif` silently, leaving `aliases` empty — and the
+    `if not aliases: aliases = alias_groups` fallback below then supplied a
+    DIFFERENT table's contents, so the lane compared Scarf against
+    `_ALIAS_GROUPS` while reporting on `ALIASES`.
+    """
+
+    OVERLAYS = 'HERMES_OVERLAYS: dict = {"o": Overlay()}\n'
+
+    def _parse(self, aliases_src, groups_src=""):
+        return cht.parse_hermes(FakeSource({
+            cht.PROVIDERS_PY: groups_src + aliases_src + self.OVERLAYS}))
+
+    def test_dict_literal_is_used_verbatim(self):
+        aliases, _, _ = self._parse('ALIASES: dict = {"ai-gateway": "vercel"}\n')
+        self.assertEqual(aliases, {"ai-gateway": "vercel"})
+
+    def test_comprehension_is_answered_from_alias_groups(self):
+        aliases, _, _ = self._parse(
+            "ALIASES: dict = {a: c for c, g in _ALIAS_GROUPS.items() for a in g}\n",
+            '_ALIAS_GROUPS: dict = {"vercel": ("ai-gateway",)}\n')
+        self.assertEqual(aliases, {"ai-gateway": "vercel"})
+
+    def test_a_third_shape_is_not_silently_answered_from_alias_groups(self):
+        # `dict(...)` is an ast.Call. Before the fix this returned
+        # `_ALIAS_GROUPS`'s contents — a wrong table, reported as `ALIASES`.
+        with self.assertRaises(SystemExit) as ctx:
+            self._parse('ALIASES: dict = dict(_PAIRS)\n',
+                        '_ALIAS_GROUPS: dict = {"vercel": ("ai-gateway",)}\n')
+        self.assertNotEqual(ctx.exception.code, 0)
+        self.assertIn("neither a dict literal", str(ctx.exception.code))
+
+    def test_a_renamed_table_is_not_silently_answered_from_alias_groups(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self._parse('ALIASES_V2: dict = {"a": "b"}\n',
+                        '_ALIAS_GROUPS: dict = {"vercel": ("ai-gateway",)}\n')
+        self.assertNotEqual(ctx.exception.code, 0)
+
+    def test_an_empty_dict_literal_is_still_an_error_not_a_substitution(self):
+        # `ALIASES = {}` is a shape we understand but a table we cannot use;
+        # it must not be back-filled from `_ALIAS_GROUPS` either.
+        with self.assertRaises(SystemExit) as ctx:
+            self._parse("ALIASES: dict = {}\n",
+                        '_ALIAS_GROUPS: dict = {"vercel": ("ai-gateway",)}\n')
+        self.assertNotEqual(ctx.exception.code, 0)
+
+
 def _git(cwd, *args):
     subprocess.run(["git", "-C", cwd, *args], check=True,
                    capture_output=True, text=True)
@@ -195,12 +246,32 @@ def _target_tag_available():
         capture_output=True).returncode == 0
 
 
-@unittest.skipUnless(_target_tag_available(),
-                     f"needs a hermes-agent checkout with {cht.HERMES_TARGET_TAG}")
+# The script's own policy is that a lane which cannot run is NOT a pass unless
+# the operator opts in with `--allow-skip` (P27). These tests are the same
+# claim one level up: on a machine with no hermes-agent checkout at the target
+# tag, `skipUnless` used to make the whole run print OK — a green suite that
+# exercised none of the end-to-end lanes, which is exactly the "skip reads as
+# pass" hole P27 closed inside the script. So the missing checkout FAILS, and
+# `SCARF_ALLOW_SKIP=1` is the test-runner spelling of `--allow-skip`.
+ALLOW_SKIP = os.environ.get("SCARF_ALLOW_SKIP") == "1"
+
+
+def _require_target_checkout(case):
+    if _target_tag_available():
+        return
+    reason = (f"needs a hermes-agent checkout at {HERMES_CHECKOUT} carrying "
+              f"{cht.HERMES_TARGET_TAG}; set SCARF_ALLOW_SKIP=1 to accept a "
+              f"partial run")
+    if ALLOW_SKIP:
+        case.skipTest(reason)
+    case.fail(reason)
+
+
 class SkippedLaneIsNotAPass(unittest.TestCase):
     """A lane that cannot run must make the overall verdict non-OK by default."""
 
     def setUp(self):
+        _require_target_checkout(self)
         self._real_cache = cht.MODELS_DEV_CACHE
         # Point the models.dev cache at a path that cannot exist: lanes 3 and 4
         # then cannot run, exactly as on a fresh machine.
@@ -235,7 +306,11 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
     def test_full_run_at_the_target_tag_is_ok(self):
         cht.MODELS_DEV_CACHE = self._real_cache
         if not os.path.exists(cht.MODELS_DEV_CACHE):
-            self.skipTest("no models.dev cache on this machine")
+            reason = ("no models.dev cache on this machine; set "
+                      "SCARF_ALLOW_SKIP=1 to accept a partial run")
+            if ALLOW_SKIP:
+                self.skipTest(reason)
+            self.fail(reason)
         code, text = self._run()
         self.assertEqual(code, 0, text)
         self.assertIn("lanes=5/5", text)

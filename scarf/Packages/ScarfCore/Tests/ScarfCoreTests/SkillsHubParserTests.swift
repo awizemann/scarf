@@ -119,7 +119,7 @@ struct SkillsHubParserTests {
     }
 
     /// Only `update_available` is something `hermes skills update` acts on
-    /// (`skills_hub.py:843` filters on exactly that word).
+    /// (`hermes_cli/skills_hub.py:843` filters on exactly that word).
     @Test func onlyUpdateAvailableIsActionable() {
         let statuses = HermesSkillUpdateStatus.allCases.filter(\.isActionable)
         #expect(statuses == [.updateAvailable])

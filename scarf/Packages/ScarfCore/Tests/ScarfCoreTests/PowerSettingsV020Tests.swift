@@ -151,14 +151,38 @@ import Testing
 
     @Test func effortVocabularyMatchesHermes() {
         // hermes_constants.py VALID_REASONING_EFFORTS + the "none" disable
-        // alias; max/ultra are v0.20-only picker options.
+        // alias. `max` arrives at v2026.7.7 (0.18.1) and `ultra` at
+        // v2026.7.20 (0.19.0) — see `hasReasoningEffortMax` / `…Ultra`.
         #expect(HermesReasoningEffort.levels(capabilities: v020)
             == ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
         #expect(HermesReasoningEffort.levels(capabilities: v019)
-            == ["none", "minimal", "low", "medium", "high", "xhigh"])
+            == ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
         #expect(HermesReasoningEffort.isValid("ULTRA"))
         #expect(!HermesReasoningEffort.isValid("extreme"))
         #expect(!HermesReasoningEffort.isValid(""))
+    }
+
+    /// Both boundaries of the re-floored picker (P35). `max` is offered from
+    /// 0.18.1 (`hermes_constants.py:794` @ v2026.7.7 gains it; v2026.7.1 =
+    /// 0.18.0 has the five-level tuple) and `ultra` from 0.19.0
+    /// (`hermes_constants.py:835-837` @ v2026.7.20; absent at v2026.7.7.2 =
+    /// 0.18.2).
+    @Test func effortPickerRespectsTheMaxAndUltraFloors() {
+        let v0180 = caps(0, 18)
+        let v0181 = HermesCapabilities(
+            versionLine: "hermes 0.18.1",
+            semver: HermesCapabilities.SemVer(major: 0, minor: 18, patch: 1),
+            dateVersion: nil
+        )
+        #expect(HermesReasoningEffort.levels(capabilities: v0180)
+            == ["none", "minimal", "low", "medium", "high", "xhigh"])
+        #expect(HermesReasoningEffort.levels(capabilities: v0181)
+            == ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+        #expect(HermesReasoningEffort.levels(capabilities: v019)
+            == ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+        // An undetected host keeps the conservative base vocabulary.
+        #expect(HermesReasoningEffort.levels(capabilities: .empty)
+            == ["none", "minimal", "low", "medium", "high", "xhigh"])
     }
 
     // MARK: - Excluded providers

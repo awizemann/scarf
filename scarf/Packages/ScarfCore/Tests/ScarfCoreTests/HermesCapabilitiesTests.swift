@@ -936,6 +936,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)
@@ -953,6 +954,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
         #expect(!caps.hasPeerRunCommands)
         #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasCronRecoverableErrorResume)
         #expect(!caps.hasConfigDottedKeyEscape)
         #expect(!caps.hasCronIncidents)
         #expect(!caps.hasCronResumeRunNow)
@@ -979,6 +981,7 @@ import Foundation
         #expect(caps.hasBrowserCloseProfile)
         #expect(!caps.hasPeerRunCommands)
         #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasCronRecoverableErrorResume)
         #expect(!caps.hasConfigDottedKeyEscape)
     }
 
@@ -988,6 +991,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)
@@ -1116,6 +1120,7 @@ import Foundation
         // The v0.21.0 surface stays alive on a v0.21.0 host.
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.isV021OrLater)
     }
 
@@ -1172,6 +1177,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)
@@ -1344,6 +1350,33 @@ import Foundation
         #expect(!HermesCapabilities.empty.hasSessionsExportFormats)
     }
 
+    /// The two reasoning-effort levels have DIFFERENT floors (P35):
+    /// `VALID_REASONING_EFFORTS` gains `max` at v2026.7.7 (0.18.1,
+    /// `hermes_constants.py:794`) and `ultra` one release later at
+    /// v2026.7.20 (0.19.0, `:835-837`). v2026.7.1 (0.18.0) has neither and
+    /// v2026.7.7.2 (0.18.2) has only `max`.
+    @Test func reasoningEffortMaxAndUltraFloorsAreOneReleaseApart() {
+        let v0180 = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(!v0180.hasReasoningEffortMax)
+        #expect(!v0180.hasReasoningEffortUltra)
+
+        let v0181 = HermesCapabilities.parseLine("Hermes Agent v0.18.1 (2026.7.7)")
+        #expect(v0181.hasReasoningEffortMax)
+        #expect(!v0181.hasReasoningEffortUltra)
+
+        let v0182 = HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
+        #expect(v0182.hasReasoningEffortMax)
+        #expect(!v0182.hasReasoningEffortUltra)
+
+        let v019 = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        #expect(v019.hasReasoningEffortMax)
+        #expect(v019.hasReasoningEffortUltra)
+
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasReasoningEffortUltra)
+        #expect(!HermesCapabilities.empty.hasReasoningEffortMax)
+        #expect(!HermesCapabilities.empty.hasReasoningEffortUltra)
+    }
+
     /// `hermes_cli/personality.py` first exists at v2026.8.13 (0.20.1).
     @Test func builtinPersonalitiesInCodeFloorIsV0201() {
         #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").hasBuiltinPersonalitiesInCode)
@@ -1512,10 +1545,8 @@ import Foundation
                 RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
                     == "/compact auth"
             )
-            let names = RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps,
-                hasActiveSession: true
-            ).map(\.name)
+            let names = RichChatViewModel.alwaysAvailableCommands(capabilities: caps)
+                .map(\.name)
             #expect(names.contains("compact"), "\(caps.versionLine)")
             #expect(!names.contains("compress"), "\(caps.versionLine)")
         }
@@ -1534,10 +1565,8 @@ import Foundation
                 RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
                     == "/compress auth"
             )
-            let names = RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps,
-                hasActiveSession: true
-            ).map(\.name)
+            let names = RichChatViewModel.alwaysAvailableCommands(capabilities: caps)
+                .map(\.name)
             #expect(names.contains("compress"), "\(caps.versionLine)")
             #expect(!names.contains("compact"), "\(caps.versionLine)")
         }

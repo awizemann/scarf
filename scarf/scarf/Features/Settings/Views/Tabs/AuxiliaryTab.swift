@@ -22,6 +22,7 @@ struct AuxiliaryTab: View {
 
     @Environment(\.serverContext) private var serverContext
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
     @State private var subscription: NousSubscriptionState = .absent
     @State private var showNousSignIn: Bool = false
 
@@ -240,7 +241,7 @@ struct AuxiliaryTab: View {
         }
         // v0.20.4+ — documented only for `compression`.
         if key == "compression", capabilitiesStore?.capabilities.isV0204OrLater ?? false {
-            maxConcurrencyRow(value: model.maxConcurrency) { viewModel.setAuxiliaryMaxConcurrency(key, value: $0) }
+            maxConcurrencyRow(value: model.maxConcurrency) { viewModel.setAuxiliaryMaxConcurrency(key, value: $0, stored: model.maxConcurrency, capabilities: capabilities) }
         }
     }
 
@@ -256,16 +257,24 @@ struct AuxiliaryTab: View {
     }
 
     /// Shared reasoning-effort picker for `auxiliary.<task>.reasoning_effort`
-    /// (v0.19+) — "Default" writes an empty scalar (provider default);
-    /// the other options are `AuxiliaryReasoningEffort`'s raw values,
-    /// source-verified against `hermes_constants.VALID_REASONING_EFFORTS`
-    /// + `parse_reasoning_effort`'s `"none"` alias.
+    /// (v0.19+) — "Default" writes an empty scalar (provider default); the
+    /// other options come from ``HermesReasoningEffort/levels(capabilities:)``,
+    /// the ONE vocabulary, whose per-level floors P35 walked
+    /// (`hermes_constants.VALID_REASONING_EFFORTS` gains `max` at v2026.7.7 =
+    /// 0.18.1 and `ultra` at v2026.7.20 = 0.19.0).
+    ///
+    /// P37 finding 6: this used to build its options from a second,
+    /// hard-coded enum (`AuxiliaryReasoningEffort`, now retired) whose doc
+    /// still credited "v0.20.0" for both additions. The narrowing is moot on
+    /// every host that renders this row — `hasAuxiliaryReasoningEffort` is
+    /// itself 0.19.0, the tag that added `ultra` — but expressing it through
+    /// the shared source is what stops the two lists drifting again.
     @ViewBuilder
     private func reasoningEffortPicker(value: String, onChange: @escaping (String) -> Void) -> some View {
         PickerRow(
             label: "Reasoning Effort",
             selection: value,
-            options: [""] + AuxiliaryReasoningEffort.allCases.map(\.rawValue),
+            options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
             optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )
@@ -295,7 +304,7 @@ struct AuxiliaryTab: View {
                 .padding(.bottom, 4)
         }
         if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
-            maxConcurrencyRow(value: settings.maxConcurrency) { viewModel.setTitleGenerationMaxConcurrency($0) }
+            maxConcurrencyRow(value: settings.maxConcurrency) { viewModel.setTitleGenerationMaxConcurrency($0, capabilities: capabilities) }
         }
     }
 

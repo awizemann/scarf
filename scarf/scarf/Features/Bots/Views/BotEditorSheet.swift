@@ -78,6 +78,7 @@ struct BotEditorSheet: View {
     /// read a CLI-shaped error for a name the field could have caught
     /// (A1-L10).
     private var canSave: Bool {
+        guard draft.controlCharacterFieldLabel == nil else { return false }
         guard isCreate else { return true }
         let name = draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return HermesProfileScope.isValidName(name) && name != HermesProfileScope.defaultProfileName
@@ -264,6 +265,14 @@ struct BotEditorSheet: View {
     /// button so a dead primary button always says what it wants (the id
     /// field itself may be scrolled out of view).
     private var cannotSaveReason: LocalizedStringKey? {
+        // Round-3 decision 6, and it applies on EDIT as well as create: a
+        // control character in one of these scalars makes PyYAML refuse the
+        // profile.yaml, `read_profile_meta` swallow the exception and return
+        // empty defaults, and the bot drop out of the roster entirely
+        // (`hermes_cli/profiles.py:471-480`, `:609-618` @ `v2026.9.7`).
+        if let field = draft.controlCharacterFieldLabel {
+            return "“\(field)” contains a tab or a control character. Remove it, then save."
+        }
         guard isCreate, !canSave else { return nil }
         let name = draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { return "Enter a profile id (or a name to derive one)." }

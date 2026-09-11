@@ -179,6 +179,7 @@ def parse_hermes(src):
                  f"hermes-agent checkout path")
     tree = ast.parse(text)
     aliases, alias_groups, overlay_keys, aggregators = {}, {}, [], set()
+    aliases_shape = None
     for node in ast.walk(tree):
         if not isinstance(node, ast.AnnAssign):
             continue
@@ -193,10 +194,20 @@ def parse_hermes(src):
                         alias_groups[elt.value] = k.value
         elif name == "ALIASES":
             if isinstance(node.value, ast.Dict):
+                aliases_shape = "dict"
                 for k, v in zip(node.value.keys, node.value.values):
                     aliases[k.value] = v.value
-            # A DictComp is the v0.21.1+ inversion — filled in from
-            # _ALIAS_GROUPS below (declaration order is not guaranteed here).
+            elif isinstance(node.value, ast.DictComp):
+                # The v0.21.1+ inversion of `_ALIAS_GROUPS` — filled in below
+                # (declaration order is not guaranteed here).
+                aliases_shape = "comprehension"
+            else:
+                # A THIRD shape (a `dict(...)` call, a module-level merge, a
+                # name alias). Falling through here used to leave `aliases`
+                # empty and let the `alias_groups` fallback below quietly
+                # substitute a DIFFERENT table's contents — the same
+                # silent-substitute hole lane 5 was hardened against in P27.
+                aliases_shape = "unknown"
         elif name == "HERMES_OVERLAYS":
             for k, v in zip(node.value.keys, node.value.values):
                 overlay_keys.append(k.value)
@@ -206,7 +217,12 @@ def parse_hermes(src):
                                 and isinstance(kw.value, ast.Constant)
                                 and kw.value.value is True):
                             aggregators.add(k.value)
-    if not aliases:
+    if aliases_shape == "unknown":
+        sys.exit(f"error: ALIASES in {PROVIDERS_PY} at {src.mode} is neither a "
+                 f"dict literal nor the _ALIAS_GROUPS comprehension — its shape "
+                 f"changed and this script must be updated, not guessed past")
+    if aliases_shape == "comprehension":
+        # ONLY the comprehension shape may be answered from `_ALIAS_GROUPS`.
         aliases = alias_groups
     if not aliases or not overlay_keys:
         sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from "

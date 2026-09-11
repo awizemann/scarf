@@ -4,7 +4,8 @@ import Foundation
 /// **structured** value rather than "whatever string we happened to have".
 ///
 /// Hermes parses this positional in `cron/jobs.py::parse_schedule`
-/// (verified at tag `v2026.8.31`) into exactly three kinds:
+/// (re-verified at tag `v2026.9.7`, `cron/jobs.py:733-755`) into exactly
+/// three kinds:
 /// - `cron`     — a 5/6-field cron expression (persisted as `schedule.expr`)
 /// - `interval` — `"30m"` / `"every 2h"` (persisted as `schedule.minutes`)
 /// - `once`     — an ISO timestamp (persisted as `schedule.run_at`)

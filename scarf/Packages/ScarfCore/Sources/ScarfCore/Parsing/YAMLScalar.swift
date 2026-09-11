@@ -29,6 +29,40 @@ public enum YAMLScalar {
         s.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
     }
 
+    /// True when `s` carries a character no single-line YAML scalar should
+    /// have to represent: a tab, a line break, or any other C0/C1 control
+    /// (including DEL, NEL and the Unicode line/paragraph separators).
+    ///
+    /// This is the **refusal** predicate, not an emission rule. Round-3
+    /// decision 6: a control character in a user-typed scalar is a visible
+    /// editor validation error in the same shape as
+    /// `MCPServerEditorViewModel.duplicateKey`, not a silent reshape — a tab
+    /// pasted into a route Name is a paste accident, and double-quoting it
+    /// away means the value the user reads back is not the value they see in
+    /// the field. The writers below still handle one safely (a hand-edited
+    /// file can carry anything), so this gates the EDITOR, not the emitter.
+    ///
+    /// `allowingLineBreaks` is for the one field that is deliberately
+    /// multi-line — a bot's Role/`description`, which Hermes itself
+    /// round-trips through `yaml.safe_dump` and which
+    /// ``doubleQuoted(_:)`` represents losslessly.
+    ///
+    /// Scanned over unicode SCALARS for the same reason
+    /// ``containsLineBreak(_:)`` is: `"\r\n"` is one grapheme cluster.
+    public static func containsControlCharacter(
+        _ s: String,
+        allowingLineBreaks: Bool = false
+    ) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            if allowingLineBreaks, scalar == "\n" || scalar == "\r" { return false }
+            return scalar.value < 0x20
+                || scalar.value == 0x7F
+                || (scalar.value >= 0x80 && scalar.value <= 0x9F)
+                || scalar.value == 0x2028
+                || scalar.value == 0x2029
+        }
+    }
+
     /// The Unicode byte-order mark, which YAML permits at the start of a
     /// document and which no Foundation character set trims: it is not in
     /// `.whitespaces` and not in `.whitespacesAndNewlines`, exactly as `\r`
@@ -100,15 +134,25 @@ public enum YAMLScalar {
     /// (`plugins/platforms/telegram/adapter.py:5019-5026`,
     /// `plugins/platforms/slack/adapter.py:5960-5973` at `v2026.9.7`).
     ///
-    /// A value carrying a literal newline cannot be represented on one row
-    /// at all; callers reject those before reaching here, and as a last
-    /// resort this escapes the value double-quoted rather than emitting a
-    /// broken document.
+    /// A value carrying a literal newline or a control character cannot be
+    /// represented on one row as a plain or single-quoted scalar. The
+    /// EDITORS refuse those up front (round-3 decision 6; see
+    /// ``containsControlCharacter(_:allowingLineBreaks:)``), because a
+    /// silent reshape is a value the user cannot see — but a hand-edited
+    /// file can carry anything, so this still emits a correct
+    /// double-quoted scalar rather than a broken document.
     public static func quoteIfNeeded(_ raw: String) -> String {
         if raw.isEmpty { return "''" }
-        if containsLineBreak(raw) {
-            // Double quotes are the only YAML style that can carry an
-            // escaped line break inline.
+        if containsLineBreak(raw) || containsUnrepresentableControl(raw) {
+            // Double quotes are the only YAML style with escapes, and
+            // therefore the only single-line form that can carry a line
+            // break or a control character at all. A raw C0/C1 control is
+            // refused by PyYAML's READER — "unacceptable character #x0001:
+            // special characters are not allowed" — in EVERY quoting style,
+            // single quotes included, so this arm is not optional (verified
+            // against PyYAML 6.0.3). A TAB is deliberately not in that set:
+            // it is legal raw inside both quote styles and only illegal in
+            // a plain scalar, which ``quoteIfNeeded`` already quotes.
             return doubleQuoted(raw)
         }
         let anywhere: Set<Character> = [":", "#", "&", "*", ">", "|", "[", "]", "{", "}", ","]
@@ -122,20 +166,181 @@ public enum YAMLScalar {
         // Single-quote, escaping any embedded single quotes by doubling.
         // `HermesYAML.stripYAMLQuotes` / `normalizedScalar` UN-double on the
         // way back in — an asymmetric pair here grew one `'` per save.
-        let escaped = raw.replacingOccurrences(of: "'", with: "''")
-        return "'\(escaped)'"
+        return singleQuoted(raw)
+    }
+
+    /// Single-quoted form, escaping an embedded `'` by doubling — YAML's one
+    /// escape in this style.
+    ///
+    /// Exposed so a writer with an ALWAYS-quote policy (`ProfileRoutesWriter`
+    /// quotes platform ids unconditionally, because Hermes compares them
+    /// with `!=` against string source ids and an unquoted `123` would load
+    /// as an int) can reuse the emission instead of hand-rolling
+    /// `"'\(raw)'"` — which loses the doubling and breaks on any value
+    /// carrying a quote.
+    public static func singleQuoted(_ raw: String) -> String {
+        "'\(raw.replacingOccurrences(of: "'", with: "''"))'"
+    }
+
+    /// True when `s` carries a character PyYAML's reader rejects in ANY
+    /// quoting style and which therefore has to be escaped: the C0 controls
+    /// except tab/CR/LF, DEL, the C1 block, and the Unicode line/paragraph
+    /// separators.
+    private static func containsUnrepresentableControl(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            if scalar == "\t" { return false }
+            return scalar.value < 0x20
+                || scalar.value == 0x7F
+                || (scalar.value >= 0x80 && scalar.value <= 0x9F)
+                || scalar.value == 0x2028
+                || scalar.value == 0x2029
+        }
     }
 
     /// Double-quoted form with every escape YAML requires, including line
-    /// breaks. Lossless: `HermesFileService.unescapeYAMLDoubleQuoted`
-    /// reverses it.
+    /// breaks and control characters.
+    ///
+    /// **Why nothing else will do** (lifted here from
+    /// `HermesBotProfileYAML.requiresDoubleQuoting`, which P32 deleted). A
+    /// single-quoted scalar escapes exactly one thing — `''` for a literal
+    /// quote — and has no escape for a line break at all, so emitting
+    /// `'line1<LF>line2'` with a REAL newline produces a *multi-line flow
+    /// scalar*, which fails two ways against PyYAML 6.0.3: (1) line folding
+    /// turns every interior newline into a space, and because Scarf re-reads
+    /// the file before the next save, the mangled form is what gets
+    /// persisted — cumulative and invisible; (2) a line that is exactly
+    /// `---` or `...` — ordinary in pasted prose or markdown — terminates
+    /// the document mid-scalar and PyYAML raises on the whole file.
+    ///
+    /// Lossless in both directions: ``unquote(_:)`` reverses it (and so do
+    /// `HermesFileService.unquote` / `HermesBotProfileYAML.unquote`, which are
+    /// one-line forwarders over it), and so does PyYAML.
     public static func doubleQuoted(_ raw: String) -> String {
-        let escaped = raw
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return "\"\(escaped)\""
+        var out = "\""
+        for scalar in raw.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            // `\t`, which is also how PyYAML's own writer spells a tab in a
+            // double-quoted scalar (`yaml.safe_dump("a\tb")` → `"a\\tb"`,
+            // probed against PyYAML 6).
+            case "\t": out += "\\t"
+            default:
+                // A raw control character makes PyYAML's reader refuse the
+                // whole document, so it is escaped here rather than passed
+                // through. A TAB has a dedicated YAML escape and takes it
+                // (the `< 0x20` arm below would otherwise spell it `\x09`,
+                // which is legal but reads as a mystery byte in a
+                // hand-inspected config.yaml); every other C0/C1 control
+                // has no mnemonic and goes out as `\xNN` / `\uNNNN`.
+                if scalar.value < 0x20 || scalar.value == 0x7F {
+                    out += String(format: "\\x%02x", scalar.value)
+                } else if (scalar.value >= 0x80 && scalar.value <= 0x9F)
+                    || scalar.value == 0x2028 || scalar.value == 0x2029 {
+                    out += String(format: "\\u%04x", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out + "\""
+    }
+
+    // MARK: - The one decoder
+
+    /// The inverse of ``quoteIfNeeded(_:)`` / ``singleQuoted(_:)`` /
+    /// ``doubleQuoted(_:)`` — decode one flow scalar the way PyYAML does.
+    ///
+    /// **Why it lives here.** P19's rule is that a quote-escaping writer
+    /// needs its reader un-escaping in the same place, and P32 proved the
+    /// cost of forgetting: `ProfileRoutesWriter` moved onto
+    /// ``quoteIfNeeded(_:)`` (which escapes `\\`, `\n`, `\xNN`) while its
+    /// reader still went through `HermesYAML.stripYAMLQuotes`, which hands a
+    /// double-quoted BODY back verbatim — so a route name containing a
+    /// backslash came back doubled and grew one `\` per save. This is the
+    /// single decoder every Scarf-written scalar is read back through;
+    /// `HermesFileService.unquote` and `HermesBotProfileYAML.unquote` are
+    /// thin forwarders over it, so there is one escape table, not three.
+    ///
+    /// `HermesYAML.stripYAMLQuotes` is deliberately NOT folded in: it reads
+    /// arbitrary HERMES-written config.yaml values, where widening the rule
+    /// would change the meaning of every unrelated `\` in the file. This
+    /// decoder is for the blocks Scarf both reads AND writes.
+    ///
+    /// Anything that is not a quoted flow scalar comes back unchanged. An
+    /// escape Scarf never emits — and a malformed `\xNN` / `\uNNNN`, whose
+    /// body must be hex DIGITS (`UInt32("+9", radix: 16)` is 9, so a signed
+    /// body would otherwise decode to a tab) — is passed through verbatim
+    /// rather than half-decoded.
+    public static func unquote(_ raw: String) -> String {
+        guard raw.count >= 2 else { return raw }
+        if raw.first == "'" && raw.last == "'" {
+            // Single-quoted YAML has exactly one escape: `''` is a quote.
+            return String(raw.dropFirst().dropLast())
+                .replacingOccurrences(of: "''", with: "'")
+        }
+        guard raw.first == "\"" && raw.last == "\"" else { return raw }
+        let body = Array(raw.dropFirst().dropLast())
+        var out = ""
+        var i = 0
+        /// `count` hex digits at `i`, or `nil` (leaving `i` put) when the
+        /// run is short, not all hex digits, or not a Unicode scalar.
+        func hex(_ count: Int) -> String? {
+            guard i + count <= body.count else { return nil }
+            let digits = String(body[i..<(i + count)])
+            guard digits.allSatisfy(\.isHexDigit),
+                  let value = UInt32(digits, radix: 16),
+                  let scalar = Unicode.Scalar(value) else { return nil }
+            i += count
+            return String(Character(scalar))
+        }
+        while i < body.count {
+            let c = body[i]
+            i += 1
+            guard c == "\\" else { out.append(c); continue }
+            // A trailing lone backslash is emitted as itself.
+            guard i < body.count else { out.append("\\"); break }
+            let esc = body[i]
+            i += 1
+            switch esc {
+            case "n": out.append("\n")
+            case "r": out.append("\r")
+            case "t": out.append("\t")
+            case "0": out.append("\0")
+            case "a": out.append("\u{07}")
+            case "b": out.append("\u{08}")
+            case "f": out.append("\u{0C}")
+            case "v": out.append("\u{0B}")
+            case "e": out.append("\u{1B}")
+            case "\\": out.append("\\")
+            case "\"": out.append("\"")
+            case "/": out.append("/")
+            // The rest of PyYAML's `ESCAPE_REPLACEMENTS`. Hermes's own writer
+            // does NOT produce these — `atomic_yaml_write` passes
+            // `allow_unicode=True` (`utils.py:271` @ `v2026.9.7`), which sends
+            // U+0085 / U+00A0 / U+2028 / U+2029 out RAW inside single quotes
+            // (probed against PyYAML 6, not reasoned about) — and neither does
+            // `doubleQuoted`, which spells them `\uNNNN`. They are here
+            // because PyYAML's READER accepts them, so a hand-edited
+            // config.yaml can carry them and this claims to decode "the way
+            // PyYAML does".
+            case "N": out.append("\u{85}")
+            case "_": out.append("\u{A0}")
+            case "L": out.append("\u{2028}")
+            case "P": out.append("\u{2029}")
+            case "x": out.append(hex(2) ?? "\\x")
+            case "u": out.append(hex(4) ?? "\\u")
+            case "U": out.append(hex(8) ?? "\\U")
+            default:
+                // Not one of ours: keep the bytes as written. PyYAML would
+                // RAISE here, so a Hermes-written file cannot reach it.
+                out.append("\\")
+                out.append(esc)
+            }
+        }
+        return out
     }
 
     // MARK: - Implicit resolvers

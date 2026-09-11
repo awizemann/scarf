@@ -653,7 +653,7 @@ final class SessionsViewModel {
     /// `--session-id` nor a filter, `_export_trace` takes its "the last thing
     /// I did" branch and resolves ONE session via
     /// `list_sessions_rich(limit=1, order_by_last_active=True)`
-    /// (`hermes_cli/sessions_cmd.py:383-388` at v2026.9.7), so the export
+    /// (`hermes_cli/sessions_cmd.py:385-389` at v2026.9.7), so the export
     /// Scarf captured held a single session while the banner claimed the
     /// whole board. The CLI's own multi-session trace path writes a
     /// DIRECTORY of `<id>.trace.jsonl` files (`:425-436`, the `else` branch
@@ -1045,10 +1045,4 @@ final class SessionsViewModel {
     /// stat-less `computeStats()` path.
     @ObservationIgnored private var lastKnownDBSize: String?
 
-    // MARK: - Hermes CLI
-
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
-    }
 }

@@ -87,7 +87,7 @@ struct PreReleaseFixupTests {
         #expect(conversation.chat.richChatViewModel.capabilitiesGate.versionLine.isEmpty)
 
         // A store whose probe is stubbed, so this needs no `hermes` binary.
-        let defaults = try! #require(UserDefaults(suiteName: "scarf.tests.\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "scarf.tests.\(UUID().uuidString)"))
         let cache = HermesVersionCache(defaults: defaults, probe: { _ in
             HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
         })

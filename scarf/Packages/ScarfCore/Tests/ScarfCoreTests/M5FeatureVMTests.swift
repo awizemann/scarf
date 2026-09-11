@@ -742,6 +742,15 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, home) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            // P38: the past-deadline / terminal refusals are now DOORS in the
+            // shared `CronRecoveryOffer`, each behind its Hermes floor —
+            // `resume_job`'s past-one-shot raise is v0.18.1+
+            // (`cron/jobs.py:1991-1996`, absent at v2026.7.1) and the
+            // terminal-activation refusal is v0.20.6+. These fixtures predate
+            // the flags; a defaulted VM correctly refuses nothing and lets the
+            // CLI decide (charter C1).
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             await vm.upsert(HermesCronJob(
                 id: "j1", name: "One shot", prompt: "p",
                 schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00Z"),
@@ -769,6 +778,8 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             await vm.upsert(HermesCronJob(
                 id: "j1", name: "Done", prompt: "p",
                 schedule: CronSchedule(kind: "once", runAt: "2030-01-01T09:00:00Z"),
@@ -777,7 +788,11 @@ import Foundation
             ))
             #expect(await vm.toggleEnabled(id: "j1") == false)
             #expect(vm.lastToggleRoute == .refused)
-            #expect(vm.lastError?.contains("already finished") == true)
+            // P38: a terminal ONE-SHOT is re-armable, so iOS now says what
+            // the Mac says — `rearm_oneshot` accepts it — instead of the old
+            // "duplicate it" dead end that `oneShotIsUnresumable` produced by
+            // running ahead of the shared offer.
+            #expect(vm.lastError?.contains("Resume & Run Now") == true)
         }
     }
 
@@ -787,6 +802,8 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             let now = Date(timeIntervalSince1970: 1_800_000_000)
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime]
@@ -804,6 +821,8 @@ import Foundation
 
             // …and just outside it, the same job is refused.
             let vm2 = IOSCronViewModel(context: ctx)
+            vm2.isV0181OrLater = true
+            vm2.isV0206OrLater = true
             await vm2.load()
             #expect(await vm2.setEnabled(
                 id: "j1", enabled: false, now: now
@@ -891,6 +910,100 @@ import Foundation
             #expect(vm.isLoading == false)
             #expect(vm.lastError != nil)
             #expect(vm.config.model == "unknown")
+        }
+    }
+
+    // MARK: - P38: iOS's resume gate is the shared offer, nothing ahead of it
+
+    /// The P38 HIGH on this surface: `setEnabled` used to consult
+    /// `oneShotIsUnresumable` BEFORE the offer, and that predicate is true
+    /// for every terminal one-shot — so the offer's `canRearm` branch was
+    /// dead code and iOS said "duplicate it" where the Mac said
+    /// "Resume & Run Now" for the same job on the same host.
+    @Test @MainActor func p38TerminalOneShotGetsTheRearmWordingOnIOS() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV021OrLater = true
+            vm.isV0181OrLater = true
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Once", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00+00:00"),
+                enabled: false, state: "completed"
+            ))
+
+            #expect(await vm.setEnabled(id: "j1", enabled: true) == false)
+            #expect(vm.lastToggleRoute == .refused)
+            let message = try #require(vm.lastError)
+            #expect(message.contains("Resume & Run Now"), Comment(rawValue: message))
+            #expect(!message.contains("Duplicate it"), Comment(rawValue: message))
+        }
+    }
+
+    /// The other half of the same door: a one-shot that is merely PAST its
+    /// deadline (not terminal) is re-armable too, so iOS must point at
+    /// `--run-now` rather than telling the user to duplicate it.
+    @Test @MainActor func p38PastDeadlineOneShotPointsAtRearmOnIOS() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV0181OrLater = true
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Once", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00+00:00"),
+                enabled: false, state: "paused"
+            ))
+
+            #expect(await vm.setEnabled(id: "j1", enabled: true) == false)
+            #expect(vm.lastToggleRoute == .refused)
+            let message = try #require(vm.lastError)
+            #expect(message.contains("is in the past"), Comment(rawValue: message))
+            #expect(message.contains("Resume & Run Now"), Comment(rawValue: message))
+        }
+    }
+
+    /// C1: below v0.18.1 `resume_job` carries no past-one-shot raise, so the
+    /// same job must round-trip instead of being pre-refused.
+    @Test @MainActor func p38PastDeadlineOneShotIsNotPreRefusedBelowTheFloor() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV0181OrLater = false
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Once", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00+00:00"),
+                enabled: false, state: "paused"
+            ))
+
+            #expect(await vm.setEnabled(id: "j1", enabled: true))
+            #expect(vm.lastToggleRoute == .jsonFallback)
+            #expect(vm.lastError == nil)
+        }
+    }
+
+    /// `refusesResume`, not `!canResume`: an already-enabled healthy job gets
+    /// `CronRecoveryOffer.none`, which has no resume door either — reading
+    /// that as a refusal would break `setEnabled`'s documented idempotence.
+    @Test @MainActor func p38EnablingAnAlreadyEnabledJobStillRoundTrips() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV021OrLater = true
+            vm.isV0181OrLater = true
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Recurring", prompt: "p",
+                schedule: CronSchedule(kind: "cron", expression: "0 9 * * *"),
+                enabled: true, state: "scheduled",
+                nextRunAt: "2030-01-01T09:00:00Z"
+            ))
+
+            #expect(await vm.setEnabled(id: "j1", enabled: true))
+            #expect(vm.lastToggleRoute == .jsonFallback)
+            #expect(vm.lastError == nil)
         }
     }
 }

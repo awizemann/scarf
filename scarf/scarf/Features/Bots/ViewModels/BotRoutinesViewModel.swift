@@ -54,6 +54,18 @@ final class BotRoutinesViewModel {
         set { cron.isV0206OrLater = newValue }
     }
 
+    /// Mirror of `hasCronRecoverableErrorResume` (v0.21.0), same shape.
+    var isV021OrLater: Bool {
+        get { cron.isV021OrLater }
+        set { cron.isV021OrLater = newValue }
+    }
+
+    /// Mirror of `hasCronPastOneShotResumeRefusal` (v0.18.1), same shape.
+    var isV0181OrLater: Bool {
+        get { cron.isV0181OrLater }
+        set { cron.isV0181OrLater = newValue }
+    }
+
     /// This bot's routines, filtered from the FULL job list by the verified
     /// `[bot:<name>] ` prefix — never a separate fetch, so a job Hermes
     /// Desktop would show under this bot is exactly the set Scarf shows.
@@ -90,9 +102,16 @@ final class BotRoutinesViewModel {
         }
     }
 
-    /// Same local pre-check `CronView` uses to decide whether to show
-    /// Resume vs. Resume & Run Now — delegated straight to `CronViewModel`
-    /// so this pane never drifts from the terminal-state rule it encodes.
+    /// Same offer `CronView` renders — delegated straight to
+    /// `CronViewModel` so this pane never drifts from the two Hermes
+    /// predicates it encodes.
+    func recoveryOffer(for job: HermesCronJob) -> CronRecoveryOffer {
+        cron.recoveryOffer(for: job)
+    }
+
+    /// The `trigger_job` gate, which is the BARE `is_terminal_job` test
+    /// (`cron/jobs.py:2012` @ `v2026.9.7`) — deliberately not the resume
+    /// gate: a recurring job in `error` is resumable and not runnable.
     func refusesTerminalJobLocally(_ job: HermesCronJob) -> Bool {
         cron.refusesTerminalJobLocally(job)
     }

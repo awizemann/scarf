@@ -382,7 +382,6 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// Mirrors `_recoverable_oneshot_run_at` (`cron/jobs.py::_recoverable_oneshot_run_at`, v2026.9.7 :841-853), which
     /// is what `compute_next_run` delegates to for `kind == "once"`.
     public nonisolated func oneShotIsUnresumable(now: Date = Date()) -> Bool {
-        guard schedule.kind == "once" else { return false }
         // NOT "`last_run_at` is set". `_recoverable_oneshot_run_at` does have
         // an "already run, never eligible again" arm (`cron/jobs.py:841-853`,
         // v2026.9.7), but `resume_job` reaches it through
@@ -398,7 +397,28 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         // (:1865-1878, called from :1941/:1965), which is also the state a
         // genuinely spent one-shot ends in — `_advance_after_run` calls
         // `_complete_job_record` for every `kind == "once"` with no next run.
-        if isTerminal { return true }
+        //
+        // The two halves are separate predicates because
+        // `recoveryOffer` needs them separately: a TERMINAL one-shot has the
+        // `_reject_terminal_activation` door shut, a merely past-deadline one
+        // has the `resume_job` door shut, and `rearm_oneshot` opens the second
+        // but not the first kind of Resume.
+        guard schedule.kind == "once" else { return false }
+        return isTerminal || isPastDeadlineOneShot(now: now)
+    }
+
+    /// The non-terminal half of `oneShotIsUnresumable`: a `once` job whose
+    /// `run_at` is already past Hermes's grace window, so `resume_job` raises
+    /// `"Cannot resume: one-shot time … is in the past"` BEFORE `update_job`
+    /// (`cron/jobs.py:1991-1996` @ `v2026.9.7`).
+    ///
+    /// Floor-walked: that `ValueError` first appears at **`v2026.7.7`**
+    /// (0.18.1) and is absent from every earlier tag through `v2026.7.1`
+    /// (`grep "Cannot resume: one-shot time"` across all 32 `v2026.*` tags).
+    /// Pre-refusing on an older host would refuse what the host accepts, so
+    /// the offer gates this door on `hasCronPastOneShotResumeRefusal`.
+    public nonisolated func isPastDeadlineOneShot(now: Date = Date()) -> Bool {
+        guard schedule.kind == "once" else { return false }
         guard let runAt = schedule.runAt, !runAt.isEmpty else { return true }
         // An offset-bearing `run_at` names one instant — compare directly.
         if let exact = CronScheduleFormatter.isoDate(runAt) {
@@ -485,11 +505,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     public nonisolated var effectiveState: String {
         let stored = state.trimmingCharacters(in: .whitespaces)
         if stored == "completed" || stored == "error" { return stored }
-        let hasPauseMarker: Bool = {
-            guard let marker = extra["paused_at"] else { return false }
-            if case .null = marker { return false }
-            return true
-        }()
+        let hasPauseMarker = Self.isTruthyPauseMarker(extra["paused_at"])
         if !enabled {
             if hasPauseMarker || stored == "paused" { return "paused" }
             return stored.isEmpty ? "paused" : stored
@@ -512,6 +528,127 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     public nonisolated var isTerminal: Bool {
         let s = effectiveState
         return s == "completed" || s == "error"
+    }
+
+    /// Hermes's `_has_pause_marker` is
+    /// `_coerce_job_text(job.get("state")).strip() == "paused" or
+    /// bool(job.get("paused_at"))` (`cron/jobs.py:477-479` @ `v2026.9.7`).
+    /// This helper ports the SECOND arm only — Python truthiness over
+    /// `paused_at` — because `effectiveState` already carries the `paused`
+    /// arm, so the two together reproduce the whole predicate. So `""`, `0`,
+    /// `false`, `[]` and `{}` are NOT markers, only
+    /// `null` used to be read that way by Scarf. A record carrying
+    /// `paused_at: ""` therefore renders "paused" in Scarf while the host
+    /// keeps firing it, which is exactly the divergence `effective_job_state`
+    /// exists to prevent.
+    static nonisolated func isTruthyPauseMarker(_ value: JSONValue?) -> Bool {
+        switch value {
+        case nil, .null:            return false
+        case .bool(let b):          return b
+        case .int(let i):           return i != 0
+        case .double(let d):        return d != 0
+        case .string(let s):        return !s.isEmpty
+        case .array(let a):         return !a.isEmpty
+        case .object(let o):        return !o.isEmpty
+        }
+    }
+
+    /// Hermes's `_is_recoverable_error_job` (`cron/jobs.py:509-522` @
+    /// `v2026.9.7`): `state == "error"` AND `schedule.kind` in
+    /// `{"cron", "interval"}`.
+    ///
+    /// `state = "error"` is set ONLY when `compute_next_run()` fails for a
+    /// recurring job (croniter missing, malformed schedule), so such a job
+    /// still has future occurrences once the cause is fixed — treating it as
+    /// terminal "would wedge it forever". `_reject_terminal_activation`
+    /// exempts it (`:1865-1878`), so plain `hermes cron resume` recovers it.
+    ///
+    /// **Floor v0.21.0.** The symbol first exists at `v2026.8.31`
+    /// (`pyproject.toml version = "0.21.0"`); at `v2026.8.27` (0.20.6) — the
+    /// last tag without it — `update_job`'s terminal block is unconditional,
+    /// so resume is refused there. Callers gate on
+    /// `HermesCapabilities.hasCronRecoverableErrorResume`.
+    ///
+    /// Read off `effectiveState` for consistency with `isTerminal`, which the
+    /// two predicates are always evaluated together with; `effectiveState`
+    /// preserves `error` verbatim (`effective_job_state` returns a terminal
+    /// stored state unchanged, `:490-491`).
+    public nonisolated var isRecoverableErrorJob: Bool {
+        effectiveState == "error" && (schedule.kind == "cron" || schedule.kind == "interval")
+    }
+
+    /// Whether `hermes cron resume <id> --run-now` / `--at` can succeed at
+    /// all: `rearm_oneshot` re-checks the JOB's own schedule inside `apply`
+    /// and raises `_REARM_RECURRING_ERROR` — "Cannot re-arm recurring jobs:
+    /// re-arm is one-shot-only; use plain resume or cron run." — for
+    /// anything but `once` (`cron/jobs.py:2040-2042`, `:2065-2066` @
+    /// `v2026.9.7`); `cron_resume` prints it and returns 1
+    /// (`hermes_cli/cron.py:691-695`).
+    ///
+    /// **No flag needed.** The guard is present verbatim inside
+    /// `rearm_oneshot` at the function's FIRST tag, `v2026.8.27` (0.20.6,
+    /// `cron/jobs.py:2467-2471` on the parsed schedule, `:2490-2494` on the
+    /// job's own schedule inside `apply`) and at `v2026.8.31` — i.e. re-arm
+    /// has never accepted a recurring job on any host that has re-arm at
+    /// all, and that is exactly `hasCronResumeRunNow`'s floor.
+    public nonisolated var isRearmableOneShot: Bool { schedule.kind == "once" }
+
+    /// What Scarf may offer this job, given the host's floors. The single
+    /// source of truth both platforms' view models delegate to, so the Mac
+    /// detail pane, the Bots routines list and the iOS toggle cannot drift
+    /// apart again.
+    ///
+    /// - Parameters:
+    ///   - hostRefusesTerminalJobs: `HermesCapabilities.hasCronResumeRunNow`
+    ///     (`isV0206OrLater`). Below it neither `update_job` nor
+    ///     `trigger_job` refuses a terminal job and `--run-now` does not
+    ///     exist, so Scarf pre-refuses nothing and offers no re-arm — the
+    ///     rule `refusesTerminalJobLocally` already documented.
+    ///   - hostRecoversErrorRecurring:
+    ///     `HermesCapabilities.hasCronRecoverableErrorResume`
+    ///     (`isV021OrLater`) — the `_is_recoverable_error_job` exemption.
+    ///   - hostRefusesPastOneShotResume:
+    ///     `HermesCapabilities.hasCronPastOneShotResumeRefusal`
+    ///     (`isV0181OrLater`) — `resume_job`'s
+    ///     `"Cannot resume: one-shot time … is in the past"` guard.
+    public nonisolated func recoveryOffer(
+        hostRefusesTerminalJobs: Bool,
+        hostRecoversErrorRecurring: Bool,
+        hostRefusesPastOneShotResume: Bool,
+        now: Date = Date()
+    ) -> CronRecoveryOffer {
+        guard isTerminal else {
+            // A running job is offered Pause, not recovery.
+            guard !enabled else { return .none }
+            // Third door: a paused one-shot whose deadline has passed. Plain
+            // Resume raises inside `resume_job` before `update_job` is
+            // reached, so only `--run-now` re-arms it. iOS pre-refused this
+            // and the Mac did not — that divergence is what this arm removes.
+            if hostRefusesPastOneShotResume, isPastDeadlineOneShot(now: now) {
+                return hostRefusesTerminalJobs
+                    ? CronRecoveryOffer(canRearm: true)
+                    : CronRecoveryOffer(hint: CronRecoveryOffer.pastDeadlineOneShotHint)
+            }
+            return CronRecoveryOffer(
+                canResume: true,
+                canRearm: hostRefusesTerminalJobs && isRearmableOneShot
+            )
+        }
+        // Pre-v0.20.6: the host accepts what Scarf would refuse. Let the CLI
+        // decide and show no re-arm button (it does not exist there).
+        guard hostRefusesTerminalJobs else { return CronRecoveryOffer(canResume: true) }
+
+        if isRecoverableErrorJob {
+            return hostRecoversErrorRecurring
+                ? CronRecoveryOffer(canResume: true)
+                : CronRecoveryOffer(hint: CronRecoveryOffer.errorNeedsNewerHermesHint)
+        }
+        // Genuinely terminal. Re-arm is the documented escape hatch, and it
+        // is one-shot-only.
+        return isRearmableOneShot
+            ? CronRecoveryOffer(canRearm: true)
+            : CronRecoveryOffer(
+                hint: CronRecoveryOffer.noFutureOccurrencesHint(repeatTimes: repeatSpec.times))
     }
 
     // MARK: - repeat (unmodeled; lives in `extra`)

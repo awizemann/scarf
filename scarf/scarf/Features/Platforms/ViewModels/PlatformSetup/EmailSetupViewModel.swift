@@ -13,6 +13,10 @@ final class EmailSetupViewModel: PlatformSetupForm {
     /// Load/save in-flight flags owned by ``PlatformSetupForm``.
     var isLoading = false
     var isSaving = false
+    /// Latched load refusal owned by ``PlatformSetupForm`` — set when a
+    /// `.env` / config.yaml read could not be proved, and what makes
+    /// `commitSave` refuse rather than publish blanks (P33).
+    var loadRefusal: String?
     init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.cliRunner = cliRunner
         self.context = context
@@ -68,13 +72,14 @@ final class EmailSetupViewModel: PlatformSetupForm {
             homeAddress = env["EMAIL_HOME_ADDRESS"] ?? ""
             allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["EMAIL_ALLOW_ALL_USERS"])
             // skip_attachments lives in config.yaml, under the platform's
-            // `extra:` sub-map. Verified against Hermes v2026.8.31:
-            // `plugins/platforms/email/adapter.py:565` does
-            // `self._skip_attachments = extra.get("skip_attachments", False)`,
-            // and `extra` is populated ONLY from the `extra:` sub-key
-            // (`gateway/config.py::PlatformConfig.from_dict`) plus the
-            // hardcoded shared-key bridge list in `load_gateway_config`
-            // (config.py ~1700-1766) — which does NOT include
+            // `extra:` sub-map. Verified against Hermes **v2026.9.7**:
+            // `plugins/platforms/email/adapter.py:354` does
+            // `self._skip_attachments = extra.get("skip_attachments", False)`
+            // (and carries `# platforms.email.skip_attachments` as its own
+            // comment), and `extra` is populated ONLY from the `extra:`
+            // sub-key (`gateway/config.py:415::PlatformConfig.from_dict`)
+            // plus the shared-key bridge `_SHARED_KEYS`
+            // (`gateway/config_loader.py:197-213`) — which does NOT include
             // skip_attachments. The old TOP-LEVEL
             // `platforms.email.skip_attachments` Scarf used to write was
             // therefore never read by Hermes; Scarf's own reader read the
@@ -86,7 +91,13 @@ final class EmailSetupViewModel: PlatformSetupForm {
             // `extra.` path. The stale top-level key is left in place —
             // Hermes ignores unknown platform keys, and a second
             // `config unset` round-trip on every save isn't worth it.
-            let parsed = HermesFileService.parseNestedYAML(snapshot.rawConfigText ?? "")
+            // `nil` means the config.yaml read was REFUSED (P33), not that
+            // the file is empty — leave the toggle showing whatever it had
+            // rather than flipping it to the default over a live `true`.
+            // `loadSnapshot` has already put the refusal on the bar and
+            // latched the save.
+            guard let rawConfigText = snapshot.rawConfigText else { return }
+            let parsed = HermesFileService.parseNestedYAML(rawConfigText)
             let raw = parsed.values["platforms.email.extra.skip_attachments"]
                 ?? parsed.values["platforms.email.skip_attachments"]
                 ?? "false"

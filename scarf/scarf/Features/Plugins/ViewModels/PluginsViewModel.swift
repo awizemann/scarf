@@ -333,7 +333,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// success line and no refusal and is judged exactly as before (C1).
     func update(_ plugin: HermesPlugin) {
         runAndReload(
-            ["plugins", "update", plugin.name],
+            ["plugins", "update", "--", plugin.name],
             success: "Updated",
             successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
             failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
@@ -342,7 +342,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
     }
 
     func remove(_ plugin: HermesPlugin) {
-        runAndReload(["plugins", "remove", plugin.name], success: "Removed")
+        runAndReload(["plugins", "remove", "--", plugin.name], success: "Removed")
     }
 
     /// Enables a plugin, answering the built-in-tool-override consent
@@ -362,10 +362,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// `allowToolOverride` must come from an explicit in-app confirmation
     /// (`PluginsView`'s tool-override dialog). It is never inferred.
     func enable(_ plugin: HermesPlugin, allowToolOverride: Bool? = nil) {
-        var args = ["plugins", "enable", plugin.name]
+        // Flags first, then `--`, then the positional: argparse reads
+        // everything after the first `--` as a positional, so a flag appended
+        // afterwards would exit 2.
+        var args = ["plugins", "enable"]
         if let allowToolOverride, supportsToolOverrideFlags {
             args.append(allowToolOverride ? "--allow-tool-override" : "--no-allow-tool-override")
         }
+        args += ["--", plugin.name]
         runAndReload(
             args,
             success: "Enabled",
@@ -387,7 +391,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
 
     func disable(_ plugin: HermesPlugin) {
         runAndReload(
-            ["plugins", "disable", plugin.name],
+            ["plugins", "disable", "--", plugin.name],
             success: "Disabled",
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
             failureMarkers: HermesCLIMarkers.pluginsDisableFailure

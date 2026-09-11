@@ -67,7 +67,7 @@ struct HermesCLIOutcomeTests {
 
     // MARK: - skills install — hermes_cli/skills_hub.py
 
-    /// `do_install(...) -> None` (skills_hub.py:645-648) with nine bare
+    /// `do_install(...) -> None` (hermes_cli/skills_hub.py:645-648) with nine bare
     /// `return`s. Verbatim refusals, each at exit 0:
     ///  - `_pinned_sources` → `_print_error` (:582, :134-135)
     ///  - `_print_fetch_failure` (:592)
@@ -77,22 +77,22 @@ struct HermesCLIOutcomeTests {
     ///  - `_resolve_url_bundle_name` non-interactive URL (:525-532)
     ///  - `_confirm_install` declined (:642)
     @Test(arguments: [
-        // skills_hub.py:582 via _print_error (:134-135)
+        // hermes_cli/skills_hub.py:582 via _print_error (:134-135)
         "Error: no source adapter for 'nous'. Refusing to resolve 'reddit' against other registries (that would change the skill's provenance).\n",
-        // skills_hub.py:592
+        // hermes_cli/skills_hub.py:592
         "\nFetching: community/reddit\nError: Could not fetch 'community/reddit' from any source.\n",
-        // skills_hub.py:683-686
+        // hermes_cli/skills_hub.py:683-686
         "\nFetching: smart-home/openhue\n" +
             "Warning: 'openhue' is already installed at smart-home/openhue\n" +
             "Use --force to reinstall.\n",
-        // skills_hub.py:707 via _install_blocked (:498)
+        // hermes_cli/skills_hub.py:707 via _install_blocked (:498)
         "Running security scan...\nInstallation blocked: dangerous verdict: 3 finding(s)\n",
-        // skills_hub.py:506 via _invalid_path → _install_blocked (:498)
+        // hermes_cli/skills_hub.py:506 via _invalid_path → _install_blocked (:498)
         "Installation blocked: bundle path escapes the quarantine root\n",
-        // skills_hub.py:525-532
+        // hermes_cli/skills_hub.py:525-532
         "Cannot install from URL: https://example.com/SKILL.md\n" +
             "The SKILL.md has no `name:` in its frontmatter, and the URL path doesn't produce a valid identifier.\n",
-        // skills_hub.py:642 via _confirm_or_cancel
+        // hermes_cli/skills_hub.py:642 via _confirm_or_cancel
         "Installation cancelled.\n",
     ])
     func skillsInstallRefusalsAtExitZeroAreFailures(fixture: String) {
@@ -103,7 +103,7 @@ struct HermesCLIOutcomeTests {
     }
 
     /// The only success line: `c.print(f"[bold green]Installed:[/] {…}")`
-    /// (skills_hub.py:720). `[/]`-style rich markup is rendered away before it
+    /// (hermes_cli/skills_hub.py:720). `[/]`-style rich markup is rendered away before it
     /// reaches a pipe, so the plain form is what Scarf sees.
     @Test func skillsInstallSuccessLineIsTheSuccessLine() {
         let fixture = """
@@ -116,7 +116,7 @@ struct HermesCLIOutcomeTests {
         #expect(SkillsViewModel.installOutcome(exitCode: 0, output: fixture).succeeded)
     }
 
-    /// `do_uninstall` (skills_hub.py:909-918) is `-> None` too; `_report_pair`
+    /// `do_uninstall` (hermes_cli/skills_hub.py:909-918) is `-> None` too; `_report_pair`
     /// (:144-150) prints `uninstall_skill`'s refusal
     /// (tools/skills_hub_install.py:209) through `_print_error`, at exit 0.
     @Test func skillsUninstallRefusalAtExitZeroIsAFailure() {
@@ -127,7 +127,7 @@ struct HermesCLIOutcomeTests {
         #expect(SkillsViewModel.uninstallOutcome(exitCode: 0, output: removed).succeeded)
     }
 
-    /// A declined confirmation (`_confirm_or_cancel` at skills_hub.py:915)
+    /// A declined confirmation (`_confirm_or_cancel` at hermes_cli/skills_hub.py:915)
     /// prints NOTHING and returns — the "no success marker" rule is the only
     /// thing that catches it.
     @Test func skillsUninstallSilentDeclineIsAFailure() {

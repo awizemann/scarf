@@ -25,7 +25,7 @@ struct RichChatInputBar: View {
     /// session-required grey-out set in the slash menu (P2 of the
     /// projects-feature fix). Distinct from `isEnabled` — the input
     /// is enabled the moment hermes is installed, but agent-side
-    /// commands (`/clear`, `/compact`, `/cost`, etc.) only do anything
+    /// commands (`/reset`, `/compress`, `/context`, etc.) only do anything
     /// after `session/new` returns. Source: `richChat.sessionId != nil`.
     var hasActiveSession: Bool = false
     /// The session's per-session model override, if any — same source

@@ -14,6 +14,15 @@ struct HermesFileService: Sendable {
         self.transport = context.makeTransport()
     }
 
+    /// Test seam: run against a supplied transport instead of the context's
+    /// own. Used to COUNT round trips — the per-server `fileExists` probing in
+    /// `loadMCPServers` was only visible as a cost once something could count
+    /// it (P35).
+    nonisolated init(context: ServerContext, transport: any ServerTransport) {
+        self.context = context
+        self.transport = transport
+    }
+
     // MARK: - Config
 
     nonisolated func loadConfig() -> HermesConfig {
@@ -49,6 +58,78 @@ struct HermesFileService: Sendable {
     /// instead of silently falling back to `.empty`.
     nonisolated func loadConfigResult() -> Result<HermesConfig, Error> {
         readFileResult(context.paths.configYAML).map { HermesConfig(yaml: $0) }
+    }
+
+    /// What a PROVEN config.yaml read found: the parsed config and its raw
+    /// text.
+    ///
+    /// There is deliberately no `exists` here. `loadConfigProven` carried one
+    /// and nothing ever read it — and there is no caller that could: absence
+    /// is already folded into `config` (`.empty`) and `rawText` (`""`), and
+    /// the only thing `exists` could gate is the "Reload before saving"
+    /// refusal, which by construction never sees an absent file (an ABSENT
+    /// config.yaml is not a refusal — a fresh host genuinely has nothing set
+    /// and Save must work, or first-run setup is impossible). A decoded-but-
+    /// dead field is the class P18 deleted rather than kept "for later".
+    struct ProvenConfig: Sendable {
+        let config: HermesConfig
+        let rawText: String
+    }
+
+    /// ``loadConfig()`` with the two failures kept apart, the same way
+    /// `HermesEnvService.loadProven()` splits `.env`'s (GW-F6 / DI L10,
+    /// round-3 P33).
+    ///
+    /// **Why `loadConfigResult()` is not this.** That one maps a plain
+    /// `readFileResult`, so it (a) cannot tell an ABSENT config.yaml from an
+    /// unreadable one — both are `.failure`, and refusing to save on a fresh
+    /// host that simply has no config.yaml yet would break every first-run
+    /// setup — and (b) judges on ONE read, so a single dropped SSH round-trip
+    /// reads as damage. `GuardedTextFile.load` is the primitive that already
+    /// settles both: absence is proved by a failed read AND a failed `stat`,
+    /// and a present-but-unreadable file is only declared after a RETRY.
+    ///
+    /// **Why the distinction is load-bearing.** `loadConfig()`'s `.empty`
+    /// fallback feeds the platform setup forms. A blipped read made
+    /// `whatsapp_cloud` render blank fields over live values, and its Save
+    /// writes the whole block explicitly — so pressing Save on a form the
+    /// user never edited would `hermes config set … ""` over the access
+    /// token, app secret and verify token, and set `enabled: false`.
+    /// Surfacing at LOAD, and refusing the save, is what closes it.
+    /// Why a config.yaml could not be read. Mirrors
+    /// `HermesEnvService.LoadRefusal` — the two files' refusals reach the
+    /// same save bar, so they read as one sentence family.
+    ///
+    /// `GuardedTextFile.Refusal`'s own prose is written for a WRITE ("refusing
+    /// to overwrite it"), which is the wrong tense on a form that has not
+    /// written anything yet and needs to be told what to do next.
+    enum LoadRefusal: LocalizedError, Equatable {
+        case unreadable(path: String)
+
+        var errorDescription: String? {
+            switch self {
+            case let .unreadable(path):
+                return "Couldn't read \(path). It's there, but two reads of it failed — the fields below may be blank even though values are set. Fix the connection or the file's permissions and Reload before saving, or a save will write those blanks over live values."
+            }
+        }
+    }
+
+    nonisolated func loadConfigProven() throws -> ProvenConfig {
+        // Read-only, so the UNSERIALIZED initializer is correct: reads need
+        // no serialization against each other, only against a writer, and a
+        // reader that loses that race read bytes that were true a moment ago
+        // (see `GuardedTextFile.lockContext`).
+        let path = context.paths.configYAML
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try GuardedTextFile(transport: transport, label: "config.yaml").load(path)
+        } catch {
+            throw LoadRefusal.unreadable(path: path)
+        }
+        return ProvenConfig(
+            config: loaded.exists ? HermesConfig(yaml: loaded.text) : .empty,
+            rawText: loaded.text
+        )
     }
 
     /// Parsed YAML result bundle. Type alias into ScarfCore's canonical
@@ -314,13 +395,18 @@ struct HermesFileService: Sendable {
     nonisolated func loadMCPServers() -> [HermesMCPServer] {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
+        // ONE listing of `mcp-tokens/` for the whole roster. The per-server
+        // probe this replaces asked `fileExists` once per candidate spelling
+        // — up to 2N serialized SSH round trips inside a single load. An
+        // unreadable or absent directory is an empty set, which is exactly
+        // "no server has a token" and the same answer the per-path probe gave.
+        let tokenEntries = Set((try? transport.listDirectory(context.paths.mcpTokensDir)) ?? [])
         return parsed.map { server in
             // NOT `<name>.json`: Hermes files OAuth state under
             // `_safe_filename(name)`, so `github.com` is `github_com.json`.
             // See `HermesMCPOAuthPaths` for the port and the tag walk.
             let hasToken = HermesMCPOAuthPaths
-                .tokenPaths(serverName: server.name, tokensDir: context.paths.mcpTokensDir)
-                .contains { transport.fileExists($0) }
+                .hasToken(serverName: server.name, tokenDirEntries: tokenEntries)
             guard hasToken != server.hasOAuthToken else { return server }
             return HermesMCPServer(
                 name: server.name,
@@ -339,7 +425,6 @@ struct HermesFileService: Sendable {
                 resourcesEnabled: server.resourcesEnabled,
                 promptsEnabled: server.promptsEnabled,
                 hasOAuthToken: hasToken,
-                sseReadTimeout: server.sseReadTimeout,
                 supportsParallelToolCalls: server.supportsParallelToolCalls,
                 clientCert: server.clientCert,
                 clientKey: server.clientKey,
@@ -1159,7 +1244,6 @@ struct HermesFileService: Sendable {
             let enabled = Self.boolish(fields["enabled"], default: true)
             let timeout = fields["timeout"].flatMap(Int.init)
             let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
-            let sseReadTimeout = fields["sse_read_timeout"].flatMap(Int.init)
             // v0.14 — supports_parallel_tool_calls is an optional bool;
             // absent means "use Hermes's default" and stays nil.
             // Absent stays nil ("use Hermes's default"); a present value is
@@ -1250,7 +1334,6 @@ struct HermesFileService: Sendable {
                 resourcesEnabled: resources,
                 promptsEnabled: prompts,
                 hasOAuthToken: false,
-                sseReadTimeout: sseReadTimeout,
                 supportsParallelToolCalls: parallel,
                 clientCert: clientCert,
                 clientKey: clientKey,
@@ -2317,42 +2400,20 @@ struct HermesFileService: Sendable {
         return nil
     }
 
+    /// The reader half of `YAMLScalar`'s writers: PyYAML's whole escape
+    /// table inside double quotes (`\\ \" \/ \n \r \t \0 \a \b \f \v \e
+    /// \N \_ \L \P \xNN \uNNNN \UNNNNNNNN`) and `''` inside single quotes.
+    /// Wider than it was before P37 — the old local copy stopped at
+    /// `\\ \" \n \r \t \xNN \uNNNN` and passed the rest through, which is
+    /// simply a reader that cannot read what PyYAML writes.
+    ///
+    /// P37: this WAS a second copy of that escape table, and it differed
+    /// from the one in `HermesBotProfileYAML` in exactly the way that
+    /// matters — its hex arm called `UInt32(_:radix:)` with no
+    /// `allSatisfy(\.isHexDigit)` guard, so `\x+9` decoded to a TAB. One
+    /// decoder now: ``YAMLScalar/unquote(_:)``.
     nonisolated static func unquote(_ value: String) -> String {
-        let v = value
-        if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {
-            // Double-quoted YAML: `\\`, `\"`, `\n` and `\r` are the escapes
-            // we emit (the last two since P19 gave `yamlScalar` a
-            // line-break guard). Anything else is left as written rather
-            // than half-decoded — we never produce it, and inventing a
-            // partial decoder for `\uXXXX` would be a new way to be wrong.
-            var out = ""
-            var escaped = false
-            for char in v.dropFirst().dropLast() {
-                if escaped {
-                    switch char {
-                    case "\\", "\"": out.append(char)
-                    case "n": out.append("\n")
-                    case "r": out.append("\r")
-                    default:
-                        out.append("\\")
-                        out.append(char)
-                    }
-                    escaped = false
-                } else if char == "\\" {
-                    escaped = true
-                } else {
-                    out.append(char)
-                }
-            }
-            if escaped { out.append("\\") }
-            return out
-        }
-        if v.count >= 2, v.hasPrefix("'"), v.hasSuffix("'") {
-            // Single-quoted YAML has exactly one escape: `''` is a quote.
-            return String(v.dropFirst().dropLast())
-                .replacingOccurrences(of: "''", with: "'")
-        }
-        return v
+        YAMLScalar.unquote(value)
     }
 
     /// Normalizes an `client_cert`-style value that may be either a scalar

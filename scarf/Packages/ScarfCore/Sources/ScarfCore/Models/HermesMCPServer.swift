@@ -60,24 +60,15 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
     public let resourcesEnabled: Bool
     public let promptsEnabled: Bool
     public let hasOAuthToken: Bool
-    /// The `sse_read_timeout` key as written in the user's config.yaml —
-    /// **parsed for round-trip fidelity only. No Hermes in Scarf's supported
-    /// range reads it, and Scarf no longer offers or writes it.**
-    ///
-    /// `_sse_transport` hard-codes `"sse_read_timeout": 300.0`
-    /// (`tools/mcp_tool_transport.py:351-352` at `v2026.9.7`) and Hermes's
-    /// own suite asserts that it stays 300 whatever `timeout` says
-    /// (`tests/tools/test_mcp_sse_transport.py:109,140`). Walked across all
-    /// 32 `v2026.*` tags: the key first appears at `v2026.5.7`
-    /// (`tools/mcp_tool.py:1323`) and is a literal at every one of them —
-    /// there is no `config.get("sse_read_timeout")` anywhere, ever. An
-    /// editor field for it promised a knob that does nothing, and its
-    /// "clear the field" arm DELETED the key from the user's file.
-    ///
-    /// Kept on the model, and kept parsed, precisely so that a value already
-    /// on disk survives untouched: nothing reads this, so nothing rewrites
-    /// the line either.
-    public let sseReadTimeout: Int?
+    // `sseReadTimeout` used to be parsed and threaded through here "for
+    // round-trip fidelity". It never protected anything: both writers are
+    // line-level patchers over the user's own YAML, so an `sse_read_timeout`
+    // line survives whether or not the model carries it — and no Hermes in
+    // Scarf's supported range READS the key (`_sse_transport` hard-codes
+    // `"sse_read_timeout": 300.0`, `tools/mcp_tool_transport.py:351-352` @
+    // v2026.9.7; a literal at all 32 `v2026.*` tags, first appearing at
+    // v2026.5.7 `tools/mcp_tool.py:1323`). P24 removed the editor field; P35
+    // removes the residue.
     /// Hermes v0.14+ — when `true`, the agent batches concurrent tool
     /// calls to this MCP server instead of serializing them. `nil`
     /// means "use Hermes's default" (currently false). The setting
@@ -147,7 +138,6 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         resourcesEnabled: Bool,
         promptsEnabled: Bool,
         hasOAuthToken: Bool,
-        sseReadTimeout: Int? = nil,
         supportsParallelToolCalls: Bool? = nil,
         clientCert: String? = nil,
         clientKey: String? = nil,
@@ -173,7 +163,6 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         self.resourcesEnabled = resourcesEnabled
         self.promptsEnabled = promptsEnabled
         self.hasOAuthToken = hasOAuthToken
-        self.sseReadTimeout = sseReadTimeout
         self.supportsParallelToolCalls = supportsParallelToolCalls
         self.clientCert = clientCert
         self.clientKey = clientKey

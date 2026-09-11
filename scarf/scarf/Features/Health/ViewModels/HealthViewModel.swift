@@ -1187,7 +1187,10 @@ final class HealthViewModel {
     /// filter silently misses every standard install.
     private static let lsofTimeout: TimeInterval = 3
 
-    private static func dashboardListenerPID(port: Int) -> pid_t? {
+    /// `nonisolated`: the only caller is inside `Task.detached` (see
+    /// `stopDashboard`), so this must not be main-actor work — and now that the
+    /// body is four lines there is nothing left to justify an isolation hop.
+    private nonisolated static func dashboardListenerPID(port: Int) -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN"]
@@ -1198,12 +1201,13 @@ final class HealthViewModel {
 
         do {
             try lsof.run()
-            // C10: every subprocess gets a timeout. `waitUntilExit()` alone
-            // waits forever, and lsof CAN hang — a stuck NFS/FUSE mount or an
-            // unresponsive socket makes it block in the kernel. An overrun is
-            // reported as "no listener", the same answer a failed lsof has
-            // always given.
-            guard lsof.waitUntilExit(timeout: lsofTimeout) else {
+            // `Process.waitDraining` WAS hoisted out of this function in P33
+            // and this copy was left behind: bounded wait, concurrent drain,
+            // bounded drain grace — plus the read-end close this version never
+            // did. An overrun is reported as "no listener", the same answer a
+            // failed lsof has always given.
+            let (exited, data) = lsof.waitDraining(timeout: Self.lsofTimeout, pipes: [output])
+            guard exited else {
                 Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
                 return nil
             }
@@ -1211,8 +1215,7 @@ final class HealthViewModel {
             // not an error. Anything else is something we can't recover
             // from in this code path; log and bail.
             guard lsof.terminationStatus == 0 else { return nil }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
+            let text = String(data: data[0], encoding: .utf8) ?? ""
             return text
                 .split(whereSeparator: \.isNewline)
                 .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }

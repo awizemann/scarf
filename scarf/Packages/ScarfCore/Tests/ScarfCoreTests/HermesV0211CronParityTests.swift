@@ -363,11 +363,11 @@ import Foundation
     /// A prompt or schedule beginning with `-` is user text, not a flag.
     /// Without `--` argparse exits 2 on it and the whole fleet apply (or
     /// template install) aborts.
-    @Test func cronCreateArgsEndsOptionsBeforeTheUserPositionals() {
+    @Test func cronCreateArgsEndsOptionsBeforeTheUserPositionals() throws {
         let (args, _) = FleetApplyPlan.cronCreateArgs(
             name: "n", deliver: nil, schedule: "@daily",
             prompt: "--summarize the inbox", caps: v0211)
-        let end = try! #require(args.firstIndex(of: "--"))
+        let end = try #require(args.firstIndex(of: "--"))
         #expect(Array(args[end...]) == ["--", "@daily", "--summarize the inbox"])
         // …and nothing option-shaped follows the marker.
         #expect(args.firstIndex(of: "--name")! < end)

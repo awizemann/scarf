@@ -6,6 +6,7 @@ import ScarfDesign
 struct VoiceTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     /// STT providers, with the "Auto (unset)" row dropped on hosts without
     /// `hermes config unset` (pre-v0.19) — same shape as BrowserTab's
@@ -66,10 +67,13 @@ struct VoiceTab: View {
                 // v0.21 defaults are voice_id/language/speed/auto_speech_tags/
                 // optimize_streaming_latency/sample_rate/bit_rate only
                 // (config_defaults.py), and `_generate_xai_tts`
-                // (tools/tts_tool.py:2100-2170) reads none named "model".
-                // The single reader anywhere is `xai_retirement.py:110`, a
-                // staleness WARNING pass — so writing the key could only
-                // ever produce a spurious retirement notice. Removed with
+                // (`tools/tts_tool_providers.py:287-340` @ `v2026.9.7`,
+                // imported into `tools/tts_tool.py:55`) reads none named
+                // "model". The single reader anywhere is
+                // `hermes_cli/xai_retirement.py:91` via `_check_section`
+                // (`:82-85`), a staleness WARNING pass — so writing the key
+                // could only ever produce a spurious retirement notice.
+                // Removed with
                 // its parse (go/no-go blocking condition 8, A5).
                 // v0.15: auto-insert speech-control tags — hidden on pre-v0.15 hosts.
                 if capabilitiesStore?.capabilities.hasXAITTSAutoSpeechTags == true {
@@ -109,7 +113,7 @@ struct VoiceTab: View {
                 optionLabel: { id in
                     sttProviderOptions.first { $0.id == id }?.label ?? id
                 }
-            ) { viewModel.setSTTProvider($0) }
+            ) { viewModel.setSTTProvider($0, capabilities: capabilities) }
             // v0.19.1: global language hint applied to every provider unless a
             // per-provider language overrides it — hidden below v0.19.1
             // (hasSTTUnifiedLanguage). Default "en"; empty restores auto-detect.

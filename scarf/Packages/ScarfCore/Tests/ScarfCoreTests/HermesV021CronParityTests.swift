@@ -423,6 +423,9 @@ import Foundation
         // Doctor is the one that is genuinely new at v0.21.
         #expect(v0206.hasCronDoctor == false)
         #expect(v021.hasCronDoctor)
+        // P30: `_is_recoverable_error_job` exists at v2026.8.31 only (0.21.0).
+        #expect(v0206.hasCronRecoverableErrorResume == false)
+        #expect(v021.hasCronRecoverableErrorResume)
     }
 
     // MARK: - cron runs format is unchanged at v0.21 (item 8)

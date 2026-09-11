@@ -42,6 +42,20 @@ struct MainActorSpawnDisciplineP22Tests {
 
     private static func scratchContext() -> ServerContext { .local(home: scratchHome()) }
 
+    /// Leading-space count, the proxy for declaration nesting in the
+    /// indent-based walk in the sweep below.
+    private static func indent(of line: String) -> Int {
+        line.prefix(while: { $0 == " " }).count
+    }
+
+    /// Repo root, for the source scans below (`…/scarf/scarfTests/x.swift`).
+    private static var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // …/scarfTests
+            .deletingLastPathComponent()   // …/scarf
+            .deletingLastPathComponent()   // repo root
+    }
+
     /// Poll until `condition` holds or `timeout` elapses. Load-independent:
     /// the assertions afterwards are all about WHERE work ran or HOW MANY
     /// times it ran, never how long it took.
@@ -174,7 +188,7 @@ struct MainActorSpawnDisciplineP22Tests {
         vm.approvePairing(platform: "telegram", code: "ABC123")
         await Self.until(timeout: 10) { log.calls.contains { $0.args.first == "pairing" } }
         let pairing = log.calls.first { $0.args.first == "pairing" }
-        #expect(pairing?.args == ["pairing", "approve", "telegram", "ABC123"])
+        #expect(pairing?.args == ["pairing", "approve", "--", "telegram", "ABC123"])
         #expect(pairing?.timeout == MessagingGatewayViewModel.mutationTimeout)
     }
 
@@ -383,6 +397,216 @@ struct MainActorSpawnDisciplineP22Tests {
         let exited = await Task.detached { proc.waitUntilExit(timeout: 10) }.value
         #expect(exited == true)
         #expect(proc.terminationStatus == 3)
+    }
+
+    // MARK: - 6. The sweep: no NEW synchronous wait on the main actor
+
+    /// P37 finding 10. `waitDraining` / `waitUntilExit` are this codebase's
+    /// two synchronous PROCESS waits, and both are C10 violations when they
+    /// run on the main actor — `ProcessTimeout`'s cap bounds them, but a
+    /// bounded 20 s block is still 20 s of a frozen window.
+    ///
+    /// The tests above each prove ONE site is off-main. This is the sweep: it
+    /// finds every synchronous process wait whose enclosing function is
+    /// main-actor-isolated and requires that set to be exactly the two
+    /// documented, task-tracked allowances.
+    ///
+    /// **How isolation is decided, and why the obvious way is wrong.** The
+    /// first draft of this test looked for a `@MainActor` line and gave up
+    /// otherwise — which found exactly one file, because the app targets
+    /// build with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+    /// (`project.pbxproj`), so in `scarf/scarf` and `Scarf iOS` EVERYTHING is
+    /// main-actor-isolated and almost nothing says `@MainActor` anywhere. The
+    /// test passed while `HealthViewModel.dashboardListenerPID` sat right
+    /// there doing an `lsof` wait on the main actor. So: in a
+    /// default-isolated target a wait is a hit UNLESS something on its
+    /// declaration chain says `nonisolated`; in ScarfCore (no default
+    /// isolation) it is a hit only when the type carries `@MainActor`.
+    ///
+    /// **One allowance, with a task.** `AppRelauncher.relaunch()`
+    /// (t-b15ba4c3) is a bounded 20 s `waitDraining` on `open(1)` in a
+    /// gesture whose whole contract is "this window is about to go away".
+    /// `HealthViewModel.dashboardListenerPID` (t-cd9fd829) was the other one;
+    /// P38 replaced its hand-rolled drain with `waitDraining` and marked it
+    /// `nonisolated` (its only caller is inside `Task.detached`), so the
+    /// allowance is gone and the task is closed.
+    ///
+    /// The "still REAL" check is now isolation-aware: it asserts the sweep
+    /// ITSELF still reaches the allowed file's site (i.e. the site is still
+    /// main-actor-isolated and un-opted-out), not merely that the string
+    /// `waitDraining(` appears somewhere in it — which a `nonisolated` fix
+    /// leaves true, so the check would have kept passing over dead debt.
+    /// `allowed` carries each entry's path so a third allowance cannot be
+    /// mis-mapped by an `if name == …` ladder.
+    @Test func noNewSynchronousWaitRunsOnTheMainActor() throws {
+        /// File basenames allowed to hold a main-actor-isolated sync wait,
+        /// each with the task that will remove it. Adding to this set is the
+        /// thing this test exists to make hard.
+        let allowed: [String: (path: String, task: String)] = [
+            "AppRelauncher.swift": (
+                path: "scarf/scarf/Core/Services/AppRelauncher.swift",
+                task: "t-b15ba4c3"
+            ),
+        ]
+        /// Every synchronous wait shape this sweep recognises. `waitDraining`
+        /// and `waitUntilExit` are the process primitives; the other three are
+        /// how a main-actor caller blocks on work it handed to another thread,
+        /// which is the same C10 violation wearing different clothes — an
+        /// `isRunning` spin, or a `wait(` on a semaphore or a group.
+        /// The primitives' own file. `ProcessTimeout.swift` IS the bounded,
+        /// concurrently-drained wait every other site is supposed to call, so
+        /// its internals are not a finding — and its `group.wait(` is the
+        /// bounded drain grace, not a main-actor block.
+        let primitivesFile = "ProcessTimeout.swift"
+        /// Roots and whether the target defaults every declaration to the
+        /// main actor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`).
+        let roots: [(path: String, defaultsToMainActor: Bool)] = [
+            ("scarf/scarf", true),
+            ("scarf/Scarf iOS", true),
+            ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
+        ]
+
+        var offenders: [String] = []
+        var isolatedScanned = 0
+        /// Basenames the sweep actually flagged — what makes an allowance
+        /// verifiably still live, rather than "the string is in the file".
+        var reachedByTheSweep: Set<String> = []
+
+        for (relative, defaultsToMainActor) in roots {
+            let root = Self.repoRoot.appendingPathComponent(relative)
+            let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+            while let url = files?.nextObject() as? URL {
+                guard url.pathExtension == "swift" else { continue }
+                guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                let lines = src.components(separatedBy: "\n")
+
+                // In ScarfCore, only an explicitly `@MainActor` type counts.
+                let hasMainActorAttribute = lines.contains {
+                    $0.trimmingCharacters(in: .whitespaces) == "@MainActor"
+                }
+                guard defaultsToMainActor || hasMainActorAttribute else { continue }
+
+                guard url.lastPathComponent != primitivesFile else { continue }
+
+                // Names bound to a `DispatchSemaphore` / `DispatchGroup` in
+                // this file. A main-actor `sem.wait(…)` blocks the actor just
+                // as hard as `waitUntilExit()` does — P38 added this shape
+                // because `dashboardListenerPID`'s hand-rolled drain used
+                // exactly it and the sweep only saw its `waitUntilExit`.
+                var blockingWaiters: Set<String> = []
+                for line in lines {
+                    guard line.contains("DispatchSemaphore") || line.contains("DispatchGroup")
+                    else { continue }
+                    guard let eq = line.range(of: " = "),
+                          let binding = line.range(of: "let ") ?? line.range(of: "var ")
+                    else { continue }
+                    let name = line[binding.upperBound..<eq.lowerBound]
+                        .trimmingCharacters(in: .whitespaces)
+                    if !name.isEmpty, !name.contains(" ") { blockingWaiters.insert(name) }
+                }
+
+                for (index, line) in lines.enumerated() {
+                    let isProcessWait = line.contains("waitDraining(")
+                        || line.contains(".waitUntilExit(")
+                    // A poll on `Process.isRunning` is the third hand-rolled
+                    // shape: a `while p.isRunning { Thread.sleep(…) }` spin is
+                    // a synchronous wait with extra steps. A loop that
+                    // SUSPENDS instead (`try? await Task.sleep`) is not — it
+                    // hands the actor back on every turn, which is the whole
+                    // point — so the body decides, not the condition.
+                    let pollBody = lines[index..<min(index + 4, lines.count)].joined(separator: "\n")
+                    let isRunningPoll = line.contains(".isRunning")
+                        && (line.contains("while ") || line.contains("repeat"))
+                        && (pollBody.contains("Thread.sleep") || pollBody.contains("usleep("))
+                    let isWaiterBlock = line.contains(".wait(")
+                        && blockingWaiters.contains { line.contains($0 + ".wait(") }
+                    guard isProcessWait || isRunningPoll || isWaiterBlock else { continue }
+                    // The primitives' own declarations and their doc comments.
+                    if line.contains("func waitDraining") || line.contains("func waitUntilExit") { continue }
+                    let bare = line.trimmingCharacters(in: .whitespaces)
+                    if bare.hasPrefix("//") || bare.hasPrefix("///") { continue }
+
+                    // Walk OUT to the enclosing declarations by indent. Only
+                    // a line indented strictly less than everything seen so
+                    // far encloses this one, so this visits the real chain
+                    // and nothing else. Two mistakes this replaces: reading
+                    // the nearest `func` landed on a NESTED helper (`func
+                    // closePipes` inside a `nonisolated func unzip`) and
+                    // reported three already-opted-out sites as hits; then
+                    // scanning every line above it found a `nonisolated`
+                    // hundreds of lines away on an unrelated member and
+                    // silently excused a real one.
+                    var optedOut = false
+                    var minIndent = Self.indent(of: line)
+                    // P38: a MULTI-LINE signature meant the walk landed on the
+                    // signature's closing `) throws -> String {` — same indent
+                    // as the `private nonisolated static func` line that opens
+                    // it — and then refused to look at that line, because it
+                    // was not strictly less indented. Two already-`nonisolated`
+                    // helpers were reported as offenders. While the enclosing
+                    // line has not yet been recognised as a declaration START,
+                    // keep walking at the SAME indent.
+                    var needDeclarationStart = false
+                    let declarationStarts = ["func ", "var ", "init(", "subscript",
+                                             "class ", "struct ", "enum ", "extension "]
+                    var i = index - 1
+                    while i >= 0 {
+                        let candidate = lines[i]
+                        defer { i -= 1 }
+                        let trimmed = candidate.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty else { continue }
+                        let indent = Self.indent(of: candidate)
+                        if needDeclarationStart {
+                            guard indent <= minIndent else { continue }
+                        } else {
+                            guard indent < minIndent else { continue }
+                        }
+                        minIndent = indent
+                        if trimmed.contains("nonisolated") { optedOut = true; break }
+                        needDeclarationStart = !declarationStarts.contains { trimmed.contains($0) }
+                            && !trimmed.hasPrefix("//")
+                        // Column 0 with a body brace: we have left the type.
+                        if indent == 0, !needDeclarationStart { break }
+                    }
+                    guard !optedOut else { continue }
+
+                    isolatedScanned += 1
+                    let name = url.lastPathComponent
+                    reachedByTheSweep.insert(name)
+                    guard allowed[name] == nil else { continue }
+                    offenders.append("\(name):\(index + 1) — \(bare)")
+                }
+            }
+        }
+
+        #expect(isolatedScanned == allowed.count, """
+            The sweep found \(isolatedScanned) main-actor-isolated synchronous \
+            process wait(s) and there are \(allowed.count) allowance(s). If \
+            the count is LOWER the gate has stopped matching and this test is \
+            no longer a check; if higher, see `offenders`.
+            """)
+        #expect(offenders.isEmpty, Comment(rawValue: """
+            A synchronous process wait runs on the main actor (charter C10). \
+            Move it off-main (see `PlatformSetupHelpers.detached`) or, if it \
+            genuinely must block the gesture, add it to `allowed` with the \
+            task that will remove it: \(offenders.joined(separator: "; "))
+            """))
+
+        // Each allowance must still be REAL, judged by ISOLATION rather than
+        // by a substring: the sweep above must have reached it. A site fixed
+        // by marking it `nonisolated` still contains `waitDraining(`, so the
+        // old substring check kept passing over debt that no longer existed —
+        // which is exactly what happened to the `HealthViewModel.swift` entry.
+        for (name, entry) in allowed {
+            let url = Self.repoRoot.appendingPathComponent(entry.path)
+            #expect(FileManager.default.fileExists(atPath: url.path),
+                    Comment(rawValue: "\(name) moved — fix `allowed`'s path (\(entry.task))"))
+            #expect(
+                reachedByTheSweep.contains(name),
+                Comment(rawValue: "\(name) is no longer a main-actor-isolated synchronous wait"
+                        + " — drop it from `allowed` and close \(entry.task)")
+            )
+        }
     }
 
     // MARK: - Helpers

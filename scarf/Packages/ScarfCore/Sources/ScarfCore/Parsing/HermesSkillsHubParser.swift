@@ -33,13 +33,13 @@ public enum HermesSkillsHubParser: Sendable {
     /// * Description wraps on WORD boundaries (Rich's default), so its
     ///   continuation cells are joined with a space.
     /// * Identifier is declared `overflow="fold"` (`_ident_col`,
-    ///   `skills_hub.py:64-69`), which is a hard character fold — the slug
+    ///   `hermes_cli/skills_hub.py:64-69`), which is a hard character fold — the slug
     ///   above is `pdf-tools-a1b` + `2c3`, so its continuation cells are
     ///   concatenated with NOTHING between them. Joining them with a space
     ///   would produce an identifier that installs nothing.
     ///
     /// The column set is byte-identical back to `v2026.6.19` (v0.17,
-    /// `skills_hub.py:424-432`), so this needs no capability gate: every
+    /// `hermes_cli/skills_hub.py:424-432`), so this needs no capability gate: every
     /// host Scarf supports that can browse prints an Identifier column.
     ///
     /// A row with fewer than the browse table's cells (the `skills search`
@@ -201,7 +201,7 @@ public enum HermesSkillsHubParser: Sendable {
     /// content hash (`bundle_content_hash`, `:300`), so there is nothing
     /// to render as "1.0.0 → 1.1.0". Every row is returned, status and
     /// all; `SkillsViewModel` splits the actionable `update_available`
-    /// rows (the only ones `do_update` acts on, `skills_hub.py:847`) from
+    /// rows (the only ones `do_update` acts on, `hermes_cli/skills_hub.py:847`) from
     /// the three fault statuses, which are diagnostics the user has to fix
     /// by hand.
     ///
@@ -270,7 +270,7 @@ public enum HermesSkillsHubParser: Sendable {
         for line in HermesCLIVerdict.significantLines(output) {
 
             // `do_update` prints this and returns when nothing is actionable
-            // (skills_hub.py:849). Exit 0 with nothing else is then correct,
+            // (hermes_cli/skills_hub.py:849). Exit 0 with nothing else is then correct,
             // not a silent refusal.
             if line.hasPrefix(Self.noUpdatesLine) {
                 noUpdatesAvailable = true
@@ -293,8 +293,15 @@ public enum HermesSkillsHubParser: Sendable {
                 continue
             }
 
+            // The FIRST real refusal. Deliberately `skillsUpdateFailure`,
+            // not `skillsInstallFailure`: `do_update` calls
+            // `do_install(force: True)` (hermes_cli/skills_hub.py:868), which prints
+            // `Warning: '<name>' is already installed at …` (:682) for every
+            // skill it updates — including the ones that succeed — before it
+            // ever checks `force` (:683). Matching that made a failed update
+            // quote a benign warning instead of the reason.
             if failureDetail == nil,
-               HermesCLIMarkers.skillsInstallFailure.contains(where: { line.contains($0) }) {
+               HermesCLIMarkers.skillsUpdateFailure.contains(where: { line.contains($0) }) {
                 failureDetail = line
             }
 
@@ -356,7 +363,7 @@ public enum HermesSkillsHubParser: Sendable {
 /// skills it left alone because the user edited them on disk. On
 /// pre-v0.20.4 hosts `skipped` is always empty.
 public struct HermesSkillsUpdateReport: Sendable, Equatable {
-    /// `N` from `Updated N skill(s).` (`skills_hub.py:872`). This counts
+    /// `N` from `Updated N skill(s).` (`hermes_cli/skills_hub.py:872`). This counts
     /// ATTEMPTS, not successes: it is `len(updates) - len(skipped_local)`,
     /// computed from the list `do_update` decided to walk and printed
     /// unconditionally after the loop, whatever each `do_install` did. Kept
@@ -416,7 +423,7 @@ public struct HermesHubSkill: Identifiable, Sendable, Equatable {
 /// One row of `hermes skills check`.
 ///
 /// `identifier` is the lock-file skill NAME — which is what
-/// `hermes skills update <name>` takes (`skills_hub.py:847`, keyed off
+/// `hermes skills update <name>` takes (`hermes_cli/skills_hub.py:847`, keyed off
 /// `entry["name"]`). It is deliberately NOT the hub identifier: the update
 /// path resolves through the lock file, not through a registry slug.
 public struct HermesSkillUpdate: Identifiable, Sendable, Equatable {

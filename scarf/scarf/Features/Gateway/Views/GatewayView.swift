@@ -247,6 +247,34 @@ struct GatewayView: View {
             Text("Paired Users")
                 .font(.headline)
 
+            // Sticky until dismissed: `pairing approve` and `pairing revoke`
+            // both refuse at exit 0, so this banner is the ONLY place the
+            // user learns the action did not happen. Hermes's line is quoted
+            // verbatim — the lockout's "clears in ~N minute(s)" is the
+            // remediation and summarising it away loses it.
+            if let error = viewModel.pairingError {
+                HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s2) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(ScarfColor.danger)
+                        .accessibilityHidden(true)
+                    Text(error)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: ScarfSpace.s2)
+                    Button { viewModel.dismissPairingError() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text("Dismiss"))
+                    .help("Dismiss")
+                }
+                .padding(ScarfSpace.s2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ScarfColor.danger.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+            }
+
             if !viewModel.pendingPairings.isEmpty {
                 VStack(alignment: .leading, spacing: ScarfSpace.s2) {
                     Label("Pending Approvals", systemImage: "clock.badge.questionmark")

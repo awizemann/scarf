@@ -9,12 +9,14 @@ import Foundation
 /// - `tools/bot_mode_probe.py:60-92` — `_is_bot_managed` (a `ui_meta`
 ///   `hermes-bots` **mapping**) and `_roster` (default profile + sorted
 ///   children of `<root>/profiles`).
-/// - `hermes_cli/profiles.py:920-991` — `profile.yaml`'s top-level keys and
-///   Hermes' own read/write semantics (empty `display_name` pops the key).
-/// - `hermes_cli/subcommands/profile.py:29-131` — `create` / `delete` /
-///   `rename` argv.
-/// - `tui_gateway/methods_profiles.py:780-863, 1020+` — the 64KB `ui_meta`
-///   cap and the 2MB avatar cap.
+/// - `hermes_cli/profiles.py:609-618` (`read_profile_meta`) and `:621-646`
+///   (`write_profile_meta`) @ `v2026.9.7` — `profile.yaml`'s top-level keys
+///   and Hermes' own read/write semantics (empty `display_name` pops the
+///   key, `:635-640`).
+/// - `hermes_cli/subcommands/profile.py:18-40` (`create`), `:41-44`
+///   (`delete`), `:75-81` (`rename`) @ `v2026.9.7` — the argv.
+/// - `tui_gateway/methods_profiles.py:443` — the 64KB `ui_meta` cap — and
+///   `:620-621` — the 2MB avatar cap.
 /// - `apps/desktop/src/plugins/hermes-bots/types.ts` — the `BotMeta` field
 ///   set, including the legacy `group` scalar alongside `groups`.
 ///
@@ -455,7 +457,7 @@ import Foundation
 
     // MARK: - Audit regressions
 
-    @Test func aHermesBotsKeyNestedInAnotherNamespaceIsNotOurs() {
+    @Test func aHermesBotsKeyNestedInAnotherNamespaceIsNotOurs() throws {
         // `ui_meta` is one namespace per client. A `hermes-bots` key inside a
         // SIBLING namespace belongs to that client; reading it would invent a
         // bot and writing through it would corrupt their block.
@@ -472,7 +474,7 @@ import Foundation
         var promoted = id
         promoted.isBotManaged = true
         promoted.title = "Real"
-        let out = try! #require(HermesBotProfileYAML.write(identity: promoted, into: yaml))
+        let out = try #require(HermesBotProfileYAML.write(identity: promoted, into: yaml))
         // The foreign block is untouched and a real sibling key was added.
         #expect(out.contains("      title: not a bot"))
         #expect(HermesBotProfileYAML.parse(out, profileName: "p", profileDirectory: "/x").title == "Real")

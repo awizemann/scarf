@@ -181,20 +181,50 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.13 (v2026.5.7) flags
 
     /// `/goal` slash command + Persistent Goals + Checkpoints v2 single-store
-    /// (v0.13+). Used by RichChatViewModel to add `/goal` to the
-    /// non-interruptive command list and to render the "Goal locked" pill in
-    /// the chat header.
+    /// (v0.13+).
+    ///
+    /// **CLI/gateway only.** This doc used to say `RichChatViewModel` adds
+    /// `/goal` to the non-interruptive command list; it does not, and has not
+    /// since the ACP roster was reconciled — `/goal` is not an
+    /// `acp_adapter/` name at any tag, so a row for it would no-op against an
+    /// ACP host. The consumers are the optimistic goal PILL
+    /// (`ChatViewModel.swift:1269`, iOS `ChatView.swift:56`) and the
+    /// typed-command path that feeds it.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
 
     /// `/queue` slash command in the ACP adapter (v0.13+). Queues a prompt
     /// to run after the current turn completes without interrupting.
+    ///
+    /// Walked, not asserted — the same two-tag citation as ``hasACPSteer``,
+    /// because the two arrived in the same commit: `queue` first appears at
+    /// **v2026.5.7** (0.13.0) in `acp_adapter/server.py:171`, on the line
+    /// below `steer` (`:170`), and `acp_adapter/` at **v2026.4.30** (0.12.x)
+    /// has no `queue` slash command anywhere.
     public var hasACPQueue: Bool { atLeastSemver(0, 13, 0) }
 
-    /// `/steer` runs as a regular prompt on idle ACP sessions (v0.13+). Pre-
-    /// v0.13 hosts silently no-op `/steer` when no turn is in flight; with
-    /// this flag on, Scarf can surface `/steer` even when the agent isn't
-    /// mid-turn without confusing UX.
-    public var hasACPSteerOnIdle: Bool { atLeastSemver(0, 13, 0) }
+    /// `/steer` EXISTS as an ACP slash command (v0.13+).
+    ///
+    /// Walked, not asserted: `steer` first appears at **v2026.5.7** (0.13.0)
+    /// in `acp_adapter/server.py:170`, on the line above `queue` (`:171`) —
+    /// the two arrived together — and `acp_adapter/` at **v2026.4.30**
+    /// (0.12.x) has no `steer` anywhere. Below the floor the composer's
+    /// `/steer` row was a dead name: over ACP an unknown command is not an
+    /// error, `_handle_slash_command` returns `None` and the text falls
+    /// through to the LLM (`acp_adapter/commands.py:88-95` @ `v2026.9.7`),
+    /// so the row silently burned a turn (P34's finding, one row late).
+    public var hasACPSteer: Bool { atLeastSemver(0, 13, 0) }
+
+    /// `/steer` runs as a regular prompt on an IDLE ACP session, rather than
+    /// needing a turn in flight to inject into
+    /// (`acp_adapter/server.py:812-820` @ `v2026.5.7`).
+    ///
+    /// Same floor as ``hasACPSteer`` and deliberately expressed as it: the
+    /// idle handling shipped in the same commit as the command, so there is
+    /// no host that has `/steer` without it. (The old doc here claimed
+    /// pre-v0.13 hosts "silently no-op `/steer` when no turn is in flight" —
+    /// a CLI/TUI fact, not an ACP one: pre-v0.13 hosts have no `/steer` at
+    /// all. C2.)
+    public var hasACPSteerOnIdle: Bool { hasACPSteer }
 
     /// Kanban v0.13 reliability surface, as it actually exists at v2026.9.7:
     /// the `kanban diagnostics [--json]` subcommand over the rule engine
@@ -351,22 +381,46 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/yolo` slash command — toggles YOLO mode (skip all dangerous
-    /// command approvals) for the current session (v0.14+). Available
-    /// in ACP. Pairs with the YOLO warning banner driven by
-    /// `hasYOLOWarning`.
+    /// command approvals) for the current session (v0.14+). Pairs with the
+    /// YOLO warning banner driven by `hasYOLOWarning`.
+    ///
+    /// **CLI/gateway only, NOT ACP.** The old doc comment here said
+    /// "Available in ACP" and was wrong (C2): `yolo` appears nowhere under
+    /// `acp_adapter/` at ANY `v2026.*` tag — the adapter's whole slash dict
+    /// is `help model tools context reset compact|compress steer queue
+    /// version` (`acp_adapter/commands.py:44-66` @ v2026.9.7,
+    /// `acp_adapter/server.py:453-463` @ v2026.7.20). The real definition is
+    /// a CommandDef in the CLI/gateway catalog
+    /// (`hermes_cli/commands.py:181` @ v2026.9.7).
+    ///
+    /// **No consumer** — P34 removed the slash-menu row it used to gate
+    /// (`RichChatViewModel.alwaysAvailableCommands`), because the ACP
+    /// composer sending `/yolo` just fell through to the LLM. Kept because
+    /// the floor is source-verified and rediscovering it costs a tag walk;
+    /// a future CLI/gateway-fronted surface can gate on it.
     public var hasYOLOSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/sessions` slash command — browse and resume previous sessions
-    /// from inside an active chat (v0.14+). Scarf already exposes session
-    /// browse via the sidebar, but the literal slash command is a v0.14
-    /// addition surfaced in the slash menu for parity.
+    /// from inside an active chat (v0.14+).
+    ///
+    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:148` @
+    /// v2026.9.7; absent from `acp_adapter/` at every tag).
+    ///
+    /// **No consumer** — P34 removed its slash-menu row. Scarf exposes
+    /// session browse via the sidebar, which is the native equivalent.
+    /// Kept for the same reason as ``hasYOLOSlashCommand``.
     public var hasSessionsSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/codex-runtime` slash command — toggle Codex app-server runtime
     /// for OpenAI/Codex models (v0.14+). Argument forms:
-    /// `[auto|codex_app_server]`. Forward-compat flag — Scarf surfaces it
-    /// in the slash menu so users on Codex models can flip the runtime
-    /// without leaving chat.
+    /// `[auto|codex_app_server]`.
+    ///
+    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:156-158` @
+    /// v2026.9.7, alias `codex_runtime`; absent from `acp_adapter/` at
+    /// every tag).
+    ///
+    /// **No consumer** — P34 removed its slash-menu row. Kept for the same
+    /// reason as ``hasYOLOSlashCommand``.
     public var hasCodexRuntimeSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// xAI Grok OAuth (SuperGrok) provider — overlay-only, OAuth-external
@@ -931,6 +985,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// option moved to `subcommands/sessions.py:75` by v2026.9.7, unchanged.
     public var hasSessionsExportFormats: Bool { isV0181OrLater }
 
+    /// `max` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
+    ///
+    /// **Floor v0.18.1, not v0.20.** `VALID_REASONING_EFFORTS` is
+    /// `("minimal","low","medium","high","xhigh")` at v2026.7.1 (0.18.0,
+    /// `hermes_constants.py:794`) and gains `"max"` in the same line at tag
+    /// **v2026.7.7** (`pyproject.toml` = `0.18.1`). Walked across every
+    /// `v2026.*` tag; v2026.6.19 and earlier carry the five-level tuple.
+    /// Offering the level on a host that accepts it is a permissive
+    /// rendering change, not a C1 degradation (round-3 decision 5).
+    public var hasReasoningEffortMax: Bool { isV0181OrLater }
+
+    /// `ultra` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
+    ///
+    /// **Floor v0.19.0, not v0.20.** `VALID_REASONING_EFFORTS` still ends at
+    /// `"max"` at v2026.7.7.2 (0.18.2, `hermes_constants.py:794`) and gains
+    /// `"ultra"` at tag **v2026.7.20** (`pyproject.toml` = `0.19.0`,
+    /// `hermes_constants.py:835-837`), where the tuple wraps to two lines.
+    /// One release later than ``hasReasoningEffortMax`` — the two levels did
+    /// not arrive together.
+    public var hasReasoningEffortUltra: Bool { isV019OrLater }
+
     // MARK: v0.19.x re-floored flags (v2026.7.20 = 0.19.0, v2026.7.30 = 0.19.1)
     //
     // These shipped in the v0.20 audit's flag cluster because v2026.7.30 was
@@ -1292,6 +1367,44 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// resume` takes a bare `job_id` and argparse rejects the flags — but
     /// present at v2026.8.27 (0.20.6), so the floor is v0.20.6.
     public var hasCronResumeRunNow: Bool { isV0206OrLater }
+
+    /// Whether `hermes cron resume <id>` recovers a RECURRING job stuck in
+    /// `state = "error"`.
+    ///
+    /// The terminal-activation guard gained its `and not
+    /// _is_recoverable_error_job(job)` arm at `v2026.8.31`
+    /// (`pyproject.toml version = "0.21.0"`). **Do not grep for
+    /// `_reject_terminal_activation` at that tag** — the helper does not
+    /// exist there: v2026.8.31 still carries the guard as two INLINE blocks
+    /// inside `update_job`'s `apply` (`cron/jobs.py:2583-2595` and
+    /// `:2684-2696`), and only `v2026.9.7` extracts it into the named
+    /// function at `:1865-1879` (called from `:1941` / `:1965`).
+    /// The predicate itself is defined at `v2026.8.31:664-692` and
+    /// is absent from every earlier tag. At `v2026.8.27` (0.20.6) the same
+    /// block reads `is_terminal_job(job) and (…)` with no exemption
+    /// (`:2270-2278`, `:2367-2375`), so a resume of an error-state cron or
+    /// interval job raises "Cannot activate terminal cron job …" and
+    /// `cron_resume` returns 1.
+    ///
+    /// A walk of all 32 `v2026.*` tags for `_is_recoverable_error_job`
+    /// matches exactly `v2026.8.31` and `v2026.9.7` — first tag with it
+    /// `v2026.8.31` (0.21.0), last tag without it `v2026.8.27` (0.20.6).
+    /// Minor-level floor, so a v0.21.0 host gets it too.
+    public var hasCronRecoverableErrorResume: Bool { isV021OrLater }
+
+    /// Whether `resume_job` refuses a one-shot whose `run_at` is already past
+    /// the grace window, instead of writing an `enabled` record that can never
+    /// fire.
+    ///
+    /// `resume_job` raises `"Cannot resume: one-shot time {run_at} is in the
+    /// past (grace window: {ONESHOT_GRACE_SECONDS}s) and will never fire."`
+    /// (`cron/jobs.py:1991-1996` @ `v2026.9.7`). Walked across all 32
+    /// `v2026.*` tags: first tag with that sentence is **`v2026.7.7`**
+    /// (`pyproject.toml` = `0.18.1`), last tag without it is `v2026.7.1`
+    /// (0.18.0). Below the floor the host happily resumes such a job, so
+    /// Scarf must not pre-refuse it (charter C1) — `recoveryOffer` takes this
+    /// as `hostRefusesPastOneShotResume`.
+    public var hasCronPastOneShotResumeRefusal: Bool { isV0181OrLater }
 
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
