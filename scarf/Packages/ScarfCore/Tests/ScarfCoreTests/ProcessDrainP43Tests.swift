@@ -70,22 +70,29 @@ struct ProcessDrainP43Tests {
         // 0.5 s budget + the SIGTERM grace + the drain grace. The point is
         // that it RETURNED: a bare `waitUntilExit()` here waits forever.
         #expect(elapsed < 10, "waitDraining took \(elapsed)s")
-        // What the child managed to write before the deadline is still handed
-        // back — the reader ran concurrently with the wait, not after it.
-        let stderrData = try #require(drained.first)
-        #expect(stderrData.count == Self.chattyBytes)
+        // A slot per pipe comes back either way — the caller indexes it
+        // unconditionally. What it HOLDS is deliberately not asserted: under
+        // a loaded test host a 0.5 s budget can expire before the child is
+        // scheduled at all, so any floor here is a flake. That the drain runs
+        // concurrently with the wait is proved by the test above, on a child
+        // that is given time to finish.
+        #expect(drained.count == 1)
     }
 
     // MARK: - The three ScarfCore archive spawns
 
-    /// A zip holding one 24 MB member, so extraction is long enough that a
-    /// sub-millisecond budget cannot be met by a child that has only just
-    /// been `exec`ed.
-    static func makeFatZip(in dir: URL) throws -> URL {
+    /// A zip holding one member of `bytes`.
+    ///
+    /// The overrun tests need extraction to take longer than ONE poll turn,
+    /// not longer than the budget: `waitUntilExit(timeout:)` sleeps
+    /// `pollInterval` (50 ms) before it re-checks, so a sub-millisecond
+    /// budget is really "50 ms or the first turn, whichever is later". 24 MB
+    /// of zeros is written and zipped in milliseconds and takes well past
+    /// that to unpack, which is the property these tests need.
+    static func makeZip(in dir: URL, bytes: Int) throws -> URL {
         let staging = dir.appendingPathComponent("staging")
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        try Data(count: 24 * 1024 * 1024)
-            .write(to: staging.appendingPathComponent("fat.bin"))
+        try Data(count: bytes).write(to: staging.appendingPathComponent("fat.bin"))
         let archive = dir.appendingPathComponent("fat.zip")
         let zip = Process()
         zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
@@ -109,7 +116,7 @@ struct ProcessDrainP43Tests {
     func unzipArchiveIsBounded() throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let archive = try Self.makeFatZip(in: dir)
+        let archive = try Self.makeZip(in: dir, bytes: 24 * 1024 * 1024)
         let dest = dir.appendingPathComponent("out")
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
@@ -127,7 +134,7 @@ struct ProcessDrainP43Tests {
     func unzipArchiveSucceeds() throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let archive = try Self.makeFatZip(in: dir)
+        let archive = try Self.makeZip(in: dir, bytes: 4096)
         let dest = dir.appendingPathComponent("out")
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
