@@ -5,14 +5,12 @@ permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-neve
 tags: [settings, config-parsing, drift]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-07-14
 updated: 2026-07-14
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
-
-Alan's 2026-07-14 bug report ("settings drop downs are saving but not showing selected") was parser drift, not a save failure: SettingsViewModel.setSetting reloads config after every `hermes config set`, but the Mac app read config through a 360-line duplicate of ScarfCore's parser that had missed every v0.17/v0.18 key addition, so the reloaded struct snapped those fields back to defaults and PickerRow rendered a blank selection. Most visible surface: Web Tools tab search/extract backend dropdowns.
 
 ## Observations
 - [fact] HermesFileService.loadConfig/loadConfigResult route through ScarfCore's HermesConfig(yaml:) — the app's duplicated parseConfig was deleted in 3e0184d #settings #parsing
@@ -20,7 +18,6 @@ Alan's 2026-07-14 bug report ("settings drop downs are saving but not showing se
 - [convention] New config keys are added ONLY in ScarfCore (HermesConfig model + HermesConfig+YAML parser); the Mac app must never grow its own key->field mapping #convention
 - [fact] HermesFileService.parseNestedYAML/stripYAMLQuotes are now thin delegates to HermesYAML with ParsedYAML type-aliased to ScarfCore's, keeping the 5 app features (Plugins, QuickCommands, Personalities, EmailSetup, CredentialPools) on the canonical raw-YAML parser #parsing
 - [fact] HermesFileServiceConfigParityTests (scarfTests) pins the drifted key set + save-then-reload flow; it fails if an app-side mapping ever reappears #tests
-
 
 ## Drift-audit systemic finding (2026-07-14)
 - [fact] A full app-target-vs-ScarfCore duplication sweep confirmed the config parser was mostly a ONE-OFF, not a pervasive pattern: ACP wire encoding, path/home resolution (HermesPathSet/HermesProfileScope), capability gating (HermesCapabilities), ModelPreflight, and the YAML helpers (post-3e0184d) all have single owners with app-side delegation. Architecture is sound. #audit

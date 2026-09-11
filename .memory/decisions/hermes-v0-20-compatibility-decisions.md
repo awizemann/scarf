@@ -4,18 +4,18 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-08-03
-updated: 2026-08-12
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-10
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
 - [decision] Compaction-summary styling is driven by HYDRATION-LAYER content classification (marker prefixes "[CONTEXT COMPACTION — REFERENCE ONLY]", legacy "[CONTEXT SUMMARY]:", merged delimiter — mirroring Hermes ContextCompressor.classify_summary_content), NOT the ACP _meta.hermes.compactionSummary replay flags. Rationale: Hermes persists summaries as ordinary active state.db rows; Scarf's loadSessionHistory wholesale-replaces messages, so replay-side styling either no-ops or double-renders (proven by fresh-eyes audit). The _meta parsing is kept in ACPMessages but replay stays fully suppressed pre-engagement. #decision
 - [decision] max_turns absent-key parse keeps the 0 sentinel; the DISPLAY default is capability-resolved (HermesConfig.displayMaxTurns: 500 at v0.20.0–v0.20.4, 60 older; upgraded to unlimited as of v0.20.5). Never bake a new upstream default into the parser — it leaks writes to old hosts. #decision
 - [decision] Remote-context session export offers only stdout-capable formats (jsonl/trace); path formats (md/html/qmd) are local-only because the CLI writes on the remote host. #decision
-- [decision] Curator adopt: bulk "Adopt All" requires a confirmation alert; adopt/adoptAll always pass --yes because hermes curator adopt prompts [y/N] on TTY. skills uninstall has NO --yes flag and prompts unconditionally — Scarf feeds stdin "y\n". #decision
+- [decision] Curator adopt: bulk "Adopt All" requires a confirmation alert; adopt/adoptAll always pass --yes because hermes curator adopt prompts [y/N] on TTY. skills uninstall has NO --yes flag and prompts unconditionally — Scarf feeds stdin "y\n". **STALE as of v0.20.5:** `skills uninstall` gained `--yes` at v2026.8.19 (see `SkillsViewModel.swift:667`), so Scarf passes the flag when the host has it and falls back to the stdin feed below the floor. #decision
 - [decision] A2A deliberately NOT added to the platform roster (infrastructure plugin, no user config surface). Buzz added with NO GatewayAllowlistKind mapping (user-gated via allowed_users). #decision
 - [decision] Parsers are version-agnostic (curator status accepts both header generations); only UI surfaces and CLI invocations are capability-gated. #convention
 
@@ -26,7 +26,7 @@ reviewed_by: audit:claude-code (background)
 - implements [[Hermes Capability Gating Pattern]]
 
 
-- [done] Power-settings pass shipped post-v2.18.0 (merge db8c070): compression.threshold_tokens/min_tail_user_messages/idle_compact_after_seconds/progress_notices rows; agent.reasoning_overrides table via new GatewayConfigWriter.setMap + PowerSettingsWriter (dict unsupported by `hermes config set` — config_defaults.py:248 says so outright; matching is spelling-tolerant variant matching per hermes_constants.py:1064, NOT substring; valid efforts minimal…ultra + none-alias, hermes_constants.py:942-967); excluded providers key is **model_catalog.excluded_providers** (inventory.py:100 — NOT top-level as the audit note guessed). HermesYAML learned quoted-key parsing (model patterns with `:` round-trip). All gated isV020OrLater; 14 tests in PowerSettingsV020Tests. Remaining Phase 3 backlog: task t-1cc0a505. #done
+- [done] Power-settings pass shipped post-v2.18.0 (merge db8c070): compression.threshold_tokens/min_tail_user_messages/idle_compact_after_seconds/progress_notices rows; agent.reasoning_overrides table via new GatewayConfigWriter.setMap + PowerSettingsWriter (dict unsupported by `hermes config set` — config_defaults.py:248 says so outright; matching is spelling-tolerant variant matching per hermes_constants.py:1064, NOT substring; valid efforts minimal…ultra + none-alias, hermes_constants.py:942-967); excluded providers key is **model_catalog.excluded_providers** (inventory.py:100 — NOT top-level as the audit note guessed). HermesYAML learned quoted-key parsing (model patterns with `:` round-trip). All gated isV020OrLater; 14 tests in PowerSettingsV020Tests. **CORRECTED in P35 (round-3, 2026-09-10):** the effort VOCABULARY is not a v0.20 surface — `VALID_REASONING_EFFORTS` gains `max` at v2026.7.7 (0.18.1) and `ultra` at v2026.7.20 (0.19.0), so the picker is now gated on `hasReasoningEffortMax`/`hasReasoningEffortUltra`. The `reasoning_overrides` dict and `excluded_providers` list writers keep their v0.20 guard, which is correct. Remaining Phase 3 backlog: task t-1cc0a505. #done
 
 
 - [done] Phase 3 leftovers run shipped 2026-08-12 (commits 0bdbf90..75456b4 on main, orchestrated sub-agent phases P1–P3d + two audit passes; plan: documents/hermes-leftovers-2026-08-12-plan.md): browser provider key corrected to `browser.cloud_provider` (browser.backend was NEVER a valid Hermes key — pure Scarf invention; cloud_provider dates to v0.4.0, ungated), single cached+persisted version probe (HermesVersionCache, keyed by connection fingerprint, 10-min TTL, failed probes never memoized), title_generation block, per-task reasoning_effort (v0.19 gate), approvals.smart_policy (v0.20), secrets.command.* + bitwarden.encrypted_cache + telemetry.shared_metrics + database.* (all v0.20), STT/TTS knob expansion (per-key v0.19/v0.20 floors; tts.xai.text_normalization and global tts.speed DROPPED — absent from released v2026.8.3, audit note had guessed wrong), gateway.profile_routes list editor (v0.19 gate, lossless direct-YAML writer). Remaining backlog in t-1cc0a505 (import-agent, sync, parked items) + audit follow-ups t-9634ae74 and the profile_routes edge-case task. #done

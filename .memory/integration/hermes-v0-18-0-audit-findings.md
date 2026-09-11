@@ -5,11 +5,11 @@ permalink: scarf/integration/hermes-v0-18-0-audit-findings
 tags: [hermes, v018, audit, verification, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift]
 source_paths_inferred: false
-source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-07-04
-updated: 2026-07-04
-reviewed: 2026-09-04
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-10
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
@@ -17,7 +17,7 @@ reviewed_by: audit:claude-code (background)
 - [schema] In-place compaction (`archive_and_compact()`, hermes_state.py:3346) marks summarized-away rows active=0+compacted=1; rewind/undo rows stay active=0+compacted=0. Hermes `search_messages` now filters `(m.active = 1 OR m.compacted = 1)` (hermes_state.py:4224). FIXED: Scarf now schema-detects `hasCompactedColumn` and widens the clause when present (HermesDataService.swift:882-884). #upgrade-forced #done
 - [providers] v0.18 removes `google-gemini-cli` (OAuth) entirely, replacing it with `vertex` (Google Vertex AI, OAuth2 SA/ADC; hermes_cli/models.py:1035) + 4 aliases google-vertex/vertex-ai/gcp-vertex/vertexai (models.py:1197-1200); drops aliases gemini-cli/gemini-oauth. Adds overlay-only provider `moa` (Mixture of Agents, transport openai_chat, auth virtual, base moa://local; providers.py:47-51). FIXED: Both `vertex` and `moa` added to ModelCatalogService.overlayOnlyProviders; google-gemini-cli aliases removed; check-hermes-tables.py passes. #upgrade-forced #done
 - [cron] NEW per-job `attach_to_session` optional bool (cron/jobs.py:867,1024 — zero matches at v2026.6.19; verified new in v0.18). FIXED: Scarf's HermesCronJob now models it (HermesCronJob.swift:43, case .attachToSession); round-trip preserved in withEnabled() (line 239). #upgrade-forced #done
-- [preexisting-webtools] Scarf's Web Tools tab silent no-op on BOTH sides, pre-existing since at least v0.14: Scarf was writing `web_tools.backend`/`web_tools.search.backend`/`web_tools.extract.backend` and reading the same dead keys (Hermes reads `web.backend`/`web.search_backend`/`web.extract_backend`). FIXED: Both SettingsViewModel (lines 459-461) and HermesConfig+YAML (lines 633-635) now use the correct `web.*` keys. #preexisting #bug #done
+- [preexisting-webtools] Scarf's Web Tools tab silent no-op on BOTH sides, pre-existing since at least v0.14: Scarf was writing `web_tools.backend`/`web_tools.search.backend`/`web_tools.extract.backend` and reading the same dead keys (Hermes reads `web.backend`/`web.search_backend`/`web.extract_backend`). FIXED: Both SettingsViewModel (`:610-612` as of 2026-09-10) and HermesConfig+YAML (`:946-948`) now use the correct `web.*` keys. #preexisting #bug #done
 - [preexisting-cron] `HermesCronJob.withEnabled()` omits `workdir`, `contextFrom`, `noAgent` from the copy — toggling enabled permanently dropped those fields from jobs.json. FIXED: withEnabled() now forwards all fields (lines 236-239); method moved onto HermesCronJob (line 203) so next field addition can't miss it; HermesConfig.buildJob() also updated. #preexisting #bug #done
 - [cli] All 42+ Scarf CLI invocations survive v0.18 unchanged (zero breaking argparse changes). New optional verbs worth roadmap consideration: `hermes serve` (headless backend, --port/--no-open), `hermes journey` (learning timeline), `hermes mcp reauth [name|--all]` (OAuth refresh). `hermes status --all` flag removed — Scarf never used it. #no-op
 - [gateway] No breaking platform changes. 9 core platforms migrated to plugin implementations — backward compatible, Scarf's runtime discovery unaffected. NEW optional PlatformConfig field `typing_indicator: bool = true` (gateway/config.py:345) — candidate Settings toggle. Email now defaults `unauthorized_dm_behavior: "ignore"` (config.py:789) — onboarding copy nuance. Pairing-syncs-to-allowlist (1bfe08145) mirrors approvals into *_ALLOWED_USERS env vars, operator-initiated, YAML allowlists Scarf writes are untouched. #no-op

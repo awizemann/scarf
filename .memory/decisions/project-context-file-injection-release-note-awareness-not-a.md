@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift]
 source_paths_inferred: false
 source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
 created: 2026-06-28
-updated: 2026-06-28
+updated: 2026-09-10
 reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
@@ -43,7 +43,7 @@ If a future change threads `projectCwd` into the mini-app factory (revisit only 
 
 ## Future-escalation trigger
 
-Revisit a first-open trust affordance (persisted per project id, mirroring the mini-app gate via [[phase-1-milestone-2-mini-apps-implementation-decisions]]) IF the threat model changes — chiefly if Scarf ever auto-opens chats in projects the user did NOT deliberately add, or if Hermes drops its context-file injection scan. Relates to [[hermes-v0-17-0-audit-findings]].
+Revisit a first-open trust affordance (persisted per project id, mirroring the mini-app gate via [[phase-1-milestone-2-mini-apps-implementation-decisions]]) IF the threat model changes — chiefly if Scarf ever auto-opens chats in projects the user did NOT deliberately add, or if Hermes drops its context-file injection scan. Relates to [[Hermes v0.17 Compatibility Decisions]].
 
 ## Observations
 - [decision] Ship a release-note awareness line for v-next; do NOT add a first-open "trust this project's context?" gate — keep the trust affordance ticketed as a future escalation #projects
@@ -54,4 +54,4 @@ Revisit a first-open trust affordance (persisted per project id, mirroring the m
 
 ## Relations
 - relates_to [[phase-1-milestone-2-mini-apps-implementation-decisions]]
-- relates_to [[hermes-v0-17-0-audit-findings]]
+- (no relation: the hermes-v0-17-0-audit-findings note was never written; see [[Hermes v0.17 Compatibility Decisions]] instead)

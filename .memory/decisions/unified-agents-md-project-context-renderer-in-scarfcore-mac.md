@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContex
 source_paths_inferred: false
 source_sha: 6ec7e92a3340153ed472a7bdf07d61e0f77bab42
 created: 2026-06-28
-updated: 2026-06-28
+updated: 2026-09-10
 reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
@@ -42,5 +42,5 @@ ScarfCore 775/775; new `ProjectContextBlockManagedTests` (cron filter/format, co
 - [fact] The iOS resume path previously wrote NO block; it now refreshes cron/config on every project-scoped start, matching the Mac's rewrite-on-every-start #ios
 
 ## Relations
-- relates_to [[scarf/architecture/scarfgo-ios-does-not-load-project-context-process-cwd-gap]]
+- (no relation: the planned "ScarfGo iOS does not load project context (process cwd gap)" note was never written; the gap it named is closed by this note's iOS renderer)
 - relates_to [[scarf/features/project-scoped-chat-and-agents.md-context]]

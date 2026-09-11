@@ -5,11 +5,11 @@ permalink: scarf/decisions/absent-vs-unreadable-is-the-discriminator-every-scarf
 tags: [projects, transport, resilience, dataloss, restore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 t-a6f22379. `projects.json` got this discriminator in commit 7460cf9; `project.json` and the restore service's remote rewrites did not, and both destroyed state through the same hole.

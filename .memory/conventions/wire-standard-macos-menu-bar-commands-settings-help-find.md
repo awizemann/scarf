@@ -5,10 +5,10 @@ permalink: scarf/conventions/wire-standard-macos-menu-bar-commands-settings-help
 tags: [hig, macos, conventions, audit-2026-06-13]
 source_paths: [scarf/scarf/scarfApp.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: 3e64448e9c9e625348b929019a1050994b774e8a
 created: 2026-06-13
 updated: 2026-06-15
-reviewed: 2026-09-09
+reviewed: 2026-09-10
 reviewed_by: audit:claude-code (background)
 ---
 

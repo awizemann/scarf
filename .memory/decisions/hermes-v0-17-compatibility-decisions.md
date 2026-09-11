@@ -2,17 +2,12 @@
 title: Hermes v0.17 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-17-compatibility-decisions
-tags:
-- hermes
-- v017
-- compatibility
-- capabilities
-- decisions
-updated: 2026-06-27
+tags: [hermes, v017, compatibility, capabilities, decisions]
 created: 2026-06-21
+updated: 2026-09-10
 ---
 
-Implemented on branch `feat/hermes-v017-parity` (6 commits, 2026-06-21), built on top of the [[Hermes v0.17.0 Audit Findings]]. Merged + SHIPPED in v2.12.0 (the Hermes v0.17 catch-up release; task t-b2b590c6) — main is now at v2.13.0. [corrected 2026-06-27] Verified each phase: Debug build + ScarfCore tests green (641/642; the 1 failure is the known flaky RemoteSQLiteBackend subprocess race [[t-aud32]], not these changes).
+Implemented on branch `feat/hermes-v017-parity` (6 commits, 2026-06-21), built on top of the Hermes v0.17.0 audit findings (never written up as its own note). Merged + SHIPPED in v2.12.0 (the Hermes v0.17 catch-up release; task t-b2b590c6) — main is now at v2.13.0. [corrected 2026-06-27] Verified each phase: Debug build + ScarfCore tests green (641/642; the 1 failure is the known flaky RemoteSQLiteBackend subprocess race [[t-aud32]], not these changes).
 
 ## Observations
 - [tier1] Fixed 5 PRE-EXISTING bugs the v0.17 argv-vs-argparse audit surfaced (broken on v0.16 too, missed by prior cycles): `hermes audit`→`security audit` (bare audit routed to an agent turn); `migrate xai` needs `--apply` (was dry-run → silent no-op + false success); `acp --setup-browser` flag is `--yes` not `--assume-yes` (argparse exit 2); WhatsApp allowlist wrote a no-op `whatsapp.allowed_chats` (Hermes reads `allow_from`) — dropped from the chat-id editor; Settings now surfaces the real `config set` failure reason (managed-scope etc.). Commit 0d9e026. #tier1
@@ -25,5 +20,5 @@ Implemented on branch `feat/hermes-v017-parity` (6 commits, 2026-06-21), built o
 ## Relations
 - supersedes [[Hermes v0.16 Compatibility Decisions]]
 - implements [[Hermes Capability Gating Pattern]]
-- relates_to [[Hermes v0.17.0 Audit Findings]]
+- (no relation: a "Hermes v0.17.0 Audit Findings" note was never written — this decisions note is the surviving record of that audit)
 - relates_to [[Hermes Release Audit Process]]

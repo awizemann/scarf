@@ -5,10 +5,10 @@ permalink: scarf/decisions/section-audit-remediation-2026-09
 tags: [security, miniapps, widgets, audit, decision]
 source_paths: [scarf/scarf/Features/Projects/Views/Widgets/WidgetPathResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppManifest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppPermission.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectHermesShadowDetector.swift, scarf/Packages/ScarfDesign/Sources/ScarfDesign/ScarfLinkPolicy.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/SQLValueInliner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesWebhookList.swift, scarf/scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift, scarf/scarf/Features/Plugins/ViewModels/PluginsViewModel.swift, scarf/Scarf iOS/Projects/Widgets/WebviewWidgetView.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: 871ced409d12711f2ddd74a0cf5301b640294fb5
 created: 2026-09-02
-updated: 2026-09-02
-reviewed: 2026-09-09
+updated: 2026-09-10
+reviewed: 2026-09-10
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -25,7 +25,7 @@ Verification note: every F1 finding was confirmed against the code before fixing
 - [decision] `MiniAppPermission.fileRead` is now `isSensitive`, so whole-project read is never pre-ticked for agent-generated mini-apps; and the Dashboard shadow-consolidation one-liner never clobbers the user's ~/.hermes/auth.json, with the `.help` copy reworded to match. ⚠️ **F9 correction:** F1 implemented this as `cp -n`, which BROKE the command on macOS hosts — BSD `cp -n` exits 1 when it skips, aborting the `&&` chain so the `chmod` and the `mv` never ran, on exactly the case `-n` was added to protect. Now `{ [ -e dest ] || cp src dest; }`. See F9 below. #security
 
 - [gotcha] `RemoteSQLiteBackend` ships SQL inside `<<'__SCARF_SQL__'`; QUOTING the delimiter stops expansion but NOT a value that closes the document, so any `.text` param with a newline was a remote shell-exec vector. `SQLValueInliner.encodeText` now splits newlines into `char(10)`/`char(13)` concatenation — ENCODE, never reject: a pasted multi-line search query is a legitimate param, and rejecting would have broken search. #security
-- [convention] `--` end-of-options goes AFTER every flag and immediately before the positionals, never next to the verb: argparse reads every token following the first `--` as a positional, so a flag behind it is rejected as an unrecognized extra argument. This forced `kanban swarm`'s goal and `cron edit`'s job_id to move from position 1 to the end. #cli
+- [convention] `--` end-of-options goes AFTER every flag and immediately before the positionals, never next to the verb: argparse reads every token following the first `--` as a positional, so a flag behind it is rejected as an unrecognized extra argument. This forced `kanban swarm`'s goal and `cron edit`'s job_id to move from position 1 to the end. (The `swarm` wrapper itself was deleted from `KanbanService` in P25 — no Scarf surface drove it — so `cron edit` is the live instance; the rule is unchanged.) #cli
 - [gotcha] Kanban free-text reasons must be ONE argv element, not space-split — the CLI does `" ".join(args.reason)`, so splitting only destroyed runs of whitespace and handed argparse dash-leading words to claim as flags. #cli
 - [decision] Substring-matching CLI prose is not a protocol: both `"no matching tasks"` sentinels are deleted. Both argv paths always pass `--json`, and `_cmd_list` returns `json.dumps([])` before that line can print — so the check was dead code that a task TITLED "no matching tasks" could still trip, wiping a populated board. #security
 - [gotcha] `SSHTransport.writeFile` chmods the TMP file 0600 in the same command as, and BEFORE, the `mv` — a chmod after the rename leaves the real path world-readable for a window, and scp creates the upload with the remote umask. The private-mode basename list is shared with LocalTransport via `TransportPrivateMode`; remote `.env` had been landing world-readable while the local side enforced 0600. #security

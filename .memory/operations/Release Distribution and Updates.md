@@ -5,11 +5,11 @@ permalink: scarf/ops/release-distribution-and-updates
 tags: [release, sparkle, distribution]
 source_paths: [scripts/release.sh, README.md]
 source_paths_inferred: false
-source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-05-29
 updated: 2026-06-06
-reviewed: 2026-09-04
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

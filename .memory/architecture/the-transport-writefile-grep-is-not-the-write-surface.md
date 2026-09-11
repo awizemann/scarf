@@ -3,17 +3,18 @@ title: The transport writeFile grep is not the write surface — helper seams an
 type: note
 permalink: scarf/architecture/the-transport-writefile-grep-is-not-the-write-surface
 tags: [transport, dataloss, guarded-write, projects]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Core/Persistence/ServerRegistry.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Core/Persistence/ServerRegistry.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
 - [gotcha] TWO HELPER SEAMS exist but are now properly walled off with explicit naming and enforcement: `ServerContext.unguardedWriteText` and the transport's raw `unguardedWriteFile` primitive. The E0 census found them, but GW-E2a / GW-F5 have since converted all five unsafe read-then-write callers in `SettingsViewModel.saveDirectYAML` and `GatewayConfigWriter.saveList` to use `GuardedTextFile` instead — both now hold the write lock across read-modify-write, surfacing refusals through the same `saveMessage` a write failure does. The remaining `UNGUARDED-WRITE` call sites are marked with line-level annotations (rule 2 in UnguardedWriteScanTests) so they're impossible to miss in review, and the `unguardedWriteText` name itself prevents accidental confusion with protected paths. #dataloss #convention
+- [fact] `saveDirectYAML` (P33 refactor) explicitly joins a `writeChain` for intra-process serialization — the guarded lock protects BYTES from other processes, but the chain orders THIS process's own writes against each other. Without the chain, a config write queued by one async task would be overwritten by a concurrent toggle's write/re-read pair. #dataloss
 - [gotcha] `ServerRegistry` (servers.json — the user's entire server list) bypassed transports entirely before GW-E2b: `load()` set `entries = []` on ANY read/decode failure and `save()` published via `Data.write(to:options:.atomic)`. That pattern is now CLOSED (5dd8e409): it runs `GuardedSidecarStore` over `LocalTransport`, refuses forever (its rows exist nowhere else), keeps a one-deep `.bak`, and surfaces `ServerRegistry.StoreDamage` as a banner in ManageServersView. #dataloss
 - [constraint] A guarded-write scanner must cover THREE idioms, not one: (1) the renamed transport method, (2) the local helper seams (`unguardedWriteText`) with line-level annotation enforcement, and (3) `Data.write(to:)` against a Scarf-owned state path. #convention
 - [fact] The remaining local `Data.write` sites are legitimately outside the guarded surface — export staging, user-chosen save panels, diagnostics, and the transports' own internals — so the rule is about Scarf-owned LIVE state, not about Foundation file APIs per se.
