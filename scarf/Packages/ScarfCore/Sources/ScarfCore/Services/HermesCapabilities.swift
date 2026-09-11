@@ -1105,6 +1105,26 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `"logprob_threshold": -1.0,`.
     public var hasSTTLocalVADTuning: Bool { isV0191OrLater }
 
+    /// `provider_override` in the `kanban list --json` task envelope.
+    ///
+    /// **Floor v0.19.1 (`v2026.7.30`), not v0.21.1.** P42 read the FILE move
+    /// for the KEY's birth: the task dict moved out of
+    /// `hermes_cli/kanban.py::_task_to_dict` into
+    /// `hermes_cli/kanban_output.py::_TASK_DICT_FIELDS` at `v2026.9.7`, and
+    /// grepping the new file across the tags found only the new tag. The key
+    /// itself is two releases older. Re-walked by opening
+    /// `hermes_cli/kanban.py` at every `v2026.*` tag: `_task_to_dict` gains
+    /// `"provider_override": t.provider_override` at **`v2026.7.30`**
+    /// (`:80`; `pyproject.toml` = `0.19.1`) and has it at every later tag
+    /// including `v2026.8.31` (`:80`); `v2026.7.20` (0.19.0) has no
+    /// occurrence of the name in the file at all. `list --json` prints
+    /// `[_task_to_dict(t) for t in tasks]` at `v2026.7.30:1594`, so that tag
+    /// is the first that EMITS it, not merely the first that stores it.
+    ///
+    /// Gates the inspector's `Provider:` chip only; the DECODE is
+    /// `decodeIfPresent` and stays ungated (C1).
+    public var hasKanbanProviderOverride: Bool { isV0191OrLater }
+
     /// `gateway.profile_routes` (and the top-level `profile_routes` form) —
     /// per-guild/channel/thread routing of inbound gateway messages to
     /// distinct Hermes profiles (hermes-agent commit 5e65f6d79f
@@ -1670,14 +1690,6 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// (`hermes_cli/kanban_output.py:23`) — the real failure reason without
     /// a second `kanban show` round-trip. v0.21.1+.
     public var hasKanbanCompletionContract: Bool { isV0211OrLater }
-
-    /// `provider_override` in the `--json` task envelope. Walked across every
-    /// `v2026.*` tag: the key first appears in `_TASK_DICT_FIELDS` at
-    /// `v2026.9.7` (= v0.21.1) and is absent from `v2026.8.31` (0.21.0) and
-    /// every earlier tag (`hermes_cli/kanban_output.py:18-24`). Gates the
-    /// inspector's `Provider:` chip so a pre-target host renders exactly as
-    /// the prior Scarf release did (C1).
-    public var hasKanbanProviderOverride: Bool { isV0211OrLater }
 
     /// `hermes auth priority <provider> <target> <n>` and `auth refresh
     /// <provider> [target]` — reorder a credential pool and clear one

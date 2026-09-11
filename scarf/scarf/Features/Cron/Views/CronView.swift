@@ -1458,6 +1458,17 @@ struct CronJobEditor: View {
     @State private var form = FormState()
     @State private var isEditMode = false
 
+    /// The TARGET host's capabilities, for the duplicate gaps line only.
+    /// Read from the environment rather than plumbed through the three
+    /// `supports…` flags above because the gaps list needs the FLOORS, not
+    /// just "is the field visible" — and because `.empty` (no store) is
+    /// exactly the state in which the parent's own `?? false` gates blank all
+    /// three values, so naming all three is the correct answer there.
+    @Environment(\.hermesCapabilities) private var duplicateGapCapabilitiesStore
+    private var duplicateGapCapabilities: HermesCapabilities {
+        duplicateGapCapabilitiesStore?.capabilities ?? .empty
+    }
+
     /// The host roster plus any skill already on the job that the roster
     /// doesn't list, in roster order then job order. Keeps the block (and
     /// "Clear all skills on save") reachable on a host with an empty roster.
@@ -1605,7 +1616,7 @@ struct CronJobEditor: View {
             // tick. Naming them is the honest alternative to widening the
             // form; see `HermesCronJob.settingsACreateFormCannotCarry`.
             if case .duplicate(let job) = mode {
-                let dropped = job.settingsACreateFormCannotCarry
+                let dropped = job.settingsACreateFormCannotCarry(caps: duplicateGapCapabilities)
                 if !dropped.isEmpty {
                     Text("This copy won't carry: \(dropped.joined(separator: ", ")). Set those with `hermes cron edit` on the host.")
                         .scarfStyle(.caption)
@@ -1640,7 +1651,20 @@ struct CronJobEditor: View {
                 // parse back, so seeding the field from it made every
                 // one-shot edit fail at `parse_schedule`. See
                 // `CronSchedule.editValue`.
-                form.schedule = job.schedule.editValue
+                // `.duplicate` of a SPENT one-shot seeds the schedule field
+                // EMPTY, not from the record: `cron create` refuses a
+                // past-grace one-shot outright
+                // (`_next_run_or_reject_past_oneshot`, `cron/jobs.py:1758`
+                // → `:1663-1666` @ `v2026.9.7`), so pre-filling the dead time
+                // built an argv guaranteed to exit 1 while the Duplicate hint
+                // was already telling the user "with a new time". Save is
+                // `.disabled(form.schedule.isEmpty)`, so an empty field IS the
+                // ask. `.edit` keeps `editValue` — editing a past one-shot's
+                // OTHER fields is a different verb with a different refusal.
+                form.schedule = {
+                    if case .duplicate = mode { return job.duplicateSeedSchedule() }
+                    return job.schedule.editValue
+                }()
                 form.prompt = job.prompt
                 form.deliver = job.deliver ?? ""
                 form.failureDeliver = job.failureDeliver ?? ""

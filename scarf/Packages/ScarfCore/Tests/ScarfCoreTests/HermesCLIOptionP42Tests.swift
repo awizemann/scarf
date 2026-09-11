@@ -177,12 +177,13 @@ import Foundation
         #expect(bare.id == "t_1")
     }
 
-    /// The floor behind the `Provider:` chip, walked rather than asserted:
-    /// `provider_override` first appears in `_TASK_DICT_FIELDS` at
-    /// `v2026.9.7`; `v2026.8.31` (0.21.0) has `model_override` and not it.
-    @Test func theProviderChipIsGatedAtV0211() {
-        #expect(HermesCapabilities.parse("Hermes Agent v0.21.1 (2026.9.7)").hasKanbanProviderOverride)
-        #expect(!HermesCapabilities.parse("Hermes Agent v0.21.0 (2026.8.31)").hasKanbanProviderOverride)
+    /// The floor behind the `Provider:` chip. P42 read the FILE move for the
+    /// KEY's birth and floored this at v0.21.1; the real floor is **v0.19.1**
+    /// (`v2026.7.30:80`). See `HermesKanbanProviderFloorP42bTests` for the
+    /// full walk — this pins the one fact this suite's chip depends on.
+    @Test func theProviderChipIsGatedAtV0191() {
+        #expect(HermesCapabilities.parse("Hermes Agent v0.19.1 (2026.7.30)").hasKanbanProviderOverride)
+        #expect(!HermesCapabilities.parse("Hermes Agent v0.19.0 (2026.7.20)").hasKanbanProviderOverride)
         #expect(!HermesCapabilities.empty.hasKanbanProviderOverride)
         // `model_override`'s own gate is older and must not move with it.
         #expect(HermesCapabilities.parse("Hermes Agent v0.21.0 (2026.8.31)").hasKanbanV015)

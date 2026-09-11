@@ -326,6 +326,12 @@ struct CronEditorView: View {
                         TextField("Run at (ISO8601)", text: $scheduleRunAt)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
+                        if oneShotTimeIsUnusable {
+                            Text("Pick a future time — a one-shot more than \(Int(HermesCronJob.oneShotGraceSeconds)) s in the past can never fire.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .accessibilityIdentifier("cron.editor.pastOneShot")
+                        }
                     }
                 }
 
@@ -359,10 +365,38 @@ struct CronEditorView: View {
         }
     }
 
+    /// A `once` job whose `run_at` is already past Hermes's grace window, as
+    /// the FORM currently reads — i.e. what pressing Save would write.
+    ///
+    /// iOS persists by rewriting `cron/jobs.json` (`IOSCronViewModel.saveJobs`)
+    /// with no `cron create` in the path, so nothing downstream refuses it:
+    /// the record lands `scheduled`, and the misfire backstop then declines to
+    /// resurrect a one-shot more than `ONESHOT_GRACE_SECONDS` overdue
+    /// (`cron/scheduler_provider.py:274-279` @ `v2026.9.7`). A "scheduled" job
+    /// that can never fire is exactly the ghost
+    /// `_next_run_or_reject_past_oneshot` (`cron/jobs.py:1669-1680`) exists to
+    /// stop the CLI writing, so this form is where iOS has to stop it. Reuses
+    /// the Mac's own predicate, `HermesCronJob.oneShotScheduleIsPastGrace` —
+    /// including its conservative +12h window for a naive timestamp: a value
+    /// still future in SOME zone is accepted, because Scarf cannot know the
+    /// host's. An EMPTY time is unusable for the same reason (a `once` with no
+    /// `run_at` has no `next_run_at` to compute) and that string-level helper
+    /// answers `false` for one, so it is checked here.
+    /// Applies to `.edit` as well as the duplicate that motivated it: the
+    /// write is the same `jobs.json` rewrite either way, and re-saving a
+    /// `once` record whose time is spent re-writes the same ghost. Switching
+    /// the kind, or supplying a future time, is what unblocks Save.
+    private var oneShotTimeIsUnusable: Bool {
+        guard scheduleKind == "once" else { return false }
+        let raw = scheduleRunAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return true }
+        return HermesCronJob.oneShotScheduleIsPastGrace(raw)
+    }
+
     private var isValid: Bool {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !n.isEmpty && !p.isEmpty
+        return !n.isEmpty && !p.isEmpty && !oneShotTimeIsUnusable
     }
 
     private func buildJob() -> HermesCronJob {

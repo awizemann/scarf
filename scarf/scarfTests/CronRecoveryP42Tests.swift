@@ -11,6 +11,10 @@ import ScarfCore
 @MainActor
 @Suite struct CronRecoveryP42Tests {
 
+    /// P42b: the gaps list is host-shaped now — these three tests are about
+    /// the RECORD-shaped half, so they pass a host that has every field.
+    static let modernHost = HermesCapabilities.parse("Hermes Agent v0.21.1 (2026.9.7)")
+
     static func job(
         state: String,
         kind: String,
@@ -123,12 +127,12 @@ import ScarfCore
     /// sheet's job; producing the list is the model's.
     @Test func theDuplicateSheetNamesEverySettingItCannotCarry() throws {
         let bare = try Self.job(state: "completed", kind: "cron")
-        #expect(bare.settingsACreateFormCannotCarry.isEmpty)
+        #expect(bare.settingsACreateFormCannotCarry(caps: Self.modernHost).isEmpty)
 
         let loaded = try Self.job(
             state: "completed", kind: "cron",
             extra: #""model":"kimi-k2","provider":"nous","reasoning_effort":"high","monitor_script":"/s/check.sh","context_from":["self"]"#)
-        let dropped = loaded.settingsACreateFormCannotCarry
+        let dropped = loaded.settingsACreateFormCannotCarry(caps: Self.modernHost)
         #expect(dropped.contains { $0.contains("kimi-k2") })
         #expect(dropped.contains { $0.contains("nous") })
         #expect(dropped.contains { $0.contains("high") })
@@ -144,7 +148,7 @@ import ScarfCore
         let blank = try Self.job(
             state: "completed", kind: "cron",
             extra: #""monitor_script":"","monitor_url":"   ","provider":"""#)
-        #expect(blank.settingsACreateFormCannotCarry.isEmpty)
+        #expect(blank.settingsACreateFormCannotCarry(caps: Self.modernHost).isEmpty)
         #expect(!blank.isMonitorJob)
     }
 

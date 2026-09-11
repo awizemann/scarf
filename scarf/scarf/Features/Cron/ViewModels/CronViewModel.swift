@@ -566,6 +566,31 @@ final class CronViewModel {
                 ? "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
                 : "That job already finished and can't be re-armed — duplicate it to schedule a new one."
         }
+        // `rearm_oneshot`'s own two refusal families, both of which used to
+        // fall through to the generic `prefix(200)` truncation of raw CLI text.
+        //
+        // 1. `_REARM_RECURRING_ERROR` (`cron/jobs.py:2040-2042` @ `v2026.9.7`,
+        //    raised at `:2054` on the parsed schedule and again at `:2066` on
+        //    the stored record) — re-arm is one-shot-only. Exit 1 through
+        //    `cron_resume`'s `except (AmbiguousJobReference, ValueError)`
+        //    (`hermes_cli/cron.py:693-695`). Reachable when the offer was
+        //    computed against a record that has since been edited to a
+        //    recurring schedule.
+        if output.contains("Cannot re-arm recurring jobs") {
+            return String(localized: "Re-arm is for one-shot jobs only — this one repeats. Use Resume, or Run Now for a single extra run.")
+        }
+        // 2. The live-claim refusals (`:2061-2064`): `_claim_is_live`
+        //    (`:2031-2037`) is true only for a well-formed claim aged within
+        //    `[0, ttl)` — a run claim's TTL is at least 600s
+        //    (`_oneshot_run_claim_ttl_seconds`, `:164-172`) and a fire claim's
+        //    is `FIRE_CLAIM_TTL_SECONDS = 300` (`:891`) — and a future-dated
+        //    or malformed claim counts as STALE so it can never wedge a job.
+        //    So the remedy really is "wait": the claim goes when the run
+        //    clears it, and lapses on its own if the run dies. Verified
+        //    against the claim logic before naming it.
+        if output.contains("Cannot re-arm one-shot over a live") {
+            return String(localized: "That job has a run in progress — try again after it finishes.")
+        }
         // v0.21.1 (A9): the cron lifecycle guard refuses a `--script` that
         // lives on a cloud-synced FileProvider path WITHOUT opening it
         // (`cron/lifecycle_guard.py:981-994`), and the same wording covers

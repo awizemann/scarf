@@ -271,7 +271,7 @@ struct FleetApplyExecutor: Sendable {
         let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
 
         var created = 0, skipped = 0, failed = 0, deliverAllDowngrades = 0, scriptOnlySkipped = 0
-        var monitorSkipped = 0, continuityDowngrades = 0
+        var monitorSkipped = 0, continuityDowngrades = 0, crossJobContextDowngrades = 0
         var cancelledRemaining = 0
         var createdNames: [String] = []
         // First failing `cron create`'s combined stdout+stderr — the only
@@ -351,6 +351,18 @@ struct FleetApplyExecutor: Sendable {
                 // degraded, it failed, and reporting both would double-count
                 // the same job in two different notes.
                 if job.hasRunToRunContinuity { continuityDowngrades += 1 }
+                // A `context_from` ref naming ANOTHER job is the second half
+                // of the same field and gets the same treatment for a harder
+                // reason: there is no `--context-from` option on `cron
+                // create`/`edit` at all (`hermes_cli/subcommands/cron.py`
+                // exposes only `--continuity`/`--no-continuity`, `:76-84`,
+                // `:115-120` @ `v2026.9.7`), so nothing CAN forward it — and
+                // `_validate_context_from_refs`
+                // (`tools/cronjob_job_args.py:326-337`) would reject the ids
+                // anyway, because they name jobs on the SOURCE host. Surface,
+                // never forward. Counted on the success arm: the copy landed,
+                // it just wakes without the other job's output.
+                if !job.crossJobContextRefs.isEmpty { crossJobContextDowngrades += 1 }
             } else {
                 failed += 1
                 if firstFailureDetail == nil {
@@ -406,6 +418,9 @@ struct FleetApplyExecutor: Sendable {
         // history. Same created-but-degraded rule as the deliver note.
         if continuityDowngrades > 0 {
             parts.append(String(localized: "\(continuityDowngrades) w/o run-to-run continuity"))
+        }
+        if crossJobContextDowngrades > 0 {
+            parts.append(String(localized: "\(crossJobContextDowngrades) w/o cross-job context (no CLI flag to copy it)"))
         }
         let status = Self.cronFieldStatus(
             created: created, failed: failed,

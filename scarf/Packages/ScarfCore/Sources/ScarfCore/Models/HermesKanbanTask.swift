@@ -78,17 +78,31 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     /// The inference PROVIDER paired with `modelOverride`
     /// (`_TASK_DICT_FIELDS`, `hermes_cli/kanban_output.py:22`).
     ///
-    /// **Floor v0.21.1.** Walked across every `v2026.*` tag: the key first
-    /// appears in `_TASK_DICT_FIELDS` at `v2026.9.7` and is absent from
-    /// every earlier tag including `v2026.8.31` (0.21.0). The inspector gates
-    /// its chip on `HermesCapabilities.hasKanbanProviderOverride` so a
-    /// pre-target host renders byte-identically (C1); the DECODE itself needs
-    /// no gate, being `decodeIfPresent`.
+    /// **Floor v0.19.1 (`v2026.7.30`).** P42 first wrote v0.21.1 here by
+    /// grepping `_TASK_DICT_FIELDS`, which dates the FILE MOVE (`kanban.py::
+    /// _task_to_dict` → `kanban_output.py::_TASK_DICT_FIELDS` at `v2026.9.7`)
+    /// and not the KEY. Re-walked by opening `hermes_cli/kanban.py` at every
+    /// `v2026.*` tag: `"provider_override": t.provider_override` enters
+    /// `_task_to_dict` at `v2026.7.30:80` (0.19.1) and is in every later tag
+    /// — `v2026.8.31:80` included — while `v2026.7.20` (0.19.0) has no
+    /// occurrence of the name in the file. `list --json` prints
+    /// `[_task_to_dict(t) for t in tasks]` (`v2026.7.30:1594`), so the key is
+    /// EMITTED from that tag. The inspector gates its chip on
+    /// `HermesCapabilities.hasKanbanProviderOverride`; the DECODE itself
+    /// needs no gate, being `decodeIfPresent`.
     public let providerOverride: String?
     /// `project_id` — the optional link to a first-class Hermes Project
     /// (`hermes_cli/projects_db`), declared on the `tasks` DDL at
     /// `hermes_cli/kanban_db.py:866-869` and emitted in every task envelope
     /// (`kanban_output.py:20`) @ `v2026.9.7`.
+    ///
+    /// **No capability flag, deliberately.** Walked the same way as
+    /// `providerOverride`: `"project_id": t.project_id` enters
+    /// `_task_to_dict` at `v2026.7.1:72` (0.18.0) and is absent at
+    /// `v2026.6.19`. Nothing in Scarf's UI is gated on it — it is decode-only
+    /// and `decodeIfPresent`, so a pre-v0.18 row decodes to `nil`, which is
+    /// the same answer an unlinked task gives. A flag would gate nothing, so
+    /// there is none; add one the day a surface renders it.
     ///
     /// This is NOT Scarf's project key and cannot become one: `create_task`
     /// resolves the id against the creator's per-profile `projects.db` and

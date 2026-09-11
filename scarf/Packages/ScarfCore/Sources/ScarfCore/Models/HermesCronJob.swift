@@ -464,6 +464,30 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         return nil
     }
 
+    /// The schedule a DUPLICATE form should open with — `schedule.editValue`
+    /// for everything except a one-shot whose `run_at` is already past
+    /// Hermes's grace window, which seeds EMPTY.
+    ///
+    /// A duplicate carries the source record's fields, and for a spent
+    /// one-shot the one field it must NOT carry is the time. `cron create`
+    /// refuses it outright: `_next_run_or_reject_past_oneshot`
+    /// (`cron/jobs.py:1669-1680` @ `v2026.9.7`, called from the create path
+    /// at `:1758`) raises `_oneshot_past_grace_error` (`:1663-1666`) when
+    /// `compute_next_run` returns `None` for `kind == "once"`, so the Mac's
+    /// copy is a guaranteed exit 1 with the argv already built. iOS's create
+    /// is a `jobs.json` rewrite with no CLI in the path, so there the copy
+    /// LANDS — permanently "scheduled" and never runnable, because the
+    /// misfire backstop refuses to resurrect a one-shot more than
+    /// `ONESHOT_GRACE_SECONDS` overdue (`cron/scheduler_provider.py:274-279`).
+    ///
+    /// Empty is the honest seed on both: the Duplicate hint already says "with
+    /// a new time", and an empty schedule field is what makes the user supply
+    /// one (the Mac's Save is `.disabled(form.schedule.isEmpty)`; iOS's
+    /// `CronEditorView.isValid` refuses a `once` job with no future `run_at`).
+    public nonisolated func duplicateSeedSchedule(now: Date = Date()) -> String {
+        isPastDeadlineOneShot(now: now) ? "" : schedule.editValue
+    }
+
     /// A fresh record seeded from this one, for iOS's Duplicate (round-4
     /// decision 5). iOS creates by rewriting `cron/jobs.json` rather than by
     /// shelling `cron create`, so its "ordinary create" is a NEW record —
@@ -479,7 +503,11 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// dead job's terminal state (`effective_job_state` preserves
     /// `completed`/`error` regardless of `enabled`, `cron/jobs.py:488-503` @
     /// `v2026.9.7`) and be just as unrunnable as its source.
-    public nonisolated func duplicatedAsNewJob(id newID: String) -> HermesCronJob {
+    ///
+    /// A one-shot whose time is already past grace has that time dropped too
+    /// — see `duplicateSeedSchedule` for why, and `CronEditorView.isValid`
+    /// for the gate that then makes the user supply a new one.
+    public nonisolated func duplicatedAsNewJob(id newID: String, now: Date = Date()) -> HermesCronJob {
         var carried = extra
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
                            "last_status", "last_dispatch", "last_delivery_unverified",
@@ -493,9 +521,21 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             repeatObject["completed"] = .int(0)
             carried["repeat"] = .object(repeatObject)
         }
+        // A spent one-shot's time is the one field a duplicate must NOT
+        // carry (see `duplicateSeedSchedule`): iOS's create is a `jobs.json`
+        // rewrite with no CLI to refuse it, so carrying it verbatim wrote a
+        // record that is "scheduled" forever and can never fire
+        // (`cron/scheduler_provider.py:274-279` @ `v2026.9.7`). Blank the
+        // time and let the editor make the user pick one; `display` goes with
+        // it because it is the label OF that dead time.
+        let seedSchedule = isPastDeadlineOneShot(now: now)
+            ? CronSchedule(kind: schedule.kind, runAt: nil, display: nil,
+                           expression: schedule.expression, minutes: schedule.minutes,
+                           extra: schedule.extra)
+            : schedule
         return HermesCronJob(
             id: newID, name: name, prompt: prompt, skills: skills, model: model,
-            schedule: schedule, enabled: true, state: "scheduled", deliver: deliver,
+            schedule: seedSchedule, enabled: true, state: "scheduled", deliver: deliver,
             nextRunAt: nil, lastRunAt: nil, lastError: nil,
             preRunScript: preRunScript, deliveryFailures: nil,
             lastDeliveryError: nil, timeoutType: timeoutType,
@@ -837,10 +877,38 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// (`cron/scheduler_prompt.py:77-79`). So read it the same way, and
     /// accept the already-resolved id as well as the literal sentinel.
     public nonisolated var hasRunToRunContinuity: Bool {
-        (contextFrom ?? []).contains { ref in
-            let trimmed = ref.trimmingCharacters(in: .whitespaces)
-            return trimmed.lowercased() == "self" || trimmed == id
-        }
+        !selfContextRefs.isEmpty
+    }
+
+    /// The `context_from` refs that mean "this job's own previous output".
+    private nonisolated var selfContextRefs: [String] {
+        (contextFrom ?? []).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.lowercased() == "self" || $0 == id }
+    }
+
+    /// `context_from` refs naming OTHER jobs — cross-job context, which
+    /// `build_prompt` resolves by id (`cron/scheduler_prompt.py:77-79` @
+    /// `v2026.9.7`).
+    ///
+    /// **No CLI can forward these, and no copy should.** `cron create` and
+    /// `cron edit` expose only `--continuity`/`--no-continuity`
+    /// (`hermes_cli/subcommands/cron.py:76-84`, `:115-120` @ `v2026.9.7`),
+    /// which `_apply_continuity` implements purely as "ensure/remove `self`
+    /// in `context_from`" and leaves every other ref untouched
+    /// (`tools/cronjob_job_args.py:313-323`); there is no `--context-from`
+    /// option anywhere in the CLI at that tag. The only setters are the
+    /// agent's `cronjob` tool and the web dashboard.
+    ///
+    /// And even if there were a flag, the ids would not survive a fleet copy:
+    /// `_validate_context_from_refs` (`tools/cronjob_job_args.py:326-337`)
+    /// rejects any non-`self` ref that `get_job` cannot find in the TARGET
+    /// profile, and a fleet copy addresses a different host whose jobs carry
+    /// different ids. So the copier SURFACES the loss instead of forwarding
+    /// it — the same treatment `--continuity` gets, one line up.
+    public nonisolated var crossJobContextRefs: [String] {
+        let mine = Set(selfContextRefs)
+        return (contextFrom ?? []).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !mine.contains($0) }
     }
 
     /// `extra[key]` as a trimmed non-empty string, or `nil`. Hermes writes
@@ -870,7 +938,20 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// So NAME them. The sheet shows this list; it does not pretend the copy
     /// is faithful.
-    public nonisolated var settingsACreateFormCannotCarry: [String] {
+    ///
+    /// **`caps` is required because the list is HOST-shaped, not just
+    /// record-shaped.** The two call sites (`CronView`'s duplicate sheet,
+    /// `BotRoutinesView`'s) already blank `workdir`, `noAgent` and
+    /// `failureDeliver` below each flag's floor — `hasCronWorkdir` (v0.12),
+    /// `hasCronNoAgent` (v0.13), `hasCronFailureDeliver` (v0.21.1) — before
+    /// handing the form to `createJob`. Those are real losses the form CAN
+    /// express on a newer host, and the gaps line said nothing about them, so
+    /// a `--workdir` job duplicated onto a pre-v0.12 host reported a faithful
+    /// copy and produced a job running from the wrong directory. Pass the
+    /// TARGET host's capabilities and the list names what that host drops too.
+    public nonisolated func settingsACreateFormCannotCarry(
+        caps: HermesCapabilities
+    ) -> [String] {
         var out: [String] = []
         if let model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
             out.append(String(localized: "model pin (\(model))"))
@@ -886,6 +967,20 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         }
         if hasRunToRunContinuity {
             out.append(String(localized: "run-to-run continuity"))
+        }
+        // Host-gated losses: the form HAS these fields, but the call site
+        // blanks each one below its floor rather than handing an older
+        // argparse a flag it will exit 2 on. Silent until now.
+        if let workdir, !workdir.trimmingCharacters(in: .whitespaces).isEmpty,
+           !caps.hasCronWorkdir {
+            out.append(String(localized: "working directory (\(workdir)) — host is below v0.12"))
+        }
+        if noAgent == true, !caps.hasCronNoAgent {
+            out.append(String(localized: "script-only (no-agent) mode — host is below v0.13"))
+        }
+        if let failureDeliver, !failureDeliver.trimmingCharacters(in: .whitespaces).isEmpty,
+           !caps.hasCronFailureDeliver {
+            out.append(String(localized: "failure delivery (\(failureDeliver)) — host is below v0.21.1"))
         }
         return out
     }
