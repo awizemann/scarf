@@ -16,7 +16,7 @@ public struct AuxiliaryModel: Sendable, Equatable {
     /// `disabled`) meaning "explicitly disable thinking" as opposed to an
     /// empty string, which means "inherit the provider default". Scarf
     /// stores the raw string and writes it verbatim; validation of the
-    /// allowed set is ``HermesReasoningEffort`` — the one vocabulary, whose
+    /// allowed set lives in ``HermesReasoningEffort`` — the one vocabulary, whose
     /// per-level floors are walked on `hasReasoningEffortMax` /
     /// `hasReasoningEffortUltra`. Empty means "unset — inherit the provider
     /// default" and is not one of its levels; the picker offers it as a

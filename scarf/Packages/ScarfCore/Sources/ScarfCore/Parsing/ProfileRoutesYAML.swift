@@ -329,13 +329,14 @@ public enum ProfileRoutesYAML {
             }
 
             // The full decoder, not `HermesYAML.stripYAMLQuotes`: every
-            // scalar in this block is emitted by
-            // `ProfileRoutesWriter.render` through
-            // `YAMLScalar.quoteIfNeeded` / `singleQuoted`, which escape
-            // `\\`, `\n`, `\"` and `\xNN` — and `stripYAMLQuotes` returns a
-            // double-quoted BODY verbatim, so a route name with a backslash
-            // came back doubled and grew one `\` per save (P19's
-            // writer-and-reader rule, missed when P32 moved the writer).
+            // scalar in this block is emitted by `ProfileRoutesWriter.render`
+            // through `YAMLScalar.quoteIfNeeded`, whose double-quoted arm
+            // escapes `\\`, `\"`, `\n`, `\t` and `\xNN` (ids additionally go
+            // through `singleQuoted`, which escapes only `''`). And
+            // `stripYAMLQuotes` returns a double-quoted BODY verbatim, so a
+            // route name with a backslash came back doubled and grew one `\`
+            // per save (P19's writer-and-reader rule, missed when P32 moved
+            // the writer).
             let value = YAMLScalar.unquote(
                 rawValue.hasPrefix("#") ? "" : rawValue
             )

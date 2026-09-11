@@ -212,9 +212,9 @@ public enum YAMLScalar {
     /// `---` or `...` — ordinary in pasted prose or markdown — terminates
     /// the document mid-scalar and PyYAML raises on the whole file.
     ///
-    /// Lossless in both directions:
-    /// `HermesFileService.unquote` and `HermesBotProfileYAML.unquote`
-    /// reverse it, and so does PyYAML.
+    /// Lossless in both directions: ``unquote(_:)`` reverses it (and so do
+    /// `HermesFileService.unquote` / `HermesBotProfileYAML.unquote`, which are
+    /// one-line forwarders over it), and so does PyYAML.
     public static func doubleQuoted(_ raw: String) -> String {
         var out = "\""
         for scalar in raw.unicodeScalars {
@@ -223,6 +223,9 @@ public enum YAMLScalar {
             case "\"": out += "\\\""
             case "\n": out += "\\n"
             case "\r": out += "\\r"
+            // `\t`, which is also how PyYAML's own writer spells a tab in a
+            // double-quoted scalar (`yaml.safe_dump("a\tb")` → `"a\\tb"`,
+            // probed against PyYAML 6).
             case "\t": out += "\\t"
             default:
                 // A raw control character makes PyYAML's reader refuse the
@@ -314,6 +317,19 @@ public enum YAMLScalar {
             case "\\": out.append("\\")
             case "\"": out.append("\"")
             case "/": out.append("/")
+            // The rest of PyYAML's `ESCAPE_REPLACEMENTS`. Hermes's own writer
+            // does NOT produce these — `atomic_yaml_write` passes
+            // `allow_unicode=True` (`utils.py:271` @ `v2026.9.7`), which sends
+            // U+0085 / U+00A0 / U+2028 / U+2029 out RAW inside single quotes
+            // (probed against PyYAML 6, not reasoned about) — and neither does
+            // `doubleQuoted`, which spells them `\uNNNN`. They are here
+            // because PyYAML's READER accepts them, so a hand-edited
+            // config.yaml can carry them and this claims to decode "the way
+            // PyYAML does".
+            case "N": out.append("\u{85}")
+            case "_": out.append("\u{A0}")
+            case "L": out.append("\u{2028}")
+            case "P": out.append("\u{2029}")
             case "x": out.append(hex(2) ?? "\\x")
             case "u": out.append(hex(4) ?? "\\u")
             case "U": out.append(hex(8) ?? "\\U")

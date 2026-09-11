@@ -2395,8 +2395,12 @@ struct HermesFileService: Sendable {
         return nil
     }
 
-    /// The reader half of `YAMLScalar`'s writers — `\\`, `\"`, `\n`, `\r`,
-    /// `\t`, `\xNN`, `\uNNNN`, and `''` inside single quotes.
+    /// The reader half of `YAMLScalar`'s writers: PyYAML's whole escape
+    /// table inside double quotes (`\\ \" \/ \n \r \t \0 \a \b \f \v \e
+    /// \N \_ \L \P \xNN \uNNNN \UNNNNNNNN`) and `''` inside single quotes.
+    /// Wider than it was before P37 — the old local copy stopped at
+    /// `\\ \" \n \r \t \xNN \uNNNN` and passed the rest through, which is
+    /// simply a reader that cannot read what PyYAML writes.
     ///
     /// P37: this WAS a second copy of that escape table, and it differed
     /// from the one in `HermesBotProfileYAML` in exactly the way that

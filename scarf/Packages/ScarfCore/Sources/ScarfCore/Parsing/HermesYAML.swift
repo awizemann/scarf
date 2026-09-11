@@ -52,9 +52,15 @@ public enum HermesYAML {
         var values: [String: String] = [:]
         var lists: [String: [String]] = [:]
         var maps: [String: [String: String]] = [:]
-        /// Section headers already opened once, so the last-wins purge below
-        /// can tell a genuine duplicate block from a first opening.
-        var openedPaths: Set<String> = []
+        /// Every path this walk has already WRITTEN — a section header it
+        /// opened, a flow map or flow list it parsed, or a scalar it assigned.
+        /// The last-wins purge below fires only on a path already in here,
+        /// which is what "this key appears twice" actually means. Recording
+        /// only the HEADERS was P37's own bug: the flow-list branch wrote
+        /// `lists[path]` and `continue`d without recording, so a later block
+        /// header at the same path read as a first open, the purge was
+        /// skipped, and `toolsets: [a]` + `toolsets:\n  - b` concatenated.
+        var writtenPaths: Set<String> = []
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
         // Indent of the most recent scalar `key: value` line at the current
@@ -218,14 +224,14 @@ public enum HermesYAML {
                 // block's descendants (`values` and `maps` as well as
                 // `lists`) as the second one opens.
                 //
-                // P37: only on a RE-OPENED path, which `openedPaths` decides
-                // — the purge used to run on EVERY header, and the comment
-                // said it was a no-op on a fresh one. It was not: a flat
-                // dotted key (`gateway.enabled: true`, which PyYAML keeps as
-                // a key of its own ALONGSIDE a `gateway:` mapping) matches
-                // the `gateway.` descendant prefix, so the FIRST opening of
-                // `gateway:` deleted it.
-                if !openedPaths.insert(path).inserted {
+                // P37: only on a path already WRITTEN, which `writtenPaths`
+                // decides — the purge used to run on EVERY header, and the
+                // comment said it was a no-op on a fresh one. It was not: a
+                // flat dotted key (`gateway.enabled: true`, which PyYAML
+                // keeps as a key of its own ALONGSIDE a `gateway:` mapping)
+                // matches the `gateway.` descendant prefix, so the FIRST
+                // opening of `gateway:` deleted it.
+                if !writtenPaths.insert(path).inserted {
                     lists.removeValue(forKey: path)
                     let staleDescendant = path + "."
                     for key in values.keys where key.hasPrefix(staleDescendant) {
@@ -260,6 +266,7 @@ public enum HermesYAML {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
                 maps[path] = parseFlatFlowMap(inner) ?? [:]
+                writtenPaths.insert(path)
                 continue
             }
             // Inline flow list `[...]` (`["work", "personal"]`, `[]`) →
@@ -280,10 +287,12 @@ public enum HermesYAML {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
                 lists[path] = parseFlatFlowList(inner)
+                writtenPaths.insert(path)
                 continue
             }
 
             values[path] = afterColon
+            writtenPaths.insert(path)
             lastScalarPath = path
 
             // Also record as a map entry under the parent so blocks like

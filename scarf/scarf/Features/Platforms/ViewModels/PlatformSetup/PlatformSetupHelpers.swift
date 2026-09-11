@@ -341,20 +341,27 @@ extension PlatformSetupForm {
             // comments the live keys out — or, for a config-only form like
             // whatsapp_cloud, writes `""` over the access token.
             self.loadRefusal = snapshot.loadFailure
-            if let failure = snapshot.loadFailure {
-                self.showSaveFailure(failure)
-                // P37 finding 5: do NOT apply. `apply` assigns every field
-                // from the snapshot, and on a refusal the snapshot's `env`
-                // is `[:]` and its `config` is nil — so every
-                // `env["…"] ?? ""` overwrote a live credential with a blank.
-                // The latched refusal already stops the blanks reaching disk
-                // (`commitSave` refuses while it is set), but the user still
-                // watched their token disappear with no way to know it was
-                // safe on the host. Nothing was proven, so nothing changes:
-                // the form keeps exactly what the last proven load put
-                // there, and the message names Reload.
-                return
-            }
+            if let failure = snapshot.loadFailure { self.showSaveFailure(failure) }
+            // P37 finding 5: do NOT apply when the `.env` half was refused.
+            // `apply` assigns every field from the snapshot, and on an
+            // `envFailure` the snapshot's `env` is `[:]` — so every
+            // `env["…"] ?? ""` overwrote a live credential with a blank. The
+            // latched refusal already stopped the blanks reaching disk
+            // (`commitSave` refuses while `loadRefusal` is set), but the user
+            // still watched their token disappear with no way to know it was
+            // safe on the host, and the obvious next move — retype it — is
+            // exactly the wrong one.
+            //
+            // The guard is on `envFailure`, NOT on `loadFailure`, because the
+            // two halves are not symmetric. `config` / `rawConfigText` are
+            // `nil` on a refusal and every form's `apply` already opens with
+            // `guard let cfg = snapshot.config?.<platform> else { return }`,
+            // so the config half declines itself. `env` is `[:]`, which is
+            // indistinguishable from "nothing is set yet", so only it needs
+            // stopping here. Guarding on `loadFailure` would suppress a
+            // PROVEN `.env` because the OTHER file was unreadable — which is
+            // this finding's own failure mode through the other door.
+            guard snapshot.envFailure == nil else { return }
             apply(snapshot)
         }
     }

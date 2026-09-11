@@ -198,6 +198,45 @@ struct HermesP37RefusedReadTests {
         #expect(vm.phoneNumberID == "1234567890")
     }
 
+    /// The over-correction P37's own fresh-eyes pass caught: the first fix
+    /// skipped `apply` on `loadFailure`, which is `envFailure ?? configFailure`
+    /// — so a form whose `.env` read was PROVEN and whose config.yaml was not
+    /// rendered nothing at all, and a first load showed an empty form over a
+    /// credential it had just read successfully. That is finding 5's own
+    /// failure mode, reintroduced through the other door.
+    ///
+    /// The guard belongs on `envFailure` alone, because the halves are not
+    /// symmetric: `FormSnapshot.config` / `rawConfigText` are nil on a
+    /// refusal and every form's `apply` already opens with `guard let cfg =
+    /// snapshot.config?.… else { return }`, while `env` is `[:]`, which is
+    /// indistinguishable from "nothing is set yet".
+    @Test func aProvenEnvStillRendersWhenOnlyConfigYamlIsRefused() async {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-p37-half-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let ctx = ServerContext.local(home: home)
+        try? "TELEGRAM_BOT_TOKEN=PROVEN-TOKEN\nTELEGRAM_ALLOWED_USERS=999\n"
+            .write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
+        try? "telegram:\n  require_mention: true\n"
+            .write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0], ofItemAtPath: ctx.paths.configYAML)
+
+        let log = CLILog()
+        let vm = TelegramSetupViewModel(context: ctx, cliRunner: log.runner())
+        vm.load(capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)"))
+        await Self.until(timeout: 10) { !vm.isLoading }
+
+        #expect(vm.loadRefusal != nil, "premise: the config.yaml read must be refused")
+        #expect(vm.botToken == "PROVEN-TOKEN",
+                "a refused config.yaml suppressed the PROVEN `.env` half")
+        #expect(vm.allowedUsers == "999")
+        // …and the save is still latched shut, because one half is unproven.
+        vm.save()
+        await Self.until(timeout: 2) { !log.calls.isEmpty }
+        #expect(log.calls.isEmpty, "a save ran with an unproven config.yaml")
+    }
+
     /// The control: a PROVEN read still applies, blanks included — "the key
     /// is not set" is a real answer and the form must render it.
     @Test func aProvenReadStillApplies() async {

@@ -108,6 +108,26 @@ struct HermesP37RemediationTests {
         #expect(YAMLScalar.unquote("\"a\\u0041b\"") == "aAb")
     }
 
+    /// The rest of PyYAML's escape table, which the shared decoder accepts so
+    /// a hand-edited config.yaml round-trips. Hermes's own writer emits these
+    /// four RAW inside single quotes (`allow_unicode=True`,
+    /// `utils.py:271` @ `v2026.9.7`) and `doubleQuoted` spells them `\uNNNN`,
+    /// so this arm exists for the hand-written case only — both forms decode
+    /// to the same scalar.
+    @Test func theWholePyYAMLEscapeTableDecodes() {
+        #expect(YAMLScalar.unquote("\"a\\Nb\"") == "a\u{85}b")
+        #expect(YAMLScalar.unquote("\"a\\_b\"") == "a\u{A0}b")
+        #expect(YAMLScalar.unquote("\"a\\Lb\"") == "a\u{2028}b")
+        #expect(YAMLScalar.unquote("\"a\\Pb\"") == "a\u{2029}b")
+        // `doubleQuoted`'s own spelling for the same scalars.
+        for raw in ["a\u{85}b", "a\u{2028}b", "a\u{2029}b"] {
+            #expect(YAMLScalar.unquote(YAMLScalar.doubleQuoted(raw)) == raw)
+        }
+        #expect(YAMLScalar.unquote("\"a\\0\\a\\b\\f\\v\\e\\/b\"")
+                == "a\0\u{07}\u{08}\u{0C}\u{0B}\u{1B}/b")
+        #expect(YAMLScalar.unquote("\"\\U0001F600\"") == "\u{1F600}")
+    }
+
     /// Finding 3's headline: the `profile_routes` READER could not decode
     /// what its own writer emits. Fails before the fix — `stripYAMLQuotes`
     /// returned `a\\b` for the writer's `"a\\\\b"`.
@@ -147,6 +167,35 @@ struct HermesP37RemediationTests {
         #expect(parsed.values["gateway.enabled"] == "true",
                 "the first opening of `gateway:` deleted a flat key PyYAML keeps")
         #expect(parsed.values["gateway.port"] == "8080")
+    }
+
+    /// The regression the `openedPaths` guard introduced, caught in P37's own
+    /// fresh-eyes pass: the INLINE-FLOW-LIST branch writes `lists[path]` and
+    /// `continue`s without recording the path, so a later block header at the
+    /// same path looked like a first open, the purge was skipped and the two
+    /// lists CONCATENATED. `agent.toolsets` is exactly the shape — a
+    /// list-valued key people write either way — and PyYAML is last-wins.
+    @Test func aFlowListFollowedByABlockListIsStillLastWins() {
+        let parsed = HermesYAML.parseNestedYAML("""
+        agent:
+          toolsets: [hermes-cli]
+          toolsets:
+            - browser
+        """)
+        #expect(parsed.lists["agent.toolsets"] == ["browser"],
+                "the flow list and the block list were concatenated")
+    }
+
+    /// The mirror: block first, flow second. Both orders must answer with the
+    /// SECOND value, whichever shape each one happens to be in.
+    @Test func aBlockListFollowedByAFlowListIsStillLastWins() {
+        let parsed = HermesYAML.parseNestedYAML("""
+        agent:
+          toolsets:
+            - browser
+          toolsets: [hermes-cli]
+        """)
+        #expect(parsed.lists["agent.toolsets"] == ["hermes-cli"])
     }
 
     /// …and a genuine duplicate block is still last-wins across `values`,
