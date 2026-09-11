@@ -72,9 +72,11 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
         // call runs. Every other platform Scarf configures has an env-var
         // path to move the secret into `.env` (0600, written through the
         // transport); whatsapp_cloud does not — `gateway/platforms/
-        // whatsapp_cloud.py` reads nothing from the environment, and
-        // `hermes_cli/setup_whatsapp_cloud.py` only prompts interactively.
-        // Verified against Hermes v2026.8.31. The fix belongs UPSTREAM:
+        // whatsapp_cloud.py:164-166` reads all six credentials out of the
+        // config section and NOTHING from the environment (`os.environ` and
+        // `getenv` occur in neither that file nor
+        // `hermes_cli/setup_whatsapp_cloud.py`, which only prompts
+        // interactively). Verified against Hermes **v2026.9.7**. The fix belongs UPSTREAM:
         // WHATSAPP_CLOUD_ACCESS_TOKEN / _APP_SECRET env fallbacks in the
         // adapter, at which point this moves to `envPairs` exactly like
         // NtfySetupViewModel's token did. Do not "solve" it locally by

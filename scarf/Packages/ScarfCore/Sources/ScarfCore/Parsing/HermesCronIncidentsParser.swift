@@ -52,9 +52,10 @@ public struct HermesCronIncident: Sendable, Equatable, Identifiable {
 /// Argv builder + text parser for `hermes cron incidents [--state s]`
 /// and `hermes cron incidents ack <id>`.
 ///
-/// There is no `--json` flag (verified against v0.21.0
-/// `hermes_cli/subcommands/cron.py:287-305`), so we parse the block
-/// format `hermes_cli/cron.py::cron_incidents` prints:
+/// There is no `--json` flag: the `incidents` subparser takes `--state`,
+/// `incident_action` and `incident_id` and nothing else
+/// (`hermes_cli/subcommands/cron.py:165-172` @ **v2026.9.7**). So we parse
+/// the block format `hermes_cli/cron.py:272::cron_incidents` prints:
 ///
 /// ```
 ///   <incident_id>  <state>

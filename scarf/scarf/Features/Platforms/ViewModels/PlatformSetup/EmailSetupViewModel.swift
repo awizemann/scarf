@@ -72,13 +72,14 @@ final class EmailSetupViewModel: PlatformSetupForm {
             homeAddress = env["EMAIL_HOME_ADDRESS"] ?? ""
             allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["EMAIL_ALLOW_ALL_USERS"])
             // skip_attachments lives in config.yaml, under the platform's
-            // `extra:` sub-map. Verified against Hermes v2026.8.31:
-            // `plugins/platforms/email/adapter.py:565` does
-            // `self._skip_attachments = extra.get("skip_attachments", False)`,
-            // and `extra` is populated ONLY from the `extra:` sub-key
-            // (`gateway/config.py::PlatformConfig.from_dict`) plus the
-            // hardcoded shared-key bridge list in `load_gateway_config`
-            // (config.py ~1700-1766) — which does NOT include
+            // `extra:` sub-map. Verified against Hermes **v2026.9.7**:
+            // `plugins/platforms/email/adapter.py:354` does
+            // `self._skip_attachments = extra.get("skip_attachments", False)`
+            // (and carries `# platforms.email.skip_attachments` as its own
+            // comment), and `extra` is populated ONLY from the `extra:`
+            // sub-key (`gateway/config.py:415::PlatformConfig.from_dict`)
+            // plus the shared-key bridge `_SHARED_KEYS`
+            // (`gateway/config_loader.py:197-213`) — which does NOT include
             // skip_attachments. The old TOP-LEVEL
             // `platforms.email.skip_attachments` Scarf used to write was
             // therefore never read by Hermes; Scarf's own reader read the
