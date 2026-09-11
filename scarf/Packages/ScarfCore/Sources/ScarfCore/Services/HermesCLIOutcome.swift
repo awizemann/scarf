@@ -362,6 +362,19 @@ public enum HermesCLIMarkers {
     /// yet — add them under {subdirs}.` (`:246-247`), none of which contains
     /// any of these. NB `Already trusted: ` does not contain `Trusted: ` —
     /// different case on the `t` — so the two stay distinct markers.
+    ///
+    /// **Tag walk** (C1): `hermes skills trust|untrust` ARRIVES at
+    /// **v2026.8.16.2** (`hermes_cli/main.py:12051-12052` dispatching
+    /// `_cmd_skills_trust` at `:12059`); v2026.8.16 and earlier route the
+    /// action to `skills_command` instead, where it is unknown. All seven
+    /// print statements are byte-identical from that tag through v2026.9.7
+    /// (v2026.8.18, v2026.8.19, v2026.8.27, v2026.8.31 checked line by line;
+    /// only the file moved, to `main_agent_cmds.py:179-247`).
+    ///
+    /// On a host BELOW that floor the verb is unknown and prints none of
+    /// these, so this verdict reports a failure — which is the C5 answer, and
+    /// strictly better than the exit code Scarf read before. Gating the
+    /// surface itself is a separate follow-up (`t-74df283e`).
     public static let skillsTrustSuccess = [
         "Trusted: ",
         "Already trusted: ",
@@ -389,6 +402,13 @@ public enum HermesCLIMarkers {
     /// prints `  ✓ Memory provider: built-in only` (`:17`) whether or not the
     /// save happened. Anchored, so `_success`'s `✓ ` is stripped by
     /// `unglyphed`.
+    ///
+    /// **Tag walk** (C1): `print("\n  ✓ Memory provider: built-in only")`
+    /// followed by `print("  Saved to config.yaml\n")`, byte-identical at
+    /// every tag Scarf supports — `hermes_cli/main.py:11424` @ v2026.6.19
+    /// (v0.17.0, the floor), `:13200` @ v2026.7.20, `:12863` @ v2026.8.31,
+    /// and `hermes_cli/main_agent_cmds.py:17` @ v2026.9.7 after the file
+    /// split. Only the file and the line moved.
     public static let memoryOffSuccess = ["Memory provider: built-in only"]
 
     /// `_cmd_memory_off` prints no refusal of its own — it has no failure arm.

@@ -195,3 +195,47 @@ struct BotAgentClearPinP39Tests {
             1)) == false)
     }
 }
+
+/// P39 fresh-eyes — the quick-commands sheet writes TWO keys, and picked which
+/// one to blame with `exitCode != 0`.
+///
+/// That predicate is false for the refusal this whole phase is about, so a
+/// `type` write refused at exit 0 read as "type is fine" and the banner named
+/// `quick_commands.<name>.command` and quoted the OTHER spawn's output.
+@Suite("P39 — the quick-commands failure attribution")
+@MainActor
+struct QuickCommandFailureAttributionP39Tests {
+
+    private static let managedRefusal = """
+    Cannot set configuration values: this Hermes installation is managed by nixos.
+    Use your package manager to upgrade or reinstall Hermes.
+    """
+
+    @Test func anExitZeroRefusalOnTheTypeWriteNamesTheTypeKey() {
+        let vm = QuickCommandsViewModel(context: .local)
+        vm.applyAddOrUpdateResult(
+            sanitizedName: "deploy",
+            typeResult: (output: Self.managedRefusal, exitCode: 0),
+            cmdResult: (output: "✓ Set quick_commands.deploy.command = ./go in /tmp/config.yaml",
+                        exitCode: 0)
+        )
+        #expect(vm.messageIsFailure, "a refused quick-command save reported success")
+        #expect(vm.message?.contains("quick_commands.deploy.type") == true,
+                "blamed the wrong key: \(vm.message ?? "nil")")
+        #expect(vm.message?.contains("managed by nixos") == true,
+                "did not quote Hermes's own reason: \(vm.message ?? "nil")")
+    }
+
+    @Test func anExitZeroRefusalOnTheCommandWriteNamesTheCommandKey() {
+        let vm = QuickCommandsViewModel(context: .local)
+        vm.applyAddOrUpdateResult(
+            sanitizedName: "deploy",
+            typeResult: (output: "✓ Set quick_commands.deploy.type = exec in /tmp/config.yaml",
+                         exitCode: 0),
+            cmdResult: (output: Self.managedRefusal, exitCode: 0)
+        )
+        #expect(vm.messageIsFailure)
+        #expect(vm.message?.contains("quick_commands.deploy.command") == true,
+                "blamed the wrong key: \(vm.message ?? "nil")")
+    }
+}
