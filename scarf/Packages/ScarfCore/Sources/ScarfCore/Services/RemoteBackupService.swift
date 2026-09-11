@@ -342,7 +342,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         progress(.bundling)
         let tempArchive = archiveURL.deletingLastPathComponent()
             .appendingPathComponent(".\(archiveURL.lastPathComponent).inflight-\(UUID().uuidString).zip")
-        try Self.zipDirectory(workDir: workDir, into: tempArchive)
+        try await Self.zipDirectory(workDir: workDir, into: tempArchive)
         progress(.finalizing)
         do {
             if FileManager.default.fileExists(atPath: archiveURL.path) {
@@ -514,7 +514,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         workDir: URL,
         into archive: URL,
         timeout: TimeInterval = RemoteBackupService.zipTimeout
-    ) throws {
+    ) async throws {
         #if os(iOS)
         throw BackupError.zipFailed("Backup zip is not supported on iOS — run the backup from the Mac app.")
         #else
@@ -539,9 +539,10 @@ public final class RemoteBackupService: @unchecked Sendable {
         // a warning per unreadable entry, and a Hermes home full of sockets
         // and permission-denied files produces enough of them to fill the
         // 64 KB pipe buffer — which deadlocks a parent that reads only after
-        // the wait. See ``Process.waitDraining(timeout:pipes:)``.
-        let (exited, drained) = proc.waitDraining(timeout: timeout, pipes: [errPipe, outPipe])
-        // The write ends stay ours; `waitDraining` owns the read ends.
+        // the wait. See ``Process.waitDrainingAsync(timeout:pipes:drainGrace:)``.
+        let (exited, drained) = await proc.waitDrainingAsync(
+            timeout: timeout, pipes: [errPipe, outPipe])
+        // The write ends stay ours; the drain owns the read ends.
         try? errPipe.fileHandleForWriting.close()
         try? outPipe.fileHandleForWriting.close()
         guard exited else {

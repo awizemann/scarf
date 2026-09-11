@@ -202,6 +202,37 @@ struct SpawnDisciplineP43Tests {
         #expect(gone, "cancel() left a SIGTERM-ignoring child running")
     }
 
+    /// The launch-failure arm. `start()` had already stored the `Process` and
+    /// both pipes on `self` by the time `run()` threw, then returned with a
+    /// `.failure` state and every one of them still hooked up: nothing would
+    /// ever reach EOF or report an exit, so the run could not end itself, and
+    /// the write ends — which on THIS path really are still the parent's,
+    /// since Foundation only closes its copies as part of a spawn that
+    /// happened — stayed open until the next `start()` replaced them.
+    @Test("a launch that fails releases the process and its pipes")
+    @MainActor
+    func spotifyLaunchFailureReleases() async throws {
+        let flow = SpotifyAuthFlow(context: .local)
+        flow.makeAuthProcess = {
+            let p = Process()
+            // Guaranteed absent: a path under a directory that is itself a
+            // file in the temp dir would still be a race, so use a name no
+            // installer writes.
+            p.executableURL = URL(fileURLWithPath: "/var/empty/scarf-p43c-no-such-binary")
+            return p
+        }
+        flow.start()
+
+        guard case .failure(let reason) = flow.state else {
+            Issue.record("a missing executable must fail the flow, not start it: \(flow.state)")
+            return
+        }
+        #expect(reason.contains("Couldn't start"), Comment(rawValue: reason))
+        #expect(!flow.retainsRunForTesting,
+                "the launch-failure arm kept the process and pipes of a run that never happened")
+        #expect(flow.runningPIDForTesting == 0)
+    }
+
     // MARK: - What actually leaks at a piped spawn (P43b)
 
     /// The rationale two call sites carried — "each spawn leaks 4 fds unless

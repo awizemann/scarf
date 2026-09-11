@@ -125,7 +125,7 @@ struct ProcessDrainP43Tests {
     }
 
     @Test("restore's unzip refuses instead of hanging when it outstays its budget")
-    func unzipArchiveIsBounded() throws {
+    func unzipArchiveIsBounded() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         // Was a 24 MB zip against a 1 ms budget — a bet that unpacking is
@@ -137,7 +137,7 @@ struct ProcessDrainP43Tests {
 
         var thrown: Error?
         do {
-            try RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 0.5)
+            try await RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 0.5)
         } catch {
             thrown = error
         }
@@ -146,37 +146,46 @@ struct ProcessDrainP43Tests {
     }
 
     @Test("restore's unzip still succeeds on a sane archive within its budget")
-    func unzipArchiveSucceeds() throws {
+    func unzipArchiveSucceeds() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let archive = try Self.makeZip(in: dir, bytes: 4096)
         let dest = dir.appendingPathComponent("out")
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
-        try RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 60)
+        try await RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 60)
         #expect(FileManager.default.fileExists(atPath: dest.appendingPathComponent("fat.bin").path))
     }
 
     @Test("backup's zip refuses instead of hanging when it outstays its budget")
-    func zipDirectoryIsBounded() throws {
+    func zipDirectoryIsBounded() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let work = dir.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         // Incompressible, so `zip` cannot shortcut its way under the budget.
+        //
+        // **64 MB against a 300 ms budget, not 24 MB against 1 ms** (round-4
+        // P43c). The old pair was a bet that one poll turn (50 ms, per
+        // `waitUntilExit`'s own note) outruns a freshly exec'd `zip`, and once
+        // the reap moved onto a detached task the scheduling hop in front of
+        // it was enough to lose that bet: `zip` had already finished by the
+        // time the wait began. Measured: 64 MB of `/dev/urandom` takes `zip`
+        // about 1.5 s, so the budget is beaten by 5x and a hop of a few
+        // milliseconds cannot change the answer.
         let urandom = try #require(FileHandle(forReadingAtPath: "/dev/urandom"))
         defer { try? urandom.close() }
-        let bytes = urandom.readData(ofLength: 24 * 1024 * 1024)
+        let bytes = urandom.readData(ofLength: 64 * 1024 * 1024)
         try bytes.write(to: work.appendingPathComponent("noise.bin"))
 
         var thrown: Error?
         do {
-            try RemoteBackupService.zipDirectory(
-                workDir: work, into: dir.appendingPathComponent("o.zip"), timeout: 0.001)
+            try await RemoteBackupService.zipDirectory(
+                workDir: work, into: dir.appendingPathComponent("o.zip"), timeout: 0.3)
         } catch {
             thrown = error
         }
-        let error = try #require(thrown, "a 1 ms budget cannot be met by a freshly exec'd zip")
+        let error = try #require(thrown, "zipping 64 MB of noise cannot finish inside 300 ms")
         #expect("\(error)".contains("did not finish"))
     }
 
@@ -323,6 +332,129 @@ struct ProcessDrainP43Tests {
         let after = openFDs()
         // Six handles per attempt would be +120 here.
         #expect(after - before < 12, "launch failures leaked fds: \(before) -> \(after)")
+    }
+
+    // MARK: - The pump's throughput (P43c)
+
+    /// **Why this is a mechanism test and not a throughput test.** A fixed
+    /// 20 ms nap per `EAGAIN` is a correctness fix that costs three orders of
+    /// magnitude — a pump that naps whenever the pipe is full moves one
+    /// pipe-full per tick no matter how fast the machine is, and the reviewer
+    /// measured 4138 MB/s blocking against 2.8 MB/s with the sleep on a 64 MB
+    /// payload. The obvious test is a throughput floor, and it was written
+    /// three ways and thrown away three times:
+    ///
+    /// * 64 MB into `cat > /dev/null` under a 5 s bound — the pipe is only
+    ///   intermittently full there, so `EAGAIN` is intermittent and the
+    ///   sleeping pump measured anywhere from 3 to 16 MB/s. 3.9 s of that
+    ///   range passes the bound;
+    /// * 32 MB into a reader that takes one pipe-full and pauses 1 ms, which
+    ///   DOES pin the sleeping pump to the tick (7.2 s against 1.3 s) — but
+    ///   the polling pump's own floor is the reader's pace, and under a full
+    ///   parallel `swift test` that floor inflates past the bound;
+    /// * the same, normalised against a blocking-`write` baseline measured in
+    ///   the same test. The ratios overlap: 8.6x for the sleep in isolation,
+    ///   6.6x for `poll` under load.
+    ///
+    /// Wall-clock throughput is simply not a stable signal on a machine also
+    /// running 2900 other tests. What IS stable is the property the fix is
+    /// about, asserted directly below: the wait ends when the reader takes a
+    /// byte. A sleep cannot do that at all — it ends when the clock says so —
+    /// so the first half of this test fails against the sleep for the same
+    /// reason the throughput test did, with a 40x margin instead of a 2x one.
+    ///
+    /// Both halves are asserted, because the second — the cap — is what the
+    /// stall ceiling and `Task.checkCancellation()` rest on.
+    @Test("the writability wait ends on the byte, and is capped when no byte comes")
+    func waitWritableWakesOnTheByte() throws {
+        /// A pipe filled to the brim, plus its write fd in non-blocking mode.
+        func fullPipe() -> (Pipe, Int32) {
+            let pipe = Pipe()
+            let fd = pipe.fileHandleForWriting.fileDescriptor
+            _ = fcntl(fd, F_SETNOSIGPIPE, 1)
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            let chunk = [UInt8](repeating: 0x78, count: 64 * 1024)
+            while true {
+                let n = chunk.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+                if n <= 0 { break }
+            }
+            return (pipe, fd)
+        }
+
+        // 1. Nobody reads: the wait is capped by its budget and returns.
+        let (idle, idleFD) = fullPipe()
+        let idleStarted = Date()
+        RemoteRestoreService.waitWritable(idleFD, upTo: 0.2)
+        let idleElapsed = Date().timeIntervalSince(idleStarted)
+        #expect(idleElapsed >= 0.15, "a full pipe with no reader must actually wait")
+        #expect(idleElapsed < 5, "the wait is capped, so cancellation gets a turn")
+        try? idle.fileHandleForReading.close()
+        try? idle.fileHandleForWriting.close()
+
+        // 2. A reader takes one chunk 5 ms in: the wait ends THERE, not at the
+        //    end of the budget. A 200 ms budget against a 5 ms byte is a 40x
+        //    gap, so scheduling noise cannot flip the answer.
+        let (live, liveFD) = fullPipe()
+        let reader = live.fileHandleForReading
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: 0.005)
+            _ = reader.readData(ofLength: 64 * 1024)
+        }
+        let liveStarted = Date()
+        RemoteRestoreService.waitWritable(liveFD, upTo: 5)
+        let liveElapsed = Date().timeIntervalSince(liveStarted)
+        #expect(liveElapsed < 1,
+                Comment(rawValue: String(
+                    format: "the wait took %.3fs for a byte that arrived at 0.005s — it is "
+                        + "sleeping on a clock, not watching the fd", liveElapsed)))
+        try? live.fileHandleForWriting.close()
+    }
+
+    // MARK: - A give-up arm quotes the child (P43c)
+
+    /// The give-up arms threw the drain away (`_ = proc.waitDraining(…)`), so
+    /// a `tar` that had already explained itself on stderr and exited was
+    /// reported to the user as "Broken pipe" — the mechanical consequence,
+    /// with the cause discarded one line earlier.
+    ///
+    /// The child here is the shape that actually happens: `tar -x` cannot open
+    /// its destination, says so, and exits before reading the archive. The
+    /// push is multi-MB, so the write outlives the child and lands on EPIPE.
+    @Test("a push whose remote died explaining itself quotes the explanation")
+    func pumpGiveUpQuotesTheChild() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tarball = dir.appendingPathComponent("payload.bin")
+        try Data(count: 8 * 1024 * 1024).write(to: tarball)
+
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        child.arguments = ["-c", "echo 'tar: /nope: Cannot open: Permission denied' 1>&2; exit 2"]
+
+        var thrown: Error?
+        do {
+            try await RemoteRestoreService.streamTarball(
+                into: child, tarball: tarball, extractTimeout: 20, stallTimeout: 10
+            ) { _ in }
+        } catch {
+            thrown = error
+        }
+        let error = try #require(thrown, "a remote that exits 2 without reading cannot succeed")
+        let message = "\(error)"
+        #expect(message.contains("Cannot open"),
+                Comment(rawValue: "the drained stderr was discarded: \(message)"))
+    }
+
+    /// The tail helper itself: last lines only, blanks dropped, indentation
+    /// trimmed, and nothing appended when the child said nothing.
+    @Test("the error tail takes the last lines and says nothing when there are none")
+    func outputTailIsATail() {
+        let err = Data("one\n  two  \n\nthree\nfour\nfive\n".utf8)
+        let tail = RemoteRestoreService.outputTail([err, Data()], lines: 2)
+        #expect(tail == "four / five")
+        #expect(RemoteRestoreService.outputTail([Data(), Data()]).isEmpty)
+        #expect(RemoteRestoreService.appendingTail("boom", "") == "boom")
+        #expect(RemoteRestoreService.appendingTail("boom", "why").contains("why"))
     }
 
     /// The audit's actual finding was textual: three `proc.waitUntilExit()`

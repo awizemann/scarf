@@ -75,6 +75,16 @@ final class SpotifyAuthFlow {
     /// Test seam: the pid of the in-flight child, or 0.
     var runningPIDForTesting: Int32 { process?.processIdentifier ?? 0 }
 
+    /// Whether this flow is still holding a run's `Process` and pipes.
+    ///
+    /// The observable half of `releaseProcess()`: a run that ended — finished,
+    /// cancelled, or never launched at all — must not be holding either. The
+    /// launch-failure arm used to return with both still hooked up (round-4
+    /// P43b), which is what `SpawnDisciplineP43Tests` watches here.
+    var retainsRunForTesting: Bool {
+        process != nil || stdoutPipe != nil || stderrPipe != nil
+    }
+
     /// C10: every subprocess has a timeout, including one that is waiting on
     /// a human in a browser.
     ///
