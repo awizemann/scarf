@@ -52,6 +52,11 @@ final class CronViewModel {
 
     var showCreateSheet = false
     var editingJob: HermesCronJob?
+    /// Round-4 decision 5 — the record the Duplicate sheet is pre-filled
+    /// from. Deliberately a SEPARATE slot from `editingJob`: the sheet it
+    /// drives runs `cron create`, and sharing the edit slot would make one
+    /// state carry two different verbs.
+    var duplicatingJob: HermesCronJob?
     var isLoading = false
     /// True when `jobs.json` exists but failed to decode — the Cron view
     /// warns instead of silently showing an empty board. (t-aud09)
@@ -536,10 +541,28 @@ final class CronViewModel {
     ) -> String? {
         if output.contains("Cannot activate terminal cron job")
             || (output.contains("(terminal)") && output.contains("Cannot run")) {
-            // No offer known (a generic `runAndReload` with no job in hand):
-            // keep naming re-arm, since the caller cannot rule it out.
-            let rearmable = offer?.canRearm ?? true
-            return rearmable
+            // Three arms, because there are three things Scarf can know.
+            //
+            // `offer.canRearm` already folds the host floor
+            // (`hasCronResumeRunNow`, v0.20.6) together with
+            // `rearm_oneshot`'s own-schedule guard — it raises
+            // `_REARM_RECURRING_ERROR` for anything but `once`
+            // (`cron/jobs.py:2040-2042`, `:2065-2066` @ `v2026.9.7`, exit 1
+            // through `cron_resume`, `hermes_cli/cron.py:691-695`) — so it is
+            // the predicate to key on, not "the job is terminal".
+            //
+            // With NO offer (the `cron edit` race: the record turned terminal
+            // between load and click, so `jobs.first { $0.id == id }` came
+            // back nil) this used to default to naming "Resume & Run Now"
+            // anyway. That is the one arm that can be WRONG in the unsafe
+            // direction: it points a recurring job at a button Hermes
+            // refuses. Assert only what holds for every terminal record —
+            // duplicating is an ordinary `cron create`, which no terminal
+            // guard touches — and stay silent about a door we cannot prove.
+            guard let offer else {
+                return "That job already finished — duplicate it to schedule a new one."
+            }
+            return offer.canRearm
                 ? "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
                 : "That job already finished and can't be re-armed — duplicate it to schedule a new one."
         }

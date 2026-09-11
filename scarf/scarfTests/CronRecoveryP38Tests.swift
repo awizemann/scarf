@@ -75,12 +75,20 @@ import ScarfCore
         }
     }
 
-    /// With no job in hand (a generic `runAndReload` call) the caller cannot
-    /// rule re-arm out, so the wording is unchanged — the pre-P38 behaviour.
-    @Test("with no offer the sentence keeps its old shape")
-    func noOfferKeepsTheOldWording() {
-        #expect(CronViewModel.friendlyCronFailure(Self.updateRefusal)?
-            .contains("Resume & Run Now") == true)
+    /// With no job in hand (the `cron edit` race: the record turned terminal
+    /// between load and click, so `jobs.first { $0.id == id }` came back nil)
+    /// P38 defaulted to naming re-arm, on the reasoning that the caller could
+    /// not rule it out. Round-4 reversed that: "cannot rule it out" is not
+    /// evidence, and for a RECURRING job the button named is a guaranteed
+    /// exit 1 (`_REARM_RECURRING_ERROR`, `cron/jobs.py:2065-2066` @
+    /// `v2026.9.7`). The unknown-offer arm now asserts only what holds for
+    /// every terminal record — duplicating, which no terminal guard touches.
+    /// The P42 suite owns the positive assertions.
+    @Test("with no offer the sentence names no door it cannot prove")
+    func noOfferNamesOnlyWhatItCanProve() {
+        let message = CronViewModel.friendlyCronFailure(Self.updateRefusal)
+        #expect(message?.contains("Resume & Run Now") == false)
+        #expect(message?.lowercased().contains("duplicate") == true)
         #expect(CronViewModel.friendlyCronFailure("error: no such job 'x'") == nil)
     }
 
