@@ -353,7 +353,7 @@ struct BotsViewModelTests {
     // MARK: - Editor round-trip
 
     @Test("an edit writes only the fields the editor owns and preserves everything else")
-    func editorRoundTripPreservesUnknownMetadata() async {
+    func editorRoundTripPreservesUnknownMetadata() async throws {
         // A bot carrying every key B2's editor does NOT show: a created
         // timestamp, groups, the legacy group scalar, and two unmodeled
         // lines B0 keeps verbatim.
@@ -392,7 +392,7 @@ struct BotsViewModelTests {
         viewModel.save(draft)
         await waitForIdle(viewModel)
 
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         // Changed:
         #expect(saved.title == "Deep Research")
         #expect(saved.displayName == "Deep Research")
@@ -411,7 +411,7 @@ struct BotsViewModelTests {
     }
 
     @Test("the draft is applied to a freshly re-read identity, not the sheet's snapshot")
-    func saveRereadsBeforeWriting() async {
+    func saveRereadsBeforeWriting() async throws {
         let backend = MockBotsBackend([Self.bot("research", title: "Research")])
         let viewModel = makeViewModel(backend)
         viewModel.load()
@@ -428,7 +428,7 @@ struct BotsViewModelTests {
         viewModel.save(draft)
         await waitForIdle(viewModel)
 
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         #expect(saved.title == "Renamed")
         // The concurrent key survived because the write merged onto the
         // CURRENT file, not the draft's origin.
@@ -450,7 +450,7 @@ struct BotsViewModelTests {
     // MARK: - Promote / demote
 
     @Test("promoting a plain profile makes it bot-managed without touching the profile")
-    func promoteMakesAProfileABot() async {
+    func promoteMakesAProfileABot() async throws {
         let plain = HermesBotIdentity(
             profileName: "scratch",
             profileDirectory: "/tmp/scratch",
@@ -466,7 +466,7 @@ struct BotsViewModelTests {
         viewModel.promote(BotRow(identity: plain, avatar: nil))
         await waitForIdle(viewModel)
 
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         #expect(saved.isBotManaged)
         #expect(saved.title == "Scratch")
         #expect(saved.botDescription == "Odds and ends.")
@@ -490,14 +490,14 @@ struct BotsViewModelTests {
     /// now clears the `hermes-bots` block, which is what returns the profile
     /// to "Other profiles"; it still never touches the profile itself.
     @Test("demoting clears the bot block and never deletes anything")
-    func demoteClearsTheBotBlock() async {
+    func demoteClearsTheBotBlock() async throws {
         let identity = Self.bot("research", title: "Research", pinned: true)
         let backend = MockBotsBackend([identity])
         let viewModel = makeViewModel(backend)
         viewModel.demote(BotRow(identity: identity, avatar: nil))
         await waitForIdle(viewModel)
 
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         // The write the YAML layer turns into "remove the block".
         #expect(!saved.isBotManaged)
         // Both live inside the block being removed.
@@ -510,14 +510,14 @@ struct BotsViewModelTests {
     /// Hide is the other, still-distinct verb: it keeps the profile
     /// bot-managed and only collapses it behind the roster's disclosure.
     @Test("hiding is still a separate, non-destructive verb")
-    func hideRemainsDistinctFromDemote() async {
+    func hideRemainsDistinctFromDemote() async throws {
         let identity = Self.bot("research", title: "Research", pinned: true)
         let backend = MockBotsBackend([identity])
         let viewModel = makeViewModel(backend)
         viewModel.toggleHidden(BotRow(identity: identity, avatar: nil))
         await waitForIdle(viewModel)
 
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         #expect(saved.hidden == true)
         #expect(saved.isBotManaged)
         #expect(backend.lifecycleActions.isEmpty)
@@ -526,7 +526,7 @@ struct BotsViewModelTests {
     // MARK: - Create
 
     @Test("create runs the CLI, then writes the identity")
-    func createRunsCLIThenWritesIdentity() async {
+    func createRunsCLIThenWritesIdentity() async throws {
         let backend = MockBotsBackend([Self.bot("default", managed: false)])
         let viewModel = makeViewModel(backend)
         var draft = BotDraft(identity: HermesBotIdentity(profileName: "", profileDirectory: ""))
@@ -540,7 +540,7 @@ struct BotsViewModelTests {
         #expect(backend.lifecycleActions.first == .create(
             name: "deploy", cloneFrom: nil, cloneAll: false, noSkills: false, description: "Ships things."
         ))
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         #expect(saved.profileName == "deploy")
         #expect(saved.isBotManaged)
         #expect(saved.title == "Deploy")
@@ -567,7 +567,7 @@ struct BotsViewModelTests {
     }
 
     @Test("a created profile whose identity write fails is kept and named, not silently half-made")
-    func createPartialFailureIsExplicit() async {
+    func createPartialFailureIsExplicit() async throws {
         // The adversarial case: `hermes profile create` succeeded, then the
         // profile.yaml write failed. Deleting the new profile to tidy up
         // would run an irreversible verb over a directory the user asked
@@ -585,7 +585,7 @@ struct BotsViewModelTests {
         await waitForIdle(viewModel)
         await waitForLoad(viewModel, expecting: 1)
 
-        let message = try! #require(viewModel.errorMessage)
+        let message = try #require(viewModel.errorMessage)
         #expect(message.contains("was created"))
         #expect(message.contains("Other profiles"))
         // No compensating delete: the profile survives, as an unmanaged one.
@@ -708,7 +708,7 @@ struct BotsViewModelTests {
     // MARK: - Avatar
 
     @Test("storing an avatar marks the identity as carrying a photo")
-    func avatarWriteStampsImageKind() async {
+    func avatarWriteStampsImageKind() async throws {
         let identity = Self.bot("research", title: "Research")
         let backend = MockBotsBackend([identity])
         let viewModel = makeViewModel(backend)
@@ -717,7 +717,7 @@ struct BotsViewModelTests {
         await waitForIdle(viewModel)
 
         #expect(backend.writtenAvatars.map(\.name) == ["research"])
-        let saved = try! #require(backend.savedIdentities.last)
+        let saved = try #require(backend.savedIdentities.last)
         #expect(saved.imageKind == .photo)
         #expect(saved.custom == true)
         #expect(saved.isBotManaged)
@@ -1021,13 +1021,13 @@ struct BotsViewModelTests {
     }
 
     @Test("Bots is ordered immediately before Chat")
-    func botsPrecedesChatInTheEnum() {
+    func botsPrecedesChatInTheEnum() throws {
         // The sidebar builds its own section list, but the enum's own order
         // is the declaration of intent — Bots sits directly above Interact,
         // whose first row is Chat.
         let all = SidebarSection.allCases
-        let bots = try! #require(all.firstIndex(of: .bots))
-        let chat = try! #require(all.firstIndex(of: .chat))
+        let bots = try #require(all.firstIndex(of: .bots))
+        let chat = try #require(all.firstIndex(of: .chat))
         #expect(bots + 1 == chat)
     }
 }

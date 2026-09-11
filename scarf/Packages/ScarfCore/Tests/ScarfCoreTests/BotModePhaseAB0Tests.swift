@@ -457,7 +457,7 @@ import Foundation
 
     // MARK: - Audit regressions
 
-    @Test func aHermesBotsKeyNestedInAnotherNamespaceIsNotOurs() {
+    @Test func aHermesBotsKeyNestedInAnotherNamespaceIsNotOurs() throws {
         // `ui_meta` is one namespace per client. A `hermes-bots` key inside a
         // SIBLING namespace belongs to that client; reading it would invent a
         // bot and writing through it would corrupt their block.
@@ -474,7 +474,7 @@ import Foundation
         var promoted = id
         promoted.isBotManaged = true
         promoted.title = "Real"
-        let out = try! #require(HermesBotProfileYAML.write(identity: promoted, into: yaml))
+        let out = try #require(HermesBotProfileYAML.write(identity: promoted, into: yaml))
         // The foreign block is untouched and a real sibling key was added.
         #expect(out.contains("      title: not a bot"))
         #expect(HermesBotProfileYAML.parse(out, profileName: "p", profileDirectory: "/x").title == "Real")

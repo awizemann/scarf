@@ -742,6 +742,15 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, home) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            // P38: the past-deadline / terminal refusals are now DOORS in the
+            // shared `CronRecoveryOffer`, each behind its Hermes floor —
+            // `resume_job`'s past-one-shot raise is v0.18.1+
+            // (`cron/jobs.py:1991-1996`, absent at v2026.7.1) and the
+            // terminal-activation refusal is v0.20.6+. These fixtures predate
+            // the flags; a defaulted VM correctly refuses nothing and lets the
+            // CLI decide (charter C1).
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             await vm.upsert(HermesCronJob(
                 id: "j1", name: "One shot", prompt: "p",
                 schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00Z"),
@@ -769,6 +778,8 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             await vm.upsert(HermesCronJob(
                 id: "j1", name: "Done", prompt: "p",
                 schedule: CronSchedule(kind: "once", runAt: "2030-01-01T09:00:00Z"),
@@ -777,7 +788,11 @@ import Foundation
             ))
             #expect(await vm.toggleEnabled(id: "j1") == false)
             #expect(vm.lastToggleRoute == .refused)
-            #expect(vm.lastError?.contains("already finished") == true)
+            // P38: a terminal ONE-SHOT is re-armable, so iOS now says what
+            // the Mac says — `rearm_oneshot` accepts it — instead of the old
+            // "duplicate it" dead end that `oneShotIsUnresumable` produced by
+            // running ahead of the shared offer.
+            #expect(vm.lastError?.contains("Resume & Run Now") == true)
         }
     }
 
@@ -787,6 +802,8 @@ import Foundation
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
+            vm.isV0181OrLater = true
+            vm.isV0206OrLater = true
             let now = Date(timeIntervalSince1970: 1_800_000_000)
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime]
@@ -804,6 +821,8 @@ import Foundation
 
             // …and just outside it, the same job is refused.
             let vm2 = IOSCronViewModel(context: ctx)
+            vm2.isV0181OrLater = true
+            vm2.isV0206OrLater = true
             await vm2.load()
             #expect(await vm2.setEnabled(
                 id: "j1", enabled: false, now: now

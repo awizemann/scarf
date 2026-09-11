@@ -60,14 +60,20 @@ struct HermesFileService: Sendable {
         readFileResult(context.paths.configYAML).map { HermesConfig(yaml: $0) }
     }
 
-    /// What a PROVEN config.yaml read found: the parsed config, its raw
-    /// text, and whether the file is actually there.
+    /// What a PROVEN config.yaml read found: the parsed config and its raw
+    /// text.
+    ///
+    /// There is deliberately no `exists` here. `loadConfigProven` carried one
+    /// and nothing ever read it — and there is no caller that could: absence
+    /// is already folded into `config` (`.empty`) and `rawText` (`""`), and
+    /// the only thing `exists` could gate is the "Reload before saving"
+    /// refusal, which by construction never sees an absent file (an ABSENT
+    /// config.yaml is not a refusal — a fresh host genuinely has nothing set
+    /// and Save must work, or first-run setup is impossible). A decoded-but-
+    /// dead field is the class P18 deleted rather than kept "for later".
     struct ProvenConfig: Sendable {
         let config: HermesConfig
         let rawText: String
-        /// `false` only when a `stat` could not confirm the file after the
-        /// read failed — i.e. a fresh host that has no config.yaml yet.
-        let exists: Bool
     }
 
     /// ``loadConfig()`` with the two failures kept apart, the same way
@@ -122,8 +128,7 @@ struct HermesFileService: Sendable {
         }
         return ProvenConfig(
             config: loaded.exists ? HermesConfig(yaml: loaded.text) : .empty,
-            rawText: loaded.text,
-            exists: loaded.exists
+            rawText: loaded.text
         )
     }
 

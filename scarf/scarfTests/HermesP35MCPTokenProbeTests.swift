@@ -103,7 +103,12 @@ struct HermesP35MCPTokenProbeTests {
 
         let context = ServerContext.local(home: home)
         let servers = HermesFileService(context: context).loadMCPServers()
+        // `try #require`, not `#expect(count) ` + a bare subscript: an index
+        // after a FAILED count expectation traps, and a trap in one Swift
+        // Testing test takes the whole `scarfTests` host down with it. The
+        // `#require` throws out of this one test instead.
         #expect(servers.count == 1)
-        #expect(servers[0].hasOAuthToken == false)
+        let server = try #require(servers.first)
+        #expect(server.hasOAuthToken == false)
     }
 }

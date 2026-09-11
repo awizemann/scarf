@@ -7,7 +7,7 @@ import Foundation
 @Suite struct CronEndOfOptionsTests {
 
     @Test("a prompt that opens with a dash is a positional, not a flag")
-    func createPutsPositionalsBehindEndOfOptions() {
+    func createPutsPositionalsBehindEndOfOptions() throws {
         let argv = CronViewModel.createJobArguments(
             schedule: "0 9 * * *",
             prompt: "--deliver isn't working, investigate",
@@ -17,7 +17,7 @@ import Foundation
             script: "",
             repeatCount: ""
         )
-        let marker = try! #require(argv.firstIndex(of: "--"))
+        let marker = try #require(argv.firstIndex(of: "--"))
         #expect(Array(argv[marker...]) == ["--", "0 9 * * *", "--deliver isn't working, investigate"])
         // Every flag stays AHEAD of the marker — argparse reads each token
         // after it as a positional, so a flag behind it would be rejected

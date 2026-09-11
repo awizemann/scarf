@@ -37,15 +37,18 @@ struct HermesP35SelectionAndFloorsTests {
 
     // MARK: - The seam
 
-    @Test func theSeamSnapsOnlyAnAbsentSelection() {
-        let ntfy = try! #require(wideRoster.first { $0.name == "ntfy" })
+    // `throws` + `try #require`, never `try!`: a `try!` on a failed
+    // `#require` is a TRAP, and a trap in one Swift Testing test takes the
+    // whole test host down — the rule round 3 paid a phase for.
+    @Test func theSeamSnapsOnlyAnAbsentSelection() throws {
+        let ntfy = try #require(wideRoster.first { $0.name == "ntfy" })
         #expect(narrowedRoster.contains { $0.name == "ntfy" } == false,
                 "premise: the narrowed roster must no longer offer ntfy")
 
         #expect(KnownPlatforms.reconcile(selection: ntfy, against: narrowedRoster).name == "cli")
         // A selection the narrowed roster still carries is left alone — the
         // snap must not yank a user off a perfectly good pane.
-        let telegram = try! #require(narrowedRoster.first { $0.name == "telegram" })
+        let telegram = try #require(narrowedRoster.first { $0.name == "telegram" })
         #expect(KnownPlatforms.reconcile(selection: telegram, against: narrowedRoster).name == "telegram")
         #expect(KnownPlatforms.reconcile(selection: ntfy, against: wideRoster).name == "ntfy")
         // Empty roster (a paranoid caller): `cli`, never a crash.

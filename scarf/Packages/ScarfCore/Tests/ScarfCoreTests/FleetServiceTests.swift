@@ -48,7 +48,7 @@ import Foundation
 
     // MARK: - Grouping
 
-    @Test func groupsSameIdAcrossHosts() {
+    @Test func groupsSameIdAcrossHosts() throws {
         let id = UUID()
         let portfolio = ProjectPortfolio.build(from: [
             Self.host("srv-a", "Alpha host", [Self.project(id: id, name: "Repo", rootPath: "/a/repo")]),
@@ -56,7 +56,7 @@ import Foundation
         ])
 
         #expect(portfolio.projects.count == 1)
-        let fleet = try! #require(portfolio.project(id: id))
+        let fleet = try #require(portfolio.project(id: id))
         #expect(fleet.isMultiHost)
         #expect(fleet.materializations.count == 2)
         // Sorted by serverId.
@@ -91,7 +91,7 @@ import Foundation
         #expect(portfolio.projects.map(\.name) == ["apple", "Zebra"])
     }
 
-    @Test func duplicateIdOnSameHostFirstWins() {
+    @Test func duplicateIdOnSameHostFirstWins() throws {
         let id = UUID()
         // Defensive: one host listing the same id twice (shouldn't happen
         // — one record per path) collapses to a single materialization.
@@ -101,14 +101,14 @@ import Foundation
                 Self.project(id: id, name: "Second", rootPath: "/second"),
             ]),
         ])
-        let fleet = try! #require(portfolio.project(id: id))
+        let fleet = try #require(portfolio.project(id: id))
         #expect(fleet.materializations.count == 1)
         #expect(fleet.materializations.first?.project.rootPath == "/first")
     }
 
     // MARK: - Canonical name
 
-    @Test func canonicalNameFromMostRecentlyUpdatedHost() {
+    @Test func canonicalNameFromMostRecentlyUpdatedHost() throws {
         let id = UUID()
         let older = Date(timeIntervalSince1970: 1_000)
         let newer = Date(timeIntervalSince1970: 2_000)
@@ -116,7 +116,7 @@ import Foundation
             Self.host("srv-a", "A", [Self.project(id: id, name: "Old Name", updatedAt: older)]),
             Self.host("srv-b", "B", [Self.project(id: id, name: "New Name", updatedAt: newer)]),
         ])
-        let fleet = try! #require(portfolio.project(id: id))
+        let fleet = try #require(portfolio.project(id: id))
         #expect(fleet.name == "New Name")
         // ...but the name disagreement is surfaced as drift.
         #expect(fleet.drift.has(.name))
@@ -144,36 +144,36 @@ import Foundation
         #expect(portfolio.project(id: id)?.drift.isEmpty == true)
     }
 
-    @Test func modelPresetDriftDetected() {
+    @Test func modelPresetDriftDetected() throws {
         let id = UUID()
         let portfolio = ProjectPortfolio.build(from: [
             Self.host("srv-a", "A", [Self.project(id: id, modelPresetId: "fast")]),
             Self.host("srv-b", "B", [Self.project(id: id, modelPresetId: nil)]),  // bound vs default
         ])
-        let drift = try! #require(portfolio.project(id: id)?.drift)
+        let drift = try #require(portfolio.project(id: id)?.drift)
         #expect(drift.has(.modelPreset))
         #expect(!drift.has(.board))
     }
 
-    @Test func boardAndCronCountDriftDetected() {
+    @Test func boardAndCronCountDriftDetected() throws {
         let id = UUID()
         let portfolio = ProjectPortfolio.build(from: [
             Self.host("srv-a", "A", [Self.project(id: id, board: "scarf:a", cronJobIds: ["j1", "j2"])]),
             Self.host("srv-b", "B", [Self.project(id: id, board: "scarf:b", cronJobIds: ["j1"])]),
         ])
-        let drift = try! #require(portfolio.project(id: id)?.drift)
+        let drift = try #require(portfolio.project(id: id)?.drift)
         #expect(drift.has(.board))
         #expect(drift.has(.cron))
     }
 
-    @Test func memoryAndMiniAppDriftDetected() {
+    @Test func memoryAndMiniAppDriftDetected() throws {
         let id = UUID()
         let portfolio = ProjectPortfolio.build(from: [
             Self.host("srv-a", "A", [Self.project(id: id, memoryNamespace: "ns1",
                 miniApps: [ScarfProject.MiniAppRef(id: "viz")])]),
             Self.host("srv-b", "B", [Self.project(id: id, memoryNamespace: "ns2", miniApps: [])]),
         ])
-        let drift = try! #require(portfolio.project(id: id)?.drift)
+        let drift = try #require(portfolio.project(id: id)?.drift)
         #expect(drift.has(.memoryNamespace))
         #expect(drift.has(.miniApps))
         // Sorted fields are deterministic for display.
