@@ -194,6 +194,38 @@ public enum HermesCLIMarkers {
     /// nothing at all, which the "no success marker" rule already catches.
     public static let skillsUninstallFailure = ["Error:"]
 
+    // MARK: config unset — hermes_cli/config.py
+
+    /// `print(f"✓ Unset {key} from {config_path}")` — the ONLY line
+    /// `unset_config_value` prints on the success path, both for the
+    /// config.yaml arm (`hermes_cli/config.py:3581` @ v2026.9.7,
+    /// `:8922` @ v2026.7.20) and the `.env` arm (`:3562` / `:8896`).
+    /// Judged anchored, so the leading `✓` is stripped by `unglyphed`.
+    public static let configUnsetSuccess = ["Unset "]
+
+    /// `config unset` has ONE refusal that exits non-zero and one that does
+    /// NOT, which is exactly why this write cannot be judged by exit code:
+    ///
+    /// - `is_managed()` → `managed_error("unset configuration values")` →
+    ///   `format_managed_message` prints `Cannot unset configuration values:
+    ///   this Hermes installation is managed by …` to stderr and the function
+    ///   RETURNS (`hermes_cli/config.py:3550-3552`, `:445-455` @ v2026.9.7;
+    ///   `:8870-8872`, `:659` @ v2026.7.20) — Python turns that into **exit
+    ///   0**.
+    /// - `_exit_if_key_managed(key, "unset")` prints `Cannot unset '<key>':
+    ///   it is managed by your administrator (…)` and `sys.exit(1)`
+    ///   (`:3363-3371` @ v2026.9.7; inlined at `:8874-8886` @ v2026.7.20).
+    /// - `_exit_invalid(f"Config key not set: {key}")` → the same text and
+    ///   `sys.exit(1)` (`:3579`, `:3422-3424` @ v2026.9.7; printed inline at
+    ///   `:8915-8917` @ v2026.7.20).
+    ///
+    /// Both `Cannot …` spellings share the `Cannot unset` prefix, so one
+    /// marker quotes either.
+    public static let configUnsetFailure = [
+        "Cannot unset",
+        "Config key not set:",
+    ]
+
     // MARK: sessions export — hermes_cli/sessions_cmd.py
 
     /// Every file-writing export path ends in an `Exported …` summary:
@@ -605,4 +637,38 @@ public struct HermesSecurityAuditReport: Sendable, Equatable {
     }
 
     private static let foundPrefix = "Found "
+}
+
+/// `hermes config unset <key>` — argv and verdict in one place, because both
+/// platforms drive it from their "Host default" approvals row (round-3
+/// decision 10) and neither may judge it by exit code.
+///
+/// **argv** (charter C5): `config unset <key>`, one positional. Verified at
+/// the target tag — `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7,
+/// `add_parser("unset", …)` + `add_argument("key", nargs="?")` — and at the
+/// `hasConfigUnset` floor, `hermes_cli/subcommands/config.py:51-55` @
+/// v2026.7.20 (0.19.0), where it is byte-equivalent. There are no flags, so
+/// there is nothing here that a 0.19 host would reject.
+///
+/// **Verdict**: by output (see ``HermesCLIMarkers/configUnsetFailure``) — the
+/// managed-install refusal prints and returns, i.e. exits 0.
+public enum HermesConfigUnset {
+    public static func argv(key: String) -> [String] { ["config", "unset", key] }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.configUnsetSuccess,
+            failureMarkers: HermesCLIMarkers.configUnsetFailure,
+            successAnchored: true
+        )
+    }
+
+    /// What a host-default row says on a host below the `hasConfigUnset`
+    /// floor, where the row stays inert: Scarf will not shell a verb the host
+    /// does not have (C5), so it names the one gesture that does work there.
+    public static func belowFloorHint(key: String) -> String {
+        String(localized: "This Hermes is older than v0.19, which added `hermes config unset`. To go back to the host default, remove the `\(key)` line from config.yaml on the host.")
+    }
 }

@@ -103,3 +103,128 @@ struct HermesP35SelectionAndFloorsTests {
         }
     }
 }
+
+/// P35 / round-3 decision 10 — the Mac "Host default" approvals row.
+@Suite("P35 — the Host default approvals row")
+@MainActor
+struct HermesP35ApprovalsHostDefaultTests {
+
+    /// Thread-safe fake `hermes`, in the shape P11 established.
+    final class CLILog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls: [[String]] = []
+        var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return _calls }
+        let output: String
+        let exitCode: Int32
+        init(output: String = "✓ Unset approvals.mode from /tmp/config.yaml", exitCode: Int32 = 0) {
+            self.output = output
+            self.exitCode = exitCode
+        }
+        func runner() -> HermesCLIRunner {
+            { [self] args, _ in
+                lock.lock(); _calls.append(args); lock.unlock()
+                return (output, exitCode)
+            }
+        }
+    }
+
+    private static func scratchContext() -> ServerContext {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-p35-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return .local(home: home)
+    }
+
+    private static func viewModel(_ log: CLILog, storedMode: String?) -> SettingsViewModel {
+        let vm = SettingsViewModel(context: scratchContext(), cliRunner: log.runner())
+        vm.config = HermesConfig(yaml: storedMode.map { "approvals:\n  mode: \($0)\n" } ?? "agent:\n")
+        return vm
+    }
+
+    /// Let the serialised write chain run. `expectingACall: false` cannot
+    /// wait for evidence — the assertion is that nothing ran — so it settles
+    /// for a fixed beat instead of burning the deadline.
+    private static func settle(_ log: CLILog, expectingACall: Bool = true) async {
+        if expectingACall {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline, log.calls.isEmpty {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+    }
+
+    private var v0211: HermesCapabilities {
+        HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+    }
+    private var v018: HermesCapabilities {
+        HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
+    }
+
+    /// Fails before the fix: the row was inert everywhere, so nothing ran.
+    @Test func hostDefaultIssuesConfigUnsetOnAV019PlusHost() async {
+        let log = CLILog()
+        let vm = Self.viewModel(log, storedMode: "manual")
+        #expect(vm.config.storedApprovalMode != nil, "premise: a mode is stored")
+
+        vm.setApprovalMode("", capabilities: v0211)
+        await Self.settle(log)
+
+        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(vm.messageIsFailure == false)
+    }
+
+    /// Below the `hasConfigUnset` floor the row shells nothing (C5) and says
+    /// how to clear the key on the host.
+    @Test func hostDefaultIsInertWithAHintBelowTheFloor() async {
+        let log = CLILog()
+        let vm = Self.viewModel(log, storedMode: "manual")
+
+        vm.setApprovalMode("", capabilities: v018)
+        await Self.settle(log, expectingACall: false)
+
+        #expect(log.calls.isEmpty, "a v0.18 host was asked to run `config unset`")
+        #expect(vm.messageIsFailure)
+        #expect(vm.message?.contains("config unset") == true)
+    }
+
+    /// Nothing stored: nothing to clear, and no banner either.
+    @Test func hostDefaultOverAnAbsentKeyIsAPlainNoOp() async {
+        let log = CLILog()
+        let vm = Self.viewModel(log, storedMode: nil)
+
+        vm.setApprovalMode("", capabilities: v0211)
+        await Self.settle(log, expectingACall: false)
+
+        #expect(log.calls.isEmpty)
+        #expect(vm.message == nil)
+    }
+
+    /// The exit-0 refusal (`is_managed()` prints and returns) must not be
+    /// banner'd as a success. Fails if the write is judged by exit code.
+    @Test func aManagedInstallRefusalAtExitZeroIsReportedAsAFailure() async {
+        let log = CLILog(
+            output: "Cannot unset configuration values: this Hermes installation is managed by NixOS.",
+            exitCode: 0
+        )
+        let vm = Self.viewModel(log, storedMode: "manual")
+
+        vm.setApprovalMode("", capabilities: v0211)
+        await Self.settle(log)
+
+        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(vm.messageIsFailure, "an exit-0 refusal was reported as a successful clear")
+        #expect(vm.message?.contains("managed by NixOS") == true)
+    }
+
+    /// An explicit mode still goes through `config set`, unchanged.
+    @Test func anExplicitModeStillWrites() async {
+        let log = CLILog(output: "")
+        let vm = Self.viewModel(log, storedMode: nil)
+
+        vm.setApprovalMode("smart", capabilities: v0211)
+        await Self.settle(log)
+
+        #expect(log.calls == [["config", "set", "approvals.mode", "smart"]])
+    }
+}

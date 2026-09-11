@@ -242,11 +242,21 @@ final class SettingsViewModel {
         enqueueConfigWrite(key: key, arguments: arguments)
     }
 
+    /// How a queued write's outcome is decided. `nil` is the historical
+    /// exit-code rule, which is correct for `config set` (every refusal
+    /// `sys.exit(1)`s). A verb with an exit-0 refusal path passes its own
+    /// output judge — see ``unsetApprovalMode``.
+    typealias WriteVerdict = @Sendable (String, Int32) -> HermesCLIOutcome
+
     /// Append one `hermes …` write to the serialised chain. `arguments` need
     /// not be a `config set` — `memory off` rides this too — but the outcome
     /// contract is the same: analytics, a banner, and (on success only, as
     /// before) a config re-read.
-    private func enqueueConfigWrite(key: String, arguments: [String]) {
+    private func enqueueConfigWrite(
+        key: String,
+        arguments: [String],
+        verdict: WriteVerdict? = nil
+    ) {
         let run = cliRunner
         let svc = fileService
         let ctx = context
@@ -258,13 +268,18 @@ final class SettingsViewModel {
             // Re-read only on success, exactly as the synchronous version
             // did: a refused write left `config` untouched, and reloading it
             // would repaint the same values while claiming a failure.
-            let refreshed: (config: HermesConfig, raw: String)? = result.exitCode == 0
+            let succeeded = verdict.map { $0(result.output, result.exitCode).succeeded }
+                ?? (result.exitCode == 0)
+            let refreshed: (config: HermesConfig, raw: String)? = succeeded
                 ? await Task.detached {
                     (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
                 }.value
                 : nil
             guard let self else { return }
-            self.commitConfigWrite(key: key, arguments: arguments, result: result, refreshed: refreshed)
+            self.commitConfigWrite(
+                key: key, arguments: arguments, result: result,
+                succeeded: succeeded, refreshed: refreshed
+            )
         }
     }
 
@@ -273,14 +288,19 @@ final class SettingsViewModel {
         key: String,
         arguments: [String],
         result: (output: String, exitCode: Int32),
+        succeeded: Bool,
         refreshed: (config: HermesConfig, raw: String)?
     ) {
         Analytics.record(.settingChanged(
             key: .init(rawKey: key),
-            outcome: .init(succeeded: result.exitCode == 0)
+            outcome: .init(succeeded: succeeded)
         ))
         if let refreshed {
-            showSuccess(String(localized: "Saved \(key)"))
+            showSuccess(
+                arguments.contains("unset")
+                    ? String(localized: "Cleared \(key) — the host default applies")
+                    : String(localized: "Saved \(key)")
+            )
             config = refreshed.config
             // The raw YAML view and the personality picker are both derived
             // from config.yaml's text, and neither was refreshed after a
@@ -300,7 +320,11 @@ final class SettingsViewModel {
             logger.warning(
                 "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
             )
-            showSaveFailure(Self.saveFailureMessage(key: key, output: result.output))
+            showSaveFailure(
+                arguments.contains("unset")
+                    ? Self.clearFailureMessage(key: key, output: result.output)
+                    : Self.saveFailureMessage(key: key, output: result.output)
+            )
         }
     }
 
@@ -320,6 +344,17 @@ final class SettingsViewModel {
     ///
     /// `static` and `internal` so tests can drive it with fixture output
     /// without standing up a SettingsViewModel.
+    /// The `config unset` twin of ``saveFailureMessage``. Quotes Hermes's own
+    /// refusal — including the managed-install one, which arrives at exit 0.
+    static func clearFailureMessage(key: String, output: String) -> String {
+        let reason = HermesConfigUnset.judge(output: output, exitCode: 0).detail
+            ?? Self.failureReason(from: output)
+            ?? ""
+        return reason.isEmpty
+            ? String(localized: "Couldn’t clear \(key)")
+            : String(localized: "Couldn’t clear \(key): \(reason)")
+    }
+
     static func saveFailureMessage(key: String, output: String) -> String {
         let reason = Self.failureReason(from: output) ?? ""
         return reason.isEmpty
@@ -526,17 +561,45 @@ final class SettingsViewModel {
     func setCronDrainTimeout(_ value: Int) { setSetting("agent.cron_drain_timeout", value: String(value)) }
     func setGatewayTurnLeaseTimeout(_ value: Int) { setSetting("agent.gateway_turn_lease_timeout", value: String(value)) }
     func setToolUseEnforcement(_ value: String) { setSetting("agent.tool_use_enforcement", value: value) }
-    /// Empty is the picker's "Host default (…)" row, which by decision writes
-    /// NOTHING: the point of that row is that the key is absent and the host
-    /// decides. Writing an empty scalar would persist `approvals.mode: ''`,
-    /// which `_normalize_approval_mode` warns about and reads as `manual` —
-    /// i.e. selecting "host default" would pin the mode that row exists to
-    /// avoid claiming. Getting back OUT of an explicit mode needs `hermes
-    /// config unset`, which is `hasConfigUnset`-gated; that is a separate row,
-    /// not this one.
-    func setApprovalMode(_ value: String) {
-        guard !value.isEmpty else { return }
-        setSetting("approvals.mode", value: value)
+    /// Empty is the picker's "Host default (…)" row. It never writes an empty
+    /// SCALAR: `_coerce_config_set_value` keeps `''` verbatim for a str-typed
+    /// key (`hermes_cli/config.py:3306-3312` @ v2026.9.7) and
+    /// `_normalize_approval_mode("")` resolves it to `manual`
+    /// (`tools/approval_context.py:197-214`), so `config set approvals.mode ''`
+    /// would pin the very mode that row exists to avoid claiming — while
+    /// Scarf's own reader dropped it and went on rendering "Host default".
+    ///
+    /// Getting back OUT of an explicit mode is `hermes config unset`, which
+    /// this row now issues (round-3 decision 10) when the host has it. Below
+    /// the `hasConfigUnset` floor the row stays inert and says how to clear
+    /// the key on the host — Scarf does not shell a verb the host lacks (C5).
+    /// With no mode stored there is nothing to clear, so it is a plain no-op.
+    func setApprovalMode(_ value: String, capabilities: HermesCapabilities) {
+        guard value.isEmpty else {
+            setSetting("approvals.mode", value: value)
+            return
+        }
+        guard config.storedApprovalMode != nil else { return }
+        guard capabilities.hasConfigUnset else {
+            showSaveFailure(HermesConfigUnset.belowFloorHint(key: "approvals.mode"))
+            return
+        }
+        unsetApprovalMode()
+    }
+
+    /// `hermes config unset approvals.mode`, judged by OUTPUT.
+    ///
+    /// The generic `unsetSetting` judges by exit code, which is wrong for this
+    /// verb: `unset_config_value`'s managed-install arm prints its refusal and
+    /// `return`s (`hermes_cli/config.py:3550-3552` @ v2026.9.7), so a refused
+    /// clear arrives as exit 0 and would be banner'd "Saved approvals.mode"
+    /// over a mode that is still set — the P9/P21 class exactly.
+    func unsetApprovalMode() {
+        enqueueConfigWrite(
+            key: "approvals.mode",
+            arguments: HermesConfigUnset.argv(key: "approvals.mode"),
+            verdict: HermesConfigUnset.judge(output:exitCode:)
+        )
     }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the

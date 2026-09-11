@@ -153,6 +153,53 @@ public final class IOSSettingsViewModel {
         await load()
     }
 
+    /// Remove a dotted config key on the remote via `hermes config unset`.
+    ///
+    /// Not `saveValue(key:value:"")`: `hermes config set <key> ''` writes an
+    /// EMPTY SCALAR, and for `approvals.mode` that is not absence —
+    /// `_coerce_config_set_value` keeps the string verbatim for a str-typed
+    /// key (`hermes_cli/config.py:3306-3312` @ v2026.9.7) and
+    /// `_normalize_approval_mode("")` resolves it to `manual`
+    /// (`tools/approval_context.py:197-214`), while Scarf's own reader drops
+    /// it and renders "Host default" over the top. Only `config unset`
+    /// actually clears the key (round-3 decision 10).
+    ///
+    /// Judged by OUTPUT, not exit code: `unset_config_value`'s managed-install
+    /// arm prints its refusal and `return`s (`hermes_cli/config.py:3550-3552`),
+    /// i.e. exits 0. Callers must gate on `HermesCapabilities.hasConfigUnset`;
+    /// the verb does not exist below v0.19.0.
+    public func unsetValue(key: String) async throws {
+        isSaving = true
+        defer { isSaving = false }
+
+        let ctx = context
+        let hermes = ctx.paths.hermesBinary
+        let argv = HermesConfigUnset.argv(key: key).map(shellEscape).joined(separator: " ")
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
+
+        let result: ProcessResult = try await Task.detached {
+            try ctx.makeTransport().runProcess(
+                executable: "/bin/sh",
+                args: ["-c", script],
+                stdin: nil,
+                timeout: 15
+            )
+        }.value
+
+        let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+        let outcome = HermesConfigUnset.judge(output: combined, exitCode: result.exitCode)
+        guard outcome.succeeded else {
+            throw SettingsSaveError.commandFailed(
+                exitCode: result.exitCode,
+                message: outcome.detail ?? "hermes config unset \(key) did not confirm the key was removed"
+            )
+        }
+
+        await load()
+    }
+
     /// True while a `saveValue(...)` call is in flight. Sheet uses
     /// this to disable the Save button + show a ProgressView.
     public private(set) var isSaving: Bool = false

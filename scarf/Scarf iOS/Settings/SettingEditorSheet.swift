@@ -26,6 +26,9 @@ struct SettingEditorSheet: View {
     @State private var enumValue: String = ""
     @State private var saveError: String?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     var body: some View {
         NavigationStack {
@@ -191,9 +194,62 @@ struct SettingEditorSheet: View {
         return stringValue
     }
 
+    /// What selecting the host-default sentinel row over a STORED value means
+    /// — the half `valueToWrite` deliberately answers `nil` for.
+    ///
+    /// Round-3 decision 10: that row clears the key with
+    /// `hermes config unset <key>` on a host that has the verb, and below the
+    /// `hasConfigUnset` floor (v0.19.0) it stays inert with a hint, because
+    /// Scarf never shells a verb the host lacks (charter C5). `nil` means
+    /// "not a clear gesture" and Save proceeds to `valueToWrite` unchanged.
+    ///
+    /// Pure and `static` for the same reason `valueToWrite` is: `save()` is a
+    /// `private func` on a SwiftUI `View` over `@State` and cannot be reached
+    /// from a test, and this rule is the part that has been wrong twice.
+    enum ClearAction: Equatable { case unset, belowFloor }
+
+    static func clearAction(
+        kind: SettingSpec.Kind,
+        stringValue: String,
+        primedValue: String?,
+        capabilities: HermesCapabilities
+    ) -> ClearAction? {
+        guard case .enumPicker(let options, _) = kind, options.contains("") else { return nil }
+        // The sentinel row selected...
+        guard stringValue.isEmpty else { return nil }
+        // ...over a key that actually HAS a stored value. An untouched sheet
+        // on an absent key has nothing to clear, and `primedValue == nil`
+        // means priming never ran.
+        guard let primed = primedValue, !primed.isEmpty else { return nil }
+        return capabilities.hasConfigUnset ? .unset : .belowFloor
+    }
+
     @MainActor
     private func save() async {
         saveError = nil
+        // The clear gesture comes FIRST and returns: `valueToWrite` answers
+        // `nil` for it, which would otherwise dismiss the sheet having done
+        // nothing (the P28/P29 sentinel rule — it must never write `''`).
+        if let clear = Self.clearAction(
+            kind: spec.kind,
+            stringValue: stringValue,
+            primedValue: primedValue,
+            capabilities: capabilities
+        ) {
+            switch clear {
+            case .belowFloor:
+                saveError = HermesConfigUnset.belowFloorHint(key: spec.key)
+            case .unset:
+                do {
+                    try await vm.unsetValue(key: spec.key)
+                    onDismiss()
+                    dismiss()
+                } catch {
+                    saveError = error.localizedDescription
+                }
+            }
+            return
+        }
         guard let value = Self.valueToWrite(
             kind: spec.kind,
             stringValue: stringValue,
