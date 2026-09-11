@@ -51,6 +51,143 @@ struct ProjectTemplateBoundsP43Tests {
         )
     }
 
+    // MARK: - The paths the refusal must NOT take (P43b)
+
+    /// Build a zip in `dir` from the files `contents` describes
+    /// (`name` -> byte count, all zeros so a huge member still costs ~nothing
+    /// on disk and compresses to a few hundred KB).
+    static func makeZip(in dir: URL, named: String, contents: [(String, Int)]) throws -> URL {
+        let staging = dir.appendingPathComponent("staging-" + named)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        for (name, bytes) in contents {
+            let url = staging.appendingPathComponent(name)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(count: bytes).write(to: url)
+        }
+        let archive = dir.appendingPathComponent(named)
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = staging
+        zip.arguments = ["-rqX", archive.path, "."]
+        zip.standardOutput = FileHandle.nullDevice
+        zip.standardError = FileHandle.nullDevice
+        try zip.run()
+        #expect(zip.waitUntilExit(timeout: 120))
+        #expect(zip.terminationStatus == 0)
+        return archive
+    }
+
+    /// The happy path the refusal must not eat. A guard that refuses
+    /// everything is not a guard, and nothing pinned that a legitimate
+    /// multi-file template still passes both ceilings.
+    @Test("a legitimate multi-file template passes the bounds")
+    func realTemplatePassesTheBounds() throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let archive = try Self.makeZip(in: dir, named: "ok.scarftemplate", contents: [
+            ("template.json", 512),
+            ("README.md", 2048),
+            ("skills/demo/SKILL.md", 4096),
+            ("project/src/main.swift", 1024),
+        ])
+        try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path)
+    }
+
+    /// The entry-count ceiling, on a real archive rather than a parsed string.
+    @Test("an archive past the entry ceiling is refused")
+    func entryCeilingRefuses() throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let count = ProjectTemplateService.maxTemplateEntries + 1
+        let members = (0..<count).map { ("f/\($0).txt", 1) }
+        let archive = try Self.makeZip(in: dir, named: "many.scarftemplate", contents: members)
+
+        var thrown: Error?
+        do { try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
+        catch { thrown = error }
+        let error = try #require(thrown, "\(count) entries is past the ceiling")
+        #expect("\(error)".contains("files"), "\(error)")
+        #expect(!"\(error)".contains("table of contents"),
+                "refused for the wrong reason — the listing was readable: \(error)")
+    }
+
+    /// The unpacked-size ceiling: one member of zeros that expands to 300 MB
+    /// and compresses to a few hundred KB. This is the bomb the guard exists
+    /// for, and `unzip -Zt` says `1 file,` — singular — for it, which is the
+    /// spelling the old parser did not know.
+    @Test("a one-member decompression bomb is refused on size")
+    func unpackedSizeCeilingRefuses() throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bomb = 300 * 1024 * 1024
+        #expect(Int64(bomb) > ProjectTemplateService.maxTemplateUnpackedBytes)
+        let archive = try Self.makeZip(
+            in: dir, named: "bomb.scarftemplate", contents: [("payload.bin", bomb)])
+        // The premise: it got PAST the archive-size cap, so the refusal below
+        // can only come from the declared unpacked size.
+        let onDisk = (try FileManager.default.attributesOfItem(atPath: archive.path)[.size]
+                      as? Int64) ?? 0
+        #expect(onDisk < ProjectTemplateService.maxTemplateArchiveBytes,
+                "the zip is \(onDisk) bytes — it would be refused on file size instead")
+
+        var thrown: Error?
+        do { try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
+        catch { thrown = error }
+        let error = try #require(thrown, "300 MB unpacked is past the ceiling")
+        #expect("\(error)".contains("expand to"), "\(error)")
+    }
+
+    /// `openRemoteURL` downloads to its own temp file and hands it to
+    /// `openLocalFile`. A refusal — which is now the ANSWER for an archive
+    /// whose listing cannot be read, so the common case for a hostile file —
+    /// left that download on disk forever.
+    @Test("a refused download does not strand its temp archive")
+    @MainActor
+    func refusedDownloadRemovesItsTempArchive() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let downloaded = dir.appendingPathComponent("downloaded.scarftemplate")
+        try Data("not a zip".utf8).write(to: downloaded)
+
+        let vm = TemplateInstallerViewModel(context: .local)
+        vm.openLocalFile(downloaded.path, source: .url, removeArchiveWhenDone: true)
+
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if case .failed = vm.stage { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        guard case .failed = vm.stage else {
+            Issue.record("expected a refusal, got \(vm.stage)")
+            return
+        }
+        #expect(!FileManager.default.fileExists(atPath: downloaded.path),
+                "the refused download is still on disk")
+    }
+
+    /// And the file the USER picked is never removed — same entry point, the
+    /// other side of the flag.
+    @Test("a refused local file the user picked is left alone")
+    @MainActor
+    func refusedLocalFileIsKept() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let mine = dir.appendingPathComponent("mine.scarftemplate")
+        try Data("not a zip".utf8).write(to: mine)
+
+        let vm = TemplateInstallerViewModel(context: .local)
+        vm.openLocalFile(mine.path)
+
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if case .failed = vm.stage { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(FileManager.default.fileExists(atPath: mine.path),
+                "Scarf deleted a file the user chose")
+    }
+
     @Test("the unreadable-listing refusal is localized, not a bare literal")
     func refusalIsLocalized() {
         let sentence = ProjectTemplateService.unreadableListingRefusal

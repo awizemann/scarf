@@ -1,5 +1,6 @@
 #if !os(iOS)
 import Foundation
+import os
 import Testing
 @testable import ScarfCore
 
@@ -112,21 +113,35 @@ struct ProcessDrainP43Tests {
         return dir
     }
 
+    /// A path that a reader can never finish opening: `open(2)` on a FIFO with
+    /// no writer blocks in the kernel until one appears, and nothing here ever
+    /// writes. That is what makes this deterministic — the child PROVABLY
+    /// cannot exit, rather than being given work a fast host might finish
+    /// inside the budget.
+    static func makeBlockingFIFO(in dir: URL) throws -> URL {
+        let fifo = dir.appendingPathComponent("never.zip")
+        #expect(mkfifo(fifo.path, 0o600) == 0, "mkfifo failed: \(errno)")
+        return fifo
+    }
+
     @Test("restore's unzip refuses instead of hanging when it outstays its budget")
     func unzipArchiveIsBounded() throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let archive = try Self.makeZip(in: dir, bytes: 24 * 1024 * 1024)
+        // Was a 24 MB zip against a 1 ms budget — a bet that unpacking is
+        // slower than one poll turn, which is a race, not a proof. A FIFO
+        // nobody writes to cannot be read at all (round-4 P43b).
+        let archive = try Self.makeBlockingFIFO(in: dir)
         let dest = dir.appendingPathComponent("out")
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
 
         var thrown: Error?
         do {
-            try RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 0.001)
+            try RemoteRestoreService.unzipArchive(at: archive, into: dest, timeout: 0.5)
         } catch {
             thrown = error
         }
-        let error = try #require(thrown, "a 1 ms budget cannot be met by a freshly exec'd unzip")
+        let error = try #require(thrown, "unzip cannot finish reading a FIFO with no writer")
         #expect("\(error)".contains("did not finish"))
     }
 
@@ -171,6 +186,143 @@ struct ProcessDrainP43Tests {
         // through the pipe, so it is the shorter of the two by construction.
         #expect(RemoteRestoreService.remoteExtractTimeout < RemoteRestoreService.unzipTimeout)
         #expect(RemoteBackupService.zipTimeout == RemoteRestoreService.unzipTimeout)
+    }
+
+    // MARK: - inspect()'s temp dir (P43b)
+
+    /// `inspect()` creates `scarf-restore-<uuid>` before it unzips anything
+    /// and hands it to the caller inside `InspectionResult` — on the SUCCESS
+    /// path. On every throwing path it was simply left behind, holding
+    /// however much of a multi-GB archive had landed before the refusal, once
+    /// per attempt.
+    @Test("a refused inspect leaves no temp directory behind")
+    func inspectCleansUpAfterARefusal() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Not a zip at all: `unzip` refuses it in milliseconds.
+        let notAnArchive = dir.appendingPathComponent("nope.scarfbackup")
+        try Data("this is not a zip".utf8).write(to: notAnArchive)
+
+        func restoreTempDirs() -> Set<String> {
+            let temp = FileManager.default.temporaryDirectory.path
+            let all = (try? FileManager.default.contentsOfDirectory(atPath: temp)) ?? []
+            return Set(all.filter { $0.hasPrefix("scarf-restore-") })
+        }
+
+        let before = restoreTempDirs()
+        var thrown: Error?
+        do {
+            _ = try await RemoteRestoreService(context: .local).inspect(archiveURL: notAnArchive)
+        } catch {
+            thrown = error
+        }
+        _ = try #require(thrown, "a file that is not a zip cannot be inspected")
+        #expect(restoreTempDirs().subtracting(before).isEmpty,
+                "inspect() left its work directory behind on a throwing path")
+    }
+
+    // MARK: - The tarball pump (P43b)
+
+    /// The reviewer's reproduction, exactly: a child that floods stderr past
+    /// the 64 KB buffer and only THEN starts reading its stdin. With the
+    /// drains installed after the pump — the shape P43 shipped — the child
+    /// blocks in `write()`, stops reading stdin, and the parent blocks in
+    /// `writer.write()` forever: `extractTimeout` is never reached, because
+    /// the code never gets as far as the wait.
+    @Test("a remote that floods stderr before reading stdin does not wedge the pump")
+    func pumpSurvivesAChattyChild() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // 1 MB, comfortably past both pipe buffers.
+        let tarball = dir.appendingPathComponent("payload.bin")
+        try Data(count: 1_000_000).write(to: tarball)
+
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        child.arguments = [
+            "-c",
+            "head -c \(Self.chattyBytes) /dev/zero | tr '\\000' 'x' 1>&2; cat > /dev/null",
+        ]
+
+        let progressed = OSAllocatedUnfairLock(initialState: Int64(0))
+        try await RemoteRestoreService.streamTarball(
+            into: child,
+            tarball: tarball,
+            extractTimeout: 20,
+            stallTimeout: 8
+        ) { written in progressed.withLock { $0 = written } }
+
+        #expect(progressed.withLock { $0 } == 1_000_000)
+        #expect(child.terminationStatus == 0)
+    }
+
+    /// A child that never reads its stdin at all. The pump fills the pipe
+    /// buffer, blocks, and can never make progress again — so the stall
+    /// ceiling is the only thing that can end this, and it must.
+    @Test("a remote that never reads stdin is stopped by the stall ceiling")
+    func pumpStallCeilingFires() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tarball = dir.appendingPathComponent("payload.bin")
+        try Data(count: 4_000_000).write(to: tarball)
+
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // `exec sleep` so the shell itself is replaced: nothing in this child
+        // ever reads a byte of stdin.
+        child.arguments = ["-c", "exec sleep 120"]
+
+        let started = Date()
+        var thrown: Error?
+        do {
+            try await RemoteRestoreService.streamTarball(
+                into: child, tarball: tarball, extractTimeout: 20, stallTimeout: 1
+            ) { _ in }
+        } catch {
+            thrown = error
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        let error = try #require(thrown, "a child that never reads stdin cannot be pumped")
+        #expect("\(error)".contains("stopped reading"), "\(error)")
+        #expect(elapsed < 30, "the stall ceiling took \(elapsed)s to fire")
+    }
+
+    /// The third archive site's launch failure. It threw without closing a
+    /// single handle and without reaping anything — six fds per attempt on the
+    /// one path where no drain owns them.
+    @Test("a push whose child cannot launch closes its pipes and refuses")
+    func pumpLaunchFailureIsClean() async throws {
+        let dir = try Self.scratchDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tarball = dir.appendingPathComponent("payload.bin")
+        try Data(count: 1024).write(to: tarball)
+
+        func openFDs() -> Int {
+            (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
+        }
+
+        func attempt() async -> Error? {
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: "/nonexistent/scarf-p43b-no-such-binary")
+            do {
+                try await RemoteRestoreService.streamTarball(
+                    into: child, tarball: tarball, extractTimeout: 5, stallTimeout: 5
+                ) { _ in }
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        let first = await attempt()
+        let error = try #require(first)
+        #expect("\(error)".contains("start remote tar"), "\(error)")
+
+        let before = openFDs()
+        for _ in 0..<20 { _ = await attempt() }
+        let after = openFDs()
+        // Six handles per attempt would be +120 here.
+        #expect(after - before < 12, "launch failures leaked fds: \(before) -> \(after)")
     }
 
     /// The audit's actual finding was textual: three `proc.waitUntilExit()`

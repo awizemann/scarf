@@ -106,11 +106,20 @@ enum AppRelauncher {
             timeout: Self.openTimeout, pipes: [stderrPipe, stdoutPipe])
         let errData = drained.first ?? Data()
         // `waitDraining` closes the READ ends (each reader closes the handle
-        // it drained). The WRITE ends are ours, and nothing was closing them:
-        // Foundation dup()s them into the child on `run()` but the parent's
-        // copies stay open, so every relaunch attempt leaked two fds. Cheap
-        // here — the process is about to terminate — and wrong everywhere,
-        // which is why it is fixed rather than excused.
+        // it drained) — those are the ones that really leak: 50 spawns holding
+        // their `Pipe`s and never closing the read ends took /dev/fd from 4 to
+        // 104, exactly 2 per spawn. The WRITE ends do NOT leak after a
+        // successful `run()`: Foundation closes the parent's copy as part of
+        // the spawn, and the same 50-spawn count stayed flat at 4 whether or
+        // not these two lines ran (measured, round-4 P43b — the earlier
+        // "every relaunch leaked two fds" rationale here was wrong).
+        //
+        // They are kept because they are not always no-ops: on the
+        // launch-failure path above `run()` never spawned, so the parent's
+        // write ends are still open and these are the real release. Closing an
+        // already-closed handle is a harmless `EBADF` the `try?` eats, and one
+        // unconditional release is easier to keep right than two paths that
+        // must agree on who spawned.
         try? stderrPipe.fileHandleForWriting.close()
         try? stdoutPipe.fileHandleForWriting.close()
 

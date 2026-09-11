@@ -1264,7 +1264,19 @@ final class ChatViewModel {
         // Each gets its own optimistic side-effect on RichChatViewModel
         // so the chat header pill / queue chip update synchronously
         // without waiting for a server round-trip.
-        let isNonInterruptive = richChatViewModel.isNonInterruptiveSlash(text)
+        //
+        // CAPABILITY-AWARE (round-4 decision 12). The menu has hidden
+        // `/steer` and `/queue` below their v0.13 floor since P37, but the
+        // user can still TYPE either one, and below the floor the adapter
+        // does not dispatch it: `_handle_slash_command` returns `None` for a
+        // name outside `_COMMANDS` and the raw text goes to the LLM as an
+        // ordinary prompt (`acp_adapter/commands.py:88-95` @ `v2026.9.7`;
+        // both names enter the dict together at `acp_adapter/server.py:170`
+        // /`:171` @ `v2026.5.7`, and `acp_adapter/` at `v2026.4.30` has
+        // neither). So that turn is a REAL turn: no queue chip, no
+        // "runs after current turn" hint, the normal working indicator, and
+        // a one-line notice saying what Scarf actually sent.
+        let isNonInterruptive = richChatViewModel.isDispatchedNonInterruptiveSlash(text)
         let parsed = RichChatViewModel.parseSlashName(text)
         switch parsed.name {
         case "goal":
@@ -1290,7 +1302,7 @@ final class ChatViewModel {
                 richChatViewModel.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleHintClear()
-        case "queue":
+        case "queue" where isNonInterruptive:
             let queuedText = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 richChatViewModel.recordQueuedPrompt(text: queuedText)
@@ -1327,6 +1339,17 @@ final class ChatViewModel {
             // Don't flip "Agent working…" for any other
             // non-interruptive command (defensive; matches the
             // legacy contract).
+            //
+            // A sub-floor `/steer` / `/queue` lands here too, which is the
+            // point: it takes the ordinary-prompt path, indicator included,
+            // and says so once.
+            if let notice = RichChatViewModel.subFloorSlashNotice(
+                name: parsed.name,
+                capabilities: richChatViewModel.capabilitiesGate
+            ) {
+                richChatViewModel.transientHint = notice
+                scheduleHintClear()
+            }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
         // Record the in-flight interruptive turn (ChatViewModel-owned;

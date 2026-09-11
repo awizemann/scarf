@@ -454,6 +454,28 @@ struct MainActorSpawnDisciplineP22Tests {
     /// leaves true, so the check would have kept passing over dead debt.
     /// `allowed` carries each entry's path so a future allowance cannot be
     /// mis-mapped by an `if name == …` ladder.
+    /// The roots the sweep walks, named once so the sweep and the
+    /// existence check cannot drift apart.
+    static let sweepRoots: [(path: String, defaultsToMainActor: Bool)] = [
+        ("scarf/scarf", true),
+        ("scarf/Scarf iOS", true),
+        ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
+    ]
+
+    /// P40's lesson, applied here: `FileManager.enumerator` returns `nil` for
+    /// a missing root and the walk `continue`s past it in silence. A renamed
+    /// target must break this test, not quietly halve the sweep.
+    @Test("every root the sweep walks exists")
+    func sweepRootsExist() throws {
+        for (relative, _) in Self.sweepRoots {
+            var isDir: ObjCBool = false
+            let path = Self.repoRoot.appendingPathComponent(relative).path
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+            #expect(exists && isDir.boolValue,
+                    Comment(rawValue: "sweep root \(relative) is missing"))
+        }
+    }
+
     @Test func noNewSynchronousWaitRunsOnTheMainActor() throws {
         /// File basenames allowed to hold a main-actor-isolated sync wait,
         /// each with the task that will remove it. EMPTY, and adding to it is
@@ -466,24 +488,30 @@ struct MainActorSpawnDisciplineP22Tests {
         let primitivesFile = "ProcessTimeout.swift"
         /// Roots and whether the target defaults every declaration to the
         /// main actor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`).
-        let roots: [(path: String, defaultsToMainActor: Bool)] = [
-            ("scarf/scarf", true),
-            ("scarf/Scarf iOS", true),
-            ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
-        ]
+        let roots = Self.sweepRoots
 
         var offenders: [String] = []
         var isolatedScanned = 0
+        /// Every `.swift` file the enumeration actually opened, per root.
+        /// `isolatedScanned == allowed.count` is `0 == 0` while `allowed` is
+        /// empty, so an enumeration that read NOTHING — a renamed root, a
+        /// `nil` enumerator, a `contentsOf` that threw for all of them — used
+        /// to pass this test silently. The floor below is what makes "the
+        /// sweep ran" a claim with evidence (round-4 P43b).
+        var filesScannedByRoot: [String: Int] = [:]
         /// Basenames the sweep actually flagged — what makes an allowance
         /// verifiably still live, rather than "the string is in the file".
         var reachedByTheSweep: Set<String> = []
 
         for (relative, defaultsToMainActor) in roots {
             let root = Self.repoRoot.appendingPathComponent(relative)
-            let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
-            while let url = files?.nextObject() as? URL {
+            let files = try #require(
+                FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil),
+                Comment(rawValue: "\(relative) does not exist — the sweep would read nothing"))
+            while let url = files.nextObject() as? URL {
                 guard url.pathExtension == "swift" else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                filesScannedByRoot[relative, default: 0] += 1
                 let lines = src.components(separatedBy: "\n")
 
                 // In ScarfCore, only an explicitly `@MainActor` type counts.
@@ -568,6 +596,22 @@ struct MainActorSpawnDisciplineP22Tests {
                 }
             }
         }
+
+        // The premise floor. Real counts at the time of writing: 299 + 50 +
+        // 210 = 559 `.swift` files. The floor is deliberately well under that
+        // so ordinary growth or a deleted feature cannot trip it, and well
+        // over zero so a broken enumeration cannot hide.
+        for (relative, _) in roots {
+            #expect((filesScannedByRoot[relative] ?? 0) > 20,
+                    Comment(rawValue: "the sweep read \(filesScannedByRoot[relative] ?? 0)"
+                            + " Swift files under \(relative)"))
+        }
+        let filesScanned = filesScannedByRoot.values.reduce(0, +)
+        #expect(filesScanned > 450, """
+            The sweep read only \(filesScanned) Swift files. It cannot have \
+            covered the three roots, so neither the offender list nor the \
+            count below means anything.
+            """)
 
         #expect(isolatedScanned == allowed.count, """
             The sweep found \(isolatedScanned) main-actor-isolated synchronous \

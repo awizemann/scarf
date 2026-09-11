@@ -340,7 +340,10 @@ struct ProjectTemplateService: Sendable {
     /// cases the extraction that follows is the thing the caps were supposed
     /// to gate, and `try?` handed it a free pass. An unopenable template is a
     /// small loss; a Mac that fills its disk is not.
-    private nonisolated func enforceArchiveBounds(
+    /// Internal rather than private so `ProjectTemplateBoundsP43Tests` can
+    /// drive the ceilings directly, on real archives, without going through
+    /// an `inspect()` that would unpack them.
+    nonisolated func enforceArchiveBounds(
         zipPath: String,
         listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout
     ) throws {
@@ -488,12 +491,18 @@ struct ProjectTemplateService: Sendable {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        // Foundation dup()s these handles into the child on `run()`, but the
-        // parent copies stay open until explicitly released. Both ends must
-        // be closed or each Process spawn leaks 4 fds.
-        // The READ ends belong to `waitDraining` once the process has
-        // launched — see that method. On the launch-failure path below
-        // nothing is draining them, so they are closed there explicitly.
+        // The READ ends are the ones that leak: a spawn whose `Pipe` outlives
+        // it and whose read ends are never closed costs 2 fds (measured at 50
+        // spawns, round-4 P43b). They belong to `waitDraining` once the
+        // process has launched — see that method — so this closes them only on
+        // the launch-failure path below, where nothing is draining them.
+        //
+        // The WRITE ends do not leak after a successful `run()`: Foundation
+        // closes the parent's copy as part of the spawn, and the 50-spawn
+        // /dev/fd count was identical with and without these closes. They are
+        // kept anyway because on the launch-failure path `run()` never spawned
+        // and they are then the real release; a `try?` close of an
+        // already-closed handle is a harmless `EBADF`.
         func closePipes(includingReadEnds: Bool = false) {
             if includingReadEnds {
                 try? outPipe.fileHandleForReading.close()

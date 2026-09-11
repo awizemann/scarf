@@ -75,7 +75,7 @@ struct ChatView: View {
     }
 
     /// Names that render greyed-out + ignore taps. Matches the Mac's
-    /// disabled gating exactly — `/steer` on pre-v0.13 idle sessions
+    /// disabled gating exactly — `/queue` on an idle-but-open session
     /// PLUS every agent-side command when there's no active session
     /// (P2 of the projects-feature fix).
     private var disabledSlashCommandNames: Set<String> {
@@ -1676,7 +1676,7 @@ final class ChatController {
                 vm.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "queue":
+        case "queue" where vm.isDispatchedNonInterruptiveSlash(text):
             let queuedText = parsedSlash.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 vm.recordQueuedPrompt(text: queuedText)
@@ -1702,11 +1702,27 @@ final class ChatController {
                 vm.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
             }
             scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "steer" where vm.isNonInterruptiveSlash(text):
+        case "steer" where vm.isDispatchedNonInterruptiveSlash(text):
             vm.transientHint = "Guidance queued — applies after the next tool call."
             scheduleTransientHintClear(snapshot: vm.transientHint)
         default:
-            break
+            // Round-4 decision 12, iOS half. A typed `/steer` / `/queue` on
+            // a host below the v0.13 ACP floor is not dispatched — the
+            // adapter returns `None` for a name outside `_COMMANDS` and the
+            // raw text goes to the LLM as an ordinary prompt
+            // (`acp_adapter/commands.py:88-95` @ `v2026.9.7`; both names
+            // enter the dict at `acp_adapter/server.py:170`/`:171` @
+            // `v2026.5.7` and neither exists at `v2026.4.30`). The two
+            // `where` clauses above keep the optimistic mirrors off that
+            // path; this says what was actually sent. The working indicator
+            // needs no gating here — `addUserMessage` raised it already.
+            if let notice = RichChatViewModel.subFloorSlashNotice(
+                name: parsedSlash.name,
+                capabilities: vm.capabilitiesGate
+            ) {
+                vm.transientHint = notice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
+            }
         }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);

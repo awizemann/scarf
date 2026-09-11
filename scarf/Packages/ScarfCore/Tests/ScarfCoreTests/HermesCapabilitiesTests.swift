@@ -99,7 +99,7 @@ import Foundation
         // v0.13 surfaces light up.
         #expect(caps.hasGoals)
         #expect(caps.hasACPQueue)
-        #expect(caps.hasACPSteerOnIdle)
+        #expect(caps.hasACPSteer)
         #expect(caps.hasKanbanDiagnostics)
         #expect(caps.hasCuratorArchive)
         #expect(caps.hasGoogleChatPlatform)

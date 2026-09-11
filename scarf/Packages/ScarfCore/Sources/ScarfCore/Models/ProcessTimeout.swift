@@ -117,25 +117,44 @@ extension Process {
         pipes: [Pipe],
         drainGrace: TimeInterval = Process.drainGrace
     ) -> (exited: Bool, data: [Data]) {
-        let box = OSAllocatedUnfairLock(initialState: [Int: Data]())
-        let group = DispatchGroup()
-        for (index, pipe) in pipes.enumerated() {
-            let reader = pipe.fileHandleForReading
-            group.enter()
-            DispatchQueue.global(qos: .utility).async {
-                let data = reader.readDataToEndOfFile()
-                try? reader.close()
-                box.withLock { $0[index] = data }
-                group.leave()
-            }
-        }
+        waitDraining(
+            timeout: timeout,
+            drain: Process.startDraining(pipes: pipes),
+            drainGrace: drainGrace
+        )
+    }
+
+    /// Install the readers NOW and hand back the token to collect them with.
+    ///
+    /// ``waitDraining(timeout:pipes:)`` starts the readers and waits in one
+    /// call, which is right whenever the parent has nothing left to do. It is
+    /// WRONG whenever the parent still has to feed the child: a caller that
+    /// pumps a file into the child's stdin and only then calls the combined
+    /// form has no reader installed for the whole pump, so a child that fills
+    /// its 64 KB stderr buffer stops reading stdin, the parent blocks forever
+    /// inside `write()`, and the bounded wait that would have rescued it is
+    /// never reached at all (round-4 P43b, `RemoteRestoreService.pushTarball`).
+    ///
+    /// Split the two halves in that case: `startDraining` immediately after a
+    /// successful `run()`, then ``waitDraining(timeout:drain:drainGrace:)``
+    /// once the pump is done. Read-end ownership is unchanged — the drain owns
+    /// them and closes each one itself.
+    public static func startDraining(pipes: [Pipe]) -> ProcessPipeDrain {
+        ProcessPipeDrain(pipes: pipes)
+    }
+
+    /// Wait for this process within `timeout`, then collect a drain that was
+    /// started earlier by ``startDraining(pipes:)``.
+    public func waitDraining(
+        timeout: TimeInterval,
+        drain: ProcessPipeDrain,
+        drainGrace: TimeInterval = Process.drainGrace
+    ) -> (exited: Bool, data: [Data]) {
         let exited = waitUntilExit(timeout: timeout)
         // Bounded, like every other wait here: EOF arrives when the last
         // write end closes, which is at exit — but a fd inherited by a
         // grandchild would otherwise hold the read open forever.
-        _ = group.wait(timeout: .now() + drainGrace)
-        let collected = box.withLock { $0 }
-        return (exited, (0..<pipes.count).map { collected[$0] ?? Data() })
+        return (exited, drain.collect(grace: drainGrace))
     }
 
     /// How long to wait for a drained pipe to reach EOF after the child has
@@ -144,6 +163,48 @@ extension Process {
     /// `public` only because it is `waitDraining`'s default argument, and a
     /// default argument on public API cannot name a narrower symbol.
     public static let drainGrace: TimeInterval = 1
+}
+
+/// The readers `Process.startDraining(pipes:)` installed, and the handle the
+/// caller collects them with.
+///
+/// One per spawn: the readers are running from the moment this is created, so
+/// an instance cannot be reused across runs. ``collect(grace:)`` is idempotent
+/// — the second call returns the same data without waiting again.
+public final class ProcessPipeDrain: @unchecked Sendable {
+    private let box = OSAllocatedUnfairLock(initialState: [Int: Data]())
+    private let group = DispatchGroup()
+    private let count: Int
+    private let collected = OSAllocatedUnfairLock(initialState: [Data]?.none)
+
+    fileprivate init(pipes: [Pipe]) {
+        count = pipes.count
+        for (index, pipe) in pipes.enumerated() {
+            let reader = pipe.fileHandleForReading
+            group.enter()
+            DispatchQueue.global(qos: .utility).async { [box, group] in
+                let data = reader.readDataToEndOfFile()
+                // The drain owns the READ ends: each reader closes the handle
+                // it drained, immediately after its own read returned. A
+                // caller-side close while this thread is still blocked in the
+                // read raises.
+                try? reader.close()
+                box.withLock { $0[index] = data }
+                group.leave()
+            }
+        }
+    }
+
+    /// Everything the readers have produced, waiting at most `grace` for the
+    /// last EOF. One slot per pipe, in the order they were passed.
+    public func collect(grace: TimeInterval = Process.drainGrace) -> [Data] {
+        if let done = collected.withLock({ $0 }) { return done }
+        _ = group.wait(timeout: .now() + grace)
+        let snapshot = box.withLock { $0 }
+        let data = (0..<count).map { snapshot[$0] ?? Data() }
+        collected.withLock { $0 = data }
+        return data
+    }
 }
 
 #endif

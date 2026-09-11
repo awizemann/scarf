@@ -1,4 +1,5 @@
 import Foundation
+import os
 import ScarfCore
 import Testing
 @testable import scarf
@@ -108,8 +109,13 @@ struct SpawnDisciplineP43Tests {
         // rather than waiting for a `cancel()` that a successful run never
         // makes. Both pipes go through one `streamHandler`.
         #expect(src.contains("handle.readabilityHandler = nil"))
-        #expect(src.contains("stdoutPipe.fileHandleForReading.readabilityHandler = streamHandler"))
-        #expect(src.contains("stderrPipe.fileHandleForReading.readabilityHandler = streamHandler"))
+        // P43b replaced the single shared `streamHandler` with one handler per
+        // pipe, each owning its own inbox and EOF latch (see
+        // `spotifyVerdictWaitsForEOF`).
+        #expect(src.contains("stdoutPipe.fileHandleForReading.readabilityHandler = makeHandler(inbox: stdoutInbox)"))
+        #expect(src.contains("stderrPipe.fileHandleForReading.readabilityHandler = makeHandler(inbox: stderrInbox)"))
+        // And the EOF latch itself: the verdict waits for both.
+        #expect(src.contains("inbox.markEOF()"))
         // The deadline must not outlive the run it was watching.
         #expect(src.contains("deadlineTask?.cancel()"))
     }
@@ -120,6 +126,134 @@ struct SpawnDisciplineP43Tests {
     func nousFlowUnhooksOnEOF() throws {
         let src = try Self.source("Core/Services/NousAuthFlow.swift")
         #expect(src.contains("handle.readabilityHandler = nil"))
+    }
+
+    // MARK: - SpotifyAuthFlow's verdict (P43b)
+
+    /// The race the EOF latch removes: `hermes auth spotify` writes the line
+    /// that explains a failure immediately before it exits, so the exit status
+    /// and the last chunk are in flight together. Judging inside
+    /// `terminationHandler` — which is what this flow did — takes the verdict
+    /// on output that does not contain the explanation yet.
+    @Test("a last stderr line written just before exit 1 reaches the verdict")
+    @MainActor
+    func spotifyVerdictWaitsForEOF() async throws {
+        let flow = SpotifyAuthFlow(context: .local)
+        flow.makeAuthProcess = {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            // Some volume first, so the last line cannot be the only read, and
+            // then the distinctive line with nothing after it but the exit.
+            p.arguments = [
+                "-c",
+                "i=0; while [ $i -lt 400 ]; do echo \"filler line $i\" 1>&2; i=$((i+1)); done;"
+                + " echo 'SCARF-P43B-LAST-LINE' 1>&2; exit 1",
+            ]
+            return p
+        }
+        flow.start()
+
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if case .failure = flow.state { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        guard case .failure(let reason) = flow.state else {
+            Issue.record("the flow never reached a verdict: \(flow.state)")
+            return
+        }
+        #expect(reason.contains("status 1"), Comment(rawValue: reason))
+        // `tail(output, lines: 6)` — so the distinctive line has to be in the
+        // LAST six, which it is, provided the drain finished before the
+        // verdict was taken.
+        #expect(reason.contains("SCARF-P43B-LAST-LINE"),
+                Comment(rawValue: "the verdict was taken before the last stderr chunk arrived: \(reason)"))
+        #expect(flow.output.contains("SCARF-P43B-LAST-LINE"))
+    }
+
+    /// `cancel()` was a bare `terminate()` — no escalation on the one path
+    /// that exists because the child would not stop — and it closed the READ
+    /// ends while a `readabilityHandler` could still be running on them.
+    @Test("cancel stops a child that ignores SIGTERM")
+    @MainActor
+    func spotifyCancelEscalates() async throws {
+        let flow = SpotifyAuthFlow(context: .local)
+        flow.makeAuthProcess = {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            // Ignores SIGTERM outright: `terminate()` alone cannot end this.
+            p.arguments = ["-c", "trap '' TERM; while true; do sleep 0.1; done"]
+            return p
+        }
+        flow.start()
+        // Let it reach the trap.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let pid = flow.runningPIDForTesting
+        #expect(pid > 0)
+
+        flow.cancel()
+        // SIGTERM (ignored) → 2 s grace → SIGKILL → grace. Give it room.
+        let deadline = Date().addingTimeInterval(15)
+        var gone = false
+        while Date() < deadline {
+            if kill(pid, 0) != 0 { gone = true; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        #expect(gone, "cancel() left a SIGTERM-ignoring child running")
+    }
+
+    // MARK: - What actually leaks at a piped spawn (P43b)
+
+    /// The rationale two call sites carried — "each spawn leaks 4 fds unless
+    /// the write ends are closed" — was false, and a false rationale is how a
+    /// close gets moved somewhere it raises. Measured here rather than
+    /// asserted: it is the READ ends that leak.
+    @Test("Foundation closes the parent's write end at spawn; the read end is ours")
+    func onlyReadEndsLeak() throws {
+        func openFDs() -> Int {
+            (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
+        }
+        /// Spawn `/bin/echo` 50 times, keeping every `Pipe` alive so ARC
+        /// cannot do the closing for us.
+        func spawn50(closeReadEnds: Bool, closeWriteEnds: Bool) -> Int {
+            var kept: [Pipe] = []
+            let before = openFDs()
+            for _ in 0..<50 {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/echo")
+                p.arguments = ["hi"]
+                let out = Pipe()
+                let err = Pipe()
+                p.standardOutput = out
+                p.standardError = err
+                try? p.run()
+                _ = out.fileHandleForReading.readDataToEndOfFile()
+                _ = err.fileHandleForReading.readDataToEndOfFile()
+                _ = p.waitUntilExit(timeout: 10)
+                if closeReadEnds {
+                    try? out.fileHandleForReading.close()
+                    try? err.fileHandleForReading.close()
+                }
+                if closeWriteEnds {
+                    try? out.fileHandleForWriting.close()
+                    try? err.fileHandleForWriting.close()
+                }
+                kept.append(out)
+                kept.append(err)
+            }
+            let after = openFDs()
+            kept.removeAll()
+            return after - before
+        }
+
+        // Read ends left open: 2 per spawn.
+        #expect(spawn50(closeReadEnds: false, closeWriteEnds: true) >= 90)
+        // Read ends closed, write ends NOT: flat. Foundation closed the
+        // parent's copy of the write end as part of `run()`, so the closes in
+        // `AppRelauncher` / `ProjectTemplateService` are no-ops after a
+        // successful spawn — kept only because they are the real release on
+        // the launch-failure path, where `run()` never spawned.
+        #expect(spawn50(closeReadEnds: true, closeWriteEnds: false) < 10)
     }
 
     // MARK: - AppRelauncher

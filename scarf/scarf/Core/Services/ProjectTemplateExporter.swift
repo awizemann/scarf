@@ -9,8 +9,15 @@ import os
 struct ProjectTemplateExporter: Sendable {
 
     /// C10 budget for the `zip` spawn. See ``ProjectTemplateService/unzipTimeout``.
-    static let zipTimeout: TimeInterval = 120
-    private static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateExporter")
+    ///
+    /// `nonisolated` because the target defaults every declaration to the main
+    /// actor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`) and the only reader
+    /// is `zipDirectory`, which is `nonisolated` on purpose — a main-actor
+    /// static read from there is a warning today and an error under a stricter
+    /// mode. Same defect, same fix as `AppRelauncher.openTimeout` (round-4
+    /// P43b); `ProjectTemplateService`'s budgets were already spelled this way.
+    nonisolated static let zipTimeout: TimeInterval = 120
+    private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateExporter")
 
     let context: ServerContext
 

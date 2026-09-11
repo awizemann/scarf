@@ -214,17 +214,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// so the row silently burned a turn (P34's finding, one row late).
     public var hasACPSteer: Bool { atLeastSemver(0, 13, 0) }
 
-    /// `/steer` runs as a regular prompt on an IDLE ACP session, rather than
-    /// needing a turn in flight to inject into
-    /// (`acp_adapter/server.py:812-820` @ `v2026.5.7`).
-    ///
-    /// Same floor as ``hasACPSteer`` and deliberately expressed as it: the
-    /// idle handling shipped in the same commit as the command, so there is
-    /// no host that has `/steer` without it. (The old doc here claimed
-    /// pre-v0.13 hosts "silently no-op `/steer` when no turn is in flight" —
-    /// a CLI/TUI fact, not an ACP one: pre-v0.13 hosts have no `/steer` at
-    /// all. C2.)
-    public var hasACPSteerOnIdle: Bool { hasACPSteer }
+    // `hasACPSteerOnIdle` was RETIRED in P44 (round-4 decision 14). It was
+    // `hasACPSteer` expressed a second time — the idle fallback
+    // (`acp_adapter/server.py:812-820` @ `v2026.5.7`) shipped in the same
+    // commit as the command itself (`:170`), so no host has one without the
+    // other — and its only consumer was an arm of
+    // `RichChatViewModel.disabledSlashCommandNames` that the P37 roster gate
+    // had already made unreachable. A flag whose every reader is dead is not
+    // defence in depth; it is a second place for the floor to drift.
 
     /// Kanban v0.13 reliability surface, as it actually exists at v2026.9.7:
     /// the `kanban diagnostics [--json]` subcommand over the rule engine
