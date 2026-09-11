@@ -442,8 +442,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // one pid we may signal leaves the write blocked. Signalling the
         // process GROUP is not an option either: Foundation's children share
         // Scarf's group, so `kill(-pid, …)` would take Scarf with it. Measured:
-        // with the drains moved back after the pump, that timer fired, killed
-        // the child, and the test still wedged past three minutes.
+        // an earlier draft of this fix DID carry that timer, and with the
+        // drains moved back after the pump the reproduction still wedged past
+        // three minutes — the kill it can deliver does not free the write.
         //
         // With `O_NONBLOCK` the parent is never inside an uninterruptible
         // write at all: a full pipe returns `EAGAIN`, which is where the stall

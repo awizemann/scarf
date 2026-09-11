@@ -407,6 +407,28 @@ struct MainActorSpawnDisciplineP22Tests {
     }
 
     // MARK: - 6. The sweep: no NEW synchronous wait on the main actor
+    /// The roots the sweep walks, named once so the sweep and the
+    /// existence check cannot drift apart.
+    static let sweepRoots: [(path: String, defaultsToMainActor: Bool)] = [
+        ("scarf/scarf", true),
+        ("scarf/Scarf iOS", true),
+        ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
+    ]
+
+    /// P40's lesson, applied here: `FileManager.enumerator` returns `nil` for
+    /// a missing root and the walk `continue`s past it in silence. A renamed
+    /// target must break this test, not quietly halve the sweep.
+    @Test("every root the sweep walks exists")
+    func sweepRootsExist() throws {
+        for (relative, _) in Self.sweepRoots {
+            var isDir: ObjCBool = false
+            let path = Self.repoRoot.appendingPathComponent(relative).path
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+            #expect(exists && isDir.boolValue,
+                    Comment(rawValue: "sweep root \(relative) is missing"))
+        }
+    }
+
 
     /// P37 finding 10. `waitDraining` / `waitUntilExit` are this codebase's
     /// two synchronous PROCESS waits, and both are C10 violations when they
@@ -454,28 +476,6 @@ struct MainActorSpawnDisciplineP22Tests {
     /// leaves true, so the check would have kept passing over dead debt.
     /// `allowed` carries each entry's path so a future allowance cannot be
     /// mis-mapped by an `if name == …` ladder.
-    /// The roots the sweep walks, named once so the sweep and the
-    /// existence check cannot drift apart.
-    static let sweepRoots: [(path: String, defaultsToMainActor: Bool)] = [
-        ("scarf/scarf", true),
-        ("scarf/Scarf iOS", true),
-        ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
-    ]
-
-    /// P40's lesson, applied here: `FileManager.enumerator` returns `nil` for
-    /// a missing root and the walk `continue`s past it in silence. A renamed
-    /// target must break this test, not quietly halve the sweep.
-    @Test("every root the sweep walks exists")
-    func sweepRootsExist() throws {
-        for (relative, _) in Self.sweepRoots {
-            var isDir: ObjCBool = false
-            let path = Self.repoRoot.appendingPathComponent(relative).path
-            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-            #expect(exists && isDir.boolValue,
-                    Comment(rawValue: "sweep root \(relative) is missing"))
-        }
-    }
-
     @Test func noNewSynchronousWaitRunsOnTheMainActor() throws {
         /// File basenames allowed to hold a main-actor-isolated sync wait,
         /// each with the task that will remove it. EMPTY, and adding to it is

@@ -140,6 +140,12 @@ final class SpotifyAuthFlow {
             try proc.run()
         } catch {
             state = .failure(reason: "Couldn't start `hermes auth spotify`: \(error.localizedDescription)")
+            // Nothing spawned, so nothing will ever reach EOF or report an
+            // exit: this run is over here, and its pipes go with it. (On this
+            // path the write ends really are still the parent's — Foundation
+            // only closes its copies as part of a spawn that happened.)
+            didFinish = true
+            releaseProcess()
             return
         }
 
