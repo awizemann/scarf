@@ -93,7 +93,18 @@ public enum HermesApprovalMode: String, CaseIterable, Sendable {
         // What Hermes's STRING arm effectively sees: quotes off, and a
         // whitespace-preceded trailing comment dropped (PyYAML strips the
         // comment long before Hermes gets the value).
-        let value = HermesYAML.normalizedScalar(trimmed).lowercased()
+        // P41b: the trim has to come AFTER the quotes come off. Hermes's
+        // string arm is `mode.strip().lower()`
+        // (`tools/approval_context.py:207` @ `v2026.9.7`), and PyYAML hands
+        // it the scalar's CONTENT — so `mode: " off"` is the Python string
+        // `" off"`, strips to `off`, and IS in `_VALID_MODES`. Trimming the
+        // raw scalar first only ever removed whitespace OUTSIDE the quotes,
+        // so ` off` never matched and the picker rendered "Ask every time"
+        // for a host that asks for nothing — the unsafe direction again.
+        // A bare scalar is already trimmed, so this is a no-op on that arm.
+        let value = HermesYAML.normalizedScalar(trimmed)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         // A real mode name wins, so `off` reads as the mode and not via the
         // bool route (the two agree, but the intent is clearer). This is
         // also the quoted `"off"` case, which is the one quoted spelling

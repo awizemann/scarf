@@ -270,7 +270,8 @@ private struct ReasoningOverridesSection: View {
                 Button("Add") { addNew() }
                     .controlSize(.small)
                     .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty
-                              || controlCharacterFieldLabel != nil)
+                              || controlCharacterFieldLabel != nil
+                              || oversizedKeyFieldLabel != nil)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -287,6 +288,20 @@ private struct ReasoningOverridesSection: View {
                     .padding(.bottom, 6)
                     .accessibilityLabel(
                         Text("Validation error: \(field) contains a tab or a control character. Remove it, then add.")
+                    )
+            }
+            // P41b: the other way this field can make Hermes discard the
+            // whole config.yaml — a map key past PyYAML's 1024-character
+            // simple-key limit.
+            if let field = oversizedKeyFieldLabel {
+                Text("“\(field)” is longer than 1024 characters. Hermes can't read a config.yaml with a key that long — it ignores the whole file. Shorten it, then add.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .accessibilityLabel(
+                        Text("Validation error: \(field) is longer than 1024 characters. Shorten it, then add.")
                     )
             }
         }
@@ -313,6 +328,14 @@ private struct ReasoningOverridesSection: View {
     /// over-refusal P19 warned about.
     private var controlCharacterFieldLabel: String? {
         PowerSettingsWriter.controlCharacterFieldLabel(pattern: newPattern)
+    }
+
+    /// Round-4, P41b — the pattern is a config.yaml map KEY and PyYAML
+    /// refuses a simple key past 1024 emitted characters, which makes
+    /// `load_config` discard the whole file. See
+    /// ``PowerSettingsWriter/oversizedKeyFieldLabel(pattern:)``.
+    private var oversizedKeyFieldLabel: String? {
+        PowerSettingsWriter.oversizedKeyFieldLabel(pattern: newPattern)
     }
 
     /// Existing rows may carry a value outside the picker vocabulary (a

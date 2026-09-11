@@ -113,6 +113,29 @@ public enum PowerSettingsWriter {
         ) ? "Model pattern" : nil
     }
 
+    /// Label of the field whose value would make PyYAML refuse the whole
+    /// document because it is too long to be a mapping key, or `nil`.
+    ///
+    /// **Round-4, P41b.** The pattern becomes a config.yaml map KEY, and
+    /// PyYAML's scanner caps a simple key at 1024 characters of emitted
+    /// token (``YAMLScalar/simpleKeyLimit``) — quoting does not buy headroom,
+    /// it spends two characters of it. Unlike the control-character refusal
+    /// this one is not about visibility: an over-long key makes `load_config`
+    /// discard the ENTIRE config.yaml layer and fall back to `.env`
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`), so every unrelated
+    /// setting in the file silently reverts.
+    ///
+    /// Checked on the pattern as ``setReasoningOverrides(in:pairs:capabilities:)``
+    /// WRITES it — trimmed — for the same reason the sibling refusal is, and
+    /// scoped to the NEW pattern only, not the existing rows a re-save
+    /// rewrites (a file that already carries one cannot have loaded at all,
+    /// so there is nothing to keep editable).
+    public static func oversizedKeyFieldLabel(pattern: String) -> String? {
+        YAMLScalar.exceedsSimpleKeyLimit(
+            pattern.trimmingCharacters(in: .whitespaces)
+        ) ? "Model pattern" : nil
+    }
+
     /// `off` is a disable alias ONLY by way of YAML's bool coercion: bare
     /// `off` loads as Python `False` and `parse_reasoning_effort` does
     /// `str(False).lower()` → `"false"` → disabled

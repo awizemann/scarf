@@ -226,15 +226,13 @@ public enum HermesYAML {
             // take the original path.
             let key: String
             let afterColon: String
-            if let quote = trimmed.first, quote == "'" || quote == "\"" {
-                let body = trimmed.dropFirst()
-                guard let close = closingQuoteIndex(in: body, quote: quote) else { continue }
-                var raw = String(body[body.startIndex..<close])
+            guard let span = blockKeySpan(in: trimmed) else { continue }
+            let rawKeySpan = String(span.key)
+            if let quote = rawKeySpan.first, quote == "'" || quote == "\"" {
+                var raw = String(rawKeySpan.dropFirst().dropLast())
                 if quote == "'" {
                     raw = raw.replacingOccurrences(of: "''", with: "'")
                 }
-                let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
-                guard rest.hasPrefix(":") else { continue }
                 // Decision 10, the KEY half. A single-quoted key is already
                 // fully decoded above (`''` is that style's ONE escape); a
                 // DOUBLE-quoted one was taken verbatim, so a key Scarf wrote
@@ -249,7 +247,7 @@ public enum HermesYAML {
                 } else {
                     key = raw
                 }
-                afterColon = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
+                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
             } else {
                 // Plain (unquoted) key. YAML's `key: value` separator is a
                 // colon followed by whitespace (or end-of-line); a colon NOT
@@ -257,9 +255,8 @@ public enum HermesYAML {
                 // emits Ollama-style ids like `llama3:8b: high` unquoted.
                 // Splitting at the first bare colon used to shear that into
                 // key "llama3" + value "8b: high".
-                guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { continue }
-                key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                key = rawKeySpan.trimmingCharacters(in: .whitespaces)
+                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
             }
 
             let path = currentPath(joinedWith: key)
@@ -500,10 +497,30 @@ public enum HermesYAML {
 
     /// Index of the closing quote in `body` (which starts just AFTER the
     /// opening quote). Single-quoted YAML escapes an embedded quote by
-    /// doubling (`''`), so skip doubled pairs.
+    /// doubling (`''`), so skip doubled pairs; DOUBLE-quoted YAML escapes
+    /// with a backslash (`\\"`, and `\\\\` for the backslash itself), so skip
+    /// the character after any backslash.
+    ///
+    /// P41b: the double-quoted half was missing, and it is the style
+    /// ``YAMLScalar/doubleQuoted(_:)`` emits for a key carrying a control
+    /// character — a key that also contains a `"` came back with its span
+    /// cut at the escaped quote, the `rest.hasPrefix(":")` guard then failed,
+    /// and `parseNestedYAML` DROPPED the row. Under
+    /// `agent.reasoning_overrides` that row then vanished from the editor
+    /// and the next `setReasoningOverrides` save deleted it from the file.
     private static func closingQuoteIndex(in body: Substring, quote: Character) -> Substring.Index? {
         var i = body.startIndex
         while i < body.endIndex {
+            if quote == "\"", body[i] == "\\" {
+                // `\X` is one escape token: skip the backslash AND whatever
+                // follows it, so an escaped quote does not close the span.
+                // A trailing lone backslash falls off the end and the scan
+                // returns nil, which callers read as "not a quoted key".
+                let next = body.index(after: i)
+                if next == body.endIndex { return nil }
+                i = body.index(after: next)
+                continue
+            }
             if body[i] == quote {
                 let next = body.index(after: i)
                 if quote == "'", next < body.endIndex, body[next] == quote {
@@ -515,6 +532,40 @@ public enum HermesYAML {
             i = body.index(after: i)
         }
         return nil
+    }
+
+    /// Split a block-style `key: value` line (already trimmed of indentation)
+    /// into the key's RAW span — quotes included, exactly as written — and
+    /// everything after the separator colon. Returns nil when the line is not
+    /// a `key: value` row at all.
+    ///
+    /// The one block-style key scanner in the repo. `parseNestedYAML` uses it
+    /// and so does `HermesFileService`'s MCP-entry reader, which used to split
+    /// on `trimmed.firstIndex(of: ":")` with no quote awareness: an env or
+    /// header name containing a colon was WRITTEN correctly (`'A: B': v`, via
+    /// ``YAMLScalar/quoteIfNeeded(_:)``) and read back as the key `'A` with the
+    /// value `B': v`, which the next save then persisted.
+    ///
+    /// A quoted key ends at its closing quote and the colon may follow
+    /// immediately; a PLAIN key ends at the first colon followed by whitespace
+    /// or end-of-line, per ``plainKeySeparatorIndex(in:)`` — a colon with a
+    /// non-space successor belongs to the key (`llama3:8b: high`).
+    public static func blockKeySpan(
+        in trimmed: String
+    ) -> (key: Substring, afterColon: Substring)? {
+        if let quote = trimmed.first, quote == "'" || quote == "\"" {
+            let body = trimmed.dropFirst()
+            guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
+            let afterQuote = body.index(after: close)
+            let rest = body[afterQuote...].drop(while: { $0 == " " || $0 == "\t" })
+            guard rest.first == ":" else { return nil }
+            return (trimmed[trimmed.startIndex..<afterQuote], rest.dropFirst())
+        }
+        guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { return nil }
+        return (
+            trimmed[trimmed.startIndex..<colonIdx],
+            trimmed[trimmed.index(after: colonIdx)...]
+        )
     }
 
     /// Strip a single layer of surrounding single or double quotes from a YAML scalar.

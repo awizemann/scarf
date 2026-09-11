@@ -1363,13 +1363,22 @@ struct HermesFileService: Sendable {
         /// `key: value` split shared by every scalar site below: trims CRLF,
         /// unquotes the key (a hand-edited `"command":` is the same key), and
         /// drops an unquoted trailing `# comment` from the value.
+        ///
+        /// The separator comes from `HermesYAML.blockKeySpan`, the one
+        /// block-style key scanner, rather than a second one here. P41b:
+        /// `trimmed.firstIndex(of: ":")` had no quote awareness, so an env or
+        /// header name containing a colon — which the editor writes correctly
+        /// as `'A: B': v` through `YAMLScalar.quoteIfNeeded` — read back as
+        /// the key `'A` with the value `B': v`, and the next save persisted
+        /// that. It also disagreed with the parser on an unquoted
+        /// `llama3:8b: high`-shaped name.
         func keyValue(_ trimmed: String) -> (key: String, value: String)? {
-            guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
+            guard let span = HermesYAML.blockKeySpan(in: trimmed) else { return nil }
             let key = Self.unquote(
-                String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+                String(span.key).trimmingCharacters(in: .whitespacesAndNewlines)
             )
             let value = Self.stripInlineComment(
-                String(trimmed[trimmed.index(after: colonIdx)...])
+                String(span.afterColon)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             )
             return (key, value)

@@ -244,12 +244,74 @@ final class MCPServerEditorViewModel {
         if let verify = resolvedSSLVerify, verify != server.sslVerify, bad(verify) {
             return "CA bundle path"
         }
-        if identityHeaderEnabled {
-            if bad(identityHeaderNameDraft) { return "Identity header name" }
-            if identityHeaderValueFromDraft == .static,
-               bad(identityHeaderValueDraft) { return "Identity header value" }
+        // Delta-gated like the scalars above, and checked in the form the
+        // writer emits. P41b found both halves wrong here: the NAME was
+        // checked raw although `save` writes it trimmed (`.whitespaces`
+        // contains the tab, so a surrounding tab was refused although it
+        // never reaches the file), and the whole block ran on
+        // `identityHeaderEnabled` rather than on a delta — so an entry whose
+        // config.yaml already carried a control character in
+        // `identity_header.name` could not be saved at all, which is the
+        // over-refusal every sibling here is written to avoid. The VALUE
+        // stays raw: `save` passes `identityHeaderValueDraft` untrimmed.
+        if let header = resolvedIdentityHeader, header != server.identityHeader {
+            if bad(header.name) { return "Identity header name" }
+            if header.valueFrom == .static, bad(header.value) {
+                return "Identity header value"
+            }
         }
         return nil
+    }
+
+    /// Label of the first field whose value would make PyYAML refuse the
+    /// whole config.yaml because it is too long to be a mapping key, or
+    /// `nil`.
+    ///
+    /// **Round-4, P41b.** Env names and header names become map KEYS, and
+    /// PyYAML's scanner caps a simple key at 1024 characters of EMITTED
+    /// token (``YAMLScalar/simpleKeyLimit``) — quoting spends two characters
+    /// of that budget rather than buying headroom. Past it the document
+    /// raises `ScannerError`, `load_config` discards the entire config.yaml
+    /// layer and falls back to `.env` (`gateway/config.py:775-791` @
+    /// `v2026.9.7`), and every unrelated setting in the file silently
+    /// reverts — so this is not a visibility guard like the
+    /// control-character refusal, it is a parse guard.
+    ///
+    /// Scoped exactly like ``controlCharacterFieldLabel``: the env/header
+    /// maps are rewritten on every save, so they are always checked, and
+    /// the key is checked TRIMMED because that is how `save` writes it. The
+    /// scalars are not keys and carry no such limit.
+    var oversizedKeyFieldLabel: String? {
+        let rewrittenRows = server.transport == .stdio ? envDraft : headersDraft
+        let rowLabel = server.transport == .stdio ? "Environment" : "Header"
+        for row in rewrittenRows
+        where YAMLScalar.exceedsSimpleKeyLimit(row.key.trimmingCharacters(in: .whitespaces)) {
+            return "\(rowLabel) name"
+        }
+        return nil
+    }
+
+    /// The `identity_header` block ``save`` would write, or `nil` when it
+    /// writes none.
+    ///
+    /// Shared by ``save`` and ``controlCharacterFieldLabel`` so the refusal
+    /// runs on the value the writer actually emits — the same reason
+    /// ``resolvedSSLVerify`` exists. Scarf writes an identity_header only in
+    /// the shapes Hermes's own `_resolve_identity_header` accepts: a blank
+    /// `name`, or `value_from: static` with a blank `value`, are both
+    /// "warn and ignore" cases there. (`profile` mode needs no value —
+    /// Hermes substitutes the active profile name at connect time.)
+    var resolvedIdentityHeader: MCPIdentityHeader? {
+        let trimmedName = identityHeaderNameDraft.trimmingCharacters(in: .whitespaces)
+        guard identityHeaderEnabled, !trimmedName.isEmpty else { return nil }
+        guard identityHeaderValueFromDraft == .profile
+            || !identityHeaderValueDraft.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return nil }
+        return MCPIdentityHeader(
+            name: trimmedName,
+            valueFrom: identityHeaderValueFromDraft,
+            value: identityHeaderValueDraft
+        )
     }
 
     func save(completion: @escaping (Bool) -> Void) {
@@ -265,6 +327,18 @@ final class MCPServerEditorViewModel {
             isSaving = false
             saveError = String(
                 localized: "“\(field)” contains a tab or a control character. Remove it, then save."
+            )
+            completion(false)
+            return
+        }
+
+        // P41b, same placement and the same reason: a key past PyYAML's
+        // simple-key limit makes Hermes discard the WHOLE config.yaml, so it
+        // must not reach the file or the verifier's expectation.
+        if let field = oversizedKeyFieldLabel {
+            isSaving = false
+            saveError = String(
+                localized: "“\(field)” is longer than 1024 characters. Hermes can't read a config.yaml with a key that long — it falls back to your .env values and ignores the whole file. Shorten it, then save."
             )
             completion(false)
             return
@@ -317,22 +391,10 @@ final class MCPServerEditorViewModel {
         let originalCert = server.clientCert
         let originalKey = server.clientKey
         let originalVerify = server.sslVerify
-        // v0.20.4 drafts. Scarf writes an identity_header only in the shapes
-        // Hermes's own `_resolve_identity_header` accepts — a blank `name`,
-        // or `value_from: static` with a blank `value`, are both "warn and
-        // ignore" cases there, so writing one would put a header in the
-        // user's config that never gets sent AND that Scarf's own reader
-        // drops on the next load. Refusing beats round-tripping garbage.
-        // (`profile` mode needs no value: Hermes substitutes the active
-        // profile name at connect time.)
-        let trimmedIdentityName = identityHeaderNameDraft.trimmingCharacters(in: .whitespaces)
-        let identityHeaderIsResolvable = identityHeaderEnabled
-            && !trimmedIdentityName.isEmpty
-            && (identityHeaderValueFromDraft == .profile
-                || !identityHeaderValueDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-        let identityHeaderValue: MCPIdentityHeader? = identityHeaderIsResolvable
-            ? MCPIdentityHeader(name: trimmedIdentityName, valueFrom: identityHeaderValueFromDraft, value: identityHeaderValueDraft)
-            : nil
+        // v0.20.4 — see `resolvedIdentityHeader`, which the refusal above
+        // reads from the same property so the check and the write cannot
+        // drift apart.
+        let identityHeaderValue: MCPIdentityHeader? = resolvedIdentityHeader
         let originalIdentityHeader = server.identityHeader
         let strictRedirectValue = strictRedirectHeadersDraft
         let originalStrictRedirect = server.strictRedirectHeaders

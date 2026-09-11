@@ -63,6 +63,32 @@ public enum YAMLScalar {
         }
     }
 
+    /// PyYAML's simple-key length limit: a `key: value` mapping key is a
+    /// "simple key", and the scanner refuses one whose token runs more than
+    /// 1024 characters before the `:` — `self.index - key.index > 1024`
+    /// raises `ScannerError` (`yaml/scanner.py:283-291`, the comment at
+    /// `:91`). Quoting does not help: the limit is measured over the EMITTED
+    /// token, so the two quote characters count toward it.
+    ///
+    /// A refused document is not a refused key. `load_config` discards the
+    /// whole config.yaml layer on a parse error and falls back to `.env`
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`), so one over-long env
+    /// name silently unsets every setting in the file.
+    public static let simpleKeyLimit = 1024
+
+    /// True when `key`, once emitted by ``quoteIfNeeded(_:)``, would run past
+    /// ``simpleKeyLimit`` and make PyYAML refuse the document.
+    ///
+    /// Measured on the emitted form, because that is the token PyYAML
+    /// scans: an unquoted 1024-character key loads, the same key quoted is
+    /// 1026 and does not. Verified against PyYAML 6.0.3 locally — bare 1024
+    /// OK / 1025 refused, `'…'` with 1022 inside OK / 1023 refused.
+    ///
+    /// Characters, not bytes: PyYAML's `index` counts unicode characters.
+    public static func exceedsSimpleKeyLimit(_ key: String) -> Bool {
+        quoteIfNeeded(key).count > simpleKeyLimit
+    }
+
     /// The Unicode byte-order mark, which YAML permits at the start of a
     /// document and which no Foundation character set trims: it is not in
     /// `.whitespaces` and not in `.whitespacesAndNewlines`, exactly as `\r`
