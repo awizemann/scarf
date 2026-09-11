@@ -22,10 +22,21 @@ struct SecurityTab: View {
     }
 
     var body: some View {
+        // P39c: the managed lock is per-section here, not tab-wide. Every
+        // writer below is a `config set <key>` whose managed arm prints
+        // `Cannot set configuration values: …` to stderr and returns at exit 0
+        // (`set_config_value`'s `is_managed()` arm, `hermes_cli/config.py`
+        // `:3450-3452` @ v2026.9.7). What must NOT go down with them:
+        // the two `ReadOnlyRow`s (the pinned blocklist and command allowlist —
+        // the only place the user can read what the package manager pinned)
+        // and the selectable proposal patterns in Allowlist Suggestions.
+        // `.disabled` reaches every descendant, so a tab-wide lock took those
+        // with it.
         SettingsSection(title: "Redaction", icon: "eye.slash") {
             ToggleRow(label: "Redact Secrets", isOn: viewModel.config.security.redactSecrets) { viewModel.setRedactSecrets($0) }
             ToggleRow(label: "Redact PII", isOn: viewModel.config.security.redactPII) { viewModel.setRedactPII($0) }
         }
+        .disabled(viewModel.isManagedHost)
 
         SettingsSection(title: "Tirith Sandbox", icon: "shield.checkerboard") {
             ToggleRow(label: "Enabled", isOn: viewModel.config.security.tirithEnabled) { viewModel.setTirithEnabled($0) }
@@ -33,10 +44,13 @@ struct SecurityTab: View {
             StepperRow(label: "Timeout (s)", value: viewModel.config.security.tirithTimeout, range: 1...60) { viewModel.setTirithTimeout($0) }
             ToggleRow(label: "Fail Open", isOn: viewModel.config.security.tirithFailOpen) { viewModel.setTirithFailOpen($0) }
         }
+        .disabled(viewModel.isManagedHost)
 
         SettingsSection(title: "Website Blocklist", icon: "xmark.shield") {
             ToggleRow(label: "Enabled", isOn: viewModel.config.security.blocklistEnabled) { viewModel.setBlocklistEnabled($0) }
+                .disabled(viewModel.isManagedHost)
             if !viewModel.config.security.blocklistDomains.isEmpty {
+                // A read, and the only view of what the managed layer pinned.
                 ReadOnlyRow(label: "Domains", value: viewModel.config.security.blocklistDomains.joined(separator: ", "))
             }
         }
@@ -59,6 +73,7 @@ struct SecurityTab: View {
             StepperRow(label: "Min (ms)", value: viewModel.config.humanDelay.minMS, range: 0...10_000, step: 50) { viewModel.setHumanDelayMinMS($0) }
             StepperRow(label: "Max (ms)", value: viewModel.config.humanDelay.maxMS, range: 0...10_000, step: 50) { viewModel.setHumanDelayMaxMS($0) }
         }
+        .disabled(viewModel.isManagedHost)
     }
 
     // MARK: - Smart approval policy (v0.20+, `approvals.smart_policy`)
@@ -79,6 +94,7 @@ struct SecurityTab: View {
                 EditableTextField(label: "Policy", value: viewModel.config.approvalSmartPolicy) {
                     viewModel.setApprovalSmartPolicy($0)
                 }
+                .disabled(viewModel.isManagedHost)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(ScarfSpace.s3)
@@ -159,7 +175,10 @@ struct SecurityTab: View {
                     Label("Add", systemImage: "plus")
                 }
             }
-            .disabled(viewModel.applyingProposalN != nil)
+            // The row's ONE write: `approvals suggest --apply` rewrites
+            // `command_allowlist` in config.yaml. The pattern text above stays
+            // selectable on a managed host.
+            .disabled(viewModel.applyingProposalN != nil || viewModel.isManagedHost)
             .help("Add \(proposal.pattern) to command_allowlist in config.yaml")
         }
         .padding(.vertical, 4)

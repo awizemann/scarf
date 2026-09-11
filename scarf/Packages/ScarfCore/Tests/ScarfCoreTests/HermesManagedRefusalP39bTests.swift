@@ -296,21 +296,56 @@ struct HermesTransportProbeP39bTests {
     /// fall OPEN (the verdicts still catch every refusal, and a wrong
     /// read-only lock has no recovery), and must not be memoized — the next
     /// surface that asks deserves a fresh attempt.
+    ///
+    /// P39c: "not cached" is proved by ASKING AGAIN. The old assertion read
+    /// `cached(for:).isManaged == false`, which an empty cache satisfies too —
+    /// it could not tell "nothing was memoized" from "`.notManaged` was
+    /// memoized", which is the whole point of the test.
     @Test func aProbeThatOutrunsTheTimeoutFallsOpenAndIsNotCached() {
-        let gate = DispatchSemaphore(value: 0)
+        let release = Self.Release()
         let cache = HermesManagedInstallCache(
             probe: { _ in
-                _ = gate.wait(timeout: .now() + 10)
+                release.waitForRelease()
                 return "nixos"
             },
             timeout: 0.05
         )
         let ctx = Self.local(home: "/tmp/p39b-timeout")
 
+        // First ask: the probe is still blocked, so the answer falls open.
         let answer = cache.managedInstall(for: ctx, capabilities: Self.modern)
         #expect(answer.isManaged == false)
-        #expect(cache.cached(for: ctx).isManaged == false)
-        gate.signal()
+
+        // Let the probe answer, then ask again. If the fall-open had been
+        // memoized this stays `.notManaged` for the life of the process.
+        release.release()
+        let second = cache.managedInstall(for: ctx, capabilities: Self.modern)
+        #expect(second.isManaged)
+        #expect(second.system == "nixos")
+        // And THAT one is cached.
+        #expect(cache.cached(for: ctx).isManaged)
+        cache.invalidate(for: ctx)
+    }
+
+    /// A gate the probe closure can block on without a semaphore's
+    /// one-signal-per-wait arithmetic: every call after ``release()`` returns
+    /// at once.
+    final class Release: @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+
+        func release() {
+            lock.lock(); released = true; lock.unlock()
+        }
+
+        private var isReleased: Bool {
+            lock.lock(); defer { lock.unlock() }; return released
+        }
+
+        /// Bounded so a regression fails the suite instead of hanging it.
+        func waitForRelease() {
+            for _ in 0..<10_000 where !isReleased { usleep(1_000) }
+        }
     }
 
     /// The default ceiling is a named product choice, not a literal buried in

@@ -159,14 +159,20 @@ struct AdvancedTab: View {
                     telemetrySection
                 }
 
-                usageAnalyticsSection
-
                 if capabilitiesStore?.capabilities.hasDatabaseJournalSettings ?? false {
                     databaseSection
                 }
             }
         }
         .disabled(viewModel.isManagedHost)
+
+        // OUTSIDE the lock (P39c): this toggle is Scarf's own app-local
+        // `UserDefaults` state (swift-stats, keyed by app id) — it never
+        // reaches `HermesConfig`, never shells `config set`, and so a managed
+        // Hermes has nothing to refuse. See its own doc below. It sat inside
+        // the Group, which made the one setting a managed host CAN change the
+        // one it could not.
+        usageAnalyticsSection
 
         SettingsSection(title: "Config Diagnostics", icon: "stethoscope") {
             HStack {

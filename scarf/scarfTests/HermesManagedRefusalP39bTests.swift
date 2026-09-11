@@ -20,10 +20,14 @@ struct HermesManagedLockP39bTests {
         #expect(SettingsView.SettingsTab.advanced.locksWholeTabWhenManaged == false)
     }
 
-    /// Every other tab is write controls end to end, so the cheap lock is
-    /// still the right one there.
+    /// The tabs that are write controls end to end still take the cheap
+    /// wholesale lock. `.secrets` and `.security` joined `.advanced` in the
+    /// exempt set in P39c — each carries a READ (see
+    /// `HermesManagedLockP39cTests`), and this assertion used to claim the
+    /// opposite of what the Secrets tab needed.
     @Test func everyOtherTabStillLocksWholesale() {
-        for tab in SettingsView.SettingsTab.allCases where tab != .advanced {
+        let scoped: Set<SettingsView.SettingsTab> = [.advanced, .secrets, .security]
+        for tab in SettingsView.SettingsTab.allCases where !scoped.contains(tab) {
             #expect(tab.locksWholeTabWhenManaged, "\(tab) should still lock wholesale")
         }
     }

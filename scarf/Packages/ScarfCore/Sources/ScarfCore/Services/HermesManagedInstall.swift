@@ -10,7 +10,7 @@ import Foundation
 /// (`hermes_cli/config.py:3450-3452` @ v2026.9.7), `unset_config_value`
 /// (`:3549-3551`) and `save_config` (`:2316-2318`) print to **stderr** and
 /// bare-`return`, which Python turns into **exit 0**. Every verdict Scarf
-/// shells now carries ``HermesCLIMarkers/managedRefusal`` so a refused write
+/// shells now carries ``HermesCLIMarkers/managedRefusalAnchored`` so a refused write
 /// is at least reported as one (round-4 decision 1, first half).
 ///
 /// This type is the second half: a single read-only probe at connect time, so
@@ -115,7 +115,7 @@ extension HermesPathSet {
 /// that cannot reach the host must be treated as **not managed**, because the
 /// alternative is locking a reachable-but-slow host out of its own Settings on
 /// a transport hiccup. A wrong "not managed" costs nothing: the verdicts
-/// (``HermesCLIMarkers/managedRefusal``) still catch the refusal.
+/// (``HermesCLIMarkers/managedRefusalAnchored``) still catch the refusal.
 ///
 /// Thread-safety: one `NSLock` around one dictionary; the probe runs outside
 /// the lock so a slow SSH round-trip to one host never blocks a read for

@@ -259,7 +259,11 @@ struct HermesConfigSetP39Tests {
     /// to hold is that every config-mutating set can SEE the refusal line
     /// Hermes prints — not that each carries the same substring.
     @Test func everyConfigMutatingMarkerSetSeesTheSharedManagedRefusal() {
-        #expect(HermesCLIMarkers.managedRefusalAnchored == ["Cannot "])
+        // P39c: the anchors are the FULL action prefixes, not a bare
+        // `Cannot ` — see `HermesManagedRefusalP39cTests`.
+        #expect(HermesCLIMarkers.managedRefusalAnchored == [
+            "Cannot save configuration", "Cannot set", "Cannot unset", "Cannot remove",
+        ])
         let refusal = "Cannot save configuration: this Hermes installation is managed by nixos."
         for set in [
             HermesCLIMarkers.configSetFailure,

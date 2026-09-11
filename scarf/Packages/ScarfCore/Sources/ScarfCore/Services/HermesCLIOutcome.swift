@@ -238,13 +238,13 @@ public enum HermesCLIMarkers {
 
     // MARK: managed installs — hermes_cli/config.py
 
-    /// The ONE refusal a package-manager-managed Hermes prints, shared by
-    /// every config-mutating verb Scarf shells.
+    /// The refusals a package-manager-managed Hermes prints, anchored, shared
+    /// by every config-mutating verb Scarf shells.
     ///
     /// `get_managed_system()` (`hermes_cli/config.py:276-290` @ v2026.9.7)
     /// answers from `HERMES_MANAGED` or a `$HERMES_HOME/.managed` marker file;
-    /// `is_managed()` (`:294-296`) is its bool. Three distinct guards print a
-    /// line carrying `is managed by`, and none of them is a `sys.exit`:
+    /// `is_managed()` (`:294-296`) is its bool. Three distinct guards print the
+    /// refusal, and none of them is a `sys.exit` on the exit-0 arms:
     ///
     /// - `managed_error(action)` → `format_managed_message` (`:445-455`) prints
     ///   `Cannot <action>: this Hermes installation is managed by <system>.` to
@@ -255,66 +255,65 @@ public enum HermesCLIMarkers {
     /// - `_exit_if_key_managed(key, action)` (`:3363-3371`) prints
     ///   `Cannot <action> '<key>': it is managed by your administrator (…)`
     ///   and `sys.exit(1)`.
-    /// - `_env_write_blocked`'s managed-scope arm (`:2560-2564`) prints
+    /// - `_env_write_blocked`'s managed-scope arm (`:2560-2565`) prints
     ///   `Cannot <action> <KEY>: it is managed by your administrator (…)` and
     ///   returns True — but `set_config_value`'s `.env` branch prints its own
     ///   `✓ Set …` line afterwards regardless (`:3468`), which is exactly why
     ///   every verdict using this marker sets `failureWins: true`.
     ///
-    /// **Tag walk.** The managed arms on `set_config_value`/`save_config` first
-    /// appear at **v2026.3.28**, whose `managed_error` (`hermes_cli/config.py:65-72`)
-    /// printed `Cannot <action>: configuration is managed by NixOS (HERMES_MANAGED=true).`.
-    /// v2026.4.3 introduces `format_managed_message` (`:105-113`) with the
-    /// `this Hermes installation is managed by …` wording, unchanged in shape
-    /// through v2026.6.19 (`:585`), v2026.7.20 (`:659`), v2026.8.31 (`:700`)
-    /// and v2026.9.7 (`:445`). The substring `is managed by` is present in
-    /// **every** one of those spellings, so one marker covers every tag Scarf
-    /// supports and this adds no host-specific behaviour (charter C1).
+    /// **Why anchored, and why not the bare verb.** `set_config_value` ECHOES
+    /// the user's value on its success line — `✓ Set {key} = {value} in
+    /// {config_path}` (`:3521`) — so an unanchored `is managed by` /
+    /// `Cannot set` turned a completed write into a reported failure under
+    /// `failureWins: true` (round-4 review of P39). Every refusal line above is
+    /// printed at **column 0**, so `hasPrefix` on ``HermesCLIVerdict/unglyphed``
+    /// is the safe form.
     ///
-    /// **Why not the `Cannot …` prefix alone.** It is per-verb (`Cannot set`,
-    /// `Cannot unset`, `Cannot save configuration`), so each verdict still
-    /// carries its own; this one is the cross-verb half, and it is what makes
-    /// `plugins enable`, `mcp remove` and `skills trust` — which never print a
-    /// `Cannot …` line of their own, because the refusal comes from
-    /// `save_config` underneath them — judgeable at all.
+    /// **Why not the bare `Cannot ` anchor** (P39c). `plugins update` echoes
+    /// the raw `git pull` output (`cmd_update` prints `[dim]{out}[/dim]`,
+    /// `hermes_cli/plugins_cmd.py:829`) and a post-pull
+    /// `format_scan_report` (`:844`) — text Hermes does not control — and
+    /// ``HermesCLIVerdict/significantLines`` trims leading whitespace, so an
+    /// indented `Cannot open …` from git would be read as a managed refusal on
+    /// a verdict that runs `failureWins`. The anchors are therefore the FULL
+    /// action prefixes, which is every action string any `managed_error(…)` /
+    /// `format_managed_message(…)` caller passes on a path Scarf shells:
     ///
-    /// **Not a false positive on a success.** The two other `managed by`
-    /// strings in the file are `Note: n managed setting(s) were not saved
-    /// (managed by your administrator): …` (`_strip_managed_keys_for_save`,
-    /// `:2289-2291`) and `⚠ Some settings are managed by your administrator …`
-    /// (`_show_managed_banner`, `:2768`). Neither contains `is managed by`
-    /// (`were not saved (managed by`, `are managed by`), which is why the
-    /// marker carries the `is `.
-    public static let managedRefusal = ["is managed by"]
-
-    /// The ANCHORED form of ``managedRefusal``, and the one every
-    /// config-mutating verdict actually judges by (round-4 review, P39).
+    /// | source | line @ v2026.9.7 | printed prefix |
+    /// | --- | --- | --- |
+    /// | `save_config` | `:2317` | `Cannot save configuration` |
+    /// | `set_config_value` | `:3451` | `Cannot set configuration values` |
+    /// | `unset_config_value` | `:3550` | `Cannot unset configuration values` |
+    /// | `save_env_value` → `_env_write_blocked` | `:2577` → `:2557`/`:2562` | `Cannot set <KEY>` |
+    /// | `remove_env_value` → `_env_write_blocked` | `:2612` → `:2557`/`:2562` | `Cannot remove <KEY>` |
+    /// | `_exit_if_key_managed` | `:3460`/`:3552` → `:3369` | `Cannot set '<key>'` / `Cannot unset '<key>'` |
     ///
-    /// `is managed by` as a bare substring was unsafe on exactly the verbs it
-    /// was added for: `set_config_value` ECHOES the user's value on its
-    /// success line — `✓ Set {key} = {value} in {config_path}`
-    /// (`hermes_cli/config.py:3521` @ v2026.9.7) — so a QuickCommands prompt
-    /// or a platform-setup field containing the phrase turned a completed
-    /// write into a reported failure, unconditionally, because these verdicts
-    /// run `failureWins: true`.
+    /// **Deliberately NOT covered**, because Scarf never shells the verb:
+    /// `edit_config`'s `Cannot edit configuration` (`:2957`), `gateway`'s
+    /// `Cannot run gateway setup` / `Cannot install gateway service` /
+    /// `Cannot uninstall gateway service` (`hermes_cli/gateway.py:5580`,
+    /// `:5919`, `:5945`), `Cannot update Hermes Agent`
+    /// (`hermes_cli/main.py:2189`, `hermes_cli/cli_commands_mixin.py:2590`)
+    /// and `Cannot run setup wizard` (`hermes_cli/setup.py:663`). Scarf's
+    /// gateway verdict judges `start|stop|restart` only and carries its own
+    /// `Cannot restart gateway as a service` anchor — see
+    /// ``gatewayServiceFailureAnchored``.
     ///
-    /// Every refusal line on these paths is printed at **column 0** and every
-    /// one of them opens with `Cannot `:
-    /// - `format_managed_message` → `Cannot {action}: this Hermes
-    ///   installation is managed by {system}.` (`:445-450`, printed by
-    ///   `managed_error` at `:453-455`) — the `is_managed()` arm of
-    ///   `set_config_value` (`:3450`), `unset_config_value` (`:3549`) and
-    ///   `save_config` (`:2316`), i.e. the door under `plugins
-    ///   enable/disable/update`, `skills trust` and `memory off` too.
-    /// - `_env_write_blocked`'s managed-scope arm → `Cannot {action} {key}:
-    ///   it is managed by your administrator (…)` (`:2560-2565`).
-    /// - `_exit_if_key_managed` → `Cannot {action} '{key}': it is managed by
-    ///   your administrator (…)` (`:3363-3371`).
-    ///
-    /// So the anchor is the verb-agnostic `Cannot `, which also subsumes the
-    /// per-verb `Cannot set` / `Cannot unset` / `Cannot save configuration`
-    /// spellings the sets used to carry separately.
-    public static let managedRefusalAnchored = ["Cannot "]
+    /// **Floor walk.** Every action string above is byte-identical back to
+    /// **v2026.4.3**, the tag that introduced `format_managed_message`
+    /// (`hermes_cli/config.py:105-129`): `save configuration` (`:1605`),
+    /// `set {key}` (`:1749`), `set configuration values` (`:2041`) and
+    /// `edit configuration` (`:2009`); `remove {key}` joins at v2026.5.28
+    /// (`:5133`) and `unset configuration values` at v2026.7.20 (`:8871`).
+    /// The v2026.4.3–v2026.7.30 spellings hard-code `NixOS`/`Homebrew` in the
+    /// system half of the sentence, never in the `Cannot <action>` half, so
+    /// the prefixes are stable across every tag Scarf supports (charter C1).
+    public static let managedRefusalAnchored = [
+        "Cannot save configuration",
+        "Cannot set",
+        "Cannot unset",
+        "Cannot remove",
+    ]
 
     // MARK: config set — hermes_cli/config.py
 
@@ -384,7 +383,8 @@ public enum HermesCLIMarkers {
     /// would invert a real write.
     ///
     /// **Consumed ANCHORED** (round-4 review): see
-    /// ``managedRefusalAnchored``. `Cannot ` is the anchor for arms 1, 4, 5
+    /// ``managedRefusalAnchored``. `Cannot set` (and `Cannot save
+    /// configuration` under it) is the anchor for arms 1, 4, 5
     /// and 6; `Invalid config key:` for arms 2 and 3, both printed through
     /// `_exit_invalid` (`:3422-3424`) behind a `✗ ` that ``unglyphed``
     /// strips. Every entry here starts its line in the Hermes source.
@@ -420,7 +420,8 @@ public enum HermesCLIMarkers {
     /// Both `Cannot …` spellings share the `Cannot unset` prefix, so one
     /// marker quotes either.
     ///
-    /// P39: `managedRefusal` is appended, and the verdict runs `failureWins`.
+    /// P39: ``managedRefusalAnchored`` is prepended, and the verdict runs
+    /// `failureWins`.
     /// `Cannot unset` already quotes the `unset_config_value` managed arm, but
     /// the `.env` branch reaches `_env_write_blocked` through
     /// `remove_env_value` (`:2552-2566`) and `unset_config_value` prints
@@ -428,9 +429,10 @@ public enum HermesCLIMarkers {
     /// refusal line in the same run, which only `failureWins` resolves the
     /// right way.
     ///
-    /// **Consumed ANCHORED** (round-4 review): `Cannot ` covers both
-    /// `Cannot unset …` spellings and `_env_write_blocked`'s
-    /// `Cannot remove <KEY>: …` (`:2610-2612` → `:2560-2565`);
+    /// **Consumed ANCHORED** (round-4 review): `Cannot unset` covers both
+    /// `Cannot unset …` spellings and `Cannot remove` covers
+    /// `_env_write_blocked`'s `Cannot remove <KEY>: …`
+    /// (`:2610-2612` → `:2560-2565`);
     /// `Config key not set:` is printed at column 0 through `_exit_invalid`.
     public static let configUnsetFailure = managedRefusalAnchored + [
         "Config key not set:",
@@ -875,11 +877,16 @@ public enum HermesCLIMarkers {
         "is temporarily rate-limited by systemd.",
     ]
 
-    /// The column-0 gateway refusals. `Cannot ` rides along from
-    /// ``managedRefusalAnchored`` — here it is NOT a managed-install claim
-    /// but `⚠ Cannot restart gateway as a service — linger is not enabled.`
-    /// (`gateway.py:6047`), a plain `return` at exit 0; the anchor is what
-    /// keeps it from matching a gateway log line quoted into the output.
+    /// The column-0 gateway refusals. ``managedRefusalAnchored`` rides along
+    /// for the `save_config` door, and this set adds the one `Cannot …` line
+    /// that is NOT a managed-install claim:
+    /// `⚠ Cannot restart gateway as a service — linger is not enabled.`
+    /// (`gateway.py:6047`), a plain `return` at exit 0. It is spelled out in
+    /// full rather than left to a bare `Cannot ` anchor, so a gateway log line
+    /// quoted into the output cannot match it (P39c).
+    /// The three `gateway` verbs Scarf shells are `start|stop|restart`, none
+    /// of which reaches `gateway.py`'s own `managed_error` arms (`:5580`,
+    /// `:5919`, `:5945` — setup, install service, uninstall service).
     /// `✗ Gateway service restart failed.` (`:6056`) and
     /// `✗ Gateway start via {via} FAILED …`
     /// (`hermes_cli/gateway_windows.py:977`) both exit non-zero already, and
@@ -888,6 +895,7 @@ public enum HermesCLIMarkers {
     /// `hermes_cli/cli_output.py:21-22`) `sys.exit(1)`s — they are listed so
     /// the banner quotes the reason rather than the exit code.
     public static let gatewayServiceFailureAnchored = managedRefusalAnchored + [
+        "Cannot restart gateway as a service",
         "Gateway service restart failed.",
         "Gateway start via",
         "Refusing to ",
@@ -1139,8 +1147,21 @@ public enum HermesMemoryOff {
 /// - `✓ Set <key> = <value> in …/config.yaml` — the config.yaml write landed
 ///   and only the mirror was refused ⇒ partial.
 /// - `✓ Set <key> in …/.env` — the `_is_env_config_key` branch (`:3461-3468`),
-///   where the `.env` write was the ONLY write and it was refused ⇒ a plain
-///   failure, judged unchanged.
+///   where the `.env` write is the only write `set_config_value` makes on
+///   that arm and it was refused ⇒ a plain failure, judged unchanged.
+///
+/// **"the only write" is scoped to this CLI path** (P39c). Hermes has another
+/// `.env` writer that does NOT stop at the refusal:
+/// `save_provider_env_credential` (`hermes_cli/credential_lifecycle.py:167-193`
+/// @ v2026.9.7) calls `save_env_value(env_var, value)` (`:186`) and **discards
+/// its bool**, then runs `_scrub_config_yaml_mirrors(old_value, value)`
+/// (`:190`), which rewrites config.yaml through `atomic_yaml_write` (`:142`) —
+/// bypassing `save_config`, and therefore bypassing the `is_managed()` guard at
+/// `hermes_cli/config.py:2316-2318`. So on a managed host that call can refuse
+/// the `.env` write and still touch config.yaml. No code change: that path is
+/// the Desktop credential API, not a verb Scarf shells, and this
+/// discriminator errs toward FAILURE on it — a refused `.env` write with no
+/// `✓ Set … in …/config.yaml` line stays a failure, which is the safe answer.
 public enum HermesConfigMirror {
     /// Does this line name config.yaml as the file Hermes wrote? The path is
     /// the last token of both success lines, and `get_config_path()` is
@@ -1333,8 +1354,9 @@ public enum HermesConfigUnset {
 /// **restart** (`_cmd_restart`, `gateway.py:6019-6067`)
 /// - `⚠ Cannot restart gateway as a service — linger is not enabled.`
 ///   (`:6047`) is a plain `return` at exit 0 — caught by
-///   ``HermesCLIMarkers/managedRefusalAnchored``'s `Cannot ` anchor, which is
-///   a column-0 anchor and not a managed-install claim.
+///   ``HermesCLIMarkers/gatewayServiceFailureAnchored``'s own
+///   `Cannot restart gateway as a service` anchor, which is a column-0 anchor
+///   and not a managed-install claim.
 /// - `✗ Gateway service restart failed.` (`:6056`) does `sys.exit(1)`.
 /// - `_wait_for_systemd_service_restart` can end with
 ///   `⚠ … but gateway startup failed: {reason}` (`:1223`),
