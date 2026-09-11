@@ -10,6 +10,10 @@ struct CronListView: View {
     @State private var vm: IOSCronViewModel
     @State private var editingJob: HermesCronJob?
     @State private var showingNewJob = false
+    /// Round-4 decision 5 — the pre-filled create the recovery hint names.
+    /// A separate slot from `editingJob`, because it seeds a NEW record
+    /// (`HermesCronJob.duplicatedAsNewJob`) rather than editing this one.
+    @State private var duplicatingJob: HermesCronJob?
 
     /// Same mirror the Mac's `CronView` performs onto `CronViewModel`: the
     /// two recovery floors that decide what a wedged job may be offered
@@ -85,6 +89,30 @@ struct CronListView: View {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
+                        .contextMenu {
+                            // The SAME shared offer the Mac's detail pane and
+                            // the Bots routines list render, so all three make
+                            // one offer for one job
+                            // (`HermesCronJob.recoveryOffer`).
+                            let offer = vm.recoveryOffer(for: job)
+                            // Round-4 decision 6: iOS has the re-arm door now
+                            // rather than pointing at the Mac.
+                            if offer.canRearm {
+                                Button {
+                                    Task { await vm.resumeAndRunNow(id: job.id) }
+                                } label: {
+                                    Label("Resume & Run Now", systemImage: "forward.end.fill")
+                                }
+                            }
+                            // Round-4 decision 5: the remedy every hint names.
+                            // Unconditional — a create is accepted for any
+                            // record, terminal or not.
+                            Button {
+                                duplicatingJob = job
+                            } label: {
+                                Label("Duplicate…", systemImage: "plus.square.on.square")
+                            }
+                        }
                     }
                 }
             }
@@ -129,6 +157,21 @@ struct CronListView: View {
             // Cron editor is a Form with ~6 fields; .large gives room
             // without cramping. No peek detent — editing cron jobs is
             // a focused task, not something users want to half-see.
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $duplicatingJob) { job in
+            // An ordinary create, pre-filled: on iOS a create IS a rewrite of
+            // `cron/jobs.json` (see `IOSCronViewModel.saveJobs`), so the seed
+            // is a fresh record rather than a `cron create` argv — and it can
+            // carry every field, including the ones the Mac's create FORM has
+            // no widget for.
+            CronEditorView(
+                initial: job.duplicatedAsNewJob(id: "job_\(UUID().uuidString.prefix(8))"),
+                title: "Duplicate cron job"
+            ) { created in
+                Task { await vm.upsert(created) }
+            }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }

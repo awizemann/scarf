@@ -920,6 +920,84 @@ import Foundation
     /// for every terminal one-shot — so the offer's `canRearm` branch was
     /// dead code and iOS said "duplicate it" where the Mac said
     /// "Resume & Run Now" for the same job on the same host.
+    // MARK: - P42 · decision 6 — iOS has the re-arm door, not a pointer
+
+    /// `cron resume <id> --run-now` on a terminal ONE-SHOT: the door
+    /// `rearm_oneshot` opens (`cron/jobs.py:2036-2075` @ `v2026.9.7`), gated
+    /// by the SHARED offer's `canRearm` so iOS cannot grow its own rule.
+    /// The CLI is unreachable in this harness (`hermesBinaryHint` points at a
+    /// path that cannot exist), and that is the POINT of the assertion: a
+    /// re-arm rewrites a terminal record's schedule, claims and repeat
+    /// counter, so an unreachable CLI must be a refusal and never the JSON
+    /// fallback `setEnabled` uses.
+    @Test @MainActor func p42IOSRearmsAOneShotThroughTheSharedOffer() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV021OrLater = true
+            vm.isV0181OrLater = true
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Once", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00+00:00"),
+                enabled: false, state: "completed"
+            ))
+            // The offer opens the door...
+            #expect(vm.recoveryOffer(for: try #require(vm.jobs.first)).canRearm)
+            // ...so the refusal below is the TRANSPORT's, not the gate's.
+            #expect(await vm.resumeAndRunNow(id: "j1") == false)
+            #expect(vm.lastToggleRoute == .refused)
+            let message = try #require(vm.lastError)
+            #expect(message.contains("re-arm"), Comment(rawValue: message))
+            // And the record was NOT rewritten behind Hermes's back.
+            let after = try #require(vm.jobs.first)
+            #expect(after.effectiveState == "completed")
+            #expect(!after.enabled)
+        }
+    }
+
+    /// The gate: a terminal RECURRING job. `rearm_oneshot` raises
+    /// `_REARM_RECURRING_ERROR` for anything but `once`
+    /// (`cron/jobs.py:2040-2042`, `:2065-2066` @ `v2026.9.7`), so the offer
+    /// never opens `canRearm` and the verb must not be sent at all.
+    @Test @MainActor func p42IOSRefusesARearmTheSharedOfferDoesNotOpen() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = true
+            vm.isV021OrLater = true
+            vm.isV0181OrLater = true
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Nightly", prompt: "p",
+                schedule: CronSchedule(kind: "cron", expression: "0 9 * * *"),
+                enabled: false, state: "completed"
+            ))
+            #expect(await vm.resumeAndRunNow(id: "j1") == false)
+            #expect(vm.lastToggleRoute == .refused)
+            let message = try #require(vm.lastError)
+            #expect(!message.contains("Resume & Run Now"), Comment(rawValue: message))
+            #expect(message.lowercased().contains("duplicate"), Comment(rawValue: message))
+        }
+    }
+
+    /// C1: on a host below `hasCronResumeRunNow` (v0.20.6) `--run-now` does
+    /// not exist, `offer.canRearm` is false for every job, and iOS must never
+    /// put the flag on a command line that host's argparse would reject.
+    @Test @MainActor func p42IOSSendsNoRunNowBelowTheReArmFloor() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            vm.isV0206OrLater = false
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Once", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00+00:00"),
+                enabled: false, state: "completed"
+            ))
+            #expect(!vm.recoveryOffer(for: try #require(vm.jobs.first)).canRearm)
+            #expect(await vm.resumeAndRunNow(id: "j1") == false)
+        }
+    }
+
     @Test @MainActor func p38TerminalOneShotGetsTheRearmWordingOnIOS() async throws {
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
