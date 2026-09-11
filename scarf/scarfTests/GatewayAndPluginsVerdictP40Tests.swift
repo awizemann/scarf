@@ -80,6 +80,35 @@ struct GatewayAndPluginsVerdictP40Tests {
         #expect(vm.actionMessage == "Gateway started")
     }
 
+    /// The two `gateway restart` call sites the finding did not name —
+    /// `PlatformsViewModel.restartGateway` and `MCPServersViewModel`'s
+    /// restart banner — reach it through `HermesFileService.restartGateway`,
+    /// which returns the verdict now. Found by walking the verb's callers
+    /// after the return type changed, which is the point of changing it.
+    @Test func noCallSiteStillReadsAGatewayVerbsExitCode() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+        var offenders: [String] = []
+        for dir in ["scarf", "ScarfGo", "Packages/ScarfCore/Sources"] {
+            let base = root.appendingPathComponent(dir)
+            guard let walk = FileManager.default.enumerator(
+                at: base, includingPropertiesForKeys: nil
+            ) else { continue }
+            for case let url as URL in walk where url.pathExtension == "swift" {
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                for (n, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
+                where line.contains("\"gateway\", \"start\"")
+                    || line.contains("\"gateway\", \"stop\"")
+                    || line.contains("\"gateway\", \"restart\"") {
+                    offenders.append("\(url.lastPathComponent):\(n + 1)")
+                }
+            }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue:
+            "these build the argv by hand instead of going through HermesGatewayServiceVerdict:\n"
+            + offenders.joined(separator: "\n")))
+    }
+
     // MARK: - plugins update (round-4 decision 3)
 
     @MainActor private static func pluginsViewModel(

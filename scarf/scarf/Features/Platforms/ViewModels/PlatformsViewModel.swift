@@ -238,6 +238,14 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Restart the hermes gateway so newly-saved config takes effect. Runs on a
     /// background task so the UI stays responsive during the ~second or two
     /// `hermes gateway restart` takes.
+    /// The banner for a refused restart. The reason is Hermes's own line, so
+    /// it is interpolated into the already-localized stem rather than being
+    /// part of a format key nobody could translate meaningfully.
+    private nonisolated static func restartFailureMessage(_ detail: String?) -> String {
+        let stem = String(localized: "Restart failed")
+        return detail.map { "\(stem): \($0)" } ?? stem
+    }
+
     func restartGateway() {
         restartInProgress = true
         // In-progress, not an outcome: shown in the success style because
@@ -245,14 +253,18 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         message = String(localized: "Restarting gateway…")
         messageIsFailure = false
         Task.detached { [weak self, fileService] in
-            let result = fileService.runHermesCLI(args: ["gateway", "restart"], timeout: 30)
+            // P40: judged by output, like every other gateway-service call
+            // site — `_cmd_restart` has exit-0 refusal arms
+            // (`hermes_cli/gateway.py:6047` @ v2026.9.7) and `cmd_gateway`
+            // discards the return anyway (`hermes_cli/main.py:1736-1742`).
+            let outcome = fileService.restartGateway()
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
                 self.applySaveOutcome(
-                    result.exitCode == 0
+                    outcome.succeeded
                         ? .success(String(localized: "Gateway restarted"))
-                        : .failure(String(localized: "Restart failed"))
+                        : .failure(Self.restartFailureMessage(outcome.detail))
                 )
                 self.load(force: true)
             }

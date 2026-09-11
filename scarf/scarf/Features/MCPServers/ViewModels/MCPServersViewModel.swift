@@ -510,14 +510,15 @@ final class MCPServersViewModel {
     func restartGateway() {
         let fileService = self.fileService
         Task.detached { [weak self] in
-            let result = fileService.restartGateway()
+            let outcome = fileService.restartGateway()
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
+                if outcome.succeeded {
                     self.flashStatus("Gateway restarted")
                     self.showRestartBanner = false
                 } else {
-                    self.activeError = "Restart failed: \(result.output)"
+                    self.activeError = outcome.detail
+                        .map { "Restart failed: \($0)" } ?? "Restart failed"
                 }
             }
         }

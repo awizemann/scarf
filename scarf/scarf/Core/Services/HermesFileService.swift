@@ -916,7 +916,6 @@ struct HermesFileService: Sendable {
         )
     }
 
-
     /// Tool names out of `hermes mcp test` output.
     ///
     /// The old implementation looked for `- ` / `* ` bullets. **Hermes has
@@ -1100,9 +1099,16 @@ struct HermesFileService: Sendable {
         return ok
     }
 
+    /// Restart the gateway, judged by what the backend PRINTED (P40). Same
+    /// walk as ``stopHermes()``: `cmd_gateway` discards `gateway_command`'s
+    /// return (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `_cmd_restart`
+    /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
     @discardableResult
-    nonisolated func restartGateway() -> (exitCode: Int32, output: String) {
-        runHermesCLI(args: ["gateway", "restart"], timeout: 30)
+    nonisolated func restartGateway() -> HermesCLIOutcome {
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 30)
+        return HermesGatewayServiceVerdict.judge(
+            verb: .restart, output: result.output, exitCode: result.exitCode
+        )
     }
 
     // MARK: - MCP YAML: block extractor + parser
