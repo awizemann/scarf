@@ -87,7 +87,7 @@ struct HermesP41bYAMLTests {
         ("command: /usr/local/bin/tool", "command", "/usr/local/bin/tool"),
         ("url: https://mcp.example.com", "url", "https://mcp.example.com"),
         ("'quoted':", "'quoted'", ""),
-        ("'quoted':\tv", "'quoted'", "v"),   // tab: lenient, see blockKeySpan
+        ("'quoted' : v", "'quoted'", "v"),   // spaces before the colon are fine
     ])
     func blockKeySpanSplitsTheseShapes(
         _ line: String, _ expectedKey: String, _ expectedValue: String
@@ -106,9 +106,53 @@ struct HermesP41bYAMLTests {
     @Test(arguments: [
         "'unterminated: v", "\"trailing backslash\\", "novaluehere",
         "'a':b", "\"a\":b", "'A: B':v",
+        // P42c: a TAB is not a space. PyYAML's SCANNER refuses a tab in
+        // this position in every arm — quoted, double-quoted, plain, and
+        // with nothing after it at all — so none of these is a row, and
+        // reading one as a row shows the user a line that makes Hermes
+        // discard the whole config.yaml layer. Pinned against the real
+        // interpreter in `pyYAMLRefusesEveryTabSeparatedRow`.
+        "'quoted':\tv", "\"quoted\":\tv", "plain:\tv", "'quoted':\t", "plain:\t",
+        "'quoted'\t: v",
     ])
     func blockKeySpanRefusesANonRow(_ line: String) {
         #expect(HermesYAML.blockKeySpan(in: line) == nil)
+    }
+
+    /// The same rule at the PLAIN separator primitive, which
+    /// `blockKeySpan`'s plain arm and `PlatformsViewModel` both go through.
+    @Test(arguments: ["k:\tv", "k:\t", "llama3:8b:\thigh"])
+    func plainKeySeparatorRefusesATabAfterTheColon(_ line: String) {
+        #expect(HermesYAML.plainKeySeparatorIndex(in: line) == nil)
+    }
+
+    /// And the interpreter's own verdict on every one of those shapes, so
+    /// the refusal is pinned to PyYAML rather than to a reading of it. Each
+    /// must raise; `k: v` in the same lane proves the probe can succeed.
+    @Test func pyYAMLRefusesEveryTabSeparatedRow() {
+        typealias PyYAML = HermesP19YAMLHardeningTests.PyYAML
+        // Absence is reported out loud by
+        // `HermesP19YAMLHardeningTests.pyYAMLRoundTripLaneIsPresent`; here it
+        // only decides whether there is anything to compare against. The
+        // assertions below are UNGUARDED — the P41c rule: a guard belongs
+        // around the thing that can be ABSENT, never around the thing that
+        // can be WRONG.
+        guard PyYAML.parses("probe: 1") else { return }
+
+        for line in ["'quoted':\tv", "\"quoted\":\tv", "plain:\tv",
+                     "'quoted':\t", "plain:\t", "'quoted'\t: v"] {
+            #expect(PyYAML.parses(line) == false,
+                    "PyYAML accepted \(line.debugDescription) — then the refusal is ours, not YAML's")
+            #expect(HermesYAML.blockKeySpan(in: line) == nil,
+                    "Scarf split a line PyYAML refuses: \(line.debugDescription)")
+        }
+        // The spellings that DO load, so the refusal is a rule and not a
+        // blanket "anything with a tab in it".
+        for line in ["plain: v", "'quoted': v", "'quoted' : v", "plain:", "'quoted':"] {
+            #expect(PyYAML.parses(line), "PyYAML refuses \(line.debugDescription)")
+            #expect(HermesYAML.blockKeySpan(in: line) != nil,
+                    "Scarf refused a row PyYAML loads: \(line.debugDescription)")
+        }
     }
 
     // MARK: - Finding 6: PyYAML's simple-key length limit

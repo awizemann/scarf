@@ -488,6 +488,31 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         isPastDeadlineOneShot(now: now) ? "" : schedule.editValue
     }
 
+    /// Drop the UNMODELED top-level `schedule_display` key.
+    ///
+    /// Hermes DERIVES this field: `_normalize_job_record` stamps
+    /// `_schedule_display_for_job(record)` onto every record it reads
+    /// (`cron/jobs.py:470` @ `v2026.9.7`), and that function PREFERS the
+    /// stored top-level `schedule_display` whenever it is non-empty, only
+    /// falling back to `schedule.display` / `value` / `expr` / `run_at`
+    /// (`:438-446`). So a stale label does not merely display wrong — it
+    /// SHADOWS the schedule it is supposed to describe, for every reader,
+    /// until something rewrites it.
+    ///
+    /// Scarf sweeps it into `extra` (it is not in `CodingKeys`) and
+    /// re-encodes `extra` verbatim, so any writer that carries a record's
+    /// `extra` across a schedule change carries the OLD schedule's label
+    /// onto the NEW schedule. Drop it instead and let Hermes re-derive on
+    /// its next read: dropping is always safe, because the field has no
+    /// authority Hermes does not re-grant it.
+    public nonisolated static func droppingDerivedScheduleDisplay(
+        _ extra: [String: JSONValue]
+    ) -> [String: JSONValue] {
+        var copy = extra
+        copy.removeValue(forKey: "schedule_display")
+        return copy
+    }
+
     /// A fresh record seeded from this one, for iOS's Duplicate (round-4
     /// decision 5). iOS creates by rewriting `cron/jobs.json` rather than by
     /// shelling `cron create`, so its "ordinary create" is a NEW record —
@@ -506,7 +531,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// A one-shot whose time is already past grace has that time dropped too
     /// — see `duplicateSeedSchedule` for why, and `CronEditorView.isValid`
-    /// for the gate that then makes the user supply a new one.
+    /// for the gate that then makes the user supply a new one. The derived
+    /// top-level `schedule_display` goes unconditionally: it is the label of
+    /// whatever time the SOURCE was on, and the duplicate is about to be
+    /// given a different one (`droppingDerivedScheduleDisplay`).
     public nonisolated func duplicatedAsNewJob(id newID: String, now: Date = Date()) -> HermesCronJob {
         var carried = extra
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
@@ -514,6 +542,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
                            "latest_execution"] {
             carried.removeValue(forKey: runtimeKey)
         }
+        carried = Self.droppingDerivedScheduleDisplay(carried)
         // `repeat.completed` is a run counter on a config field — reset the
         // count, keep the limit, so a duplicate of a job that ran all 3 of
         // its times is a job that will run 3 more.

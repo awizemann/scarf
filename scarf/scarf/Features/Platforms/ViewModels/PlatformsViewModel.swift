@@ -125,8 +125,9 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // `hasSuffix(":")` test saw neither, so a configured platform
         // rendered as unconfigured. Split at the `key: value` separator
         // colon instead — `HermesYAML.plainKeySeparatorIndex`, the same rule
-        // the parser and the writers use: the first colon followed by
-        // whitespace or end-of-line, so a colon inside the key
+        // the parser and the writers use: the first colon followed by a
+        // SPACE or end-of-line (a tab there is a PyYAML ScannerError, not a
+        // separator — P42c), so a colon inside the key
         // (`slack:dev: {}`) stays part of the key rather than truncating it
         // to a platform name the file never mentioned.
         // (`.whitespacesAndNewlines` so a CRLF config.yaml doesn't leave a

@@ -128,6 +128,14 @@ struct LocalizationCatalogTests {
         "%lld prompt%@ queued — manage on the Mac app",
         "ScarfGo",
         "Not saved: %@",
+        // P42c: added by P42b's iOS duplicate work
+        // (`Scarf iOS/Cron/CronListView.swift:171`, `:329`) and registered
+        // here in the same pass that found them unregistered. The audit that
+        // produced this entry swept EVERY catalog key added since `5be08f2e`
+        // against its call sites; these two were the only ones whose only
+        // call site is under `Scarf iOS`.
+        "Duplicate cron job",
+        "Pick a future time — a one-shot more than %lld s in the past can never fire.",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")

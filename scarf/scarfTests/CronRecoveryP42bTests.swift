@@ -29,7 +29,9 @@ import ScarfCore
     /// The live-claim refusals (`cron/jobs.py:2061-2064`). The remedy was
     /// verified against the claim logic rather than assumed: `_claim_is_live`
     /// (`:2031-2037`) is true only for a well-formed claim aged within
-    /// `[0, ttl)` — run-claim TTL ≥ 600s (`:164-172`), fire-claim TTL 300s
+    /// `[0, ttl)` — run-claim TTL ≥ 1800s (`ONESHOT_RUN_CLAIM_TTL_SECONDS`,
+    /// `:154`, applied as a floor by `max(timeout * 3, 1800)`, `:174`; the
+    /// 600 beside it is the INACTIVITY timeout, `:161`), fire-claim TTL 300s
     /// (`:891`) — and a future-dated or malformed claim counts as STALE, so
     /// the claim cannot outlive the run and "try again after it finishes" is
     /// an honest remedy.

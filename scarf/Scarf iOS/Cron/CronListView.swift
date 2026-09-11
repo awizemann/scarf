@@ -429,6 +429,25 @@ struct CronEditorView: View {
             minutes: sameKind ? existing?.schedule.minutes : nil,
             extra: sameKind ? (existing?.schedule.extra ?? [:]) : [:]
         )
+        // The UNMODELED top-level `schedule_display`, which `extra` carries
+        // verbatim and `HermesCronJob.encode` re-emits, is the label of the
+        // schedule the record USED to be on. Hermes's
+        // `_schedule_display_for_job` PREFERS it over everything inside
+        // `schedule` whenever it is non-empty (`cron/jobs.py:438-446` @
+        // `v2026.9.7`) and `_normalize_job_record` stamps the result onto
+        // every record it reads (`:470`) — so forwarding it across a
+        // schedule change does not merely look stale, it SHADOWS the new
+        // time for every reader of the job. Drop it whenever the schedule
+        // moved and let Hermes re-derive from the fields that did.
+        //
+        // This bit ORDINARY edits, not just duplicates: `buildJob` is the
+        // one writer behind both, and it forwarded `existing?.extra`
+        // unconditionally, so re-timing a live job from the iOS editor left
+        // the old label in front of the new time.
+        let scheduleMoved = existing?.schedule != schedule
+        let carriedExtra = scheduleMoved
+            ? HermesCronJob.droppingDerivedScheduleDisplay(existing?.extra ?? [:])
+            : (existing?.extra ?? [:])
         return HermesCronJob(
             id: id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -456,7 +475,7 @@ struct CronEditorView: View {
             contextFrom: existing?.contextFrom,
             noAgent: existing?.noAgent,
             attachToSession: existing?.attachToSession,
-            extra: existing?.extra ?? [:]
+            extra: carriedExtra
         )
     }
 }

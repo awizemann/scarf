@@ -581,8 +581,12 @@ final class CronViewModel {
         }
         // 2. The live-claim refusals (`:2061-2064`): `_claim_is_live`
         //    (`:2031-2037`) is true only for a well-formed claim aged within
-        //    `[0, ttl)` — a run claim's TTL is at least 600s
-        //    (`_oneshot_run_claim_ttl_seconds`, `:164-172`) and a fire claim's
+        //    `[0, ttl)` — a run claim's TTL is at least 1800s
+        //    (`ONESHOT_RUN_CLAIM_TTL_SECONDS = 1800`, `:154`, which
+        //    `_oneshot_run_claim_ttl_seconds` applies as a FLOOR:
+        //    `max(timeout * 3, 1800)`, `:174`; the 600 nearby is
+        //    `_DEFAULT_CRON_INACTIVITY_TIMEOUT`, `:161`, an inactivity limit,
+        //    not the TTL) and a fire claim's
         //    is `FIRE_CLAIM_TTL_SECONDS = 300` (`:891`) — and a future-dated
         //    or malformed claim counts as STALE so it can never wedge a job.
         //    So the remedy really is "wait": the claim goes when the run

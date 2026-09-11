@@ -423,8 +423,14 @@ public enum HermesYAML {
     }
 
     /// Index of the `key: value` separator colon in a trimmed plain-key
-    /// line: the first colon followed by whitespace or end-of-line. Colons
-    /// with a non-space successor are part of the key (`llama3:8b: high`).
+    /// line: the first colon followed by a SPACE or end-of-line. Colons
+    /// with any other successor are part of the key (`llama3:8b: high`).
+    ///
+    /// A space, not "whitespace": PyYAML's scanner refuses a TAB after the
+    /// value indicator (`k:\tv`, and `k:\t` alone, are both ScannerError;
+    /// 6.0.3), so a tab-separated line is not a row Hermes can load — it is
+    /// a document Hermes discards whole (`gateway/config.py:775-791` @
+    /// `v2026.9.7`). Reading it as a row was P42c's finding.
     ///
     /// Public so every reader that has to decide "is this line a `key:`
     /// row, and where does the key end?" uses ONE rule — the parser here,
@@ -437,7 +443,11 @@ public enum HermesYAML {
         while i < trimmed.endIndex {
             if trimmed[i] == ":" {
                 let next = trimmed.index(after: i)
-                if next == trimmed.endIndex || trimmed[next] == " " || trimmed[next] == "\t" {
+                // Space or end of line only — a TAB after the value
+                // indicator is a PyYAML ScannerError even for a plain key
+                // (`k:\tv`, and `k:\t` alone; PyYAML 6.0.3), so `k:\tv` is
+                // not a row, it is a document Hermes cannot load.
+                if next == trimmed.endIndex || trimmed[next] == " " {
                     return i
                 }
             }
@@ -547,15 +557,16 @@ public enum HermesYAML {
     /// value `B': v`, which the next save then persisted.
     ///
     /// A quoted key ends at its closing quote, and the colon after it must be
-    /// followed by whitespace or end the line: PyYAML's parser demands a
+    /// followed by a SPACE or end the line: PyYAML's parser demands a
     /// space after the value indicator whenever the key is not plain, so
     /// `'a':b` raises `ParserError` while `'a': b` and `'a':` both load
     /// (verified against PyYAML 6.0.3). Accepting `'a':b` here meant reading
-    /// a row Hermes cannot load at all. A TAB is accepted as the separator
-    /// for symmetry with the plain arm; PyYAML refuses a tab there too, but
-    /// as a scanner-wide rule about tabs rather than anything about keys,
-    /// and no Scarf writer emits one. A PLAIN key ends at the first colon
-    /// followed by whitespace or end-of-line, per
+    /// a row Hermes cannot load at all. A TAB is NOT a space, on either side
+    /// of the colon — P41b accepted one "for symmetry with the plain arm",
+    /// but the plain arm was wrong too: `'q':\tv`, `"q":\tv`, `plain:\tv`,
+    /// a bare `'q':\t` and `'q'\t: v` are every one of them ScannerError
+    /// (6.0.3), while `'q' : v` loads. Spaces only, both arms. A PLAIN key
+    /// ends at the first colon followed by a space or end-of-line, per
     /// ``plainKeySeparatorIndex(in:)`` — there a colon with a non-space
     /// successor belongs to the key (`llama3:8b: high`).
     public static func blockKeySpan(
@@ -565,12 +576,23 @@ public enum HermesYAML {
             let body = trimmed.dropFirst()
             guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
             let afterQuote = body.index(after: close)
-            let rest = body[afterQuote...].drop(while: { $0 == " " || $0 == "\t" })
+            let rest = body[afterQuote...].drop(while: { $0 == " " })
             guard rest.first == ":" else { return nil }
             let afterColon = rest.dropFirst()
-            // PyYAML: after a non-plain key the `:` needs a space or the end
+            // PyYAML: after a non-plain key the `:` needs a SPACE or the end
             // of the line. `'a':b` is a ParserError, not a row.
-            if let next = afterColon.first, next != " ", next != "\t" { return nil }
+            //
+            // A TAB is not a space here. PyYAML's scanner refuses a tab in
+            // this position outright — `'q':\tv`, `"q":\tv` and even a bare
+            // `'q':\t` are all ScannerError ("found character '\t' that
+            // cannot start any token"), verified against PyYAML 6.0.3 — so a
+            // tab-separated row is one Hermes cannot load at all, and
+            // accepting it meant Scarf displayed a row that makes Hermes
+            // discard the whole config.yaml layer
+            // (`gateway/config.py:775-791` @ `v2026.9.7`). Same for a tab
+            // BEFORE the colon: `'q'\t: v` is a ScannerError too, while
+            // `'q' : v` loads — hence spaces only on both sides.
+            if let next = afterColon.first, next != " " { return nil }
             return (trimmed[trimmed.startIndex..<afterQuote], afterColon)
         }
         guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { return nil }
