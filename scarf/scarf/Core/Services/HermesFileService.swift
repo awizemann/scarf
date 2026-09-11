@@ -2603,7 +2603,7 @@ struct HermesFileService: Sendable {
     /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
     /// When `interactive` is true, injects env vars that suppress common
     /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
-    nonisolated private static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
+    nonisolated static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
         let pipe = Pipe()
         let errPipe = Pipe()
         let process = Process()
@@ -2626,27 +2626,28 @@ struct HermesFileService: Sendable {
             process.environment = env
         }
 
+        // Only the WRITE ends here: once `waitDraining` has launched its
+        // readers they own the read ends and close each one themselves, and
+        // closing a handle another thread is blocked reading is a raised
+        // exception. The launch-failure path below has no readers, so it
+        // closes all four.
         defer {
-            try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()
-            try? errPipe.fileHandleForReading.close()
             try? errPipe.fileHandleForWriting.close()
         }
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                process.terminate()
-                // Brief grace period for SIGTERM to take; then the defer
-                // cleanup closes the pipes regardless.
-                Thread.sleep(forTimeInterval: 0.1)
-                return nil
-            }
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            // C10, both halves. The old shape polled for the exit and THEN
+            // read stdout, with stderr on a pipe nothing ever read: an rc
+            // file noisy enough to fill the 64 KB stderr buffer — `nvm`
+            // warnings, a `compaudit` complaint per insecure directory —
+            // wedged zsh in `write()` until the budget expired, and the env
+            // probe came back nil for a shell that was working fine. Both
+            // pipes are drained CONCURRENTLY with the wait now.
+            let (exited, drained) = process.waitDraining(
+                timeout: timeout, pipes: [pipe, errPipe])
+            guard exited else { return nil }
+            let data = drained.first ?? Data()
             guard process.terminationStatus == 0, !data.isEmpty else { return nil }
             var result: [String: String] = [:]
             let parts = data.split(separator: 0, omittingEmptySubsequences: false)
@@ -2661,6 +2662,10 @@ struct HermesFileService: Sendable {
             }
             return result.isEmpty ? nil : result
         } catch {
+            // Never launched, so nothing is draining: these two are ours to
+            // close (the write ends are the `defer`'s).
+            try? pipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForReading.close()
             return nil
         }
     }

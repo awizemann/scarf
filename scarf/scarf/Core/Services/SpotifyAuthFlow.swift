@@ -50,6 +50,22 @@ final class SpotifyAuthFlow {
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
     private var pollTask: Task<Void, Never>?
+    private var deadlineTask: Task<Void, Never>?
+
+    /// C10: every subprocess has a timeout, including one that is waiting on
+    /// a human in a browser.
+    ///
+    /// The number is Hermes's own, not a guess. `hermes auth spotify` waits
+    /// for the local OAuth callback with `timeout_seconds: float = 180.0`
+    /// (`hermes_cli/auth_spotify.py:154`, passed at `:420` @ v2026.9.7) and
+    /// then exchanges the code with a 20 s HTTP timeout (`:433`), raising
+    /// `spotify_callback_timeout` (`:180`) if the user never approves. So a
+    /// healthy run ALWAYS ends by itself inside ~200 s, and this ceiling is
+    /// reached only when the child cannot report that — a wedged SSH channel
+    /// to a remote host, a `hermes` stopped in the debugger, a callback
+    /// server that took the port and then hung. Without it the sheet sits on
+    /// its spinner forever with no way out but quitting Scarf.
+    static let authTimeout: TimeInterval = 240
 
     init(context: ServerContext = .local) {
         self.context = context
@@ -91,24 +107,48 @@ final class SpotifyAuthFlow {
         }
 
         // Stream both pipes into `output`; URL detection on every chunk.
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // Empty `availableData` is EOF. Unhook there rather than waiting for
+        // `cancel()`: a handler left installed on a closed descriptor keeps
+        // Foundation's reader alive and keeps this pipe's fd out of reach of
+        // the close, and `handleTermination` — the other end of a successful
+        // run — never calls `cancel()` at all. `NousAuthFlow:105-109` already
+        // had this shape; these two were the pair that did not.
+        func streamHandler(_ handle: FileHandle) {
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let text = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor [weak self] in
                 self?.absorb(text)
             }
         }
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor [weak self] in
-                self?.absorb(text)
-            }
-        }
+        stdoutPipe.fileHandleForReading.readabilityHandler = streamHandler
+        stderrPipe.fileHandleForReading.readabilityHandler = streamHandler
 
         proc.terminationHandler = { [weak self] terminated in
             Task { @MainActor [weak self] in
                 self?.handleTermination(exitCode: terminated.terminationStatus)
+            }
+        }
+
+        deadlineTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.authTimeout * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.process === proc else { return }
+            switch self.state {
+            case .success, .failure, .idle:
+                return
+            case .starting, .waitingForApproval, .verifying:
+                self.logger.warning("hermes auth spotify passed its \(Int(Self.authTimeout))s deadline; stopping it")
+                self.cancel()
+                let minutes = Int(Self.authTimeout) / 60
+                self.state = .failure(
+                    reason: String(
+                        localized: "Spotify sign-in didn't finish within \(minutes) minutes, so Scarf stopped it. Try again, or run `hermes auth spotify` in a terminal on the host.",
+                        comment: "Failure shown when the hermes auth spotify subprocess passes Scarf's deadline. The argument is the deadline in whole minutes."
+                    )
+                )
             }
         }
     }
@@ -117,6 +157,8 @@ final class SpotifyAuthFlow {
     func cancel() {
         pollTask?.cancel()
         pollTask = nil
+        deadlineTask?.cancel()
+        deadlineTask = nil
         if let p = process, p.isRunning {
             p.terminate()
         }
@@ -158,6 +200,8 @@ final class SpotifyAuthFlow {
     // MARK: - Termination
 
     private func handleTermination(exitCode: Int32) {
+        deadlineTask?.cancel()
+        deadlineTask = nil
         guard exitCode == 0 else {
             // Cancelled by us, or hermes returned non-zero.
             if state == .starting || state == .verifying {

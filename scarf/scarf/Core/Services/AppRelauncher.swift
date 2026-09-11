@@ -30,8 +30,8 @@ enum AppRelauncher {
     /// C10 budget for the `open(1)` dispatch. There is no `-W`, so this is a
     /// LaunchServices hand-off that returns immediately in every healthy
     /// case; 20s is "the world is broken", not "the app is slow to start".
-    static let openTimeout: TimeInterval = 20
-    static let logger = Logger(subsystem: "com.scarf.app", category: "AppRelauncher")
+    nonisolated static let openTimeout: TimeInterval = 20
+    nonisolated static let logger = Logger(subsystem: "com.scarf.app", category: "AppRelauncher")
 
     enum RelaunchError: Error, LocalizedError {
         case debugBuild
@@ -53,7 +53,14 @@ enum AppRelauncher {
     /// `NSApp.terminate(nil)` (deferred ~250ms for a smooth dock hand-off).
     /// Throws `.debugBuild` when launched from Xcode/DerivedData;
     /// `.openFailed` when `open` itself errored.
-    static func relaunch() throws {
+    ///
+    /// **`nonisolated`, and it must stay that way** (t-b15ba4c3). Round-3 P33
+    /// bounded this wait at 20 s, which is the C10 timeout half — but the
+    /// wait still ran ON the main actor, so a wedged `lsd`/`launchservicesd`
+    /// froze the window for the whole 20 s with no way out. The body touches
+    /// only `Bundle.main`, `Process` and the logger, none of which need the
+    /// main actor; the caller hops back for `NSApp.terminate`.
+    nonisolated static func relaunch() throws {
         let bundleURL = Bundle.main.bundleURL
         let path = bundleURL.path
         if path.contains("/DerivedData/")
@@ -82,6 +89,12 @@ enum AppRelauncher {
         do {
             try proc.run()
         } catch {
+            // Never launched, so no reader owns the read ends: all four are
+            // ours to close.
+            try? stderrPipe.fileHandleForReading.close()
+            try? stdoutPipe.fileHandleForReading.close()
+            try? stderrPipe.fileHandleForWriting.close()
+            try? stdoutPipe.fileHandleForWriting.close()
             throw RelaunchError.openFailed(exitCode: -1, stderr: error.localizedDescription)
         }
 
@@ -92,6 +105,14 @@ enum AppRelauncher {
         let (exited, drained) = proc.waitDraining(
             timeout: Self.openTimeout, pipes: [stderrPipe, stdoutPipe])
         let errData = drained.first ?? Data()
+        // `waitDraining` closes the READ ends (each reader closes the handle
+        // it drained). The WRITE ends are ours, and nothing was closing them:
+        // Foundation dup()s them into the child on `run()` but the parent's
+        // copies stay open, so every relaunch attempt leaked two fds. Cheap
+        // here — the process is about to terminate — and wrong everywhere,
+        // which is why it is fixed rather than excused.
+        try? stderrPipe.fileHandleForWriting.close()
+        try? stdoutPipe.fileHandleForWriting.close()
 
         guard exited else {
             logger.warning("open(1) did not finish within \(Int(Self.openTimeout))s")

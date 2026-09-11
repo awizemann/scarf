@@ -430,36 +430,35 @@ struct MainActorSpawnDisciplineP22Tests {
     /// declaration chain says `nonisolated`; in ScarfCore (no default
     /// isolation) it is a hit only when the type carries `@MainActor`.
     ///
-    /// **One allowance, with a task.** `AppRelauncher.relaunch()`
-    /// (t-b15ba4c3) is a bounded 20 s `waitDraining` on `open(1)` in a
-    /// gesture whose whole contract is "this window is about to go away".
-    /// `HealthViewModel.dashboardListenerPID` (t-cd9fd829) was the other one;
-    /// P38 replaced its hand-rolled drain with `waitDraining` and marked it
-    /// `nonisolated` (its only caller is inside `Task.detached`), so the
-    /// allowance is gone and the task is closed.
+    /// **No allowances left.** There were two. `HealthViewModel`
+    /// `.dashboardListenerPID` (t-cd9fd829) went first: P38 replaced its
+    /// hand-rolled drain with `waitDraining` and marked it `nonisolated`.
+    /// `AppRelauncher.relaunch()` (t-b15ba4c3) went in round-4 P43 — the
+    /// gesture's contract really is "this window is about to go away", but
+    /// only AFTER `open(1)` succeeds, and a wedged `lsd` made that 20 s of
+    /// frozen window instead. `relaunch()` is `nonisolated` and
+    /// `ProfilesViewModel.switchAndRelaunch` calls it from its detached task,
+    /// hopping back only for the verdict.
+    ///
+    /// An empty `allowed` takes the teeth out of the `isolatedScanned ==
+    /// allowed.count` floor — zero equals zero however badly the matcher is
+    /// broken — so the matcher is a named function now and
+    /// `theSweepMatcherStillRecognisesEveryShape` plants one of each shape
+    /// and checks it fires. That calibration, not the count, is what keeps
+    /// this from passing vacuously.
     ///
     /// The "still REAL" check is now isolation-aware: it asserts the sweep
     /// ITSELF still reaches the allowed file's site (i.e. the site is still
     /// main-actor-isolated and un-opted-out), not merely that the string
     /// `waitDraining(` appears somewhere in it — which a `nonisolated` fix
     /// leaves true, so the check would have kept passing over dead debt.
-    /// `allowed` carries each entry's path so a third allowance cannot be
+    /// `allowed` carries each entry's path so a future allowance cannot be
     /// mis-mapped by an `if name == …` ladder.
     @Test func noNewSynchronousWaitRunsOnTheMainActor() throws {
         /// File basenames allowed to hold a main-actor-isolated sync wait,
-        /// each with the task that will remove it. Adding to this set is the
-        /// thing this test exists to make hard.
-        let allowed: [String: (path: String, task: String)] = [
-            "AppRelauncher.swift": (
-                path: "scarf/scarf/Core/Services/AppRelauncher.swift",
-                task: "t-b15ba4c3"
-            ),
-        ]
-        /// Every synchronous wait shape this sweep recognises. `waitDraining`
-        /// and `waitUntilExit` are the process primitives; the other three are
-        /// how a main-actor caller blocks on work it handed to another thread,
-        /// which is the same C10 violation wearing different clothes — an
-        /// `isRunning` spin, or a `wait(` on a semaphore or a group.
+        /// each with the task that will remove it. EMPTY, and adding to it is
+        /// the thing this test exists to make hard.
+        let allowed: [String: (path: String, task: String)] = [:]
         /// The primitives' own file. `ProcessTimeout.swift` IS the bounded,
         /// concurrently-drained wait every other site is supposed to call, so
         /// its internals are not a finding — and its `group.wait(` is the
@@ -513,25 +512,9 @@ struct MainActorSpawnDisciplineP22Tests {
                 }
 
                 for (index, line) in lines.enumerated() {
-                    let isProcessWait = line.contains("waitDraining(")
-                        || line.contains(".waitUntilExit(")
-                    // A poll on `Process.isRunning` is the third hand-rolled
-                    // shape: a `while p.isRunning { Thread.sleep(…) }` spin is
-                    // a synchronous wait with extra steps. A loop that
-                    // SUSPENDS instead (`try? await Task.sleep`) is not — it
-                    // hands the actor back on every turn, which is the whole
-                    // point — so the body decides, not the condition.
-                    let pollBody = lines[index..<min(index + 4, lines.count)].joined(separator: "\n")
-                    let isRunningPoll = line.contains(".isRunning")
-                        && (line.contains("while ") || line.contains("repeat"))
-                        && (pollBody.contains("Thread.sleep") || pollBody.contains("usleep("))
-                    let isWaiterBlock = line.contains(".wait(")
-                        && blockingWaiters.contains { line.contains($0 + ".wait(") }
-                    guard isProcessWait || isRunningPoll || isWaiterBlock else { continue }
-                    // The primitives' own declarations and their doc comments.
-                    if line.contains("func waitDraining") || line.contains("func waitUntilExit") { continue }
+                    guard Self.isSynchronousWait(
+                        at: index, in: lines, blockingWaiters: blockingWaiters) else { continue }
                     let bare = line.trimmingCharacters(in: .whitespaces)
-                    if bare.hasPrefix("//") || bare.hasPrefix("///") { continue }
 
                     // Walk OUT to the enclosing declarations by indent. Only
                     // a line indented strictly less than everything seen so
@@ -614,6 +597,84 @@ struct MainActorSpawnDisciplineP22Tests {
                         + " — drop it from `allowed` and close \(entry.task)")
             )
         }
+    }
+
+    /// Every synchronous wait shape this sweep recognises, as one named
+    /// predicate so the calibration test below can plant each shape and watch
+    /// it fire. With `allowed` empty the `isolatedScanned == allowed.count`
+    /// floor is 0 == 0 — true no matter how broken the matcher is — so this
+    /// is the only thing standing between the sweep and a vacuous pass.
+    ///
+    /// `waitDraining` and `waitUntilExit` are the process primitives. The
+    /// other two are how a main-actor caller blocks on work it handed to
+    /// another thread, which is the same C10 violation in different clothes:
+    /// an `isRunning` spin, or a `wait(` on a semaphore or a group bound in
+    /// the same file (`blockingWaiters`).
+    static func isSynchronousWait(
+        at index: Int, in lines: [String], blockingWaiters: Set<String>
+    ) -> Bool {
+        let line = lines[index]
+        let isProcessWait = line.contains("waitDraining(")
+            || line.contains(".waitUntilExit(")
+        // A `while p.isRunning { Thread.sleep(…) }` spin is a synchronous
+        // wait with extra steps. A loop that SUSPENDS instead (`try? await
+        // Task.sleep`) is not — it hands the actor back on every turn, which
+        // is the whole point — so the BODY decides, not the condition.
+        let pollBody = lines[index..<min(index + 4, lines.count)].joined(separator: "\n")
+        let isRunningPoll = line.contains(".isRunning")
+            && (line.contains("while ") || line.contains("repeat"))
+            && (pollBody.contains("Thread.sleep") || pollBody.contains("usleep("))
+        let isWaiterBlock = line.contains(".wait(")
+            && blockingWaiters.contains { line.contains($0 + ".wait(") }
+        guard isProcessWait || isRunningPoll || isWaiterBlock else { return false }
+        // The primitives' own declarations, and comments about them.
+        if line.contains("func waitDraining") || line.contains("func waitUntilExit") { return false }
+        let bare = line.trimmingCharacters(in: .whitespaces)
+        if bare.hasPrefix("//") || bare.hasPrefix("///") { return false }
+        return true
+    }
+
+    /// Plant one of each shape and one of each near-miss. If a refactor ever
+    /// narrows the matcher, this fails here rather than letting the sweep
+    /// report a clean repo it never actually looked at.
+    @Test func theSweepMatcherStillRecognisesEveryShape() {
+        func matches(_ source: String, waiters: Set<String> = ["sem", "group"]) -> Bool {
+            let lines = source.components(separatedBy: "\n")
+            return (0..<lines.count).contains {
+                Self.isSynchronousWait(at: $0, in: lines, blockingWaiters: waiters)
+            }
+        }
+
+        // The two process primitives.
+        #expect(matches("        proc.waitUntilExit(timeout: 5)"))
+        #expect(matches("        let r = proc.waitDraining(timeout: 5, pipes: [p])"))
+        // The hand-rolled spin (P38 item 23).
+        #expect(matches("""
+                while proc.isRunning, Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+            """))
+        #expect(matches("""
+                while proc.isRunning {
+                    usleep(20_000)
+                }
+            """))
+        // The hand-off blocks (P38 item 23).
+        #expect(matches("        sem.wait(timeout: .now() + 2)"))
+        #expect(matches("        group.wait(timeout: .now() + 2)"))
+
+        // Near misses that must NOT fire, so the sweep stays usable.
+        #expect(!matches("        // proc.waitUntilExit(timeout: 5)"))
+        #expect(!matches("        /// See ``Process.waitDraining(timeout:pipes:)``."))
+        #expect(!matches("    func waitDraining(timeout: TimeInterval) -> Bool {"))
+        // A loop that SUSPENDS hands the actor back every turn.
+        #expect(!matches("""
+                while proc.isRunning {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                }
+            """))
+        // A `.wait(` on something this file never bound to a semaphore.
+        #expect(!matches("        other.wait(timeout: .now() + 2)"))
     }
 
     // MARK: - Helpers

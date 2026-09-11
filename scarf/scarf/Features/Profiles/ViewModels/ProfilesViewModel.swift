@@ -86,25 +86,37 @@ final class ProfilesViewModel {
     func switchAndRelaunch(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 30)
-            await MainActor.run {
+            let switched = await MainActor.run { () -> Bool in
                 guard result.exitCode == 0 else {
                     self.message = Self.failureMessage(result.output)
                     self.load()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                         self?.message = nil
                     }
-                    return
+                    return false
                 }
                 HermesProfileResolver.invalidateCache()
-                do {
-                    try AppRelauncher.relaunch()
+                return true
+            }
+            guard switched else { return }
+            // `relaunch()` spawns `open(1)` and waits up to 20 s for it. That
+            // wait stays OUT here in the detached task (t-b15ba4c3): it talks
+            // to LaunchServices, and a wedged `lsd` used to freeze the window
+            // for the full budget. Only the verdict hops back.
+            do {
+                try AppRelauncher.relaunch()
+                await MainActor.run {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         NSApp.terminate(nil)
                     }
-                } catch AppRelauncher.RelaunchError.debugBuild {
+                }
+            } catch AppRelauncher.RelaunchError.debugBuild {
+                await MainActor.run {
                     self.message = "Profile switched to \(profile.name). Restart Scarf manually (Xcode-launched instance)."
                     self.load()
-                } catch {
+                }
+            } catch {
+                await MainActor.run {
                     self.message = "Profile switched to \(profile.name). Please quit and reopen Scarf manually."
                     self.load()
                 }
