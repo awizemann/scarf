@@ -85,10 +85,14 @@ import Foundation
     private func offer(
         _ j: HermesCronJob,
         refusesTerminal: Bool = true,
-        recoversError: Bool = true
+        recoversError: Bool = true,
+        refusesPastOneShot: Bool = true,
+        now: Date = Date()
     ) -> CronRecoveryOffer {
         j.recoveryOffer(hostRefusesTerminalJobs: refusesTerminal,
-                        hostRecoversErrorRecurring: recoversError)
+                        hostRecoversErrorRecurring: recoversError,
+                        hostRefusesPastOneShotResume: refusesPastOneShot,
+                        now: now)
     }
 
     @Test func recurringErrorJobIsOfferedPlainResumeOnly() throws {
@@ -103,6 +107,7 @@ import Foundation
         #expect(!o.canResume)
         #expect(!o.canRearm)
         #expect(o.hint == CronRecoveryOffer.noFutureOccurrencesHint)
+        #expect(o.hint.map { !$0.contains("edit the schedule") } == true)
     }
 
     @Test func terminalOneShotKeepsTheRearmEscapeHatch() throws {

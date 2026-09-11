@@ -15,6 +15,8 @@ import Foundation
 /// | `error` + `cron`/`interval` | < v0.21.0 | nothing — `hint` |
 /// | terminal `once` | v0.20.6+ | Resume & Run Now (`rearm_oneshot`) |
 /// | `completed` + `cron`/`interval` | any | nothing — `hint` |
+/// | paused past-deadline `once` | v0.18.1+ | Resume & Run Now only |
+/// | paused past-deadline `once` | < v0.18.1 (+ no `--run-now`) | nothing — `hint` |
 ///
 /// The last row is decision 1 of the round-3 product calls: a recurring job
 /// that went terminal via `completed` gets no button, because neither
@@ -40,9 +42,34 @@ public struct CronRecoveryOffer: Sendable, Equatable {
     public static let none = CronRecoveryOffer()
 
     /// A recurring job that reached `completed`. Every Hermes activation door
-    /// is shut for it; the schedule itself is what has to change.
+    /// is shut for it — **including editing the schedule**, which is why this
+    /// sentence no longer suggests that. `update_job` arms
+    /// `_reject_terminal_activation` twice (`cron/jobs.py:1941` and `:1965` @
+    /// `v2026.9.7`, predicate at `:1865-1879`) and the second call sees the
+    /// `next_run_at` that `_apply_schedule_update` just wrote for any record
+    /// whose `state != "paused"` (`:1899-1910`) — so `hermes cron edit
+    /// --schedule …` on a `completed` job raises. Duplicating is the only
+    /// door, the same remedy `CronViewModel.friendlyCronFailure` names.
     public static let noFutureOccurrencesHint =
-        String(localized: "No future occurrences — edit the schedule to run it again.")
+        String(localized: "This job has no runs left — duplicate it to schedule a new one.")
+
+    /// `noFutureOccurrencesHint`, but naming the exhausted repeat limit when
+    /// the record carries a finite one. `_advance_after_run` retires a
+    /// recurring job as `completed` the moment `repeat.completed >= times`
+    /// (`cron/jobs.py:2192-2215` @ `v2026.9.7`), which makes this the common
+    /// way a recurring job becomes a dead end — so say which limit ran out.
+    public static func noFutureOccurrencesHint(repeatTimes: Int?) -> String {
+        guard let times = repeatTimes, times > 0 else { return noFutureOccurrencesHint }
+        return String(localized: "This job has run all \(times) of its scheduled times — duplicate it to schedule a new one.")
+    }
+
+    /// A paused one-shot whose `run_at` is already past Hermes's grace window.
+    /// `resume_job` raises before `update_job` is even reached
+    /// (`cron/jobs.py:1991-1996` @ `v2026.9.7`), so plain Resume is a
+    /// guaranteed exit 1; only `--run-now` (v0.20.6+) re-arms it. Shown when
+    /// the host has neither door.
+    public static let pastDeadlineOneShotHint =
+        String(localized: "This one-shot's time has passed — duplicate it with a new time.")
 
     /// A recurring job in `error` on a host older than v0.21.0, where
     /// `_reject_terminal_activation` has no `_is_recoverable_error_job`
@@ -53,4 +80,10 @@ public struct CronRecoveryOffer: Sendable, Equatable {
 
     /// True when the only thing to show is the hint.
     public var isDeadEnd: Bool { !canResume && !canRearm && hint != nil }
+
+    /// True when this offer is an explicit *refusal* of plain Resume, as
+    /// opposed to `CronRecoveryOffer.none` — which a healthy running job also
+    /// gets, and which must not be read as a refusal (iOS's `setEnabled` is
+    /// idempotent and still round-trips an already-enabled job).
+    public var refusesResume: Bool { !canResume && (canRearm || hint != nil) }
 }

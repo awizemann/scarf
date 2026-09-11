@@ -60,6 +60,12 @@ final class BotRoutinesViewModel {
         set { cron.isV021OrLater = newValue }
     }
 
+    /// Mirror of `hasCronPastOneShotResumeRefusal` (v0.18.1), same shape.
+    var isV0181OrLater: Bool {
+        get { cron.isV0181OrLater }
+        set { cron.isV0181OrLater = newValue }
+    }
+
     /// This bot's routines, filtered from the FULL job list by the verified
     /// `[bot:<name>] ` prefix — never a separate fetch, so a job Hermes
     /// Desktop would show under this bot is exactly the set Scarf shows.

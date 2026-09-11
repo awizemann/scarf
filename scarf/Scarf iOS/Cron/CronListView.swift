@@ -26,9 +26,17 @@ struct CronListView: View {
         capabilitiesStore?.capabilities.hasCronRecoverableErrorResume ?? false
     }
 
+    /// v0.18.1 — `resume_job`'s past-one-shot refusal. iOS used to apply this
+    /// rule unflagged and BEFORE the offer; it is now the offer's third door,
+    /// so the Mac inherits it too and both platforms gate it on the floor.
+    private var hasCronPastOneShotResumeRefusal: Bool {
+        capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
+    }
+
     private func mirrorCapabilities() {
         vm.isV0206OrLater = hasCronResumeRunNow
         vm.isV021OrLater = hasCronRecoverableErrorResume
+        vm.isV0181OrLater = hasCronPastOneShotResumeRefusal
     }
 
     private static let sharedContextID: ServerID = ServerID(
@@ -113,6 +121,7 @@ struct CronListView: View {
         // can run before the answer lands (same reasoning as `CronView`).
         .onChange(of: hasCronResumeRunNow) { _, _ in mirrorCapabilities() }
         .onChange(of: hasCronRecoverableErrorResume) { _, _ in mirrorCapabilities() }
+        .onChange(of: hasCronPastOneShotResumeRefusal) { _, _ in mirrorCapabilities() }
         .sheet(item: $editingJob) { job in
             CronEditorView(initial: job, title: "Edit cron job") { edited in
                 Task { await vm.upsert(edited) }

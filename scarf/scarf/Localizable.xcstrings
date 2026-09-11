@@ -110986,43 +110986,125 @@
     "ScarfGo" : {
 
     },
-    "No future occurrences — edit the schedule to run it again." : {
-      "comment" : "Shown in place of the cron recovery buttons for a recurring job that reached the completed state; no Hermes activation door accepts it, so the schedule itself has to change.",
+    "This job has no runs left — duplicate it to schedule a new one." : {
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job that reached the completed state; no Hermes door accepts it, editing the schedule included, so duplicating is the only remedy.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Keine weiteren Ausführungen — bearbeite den Zeitplan, um sie erneut auszuführen."
+            "value" : "Für diesen Job stehen keine Ausführungen mehr aus — dupliziere ihn, um eine neue zu planen."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No hay próximas ejecuciones: edita la programación para volver a ejecutarla."
+            "value" : "A esta tarea no le quedan ejecuciones: duplícala para programar una nueva."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Plus aucune exécution prévue — modifiez la planification pour la relancer."
+            "value" : "Cette tâche n’a plus d’exécutions — dupliquez-la pour en planifier une nouvelle."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "今後の実行予定はありません。もう一度実行するにはスケジュールを編集してください。"
+            "value" : "このジョブには残りの実行がありません。複製して新しい実行を予約してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sem execuções futuras — edite o agendamento para executá-la novamente."
+            "value" : "Esta tarefa não tem execuções restantes — duplique-a para agendar uma nova."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有后续执行计划 — 请编辑排程以再次运行。"
+            "value" : "此作业已无剩余运行次数 — 请复制它以安排新的运行。"
+          }
+        }
+      }
+    },
+    "This job has run all %lld of its scheduled times — duplicate it to schedule a new one." : {
+      "comment" : "Cron recovery hint naming the exhausted repeat limit (%lld is repeat.times) for a recurring job Hermes retired as completed.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Job wurde alle %lld geplanten Male ausgeführt — dupliziere ihn, um eine neue Ausführung zu planen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta tarea se ha ejecutado las %lld veces programadas: duplícala para programar una nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche s’est exécutée %lld fois, soit toutes celles prévues — dupliquez-la pour en planifier une nouvelle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブは予定されていた %lld 回すべてを実行しました。複製して新しい実行を予約してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta tarefa já foi executada todas as %lld vezes agendadas — duplique-a para agendar uma nova."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此作业已运行完计划的全部 %lld 次 — 请复制它以安排新的运行。"
+          }
+        }
+      }
+    },
+    "This one-shot's time has passed — duplicate it with a new time." : {
+      "comment" : "Cron recovery hint for a paused one-shot whose run_at is past the grace window on a host too old to offer Resume & Run Now.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Zeitpunkt dieses einmaligen Jobs ist verstrichen — dupliziere ihn mit einer neuen Zeit."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La hora de esta ejecución única ya pasó: duplícala con una hora nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’heure de cette exécution unique est passée — dupliquez-la avec une nouvelle heure."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この単発ジョブの予定時刻は過ぎています。新しい時刻で複製してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O horário desta execução única já passou — duplique-a com um novo horário."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此单次作业的时间已过 — 请以新的时间复制它。"
           }
         }
       }

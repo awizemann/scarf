@@ -78,6 +78,13 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronRecoverableErrorResume ?? false
     }
 
+    /// v0.18.1 — `resume_job`'s "one-shot time … is in the past" refusal.
+    /// Gates the offer's third door so a pre-0.18.1 host, which resumes such
+    /// a job happily, still gets a Resume button.
+    private var hasCronPastOneShotResumeRefusal: Bool {
+        capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
+    }
+
     /// v0.20.6 — `--deliver bot-chat[:profile]`. Placeholder/hint only;
     /// the strip happens in `supportsCronDeliver`.
     private var hasCronBotChatDelivery: Bool {
@@ -144,6 +151,7 @@ struct CronView: View {
             viewModel.load(changeToken: fileWatcher.lastChangeDate)
             viewModel.isV0206OrLater = hasCronResumeRunNow
             viewModel.isV021OrLater = hasCronRecoverableErrorResume
+            viewModel.isV0181OrLater = hasCronPastOneShotResumeRefusal
             viewModel.isV0211OrLater = isV0211OrLater
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
@@ -165,6 +173,7 @@ struct CronView: View {
         // no doctor findings, and the wrong terminal-refusal wording.
         .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
         .onChange(of: hasCronRecoverableErrorResume) { _, newValue in viewModel.isV021OrLater = newValue }
+        .onChange(of: hasCronPastOneShotResumeRefusal) { _, newValue in viewModel.isV0181OrLater = newValue }
         .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
@@ -431,13 +440,32 @@ struct CronView: View {
         // Selection is conveyed visually by the tint alone.
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
         .contextMenu {
-            Button(job.enabled ? "Pause" : "Resume") {
-                if job.enabled { viewModel.pauseJob(job) } else { viewModel.resumeJob(job) }
+            // The FOURTH offer site. It used to read `job.enabled` raw, which
+            // made it the one place that still offered plain Resume for a
+            // terminal or past-deadline job — a guaranteed exit 1 that the
+            // detail pane and the Bots routines list had already stopped
+            // offering. Same shared offer as `actionBar`, same conditions.
+            let offer = viewModel.recoveryOffer(for: job)
+            if job.enabled, !job.isTerminal {
+                Button("Pause") { viewModel.pauseJob(job) }
+                    // UI gate: addressed by identifier, not title — the Edit
+                    // menu also has a "Delete" item, so a title lookup
+                    // matches two elements.
+                    .accessibilityIdentifier("cron.contextMenu.pauseToggle")
+            } else if offer.canResume {
+                Button("Resume") { viewModel.resumeJob(job) }
+                    .accessibilityIdentifier("cron.contextMenu.pauseToggle")
             }
-            // UI gate: addressed by identifier, not title — the Edit menu also has
-            // a "Delete" item, so a title lookup matches two elements.
-            .accessibilityIdentifier("cron.contextMenu.pauseToggle")
+            if offer.canRearm {
+                Button("Resume & Run Now") { viewModel.resumeAndRunNow(job) }
+                    .accessibilityIdentifier("cron.contextMenu.resumeRunNow")
+            }
             Button("Run Now") { viewModel.runNow(job) }
+                // `trigger_job` uses the BARE `is_terminal_job`
+                // (`cron/jobs.py:2012` @ v2026.9.7) with no
+                // recoverable-error exemption, so a terminal job can never be
+                // run — disabled exactly as `BotRoutinesView` disables it.
+                .disabled(viewModel.refusesTerminalJobLocally(job))
             Button("Edit") { viewModel.editingJob = job }
             Divider()
             Button("Delete", role: .destructive) { pendingDelete = job }

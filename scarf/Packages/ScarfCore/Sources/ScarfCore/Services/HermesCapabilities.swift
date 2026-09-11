@@ -1359,10 +1359,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Whether `hermes cron resume <id>` recovers a RECURRING job stuck in
     /// `state = "error"`.
     ///
-    /// `_reject_terminal_activation` gained its `and not
+    /// The terminal-activation guard gained its `and not
     /// _is_recoverable_error_job(job)` arm at `v2026.8.31`
-    /// (`pyproject.toml version = "0.21.0"`, `cron/jobs.py:2583-2595` and
-    /// `:2684-2696`); the predicate itself is defined there at `:664-692` and
+    /// (`pyproject.toml version = "0.21.0"`). **Do not grep for
+    /// `_reject_terminal_activation` at that tag** — the helper does not
+    /// exist there: v2026.8.31 still carries the guard as two INLINE blocks
+    /// inside `update_job`'s `apply` (`cron/jobs.py:2583-2595` and
+    /// `:2684-2696`), and only `v2026.9.7` extracts it into the named
+    /// function at `:1865-1879` (called from `:1941` / `:1965`).
+    /// The predicate itself is defined at `v2026.8.31:664-692` and
     /// is absent from every earlier tag. At `v2026.8.27` (0.20.6) the same
     /// block reads `is_terminal_job(job) and (…)` with no exemption
     /// (`:2270-2278`, `:2367-2375`), so a resume of an error-state cron or
@@ -1374,6 +1379,20 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `v2026.8.31` (0.21.0), last tag without it `v2026.8.27` (0.20.6).
     /// Minor-level floor, so a v0.21.0 host gets it too.
     public var hasCronRecoverableErrorResume: Bool { isV021OrLater }
+
+    /// Whether `resume_job` refuses a one-shot whose `run_at` is already past
+    /// the grace window, instead of writing an `enabled` record that can never
+    /// fire.
+    ///
+    /// `resume_job` raises `"Cannot resume: one-shot time {run_at} is in the
+    /// past (grace window: {ONESHOT_GRACE_SECONDS}s) and will never fire."`
+    /// (`cron/jobs.py:1991-1996` @ `v2026.9.7`). Walked across all 32
+    /// `v2026.*` tags: first tag with that sentence is **`v2026.7.7`**
+    /// (`pyproject.toml` = `0.18.1`), last tag without it is `v2026.7.1`
+    /// (0.18.0). Below the floor the host happily resumes such a job, so
+    /// Scarf must not pre-refuse it (charter C1) — `recoveryOffer` takes this
+    /// as `hostRefusesPastOneShotResume`.
+    public var hasCronPastOneShotResumeRefusal: Bool { isV0181OrLater }
 
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
