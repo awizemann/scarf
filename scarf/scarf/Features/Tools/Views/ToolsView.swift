@@ -56,7 +56,13 @@ struct ToolsView: View {
         }
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Tools")
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            // The load is what narrows the roster; reconcile once it has.
+            // `onChange` below covers a later narrowing (capabilities landing
+            // after the roster read).
+            await viewModel.reconcileSelection(visible: visiblePlatforms)
+        }
         // Same narrowing window as `PlatformsView`, and worse here: the
         // selection is what `toggleTool` passes to
         // `hermes tools enable … --platform <name>` (charter C5).

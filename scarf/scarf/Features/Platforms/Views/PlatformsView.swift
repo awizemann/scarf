@@ -62,7 +62,15 @@ struct PlatformsView: View {
         }
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Platforms")
-        .onAppear { viewModel.load(changeToken: fileWatcher.lastChangeDate) }
+        .onAppear {
+            viewModel.load(changeToken: fileWatcher.lastChangeDate)
+            // `onChange` fires on a CHANGE, so it covers the narrowing that
+            // happens while this view is on screen. This covers re-entry: the
+            // VM is cached in `AppCoordinator`, so a selection made in an
+            // earlier visit arrives already stale against a roster that is
+            // narrow from the first paint.
+            viewModel.reconcileSelection(visible: visiblePlatforms)
+        }
         // Re-read config.yaml / .env / gateway_state.json when any of them
         // changes on disk. This is how the left-side connectivity dots refresh
         // after the user saves in a per-platform setup form. The token guard in
