@@ -68,9 +68,17 @@ public enum PowerSettingsWriter {
         capabilities: HermesCapabilities
     ) -> String? {
         guard capabilities.isV020OrLater else { return nil }
+        // The key is TRIMMED for the write, not only for the emptiness
+        // test. It used to be trimmed for the `isEmpty` filter and written
+        // untrimmed, so a pattern pasted with a trailing space went into
+        // config.yaml quoted (`YAMLScalar.quoteIfNeeded` quotes a trailing
+        // space, correctly) and never matched a model name — while the row
+        // rendered as if it did. `setExcludedProviders` below has trimmed
+        // its items all along; this is that sibling's rule.
         let cleaned = pairs
-            .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { (key: $0.key, value: Self.canonicalDisableSpelling($0.value)) }
+            .map { (key: $0.key.trimmingCharacters(in: .whitespaces),
+                    value: Self.canonicalDisableSpelling($0.value)) }
+            .filter { !$0.key.isEmpty }
         guard cleaned.allSatisfy({ HermesReasoningEffort.isValid($0.value) }) else { return nil }
         // A refusal (a config.yaml shape the line editor can't rewrite
         // without clobbering it) reports as the same nil the pre-v0.20 and
@@ -81,6 +89,28 @@ public enum PowerSettingsWriter {
             key: "reasoning_overrides",
             pairs: cleaned
         ).appliedText(orUnchanged: yaml)
+    }
+
+    /// Label of the reasoning-override field whose value would reach
+    /// config.yaml carrying a control character, or `nil`.
+    ///
+    /// **Round-4 decision 9.** The pattern is free text
+    /// (`AgentTab.swift`'s `ReasoningOverridesSection`) and was the second
+    /// surface round-3 decision 6 left unguarded, alongside the MCP entry
+    /// editor. It lives beside the writer rather than in the view so the
+    /// rule and the emission it guards are one file apart, and so it is
+    /// testable without a view host.
+    ///
+    /// Checked on the pattern as ``setReasoningOverrides(in:pairs:capabilities:)``
+    /// WRITES it — trimmed. This is the VISIBILITY guard, not the parse
+    /// guard: `YAMLScalar.quoteIfNeeded` represents a control losslessly, so
+    /// a pasted ESC does not break the file — it round-trips as the literal
+    /// `a\x1bb`, a pattern the user cannot see and which will never match a
+    /// model name.
+    public static func controlCharacterFieldLabel(pattern: String) -> String? {
+        YAMLScalar.containsControlCharacter(
+            pattern.trimmingCharacters(in: .whitespaces)
+        ) ? "Model pattern" : nil
     }
 
     /// `off` is a disable alias ONLY by way of YAML's bool coercion: bare

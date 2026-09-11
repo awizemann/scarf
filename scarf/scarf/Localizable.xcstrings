@@ -111397,6 +111397,88 @@
         }
       }
     },
+    "“%@” contains a tab or a control character. Remove it, then add." : {
+      "comment" : "Per-model reasoning override validation error. %@ is the name of the offending field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält einen Tabulator oder ein Steuerzeichen. Entfernen Sie es und fügen Sie dann hinzu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contiene un tabulador o un carácter de control. Elimínalo y luego añádelo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » contient une tabulation ou un caractère de contrôle. Supprimez-le, puis ajoutez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」にタブまたは制御文字が含まれています。削除してから追加してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contém uma tabulação ou um caractere de controle. Remova-o e depois adicione."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”包含制表符或控制字符。请移除后再添加。"
+          }
+        }
+      }
+    },
+    "Validation error: %@ contains a tab or a control character. Remove it, then add." : {
+      "comment" : "Accessibility label for the per-model reasoning override validation error.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Validierungsfehler: %@ enthält einen Tabulator oder ein Steuerzeichen. Entfernen Sie es und fügen Sie dann hinzu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error de validación: %@ contiene un tabulador o un carácter de control. Elimínalo y luego añádelo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erreur de validation : %@ contient une tabulation ou un caractère de contrôle. Supprimez-le, puis ajoutez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検証エラー: %@ にタブまたは制御文字が含まれています。削除してから追加してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erro de validação: %@ contém uma tabulação ou um caractere de controle. Remova-o e depois adicione."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证错误：%@ 包含制表符或控制字符。请移除后再添加。"
+          }
+        }
+      }
+    },
     "“%@” contains a tab or a control character. Remove it, then save." : {
       "comment" : "Bot editor validation error. %@ is the name of the offending field, e.g. “Name”.",
       "localizations" : {

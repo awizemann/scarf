@@ -269,13 +269,50 @@ private struct ReasoningOverridesSection: View {
                 .frame(width: 110)
                 Button("Add") { addNew() }
                     .controlSize(.small)
-                    .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty
+                              || controlCharacterFieldLabel != nil)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(ScarfColor.backgroundTertiary.opacity(0.5))
             .help("Overrides the global Reasoning Effort when the active model matches the pattern (exact or common spelling variants — dots/dashes, with/without provider prefix). First match wins.")
+            // Round-4 decision 9: a dead Add button always says what it
+            // wants, in the same shape `BotEditorSheet.cannotSaveReason` uses.
+            if let field = controlCharacterFieldLabel {
+                Text("“\(field)” contains a tab or a control character. Remove it, then add.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .accessibilityLabel(
+                        Text("Validation error: \(field) contains a tab or a control character. Remove it, then add.")
+                    )
+            }
         }
+    }
+
+    /// Round-4 decision 9 — the reasoning-override pattern is the other
+    /// free-text field that reaches config.yaml with no control-character
+    /// refusal, alongside the MCP entry editor. Same shape as round-3
+    /// decision 6 gave `BotsViewModel` / `HermesProfileRoute`: refuse
+    /// visibly rather than reshape, because a pasted ESC that round-trips as
+    /// the literal `a\x1bb` is a pattern the user cannot see and which will
+    /// never match a model name.
+    ///
+    /// Checked on the pattern as ``addNew`` WRITES it — trimmed, matching
+    /// `PowerSettingsWriter.setReasoningOverrides`, which trims the key for
+    /// both the emptiness test and the write since P41.
+    ///
+    /// Deliberately NOT applied to the EXISTING rows, which a re-save
+    /// rewrites: `YAMLScalar.quoteIfNeeded` represents a control character
+    /// losslessly (`YAMLScalar.doubleQuoted` escapes it `\xNN`/`\uNNNN`)
+    /// and `YAMLScalar.unquote` reads it back, so a hand-edited pattern
+    /// survives a save intact — refusing it would make the whole section
+    /// uneditable to fix the very row that carries it, which is the
+    /// over-refusal P19 warned about.
+    private var controlCharacterFieldLabel: String? {
+        PowerSettingsWriter.controlCharacterFieldLabel(pattern: newPattern)
     }
 
     /// Existing rows may carry a value outside the picker vocabulary (a

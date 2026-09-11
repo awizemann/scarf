@@ -167,9 +167,93 @@ final class MCPServerEditorViewModel {
         return nil
     }
 
+    /// Label of the first field whose value would reach config.yaml
+    /// carrying a control character, or `nil`.
+    ///
+    /// **Round-4 decision 9 — refuse, do not reshape.** This is the
+    /// `MCPServerEditorViewModel` half of round-3 decision 6, which wired
+    /// the same refusal into `BotsViewModel` and `HermesProfileRoute` and
+    /// left this editor open. The emitter behind it
+    /// (`HermesFileService.yamlScalar` → `YAMLScalar.quoteIfNeeded` since
+    /// P41) now represents a control character correctly rather than
+    /// emitting it raw, so this is not the parse guard — it is the
+    /// VISIBILITY guard: a pasted ESC that survives as the literal `\x1b`
+    /// is a value the user cannot see in the field they typed it into, and
+    /// silently reshaping it is how a credential ends up subtly wrong.
+    ///
+    /// Scoped to what this save would actually WRITE. The env/headers maps
+    /// and the tool filters are rewritten on every save, so they are always
+    /// checked; the v0.15/v0.20.4 scalars are delta-gated in ``save`` and
+    /// are checked only when they differ from the loaded value — refusing on
+    /// an unchanged field would make an entry whose config.yaml already
+    /// carries a control character permanently uneditable, which is the
+    /// over-refusal P19 warned about for the flow-indicator gate.
+    ///
+    /// A TAB counts: `YAMLScalar.containsControlCharacter` includes it
+    /// deliberately (it is legal inside quotes and fatal in a plain scalar,
+    /// and in a header value or an env value it is a paste accident either
+    /// way).
+    var controlCharacterFieldLabel: String? {
+        func bad(_ s: String) -> Bool { YAMLScalar.containsControlCharacter(s) }
+
+        // Always rewritten, per transport.
+        let rewrittenRows = server.transport == .stdio ? envDraft : headersDraft
+        let rowLabel = server.transport == .stdio ? "Environment" : "Header"
+        for row in rewrittenRows {
+            if bad(row.key) { return "\(rowLabel) name" }
+            if bad(row.value) { return "\(rowLabel) value" }
+        }
+        if bad(includeDraft) { return "Include tools" }
+        if bad(excludeDraft) { return "Exclude tools" }
+
+        // Delta-gated, exactly as `save` gates the writes.
+        guard server.transport != .stdio else {
+            let cwd = cwdDraft.trimmingCharacters(in: .whitespaces)
+            let cwdValue: String? = cwd.isEmpty ? nil : cwd
+            if cwdValue != server.cwd, bad(cwd) { return "Working directory" }
+            return nil
+        }
+        let cert = clientCertDraft.trimmingCharacters(in: .whitespaces)
+        if (cert.isEmpty ? nil : cert) != server.clientCert, bad(cert) {
+            return "Client certificate"
+        }
+        let key = clientKeyDraft.trimmingCharacters(in: .whitespaces)
+        if (key.isEmpty ? nil : key) != server.clientKey, bad(key) {
+            return "Client key"
+        }
+        // The CA path is only WRITTEN when it is what `ssl_verify` resolves
+        // to — with verification off the resolved value is the literal
+        // `false` and the path is ignored (you cannot pin a CA while not
+        // verifying), so a control character in an ignored path is not a
+        // reason to block the save.
+        if let verify = resolvedSSLVerify, verify != server.sslVerify, bad(verify) {
+            return "CA bundle path"
+        }
+        if identityHeaderEnabled {
+            if bad(identityHeaderNameDraft) { return "Identity header name" }
+            if identityHeaderValueFromDraft == .static,
+               bad(identityHeaderValueDraft) { return "Identity header value" }
+        }
+        return nil
+    }
+
     func save(completion: @escaping (Bool) -> Void) {
         isSaving = true
         saveError = nil
+
+        // Round-4 decision 9. BEFORE anything computes a value, builds the
+        // `patchMCPServerField(expecting:)` expectation, or touches
+        // config.yaml — the expectation is built from the same emitter as
+        // the write, so a value that must not be written must not reach the
+        // expectation either.
+        if let field = controlCharacterFieldLabel {
+            isSaving = false
+            saveError = String(
+                localized: "“\(field)” contains a tab or a control character. Remove it, then save."
+            )
+            completion(false)
+            return
+        }
 
         // Surfaced as a validation error through the same `saveError` the
         // write-failure path uses, BEFORE anything touches config.yaml.
