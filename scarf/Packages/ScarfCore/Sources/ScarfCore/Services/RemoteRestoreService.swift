@@ -29,6 +29,7 @@ import os
 public final class RemoteRestoreService: @unchecked Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "RemoteRestoreService")
+    #endif
 
     // MARK: - Spawn budgets (charter C10)
     //
@@ -53,7 +54,6 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// part, and the part that varies with size — has already happened by the
     /// time the wait begins; what is left is the remote's final writes.
     public static let remoteExtractTimeout: TimeInterval = 300
-    #endif
 
     public let context: ServerContext
 

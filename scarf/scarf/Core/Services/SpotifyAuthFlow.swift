@@ -113,7 +113,11 @@ final class SpotifyAuthFlow {
         // the close, and `handleTermination` — the other end of a successful
         // run — never calls `cancel()` at all. `NousAuthFlow:105-109` already
         // had this shape; these two were the pair that did not.
-        func streamHandler(_ handle: FileHandle) {
+        //
+        // A CLOSURE with `[weak self]`, not a local `func`: a local func
+        // captures `self` strongly, and this one is stored on the pipe that
+        // `self` owns — a retain cycle that would outlive the sheet.
+        let streamHandler: @Sendable (FileHandle) -> Void = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil

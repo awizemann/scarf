@@ -26,6 +26,7 @@ import os
 public final class RemoteBackupService: @unchecked Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "RemoteBackupService")
+    #endif
 
     /// Assembling the outer `.scarfbackup` zip from the staged work dir
     /// (charter C10: every subprocess has a timeout). A ceiling on a wedged
@@ -35,7 +36,6 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// Mirrors ``RemoteRestoreService/unzipTimeout``, the same archive in
     /// the other direction.
     public static let zipTimeout: TimeInterval = 900
-    #endif
 
     public let context: ServerContext
 
