@@ -897,6 +897,27 @@ public enum HermesCLIMarkers {
     /// `launchd cannot` after ``HermesCLIVerdict/unglyphed(_:)``.
     public static let gatewayDetachedFallbackStarted = "Started gateway as a background process instead"
 
+    /// Windows's "it was already up, nothing to do" line —
+    /// `print(f"✓ Gateway already running (PID: {…})")`
+    /// (`hermes_cli/gateway_windows.py:698`, `_report_already_running`) @
+    /// v2026.9.7. A real state the user asked for, on both `start` and
+    /// `restart` (`restart()` is stop + start, `:1380-1399`).
+    ///
+    /// **The colon is load-bearing.** `gateway/run.py:4769` prints
+    /// `❌ Gateway already running (PID {n}).` — a REFUSAL, from
+    /// `_start_gateway_replace_existing_instance`, which returns False and
+    /// aborts startup — with no colon after `PID`. That line reaches Scarf
+    /// whenever a run ends inside `run_gateway` (the foreground restart arm),
+    /// and before P40c the ONLY thing keeping the bare `Gateway already
+    /// running` spelling off it was that `❌` is not in
+    /// ``HermesCLIVerdict``'s glyph set, so ``HermesCLIVerdict/unglyphed(_:)``
+    /// left it at the head of the line and the anchor missed — an accident of
+    /// one character standing in for a decision. The two are told apart by
+    /// what Hermes actually prints now: this marker carries `(PID: `, and the
+    /// colon-less spelling is a refusal marker in
+    /// ``gatewayServiceFailure``.
+    public static let gatewayWindowsAlreadyRunning = "Gateway already running (PID: "
+
     /// Every success line `gateway start` can print, matched ANCHORED at
     /// column 0 after the glyph. `✓ Service started` (`gateway.py:3927`,
     /// `:3940`, `launchd_start`), `✓ {User|System} service started`
@@ -910,7 +931,7 @@ public enum HermesCLIMarkers {
         "User service started",
         "System service started",
         "Gateway started via",
-        "Gateway already running",
+        gatewayWindowsAlreadyRunning,
         gatewayDetachedFallbackStarted,
     ]
 
@@ -950,7 +971,7 @@ public enum HermesCLIMarkers {
         "System service restarted",
         "Restarted ",
         "Gateway started via",
-        "Gateway already running",
+        gatewayWindowsAlreadyRunning,
         gatewayDetachedFallbackStarted,
     ]
 
@@ -989,10 +1010,28 @@ public enum HermesCLIMarkers {
     /// All three return at exit 0 having printed no success line, so the
     /// no-marker rule would already fail the run; these markers exist to put
     /// Hermes's own reason in the banner instead of the last stray line.
+    ///
+    /// **The run.py refusal (P40c).** `gateway/run.py:4769` prints
+    /// `❌ Gateway already running (PID {n}).` from
+    /// `_start_gateway_replace_existing_instance`, which returns False and
+    /// aborts startup. It is reachable on exactly the path the foreground
+    /// restart arm covers — `_cmd_restart`'s last-resort `run_gateway`
+    /// (`hermes_cli/gateway.py:6066`) — where, without a marker, the run read
+    /// as "started in the foreground, could not confirm" when the gateway had
+    /// in fact refused to start. Unanchored because `❌` is not in
+    /// ``HermesCLIVerdict``'s glyph set, so the sentence is not at the head of
+    /// the line after ``HermesCLIVerdict/unglyphed(_:)``.
+    ///
+    /// It cannot collide with the Windows SUCCESS line
+    /// (``gatewayWindowsAlreadyRunning``): that one spells the PID
+    /// `(PID: {n})`, with a colon where this marker has a space. And even a
+    /// future spelling that did overlap would not flip a real start — this
+    /// verdict runs `failureWins: false`, so a matched success line wins.
     public static let gatewayServiceFailure = [
         "but gateway startup failed:",
         "did not become active within",
         "is temporarily rate-limited by systemd.",
+        "Gateway already running (PID ",
     ]
 
     /// The column-0 gateway refusals. ``managedRefusalAnchored`` rides along
@@ -1012,11 +1051,24 @@ public enum HermesCLIMarkers {
     /// (`gateway.py:5776-5781` via `print_error`,
     /// `hermes_cli/cli_output.py:21-22`) `sys.exit(1)`s — they are listed so
     /// the banner quotes the reason rather than the exit code.
+    ///
+    /// **The container refusal (P40c).** `gateway start` on a Docker host with
+    /// no service backend reaches `_handle_no_backend("start", …)`
+    /// (`gateway.py:5975`) → `_no_backend_exit` (`:5870-5874`), whose
+    /// `("start", "container")` entry is `(0, "Service start is not applicable
+    /// inside a Docker container.", …)` (`:5860-5866`): a real refusal that
+    /// prints at column 0 with no glyph and **exits 0**. Without the marker it
+    /// judged `.unconfirmed` — "Scarf could not confirm it" — when Hermes had
+    /// in fact said no in as many words. The three other `_NO_BACKEND_MESSAGES`
+    /// arms reachable from a verb Scarf shells (`("start", "termux")` `:5853`,
+    /// `("start", "wsl")` `:5856`, `("start", "unsupported")` `:5866`) all
+    /// carry exit 1 and are owned by the exit code.
     public static let gatewayServiceFailureAnchored = managedRefusalAnchored + [
         "Cannot restart gateway as a service",
         "Gateway service restart failed.",
         "Gateway start via",
         "Refusing to ",
+        "Service start is not applicable inside a Docker container.",
     ]
 
     // MARK: mcp remove / mcp test — hermes_cli/mcp_config.py
@@ -1570,6 +1622,18 @@ public enum HermesGatewayServiceVerdict {
         localized: "Hermes is starting the gateway in the foreground on this host — Scarf can't confirm it from here."
     )
 
+    /// Did the run print one of the gateway service's own refusal lines?
+    /// Shared by the foreground-restart arm and the "nothing was running"
+    /// arm, both of which must never launder a genuine refusal.
+    private static func sawServiceRefusal(_ lines: [String]) -> Bool {
+        lines.contains { line in
+            HermesCLIMarkers.gatewayServiceFailure.contains { line.contains($0) }
+                || HermesCLIMarkers.gatewayServiceFailureAnchored.contains {
+                    HermesCLIVerdict.unglyphed(line).hasPrefix($0)
+                }
+        }
+    }
+
     public static func judge(verb: Verb, output: String, exitCode: Int32) -> HermesCLIOutcome {
         let successMarkers: [String]
         switch verb {
@@ -1585,15 +1649,27 @@ public enum HermesGatewayServiceVerdict {
             anchoredFailureMarkers: HermesCLIMarkers.gatewayServiceFailureAnchored,
             successAnchored: true
         )
-        if verb == .restart, !verdict.succeeded, verdict.confidence != .failed,
-           HermesCLIVerdict.significantLines(output).contains(where: {
+        let lines = HermesCLIVerdict.significantLines(output)
+        if verb == .restart, !verdict.succeeded, !sawServiceRefusal(lines),
+           lines.contains(where: {
                HermesCLIVerdict.unglyphed($0).hasPrefix(HermesCLIMarkers.gatewayForegroundStarting)
            }) {
             // `_cmd_restart`'s no-service arm (`gateway.py:6062-6066`):
-            // `Starting gateway...` and then a foreground `run_gateway`, so
-            // the run ends at Scarf's timeout with no success line and no
-            // refusal. "Started in the foreground, could not confirm" is the
-            // honest answer; the banner does not claim "restarted".
+            // `Starting gateway...` and then a foreground `run_gateway`, which
+            // NEVER RETURNS — the run ends at Scarf's own CLI timeout, so the
+            // exit code Scarf sees is the transport's `-1`, not 0.
+            //
+            // Gating this on exit 0 made the arm unreachable: `judge` fails
+            // fast on a non-zero exit (`.failed`, no confidence to inspect),
+            // and `runHermesCLI` used to throw the partial stdout away with
+            // the `TransportError.timeout` too. So the honest answer is keyed
+            // on what the output SHOWS — `Starting gateway...` with no
+            // matched refusal — which covers the exit-0 shape and the timeout
+            // shape alike. A timeout WITHOUT the line stays a failure, and a
+            // run that also printed a real refusal keeps it.
+            //
+            // "Started in the foreground, could not confirm" is the honest
+            // answer; the banner does not claim "restarted".
             return HermesCLIOutcome(
                 succeeded: false,
                 detail: foregroundStartNote,
@@ -1611,14 +1687,7 @@ public enum HermesGatewayServiceVerdict {
         // A run that ALSO printed a real refusal (`Refusing to stop the
         // gateway from inside the gateway process.`, `:5776-5781`) keeps that
         // refusal: "nothing was running" must never launder a genuine one.
-        let lines = HermesCLIVerdict.significantLines(output)
-        let sawRefusal = lines.contains { line in
-            HermesCLIMarkers.gatewayServiceFailure.contains { line.contains($0) }
-                || HermesCLIMarkers.gatewayServiceFailureAnchored.contains {
-                    HermesCLIVerdict.unglyphed(line).hasPrefix($0)
-                }
-        }
-        let sawNothingRunning = !sawRefusal && lines.contains { line in
+        let sawNothingRunning = !sawServiceRefusal(lines) && lines.contains { line in
             let head = HermesCLIVerdict.unglyphed(line)
             return HermesCLIMarkers.gatewayNothingRunning.contains { head.hasPrefix($0) }
         }

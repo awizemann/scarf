@@ -59,10 +59,18 @@ struct GatewayAndPluginsVerdictP40Tests {
         #expect(message.contains("Nothing was running"))
     }
 
-    /// The regression the phase exists for: exit 0 with nothing the backend
-    /// printed is a FAILURE now, and the banner is sticky rather than clearing
-    /// on a settle timer. Pre-fix this reported "Gateway start requested".
-    @MainActor @Test func aSilentExitZeroStartIsReportedAsAFailure() async {
+    /// The regression the phase exists for: exit 0 with a REFUSAL the backend
+    /// printed is a failure, and the banner is sticky rather than clearing on
+    /// a settle timer. Pre-fix this reported "Gateway start requested".
+    ///
+    /// P40c: the line below is a refusal — `_no_backend_exit`'s
+    /// `("start", "container")` entry (`hermes_cli/gateway.py:5860-5866` @
+    /// v2026.9.7) prints it at column 0 and exits 0 — but it was matching no
+    /// failure marker, so once the `.unconfirmed` arm reached the banner this
+    /// case turned neutral. The marker is what makes it a failure; the
+    /// genuinely SILENT exit-0 start is the neutral arm's, and
+    /// `GatewayAndPluginsVerdictP40cTests` owns it.
+    @MainActor @Test func aContainerRefusalAtExitZeroIsReportedAsAFailure() async {
         let vm = Self.gatewayViewModel(
             mutation: "Service start is not applicable inside a Docker container.", exitCode: 0
         )
@@ -86,33 +94,50 @@ struct GatewayAndPluginsVerdictP40Tests {
     /// which returns the verdict now. Found by walking the verb's callers
     /// after the return type changed, which is the point of changing it.
     @Test func noCallSiteStillReadsAGatewayVerbsExitCode() throws {
-        // Both the literal pair and the `["gateway", verb]` variable form:
-        // any line that mentions the argv head and one of the three verbs is
-        // building the argv by hand. `HermesGatewayServiceVerdict.argv(_:)`
-        // is the only sanctioned speller, and it lives in ScarfCore's own
-        // file, which spells the verbs as enum cases rather than as quoted
-        // strings next to `"gateway"`.
-        let verbs = ["\"start\"", "\"stop\"", "\"restart\"", "verb"]
-        let lines = try Self.strippedSourceLines()
-        let offenders = lines
-            .filter { entry in
-                // The sanctioned speller itself lives here, and it is the one
-                // line in the app that is SUPPOSED to say `["gateway", verb…]`.
-                guard !entry.where.contains("/HermesCLIOutcome.swift:") else { return false }
-                guard entry.line.contains("\"gateway\",") else { return false }
-                return verbs.contains { entry.line.contains($0) }
+        // Matched against each file's whole whitespace-stripped BLOB, not
+        // line by line: an argv split across lines by a formatter —
+        //     ["gateway",
+        //      "start"]
+        // — is the same argv and has to be the same match. The per-line form
+        // this sweep used to have let exactly that through.
+        let files = try Self.strippedSourceFiles()
+        // The sanctioned speller itself lives in ScarfCore's own file, and it
+        // is the one place that is SUPPOSED to say `["gateway", verb…]`.
+        let exempt = "HermesCLIOutcome.swift"
+        let offenders = files
+            .filter { !$0.where.hasSuffix(exempt) }
+            .filter { file in
+                Self.gatewayArgvPatterns.contains { file.blob.range(of: $0, options: .regularExpression) != nil }
             }
             .map(\.where)
         // …and the sanctioned speller is still there, so the exemption above
         // is an exemption and not a hole.
-        #expect(lines.contains {
-            $0.where.contains("HermesCLIOutcome.swift")
-                && $0.line.contains("[\"gateway\",verb.rawValue]")
+        #expect(files.contains {
+            $0.where.hasSuffix(exempt) && $0.blob.contains("[\"gateway\",verb.rawValue]")
         }, "HermesGatewayServiceVerdict.argv no longer spells the argv — re-point this sweep")
         #expect(offenders.isEmpty, Comment(rawValue:
             "these build the argv by hand instead of going through HermesGatewayServiceVerdict:\n"
             + offenders.joined(separator: "\n")))
     }
+
+    /// Every way a `gateway <verb>` argv can be spelled by hand, as regexes
+    /// over a whitespace-stripped file blob.
+    ///
+    /// - the three literal pairs;
+    /// - the VARIABLE form, `["gateway", verb]`. The old token for this was
+    ///   the bare string `"verb"`, which matched `"gateway",verbose` — and
+    ///   anything else beginning `verb` — so the sweep's own matcher was
+    ///   looser than its message claimed. It is an identifier boundary now:
+    ///   `verb` or a name ending in `Verb`, and nothing longer.
+    /// - INTERPOLATION, `"gateway \(verb)"` / `"gateway\(verb.rawValue)"`,
+    ///   which is a hand-built argv the two token forms above cannot see at
+    ///   all. Lower-case `gateway` immediately followed by `\(` is only ever
+    ///   an argv: the user-facing copy says `Gateway`.
+    static let gatewayArgvPatterns = [
+        #""gateway","(start|stop|restart)""#,
+        #""gateway",[A-Za-z_]*[Vv]erb\b"#,
+        #""gateway\\\("#,
+    ]
 
     // MARK: - plugins update (round-4 decision 3)
 
@@ -178,10 +203,25 @@ struct GatewayAndPluginsVerdictP40Tests {
     /// points at a terminal on the host; this pins that no code path still
     /// shells the verb.
     @Test func nothingInScarfShellsConfigMigrate() throws {
-        let offenders = try Self.strippedSourceLines()
-            .filter { $0.line.contains("\"config\",\"migrate\"") }
+        // Whole-file blobs and an interpolation matcher, for the same reasons
+        // the gateway sweep has them. NB there is no concatenated
+        // `"config migrate"` matcher here on purpose: round-4 decision 4
+        // replaced the button with copy that TELLS the user to run
+        // `hermes config migrate` in a terminal, and that hint reads as
+        // `configmigrate` once whitespace is stripped.
+        let patterns = [
+            #""config","migrate""#,
+            #""config",[A-Za-z_]*[Mm]igrate\b"#,
+            #""config\\\("#,
+        ]
+        let offenders = try Self.strippedSourceFiles()
+            .filter { file in
+                patterns.contains { file.blob.range(of: $0, options: .regularExpression) != nil }
+            }
             .map(\.where)
-        #expect(offenders.isEmpty, Comment(rawValue: offenders.joined(separator: "\n")))
+        #expect(offenders.isEmpty, Comment(rawValue:
+            "these shell `config migrate`, which decision 4 removed:\n"
+            + offenders.joined(separator: "\n")))
     }
 
     // MARK: - source sweeps
@@ -200,15 +240,21 @@ struct GatewayAndPluginsVerdictP40Tests {
             .deletingLastPathComponent()
     }
 
-    /// Every source line in ``sourceRoots``, whitespace REMOVED, paired with
-    /// its `file:line`. Stripping whitespace is what stops a matcher from
-    /// being dodged by a reformat: `["gateway", "start"]` and
-    /// `["gateway","start"]` are the same argv and must be the same match.
+    /// Every Scarf-authored source FILE under ``sourceRoots``, paired with its
+    /// whole contents with all whitespace REMOVED.
     ///
-    /// Throws when a listed root is missing, so the sweep can never pass by
-    /// reading nothing.
-    static func strippedSourceLines() throws -> [(where: String, line: String)] {
-        var out: [(where: String, line: String)] = []
+    /// Stripping whitespace is what stops a matcher from being dodged by a
+    /// reformat — `["gateway", "start"]` and `["gateway","start"]` are the
+    /// same argv and must be the same match — and blobbing the whole file is
+    /// what stops it from being dodged by a NEWLINE, which the earlier
+    /// per-line version could not see across.
+    ///
+    /// Fails the calling test when a listed root is missing or cannot be
+    /// enumerated, and asserts a line-count floor, so the sweep can never
+    /// pass by reading nothing.
+    static func strippedSourceFiles() throws -> [(where: String, blob: String)] {
+        var out: [(where: String, blob: String)] = []
+        var lineCount = 0
         for dir in sourceRoots {
             let base = repoScarfRoot.appendingPathComponent(dir)
             var isDir: ObjCBool = false
@@ -221,15 +267,14 @@ struct GatewayAndPluginsVerdictP40Tests {
             )
             for case let url as URL in walk where url.pathExtension == "swift" {
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                for (n, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-                    out.append((
-                        where: "\(dir)/\(url.lastPathComponent):\(n + 1)",
-                        line: line.filter { !$0.isWhitespace }
-                    ))
-                }
+                lineCount += text.split(separator: "\n", omittingEmptySubsequences: false).count
+                out.append((
+                    where: "\(dir)/\(url.lastPathComponent)",
+                    blob: text.filter { !$0.isWhitespace }
+                ))
             }
         }
-        #expect(out.count > 10_000, "premise: the sweep actually read the sources")
+        #expect(lineCount > 10_000, "premise: the sweep actually read the sources")
         return out
     }
 }

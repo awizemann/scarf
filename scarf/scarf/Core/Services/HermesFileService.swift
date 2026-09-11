@@ -2874,9 +2874,21 @@ struct HermesFileService: Sendable {
             let combined = result.stdoutString + result.stderrString
             return (result.exitCode, combined)
         } catch let error as TransportError {
-            return (-1, error.diagnosticStderr.isEmpty
+            let message = error.diagnosticStderr.isEmpty
                 ? (error.errorDescription ?? "transport error")
-                : error.diagnosticStderr)
+                : error.diagnosticStderr
+            // A `.timeout` carries what the child printed before the kill, and
+            // on this path that partial stdout is EVIDENCE, not noise: the
+            // callers hand `output` to a `HermesCLIVerdict`, and the live
+            // shape is `_cmd_restart`'s no-service arm — `Starting gateway...`
+            // and then a foreground `run_gateway` that never returns
+            // (`hermes_cli/gateway.py:6062-6066` @ v2026.9.7), so the ONLY way
+            // the run ends is this timeout. Dropping it reported a gateway
+            // that was coming up as "restart failed". The message keeps its
+            // place as the last line, so `fallbackDetail` still quotes
+            // something useful when nothing was printed.
+            let partial = error.partialStdoutText
+            return (-1, partial.isEmpty ? message : partial + "\n" + message)
         } catch {
             return (-1, error.localizedDescription)
         }

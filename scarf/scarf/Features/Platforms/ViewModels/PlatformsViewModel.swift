@@ -246,6 +246,22 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         return detail.map { "\(stem): \($0)" } ?? stem
     }
 
+    /// The bar for a `gateway restart` verdict — THREE arms, not two (P40c).
+    /// A `.unconfirmed` verdict (the s6 dispatch that prints nothing,
+    /// `hermes_cli/gateway.py:5608-5629` @ v2026.9.7; the foreground
+    /// `run_gateway` that never returns, `:6062-6066`) is not a failure: it
+    /// gets the neutral wording and a non-failure bar, and the `load(force:)`
+    /// that follows the call is what tells the real state. Pure and `static`
+    /// so the three arms can be tested without a live `hermes`.
+    static func restartBanner(_ outcome: HermesCLIOutcome) -> OutcomeMessage {
+        if outcome.confidence == .unconfirmed {
+            return .success(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
+        }
+        return outcome.succeeded
+            ? .success(String(localized: "Gateway restarted"))
+            : .failure(Self.restartFailureMessage(outcome.detail))
+    }
+
     func restartGateway() {
         restartInProgress = true
         // In-progress, not an outcome: shown in the success style because
@@ -261,11 +277,7 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
-                self.applySaveOutcome(
-                    outcome.succeeded
-                        ? .success(String(localized: "Gateway restarted"))
-                        : .failure(Self.restartFailureMessage(outcome.detail))
-                )
+                self.applySaveOutcome(Self.restartBanner(outcome))
                 self.load(force: true)
             }
         }

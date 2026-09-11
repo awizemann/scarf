@@ -511,6 +511,7 @@ final class HealthViewModel {
             // three-valued.
             Self.recordControlAction(.stop, outcome.confidence)
             self.actionMessage = Self.controlMessage(
+                verb: .stop,
                 done: String(localized: "Gateway stopped"),
                 failed: String(localized: "Stop failed"),
                 outcome: outcome
@@ -534,6 +535,7 @@ final class HealthViewModel {
             // the bootstrap degrades (`hermes_cli/gateway.py:3926-3928`,
             // `:3938-3939` @ v2026.9.7) and still exits 0.
             self.actionMessage = Self.controlMessage(
+                verb: .start,
                 done: String(localized: "Gateway started"),
                 failed: String(localized: "Start failed"),
                 outcome: outcome
@@ -562,6 +564,7 @@ final class HealthViewModel {
                 .restart, .combined(stop.confidence, start.confidence)
             )
             self.actionMessage = Self.controlMessage(
+                verb: .restart,
                 done: String(localized: "Gateway restarted"),
                 failed: String(localized: "Restart failed"),
                 outcome: start
@@ -585,9 +588,18 @@ final class HealthViewModel {
     /// The banner for one control action. Round-4 decision 2: the success
     /// wording claims the state, and a Stop that found nothing running says
     /// so in a neutral note instead of being reported either way.
-    private nonisolated static func controlMessage(
+    /// Internal rather than `private` so the three arms can be tested
+    /// directly: this VM builds its own `HermesFileService` and there is no
+    /// seam to inject a fake `hermes` through.
+    nonisolated static func controlMessage(
+        verb: HermesGatewayServiceVerdict.Verb,
         done: String, failed: String, outcome: HermesCLIOutcome
     ) -> String {
+        // P40c: `.unconfirmed` is its own arm. `settleAndRefresh` re-probes
+        // right after, so the honest neutral line is also the useful one.
+        if outcome.confidence == .unconfirmed {
+            return GatewayActionBanner.unconfirmed(verb, detail: outcome.detail)
+        }
         guard outcome.succeeded else {
             return outcome.detail.map { "\(failed): \($0)" } ?? failed
         }

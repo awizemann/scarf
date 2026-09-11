@@ -125,6 +125,9 @@ import Foundation
             )
         }
 
+        // `contains`, not `hasPrefix`: the composed command now opens with the
+        // `COLUMNS=…` assignment. The EXACT whole-command spelling, prefix
+        // included, is pinned in `M0bTransportTests.sshComposedCommandScopesHermesHomeToProfile`.
         #expect(command("scout").contains("HERMES_HOME=\"$HOME/.hermes/profiles/scout\" \"hermes\""))
         #expect(command("scout").contains("\"-p\" \"scout\""))
         // Root home ⇒ no assignment; the flag is the whole scope.

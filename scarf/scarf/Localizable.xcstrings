@@ -111682,6 +111682,126 @@
         }
       }
     },
+    "Restart sent; Scarf could not confirm it from the output — the status will update" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neustart gesendet; Scarf konnte ihn anhand der Ausgabe nicht bestätigen — der Status wird aktualisiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reinicio enviado; Scarf no pudo confirmarlo a partir de la salida: el estado se actualizará"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redémarrage envoyé ; Scarf n’a pas pu le confirmer d’après la sortie — le statut sera mis à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再起動を送信しました。出力からは確認できませんでした — ステータスは更新されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reinício enviado; o Scarf não pôde confirmá-lo pela saída — o status será atualizado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送重启命令；Scarf 无法从输出中确认 — 状态将会更新"
+          }
+        }
+      }
+    },
+    "Start sent; Scarf could not confirm it from the output — the status will update" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start gesendet; Scarf konnte ihn anhand der Ausgabe nicht bestätigen — der Status wird aktualisiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicio enviado; Scarf no pudo confirmarlo a partir de la salida: el estado se actualizará"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Démarrage envoyé ; Scarf n’a pas pu le confirmer d’après la sortie — le statut sera mis à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始を送信しました。出力からは確認できませんでした — ステータスは更新されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Início enviado; o Scarf não pôde confirmá-lo pela saída — o status será atualizado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送启动命令；Scarf 无法从输出中确认 — 状态将会更新"
+          }
+        }
+      }
+    },
+    "Stop sent; Scarf could not confirm it from the output — the status will update" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopp gesendet; Scarf konnte ihn anhand der Ausgabe nicht bestätigen — der Status wird aktualisiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detención enviada; Scarf no pudo confirmarla a partir de la salida: el estado se actualizará"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrêt envoyé ; Scarf n’a pas pu le confirmer d’après la sortie — le statut sera mis à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止を送信しました。出力からは確認できませんでした — ステータスは更新されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parada enviada; o Scarf não pôde confirmá-la pela saída — o status será atualizado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送停止命令；Scarf 无法从输出中确认 — 状态将会更新"
+          }
+        }
+      }
+    },
     "Stop failed" : {
       "localizations" : {
         "de" : {

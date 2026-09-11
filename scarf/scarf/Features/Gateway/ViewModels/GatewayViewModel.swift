@@ -506,6 +506,21 @@ final class MessagingGatewayViewModel {
             // message and its reload own the UI now.
             guard self.actionGeneration == generation else { return }
 
+            // The third arm (P40c): a `.unconfirmed` verdict is not a
+            // failure. Neutral wording, `actionFailed` stays false, and the
+            // settle-reload below still runs — the status is the authority.
+            if outcome.confidence == .unconfirmed {
+                self.actionFailed = false
+                self.actionMessage = GatewayActionBanner.unconfirmed(verb, detail: outcome.detail)
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(settleSeconds))
+                    guard let self, self.actionGeneration == generation else { return }
+                    self.load(force: true)
+                    self.actionMessage = nil
+                }
+                return
+            }
+
             guard outcome.succeeded else {
                 self.actionFailed = true
                 self.actionMessage = outcome.detail

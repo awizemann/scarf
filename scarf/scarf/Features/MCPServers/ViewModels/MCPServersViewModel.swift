@@ -507,18 +507,40 @@ final class MCPServersViewModel {
         }
     }
 
+    /// What a `gateway restart` verdict does to this pane. Three arms (P40c):
+    /// a `.unconfirmed` verdict is not an error — it goes to the neutral
+    /// status line rather than `activeError` — and it does NOT clear the
+    /// restart banner, because Scarf could not confirm the restart and the
+    /// "restart needed" prompt has therefore not earned its dismissal.
+    /// Pure and `static` so the arms can be tested without a live `hermes`.
+    enum RestartBanner: Equatable {
+        case confirmed(String)
+        case unconfirmed(String)
+        case failed(String)
+    }
+
+    static func restartBanner(_ outcome: HermesCLIOutcome) -> RestartBanner {
+        if outcome.confidence == .unconfirmed {
+            return .unconfirmed(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
+        }
+        if outcome.succeeded { return .confirmed("Gateway restarted") }
+        return .failed(outcome.detail.map { "Restart failed: \($0)" } ?? "Restart failed")
+    }
+
     func restartGateway() {
         let fileService = self.fileService
         Task.detached { [weak self] in
             let outcome = fileService.restartGateway()
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if outcome.succeeded {
-                    self.flashStatus("Gateway restarted")
+                switch Self.restartBanner(outcome) {
+                case .confirmed(let status):
+                    self.flashStatus(status)
                     self.showRestartBanner = false
-                } else {
-                    self.activeError = outcome.detail
-                        .map { "Restart failed: \($0)" } ?? "Restart failed"
+                case .unconfirmed(let status):
+                    self.flashStatus(status)
+                case .failed(let error):
+                    self.activeError = error
                 }
             }
         }

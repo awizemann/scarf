@@ -105,11 +105,28 @@ struct HermesGatewayVerdictP40bTests {
         #expect(outcome.detail == HermesGatewayServiceVerdict.foregroundStartNote)
     }
 
-    /// The same shape after Scarf's own timeout (`runHermesCLI` answers
-    /// `-1` on a transport timeout) is a real failure — the exit code wins.
-    @Test func aForegroundRestartThatFailedToSpawnIsStillAFailure() {
+    /// P40c corrects this case to the real semantics. The timeout IS the
+    /// shape: `run_gateway` never returns, so a foreground restart can only
+    /// ever end at Scarf's own timer with exit `-1`. Judging that `.failed`
+    /// because "the exit code wins" made the `.unconfirmed` arm above
+    /// unreachable in production — exit 0 is what this arm never sees.
+    @Test func aForegroundRestartThatTimedOutIsUnconfirmed() {
         let outcome = HermesGatewayServiceVerdict.judge(
-            verb: .restart, output: "Starting gateway...", exitCode: -1
+            verb: .restart,
+            output: "Starting gateway...\nCommand timed out after 30s.",
+            exitCode: -1
+        )
+        #expect(outcome.succeeded == false)
+        #expect(outcome.confidence == .unconfirmed)
+        #expect(outcome.detail == HermesGatewayServiceVerdict.foregroundStartNote)
+    }
+
+    /// …and a timeout WITHOUT the line stays a failure: nothing was printed
+    /// that says the gateway is coming up, so "could not confirm" would be a
+    /// claim Scarf has no evidence for.
+    @Test func aTimeoutWithoutTheForegroundLineIsStillAFailure() {
+        let outcome = HermesGatewayServiceVerdict.judge(
+            verb: .restart, output: "Command timed out after 30s.", exitCode: -1
         )
         #expect(outcome.confidence == .failed)
     }
@@ -123,6 +140,13 @@ struct HermesGatewayVerdictP40bTests {
         let outcome = HermesGatewayServiceVerdict.judge(verb: .restart, output: output, exitCode: 0)
         #expect(outcome.confidence == .failed)
         #expect(outcome.detail?.contains("linger") == true)
+        // …and after the timeout too (P40c): the arm is keyed on the absence
+        // of a refusal, not on the exit code, so it must still stand aside.
+        let timedOut = HermesGatewayServiceVerdict.judge(
+            verb: .restart, output: output, exitCode: -1
+        )
+        #expect(timedOut.confidence == .failed)
+        #expect(timedOut.detail?.contains("linger") == true)
     }
 
     /// `Starting gateway...` on the START verb is not a thing `_cmd_start`
