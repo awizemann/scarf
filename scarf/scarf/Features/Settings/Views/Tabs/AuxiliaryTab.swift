@@ -241,7 +241,7 @@ struct AuxiliaryTab: View {
         }
         // v0.20.4+ — documented only for `compression`.
         if key == "compression", capabilitiesStore?.capabilities.isV0204OrLater ?? false {
-            maxConcurrencyRow(value: model.maxConcurrency) { viewModel.setAuxiliaryMaxConcurrency(key, value: $0, capabilities: capabilities) }
+            maxConcurrencyRow(value: model.maxConcurrency) { viewModel.setAuxiliaryMaxConcurrency(key, value: $0, stored: model.maxConcurrency, capabilities: capabilities) }
         }
     }
 

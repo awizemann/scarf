@@ -166,6 +166,15 @@ nonisolated struct BotDraft: Equatable {
     var pinned: Bool
     var hidden: Bool
 
+    /// Carried, never edited. `apply(to:)` leaves both alone — but the WRITER
+    /// emits them through `YAMLScalar.quoteIfNeeded`
+    /// (`HermesBotProfileYAML.swift:437` `group`, `:441` each `groups` item),
+    /// so a control character already sitting in either one reaches
+    /// `profile.yaml` on the next save of ANY field. The refusal has to see
+    /// them or decision 6's guarantee has a hole the editor cannot show.
+    let carriedLegacyGroup: String?
+    let carriedGroups: [String]
+
     init(identity: HermesBotIdentity) {
         profileName = identity.profileName
         title = identity.title ?? identity.displayName
@@ -174,6 +183,8 @@ nonisolated struct BotDraft: Equatable {
         shape = identity.shape ?? ""
         pinned = identity.pinned ?? false
         hidden = identity.hidden ?? false
+        carriedLegacyGroup = identity.legacyGroup
+        carriedGroups = identity.groups
     }
 
     /// Stamp the edited fields onto `identity`, leaving every other key alone.
@@ -221,6 +232,16 @@ nonisolated struct BotDraft: Equatable {
             description.trimmingCharacters(in: .whitespacesAndNewlines),
             allowingLineBreaks: true
         ) { return "Role" }
+        // Not editable here, but on the write path all the same — see
+        // `carriedGroups`. A file whose `group:`/`groups:` already carries a
+        // control character would otherwise be made unloadable by a save of
+        // the Name field, and `read_profile_meta` turns an unloadable
+        // profile.yaml into empty defaults: the bot drops out of the roster.
+        if let legacy = carriedLegacyGroup,
+           YAMLScalar.containsControlCharacter(legacy) { return "Group" }
+        if carriedGroups.contains(where: { YAMLScalar.containsControlCharacter($0) }) {
+            return "Groups"
+        }
         return nil
     }
 

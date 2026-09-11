@@ -61,6 +61,16 @@ public enum HermesYAML {
         /// header at the same path read as a first open, the purge was
         /// skipped, and `toolsets: [a]` + `toolsets:\n  - b` concatenated.
         var writtenPaths: Set<String> = []
+        /// Paths whose LEAF key literally contains a `.` — a flat dotted key
+        /// (`gateway.enabled: true`) rather than a nesting of `gateway:` +
+        /// `enabled:`. PyYAML keeps such a key as an INDEPENDENT top-level
+        /// key alongside a `gateway:` mapping (probed:
+        /// `{"gateway": {"port": 2}, "gateway.enabled": true}` for a file with
+        /// two `gateway:` blocks and a `gateway.enabled` line between them),
+        /// so the last-wins purge must never sweep it just because it shares
+        /// the `gateway.` prefix. P37 already caught the FIRST-open case; the
+        /// re-open case was still wrong.
+        var dottedLiteralPaths: Set<String> = []
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
         // Indent of the most recent scalar `key: value` line at the current
@@ -189,6 +199,7 @@ public enum HermesYAML {
             }
 
             let path = currentPath(joinedWith: key)
+            if key.contains(".") { dottedLiteralPaths.insert(path) }
             lastScalarIndent = indent
             lastScalarPath = nil
             lastScalarParent = nil
@@ -231,16 +242,29 @@ public enum HermesYAML {
                 // keeps as a key of its own ALONGSIDE a `gateway:` mapping)
                 // matches the `gateway.` descendant prefix, so the FIRST
                 // opening of `gateway:` deleted it.
+                //
+                // P38: the purge dropped the earlier block's DESCENDANTS but
+                // not the block's own `values[path]` / `maps[path]`, so
+                // `HermesConfig+YAML.sharedPlatformScalar`'s
+                // `maps[section]?[key]` fallback still read the FIRST
+                // `slack:` block's `require_mention` on a file with two of
+                // them. And the descendant sweep still ate a flat dotted
+                // sibling on the re-open — see `dottedLiteralPaths`.
                 if !writtenPaths.insert(path).inserted {
                     lists.removeValue(forKey: path)
+                    values.removeValue(forKey: path)
+                    maps.removeValue(forKey: path)
                     let staleDescendant = path + "."
-                    for key in values.keys where key.hasPrefix(staleDescendant) {
+                    for key in values.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
                         values.removeValue(forKey: key)
                     }
-                    for key in maps.keys where key.hasPrefix(staleDescendant) {
+                    for key in maps.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
                         maps.removeValue(forKey: key)
                     }
-                    for key in lists.keys where key.hasPrefix(staleDescendant) {
+                    for key in lists.keys
+                    where key.hasPrefix(staleDescendant) && !dottedLiteralPaths.contains(key) {
                         lists.removeValue(forKey: key)
                     }
                 }

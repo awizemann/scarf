@@ -220,13 +220,30 @@ final class SettingsViewModel {
     /// normalizes to `local` (cloud dispatch off) while an absent key means
     /// auto-detect. Use this whenever a picker offers a "not set" row.
     ///
-    /// Judged by OUTPUT, unlike `setSetting`. Every `config set` refusal
-    /// `sys.exit(1)`s, so the exit code is the truth there; `config unset`'s
+    /// Judged by OUTPUT, unlike `setSetting`: `config unset`'s
     /// managed-install arm calls `managed_error(...)`, which PRINTS to stderr
     /// and `return`s (`hermes_cli/config.py:3549-3551` @ v2026.9.7,
     /// `:8870-8872` @ v2026.7.20), and Python makes that exit 0 — so a
     /// refused clear was banner'd "Saved <key>" over a key still on disk, for
     /// all six call sites. See ``HermesConfigUnset`` (charter C5).
+    ///
+    /// **`config set` is NOT exit-1-on-every-refusal.** This doc claimed it
+    /// was, and that is false: `set_config_value` opens with the SAME
+    /// managed-install arm — `if is_managed(): managed_error(...); return`
+    /// (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error` at
+    /// `:453-455`) — so a managed host refuses every `config set` at exit 0
+    /// and `setSetting` banners "Saved". That is a real defect on the `set`
+    /// side too, deliberately NOT fixed here: it is the pending product
+    /// decision tracked by the board task "Audit P39: managed-install
+    /// refusals — config set / save_config exit-0 verdicts". Every OTHER
+    /// `config set` refusal does `sys.exit(1)`.
+    ///
+    /// P38: the "nothing stored → no-op" guard lives here too, not just in
+    /// `setApprovalMode`. `unset_config_value` prints `Config key not set:
+    /// <key>` for an absent key, which `HermesConfigUnset.judge` correctly
+    /// reads as a failure — so six rows showed a red "Couldn't clear" for a
+    /// button that had nothing to do. `isStored` is REQUIRED for the same
+    /// reason `capabilities` is: a seventh clear row cannot forget it.
     ///
     /// P37: `capabilities` is REQUIRED, and the `hasConfigUnset` floor
     /// (v0.19.0) is checked HERE rather than at each caller. P35 gated only
@@ -235,11 +252,15 @@ final class SettingsViewModel {
     /// `auxiliary.*.max_concurrency` and two `database.*`. With the gate in
     /// the one helper, a seventh row cannot forget it — the compiler asks
     /// for capabilities before it can clear anything.
-    func unsetSetting(_ key: String, capabilities: HermesCapabilities) {
+    func unsetSetting(_ key: String, capabilities: HermesCapabilities, isStored: Bool) {
         guard capabilities.hasConfigUnset else {
             showSaveFailure(HermesConfigUnset.belowFloorHint(key: key))
             return
         }
+        // Nothing on disk to remove: the row is already in the state the
+        // click asks for. Shelling `config unset` here only ever produced
+        // `Config key not set: <key>` and a red banner.
+        guard isStored else { return }
         enqueueConfigWrite(
             key: key,
             arguments: HermesConfigUnset.argv(key: key),
@@ -267,9 +288,19 @@ final class SettingsViewModel {
     }
 
     /// How a queued write's outcome is decided. `nil` is the historical
-    /// exit-code rule, which is correct for `config set` (every refusal
-    /// `sys.exit(1)`s). A verb with an exit-0 refusal path passes its own
-    /// output judge — see ``unsetApprovalMode``.
+    /// exit-code rule; a verb with an exit-0 refusal path passes its own
+    /// output judge — see ``unsetSetting``.
+    ///
+    /// The exit-code rule is correct for EVERY `config set` refusal but one:
+    /// `set_config_value` opens with `if is_managed(): managed_error(...);
+    /// return` (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error`
+    /// printing to stderr and returning at `:453-455`), which Python exits 0
+    /// — so on a managed install every `setSetting` banners "Saved" over a
+    /// key the host never wrote. This doc used to claim `config set` always
+    /// exits 1; it does not. Giving `config set` its own output verdict is the
+    /// pending product decision tracked by the board task "Audit P39:
+    /// managed-install refusals — config set / save_config exit-0 verdicts",
+    /// deliberately not implemented here.
     typealias WriteVerdict = @Sendable (String, Int32) -> HermesCLIOutcome
 
     /// Append one `hermes …` write to the serialised chain. `arguments` need
@@ -611,10 +642,11 @@ final class SettingsViewModel {
             setSetting("approvals.mode", value: value)
             return
         }
-        guard config.storedApprovalMode != nil else { return }
-        // The floor gate lives in `unsetSetting` since P37 — every clear row
-        // gets it, not just this one.
-        unsetSetting("approvals.mode", capabilities: capabilities)
+        // The floor gate AND the nothing-stored no-op both live in
+        // `unsetSetting` since P37/P38 — every clear row gets them, not just
+        // this one.
+        unsetSetting("approvals.mode", capabilities: capabilities,
+                     isStored: config.storedApprovalMode != nil)
     }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the
@@ -663,7 +695,11 @@ final class SettingsViewModel {
     /// not what "auto-detect" means.
     func setBrowserCloudProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("browser.cloud_provider", capabilities: capabilities)
+            // Empty is exactly how an absent `browser.cloud_provider`
+            // parses (`HermesConfig.browserCloudProvider`'s doc), and Scarf
+            // never writes the present-but-empty form.
+            unsetSetting("browser.cloud_provider", capabilities: capabilities,
+                         isStored: !config.browserCloudProvider.isEmpty)
         } else {
             setSetting("browser.cloud_provider", value: value)
         }
@@ -726,7 +762,8 @@ final class SettingsViewModel {
     /// a present value (empty included) is an explicit pin.
     func setSTTProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("stt.provider", capabilities: capabilities)
+            unsetSetting("stt.provider", capabilities: capabilities,
+                         isStored: !config.voice.sttProvider.isEmpty)
         } else {
             setSetting("stt.provider", value: value)
         }
@@ -805,11 +842,21 @@ final class SettingsViewModel {
     /// `auxiliary.<task>.max_concurrency` (v0.20.4+, isV0204OrLater) —
     /// true-optional cap on simultaneous calls for that task. Currently
     /// only surfaced for `compression`. Empty clears back to unlimited.
-    func setAuxiliaryMaxConcurrency(_ task: String, value: Int?, capabilities: HermesCapabilities) {
+    /// `stored` is the value the config currently holds for this task —
+    /// the view has the `AuxiliaryModel` in hand and `AuxiliarySettings` has
+    /// no keyed accessor, so the caller passes it rather than this VM
+    /// re-deriving it from a string task name.
+    func setAuxiliaryMaxConcurrency(
+        _ task: String,
+        value: Int?,
+        stored: Int?,
+        capabilities: HermesCapabilities
+    ) {
         if let value {
             setSetting("auxiliary.\(task).max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.\(task).max_concurrency", capabilities: capabilities)
+            unsetSetting("auxiliary.\(task).max_concurrency", capabilities: capabilities,
+                         isStored: stored != nil)
         }
     }
     /// `auxiliary.background_review.enabled` (v0.20.4+, isV0204OrLater) —
@@ -852,7 +899,8 @@ final class SettingsViewModel {
         if let value {
             setSetting("auxiliary.title_generation.max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.title_generation.max_concurrency", capabilities: capabilities)
+            unsetSetting("auxiliary.title_generation.max_concurrency", capabilities: capabilities,
+                         isStored: config.auxiliary.titleGeneration.maxConcurrency != nil)
         }
     }
 
@@ -950,7 +998,8 @@ final class SettingsViewModel {
         if let value {
             setSetting("database.wal_autocheckpoint", value: String(value))
         } else {
-            unsetSetting("database.wal_autocheckpoint", capabilities: capabilities)
+            unsetSetting("database.wal_autocheckpoint", capabilities: capabilities,
+                         isStored: config.database.walAutocheckpoint != nil)
         }
     }
 
@@ -961,7 +1010,8 @@ final class SettingsViewModel {
         if let value {
             setSetting("database.journal_size_limit", value: String(value))
         } else {
-            unsetSetting("database.journal_size_limit", capabilities: capabilities)
+            unsetSetting("database.journal_size_limit", capabilities: capabilities,
+                         isStored: config.database.journalSizeLimit != nil)
         }
     }
 

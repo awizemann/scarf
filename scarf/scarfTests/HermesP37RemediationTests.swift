@@ -49,25 +49,44 @@ struct HermesP37ConfigUnsetFloorTests {
         HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
     }
 
+    /// Each clear row's real setter, plus a `config` in which that row's key
+    /// IS stored — P38 made `unsetSetting` a no-op when there is nothing to
+    /// clear, so a row driven from `HermesConfig.empty` correctly runs
+    /// nothing and would pass this suite vacuously.
+    static let clearRows: [(
+        key: String,
+        stored: @MainActor (SettingsViewModel) -> Void,
+        act: @MainActor (SettingsViewModel, HermesCapabilities) -> Void
+    )] = [
+        ("browser.cloud_provider",
+         { $0.config.browserCloudProvider = "browserbase" },
+         { $0.setBrowserCloudProvider("", capabilities: $1) }),
+        ("stt.provider",
+         { $0.config.voice.sttProvider = "openai" },
+         { $0.setSTTProvider("", capabilities: $1) }),
+        ("auxiliary.compression.max_concurrency",
+         { _ in },
+         { $0.setAuxiliaryMaxConcurrency("compression", value: nil, stored: 2, capabilities: $1) }),
+        ("auxiliary.title_generation.max_concurrency",
+         { $0.config.auxiliary.titleGeneration.maxConcurrency = 2 },
+         { $0.setTitleGenerationMaxConcurrency(nil, capabilities: $1) }),
+        ("database.wal_autocheckpoint",
+         { $0.config.database.walAutocheckpoint = 500 },
+         { $0.setDatabaseWalAutocheckpoint(nil, capabilities: $1) }),
+        ("database.journal_size_limit",
+         { $0.config.database.journalSizeLimit = 1 << 20 },
+         { $0.setDatabaseJournalSizeLimit(nil, capabilities: $1) }),
+    ]
+
     /// Every row that clears a key, driven through its real setter. Fails
     /// before the fix: all six shelled `config unset` on a v0.18 host.
     @Test func noClearRowShellsConfigUnsetBelowTheFloor() async {
-        let cases: [(String, @MainActor (SettingsViewModel, HermesCapabilities) -> Void)] = [
-            ("browser.cloud_provider", { $0.setBrowserCloudProvider("", capabilities: $1) }),
-            ("stt.provider", { $0.setSTTProvider("", capabilities: $1) }),
-            ("auxiliary.compression.max_concurrency",
-             { $0.setAuxiliaryMaxConcurrency("compression", value: nil, capabilities: $1) }),
-            ("auxiliary.title_generation.max_concurrency",
-             { $0.setTitleGenerationMaxConcurrency(nil, capabilities: $1) }),
-            ("database.wal_autocheckpoint",
-             { $0.setDatabaseWalAutocheckpoint(nil, capabilities: $1) }),
-            ("database.journal_size_limit",
-             { $0.setDatabaseJournalSizeLimit(nil, capabilities: $1) }),
-        ]
+        let cases = Self.clearRows
 
-        for (key, act) in cases {
+        for (key, stored, act) in cases {
             let belowFloor = CLILog()
             let vmBelow = Self.viewModel(belowFloor)
+            stored(vmBelow)
             act(vmBelow, v018)
             await Self.settle(belowFloor, expectingACall: false)
             #expect(belowFloor.calls.isEmpty,
@@ -79,6 +98,7 @@ struct HermesP37ConfigUnsetFloorTests {
             // …and above the floor the same row still clears the key.
             let atFloor = CLILog()
             let vmAt = Self.viewModel(atFloor)
+            stored(vmAt)
             act(vmAt, v0211)
             await Self.settle(atFloor)
             #expect(atFloor.calls == [["config", "unset", key]], "\(key): did not clear")
@@ -105,7 +125,7 @@ struct HermesP37ConfigUnsetFloorTests {
     @Test func theSharedHelperIsTheGate() async {
         let log = CLILog()
         let vm = Self.viewModel(log)
-        vm.unsetSetting("anything.at.all", capabilities: v018)
+        vm.unsetSetting("anything.at.all", capabilities: v018, isStored: true)
         await Self.settle(log, expectingACall: false)
         #expect(log.calls.isEmpty)
         #expect(vm.messageIsFailure)
