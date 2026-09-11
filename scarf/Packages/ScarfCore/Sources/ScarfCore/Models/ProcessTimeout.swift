@@ -1,6 +1,22 @@
 import Foundation
 import os
 
+// `Process` does not exist in the iOS SDK. Every Scarf spawn is a Mac-side
+// operation; the iOS half of ScarfCore compiles without this file rather
+// than carrying a stub nothing can call.
+#if !os(iOS)
+
+/// Bounded waits for `Process`, shared by the Mac app target and ScarfCore.
+///
+/// **This lives in ScarfCore, not the app target.** It was written in the app
+/// (round-3 P33, hoisted out of `HealthViewModel.dashboardListenerPID`), but
+/// ScarfCore has spawns of its own — `unzip`/`zip` in `RemoteRestoreService`
+/// and `RemoteBackupService`, the sole C10 exposure the round-4 audit found —
+/// and a package cannot import its client. A second copy down here would be
+/// two implementations of the one rule the charter states once, so the single
+/// definition moved DOWN and the app target reaches it through
+/// `import ScarfCore` like every other shared primitive (round-4 P43,
+/// decision 15).
 extension Process {
     /// Wait for this process to exit, giving up after `timeout` seconds.
     ///
@@ -30,7 +46,7 @@ extension Process {
     ///   process stuck in an uninterruptible wait cannot be killed by anyone,
     ///   and `isRunning` may still be true when this returns `false`.
     @discardableResult
-    func waitUntilExit(timeout: TimeInterval, pollInterval: TimeInterval = 0.05) -> Bool {
+    public func waitUntilExit(timeout: TimeInterval, pollInterval: TimeInterval = 0.05) -> Bool {
         /// Poll for at most `budget` seconds. `true` when the child went away.
         func poll(_ budget: TimeInterval) -> Bool {
             let deadline = Date().addingTimeInterval(budget)
@@ -96,7 +112,7 @@ extension Process {
     /// - Returns: `exited` is false after an overrun (the child has been
     ///   SIGTERMed and then SIGKILLed); the drained data is whatever arrived
     ///   either way.
-    func waitDraining(
+    public func waitDraining(
         timeout: TimeInterval,
         pipes: [Pipe],
         drainGrace: TimeInterval = Process.drainGrace
@@ -124,5 +140,10 @@ extension Process {
 
     /// How long to wait for a drained pipe to reach EOF after the child has
     /// gone. See ``waitDraining(timeout:pipes:drainGrace:)``.
-    fileprivate static let drainGrace: TimeInterval = 1
+    ///
+    /// `public` only because it is `waitDraining`'s default argument, and a
+    /// default argument on public API cannot name a narrower symbol.
+    public static let drainGrace: TimeInterval = 1
 }
+
+#endif

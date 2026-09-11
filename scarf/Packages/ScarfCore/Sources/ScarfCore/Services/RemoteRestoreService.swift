@@ -29,6 +29,30 @@ import os
 public final class RemoteRestoreService: @unchecked Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "RemoteRestoreService")
+
+    // MARK: - Spawn budgets (charter C10)
+    //
+    // Every subprocess here has a timeout, and each one is named after what
+    // it is waiting for rather than sharing one anonymous number. The sizes
+    // come from the archives these spawns actually see: a Hermes-home backup
+    // is the user's whole `~/.hermes` — state.db, logs and every project
+    // tarball — routinely hundreds of MB and occasionally multi-GB.
+    //
+    // These are CEILINGS on a wedged child, not budgets a healthy one spends:
+    // `unzip` on a 2 GB archive to local disk is a couple of minutes, and the
+    // drain now runs concurrently with the wait, so a chatty archive no longer
+    // has to reach the timeout at all. They are deliberately generous — a
+    // restore killed halfway is worse than one that takes a while — and small
+    // enough that a hung `unzip` is a message rather than a frozen app.
+
+    /// Unpacking the outer `.scarfbackup` zip on the local disk.
+    public static let unzipTimeout: TimeInterval = 900
+
+    /// The remote `tar -x` finishing after the tarball's last byte is through
+    /// the pipe. Shorter than ``unzipTimeout`` because the transfer — the slow
+    /// part, and the part that varies with size — has already happened by the
+    /// time the wait begins; what is left is the remote's final writes.
+    public static let remoteExtractTimeout: TimeInterval = 300
     #endif
 
     public let context: ServerContext
@@ -293,6 +317,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         transport: any ServerTransport,
         tarball: URL,
         extractInto target: String,
+        extractTimeout: TimeInterval = RemoteRestoreService.remoteExtractTimeout,
         onProgress: @Sendable @escaping (Int64) -> Void
     ) async throws {
         #if os(iOS)
@@ -351,10 +376,23 @@ public final class RemoteRestoreService: @unchecked Sendable {
         }
         try? writer.close() // signals EOF to the remote tar
 
-        proc.waitUntilExit()
+        // C10: bounded, and drained CONCURRENTLY with the wait. The whole
+        // tarball is already through the pipe by the time we get here, so
+        // what remains is the remote `tar` finishing its last writes — but
+        // `tar -x` reports every unreadable member on stderr, and a tarball
+        // full of them fills the 64 KB buffer and wedges a parent that reads
+        // only after the wait. See ``Process.waitDraining(timeout:pipes:)``.
+        let (exited, drained) = proc.waitDraining(
+            timeout: extractTimeout, pipes: [errPipe, outPipe])
+        // The write ends stay ours; `waitDraining` owns the read ends.
+        try? errPipe.fileHandleForWriting.close()
+        try? outPipe.fileHandleForWriting.close()
+        guard exited else {
+            throw RestoreError.remoteCommandFailed(
+                "remote tar -x did not finish within \(Int(extractTimeout))s and was stopped")
+        }
         if proc.terminationStatus != 0 {
-            let tail = (try? errPipe.fileHandleForReading.readToEnd())
-                .flatMap { $0.flatMap { String(data: $0, encoding: .utf8) } } ?? ""
+            let tail = String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
             throw RestoreError.remoteCommandFailed("tar -x exited \(proc.terminationStatus): \(tail)")
         }
         #endif
@@ -526,7 +564,11 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// `Process` is unavailable in the iOS SDK. Restore is initiated from
     /// the Mac app; the iOS stub throws so any accidental call surfaces a
     /// clear message instead of a link-time failure.
-    private static func unzipArchive(at archive: URL, into dest: URL) throws {
+    static func unzipArchive(
+        at archive: URL,
+        into dest: URL,
+        timeout: TimeInterval = RemoteRestoreService.unzipTimeout
+    ) throws {
         #if os(iOS)
         throw RestoreError.archiveUnreadable("Restore unzip is not supported on iOS — run the restore from the Mac app.")
         #else
@@ -534,17 +576,32 @@ public final class RemoteRestoreService: @unchecked Sendable {
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         proc.arguments = ["-q", archive.path, "-d", dest.path]
         let errPipe = Pipe()
+        let outPipe = Pipe()
         proc.standardError = errPipe
-        proc.standardOutput = Pipe()
+        proc.standardOutput = outPipe
         do {
             try proc.run()
         } catch {
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
+            try? outPipe.fileHandleForReading.close()
+            try? outPipe.fileHandleForWriting.close()
             throw RestoreError.archiveUnreadable("Couldn't launch unzip: \(error.localizedDescription)")
         }
-        proc.waitUntilExit()
+        // C10: bounded, and drained CONCURRENTLY with the wait — `unzip`
+        // prints a line per problem entry, so a corrupt or adversarial
+        // backup fills the 64 KB pipe buffer and deadlocks a parent that
+        // reads only after the wait. The archive here is the USER'S file,
+        // chosen in an open panel: the one input Scarf trusts least.
+        let (exited, drained) = proc.waitDraining(timeout: timeout, pipes: [errPipe, outPipe])
+        try? errPipe.fileHandleForWriting.close()
+        try? outPipe.fileHandleForWriting.close()
+        guard exited else {
+            throw RestoreError.archiveUnreadable(
+                "unzip did not finish within \(Int(timeout))s and was stopped")
+        }
         if proc.terminationStatus != 0 {
-            let tail = (try? errPipe.fileHandleForReading.readToEnd())
-                .flatMap { $0.flatMap { String(data: $0, encoding: .utf8) } } ?? ""
+            let tail = String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
             throw RestoreError.archiveUnreadable("unzip exited \(proc.terminationStatus): \(tail)")
         }
         #endif

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ScarfCore
 import os
 
 /// Quits the running app and brings up a fresh instance of the same
