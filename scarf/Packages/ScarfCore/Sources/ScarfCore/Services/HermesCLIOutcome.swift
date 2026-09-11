@@ -40,10 +40,31 @@ public struct HermesCLIOutcome: Sendable, Equatable {
     /// The emitter's own one-line explanation of a refusal, when it printed
     /// one. `nil` on success, and on a failure with nothing quotable.
     public let detail: String?
+    /// A refusal the run printed **alongside** a real success line, where the
+    /// two are not a contradiction but a PARTIAL write: Hermes wrote one of
+    /// the two files it mirrors a key into and refused the other.
+    ///
+    /// The live shape is `config set terminal.*` — `set_config_value` writes
+    /// config.yaml (`hermes_cli/config.py:3508`), then mirrors the key into
+    /// `.env` through `save_env_value` (`:3511`), whose
+    /// `_env_write_blocked` managed-**scope** arm prints `Cannot set <KEY>: it
+    /// is managed by your administrator (…)` and returns (`:2560-2565`) —
+    /// after which `:3521` prints `✓ Set <key> = <value> in <config path>`
+    /// anyway. `unset_config_value` has the same shape through
+    /// `remove_env_value` (`:3576`, `:2610-2612`).
+    ///
+    /// Round-4 product decision (Alan): that is a partial write, not a
+    /// failure. The verdict succeeds — config.yaml really did change — and
+    /// this carries the sentence the banner shows so the user learns the
+    /// mirror did not.
+    ///
+    /// `nil` everywhere else, which is every other verdict in this file.
+    public let warning: String?
 
-    public init(succeeded: Bool, detail: String?) {
+    public init(succeeded: Bool, detail: String?, warning: String? = nil) {
         self.succeeded = succeeded
         self.detail = detail
+        self.warning = warning
     }
 }
 
@@ -123,17 +144,38 @@ public enum HermesCLIVerdict {
     ///     SKILL.md-derived findings BEFORE `install_from_quarantine` can
     ///     raise (:714-720), so a skill whose own text contains
     ///     `Installed: …` used to be reported installed after it was refused.
+    ///   - anchoredFailureMarkers: the `failureAnchored` half of the same
+    ///     asymmetry, and for the same reason the success side has one.
+    ///     A marker here must START its line (after ANSI stripping, trimming
+    ///     and any leading status glyph) instead of appearing anywhere in it.
+    ///
+    ///     This is what a refusal marker needs whenever the emitter ECHOES
+    ///     user text on its success line. `config set`'s does:
+    ///     `✓ Set {key} = {value} in {config_path}`
+    ///     (`hermes_cli/config.py:3521` @ v2026.9.7). As a bare substring,
+    ///     `is managed by` / `Cannot set` inside a QuickCommands prompt or
+    ///     any of the fifteen platform-setup forms' free text flipped a real
+    ///     write into a reported failure — and with `failureWins: true`, it
+    ///     did so unconditionally. Every refusal line on these paths is
+    ///     printed at column 0, so anchoring costs nothing and closes it.
     public static func judge(
         output: String,
         exitCode: Int32,
         successMarkers: [String],
         failureMarkers: [String] = [],
+        anchoredFailureMarkers: [String] = [],
         failureWins: Bool = false,
         fallbackDetail: Bool = true,
         successAnchored: Bool = false
     ) -> HermesCLIOutcome {
         let lines = significantLines(output)
-        let refusal = lines.first { line in failureMarkers.contains { line.contains($0) } }
+        func matchesFailure(_ line: String) -> Bool {
+            if failureMarkers.contains(where: { line.contains($0) }) { return true }
+            guard !anchoredFailureMarkers.isEmpty else { return false }
+            let head = unglyphed(line)
+            return anchoredFailureMarkers.contains { head.hasPrefix($0) }
+        }
+        let refusal = lines.first(where: matchesFailure)
         func failed(_ detail: String?) -> HermesCLIOutcome {
             HermesCLIOutcome(succeeded: false, detail: detail ?? (fallbackDetail ? lines.last : nil))
         }
@@ -245,6 +287,35 @@ public enum HermesCLIMarkers {
     /// marker carries the `is `.
     public static let managedRefusal = ["is managed by"]
 
+    /// The ANCHORED form of ``managedRefusal``, and the one every
+    /// config-mutating verdict actually judges by (round-4 review, P39).
+    ///
+    /// `is managed by` as a bare substring was unsafe on exactly the verbs it
+    /// was added for: `set_config_value` ECHOES the user's value on its
+    /// success line — `✓ Set {key} = {value} in {config_path}`
+    /// (`hermes_cli/config.py:3521` @ v2026.9.7) — so a QuickCommands prompt
+    /// or a platform-setup field containing the phrase turned a completed
+    /// write into a reported failure, unconditionally, because these verdicts
+    /// run `failureWins: true`.
+    ///
+    /// Every refusal line on these paths is printed at **column 0** and every
+    /// one of them opens with `Cannot `:
+    /// - `format_managed_message` → `Cannot {action}: this Hermes
+    ///   installation is managed by {system}.` (`:445-450`, printed by
+    ///   `managed_error` at `:453-455`) — the `is_managed()` arm of
+    ///   `set_config_value` (`:3450`), `unset_config_value` (`:3549`) and
+    ///   `save_config` (`:2316`), i.e. the door under `plugins
+    ///   enable/disable/update`, `skills trust` and `memory off` too.
+    /// - `_env_write_blocked`'s managed-scope arm → `Cannot {action} {key}:
+    ///   it is managed by your administrator (…)` (`:2560-2565`).
+    /// - `_exit_if_key_managed` → `Cannot {action} '{key}': it is managed by
+    ///   your administrator (…)` (`:3363-3371`).
+    ///
+    /// So the anchor is the verb-agnostic `Cannot `, which also subsumes the
+    /// per-verb `Cannot set` / `Cannot unset` / `Cannot save configuration`
+    /// spellings the sets used to carry separately.
+    public static let managedRefusalAnchored = ["Cannot "]
+
     // MARK: config set — hermes_cli/config.py
 
     /// `set_config_value`'s two success lines, both at column 0 behind a `✓`
@@ -287,6 +358,19 @@ public enum HermesCLIMarkers {
     ///    surfaced by `_run_write_command` as `✗ Refusing to overwrite …`
     ///    (`:3598-3604`) — exit 1, caught by the exit code.
     /// 9. `_usage_exit` for a missing key/value (`:3585-3593`) — exit 1.
+    /// 10. the **terminal `.env` mirror** (round-4 review). After the
+    ///    config.yaml write lands (`_write_user_config`, `:3508`),
+    ///    `terminal_config_env_var_for_key(key)` finds an env twin for every
+    ///    `terminal.*` key except `terminal.cwd` and calls `save_env_value`
+    ///    (`:3509-3511`) → `_env_write_blocked` (`:2574-2578`), whose
+    ///    managed-**scope** arm prints `Cannot set <KEY>: it is managed by
+    ///    your administrator (…)` and returns (`:2560-2565`) — and `:3521`
+    ///    prints `✓ Set …` anyway. Exit 0, both lines. This is a PARTIAL
+    ///    write, not a failure (round-4 product decision): config.yaml really
+    ///    did change. ``HermesConfigSet/judge(output:exitCode:)`` reports it
+    ///    as a success carrying ``HermesCLIOutcome/warning``.
+    ///    `unset_config_value` has the same shape through `remove_env_value`
+    ///    (`:3574-3576`).
     ///
     /// Arms 7-9 print text this list cannot anchor on, which is fine: they all
     /// exit non-zero, and `HermesCLIVerdict.judge` fails fast on that. Only
@@ -298,10 +382,15 @@ public enum HermesCLIMarkers {
     /// and `_print_unknown_key_notice` (`:3433-3443`). All three are printed
     /// on the SUCCESS path — the value IS saved — so quoting them as failures
     /// would invert a real write.
-    public static let configSetFailure = [
-        "Cannot set",
+    ///
+    /// **Consumed ANCHORED** (round-4 review): see
+    /// ``managedRefusalAnchored``. `Cannot ` is the anchor for arms 1, 4, 5
+    /// and 6; `Invalid config key:` for arms 2 and 3, both printed through
+    /// `_exit_invalid` (`:3422-3424`) behind a `✗ ` that ``unglyphed``
+    /// strips. Every entry here starts its line in the Hermes source.
+    public static let configSetFailure = managedRefusalAnchored + [
         "Invalid config key:",
-    ] + managedRefusal
+    ]
 
     // MARK: config unset — hermes_cli/config.py
 
@@ -338,10 +427,14 @@ public enum HermesCLIMarkers {
     /// `✓ Unset …` (`:3583`) after it regardless — a success line and a
     /// refusal line in the same run, which only `failureWins` resolves the
     /// right way.
-    public static let configUnsetFailure = [
-        "Cannot unset",
+    ///
+    /// **Consumed ANCHORED** (round-4 review): `Cannot ` covers both
+    /// `Cannot unset …` spellings and `_env_write_blocked`'s
+    /// `Cannot remove <KEY>: …` (`:2610-2612` → `:2560-2565`);
+    /// `Config key not set:` is printed at column 0 through `_exit_invalid`.
+    public static let configUnsetFailure = managedRefusalAnchored + [
         "Config key not set:",
-    ] + managedRefusal
+    ]
 
     // MARK: skills trust / untrust — hermes_cli/main_agent_cmds.py
 
@@ -388,11 +481,16 @@ public enum HermesCLIMarkers {
     /// - the managed refusal `save_config` prints UNDER it (`:224`, `:234` →
     ///   `hermes_cli/config.py:2316-2318`), also exit 0 and followed by the
     ///   success line — hence ``HermesSkillsTrust``'s `failureWins: true`.
-    public static let skillsTrustFailure = [
+    ///
+    /// **Consumed ANCHORED** (round-4 review). All three of this handler's
+    /// own lines are printed at column 0 with no glyph
+    /// (`hermes_cli/main_agent_cmds.py:197`, `:202-204` @ v2026.9.7), and the
+    /// `save_config` refusal underneath is `Cannot save configuration: …`,
+    /// which ``managedRefusalAnchored`` covers.
+    public static let skillsTrustFailure = managedRefusalAnchored + [
         "Not a directory:",
         "Not inside a git checkout.",
-        "Cannot save configuration",
-    ] + managedRefusal
+    ]
 
     // MARK: memory off — hermes_cli/main_agent_cmds.py
 
@@ -415,7 +513,11 @@ public enum HermesCLIMarkers {
     /// Everything here comes from `save_config` underneath it
     /// (`hermes_cli/config.py:2316-2318`), which is why the verdict must run
     /// `failureWins: true`.
-    public static let memoryOffFailure = ["Cannot save configuration"] + managedRefusal
+    ///
+    /// **Consumed ANCHORED** (round-4 review): the one line this verdict can
+    /// see is `Cannot save configuration: this Hermes installation is managed
+    /// by …`, printed at column 0 on stderr.
+    public static let memoryOffFailure = managedRefusalAnchored
 
     // MARK: sessions export — hermes_cli/sessions_cmd.py
 
@@ -518,14 +620,16 @@ public enum HermesCLIMarkers {
     /// `_fail` (:1005, :999) prints `Plugin '<name>' is not installed or
     /// bundled.` / `was removed.` and exits nonzero.
     ///
-    /// P39: `managedRefusal` is appended — see ``managedRefusal``. This
+    /// P39: the managed refusal rides ANCHORED alongside this set (see
+    /// ``managedRefusalAnchored``), not inside it — these markers are
+    /// mid-sentence clauses and cannot be anchored themselves. This
     /// verdict already runs `failureWins: true` for the consent-screen
     /// reason, which is the same shape.
     public static let pluginsEnableFailure = [
         "capabilities NOT granted",
         "is not installed or bundled.",
         "was removed.",
-    ] + managedRefusal
+    ]
 
     /// `⊘ Plugin <key> disabled. Takes effect on next session.` (:1198), or
     /// the already-disabled line.
@@ -547,7 +651,8 @@ public enum HermesCLIMarkers {
     /// supported host has ever printed it from `plugins disable`, and carrying
     /// it here only risked flipping a real disable into a failure.
     ///
-    /// P39: `managedRefusal` is appended. `cmd_enable`/`cmd_disable` mutate
+    /// P39: the managed refusal rides ANCHORED alongside this set (see
+    /// ``managedRefusalAnchored``). `cmd_enable`/`cmd_disable` mutate
     /// config.yaml through `save_config` (`hermes_cli/plugins_cmd.py:115-120`),
     /// whose managed arm prints to stderr and RETURNS
     /// (`hermes_cli/config.py:2316-2318`) — after which the handler prints its
@@ -556,7 +661,7 @@ public enum HermesCLIMarkers {
     /// verdict must run `failureWins`.
     public static let pluginsDisableFailure = [
         "is not installed or bundled.",
-    ] + managedRefusal
+    ]
 
     /// `✓ Plugin <name> updated.` (:828) or
     /// `✓ Plugin <name> is already up to date.` (:826) — `cmd_update`'s two
@@ -585,11 +690,12 @@ public enum HermesCLIMarkers {
     /// that turns a completed update into a reported failure. Same asymmetry
     /// the success side fixed by anchoring.
     ///
-    /// P39: `managedRefusal` is appended for the same reason as
+    /// P39: the managed refusal rides ANCHORED alongside this set (see
+    /// ``managedRefusalAnchored``) for the same reason as
     /// ``pluginsEnableFailure``; this verdict already runs `failureWins`.
     public static let pluginsUpdateFailure = [
         "capabilities NOT granted",
-    ] + managedRefusal
+    ]
 
     /// `cmd_install` (plugins_cmd.py:764) discards the same bool. Unlike
     /// `enable`/`update`, `install` reports through `HermesPluginInstallOutcome`,
@@ -869,10 +975,73 @@ public enum HermesMemoryOff {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.memoryOffSuccess,
-            failureMarkers: HermesCLIMarkers.memoryOffFailure,
+            anchoredFailureMarkers: HermesCLIMarkers.memoryOffFailure,
             failureWins: true,
             successAnchored: true
         )
+    }
+}
+
+/// The tenth arm of `set_config_value` (and its `unset` twin): Hermes wrote
+/// config.yaml and then REFUSED the `.env` mirror of the same key.
+///
+/// `set_config_value` writes config.yaml (`_write_user_config`,
+/// `hermes_cli/config.py:3508` @ v2026.9.7), then mirrors every `terminal.*`
+/// key except `terminal.cwd` into `.env` through `save_env_value`
+/// (`:3509-3511`); `_env_write_blocked`'s managed-**scope** arm prints
+/// `Cannot set <KEY>: it is managed by your administrator (…)` and returns
+/// (`:2574-2578` → `:2560-2565`), after which `:3521` prints
+/// `✓ Set <key> = <value> in <config path>` regardless. Exit 0, a refusal
+/// line and a success line. `unset_config_value` reaches the same shape
+/// through `remove_env_value` (`:3574-3576` → `:2610-2612`).
+///
+/// **Round-4 product decision (Alan): that is a PARTIAL write, not a
+/// failure.** config.yaml really did change, and reporting "Couldn't save"
+/// over a file that now holds the new value is the same class of lie this
+/// phase exists to end, pointed the other way.
+///
+/// The discriminator is the destination Hermes names on its own success
+/// line, because the two exit-0 shapes are otherwise identical:
+/// - `✓ Set <key> = <value> in …/config.yaml` — the config.yaml write landed
+///   and only the mirror was refused ⇒ partial.
+/// - `✓ Set <key> in …/.env` — the `_is_env_config_key` branch (`:3461-3468`),
+///   where the `.env` write was the ONLY write and it was refused ⇒ a plain
+///   failure, judged unchanged.
+public enum HermesConfigMirror {
+    /// Does this line name config.yaml as the file Hermes wrote? The path is
+    /// the last token of both success lines, and `get_config_path()` is
+    /// `get_hermes_home() / "config.yaml"` at every tag
+    /// (`hermes_cli/config.py:491-493` @ v2026.9.7), so the suffix is exact
+    /// and a `HERMES_HOME` override does not move it.
+    static func namesConfigFile(_ line: String) -> Bool {
+        guard let tail = line.split(separator: " ").last else { return false }
+        return tail.hasSuffix("config.yaml")
+    }
+
+    /// Promote a `failureWins` verdict to a partial-write success when the run
+    /// printed BOTH a refusal and a config.yaml success line. Everything else
+    /// passes through untouched — including the whole-command managed refusal,
+    /// which returns before any success line is printed.
+    static func resolve(
+        _ verdict: HermesCLIOutcome,
+        output: String,
+        exitCode: Int32,
+        successMarkers: [String]
+    ) -> HermesCLIOutcome {
+        guard exitCode == 0, !verdict.succeeded, let refusal = verdict.detail else { return verdict }
+        let saved = HermesCLIVerdict.significantLines(output).first { line in
+            let head = HermesCLIVerdict.unglyphed(line)
+            return successMarkers.contains { head.hasPrefix($0) } && namesConfigFile(line)
+        }
+        guard saved != nil else { return verdict }
+        return HermesCLIOutcome(succeeded: true, detail: nil, warning: partialWriteMessage(refusal: refusal))
+    }
+
+    /// The banner sentence for a partial write. Quotes Hermes's own refusal
+    /// line, because "the mirror was refused" without the reason is the same
+    /// dead end `managedBannerText` avoids by naming the package manager.
+    public static func partialWriteMessage(refusal: String) -> String {
+        String(localized: "Saved to config.yaml; the .env mirror was refused: \(refusal)")
     }
 }
 
@@ -907,13 +1076,17 @@ public enum HermesConfigSet {
     }
 
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
-        HermesCLIVerdict.judge(
+        let verdict = HermesCLIVerdict.judge(
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.configSetSuccess,
-            failureMarkers: HermesCLIMarkers.configSetFailure,
+            anchoredFailureMarkers: HermesCLIMarkers.configSetFailure,
             failureWins: true,
             successAnchored: true
+        )
+        return HermesConfigMirror.resolve(
+            verdict, output: output, exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.configSetSuccess
         )
     }
 }
@@ -933,7 +1106,7 @@ public enum HermesSkillsTrust {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsTrustSuccess,
-            failureMarkers: HermesCLIMarkers.skillsTrustFailure,
+            anchoredFailureMarkers: HermesCLIMarkers.skillsTrustFailure,
             failureWins: true
         )
     }
@@ -963,13 +1136,17 @@ public enum HermesConfigUnset {
     public static func argv(key: String) -> [String] { ["config", "unset", "--", key] }
 
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
-        HermesCLIVerdict.judge(
+        let verdict = HermesCLIVerdict.judge(
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.configUnsetSuccess,
-            failureMarkers: HermesCLIMarkers.configUnsetFailure,
+            anchoredFailureMarkers: HermesCLIMarkers.configUnsetFailure,
             failureWins: true,
             successAnchored: true
+        )
+        return HermesConfigMirror.resolve(
+            verdict, output: output, exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.configUnsetSuccess
         )
     }
 

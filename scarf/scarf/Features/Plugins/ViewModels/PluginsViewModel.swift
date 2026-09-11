@@ -337,6 +337,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
             success: "Updated",
             successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
             failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
+            // P39 (round-4 review): the managed refusal is matched ANCHORED.
+            // `plugins update` prints the raw `git pull` output and the
+            // post-update scan report (`hermes_cli/plugins_cmd.py:829`, `:844`)
+            // — text Hermes does not control — and these verdicts run
+            // `failureWins`, so a bare `is managed by` substring in a commit
+            // message or a scan finding turned a completed run into a reported
+            // failure. `save_config`'s refusal is at column 0.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
             failureWins: true
         )
     }
@@ -375,6 +383,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
             success: "Enabled",
             successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
             failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
+            // P39 (round-4 review): the managed refusal is matched ANCHORED.
+            // `plugins update` prints the raw `git pull` output and the
+            // post-update scan report (`hermes_cli/plugins_cmd.py:829`, `:844`)
+            // — text Hermes does not control — and these verdicts run
+            // `failureWins`, so a bare `is managed by` substring in a commit
+            // message or a scan finding turned a completed run into a reported
+            // failure. `save_config`'s refusal is at column 0.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
             // `cmd_enable` prints the green "enabled." line (:1023) BEFORE it
             // runs the consent screen (:1033), so both markers are present by
             // design and the refusal has to win.
@@ -395,6 +411,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
             success: "Disabled",
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
             failureMarkers: HermesCLIMarkers.pluginsDisableFailure,
+            // P39 (round-4 review): the managed refusal is matched ANCHORED.
+            // `plugins update` prints the raw `git pull` output and the
+            // post-update scan report (`hermes_cli/plugins_cmd.py:829`, `:844`)
+            // — text Hermes does not control — and these verdicts run
+            // `failureWins`, so a bare `is managed by` substring in a commit
+            // message or a scan finding turned a completed run into a reported
+            // failure. `save_config`'s refusal is at column 0.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
             // P39: `cmd_disable` writes config.yaml through `save_config`
             // (`hermes_cli/plugins_cmd.py:115-120`), whose managed-install arm
             // prints to stderr and RETURNS (`hermes_cli/config.py:2316-2318`,
@@ -462,6 +486,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
         success: String,
         successMarkers: [String]? = nil,
         failureMarkers: [String] = [],
+        anchoredFailureMarkers: [String] = [],
         failureWins: Bool = false
     ) {
         let run = cliRunner
@@ -473,6 +498,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     exitCode: result.exitCode,
                     successMarkers: markers,
                     failureMarkers: failureMarkers,
+                    anchoredFailureMarkers: anchoredFailureMarkers,
                     failureWins: failureWins
                 )
             } ?? HermesCLIOutcome(

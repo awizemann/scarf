@@ -76,13 +76,29 @@ public struct HermesManagedInstall: Sendable, Equatable {
     /// exists, which is the distinction ``probe(context:)`` preserves).
     ///
     /// Hermes lowercases and strips before every comparison, so this does too.
-    public static func system(fromMarker raw: String?) -> String? {
+    /// - Parameter readsMarkerContents: ``HermesCapabilities/hasManagedMarkerContents``
+    ///   — whether this host's `get_managed_system` reads the marker at all.
+    ///   Below v0.20.5 it does NOT: the whole marker half of the function is
+    ///   `if managed_marker.exists(): return "NixOS"`
+    ///   (`hermes_cli/config.py:327-330` @ v2026.6.19, identical through
+    ///   v2026.8.18), so a marker holding `brew` — or anything else — means
+    ///   managed, and the system name is that tag's literal `"NixOS"`.
+    ///   Reading the contents on such a host would leave a genuinely managed
+    ///   install writable.
+    public static func system(fromMarker raw: String?, readsMarkerContents: Bool) -> String? {
         guard let raw else { return nil }
+        guard readsMarkerContents else { return preContentsSystem }
         let marker = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if ignoredValues.contains(marker) { return nil }
         if marker.isEmpty || trueValues.contains(marker) { return legacySystem }
         return marker
     }
+
+    /// What `get_managed_system` returns for ANY present marker below
+    /// v0.20.5 — verbatim, capital-S: `return "NixOS"`
+    /// (`hermes_cli/config.py:330` @ v2026.6.19). Not ``legacySystem``, which
+    /// is the lowercased `_LEGACY_MANAGED_SYSTEM` of the v0.20.5+ form.
+    static let preContentsSystem = "NixOS"
 }
 
 extension HermesPathSet {
@@ -116,25 +132,87 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
     private let lock = NSLock()
     private var cached: [String: HermesManagedInstall] = [:]
 
-    public init(probe: @escaping Probe = HermesManagedInstallCache.transportProbe) {
+    /// - Parameter timeout: the ceiling on one probe. Injectable only so a
+    ///   test can prove the fall-open path in milliseconds instead of
+    ///   ``probeTimeout`` seconds; production takes the default.
+    public init(
+        probe: @escaping Probe = HermesManagedInstallCache.transportProbe,
+        timeout: TimeInterval = HermesManagedInstallCache.probeTimeout
+    ) {
         self.probe = probe
+        self.timeout = timeout
     }
+
+    private let timeout: TimeInterval
 
     /// The connect-time read. Blocking — call it off the main actor.
     /// Memoized per Hermes home for the life of the process; call
     /// ``invalidate(for:)`` if the host is re-provisioned under Scarf.
-    public func managedInstall(for context: ServerContext) -> HermesManagedInstall {
+    public func managedInstall(
+        for context: ServerContext,
+        capabilities: HermesCapabilities
+    ) -> HermesManagedInstall {
         let key = Self.key(for: context)
         lock.lock()
         if let hit = cached[key] { lock.unlock(); return hit }
         lock.unlock()
 
-        let result = HermesManagedInstall(system: HermesManagedInstall.system(fromMarker: probe(context)))
+        guard let marker = probeWithinTimeout(context) else {
+            // The probe did not answer inside ``probeTimeout``. NOT cached:
+            // the next surface that asks gets a fresh attempt rather than a
+            // process-lifetime "not managed" won by a slow SSH round-trip.
+            return .notManaged
+        }
+
+        let result = HermesManagedInstall(system: HermesManagedInstall.system(
+            fromMarker: marker,
+            readsMarkerContents: capabilities.hasManagedMarkerContents
+        ))
 
         lock.lock()
         cached[key] = result
         lock.unlock()
         return result
+    }
+
+    /// How long the connect-time probe may block before Scarf gives up and
+    /// renders the pane writable.
+    ///
+    /// Named because the number is a product choice, not an implementation
+    /// detail: it is the ceiling on how long Settings' detached load can sit
+    /// on one `.managed` stat+read over SSH. A host that misses it is treated
+    /// as not managed — the documented fail-open direction, since the
+    /// verdicts (``HermesCLIMarkers/managedRefusalAnchored``) still catch
+    /// every refusal, whereas a wrong read-only lock has no recovery.
+    public static let probeTimeout: TimeInterval = 5
+
+    /// Runs ``probe`` with a ``probeTimeout`` ceiling. The outer optional is
+    /// "did it answer at all"; the inner is the probe's own `nil` for
+    /// "no marker file".
+    private func probeWithinTimeout(_ context: ServerContext) -> String??  {
+        let box = ProbeBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        let probe = self.probe
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.set(probe(context))
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + timeout) == .success else { return nil }
+        return box.value
+    }
+
+    /// One answer, one lock — the probe thread writes it and the caller reads
+    /// it only after the semaphore, but the box outlives a timed-out probe
+    /// that is still running, so the write needs the lock all the same.
+    private final class ProbeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: String??
+        func set(_ value: String?) {
+            lock.lock(); stored = .some(value); lock.unlock()
+        }
+        var value: String?? {
+            lock.lock(); defer { lock.unlock() }; return stored
+        }
     }
 
     /// The last probed answer without probing. `.notManaged` until one lands,
@@ -170,11 +248,25 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
     /// Hermes distinguishes: `nil` for genuinely absent, a throw for "the file
     /// is there and the bytes did not come back" — which Hermes reads as an
     /// empty marker, i.e. managed.
+    /// ONE `fileExists` and at most one read, against ONE transport. The
+    /// previous shape called `readTextThrowing` (itself a `fileExists` + a
+    /// read) and then a second `fileExists` on the catch path — three
+    /// round-trips on a remote host to answer a one-byte question.
     public static let transportProbe: Probe = { context in
+        let path = context.paths.managedMarker
+        let transport = context.makeTransport()
+        guard transport.fileExists(path) else { return nil }
         do {
-            return try context.readTextThrowing(context.paths.managedMarker)
+            let data = try transport.readFile(path)
+            // `errors="replace"` on Hermes's side: undecodable bytes are not
+            // an error there either.
+            return String(data: data, encoding: .utf8)
+                ?? String(decoding: data, as: UTF8.self)
         } catch {
-            return context.fileExists(context.paths.managedMarker) ? "" : nil
+            // Present but unreadable. `get_managed_system` catches the
+            // `OSError` and treats the marker as EMPTY (`:285-286`), which
+            // resolves to the legacy system — i.e. managed.
+            return ""
         }
     }
 }

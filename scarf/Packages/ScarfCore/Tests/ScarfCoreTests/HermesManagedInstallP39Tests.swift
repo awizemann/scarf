@@ -18,8 +18,8 @@ struct HermesManagedInstallP39Tests {
     // MARK: - Marker parsing (`get_managed_system`, config.py:276-290)
 
     @Test func absentMarkerIsNotManaged() {
-        #expect(HermesManagedInstall.system(fromMarker: nil) == nil)
-        #expect(HermesManagedInstall(system: HermesManagedInstall.system(fromMarker: nil)).isManaged == false)
+        #expect(HermesManagedInstall.system(fromMarker: nil, readsMarkerContents: true) == nil)
+        #expect(HermesManagedInstall(system: HermesManagedInstall.system(fromMarker: nil, readsMarkerContents: true)).isManaged == false)
     }
 
     /// `if marker == "" or marker in _MANAGED_TRUE_VALUES: return
@@ -27,7 +27,7 @@ struct HermesManagedInstallP39Tests {
     /// a bare `true` or an empty marker" (`:266`).
     @Test(arguments: ["", "   ", "true", "TRUE", "1", "yes", "\n"])
     func emptyOrTrueMarkerIsTheLegacyNixosSystem(_ raw: String) {
-        #expect(HermesManagedInstall.system(fromMarker: raw) == "nixos")
+        #expect(HermesManagedInstall.system(fromMarker: raw, readsMarkerContents: true) == "nixos")
     }
 
     /// `_IGNORED_MANAGED_VALUES = frozenset({"brew", "homebrew"})` (`:273`):
@@ -35,14 +35,14 @@ struct HermesManagedInstallP39Tests {
     /// through to git/unknown detection instead of blocking config writes."
     @Test(arguments: ["brew", "homebrew", "Homebrew", " BREW "])
     func homebrewMarkersMeanNotManaged(_ raw: String) {
-        #expect(HermesManagedInstall.system(fromMarker: raw) == nil)
+        #expect(HermesManagedInstall.system(fromMarker: raw, readsMarkerContents: true) == nil)
     }
 
     /// Anything else is returned verbatim, lowercased and stripped (`:290`).
     @Test func anyOtherMarkerNamesThePackageManager() {
-        #expect(HermesManagedInstall.system(fromMarker: "home-manager\n") == "home-manager")
-        #expect(HermesManagedInstall.system(fromMarker: "NixOS") == "nixos")
-        #expect(HermesManagedInstall.system(fromMarker: " guix ") == "guix")
+        #expect(HermesManagedInstall.system(fromMarker: "home-manager\n", readsMarkerContents: true) == "home-manager")
+        #expect(HermesManagedInstall.system(fromMarker: "NixOS", readsMarkerContents: true) == "nixos")
+        #expect(HermesManagedInstall.system(fromMarker: " guix ", readsMarkerContents: true) == "guix")
     }
 
     // MARK: - The cache
@@ -55,8 +55,8 @@ struct HermesManagedInstallP39Tests {
         })
         let ctx = Self.host(home: "/tmp/p39-home")
 
-        let first = cache.managedInstall(for: ctx)
-        let second = cache.managedInstall(for: ctx)
+        let first = cache.managedInstall(for: ctx, capabilities: Self.modern)
+        let second = cache.managedInstall(for: ctx, capabilities: Self.modern)
 
         #expect(first.system == "nixos")
         #expect(second == first)
@@ -70,7 +70,7 @@ struct HermesManagedInstallP39Tests {
         let ctx = Self.host(home: "/tmp/p39-home")
 
         #expect(cache.cached(for: ctx).isManaged == false)
-        _ = cache.managedInstall(for: ctx)
+        _ = cache.managedInstall(for: ctx, capabilities: Self.modern)
         #expect(cache.cached(for: ctx).isManaged)
 
         cache.invalidate(for: ctx)
@@ -79,7 +79,7 @@ struct HermesManagedInstallP39Tests {
 
     @Test func aHostWithNoMarkerStaysWritable() {
         let cache = HermesManagedInstallCache(probe: { _ in nil })
-        #expect(cache.managedInstall(for: Self.host(home: "/tmp/p39-home")).isManaged == false)
+        #expect(cache.managedInstall(for: Self.host(home: "/tmp/p39-home"), capabilities: Self.modern).isManaged == false)
     }
 
     /// The marker path is the one `get_managed_system` builds:
@@ -88,6 +88,10 @@ struct HermesManagedInstallP39Tests {
         let paths = HermesPathSet(home: "/Users/a/.hermes", isRemote: false, binaryHint: nil)
         #expect(paths.managedMarker == "/Users/a/.hermes/.managed")
     }
+
+    /// A v0.20.5+ host — the tag from which `get_managed_system` reads the
+    /// marker's contents at all. See ``HermesCapabilities/hasManagedMarkerContents``.
+    static let modern = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
 
     static func host(home: String) -> ServerContext {
         ServerContext(

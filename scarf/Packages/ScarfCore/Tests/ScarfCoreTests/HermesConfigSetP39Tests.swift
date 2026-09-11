@@ -247,24 +247,50 @@ struct HermesConfigSetP39Tests {
             exitCode: 0,
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
             failureMarkers: HermesCLIMarkers.pluginsDisableFailure,
+            // The managed refusal rides anchored alongside the set now
+            // (round-4 review) — the same pair `PluginsViewModel` passes.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
             failureWins: true
         )
         #expect(out.succeeded == false)
     }
 
-    @Test func everyConfigMutatingMarkerSetCarriesTheSharedManagedRefusal() {
-        let marker = "is managed by"
-        #expect(HermesCLIMarkers.managedRefusal == [marker])
+    /// Round-4 review: the shared marker is matched ANCHORED now, so what has
+    /// to hold is that every config-mutating set can SEE the refusal line
+    /// Hermes prints — not that each carries the same substring.
+    @Test func everyConfigMutatingMarkerSetSeesTheSharedManagedRefusal() {
+        #expect(HermesCLIMarkers.managedRefusalAnchored == ["Cannot "])
+        let refusal = "Cannot save configuration: this Hermes installation is managed by nixos."
         for set in [
             HermesCLIMarkers.configSetFailure,
             HermesCLIMarkers.configUnsetFailure,
-            HermesCLIMarkers.pluginsEnableFailure,
-            HermesCLIMarkers.pluginsDisableFailure,
-            HermesCLIMarkers.pluginsUpdateFailure,
             HermesCLIMarkers.skillsTrustFailure,
             HermesCLIMarkers.memoryOffFailure,
         ] {
-            #expect(set.contains(marker))
+            let out = HermesCLIVerdict.judge(
+                output: refusal, exitCode: 0,
+                successMarkers: ["nothing prints this"],
+                anchoredFailureMarkers: set,
+                failureWins: true
+            )
+            #expect(out.succeeded == false)
+            #expect(out.detail == refusal)
+        }
+        // The plugins sets carry mid-sentence markers and cannot be anchored
+        // themselves; they ride the shared anchored list alongside.
+        for set in [
+            HermesCLIMarkers.pluginsEnableFailure,
+            HermesCLIMarkers.pluginsDisableFailure,
+            HermesCLIMarkers.pluginsUpdateFailure,
+        ] {
+            let out = HermesCLIVerdict.judge(
+                output: refusal, exitCode: 0,
+                successMarkers: ["nothing prints this"],
+                failureMarkers: set,
+                anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
+                failureWins: true
+            )
+            #expect(out.succeeded == false)
         }
     }
 

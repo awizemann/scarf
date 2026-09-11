@@ -551,7 +551,9 @@ public struct BotAgentConfigService: Sendable {
         // verb — and it is here anyway for the P37 reason: a floor that lives
         // only in a comment is re-broken by the next caller, and the one place
         // to state it is the helper every door goes through. Pinned by
-        // `BotAgentUnsetP39Tests.theConfigUnsetFloorIsMootUnderBotModeButStillStructural`.
+        // `BotAgentUnsetP39Tests.theConfigUnsetFloorIsMootUnderBotModeButStillStructural`
+        // (in `HermesConfigSetP39Tests.swift`, not a file of its own — the
+        // suite name is not the file name here).
         guard capabilities.hasConfigUnset else { throw BotsError.unsupported }
         guard Self.isSafeDottedKey(key) else {
             throw BotsError.invalidValue(key: key)

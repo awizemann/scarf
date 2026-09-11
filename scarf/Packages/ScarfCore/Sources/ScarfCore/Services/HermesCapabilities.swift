@@ -1286,6 +1286,31 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     // MARK: v0.20.5 (v2026.8.19) flags
 
+    /// `get_managed_system()` READS the `.managed` marker file's contents and
+    /// honours `_IGNORED_MANAGED_VALUES` there (v0.20.5+).
+    ///
+    /// Below this floor the marker is a pure existence check: every tag from
+    /// v2026.3.12 through **v2026.8.18** ends `get_managed_system` with
+    /// ```
+    /// managed_marker = get_hermes_home() / ".managed"
+    /// if managed_marker.exists():
+    ///     return "NixOS"
+    /// ```
+    /// (`hermes_cli/config.py:327-330` @ v2026.6.19; byte-identical at
+    /// v2026.7.20 and at v2026.7.30, where `_IGNORED_MANAGED_VALUES` FIRST
+    /// appears but applies only to the `HERMES_MANAGED` env var, never to the
+    /// marker). The contents-reading form — `read_text(...)`, the `OSError`
+    /// → `""` arm, and the ignored-values check on the marker — arrives at
+    /// **v2026.8.19 = 0.20.5**, walked tag by tag over both file locations.
+    ///
+    /// So on a pre-v0.20.5 host a `.managed` file holding `brew` means
+    /// **managed** (system `"NixOS"`, that tag's literal spelling), while on
+    /// v0.20.5+ it means not managed at all. Scarf's probe has to branch, or
+    /// it locks a Homebrew install out of its own Settings on a new host — or
+    /// leaves a genuinely managed old host writable. See
+    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:)``.
+    public var hasManagedMarkerContents: Bool { isV0205OrLater }
+
     /// The bare `hermes version` subcommand was removed (dropped from
     /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:2595` — no `"version"`
     /// entry in the frozenset at v2026.9.7; `subcommands/version.py`

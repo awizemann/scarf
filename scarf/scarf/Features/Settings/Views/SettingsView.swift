@@ -67,6 +67,14 @@ struct SettingsView: View {
             }
         }
 
+        /// Whether a managed host may black out this whole tab.
+        ///
+        /// True for the twelve tabs that are write controls end to end. False
+        /// for `.advanced`, which mixes reads (diagnostics, backup, raw
+        /// config, ScarfMon) in with its toggles and locks them itself — see
+        /// the `.disabled` in `SettingsView.body` and `AdvancedTab`.
+        var locksWholeTabWhenManaged: Bool { self != .advanced }
+
         var icon: String {
             switch self {
             case .general: return "gear"
@@ -100,22 +108,30 @@ struct SettingsView: View {
                 .padding(.vertical, ScarfSpace.s6)
                 // P39 (round-4 decision 1): a package-manager-managed Hermes
                 // refuses every config write — at exit 0, with a stderr line
-                // the user never sees. One banner above, and the whole pane is
-                // read-only, instead of thirteen tabs of controls that each
-                // snap back. Untouched on a host with no `.managed` marker.
+                // the user never sees. One banner above, and the write
+                // controls are read-only, instead of thirteen tabs of
+                // controls that each snap back. Untouched on a host with no
+                // `.managed` marker.
                 //
-                // The lock covers the DIRECT writers too (the Advanced tab's
-                // raw config.yaml editor, the Secrets tab's `.env` rows),
-                // which do not go through the CLI and would therefore
-                // "succeed". That is deliberate, and it is Hermes's own
-                // posture: `_env_write_blocked` refuses every `.env` write on
-                // a managed install (`hermes_cli/config.py:2556-2558`) and
-                // `save_config` every config.yaml write (`:2316-2318`). On
-                // such a host both files belong to the package manager and
-                // are reinstated at the next activation, so a Scarf write
-                // behind Hermes's back is a change the user watches disappear
-                // — the exact failure this phase is ending, one layer down.
-                .disabled(viewModel.isManagedHost)
+                // The lock covers the DIRECT writers too (the Secrets tab's
+                // `.env` rows), which do not go through the CLI and would
+                // therefore "succeed". That is deliberate, and it is Hermes's
+                // own posture: `_env_write_blocked` refuses every `.env`
+                // write on a managed install (`hermes_cli/config.py:2556-2558`)
+                // and `save_config` every config.yaml write (`:2316-2318`).
+                //
+                // It does NOT cover the Advanced tab, which is the one tab
+                // whose contents are mostly READS — Config Diagnostics'
+                // "Check" (`_cmd_config_check` is read-only,
+                // `hermes_cli/config.py:3693-3720`), "Backup Now", the Raw
+                // Config show/hide disclosure, ScarfMon's "Copy as JSON",
+                // and the text selection in all of their output panels.
+                // `.disabled` reaches every descendant and kills all of them,
+                // so a managed host could not even read its own config to
+                // find out what its package manager had pinned (round-4
+                // review). `AdvancedTab` applies the same lock to its write
+                // controls alone.
+                .disabled(viewModel.isManagedHost && selectedTab.locksWholeTabWhenManaged)
             }
         }
         .background(ScarfColor.backgroundPrimary)

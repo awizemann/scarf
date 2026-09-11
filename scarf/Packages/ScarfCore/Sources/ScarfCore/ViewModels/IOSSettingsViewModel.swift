@@ -29,6 +29,28 @@ public final class IOSSettingsViewModel {
     public private(set) var isLoading: Bool = true
     public private(set) var lastError: String?
 
+    /// Whether this host is a package-manager-managed Hermes — the iOS twin
+    /// of `SettingsViewModel.managedInstall` (round-4 decision 1, second
+    /// half; the round-4 review found iOS had taken the verdicts and not the
+    /// probe).
+    ///
+    /// Probed once per home from `$HERMES_HOME/.managed` through the SAME
+    /// process-wide cache the Mac uses, so a phone and a Mac pointed at one
+    /// host read one marker the same way. `.notManaged` until it lands: the
+    /// editor renders writable and then locks, never the reverse flash.
+    /// `internal(set)` so ScarfCore tests can stand the managed state up
+    /// without a host; production writes it only from ``load()``.
+    public internal(set) var managedInstall: HermesManagedInstall = .notManaged
+
+    public var isManagedHost: Bool { managedInstall.isManaged }
+
+    /// The one banner, word for word the Mac's — the situation is the same
+    /// one and two spellings of it would be two facts to keep true.
+    public var managedBannerText: String? {
+        guard let system = managedInstall.system else { return nil }
+        return String(localized: "This Hermes is managed by \(system). Settings are read-only here — edit them through your package manager's configuration and re-deploy.")
+    }
+
     public init(context: ServerContext) {
         self.context = context
     }
@@ -45,6 +67,15 @@ public final class IOSSettingsViewModel {
         // (gh#112).
         let text: String? = await Task.detached {
             HermesConfigReader.readRawConfig(context: ctx)
+        }.value
+
+        // One `.managed` stat+read per home, off the main actor, memoized
+        // process-wide. Capabilities decide how the marker is read — below
+        // v0.20.5 `get_managed_system` never opens it and any marker means
+        // managed (`hermes_cli/config.py:327-330` @ v2026.6.19).
+        managedInstall = await Task.detached {
+            let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
+            return HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
         }.value
 
         guard let text else {
@@ -120,6 +151,13 @@ public final class IOSSettingsViewModel {
     /// surface the error to the user (usually a banner on the editor
     /// sheet) and leave the sheet open for retry.
     public func saveValue(key: String, value: String) async throws {
+        // A managed host refuses this write at exit 0 with a stderr line
+        // nobody sees. The editor is already locked when this is true, so
+        // reaching here means a programmatic call got past it: refuse with
+        // the banner's own sentence instead of spawning a doomed process.
+        if let refusal = managedBannerText {
+            throw SettingsSaveError.commandFailed(exitCode: 0, message: refusal)
+        }
         isSaving = true
         defer { isSaving = false }
 
@@ -175,6 +213,13 @@ public final class IOSSettingsViewModel {
     /// i.e. exits 0. Callers must gate on `HermesCapabilities.hasConfigUnset`;
     /// the verb does not exist below v0.19.0.
     public func unsetValue(key: String) async throws {
+        // A managed host refuses this write at exit 0 with a stderr line
+        // nobody sees. The editor is already locked when this is true, so
+        // reaching here means a programmatic call got past it: refuse with
+        // the banner's own sentence instead of spawning a doomed process.
+        if let refusal = managedBannerText {
+            throw SettingsSaveError.commandFailed(exitCode: 0, message: refusal)
+        }
         isSaving = true
         defer { isSaving = false }
 

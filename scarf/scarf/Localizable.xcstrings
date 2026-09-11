@@ -83521,6 +83521,47 @@
         }
       }
     },
+    "Saved to config.yaml; the .env mirror was refused: %@" : {
+      "comment" : "Banner for a PARTIAL config write: Hermes wrote config.yaml and refused the .env mirror of the same key. %@ is Hermes's own refusal line.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In config.yaml gespeichert; die .env-Spiegelung wurde abgelehnt: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardado en config.yaml; la copia en .env fue rechazada: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistré dans config.yaml ; la copie dans .env a été refusée : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "config.yaml に保存しました。.env へのミラーは拒否されました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvo em config.yaml; o espelho .env foi recusado: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存到 config.yaml；.env 镜像被拒绝：%@"
+          }
+        }
+      }
+    },
     "Saved — restart gateway to apply" : {
       "localizations" : {
         "de" : {
@@ -111146,6 +111187,88 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请编辑排程以重新启用。"
+          }
+        }
+      }
+    },
+    "This Hermes is managed by %@. Settings are read-only here — edit them through your package manager's configuration and re-deploy." : {
+      "comment" : "The one banner shown above Settings when the connected Hermes is a package-manager-managed install, which refuses every config write. %@ is the package manager get_managed_system named (nixos, home-manager, …).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Hermes wird von %@ verwaltet. Die Einstellungen sind hier schreibgeschützt — bearbeite sie in der Konfiguration deines Paketmanagers und stelle sie erneut bereit."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes está gestionado por %@. Los ajustes son de solo lectura aquí: edítalos en la configuración de tu gestor de paquetes y vuelve a desplegarlos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet Hermes est géré par %@. Les réglages sont en lecture seule ici — modifiez-les dans la configuration de votre gestionnaire de paquets, puis redéployez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は %@ によって管理されています。ここでは設定は読み取り専用です。パッケージマネージャーの構成で編集して再デプロイしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes é gerenciado por %@. As configurações são somente leitura aqui — edite-as na configuração do seu gerenciador de pacotes e implante novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 由 %@ 管理。此处的设置为只读 — 请在软件包管理器的配置中修改并重新部署。"
+          }
+        }
+      }
+    },
+    "This Hermes installation is managed; settings are read-only" : {
+      "comment" : "VoiceOver label for the managed-install banner above Settings, on both the Mac and iOS.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird verwaltet; die Einstellungen sind schreibgeschützt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalación de Hermes está gestionada; los ajustes son de solo lectura"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette installation Hermes est gérée ; les réglages sont en lecture seule"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes インストールは管理されています。設定は読み取り専用です"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalação do Hermes é gerenciada; as configurações são somente leitura"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 安装受管理；设置为只读"
           }
         }
       }

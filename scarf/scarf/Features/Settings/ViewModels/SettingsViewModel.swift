@@ -222,7 +222,15 @@ final class SettingsViewModel {
             }
             // P39: one `.managed` stat+read per home, memoized process-wide.
             // Detached with the rest of the load (charter C10).
-            let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx)
+            //
+            // Capabilities decide how the marker is READ: below v0.20.5
+            // `get_managed_system` never opens the file and any marker means
+            // managed (`hermes_cli/config.py:327-330` @ v2026.6.19). A failed
+            // version probe answers `.empty`, i.e. "below the floor", so an
+            // unreadable host errs toward the lock rather than toward
+            // offering writes it cannot make.
+            let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
+            let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.config = cfg
@@ -407,10 +415,16 @@ final class SettingsViewModel {
             outcome: .init(succeeded: outcome.succeeded)
         ))
         if let refreshed {
+            // P39 (round-4 review): a PARTIAL write — config.yaml changed and
+            // the `.env` mirror was refused — is a success that still has
+            // something to say. ``HermesCLIOutcome/warning`` carries Hermes's
+            // own refusal line; it replaces the bare "Saved <key>" rather
+            // than being dropped on the floor. See ``HermesConfigMirror``.
             showSuccess(
-                Self.isUnset(arguments)
-                    ? String(localized: "Cleared \(key) — the host default applies")
-                    : String(localized: "Saved \(key)")
+                outcome.warning
+                    ?? (Self.isUnset(arguments)
+                        ? String(localized: "Cleared \(key) — the host default applies")
+                        : String(localized: "Saved \(key)"))
             )
             config = refreshed.config
             // The raw YAML view and the personality picker are both derived

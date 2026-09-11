@@ -55,18 +55,39 @@ struct SettingsView: View {
                 v013ActiveBadgeSection
             }
 
+            // P39 (round-4 review): the iOS twin of the Mac's managed-host
+            // banner. A package-manager-managed Hermes refuses every config
+            // write at exit 0, so the editor rows are locked behind ONE
+            // banner rather than each sheet ending in the same refusal.
+            if let managed = vm.managedBannerText {
+                Section {
+                    Label(managed, systemImage: "lock.fill")
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .accessibilityLabel("This Hermes installation is managed; settings are read-only")
+                }
+            }
+
             if !vm.isLoading || vm.config.model != "unknown" {
-                quickEditsSection
-                modelSection
-                agentSection
-                displaySection
-                terminalSection
-                memorySection
-                voiceSection
-                securitySection
-                compressionSection
-                loggingSection
-                platformsSection
+                Group {
+                    quickEditsSection
+                    modelSection
+                    agentSection
+                    displaySection
+                    terminalSection
+                    memorySection
+                    voiceSection
+                    securitySection
+                    compressionSection
+                    loggingSection
+                    platformsSection
+                }
+                // The write rows only. `diagnosticsSection` and
+                // `rawYAMLToggleSection` below are reads, and `.disabled`
+                // reaches every descendant — including text selection — so a
+                // managed host would otherwise lose the ability to read the
+                // config its package manager pinned.
+                .disabled(vm.isManagedHost)
+
                 diagnosticsSection
                 rawYAMLToggleSection
             }
