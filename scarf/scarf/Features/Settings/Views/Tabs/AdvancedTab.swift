@@ -245,9 +245,31 @@ struct AdvancedTab: View {
     /// The one-line hint that replaces the old Migrate button. It names the
     /// host the command has to be typed on, because on a remote context the
     /// user's own Mac is the wrong machine.
+    ///
+    /// **On a managed install the terminal hint is a dead end.**
+    /// `_cmd_config_migrate` (`hermes_cli/config.py:3653` @ v2026.9.7) reaches
+    /// `save_config`, whose first act is `if is_managed(): managed_error("save
+    /// configuration"); return` (`:2315-2318`) — so the command the hint names
+    /// refuses at exit 0 no matter where it is typed. A hint that names a
+    /// remedy has to be walked like a button (round-4 lesson 3): here the walk
+    /// says there is no remedy the user can run, so the copy says who owns the
+    /// migration instead.
     private var migrateHint: String {
-        viewModel.context.isRemote
-            ? String(localized: "Run `hermes config migrate` in a terminal on \(viewModel.context.displayName) — it asks questions Scarf can't answer for you.")
+        Self.migrateHint(
+            isManagedHost: viewModel.isManagedHost,
+            isRemote: viewModel.context.isRemote,
+            hostName: viewModel.context.displayName
+        )
+    }
+
+    /// The copy itself, separated from the view so it can be asserted
+    /// directly (a `View`'s private computed property has no test seam).
+    static func migrateHint(isManagedHost: Bool, isRemote: Bool, hostName: String) -> String {
+        if isManagedHost {
+            return String(localized: "This Hermes is managed by a package manager, so `hermes config migrate` refuses to save. The migration comes with the next managed update.")
+        }
+        return isRemote
+            ? String(localized: "Run `hermes config migrate` in a terminal on \(hostName) — it asks questions Scarf can't answer for you.")
             : String(localized: "Run `hermes config migrate` in a terminal — it asks questions Scarf can't answer for you.")
     }
 

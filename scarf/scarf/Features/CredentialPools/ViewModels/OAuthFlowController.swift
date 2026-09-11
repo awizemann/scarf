@@ -364,15 +364,7 @@ final class OAuthFlowController {
         // writing into a pipe whose reader is gone.
         stdinPipe = nil
         awaitingCode = false
-        // Hermes exits 0 even on "login did not return credentials" — detect
-        // that failure marker explicitly so we don't report false success.
-        let failureMarkers = [
-            "did not return credentials",
-            "Token exchange failed",
-            "OAuth login failed",
-            "HTTP Error"
-        ]
-        let outputFailed = failureMarkers.contains { output.localizedCaseInsensitiveContains($0) }
+        let outputFailed = Self.outputSaysFailed(output)
         succeeded = exitCode == 0 && !outputFailed
         if !succeeded, errorMessage == nil {
             if outputFailed {
@@ -382,6 +374,72 @@ final class OAuthFlowController {
             }
         }
         onExit?(exitCode)
+    }
+
+    // MARK: - The failure verdict
+
+    /// The refusal lines this flow's emitter prints at **column 0**, matched
+    /// with `hasPrefix` on ``HermesCLIVerdict/unglyphed(_:)`` rather than as
+    /// free substrings anywhere in the blob.
+    ///
+    /// The argv is `auth add <provider> --type oauth --no-browser [--label …]`
+    /// (see ``start(provider:label:)``), which `auth_command`
+    /// (`hermes_cli/auth_commands.py:766-771` @ v2026.9.7) routes to
+    /// `auth_add_command` (`:333`) → `_add_credential` (`:361`) →
+    /// `_OAUTH_ADD_SPECS[provider].login`. For the default Anthropic provider
+    /// that is `_anthropic_oauth_login` (`:181-186`) →
+    /// `agent/anthropic_credentials.py`'s `run_hermes_oauth_login_pure`, whose
+    /// three refusal lines are all bare `print()`s at column 0:
+    ///
+    /// | line | printed |
+    /// | --- | --- |
+    /// | `anthropic_credentials.py:546` | `No code entered.` |
+    /// | `:560` | `Token exchange failed: {exc}` |
+    /// | `:563` | `No access token in response.` |
+    ///
+    /// Each returns `None`, and the caller then raises
+    /// `SystemExit("Anthropic OAuth login did not return credentials.")`
+    /// (`auth_commands.py:185`) — exit 1. So the exit code already covers
+    /// every one of them; these markers exist to put Hermes's own reason in
+    /// the banner instead of "hermes exited with code 1".
+    nonisolated static let anchoredFailureMarkers = [
+        "Token exchange failed",
+        "No code entered.",
+        "No access token in response.",
+    ]
+
+    /// The one marker that is genuinely MID-LINE, and why.
+    ///
+    /// `SystemExit`'s message is printed verbatim by the interpreter, and the
+    /// sentence leads with the provider's display name —
+    /// `Anthropic OAuth login did not return credentials.`
+    /// (`hermes_cli/auth_commands.py:185`). The stable half is the tail, so
+    /// anchoring it would match nothing. It stays a substring.
+    ///
+    /// Two markers were retired here (P40b). `HTTP Error` only ever reaches
+    /// the output interpolated INTO `Token exchange failed: {exc}` —
+    /// `_post_oauth_token` raises `urllib`'s `HTTPError`, whose `str` is
+    /// `HTTP Error 400: Bad Request` — so the anchored marker above already
+    /// catches it, while as a bare case-insensitive substring it would match
+    /// any provider page or scan text quoted into the log. `OAuth login
+    /// failed` has exactly one emitter at the tag, `hermes_cli/setup_tts.py:105`
+    /// (`xAI Grok OAuth login failed: {exc}`), which is the TTS setup wizard
+    /// and not on this argv at all.
+    nonisolated static let substringFailureMarkers = [
+        "did not return credentials",
+    ]
+
+    /// True when the run PRINTED a refusal. Line-scoped and case-SENSITIVE:
+    /// Hermes's spelling is fixed, and `localizedCaseInsensitiveContains` over
+    /// the whole blob matched these phrases wherever they appeared — including
+    /// inside the provider's own HTML error page, which this flow echoes.
+    nonisolated static func outputSaysFailed(_ output: String) -> Bool {
+        let lines = HermesCLIVerdict.significantLines(output)
+        return lines.contains { line in
+            if substringFailureMarkers.contains(where: { line.contains($0) }) { return true }
+            let head = HermesCLIVerdict.unglyphed(line)
+            return anchoredFailureMarkers.contains { head.hasPrefix($0) }
+        }
     }
 
     // MARK: - URL extraction

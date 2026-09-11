@@ -661,7 +661,13 @@ public struct SSHTransport: ServerTransport {
         // `~/`-rewritten paths so home-relative args expand on the remote.
         // The executable might be `~/.local/bin/hermes` or just `hermes`;
         // either survives.
-        var cmd = hermesHome + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+        // `COLUMNS` rides the same assignment prefix as `HERMES_HOME`: ssh
+        // does not forward the client's environment (no `SendEnv` here), so
+        // the remote `rich` would otherwise take its 80-column non-TTY
+        // default and wrap the lines Scarf's verdicts match on. Same value
+        // and same reason as ``LocalTransport/wideColumns``.
+        var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
+            + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
         // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes
         // reads project context files from the process cwd, not the ACP
         // session cwd). `;` (not `&&`) is deliberate: a stale/missing dir

@@ -125,7 +125,7 @@ import Foundation
             )
         }
 
-        #expect(command("scout").hasPrefix("HERMES_HOME=\"$HOME/.hermes/profiles/scout\" "))
+        #expect(command("scout").contains("HERMES_HOME=\"$HOME/.hermes/profiles/scout\" \"hermes\""))
         #expect(command("scout").contains("\"-p\" \"scout\""))
         // Root home ⇒ no assignment; the flag is the whole scope.
         #expect(!command("default").contains("HERMES_HOME="))

@@ -47,16 +47,16 @@ struct GatewayAndPluginsVerdictP40Tests {
     /// and returns at exit 0 (`hermes_cli/gateway.py:5998` @ v2026.9.7). Under
     /// round-4 decision 2 that is a SUCCESS, and the banner says what actually
     /// happened rather than "Gateway stop requested".
-    @MainActor @Test func aStopWithNothingRunningReportsTheNeutralNote() async {
+    @MainActor @Test func aStopWithNothingRunningReportsTheNeutralNote() async throws {
         let vm = Self.gatewayViewModel(
             mutation: "✗ No gateway running for this profile", exitCode: 0
         )
         vm.stopGateway()
         await Self.until(timeout: 10) { vm.actionMessage != nil }
-        let message = try? #require(vm.actionMessage)
+        let message = try #require(vm.actionMessage)
         #expect(vm.actionFailed == false)
-        #expect(message?.contains("Gateway stopped") == true)
-        #expect(message?.contains("Nothing was running") == true)
+        #expect(message.contains("Gateway stopped"))
+        #expect(message.contains("Nothing was running"))
     }
 
     /// The regression the phase exists for: exit 0 with nothing the backend
@@ -86,24 +86,29 @@ struct GatewayAndPluginsVerdictP40Tests {
     /// which returns the verdict now. Found by walking the verb's callers
     /// after the return type changed, which is the point of changing it.
     @Test func noCallSiteStillReadsAGatewayVerbsExitCode() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-        var offenders: [String] = []
-        for dir in ["scarf", "ScarfGo", "Packages/ScarfCore/Sources"] {
-            let base = root.appendingPathComponent(dir)
-            guard let walk = FileManager.default.enumerator(
-                at: base, includingPropertiesForKeys: nil
-            ) else { continue }
-            for case let url as URL in walk where url.pathExtension == "swift" {
-                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                for (n, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
-                where line.contains("\"gateway\", \"start\"")
-                    || line.contains("\"gateway\", \"stop\"")
-                    || line.contains("\"gateway\", \"restart\"") {
-                    offenders.append("\(url.lastPathComponent):\(n + 1)")
-                }
+        // Both the literal pair and the `["gateway", verb]` variable form:
+        // any line that mentions the argv head and one of the three verbs is
+        // building the argv by hand. `HermesGatewayServiceVerdict.argv(_:)`
+        // is the only sanctioned speller, and it lives in ScarfCore's own
+        // file, which spells the verbs as enum cases rather than as quoted
+        // strings next to `"gateway"`.
+        let verbs = ["\"start\"", "\"stop\"", "\"restart\"", "verb"]
+        let lines = try Self.strippedSourceLines()
+        let offenders = lines
+            .filter { entry in
+                // The sanctioned speller itself lives here, and it is the one
+                // line in the app that is SUPPOSED to say `["gateway", verb…]`.
+                guard !entry.where.contains("/HermesCLIOutcome.swift:") else { return false }
+                guard entry.line.contains("\"gateway\",") else { return false }
+                return verbs.contains { entry.line.contains($0) }
             }
-        }
+            .map(\.where)
+        // …and the sanctioned speller is still there, so the exemption above
+        // is an exemption and not a hole.
+        #expect(lines.contains {
+            $0.where.contains("HermesCLIOutcome.swift")
+                && $0.line.contains("[\"gateway\",verb.rawValue]")
+        }, "HermesGatewayServiceVerdict.argv no longer spells the argv — re-point this sweep")
         #expect(offenders.isEmpty, Comment(rawValue:
             "these build the argv by hand instead of going through HermesGatewayServiceVerdict:\n"
             + offenders.joined(separator: "\n")))
@@ -173,22 +178,58 @@ struct GatewayAndPluginsVerdictP40Tests {
     /// points at a terminal on the host; this pins that no code path still
     /// shells the verb.
     @Test func nothingInScarfShellsConfigMigrate() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-        var offenders: [String] = []
-        for dir in ["scarf", "ScarfGo", "Packages/ScarfCore/Sources"] {
-            let base = root.appendingPathComponent(dir)
-            guard let walk = FileManager.default.enumerator(
-                at: base, includingPropertiesForKeys: nil
-            ) else { continue }
+        let offenders = try Self.strippedSourceLines()
+            .filter { $0.line.contains("\"config\",\"migrate\"") }
+            .map(\.where)
+        #expect(offenders.isEmpty, Comment(rawValue: offenders.joined(separator: "\n")))
+    }
+
+    // MARK: - source sweeps
+
+    /// The three source roots every Scarf-authored `.swift` file lives under.
+    /// Spelled exactly as they sit on disk: the iOS target is `Scarf iOS`,
+    /// NOT `ScarfGo` — P40 swept a directory that has not existed for
+    /// several releases and the enumerator silently returned nothing.
+    static let sourceRoots = ["scarf", "Scarf iOS", "Packages/ScarfCore/Sources"]
+
+    /// `…/scarf` — the parent of `scarfTests`, which is where `sourceRoots`
+    /// resolve from.
+    static var repoScarfRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    /// Every source line in ``sourceRoots``, whitespace REMOVED, paired with
+    /// its `file:line`. Stripping whitespace is what stops a matcher from
+    /// being dodged by a reformat: `["gateway", "start"]` and
+    /// `["gateway","start"]` are the same argv and must be the same match.
+    ///
+    /// Throws when a listed root is missing, so the sweep can never pass by
+    /// reading nothing.
+    static func strippedSourceLines() throws -> [(where: String, line: String)] {
+        var out: [(where: String, line: String)] = []
+        for dir in sourceRoots {
+            let base = repoScarfRoot.appendingPathComponent(dir)
+            var isDir: ObjCBool = false
+            #expect(FileManager.default.fileExists(atPath: base.path, isDirectory: &isDir)
+                    && isDir.boolValue,
+                    Comment(rawValue: "source root missing — the sweep would read nothing: \(base.path)"))
+            let walk = try #require(
+                FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil),
+                Comment(rawValue: "could not enumerate \(base.path)")
+            )
             for case let url as URL in walk where url.pathExtension == "swift" {
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                for (n, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
-                where line.contains("\"config\", \"migrate\"") {
-                    offenders.append("\(url.lastPathComponent):\(n + 1)")
+                for (n, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                    out.append((
+                        where: "\(dir)/\(url.lastPathComponent):\(n + 1)",
+                        line: line.filter { !$0.isWhitespace }
+                    ))
                 }
             }
         }
-        #expect(offenders.isEmpty, Comment(rawValue: offenders.joined(separator: "\n")))
+        #expect(out.count > 10_000, "premise: the sweep actually read the sources")
+        return out
     }
 }

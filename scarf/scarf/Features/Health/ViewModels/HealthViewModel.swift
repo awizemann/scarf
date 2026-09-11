@@ -474,9 +474,16 @@ final class HealthViewModel {
     // `source` — so a restart here likewise reports one `restart`, never a
     // `stop` plus a `start`.
 
-    private static func recordControlAction(_ action: UsageEvent.ControlAction, succeeded: Bool) {
+    /// Records the THREE-state outcome (P40b). A gateway verdict that could
+    /// not confirm — an s6 host, where `_dispatch_via_service_manager_if_s6`
+    /// prints nothing on success (`hermes_cli/gateway.py:5608-5629` @
+    /// v2026.9.7) — is neither a success nor a refusal, and recording it as
+    /// `failed` put a healthy container host into the failure funnel.
+    private static func recordControlAction(
+        _ action: UsageEvent.ControlAction, _ confidence: HermesCLIOutcome.Confidence
+    ) {
         Analytics.record(.hermesControlAction(
-            action: action, source: .healthPanel, outcome: .init(succeeded: succeeded)
+            action: action, source: .healthPanel, outcome: .init(confidence)
         ))
     }
 
@@ -498,10 +505,11 @@ final class HealthViewModel {
             guard let self else { return }
             self.isControlBusy = false
             // P40: `stopHermes()` returns the OUTPUT verdict now, so the
-            // Analytics `succeeded:` this feeds is no longer an exit code
-            // that `_cmd_stop` returns whatever happened
-            // (`hermes_cli/gateway.py:5974-6000` @ v2026.9.7).
-            Self.recordControlAction(.stop, succeeded: outcome.succeeded)
+            // Analytics outcome this feeds is no longer an exit code that
+            // `_cmd_stop` returns whatever happened
+            // (`hermes_cli/gateway.py:5974-6000` @ v2026.9.7). P40b made it
+            // three-valued.
+            Self.recordControlAction(.stop, outcome.confidence)
             self.actionMessage = Self.controlMessage(
                 done: String(localized: "Gateway stopped"),
                 failed: String(localized: "Stop failed"),
@@ -520,7 +528,7 @@ final class HealthViewModel {
             let outcome = await Task.detached { Self.runGateway(.start, ctx) }.value
             guard let self else { return }
             self.isControlBusy = false
-            Self.recordControlAction(.start, succeeded: outcome.succeeded)
+            Self.recordControlAction(.start, outcome.confidence)
             // P40: judged by the backend's own success line, not the exit
             // code — `launchd_start` returns WITHOUT `✓ Service started` when
             // the bootstrap degrades (`hermes_cli/gateway.py:3926-3928`,
@@ -550,7 +558,9 @@ final class HealthViewModel {
             // nothing running still has to bring the gateway back — and under
             // round-4 decision 2 that stop is itself a success, so this
             // conjunction now means what it says.
-            Self.recordControlAction(.restart, succeeded: stop.succeeded && start.succeeded)
+            Self.recordControlAction(
+                .restart, .combined(stop.confidence, start.confidence)
+            )
             self.actionMessage = Self.controlMessage(
                 done: String(localized: "Gateway restarted"),
                 failed: String(localized: "Restart failed"),

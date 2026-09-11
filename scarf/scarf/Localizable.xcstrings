@@ -111720,6 +111720,126 @@
         }
       }
     },
+    "Updated, but the security scan flagged it. %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktualisiert, aber von der Sicherheitsprüfung markiert. %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actualizado, pero marcado por el análisis de seguridad. %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mis à jour, mais signalé par l'analyse de sécurité. %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新されましたが、セキュリティスキャンで警告されました。%@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atualizado, mas sinalizado pela verificação de segurança. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已更新，但被安全扫描标记。%@"
+          }
+        }
+      }
+    },
+    "Hermes is starting the gateway in the foreground on this host — Scarf can't confirm it from here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes startet das Gateway auf diesem Host im Vordergrund — Scarf kann das von hier aus nicht bestätigen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes está iniciando la pasarela en primer plano en este host: Scarf no puede confirmarlo desde aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes démarre la passerelle au premier plan sur cet hôte — Scarf ne peut pas le confirmer d'ici."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes はこのホストでゲートウェイをフォアグラウンドで起動しています。Scarf はここからは確認できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes está iniciando o gateway em primeiro plano neste host — o Scarf não consegue confirmar daqui."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 正在该主机上以前台方式启动网关，Scarf 无法在此确认。"
+          }
+        }
+      }
+    },
+    "This Hermes is managed by a package manager, so `hermes config migrate` refuses to save. The migration comes with the next managed update." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Hermes wird von einem Paketmanager verwaltet, daher verweigert `hermes config migrate` das Speichern. Die Migration kommt mit dem nächsten verwalteten Update."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes lo gestiona un gestor de paquetes, así que `hermes config migrate` se niega a guardar. La migración llegará con la próxima actualización gestionada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet Hermes est géré par un gestionnaire de paquets : `hermes config migrate` refuse donc d'enregistrer. La migration arrivera avec la prochaine mise à jour gérée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes はパッケージマネージャーの管理下にあるため、`hermes config migrate` は保存を拒否します。移行は次の管理された更新で適用されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes é gerenciado por um gerenciador de pacotes, então `hermes config migrate` se recusa a salvar. A migração vem com a próxima atualização gerenciada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 由包管理器托管，因此 `hermes config migrate` 会拒绝保存。迁移将随下一次托管更新一起提供。"
+          }
+        }
+      }
+    },
     "Updated, then disabled by the security scan. %@" : {
       "localizations" : {
         "de" : {

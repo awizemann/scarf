@@ -615,18 +615,23 @@ final class ServerLiveStatus: Identifiable {
     /// returns without `✓ Service started` when the bootstrap degrades
     /// (`hermes_cli/gateway.py:3926-3928`, `:3938-3939`), so the exit code
     /// this used to read was 0 either way — and it feeds Analytics.
-    private nonisolated static func performStart(_ context: ServerContext) -> Bool {
+    ///
+    /// Returns the full verdict, not its bool: Analytics records the
+    /// three-state ``ScarfCore/HermesCLIOutcome/Confidence`` (P40b) so a
+    /// could-not-confirm dispatch — an s6 host, `gateway.py:5608-5629` —
+    /// stops being counted as a refusal.
+    private nonisolated static func performStart(_ context: ServerContext) -> HermesCLIOutcome {
         let result = context.runHermes(HermesGatewayServiceVerdict.argv(.start))
         return HermesGatewayServiceVerdict.judge(
             verb: .start, output: result.output, exitCode: result.exitCode
-        ).succeeded
+        )
     }
 
     func startHermes() {
         Task { [context] in
-            let ok = await Task.detached { Self.performStart(context) }.value
+            let outcome = await Task.detached { Self.performStart(context) }.value
             Analytics.record(.hermesControlAction(
-                action: .start, source: .menuBar, outcome: .init(succeeded: ok)
+                action: .start, source: .menuBar, outcome: .init(outcome.confidence)
             ))
         }
         // Refresh after a short delay to pick up the new state.
@@ -638,9 +643,9 @@ final class ServerLiveStatus: Identifiable {
 
     func stopHermes() {
         Task { [fileService] in
-            let ok = await Task.detached { fileService.stopHermes().succeeded }.value
+            let outcome = await Task.detached { fileService.stopHermes() }.value
             Analytics.record(.hermesControlAction(
-                action: .stop, source: .menuBar, outcome: .init(succeeded: ok)
+                action: .stop, source: .menuBar, outcome: .init(outcome.confidence)
             ))
         }
         Task { [weak self] in
@@ -651,13 +656,14 @@ final class ServerLiveStatus: Identifiable {
 
     func restartHermes() {
         Task { [weak self, fileService, context] in
-            let stopped = await Task.detached { fileService.stopHermes().succeeded }.value
+            let stopped = await Task.detached { fileService.stopHermes() }.value
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let started = await Task.detached { Self.performStart(context) }.value
             // A restart only succeeded if both halves did; a stop that
             // found nothing running still has to bring the gateway back.
             Analytics.record(.hermesControlAction(
-                action: .restart, source: .menuBar, outcome: .init(succeeded: stopped && started)
+                action: .restart, source: .menuBar,
+                outcome: .init(.combined(stopped.confidence, started.confidence))
             ))
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.refresh()

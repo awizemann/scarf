@@ -46,6 +46,14 @@ public struct LocalTransport: ServerTransport {
     /// doesn't run subprocesses there.
     nonisolated(unsafe) public static var environmentEnricher: (@Sendable () -> [String: String])?
 
+    /// The `COLUMNS` every Hermes subprocess is handed, so `rich` does not
+    /// wrap a line Scarf matches on. Wide enough that no marker line Hermes
+    /// prints comes close, narrow enough to stay a plausible terminal.
+    /// Mirrored into the remote command prefix by
+    /// ``SSHTransport/composedRemoteCommand(executable:args:cwd:)`` — an
+    /// ssh client's own environment does not cross to the remote shell.
+    public static let wideColumns = "400"
+
     /// Build the environment dict for a single subprocess. Process
     /// env wins for keys it has; the enricher fills gaps + always
     /// owns PATH (which is the whole point of running it). The
@@ -72,6 +80,18 @@ public struct LocalTransport: ServerTransport {
                 }
             }
         }
+        // `rich` wraps `console.print` at 80 columns when stdout is not a TTY
+        // (`Console.width` falls back to `COLUMNS`, then to 80), and a pipe is
+        // never a TTY. Scarf judges Hermes runs by matching whole printed
+        // lines, so an 80-column wrap can split a marker in half: the live
+        // case is `✓ Plugin <name> updated.` (`hermes_cli/plugins_cmd.py:828`
+        // @ v2026.9.7), matched as a column-0 `Plugin ` prefix AND an
+        // `updated.` tail, which a long plugin name pushes onto two lines.
+        // A wide `COLUMNS` keeps Hermes's own lines intact. An explicit
+        // value in the environment is left alone — the user (or a test) meant
+        // it.
+        if (env["COLUMNS"] ?? "").isEmpty { env["COLUMNS"] = Self.wideColumns }
+
         // Always make sure the executable's own directory is on PATH —
         // covers the case where the enricher hasn't been wired (tests,
         // pre-launch helpers) but a child process still tries to spawn

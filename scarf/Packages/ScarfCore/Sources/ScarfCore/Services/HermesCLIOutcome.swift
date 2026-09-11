@@ -61,10 +61,58 @@ public struct HermesCLIOutcome: Sendable, Equatable {
     /// `nil` everywhere else, which is every other verdict in this file.
     public let warning: String?
 
+    /// How much the verdict actually KNOWS, which is three states rather than
+    /// the two ``succeeded`` can carry.
+    ///
+    /// `succeeded` answers "may the UI claim the new state?" and is `false`
+    /// for both of the negative answers. They are not the same event:
+    ///
+    /// - ``Confidence/confirmed`` — the emitter printed its own success line.
+    /// - ``Confidence/failed`` — a POSITIVE failure signal: a refusal marker
+    ///   matched, or the process exited non-zero.
+    /// - ``Confidence/unconfirmed`` — exit 0, no success line, no refusal
+    ///   line. The C5 answer: never read silence as success, but do not read
+    ///   it as a refusal either. The live case is an s6 container host, where
+    ///   `_dispatch_via_service_manager_if_s6` (`hermes_cli/gateway.py:5608-5629`
+    ///   @ v2026.9.7) prints NOTHING on the success path.
+    ///
+    /// Two consumers need the distinction rather than the bool:
+    /// `HermesFileService.stopHermes()` only takes its `kill -TERM` fallback
+    /// on ``Confidence/failed`` (on s6 a bare SIGTERM is read by
+    /// `s6-supervise` as a crash and the gateway comes straight back), and
+    /// Analytics records `unconfirmed` as its own token instead of laundering
+    /// it into `failed`.
+    public let confidence: Confidence
+
+    public enum Confidence: String, Sendable, CaseIterable {
+        case confirmed, unconfirmed, failed
+
+        /// Fold the two halves of a two-verb action (a Stop followed by a
+        /// Start) into one answer. `failed` if either half positively failed,
+        /// `confirmed` only when BOTH confirmed, `unconfirmed` in between —
+        /// which is what "a restart only succeeded if both halves did" means
+        /// once there are three states instead of two.
+        public static func combined(_ first: Confidence, _ second: Confidence) -> Confidence {
+            if first == .failed || second == .failed { return .failed }
+            return first == .confirmed && second == .confirmed ? .confirmed : .unconfirmed
+        }
+    }
+
+    /// The two-state initialiser every existing call site uses: a success is
+    /// ``Confidence/confirmed``, a failure is ``Confidence/failed``. Pass
+    /// `confidence:` explicitly for the third state.
     public init(succeeded: Bool, detail: String?, warning: String? = nil) {
+        self.init(
+            succeeded: succeeded, detail: detail, warning: warning,
+            confidence: succeeded ? .confirmed : .failed
+        )
+    }
+
+    public init(succeeded: Bool, detail: String?, warning: String?, confidence: Confidence) {
         self.succeeded = succeeded
         self.detail = detail
         self.warning = warning
+        self.confidence = confidence
     }
 }
 
@@ -176,8 +224,13 @@ public enum HermesCLIVerdict {
             return anchoredFailureMarkers.contains { head.hasPrefix($0) }
         }
         let refusal = lines.first(where: matchesFailure)
-        func failed(_ detail: String?) -> HermesCLIOutcome {
-            HermesCLIOutcome(succeeded: false, detail: detail ?? (fallbackDetail ? lines.last : nil))
+        func failed(_ detail: String?, confidence: HermesCLIOutcome.Confidence = .failed) -> HermesCLIOutcome {
+            HermesCLIOutcome(
+                succeeded: false,
+                detail: detail ?? (fallbackDetail ? lines.last : nil),
+                warning: nil,
+                confidence: confidence
+            )
         }
         func matchesSuccess(_ line: String) -> Bool {
             guard successAnchored else { return successMarkers.contains { line.contains($0) } }
@@ -191,8 +244,12 @@ public enum HermesCLIVerdict {
         }
         // Exit 0 with no success line: a `None`-returning refusal we have no
         // marker for, or an unknown verb whose output the agent wrote. Never a
-        // success (C5).
-        return failed(refusal)
+        // success (C5) — but only a POSITIVE failure signal (a matched refusal
+        // marker) makes it ``HermesCLIOutcome/Confidence/failed``. With no
+        // marker on either side all we know is that we do not know, and a
+        // caller whose fallback is destructive (`stopHermes`'s `kill -TERM`)
+        // must be able to tell the two apart.
+        return failed(refusal, confidence: refusal == nil ? .unconfirmed : .failed)
     }
 }
 
@@ -813,19 +870,48 @@ public enum HermesCLIMarkers {
 
     // MARK: gateway start / stop / restart — hermes_cli/gateway.py
 
+    /// The detached fallback's success line — `✓ Started gateway as a
+    /// background process instead` (`gateway.py:3614`, inside
+    /// `_launchd_fallback_to_detached` `:3607-3618` @ v2026.9.7).
+    ///
+    /// **This is a real start, not a degradation notice.** `_spawn_detached_gateway`
+    /// (`:3583-3604`) has already `Popen`ed the gateway when this prints, and
+    /// the helper returns True; its own failure arm prints
+    /// `✗ Failed to start the gateway as a background process.` through
+    /// `print_error` and `sys.exit(1)` (`:3619-3622`, `exit_on_failure`
+    /// defaults True and the one call site — `_launchd_degrade_or_raise`,
+    /// `:3626-3630` — never overrides it), so the exit code owns that half.
+    ///
+    /// It is reached on BOTH verbs Scarf shells that can hit launchd:
+    /// `gateway start` through `_launchd_bootstrap_and_kickstart` (`:3953`)
+    /// and `gateway restart` through `launchd_restart`'s two
+    /// `_launchd_degrade_or_raise` arms (`:4068`, `:4079`). `launchd_stop`
+    /// never reaches it — it swallows the unmanageable-domain error and falls
+    /// through to the PID wait, ending on `✓ Service stopped` (`:3978`).
+    /// Present since v2026.6.19 (`:3315` there), so no capability floor.
+    ///
+    /// The `⚠ launchd cannot manage the gateway on this macOS version (…)`
+    /// line printed just before it (`:3612`) matches no failure marker:
+    /// `managedRefusalAnchored` anchors `Cannot save configuration` /
+    /// `Cannot set` / `Cannot unset` / `Cannot remove`, and this line starts
+    /// `launchd cannot` after ``HermesCLIVerdict/unglyphed(_:)``.
+    public static let gatewayDetachedFallbackStarted = "Started gateway as a background process instead"
+
     /// Every success line `gateway start` can print, matched ANCHORED at
     /// column 0 after the glyph. `✓ Service started` (`gateway.py:3927`,
     /// `:3940`, `launchd_start`), `✓ {User|System} service started`
     /// (`:3171`, `systemd_start` — the scope word comes from
     /// `_service_scope_label(system).capitalize()`, `:2179-2180`, so exactly
-    /// these two spellings exist), and the two Windows lines
-    /// (`hermes_cli/gateway_windows.py:971`, `:698`).
+    /// these two spellings exist), the two Windows lines
+    /// (`hermes_cli/gateway_windows.py:971`, `:698`) and the launchd detached
+    /// fallback (``gatewayDetachedFallbackStarted``).
     public static let gatewayStartSuccess = [
         "Service started",
         "User service started",
         "System service started",
         "Gateway started via",
         "Gateway already running",
+        gatewayDetachedFallbackStarted,
     ]
 
     /// `gateway stop`'s success lines. The `_cmd_stop` trio all open
@@ -841,15 +927,47 @@ public enum HermesCLIMarkers {
 
     /// `gateway restart`'s success lines: launchd's two spellings
     /// (`gateway.py:4041`/`:4059` and `:4065`/`:4081`), systemd's
-    /// `✓ {User|System} service restarted (PID {n})` (`:1218`), and the s6
-    /// summary (`:5653`).
+    /// `✓ {User|System} service restarted (PID {n})` (`:1218`), the s6
+    /// summary (`:5653`), the launchd detached fallback
+    /// (``gatewayDetachedFallbackStarted``, reached from `launchd_restart`'s
+    /// `:4068` and `:4079` arms) and BOTH Windows lines.
+    ///
+    /// **Why Windows's start lines belong on the restart verb.**
+    /// `gateway_windows.restart()` (`hermes_cli/gateway_windows.py:1380-1399`
+    /// @ v2026.9.7) is `stop()`, a bounded absence wait, then `start()`
+    /// (`:1225`); it prints no restart line of its own, so a Windows restart
+    /// ends on `✓ Gateway started via {via} (PID: {n})`
+    /// (`_report_gateway_start`, `:971`) or `✓ Gateway already running
+    /// (PID: {n})` (`_report_already_running`, `:698`, called from `:1231`).
+    /// Its own loud arms raise `RuntimeError` (`:1390-1393`) or print
+    /// `✗ Gateway start via {via} FAILED …` (`:977`), both already covered.
+    /// Without these two markers every Windows restart Scarf drove was
+    /// reported "could not confirm".
     public static let gatewayRestartSuccess = [
         "Service restarted",
         "Service restart requested",
         "User service restarted",
         "System service restarted",
         "Restarted ",
+        "Gateway started via",
+        "Gateway already running",
+        gatewayDetachedFallbackStarted,
     ]
+
+    /// `_cmd_restart`'s last-resort arm prints `Starting gateway...`
+    /// (`gateway.py:6065`) and then calls `run_gateway(verbose=0)`, which
+    /// RUNS the gateway in the foreground — it does not return, so Scarf's
+    /// own CLI timeout ends the run. `_restart_all` has the same shape
+    /// (`:6010-6016`), though Scarf never passes `--all`.
+    ///
+    /// The honest verdict is neither half of the bool: a `Starting
+    /// gateway...` line followed by a timeout means the gateway was started
+    /// in the foreground and Scarf cannot confirm it from here, so the
+    /// restart verdict answers ``HermesCLIOutcome/Confidence/unconfirmed``
+    /// and the caller's reload tells the real state. It is deliberately NOT
+    /// a success marker: per the round-4 product call, nothing claims
+    /// "restarted" without a confirmation line.
+    public static let gatewayForegroundStarting = "Starting gateway..."
 
     /// The "there was nothing to stop" lines. Round-4 decision 2 makes these
     /// a SUCCESS with a neutral note rather than a failure — the user asked
@@ -938,7 +1056,7 @@ public enum HermesCLIMarkers {
 
     // MARK: plugins update — the security-disable third state
 
-    /// `[red]Plugin '<name>' has been disabled.[/red]` (`plugins_cmd.py:849`,
+    /// `[red]Plugin '<name>' has been disabled.[/red]` (`plugins_cmd.py:848-851`,
     /// inside `_rescan_after_update`'s `dangerous` arm `:845-851`). Printed
     /// BEFORE `cmd_update`'s `✓ Plugin <name> updated.` (`:828`), both at
     /// exit 0. Matched as a SUBSTRING, not anchored: `rich` wraps at its
@@ -1343,7 +1461,12 @@ public enum HermesConfigUnset {
 ///   it prints no success line at all — the no-marker rule covers it. The
 ///   other three `sys.exit(1)`.
 /// - `launchd_start` (`:3914-3940`) returns WITHOUT `✓ Service started` when
-///   `_launchd_bootstrap_and_kickstart` degrades (`:3926-3928`, `:3938-3939`).
+///   `_launchd_bootstrap_and_kickstart` degrades (`:3926-3928`, `:3938-3939`)
+///   — but the degradation is itself a START: `_launchd_degrade_or_raise`
+///   (`:3626-3630`) calls `_launchd_fallback_to_detached` (`:3607-3618`),
+///   which `Popen`s the gateway and prints `✓ Started gateway as a background
+///   process instead` (`:3614`). See
+///   ``HermesCLIMarkers/gatewayDetachedFallbackStarted``.
 /// - successes: `✓ Service started` (`:3927`, `:3940`),
 ///   `✓ {User|System} service started` (`systemd_start`, `:3171`), and on
 ///   Windows `✓ Gateway started via {via} (PID: …)` /
@@ -1364,10 +1487,25 @@ public enum HermesConfigUnset {
 ///   `_print_systemd_start_limit_wait`'s
 ///   `⏳ … is temporarily rate-limited by systemd.` (`:1284`) — all exit 0
 ///   with no success line.
+/// - the two no-service arms print `Starting gateway...` and then
+///   `run_gateway(verbose=0)`, which runs the gateway in the FOREGROUND and
+///   never returns: `_cmd_restart`'s last resort (`:6062-6066`) and
+///   `_restart_all` (`:6003-6016`, `--all`, which Scarf never passes). Scarf's
+///   CLI timeout ends the run. Neither half of the bool is honest there, so
+///   ``HermesCLIMarkers/gatewayForegroundStarting`` maps that shape to
+///   ``HermesCLIOutcome/Confidence/unconfirmed`` — "started in the
+///   foreground, could not confirm" — and nothing claims "restarted" without
+///   a confirmation line. `_restart_all`'s own `✓ Stopped {n} gateway
+///   process(es) across all profiles` (`:6007`) and `_cmd_restart`'s
+///   `✓ Stopped gateway for this profile` (`:6063`) are STOP lines and are
+///   deliberately absent from the restart success set.
 /// - successes: `✓ Service restart requested` (`:4041`, `:4059`),
 ///   `✓ Service restarted` (`:4065`, `:4081`),
-///   `✓ {User|System} service restarted (PID {n})` (`:1218`), and
-///   `✓ {Stopped|Restarted} {n} profile gateway(s) under s6` (`:5653`).
+///   `✓ {User|System} service restarted (PID {n})` (`:1218`),
+///   `✓ {Stopped|Restarted} {n} profile gateway(s) under s6` (`:5653`), the
+///   launchd detached fallback (`:3614`, via `launchd_restart`'s `:4068` and
+///   `:4079` arms) and, on Windows, `start()`'s own two lines — `restart()`
+///   is `stop()` + `start()` (`hermes_cli/gateway_windows.py:1380-1399`).
 ///
 /// ## Known blind spot: a bare s6 dispatch
 ///
@@ -1379,6 +1517,30 @@ public enum HermesConfigUnset {
 /// (never read silence as success) and the call sites all reload the real
 /// state afterwards, so the banner is corrected within seconds. It is called
 /// out here rather than papered over.
+///
+/// It is also why the verdict carries ``HermesCLIOutcome/Confidence``.
+/// "Could not confirm" is NOT a failure signal, and a caller must not run a
+/// destructive fallback on it: `HermesFileService.stopHermes()` used to fall
+/// through to `pgrep` + `kill -TERM` whenever `succeeded` was false, and on
+/// an s6 host `s6-supervise` reads that SIGTERM as a crash and brings the
+/// gateway straight back — Stop looked like it worked and then undid itself.
+/// The fallback is gated on ``HermesCLIOutcome/Confidence/failed`` now: a
+/// matched refusal marker, or a non-zero exit.
+///
+/// The helper's own failure arm is not silent and needs no marker — it prints
+/// `✗ {exc}` and `sys.exit(1)` (`:5625-5627`), so the exit code owns it.
+///
+/// ## `--all` under s6, for completeness
+///
+/// `_dispatch_all_via_service_manager_if_s6` (`:5631-5656`) stops or restarts
+/// EVERY registered profile gateway and prints a per-profile
+/// `✗ Could not {action} gateway-{profile}: {exc}` for each failure ALONGSIDE
+/// the `✓ {Stopped|Restarted} {n} profile gateway(s) under s6` summary
+/// (`:5653-5655`) — a partial failure that this verdict, which does not run
+/// `failureWins`, would report as a flat success. Scarf never passes `--all`
+/// (``argv(_:)`` is the bare verb), so the shape is unreachable; it is named
+/// here so the day a `--all` surface appears, the verdict is known to need a
+/// `failureWins` pass and a partial-outcome note first.
 ///
 /// ## Round-4 product decision 2
 ///
@@ -1401,6 +1563,13 @@ public enum HermesGatewayServiceVerdict {
         localized: "Nothing was running on this profile."
     )
 
+    /// What a restart that fell through to `run_gateway(verbose=0)` says —
+    /// the gateway IS being started, in the foreground, and this run cannot
+    /// see it come up. See ``HermesCLIMarkers/gatewayForegroundStarting``.
+    public static let foregroundStartNote = String(
+        localized: "Hermes is starting the gateway in the foreground on this host — Scarf can't confirm it from here."
+    )
+
     public static func judge(verb: Verb, output: String, exitCode: Int32) -> HermesCLIOutcome {
         let successMarkers: [String]
         switch verb {
@@ -1416,6 +1585,22 @@ public enum HermesGatewayServiceVerdict {
             anchoredFailureMarkers: HermesCLIMarkers.gatewayServiceFailureAnchored,
             successAnchored: true
         )
+        if verb == .restart, !verdict.succeeded, verdict.confidence != .failed,
+           HermesCLIVerdict.significantLines(output).contains(where: {
+               HermesCLIVerdict.unglyphed($0).hasPrefix(HermesCLIMarkers.gatewayForegroundStarting)
+           }) {
+            // `_cmd_restart`'s no-service arm (`gateway.py:6062-6066`):
+            // `Starting gateway...` and then a foreground `run_gateway`, so
+            // the run ends at Scarf's timeout with no success line and no
+            // refusal. "Started in the foreground, could not confirm" is the
+            // honest answer; the banner does not claim "restarted".
+            return HermesCLIOutcome(
+                succeeded: false,
+                detail: foregroundStartNote,
+                warning: nil,
+                confidence: .unconfirmed
+            )
+        }
         guard verb == .stop, !verdict.succeeded, exitCode == 0 else { return verdict }
         // Decision 2: "nothing was running" is the state the user asked for.
         // Only ever reached when no success line printed — `_cmd_stop`'s ✓/✗
@@ -1537,6 +1722,17 @@ public enum HermesMCPTestVerdict {
 /// Round-4 product decision 3 makes it a third state carried on
 /// ``HermesCLIOutcome/warning``, quoting Hermes's own reason line (`:843`).
 ///
+/// **The flag and the disable are two different arms.** `_rescan_after_update`
+/// returns early only when `should_allow_plugin_install` said `allowed is
+/// True` (`:840-841`); every other verdict prints the `⚠ Security scan
+/// flagged the updated plugin: {reason}` line and the report (`:843-844`),
+/// and ONLY `scan_result.verdict == "dangerous"` goes on to disable the
+/// plugin (`:845-851`). A `suspicious` verdict therefore leaves the plugin
+/// enabled with a flag against it — which Scarf reported as a flat "Updated"
+/// while it keyed the third state on `has been disabled.`. The warning is
+/// keyed on the FLAGGED line now; the disable line only chooses between the
+/// two wordings.
+///
 /// **Why the success side needed anchoring.** `pluginsUpdateSuccess`'s
 /// `"updated."` was a bare substring over output Hermes does not author — the
 /// raw `git pull` body (`:829`) and the scan report (`:844`). A commit message
@@ -1570,18 +1766,24 @@ public enum HermesPluginsUpdateVerdict {
         if exitCode != 0 || refusal != nil || !succeeded {
             return HermesCLIOutcome(succeeded: false, detail: refusal ?? lines.last)
         }
-        guard let disabled = lines.first(where: {
-            $0.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled)
-        }) else {
+        // The scan verdict is keyed on the FLAGGED line, not on the disable.
+        // `_rescan_after_update` prints `⚠ Security scan flagged the updated
+        // plugin: {reason}` plus the report for EVERY not-allowed verdict
+        // (`plugins_cmd.py:842-844`) and only adds
+        // `Plugin '<name>' has been disabled.` when the verdict is
+        // `dangerous` (`:845-851`). Keying the third state on the disable
+        // reported a flagged-but-still-enabled update as a plain "Updated" —
+        // the user never learned the scan had found anything.
+        let flagged = lines.first { $0.contains(HermesCLIMarkers.pluginsUpdateScanFlagged) }
+        let disabled = lines.first { $0.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled) }
+        guard let reason = flagged ?? disabled else {
             return HermesCLIOutcome(succeeded: true, detail: nil)
         }
-        let reason = lines.first {
-            $0.contains(HermesCLIMarkers.pluginsUpdateScanFlagged)
-        } ?? disabled
-        return HermesCLIOutcome(
-            succeeded: true,
-            detail: nil,
-            warning: String(localized: "Updated, then disabled by the security scan. \(reason)")
-        )
+        // `has been disabled.` selects the wording; the flagged line is the
+        // reason either way.
+        let warning = disabled != nil
+            ? String(localized: "Updated, then disabled by the security scan. \(reason)")
+            : String(localized: "Updated, but the security scan flagged it. \(reason)")
+        return HermesCLIOutcome(succeeded: true, detail: nil, warning: warning)
     }
 }

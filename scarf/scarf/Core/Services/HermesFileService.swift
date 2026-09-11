@@ -2494,6 +2494,20 @@ struct HermesFileService: Sendable {
     /// ``HermesCLIOutcome/warning``, not a failure — so the `pgrep`/`kill`
     /// fallback below is reached only when the CLI genuinely could not stop a
     /// gateway, which is what it was always for.
+    ///
+    /// **The fallback is gated on a POSITIVE failure signal, never on
+    /// `!succeeded`.** `_dispatch_via_service_manager_if_s6`
+    /// (`hermes_cli/gateway.py:5608-5629` @ v2026.9.7) hands `stop` to the s6
+    /// service manager and prints NOTHING on the success path
+    /// (`hermes_cli/service_manager.py:529-566` prints nothing either), so on
+    /// an s6 container host a real stop lands as
+    /// ``HermesCLIOutcome/Confidence/unconfirmed``. Falling through to
+    /// `pgrep` + `kill -TERM` there is actively harmful: `s6-supervise` reads
+    /// a bare SIGTERM as a crash and restarts the gateway ~1s later — Hermes
+    /// says so itself in `_dispatch_all_via_service_manager_if_s6`'s docstring
+    /// (`:5631-5634`). "Could not confirm" leaves the answer to the reload
+    /// every caller already does; only ``HermesCLIOutcome/Confidence/failed``
+    /// — a matched refusal marker, or a non-zero exit — earns the kill.
     @discardableResult
     nonisolated func stopHermes() -> HermesCLIOutcome {
         // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
@@ -2503,6 +2517,9 @@ struct HermesFileService: Sendable {
             verb: .stop, output: result.output, exitCode: result.exitCode
         )
         if outcome.succeeded { return outcome }
+        // No positive failure signal ⇒ we do not know, and we must not guess
+        // with a signal. See the doc above (s6).
+        guard outcome.confidence == .failed else { return outcome }
         // The fallback SIGTERM is a real stop when it lands; when it does not,
         // Hermes's own refusal line is still the better message.
         func fallback(_ ok: Bool) -> HermesCLIOutcome {

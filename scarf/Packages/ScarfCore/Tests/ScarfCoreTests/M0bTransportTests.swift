@@ -241,24 +241,24 @@ import Foundation
         // exe (each token double-quoted by `remotePathArg`, as before).
         let scoped = transport(remoteHome: "~/.hermes/profiles/work")
         #expect(scoped.composedRemoteCommand(executable: "hermes", args: ["profile", "list"])
-            == "HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"profile\" \"list\"")
+            == "COLUMNS=400 HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"profile\" \"list\"")
 
         // Profile-scoped absolute home → single-quoted, inert.
         let docker = transport(remoteHome: "/opt/data/profiles/work")
         #expect(docker.composedRemoteCommand(executable: "hermes", args: ["acp"])
-            == "HERMES_HOME='/opt/data/profiles/work' \"hermes\" \"acp\"")
+            == "COLUMNS=400 HERMES_HOME='/opt/data/profiles/work' \"hermes\" \"acp\"")
 
         // Root/default homes → no assignment (legacy active_profile behavior).
         #expect(transport(remoteHome: "~/.hermes")
-            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "\"hermes\" \"acp\"")
+            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "COLUMNS=400 \"hermes\" \"acp\"")
         #expect(transport(remoteHome: nil)
-            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "\"hermes\" \"acp\"")
+            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "COLUMNS=400 \"hermes\" \"acp\"")
 
         // A project cwd prefixes the SCOPED command — env assignment stays
         // attached to the executable, not swallowed by the `cd`.
         let withCwd = scoped.composedRemoteCommand(
             executable: "hermes", args: ["acp"], cwd: "/srv/Projects/news")
-        #expect(withCwd == "cd \"/srv/Projects/news\"; HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"acp\"")
+        #expect(withCwd == "cd \"/srv/Projects/news\"; COLUMNS=400 HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"acp\"")
 
         // End-to-end: the ACP spawn path (`makeProcess`) carries the scope.
         let proc = scoped.makeProcess(executable: "hermes", args: ["acp"], cwd: nil)
