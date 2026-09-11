@@ -16,7 +16,11 @@ public struct AuxiliaryModel: Sendable, Equatable {
     /// `disabled`) meaning "explicitly disable thinking" as opposed to an
     /// empty string, which means "inherit the provider default". Scarf
     /// stores the raw string and writes it verbatim; validation of the
-    /// allowed set lives in `AuxiliaryReasoningEffort`.
+    /// allowed set is ``HermesReasoningEffort`` — the one vocabulary, whose
+    /// per-level floors are walked on `hasReasoningEffortMax` /
+    /// `hasReasoningEffortUltra`. Empty means "unset — inherit the provider
+    /// default" and is not one of its levels; the picker offers it as a
+    /// separate "Default" row.
     public var reasoningEffort: String
     /// `auxiliary.<task>.max_concurrency` (v0.20.4+) — true-optional cap on
     /// simultaneous calls for this auxiliary task. Currently only
@@ -42,20 +46,6 @@ public struct AuxiliaryModel: Sendable, Equatable {
         self.maxConcurrency = maxConcurrency
     }
     public nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30, reasoningEffort: "", maxConcurrency: nil)
-}
-
-/// Valid `auxiliary.<task>.reasoning_effort` values, source-verified against
-/// `hermes_constants.VALID_REASONING_EFFORTS` + `parse_reasoning_effort`
-/// (hermes-agent HEAD == v2026.8.3 / v0.20.0). `none` is a Scarf-facing
-/// alias for Hermes's disable-thinking sentinel (Hermes also accepts
-/// `false`/`disabled`, but `none` is what `hermes_constants.py`'s docstring
-/// uses and what the picker offers).
-public enum AuxiliaryReasoningEffort: String, CaseIterable, Sendable {
-    case none, minimal, low, medium, high, xhigh, max, ultra
-
-    /// Empty string means "unset — inherit provider default" and is not a
-    /// member of this enum; callers surface it as a separate "Default" row.
-    public static let validRawValues: Set<String> = Set(allCases.map(\.rawValue))
 }
 
 /// Group of display-related settings mirroring the `display:` block in config.yaml.

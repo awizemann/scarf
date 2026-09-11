@@ -42,6 +42,14 @@ struct MainActorSpawnDisciplineP22Tests {
 
     private static func scratchContext() -> ServerContext { .local(home: scratchHome()) }
 
+    /// Repo root, for the source scans below (`…/scarf/scarfTests/x.swift`).
+    private static var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // …/scarfTests
+            .deletingLastPathComponent()   // …/scarf
+            .deletingLastPathComponent()   // repo root
+    }
+
     /// Poll until `condition` holds or `timeout` elapses. Load-independent:
     /// the assertions afterwards are all about WHERE work ran or HOW MANY
     /// times it ran, never how long it took.
@@ -383,6 +391,96 @@ struct MainActorSpawnDisciplineP22Tests {
         let exited = await Task.detached { proc.waitUntilExit(timeout: 10) }.value
         #expect(exited == true)
         #expect(proc.terminationStatus == 3)
+    }
+
+    // MARK: - 6. The sweep: no NEW synchronous wait on the main actor
+
+    /// P37 finding 10. `waitDraining` / `waitUntilExit` are the two
+    /// synchronous waits in this codebase, and both are C10 violations when
+    /// they run on the main actor — `ProcessTimeout`'s cap bounds them, but a
+    /// bounded 20 s block is still 20 s of a frozen window.
+    ///
+    /// The existing tests each prove ONE site is off-main. This one is the
+    /// sweep: it finds every synchronous wait whose enclosing function is
+    /// main-actor-isolated (its type carries a `@MainActor` attribute and the
+    /// function itself is not `nonisolated`) and requires that set to be
+    /// exactly the ONE documented allowance.
+    ///
+    /// `AppRelauncher.relaunch()` is that allowance, and only until
+    /// `t-b15ba4c3` lands: it is a `@MainActor` type doing a bounded 20 s
+    /// `waitDraining` on `open(1)`. It is deliberate rather than overlooked —
+    /// the gesture's whole contract is "this window is about to go away" and
+    /// there is nothing to keep responsive — but it is on the list to move
+    /// off-main, and this test is what stops a SECOND one appearing while it
+    /// is still there.
+    @Test func noNewSynchronousWaitRunsOnTheMainActor() throws {
+        /// File basenames allowed to hold a main-actor-isolated sync wait.
+        /// Adding to this set is the thing this test exists to make hard.
+        let allowed: Set<String> = ["AppRelauncher.swift"]
+
+        let roots = [
+            Self.repoRoot.appendingPathComponent("scarf/scarf"),
+            Self.repoRoot.appendingPathComponent("scarf/Packages/ScarfCore/Sources/ScarfCore"),
+            Self.repoRoot.appendingPathComponent("scarf/Scarf iOS"),
+        ]
+        var offenders: [String] = []
+        var scanned = 0
+
+        for root in roots {
+            let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+            while let url = files?.nextObject() as? URL {
+                guard url.pathExtension == "swift" else { continue }
+                guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                scanned += 1
+                // A type-level `@MainActor` attribute: the whole line, not a
+                // `@MainActor` closure parameter or a mention in prose.
+                let lines = src.components(separatedBy: "\n")
+                let isMainActorFile = lines.contains { $0.trimmingCharacters(in: .whitespaces) == "@MainActor" }
+                guard isMainActorFile else { continue }
+
+                for (index, line) in lines.enumerated() {
+                    guard line.contains("waitDraining(") || line.contains(".waitUntilExit(") else { continue }
+                    // Skip the declaration of the primitive itself.
+                    if line.contains("func waitDraining") || line.contains("func waitUntilExit") { continue }
+                    // Walk back to the enclosing `func` and ask whether it
+                    // opted out of the actor.
+                    var enclosing: String?
+                    var i = index
+                    while i >= 0 {
+                        let candidate = lines[i]
+                        if candidate.contains(" func ") || candidate.hasPrefix("func ") {
+                            enclosing = candidate
+                            break
+                        }
+                        i -= 1
+                    }
+                    let isNonisolated = enclosing?.contains("nonisolated") ?? false
+                    guard !isNonisolated else { continue }
+                    let name = url.lastPathComponent
+                    guard !allowed.contains(name) else { continue }
+                    offenders.append("\(name):\(index + 1) — \(line.trimmingCharacters(in: .whitespaces))")
+                }
+            }
+        }
+
+        #expect(scanned > 100, "the scan found almost no sources — the roots are wrong")
+        #expect(offenders.isEmpty, """
+            A synchronous process wait runs on the main actor (charter C10). \
+            Move it off-main (see `PlatformSetupHelpers.detached`) or, if it \
+            genuinely must block the gesture, add it to `allowed` here with \
+            the reason. \(offenders.joined(separator: "; "))
+            """)
+
+        // The allowance must still be REAL: if `AppRelauncher` is fixed (or
+        // renamed) the entry is dead and should go, so the test asserts the
+        // debt it is covering for actually exists.
+        let relauncher = try String(
+            contentsOf: Self.repoRoot
+                .appendingPathComponent("scarf/scarf/Core/Services/AppRelauncher.swift"),
+            encoding: .utf8)
+        #expect(relauncher.contains("@MainActor"))
+        #expect(relauncher.contains("waitDraining("),
+                "AppRelauncher no longer blocks — drop it from `allowed` (t-b15ba4c3)")
     }
 
     // MARK: - Helpers
