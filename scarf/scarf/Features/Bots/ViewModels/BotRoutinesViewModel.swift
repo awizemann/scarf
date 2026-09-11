@@ -96,6 +96,28 @@ final class BotRoutinesViewModel {
     func resume(_ job: HermesCronJob) { cron.resumeJob(job) }
     func resumeAndRunNow(_ job: HermesCronJob) { cron.resumeAndRunNow(job) }
     func runNow(_ job: HermesCronJob) { cron.runNow(job) }
+
+    /// Round-4 decision 5, the Bots half. A routine Hermes will not
+    /// re-activate gets the same remedy its hint names: an ORDINARY
+    /// `cron create`, pre-filled from the record and edited in the shared
+    /// `CronJobEditor`. It goes through `CronViewModel.createJob` — the same
+    /// builder `createRoutine` uses — so the prefixed name and the delegation
+    /// wrapper in the prompt round-trip verbatim and both clients' Routines
+    /// panes still recognise the copy (`BotRoutinePrefix`).
+    func duplicate(
+        schedule: String, prompt: String, name: String, deliver: String,
+        skills: [String], script: String, repeatCount: String,
+        workdir: String, noAgent: Bool, failureDeliver: String
+    ) {
+        cron.createJob(
+            schedule: schedule, prompt: prompt, name: name, deliver: deliver,
+            skills: skills, script: script, repeatCount: repeatCount,
+            workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
+            onOutcome: { succeeded in
+                Analytics.record(.botRoutineAction(action: .created, outcome: .init(succeeded: succeeded)))
+            }
+        )
+    }
     func delete(_ job: HermesCronJob) {
         cron.deleteJob(job) { succeeded in
             Analytics.record(.botRoutineAction(action: .deleted, outcome: .init(succeeded: succeeded)))

@@ -238,6 +238,32 @@ struct CronView: View {
                 viewModel.editingJob = nil
             }
         }
+        // Round-4 decision 5. The hint on a job Hermes will not re-activate
+        // says "duplicate it", and this is the button that sentence names —
+        // an ORDINARY `cron create` pre-filled from the record, which is the
+        // only door left open: `_reject_terminal_activation` guards
+        // `update_job` (`cron/jobs.py:1941`, `:1965` @ `v2026.9.7`) and
+        // `rearm_oneshot` refuses anything but `once` (`:2065-2066`), but
+        // nothing guards a create.
+        .sheet(item: $viewModel.duplicatingJob) { job in
+            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
+                viewModel.createJob(
+                    schedule: form.schedule,
+                    prompt: form.prompt,
+                    name: form.name,
+                    deliver: form.deliver,
+                    skills: form.skills,
+                    script: form.script,
+                    repeatCount: form.repeatCount,
+                    workdir: hasCronWorkdir ? form.workdir : "",
+                    noAgent: hasCronNoAgent ? form.noAgent : false,
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
+                )
+                viewModel.duplicatingJob = nil
+            } onCancel: {
+                viewModel.duplicatingJob = nil
+            }
+        }
         .confirmationDialog(
             pendingDelete.map { "Delete \($0.name)?" } ?? "",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
@@ -467,6 +493,12 @@ struct CronView: View {
                 // run — disabled exactly as `BotRoutinesView` disables it.
                 .disabled(viewModel.refusesTerminalJobLocally(job))
             Button("Edit") { viewModel.editingJob = job }
+            // Round-4 decision 5: the row menu offers the same remedy the
+            // detail pane's hint names, unconditionally — a `cron create`
+            // pre-filled from the record is accepted for ANY job, terminal
+            // or not, so this one needs no gate.
+            Button("Duplicate…") { viewModel.duplicatingJob = job }
+                .accessibilityIdentifier("cron.contextMenu.duplicate")
             Divider()
             Button("Delete", role: .destructive) { pendingDelete = job }
                 .accessibilityIdentifier("cron.contextMenu.delete")
@@ -574,6 +606,22 @@ struct CronView: View {
         }
     }
 
+    /// The one cron state → badge colour mapping, shared with
+    /// `BotRoutinesView` so the same job's state never renders in two colours
+    /// in two panes. The keys are `effective_job_state`'s own vocabulary
+    /// (`cron/jobs.py:488-503` @ `v2026.9.7`), plus `failed` as an alias the
+    /// routines list already carried.
+    static func badgeKind(for state: String) -> ScarfBadgeKind {
+        switch state {
+        case "scheduled": return .info
+        case "running": return .brand
+        case "completed": return .success
+        case "error", "failed": return .danger
+        case "paused": return .warning
+        default: return .neutral
+        }
+    }
+
     private func detailHeader(_ job: HermesCronJob) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s3) {
             ZStack {
@@ -589,15 +637,22 @@ struct CronView: View {
                     Text(job.name)
                         .scarfStyle(.title2)
                         .foregroundStyle(ScarfColor.foregroundPrimary)
-                    ScarfBadge(job.enabled ? "active" : "paused",
-                               kind: job.enabled ? .success : .neutral)
+                    // `stateDisplay` (= `effectiveState`), never the raw
+                    // `enabled` flag. The raw flag calls a `completed` or
+                    // `error` job "paused" — a state Hermes's own
+                    // `effective_job_state` deliberately refuses to claim
+                    // (`cron/jobs.py:488-503` @ `v2026.9.7`: a terminal state
+                    // is preserved regardless of `enabled`, and an `enabled`
+                    // job is NEVER reported paused). Every other cron surface
+                    // — the list row, the Bots routines list — already reads
+                    // `stateDisplay`; this pane was the last raw read, so it
+                    // was the one place a finished job looked merely paused
+                    // and the Resume button looked like it would work.
+                    ScarfBadge(verbatim: job.stateDisplay, kind: Self.badgeKind(for: job.stateDisplay))
                         // UI gate: the detail pane's rendering of
                         // enabled/paused — the thing a pause journey has
                         // to see change.
                         .accessibilityIdentifier("cron.detail.state")
-                    if job.effectiveState == "running" {
-                        ScarfBadge("running…", kind: .info)
-                    }
                 }
                 Text(CronScheduleFormatter.humanReadable(from: job.schedule))
                     .scarfStyle(.footnote)
@@ -666,6 +721,24 @@ struct CronView: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("cron.detail.recoveryHint")
+            }
+            // Every hint this offer can produce names duplicating as the
+            // remedy (`CronRecoveryOffer.noFutureOccurrencesHint`,
+            // `pastDeadlineOneShotHint`, `errorNeedsNewerHermesHint`), and a
+            // hint that names a remedy has to be walked like a button — so
+            // here is the button. Shown for the dead end, and for the
+            // re-armable one-shot too: `noFutureOccurrencesHint` is not the
+            // only sentence a user can act on, and a duplicate is always
+            // accepted where a re-arm may not be.
+            if offer.isDeadEnd || offer.canRearm {
+                Button {
+                    viewModel.duplicatingJob = job
+                } label: {
+                    Label("Duplicate", systemImage: "plus.square.on.square")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+                .help("Create a new job pre-filled from this one — the only thing Hermes accepts for a job it won't re-activate.")
+                .accessibilityIdentifier("cron.detail.duplicate")
             }
 
             Button {
@@ -1317,6 +1390,22 @@ struct CronJobEditor: View {
     enum Mode {
         case create
         case edit(HermesCronJob)
+        /// Round-4 decision 5. An ORDINARY create, pre-filled from an
+        /// existing record — the only door Hermes leaves open for a job it
+        /// refuses to re-activate. Not an edit: it runs `cron create`, so
+        /// none of `_reject_terminal_activation`'s guards
+        /// (`cron/jobs.py:1865-1878`, armed at `:1941`/`:1965` @ `v2026.9.7`)
+        /// are on its path, and every flag it fills was walked at
+        /// `hermes_cli/subcommands/cron.py:25-65` for `cron create`.
+        case duplicate(HermesCronJob)
+
+        /// The record this mode is seeded from, if any.
+        var seed: HermesCronJob? {
+            switch self {
+            case .create: return nil
+            case .edit(let job), .duplicate(let job): return job
+            }
+        }
     }
 
     struct FormState {
@@ -1508,6 +1597,23 @@ struct CronJobEditor: View {
                 .opacity(form.noAgent ? 0.4 : 1.0)
                 .disabled(form.noAgent)
             }
+            // What a duplicate CANNOT carry. This form has no field for
+            // `--model`/`--provider`/`--reasoning-effort`/`--monitor-script`/
+            // `--monitor-url`/`--continuity`, so a record holding any of them
+            // produces a copy that behaves differently — most sharply a
+            // monitor job, which without its source runs the agent on every
+            // tick. Naming them is the honest alternative to widening the
+            // form; see `HermesCronJob.settingsACreateFormCannotCarry`.
+            if case .duplicate(let job) = mode {
+                let dropped = job.settingsACreateFormCannotCarry
+                if !dropped.isEmpty {
+                    Text("This copy won't carry: \(dropped.joined(separator: ", ")). Set those with `hermes cron edit` on the host.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("cron.editor.duplicateGaps")
+                }
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { onCancel() }
@@ -1522,8 +1628,12 @@ struct CronJobEditor: View {
         .frame(minWidth: 580, minHeight: 580)
         .background(ScarfColor.backgroundPrimary)
         .onAppear {
-            if case .edit(let job) = mode {
-                isEditMode = true
+            // `.duplicate` seeds the SAME fields as `.edit` — that is what
+            // "pre-filled from the record" means — but stays a create, so
+            // `isEditMode` (which only gates the edit-only "Clear all skills
+            // on save" toggle) stays false.
+            if let job = mode.seed {
+                if case .edit = mode { isEditMode = true }
                 form.name = job.name
                 // `editValue`, never `display`: a one-shot's display label
                 // ("once at 2026-02-03 14:00") is not a schedule Hermes can
@@ -1565,6 +1675,7 @@ struct CronJobEditor: View {
         switch mode {
         case .create: return Text("Create Cron Job")
         case .edit(let job): return Text("Edit \(job.name)")
+        case .duplicate(let job): return Text("Duplicate \(job.name)")
         }
     }
 

@@ -13,6 +13,23 @@ struct BotRoutinesView: View {
 
     @State private var showCreate = false
     @State private var pendingDelete: HermesCronJob?
+    /// Round-4 decision 5 — the routine the Duplicate sheet is pre-filled
+    /// from. The sheet is the full `CronJobEditor` in `.duplicate` mode, not
+    /// the minimal `CreateRoutineSheet`: a duplicate must round-trip the
+    /// record's STORED prompt (already carrying the delegation wrapper) and
+    /// its `[bot:<name>] ` prefix verbatim, and the minimal sheet's fields are
+    /// the pre-wrapper title/instruction.
+    @State private var duplicating: HermesCronJob?
+
+    /// Same flags `CronView` mirrors onto the shared editor, read from the
+    /// same store — otherwise a duplicate raised from this pane could emit a
+    /// flag the host's argparse doesn't know and fail the whole create (C1).
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    private var hasCronWorkdir: Bool { capabilitiesStore?.capabilities.hasCronWorkdir ?? false }
+    private var hasCronNoAgent: Bool { capabilitiesStore?.capabilities.hasCronNoAgent ?? false }
+    private var hasCronDeliverAll: Bool { capabilitiesStore?.capabilities.hasCronDeliverAll ?? false }
+    private var hasCronFailureDeliver: Bool { capabilitiesStore?.capabilities.hasCronFailureDeliver ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
@@ -83,6 +100,29 @@ struct BotRoutinesView: View {
             }
         }
         .onAppear { viewModel.load() }
+        .sheet(item: $duplicating) { job in
+            CronJobEditor(
+                mode: .duplicate(job),
+                availableSkills: [],
+                supportsWorkdir: hasCronWorkdir,
+                supportsNoAgent: hasCronNoAgent,
+                supportsDeliverAll: hasCronDeliverAll,
+                supportsBotChatDelivery: hasCronBotChatDelivery,
+                supportsFailureDeliver: hasCronFailureDeliver
+            ) { form in
+                viewModel.duplicate(
+                    schedule: form.schedule, prompt: form.prompt, name: form.name,
+                    deliver: form.deliver, skills: form.skills, script: form.script,
+                    repeatCount: form.repeatCount,
+                    workdir: hasCronWorkdir ? form.workdir : "",
+                    noAgent: hasCronNoAgent ? form.noAgent : false,
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
+                )
+                duplicating = nil
+            } onCancel: {
+                duplicating = nil
+            }
+        }
         .sheet(isPresented: $showCreate) {
             CreateRoutineSheet(
                 botName: viewModel.botName,
@@ -150,6 +190,14 @@ struct BotRoutinesView: View {
                         .frame(maxWidth: 200, alignment: .trailing)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // The hint says "duplicate it"; this is that button. Same
+                // condition as `CronView`'s detail pane, so the two panes
+                // cannot offer a routine different remedies.
+                if offer.isDeadEnd || offer.canRearm {
+                    Button("Duplicate") { duplicating = job }
+                        .buttonStyle(ScarfGhostButton())
+                        .accessibilityLabel("Duplicate \(routineTitle(job))")
+                }
                 Button("Run Now") { viewModel.runNow(job) }
                     .buttonStyle(ScarfGhostButton())
                     .disabled(viewModel.refusesTerminalJobLocally(job))
@@ -178,15 +226,10 @@ struct BotRoutinesView: View {
         return job.name
     }
 
+    /// Delegated, not re-derived: `CronView` renders the same states in the
+    /// detail pane and the list, and two copies of a colour map drift.
     private func badgeKind(for state: String) -> ScarfBadgeKind {
-        switch state {
-        case "scheduled": return .info
-        case "running": return .brand
-        case "completed": return .success
-        case "error", "failed": return .danger
-        case "paused": return .warning
-        default: return .neutral
-        }
+        CronView.badgeKind(for: state)
     }
 }
 
