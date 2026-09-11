@@ -954,23 +954,29 @@ public final class RichChatViewModel {
             .union(projectNames)
             .union(globalNames)
             .union(Set(quicks.map(\.name)))
-        // Capability gate: `/queue` is a v0.13+ surface; hide it when the
-        // connected host is older. `/steer` is surfaced unconditionally —
-        // it works on v0.11+ during an active turn; idle-session greying
-        // for pre-v0.13 hosts is the input bar's concern (it reads
-        // `hasACPSteerOnIdle`). `/goal` and `/subgoal` are deliberately
-        // NOT in `nonInterruptiveCommands` (gateway-only, not advertised
+        // Capability gate: BOTH non-interruptive rows are v0.13 ACP
+        // surfaces — `steer` and `queue` are adjacent lines in the
+        // adapter's command dict and arrived at the same tag
+        // (`acp_adapter/server.py:170`/`:171` @ `v2026.5.7`, neither present
+        // at `v2026.4.30`). `/steer` used to fall through this switch's
+        // `default: return true` on the strength of a CLI/TUI-era "works on
+        // v0.11+" note, so a pre-v0.13 host was offered a name its adapter
+        // has never dispatched — and over ACP that is not an error:
+        // `_handle_slash_command` returns `None` and the text goes to the
+        // LLM, burning a turn (P34's lesson, applied to the row it missed).
+        //
+        // What stays unchanged: on a host AT or above the floor `/steer` is
+        // surfaced even with no session (P2 of the projects-feature fix —
+        // `disabledSlashCommandNames` greys it with an "Available once a
+        // chat is open" tooltip instead of hiding it, so a fresh launch does
+        // not show an empty menu), and `hasACPSteerOnIdle` still governs the
+        // active-session-but-idle greying downstream. `/goal` and `/subgoal`
+        // are NOT in `nonInterruptiveCommands` (gateway-only, not advertised
         // by the ACP adapter), so they never reach this filter.
         let supported: [HermesSlashCommand] = Self.nonInterruptiveCommands.filter { cmd in
             switch cmd.name {
             case "queue":   return capabilitiesGate.hasACPQueue
-            // P2 of the projects-feature fix: /steer used to be filtered
-            // out pre-session, which made the menu look empty on fresh
-            // app launches. Now it stays visible and `disabledSlash-
-            // CommandNames` greys it (with a "Available once a chat is
-            // open" tooltip) when sessionId is nil — same treatment as
-            // the other agent-side commands. v0.13's hasACPSteerOnIdle
-            // still controls the active-session-but-idle case downstream.
+            case "steer":   return capabilitiesGate.hasACPSteer
             default:        return true
             }
         }
@@ -1346,15 +1352,18 @@ public final class RichChatViewModel {
     ///
     /// Two grey-out conditions:
     /// - **No active session** (P2 of the projects-feature fix): every
-    ///   agent-side command (`/clear`, the version-appropriate
+    ///   agent-side command (the version-appropriate
     ///   `/compact`-or-`/compress`, `/help /model /tools /context
     ///   /reset /version`, plus non-interruptive `/steer /queue`) needs a
     ///   live ACP session to do anything.
     ///   Surfacing them greyed gives the user a visible "what's
     ///   coming once you open a chat" instead of an empty menu.
-    /// - **Pre-v0.13 idle session**: `/steer` silently no-ops on
-    ///   pre-v0.13 hosts when the agent isn't mid-turn, so we grey it
-    ///   in that specific window even when a session is active.
+    /// - **Pre-v0.13 idle session**: on a pre-v0.13 host `/steer` needs a
+    ///   turn in flight to inject into (the idle fallback arrived with the
+    ///   command's own tag, `acp_adapter/server.py:812-820` @ `v2026.5.7`),
+    ///   so we grey it in that specific window even when a session is
+    ///   active. Reachable only via an ADVERTISED `steer` — since P37 the
+    ///   fallback roster hides the row entirely below `hasACPSteer`.
     public static func disabledSlashCommandNames(
         isAgentWorking: Bool,
         hasActiveSession: Bool,

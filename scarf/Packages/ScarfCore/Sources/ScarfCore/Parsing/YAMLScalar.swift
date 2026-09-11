@@ -223,12 +223,15 @@ public enum YAMLScalar {
             case "\"": out += "\\\""
             case "\n": out += "\\n"
             case "\r": out += "\\r"
+            case "\t": out += "\\t"
             default:
                 // A raw control character makes PyYAML's reader refuse the
                 // whole document, so it is escaped here rather than passed
-                // through. Tab is left raw: it is legal inside a
-                // double-quoted scalar and every reader Scarf has decodes a
-                // literal tab without help.
+                // through. A TAB has a dedicated YAML escape and takes it
+                // (the `< 0x20` arm below would otherwise spell it `\x09`,
+                // which is legal but reads as a mystery byte in a
+                // hand-inspected config.yaml); every other C0/C1 control
+                // has no mnemonic and goes out as `\xNN` / `\uNNNN`.
                 if scalar.value < 0x20 || scalar.value == 0x7F {
                     out += String(format: "\\x%02x", scalar.value)
                 } else if (scalar.value >= 0x80 && scalar.value <= 0x9F)
@@ -240,6 +243,88 @@ public enum YAMLScalar {
             }
         }
         return out + "\""
+    }
+
+    // MARK: - The one decoder
+
+    /// The inverse of ``quoteIfNeeded(_:)`` / ``singleQuoted(_:)`` /
+    /// ``doubleQuoted(_:)`` — decode one flow scalar the way PyYAML does.
+    ///
+    /// **Why it lives here.** P19's rule is that a quote-escaping writer
+    /// needs its reader un-escaping in the same place, and P32 proved the
+    /// cost of forgetting: `ProfileRoutesWriter` moved onto
+    /// ``quoteIfNeeded(_:)`` (which escapes `\\`, `\n`, `\xNN`) while its
+    /// reader still went through `HermesYAML.stripYAMLQuotes`, which hands a
+    /// double-quoted BODY back verbatim — so a route name containing a
+    /// backslash came back doubled and grew one `\` per save. This is the
+    /// single decoder every Scarf-written scalar is read back through;
+    /// `HermesFileService.unquote` and `HermesBotProfileYAML.unquote` are
+    /// thin forwarders over it, so there is one escape table, not three.
+    ///
+    /// `HermesYAML.stripYAMLQuotes` is deliberately NOT folded in: it reads
+    /// arbitrary HERMES-written config.yaml values, where widening the rule
+    /// would change the meaning of every unrelated `\` in the file. This
+    /// decoder is for the blocks Scarf both reads AND writes.
+    ///
+    /// Anything that is not a quoted flow scalar comes back unchanged. An
+    /// escape Scarf never emits — and a malformed `\xNN` / `\uNNNN`, whose
+    /// body must be hex DIGITS (`UInt32("+9", radix: 16)` is 9, so a signed
+    /// body would otherwise decode to a tab) — is passed through verbatim
+    /// rather than half-decoded.
+    public static func unquote(_ raw: String) -> String {
+        guard raw.count >= 2 else { return raw }
+        if raw.first == "'" && raw.last == "'" {
+            // Single-quoted YAML has exactly one escape: `''` is a quote.
+            return String(raw.dropFirst().dropLast())
+                .replacingOccurrences(of: "''", with: "'")
+        }
+        guard raw.first == "\"" && raw.last == "\"" else { return raw }
+        let body = Array(raw.dropFirst().dropLast())
+        var out = ""
+        var i = 0
+        /// `count` hex digits at `i`, or `nil` (leaving `i` put) when the
+        /// run is short, not all hex digits, or not a Unicode scalar.
+        func hex(_ count: Int) -> String? {
+            guard i + count <= body.count else { return nil }
+            let digits = String(body[i..<(i + count)])
+            guard digits.allSatisfy(\.isHexDigit),
+                  let value = UInt32(digits, radix: 16),
+                  let scalar = Unicode.Scalar(value) else { return nil }
+            i += count
+            return String(Character(scalar))
+        }
+        while i < body.count {
+            let c = body[i]
+            i += 1
+            guard c == "\\" else { out.append(c); continue }
+            // A trailing lone backslash is emitted as itself.
+            guard i < body.count else { out.append("\\"); break }
+            let esc = body[i]
+            i += 1
+            switch esc {
+            case "n": out.append("\n")
+            case "r": out.append("\r")
+            case "t": out.append("\t")
+            case "0": out.append("\0")
+            case "a": out.append("\u{07}")
+            case "b": out.append("\u{08}")
+            case "f": out.append("\u{0C}")
+            case "v": out.append("\u{0B}")
+            case "e": out.append("\u{1B}")
+            case "\\": out.append("\\")
+            case "\"": out.append("\"")
+            case "/": out.append("/")
+            case "x": out.append(hex(2) ?? "\\x")
+            case "u": out.append(hex(4) ?? "\\u")
+            case "U": out.append(hex(8) ?? "\\U")
+            default:
+                // Not one of ours: keep the bytes as written. PyYAML would
+                // RAISE here, so a Hermes-written file cannot reach it.
+                out.append("\\")
+                out.append(esc)
+            }
+        }
+        return out
     }
 
     // MARK: - Implicit resolvers

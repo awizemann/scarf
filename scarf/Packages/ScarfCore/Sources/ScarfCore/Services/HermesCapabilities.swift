@@ -190,11 +190,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// to run after the current turn completes without interrupting.
     public var hasACPQueue: Bool { atLeastSemver(0, 13, 0) }
 
-    /// `/steer` runs as a regular prompt on idle ACP sessions (v0.13+). Pre-
-    /// v0.13 hosts silently no-op `/steer` when no turn is in flight; with
-    /// this flag on, Scarf can surface `/steer` even when the agent isn't
-    /// mid-turn without confusing UX.
-    public var hasACPSteerOnIdle: Bool { atLeastSemver(0, 13, 0) }
+    /// `/steer` EXISTS as an ACP slash command (v0.13+).
+    ///
+    /// Walked, not asserted: `steer` first appears at **v2026.5.7** (0.13.0)
+    /// in `acp_adapter/server.py:170`, on the line above `queue` (`:171`) —
+    /// the two arrived together — and `acp_adapter/` at **v2026.4.30**
+    /// (0.12.x) has no `steer` anywhere. Below the floor the composer's
+    /// `/steer` row was a dead name: over ACP an unknown command is not an
+    /// error, `_handle_slash_command` returns `None` and the text falls
+    /// through to the LLM (`acp_adapter/commands.py:88-95` @ `v2026.9.7`),
+    /// so the row silently burned a turn (P34's finding, one row late).
+    public var hasACPSteer: Bool { atLeastSemver(0, 13, 0) }
+
+    /// `/steer` runs as a regular prompt on an IDLE ACP session, rather than
+    /// needing a turn in flight to inject into
+    /// (`acp_adapter/server.py:812-820` @ `v2026.5.7`).
+    ///
+    /// Same floor as ``hasACPSteer`` and deliberately expressed as it: the
+    /// idle handling shipped in the same commit as the command, so there is
+    /// no host that has `/steer` without it. (The old doc here claimed
+    /// pre-v0.13 hosts "silently no-op `/steer` when no turn is in flight" —
+    /// a CLI/TUI fact, not an ACP one: pre-v0.13 hosts have no `/steer` at
+    /// all. C2.)
+    public var hasACPSteerOnIdle: Bool { hasACPSteer }
 
     /// Kanban v0.13 reliability surface, as it actually exists at v2026.9.7:
     /// the `kanban diagnostics [--json]` subcommand over the rule engine
@@ -1344,10 +1362,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `_reject_terminal_activation` gained its `and not
     /// _is_recoverable_error_job(job)` arm at `v2026.8.31`
     /// (`pyproject.toml version = "0.21.0"`, `cron/jobs.py:2583-2595` and
-    /// `:2684-2696`); the predicate itself is defined there at `:504-522` and
+    /// `:2684-2696`); the predicate itself is defined there at `:664-692` and
     /// is absent from every earlier tag. At `v2026.8.27` (0.20.6) the same
     /// block reads `is_terminal_job(job) and (…)` with no exemption
-    /// (`:2272-2278`, `:2369-2375`), so a resume of an error-state cron or
+    /// (`:2270-2278`, `:2367-2375`), so a resume of an error-state cron or
     /// interval job raises "Cannot activate terminal cron job …" and
     /// `cron_resume` returns 1.
     ///

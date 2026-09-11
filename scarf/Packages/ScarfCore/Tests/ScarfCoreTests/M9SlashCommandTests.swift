@@ -287,14 +287,20 @@ import Foundation
         #expect(names.contains("queue"))
     }
 
+    /// P37 finding 2: this test used to ASSERT the bug
+    /// (`availableCommandsExposesSteerButHidesV013OnV012` expected `steer` on
+    /// a v0.12 host). `steer` and `queue` are adjacent lines in the ACP
+    /// adapter's command dict and arrived at the same tag
+    /// (`acp_adapter/server.py:170`/`:171` @ `v2026.5.7`); `acp_adapter/` at
+    /// `v2026.4.30` has neither. Both rows are hidden below the floor.
     @MainActor
-    @Test func availableCommandsExposesSteerButHidesV013OnV012() {
+    @Test func availableCommandsHidesBothSteerAndQueueOnV012() {
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("scratch-session")
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.12.0 (2026.4.30)")
         vm.publishCapabilities(caps)
         let names = vm.availableCommands.map(\.name)
-        #expect(names.contains("steer"))
+        #expect(!names.contains("steer"))
         #expect(!names.contains("queue"))
     }
 

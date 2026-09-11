@@ -52,6 +52,9 @@ public enum HermesYAML {
         var values: [String: String] = [:]
         var lists: [String: [String]] = [:]
         var maps: [String: [String: String]] = [:]
+        /// Section headers already opened once, so the last-wins purge below
+        /// can tell a genuine duplicate block from a first opening.
+        var openedPaths: Set<String> = []
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
         // Indent of the most recent scalar `key: value` line at the current
@@ -214,16 +217,26 @@ public enum HermesYAML {
                 // rendered a value Hermes does not have. Purge the earlier
                 // block's descendants (`values` and `maps` as well as
                 // `lists`) as the second one opens.
-                lists.removeValue(forKey: path)
-                let staleDescendant = path + "."
-                for key in values.keys where key.hasPrefix(staleDescendant) {
-                    values.removeValue(forKey: key)
-                }
-                for key in maps.keys where key.hasPrefix(staleDescendant) {
-                    maps.removeValue(forKey: key)
-                }
-                for key in lists.keys where key.hasPrefix(staleDescendant) {
-                    lists.removeValue(forKey: key)
+                //
+                // P37: only on a RE-OPENED path, which `openedPaths` decides
+                // — the purge used to run on EVERY header, and the comment
+                // said it was a no-op on a fresh one. It was not: a flat
+                // dotted key (`gateway.enabled: true`, which PyYAML keeps as
+                // a key of its own ALONGSIDE a `gateway:` mapping) matches
+                // the `gateway.` descendant prefix, so the FIRST opening of
+                // `gateway:` deleted it.
+                if !openedPaths.insert(path).inserted {
+                    lists.removeValue(forKey: path)
+                    let staleDescendant = path + "."
+                    for key in values.keys where key.hasPrefix(staleDescendant) {
+                        values.removeValue(forKey: key)
+                    }
+                    for key in maps.keys where key.hasPrefix(staleDescendant) {
+                        maps.removeValue(forKey: key)
+                    }
+                    for key in lists.keys where key.hasPrefix(staleDescendant) {
+                        lists.removeValue(forKey: key)
+                    }
                 }
                 stack.append((indent: indent, name: key))
                 lastScalarIndent = nil

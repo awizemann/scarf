@@ -746,56 +746,15 @@ public enum HermesBotProfileYAML {
     /// The inverse of ``YAMLScalar/quoteIfNeeded(_:)`` — decode a flow
     /// scalar the way PyYAML does.
     ///
-    /// Kept local to this type rather than folded into
-    /// `unquote` (which every other parser shares and
-    /// which only strips the outer pair): `hermes-bots` is the one block
-    /// Scarf both reads AND writes, so it is the one block that has to
-    /// round-trip escapes exactly, and widening the shared helper would
-    /// change the meaning of every unrelated `\` in a Hermes config.
+    /// P37: this WAS a local copy of the escape table, kept out of the
+    /// shared helper because `HermesYAML.stripYAMLQuotes` (which every other
+    /// parser shares) only strips the outer pair and widening it would
+    /// change the meaning of every unrelated `\` in a Hermes config. That
+    /// reasoning stands for `stripYAMLQuotes`; the copy does not. The table
+    /// now lives once, on ``YAMLScalar/unquote(_:)``, beside the writers it
+    /// reverses — `hermes-bots` and `profile_routes` are the blocks Scarf
+    /// both reads AND writes, and they read through the same function.
     static func unquote(_ raw: String) -> String {
-        guard raw.count >= 2 else { return raw }
-        if raw.first == "'" && raw.last == "'" {
-            return String(raw.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
-        }
-        guard raw.first == "\"" && raw.last == "\"" else { return raw }
-        var out = ""
-        var it = Array(raw.dropFirst().dropLast())
-        var i = 0
-        func hex(_ count: Int) -> String? {
-            guard i + count <= it.count else { return nil }
-            let digits = String(it[i..<(i + count)])
-            guard digits.allSatisfy(\.isHexDigit),
-                  let value = UInt32(digits, radix: 16),
-                  let scalar = Unicode.Scalar(value) else { return nil }
-            i += count
-            return String(Character(scalar))
-        }
-        while i < it.count {
-            let c = it[i]
-            i += 1
-            guard c == "\\", i < it.count else { out.append(c); continue }
-            let esc = it[i]
-            i += 1
-            switch esc {
-            case "n": out.append("\n")
-            case "r": out.append("\r")
-            case "t": out.append("\t")
-            case "0": out.append("\0")
-            case "a": out.append("\u{07}")
-            case "b": out.append("\u{08}")
-            case "f": out.append("\u{0C}")
-            case "v": out.append("\u{0B}")
-            case "e": out.append("\u{1B}")
-            case "\\": out.append("\\")
-            case "\"": out.append("\"")
-            case "/": out.append("/")
-            case "x": out.append(hex(2) ?? "\\x")
-            case "u": out.append(hex(4) ?? "\\u")
-            case "U": out.append(hex(8) ?? "\\U")
-            default: out.append(esc)
-            }
-        }
-        it = []
-        return out
+        YAMLScalar.unquote(raw)
     }
 }
