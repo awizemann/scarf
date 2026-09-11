@@ -99386,6 +99386,47 @@
         }
       }
     },
+    "This Hermes has no /%@ — sent as an ordinary prompt." : {
+      "comment" : "Transient chat notice after the user typed /steer or /queue on a Hermes whose ACP adapter has neither command, so the text went to the model as an ordinary prompt. %@ is the command name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Hermes kennt kein /%@ — als normaler Prompt gesendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes no tiene /%@: se envió como un prompt normal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce Hermes n’a pas de /%@ — envoyé comme une invite ordinaire."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes には /%@ がありません。通常のプロンプトとして送信しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes não tem /%@ — enviado como um prompt comum."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 没有 /%@ — 已作为普通提示发送。"
+          }
+        }
+      }
+    },
     "this host" : {
       "localizations" : {
         "de" : {
@@ -113229,6 +113270,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "经 Scarf 加上引号后，“%@”作为 config.yaml 的键过长，Hermes 无法读取。Hermes 会忽略整个文件。请缩短后再添加。"
+          }
+        }
+      }
+    },
+    "“%@” isn’t supported on this Hermes — it ignores the value and uses the model provider’s own default." : {
+      "comment" : "Shown under a reasoning-effort picker when the level stored in config.yaml is above this host's supported set. %@ is the stored level, e.g. ultra.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wird von diesem Hermes nicht unterstützt — es ignoriert den Wert und verwendet die Standardeinstellung des Modellanbieters."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» no es compatible con este Hermes: ignora el valor y usa el valor predeterminado del proveedor del modelo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » n’est pas pris en charge par ce Hermes — il ignore la valeur et utilise la valeur par défaut du fournisseur du modèle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は「%@」に対応していません。値は無視され、モデルプロバイダーの既定値が使われます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” não é compatível com este Hermes — ele ignora o valor e usa o padrão do provedor do modelo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 不支持“%@” — 它会忽略该值并使用模型提供方的默认设置。"
           }
         }
       }
