@@ -2794,8 +2794,11 @@ struct HermesFileService: Sendable {
         let trimmedProvider = provider.trimmingCharacters(in: .whitespaces)
         guard !trimmedProvider.isEmpty else { return false }
 
-        let providerResult = runHermesCLI(args: ["config", "set", "model.provider", trimmedProvider], timeout: 30)
-        guard providerResult.exitCode == 0 else {
+        // P39: output-judged, like every other `config set` Scarf shells —
+        // the managed-install arm exits 0 (`hermes_cli/config.py:3450-3452`).
+        let providerResult = runHermesCLI(
+            args: HermesConfigSet.argv(key: "model.provider", value: trimmedProvider), timeout: 30)
+        guard HermesConfigSet.judge(output: providerResult.output, exitCode: providerResult.exitCode).succeeded else {
             Self.logger.warning("hermes config set model.provider failed: \(providerResult.output, privacy: .public)")
             return false
         }
@@ -2806,8 +2809,9 @@ struct HermesFileService: Sendable {
         // catch again on the next start.
         guard !trimmedModel.isEmpty else { return true }
 
-        let modelResult = runHermesCLI(args: ["config", "set", "model.default", trimmedModel], timeout: 30)
-        guard modelResult.exitCode == 0 else {
+        let modelResult = runHermesCLI(
+            args: HermesConfigSet.argv(key: "model.default", value: trimmedModel), timeout: 30)
+        guard HermesConfigSet.judge(output: modelResult.output, exitCode: modelResult.exitCode).succeeded else {
             Self.logger.warning("hermes config set model.default failed: \(modelResult.output, privacy: .public)")
             return false
         }
@@ -2826,10 +2830,13 @@ struct HermesFileService: Sendable {
     nonisolated func applyModelConfigPlan(_ operations: [LocalModelConfigPlan.Operation]) -> Bool {
         for operation in operations {
             let result = runHermesCLI(args: operation.cliArguments, timeout: 30)
-            guard result.exitCode == 0 else {
+            // P39: output-judged (`HermesConfigSet`) — the managed-install arm
+            // of `set_config_value` exits 0, and a model plan that "succeeded"
+            // against an untouched config.yaml is exactly the silent reroute
+            // this plan's ordering exists to prevent.
+            guard HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded else {
                 // Log key only — a .set(model.api_key, …) value is a secret.
-                let key = operation.cliArguments.count > 2 ? operation.cliArguments[2] : "?"
-                Self.logger.warning("hermes config set \(key, privacy: .public) failed (exit \(result.exitCode)): \(result.output, privacy: .public)")
+                Self.logger.warning("hermes config set \(operation.key, privacy: .public) failed (exit \(result.exitCode)): \(result.output, privacy: .public)")
                 return false
             }
         }

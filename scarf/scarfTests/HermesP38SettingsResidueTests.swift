@@ -70,7 +70,7 @@ struct HermesP38ClearRowNoOpTests {
         vmPresent.setAuxiliaryMaxConcurrency("compression", value: nil, stored: 4,
                                             capabilities: v0211)
         await Self.settle(present)
-        #expect(present.calls == [["config", "unset", "auxiliary.compression.max_concurrency"]])
+        #expect(present.calls == [["config", "unset", "--", "auxiliary.compression.max_concurrency"]])
     }
 
     /// The guard must not swallow a real clear.
@@ -82,7 +82,7 @@ struct HermesP38ClearRowNoOpTests {
             stored(vm)
             act(vm, v0211)
             await Self.settle(log)
-            #expect(log.calls == [["config", "unset", key]], "\(key): the real clear was swallowed")
+            #expect(log.calls == [["config", "unset", "--", key]], "\(key): the real clear was swallowed")
         }
     }
 }

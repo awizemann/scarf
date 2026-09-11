@@ -101,8 +101,15 @@ enum PlatformSetupHelpers {
             // from `_CONFIG_SUBCOMMANDS`) — there is no batch form, so the
             // loop stays one spawn per key. It is the whole reason this
             // function must not run on the main actor.
-            let result = run(["config", "set", key, value], configSetTimeout)
-            if result.exitCode != 0 {
+            //
+            // P39: judged by OUTPUT, not the exit code. `set_config_value`'s
+            // managed-install arm prints to stderr and `return`s
+            // (`hermes_cli/config.py:3450-3452` @ v2026.9.7), which Python
+            // exits 0 — so all fifteen platform-setup forms banner'd
+            // "Saved — restart gateway to apply" over a config.yaml the host
+            // never wrote. Same `HermesConfigSet` judge Settings uses.
+            let result = run(HermesConfigSet.argv(key: key, value: value), configSetTimeout)
+            if !HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded {
                 configFailures.append(key)
                 logger.warning("hermes config set \(key) failed: \(result.output)")
             }

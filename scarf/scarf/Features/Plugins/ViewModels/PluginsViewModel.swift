@@ -394,7 +394,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
             ["plugins", "disable", "--", plugin.name],
             success: "Disabled",
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
-            failureMarkers: HermesCLIMarkers.pluginsDisableFailure
+            failureMarkers: HermesCLIMarkers.pluginsDisableFailure,
+            // P39: `cmd_disable` writes config.yaml through `save_config`
+            // (`hermes_cli/plugins_cmd.py:115-120`), whose managed-install arm
+            // prints to stderr and RETURNS (`hermes_cli/config.py:2316-2318`,
+            // exit 0) — and `:1196-1198` then prints `⊘ Plugin … disabled.`
+            // anyway. Both markers in one run, so the refusal has to win, the
+            // same shape `enable` already had for the consent screen.
+            failureWins: true
         )
     }
 

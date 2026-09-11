@@ -113,11 +113,13 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
             // `hermes config set` is a process spawn — an SSH exec channel on
             // a remote host. Detached, matching `load()` right above.
             let result = await Task.detached {
-                ctx.runHermes(["config", "set", "display.personality", name])
+                ctx.runHermes(HermesConfigSet.argv(key: "display.personality", value: name))
             }.value
             guard let self else { return }
             self.isSaving = false
-            if result.exitCode == 0 {
+            // P39: output-judged — `set_config_value`'s managed-install arm
+            // exits 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7).
+            if HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded {
                 self.activeName = name
                 self.showSuccess(String(localized: "Active personality set to \(name)"))
             } else {

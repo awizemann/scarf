@@ -235,6 +235,20 @@ final class BotAgentViewModel {
     /// issued blind against a file Scarf never read.
     var canEditConfig: Bool { hasBotMode && (config?.isTrustworthy ?? false) }
 
+    /// Clearing a pin shells `hermes config unset`, which arrives at
+    /// **v0.19.0** (`v2026.7.20`). P39 (round-4 decision 11) put the floor on
+    /// the surface as well as inside `BotAgentConfigService.unsetValue`, so a
+    /// host below it does not offer a button whose only outcome is
+    /// `BotsError.unsupported` (charter C5).
+    ///
+    /// Today the extra term is **moot**: Bot Mode's own floor is v0.20.3, so
+    /// `canEditConfig` already implies `hasConfigUnset`. It is written out
+    /// because the two floors are independent facts about Hermes and a future
+    /// move of either must not silently open this door —
+    /// `BotAgentUnsetP39Tests` pins the implication so the day it stops
+    /// holding is a test failure, not a refusal the user discovers.
+    var canClearModelPin: Bool { canEditConfig && capabilities.hasConfigUnset }
+
     var isPinned: Bool {
         if case .pinned = modelPinState { return true }
         return false
@@ -365,10 +379,13 @@ final class BotAgentViewModel {
     /// Drop both model keys — back to **Hermes' built-in default**, not to the
     /// root profile's model, which this bot never inherited.
     func clearModelPin() {
+        guard canClearModelPin else { return }
         perform(pin: true) { backend, name in
             // `config unset` exits non-zero with "Config key not set" for a
             // key that was never pinned, which is a success here — P0 returns
             // those rather than throwing, and the reload below is the truth.
+            // Every OTHER refusal — including the managed-install one, which
+            // arrives at exit 0 — is reported (P39; see `isBenignUnset`).
             let results = try backend.clearModelPin(forProfile: name)
             return results.filter { !Self.isBenignUnset($0) }
         }
@@ -376,16 +393,34 @@ final class BotAgentViewModel {
 
     /// `hermes config unset` on an unpinned key. Not a failure to report.
     ///
-    /// Matches the CLI's exact stderr shape — `"Config key not set: {key}"`
-    /// (`hermes_cli/config.py:6009,6041,6059`) — rather than the bare
-    /// substring `"not set"`, which also appears in unrelated display
-    /// placeholders like `"(not set)"` used for masked/empty values
-    /// elsewhere in the same file; a broad match there could swallow a real
-    /// failure whose text happened to echo one of those placeholders.
+    /// P39 (round-4 decision 11) rewrote this. It used to open with
+    /// `guard result.exitCode != 0 else { return true }` — i.e. **exit 0 is
+    /// always benign** — which is precisely the hole `unset_config_value`'s
+    /// managed-install arm falls through: `if is_managed():
+    /// managed_error("unset configuration values"); return`
+    /// (`hermes_cli/config.py:3549-3551` @ v2026.9.7), printing to stderr and
+    /// bare-`return`ing, which Python exits **0**. A managed host refused both
+    /// clears and the Clear button reported success over an untouched pin.
+    ///
+    /// Now the run is judged by ``HermesConfigUnset/judge(output:exitCode:)``
+    /// — the one judge both Settings surfaces use — and only ONE of its
+    /// failures is benign here: `Config key not set: <key>`, which
+    /// `unset_config_value` emits via `_exit_invalid` at
+    /// `hermes_cli/config.py:3561` (the `.env` arm) and `:3579` (the
+    /// config.yaml arm), both `sys.exit(1)` through `:3422-3424`. The
+    /// citation this doc used to carry — `config.py:6009,6041,6059` — is past
+    /// the end of a 3891-line file; P39 re-anchored it (the third site,
+    /// `:3542`, is in `get_config_value`, not on the unset path).
+    ///
+    /// Still the exact phrase rather than the bare substring `not set`, which
+    /// also appears in unrelated display placeholders like `(not set)` used
+    /// for masked/empty values elsewhere in the same file; a broad match there
+    /// could swallow a real failure whose text happened to echo one of those.
     nonisolated static func isBenignUnset(_ result: ProcessResult) -> Bool {
-        guard result.exitCode != 0 else { return true }
-        let text = (result.stderrString + result.stdoutString).lowercased()
-        return text.contains("config key not set")
+        let combined = result.stdoutString + "\n" + result.stderrString
+        let outcome = HermesConfigUnset.judge(output: combined, exitCode: result.exitCode)
+        if outcome.succeeded { return true }
+        return combined.lowercased().contains("config key not set")
     }
 
     private func perform(

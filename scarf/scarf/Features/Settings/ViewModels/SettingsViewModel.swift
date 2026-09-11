@@ -174,6 +174,33 @@ final class SettingsViewModel {
     /// config actually contains) until capabilities are known.
     var hasBuiltinPersonalitiesInCode: Bool = false
 
+    /// Whether this host is a package-manager-managed Hermes, probed once per
+    /// home from `$HERMES_HOME/.managed` (round-4 decision 1, second half).
+    ///
+    /// On a managed host EVERY config write is refused — and refused at exit
+    /// 0, printing to stderr and returning (`hermes_cli/config.py:3450-3452`,
+    /// `:3549-3551`, `:2316-2318` @ v2026.9.7). The verdicts now catch that
+    /// after the fact; this makes the whole pane read-only up front so the
+    /// user is told once instead of once per control.
+    ///
+    /// `.notManaged` until the probe lands, so the pane renders writable and
+    /// then locks — never the reverse flash. A host WITHOUT the marker file is
+    /// byte-identical to before (charter C1), and a host managed only by the
+    /// `HERMES_MANAGED` environment variable — which Scarf's transport cannot
+    /// see — also renders unchanged and falls through to the verdicts. See
+    /// ``HermesManagedInstall``.
+    private(set) var managedInstall: HermesManagedInstall = .notManaged
+
+    var isManagedHost: Bool { managedInstall.isManaged }
+
+    /// The one banner the read-only pane shows. Quotes the package manager by
+    /// the name `get_managed_system` resolved, because "use your package
+    /// manager" is useless without it.
+    var managedBannerText: String? {
+        guard let system = managedInstall.system else { return nil }
+        return String(localized: "This Hermes is managed by \(system). Settings are read-only here — edit them through your package manager's configuration and re-deploy.")
+    }
+
     func load(force: Bool = false) {
         if !force, hasLoaded || isLoading { return }
         hasLoaded = true
@@ -193,11 +220,15 @@ final class SettingsViewModel {
             if raw == nil {
                 log.error("Failed to read config.yaml from \(displayName)")
             }
+            // P39: one `.managed` stat+read per home, memoized process-wide.
+            // Detached with the rest of the load (charter C10).
+            let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.config = cfg
                 self.gatewayState = gw
                 self.hermesRunning = running
+                self.managedInstall = managed
                 self.rawConfigYAML = raw ?? ""
                 self.personalities = self.parsePersonalities()
                 self.isLoading = false
@@ -205,10 +236,24 @@ final class SettingsViewModel {
         }
     }
 
-    /// Set a scalar config value via `hermes config set <key> <value>` and reload
-    /// the config on success so the UI reflects the new state.
+    /// Set a scalar config value via `hermes config set -- <key> <value>` and
+    /// reload the config on success so the UI reflects the new state.
+    ///
+    /// P39: judged by OUTPUT through ``HermesConfigSet``, not by the exit
+    /// code. `set_config_value` opens with `if is_managed():
+    /// managed_error("set configuration values"); return`
+    /// (`hermes_cli/config.py:3450-3452` @ v2026.9.7), which Python exits 0 —
+    /// so on a managed host every toggle, stepper and picker in Settings
+    /// banner'd "Saved <key>" over a file the host never wrote. The `--` is
+    /// the other half of the same walk: both positionals are `nargs="?"`
+    /// (`hermes_cli/subcommands/config.py:24-31`), so a value like `-1` used
+    /// to exit 2.
     func setSetting(_ key: String, value: String) {
-        applyConfigWrite(key, arguments: ["config", "set", key, value])
+        enqueueConfigWrite(
+            key: key,
+            arguments: HermesConfigSet.argv(key: key, value: value),
+            verdict: HermesConfigSet.judge(output:exitCode:)
+        )
     }
 
     /// Remove a config key entirely via `hermes config unset <key>`.
@@ -227,16 +272,14 @@ final class SettingsViewModel {
     /// refused clear was banner'd "Saved <key>" over a key still on disk, for
     /// all six call sites. See ``HermesConfigUnset`` (charter C5).
     ///
-    /// **`config set` is NOT exit-1-on-every-refusal.** This doc claimed it
-    /// was, and that is false: `set_config_value` opens with the SAME
-    /// managed-install arm — `if is_managed(): managed_error(...); return`
+    /// **`config set` is NOT exit-1-on-every-refusal either.** An earlier
+    /// version of this doc claimed it was; that was false at every tag from
+    /// v2026.3.28. `set_config_value` opens with the SAME managed-install arm
     /// (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error` at
-    /// `:453-455`) — so a managed host refuses every `config set` at exit 0
-    /// and `setSetting` banners "Saved". That is a real defect on the `set`
-    /// side too, deliberately NOT fixed here: it is the pending product
-    /// decision tracked by the board task "Audit P39: managed-install
-    /// refusals — config set / save_config exit-0 verdicts". Every OTHER
-    /// `config set` refusal does `sys.exit(1)`.
+    /// `:453-455`). P39 gave it its own output verdict — see
+    /// ``HermesConfigSet`` and ``HermesCLIMarkers/configSetFailure``, which
+    /// enumerates all nine of its refusal arms — so `setSetting` and
+    /// `unsetSetting` are now judged the same way.
     ///
     /// P38: the "nothing stored → no-op" guard lives here too, not just in
     /// `setApprovalMode`. `unset_config_value` prints `Config key not set:
@@ -290,24 +333,20 @@ final class SettingsViewModel {
     /// that visibly snaps back.
     @ObservationIgnored private var writeChain: Task<Void, Never>?
 
-    private func applyConfigWrite(_ key: String, arguments: [String]) {
-        enqueueConfigWrite(key: key, arguments: arguments)
-    }
-
-    /// How a queued write's outcome is decided. `nil` is the historical
-    /// exit-code rule; a verb with an exit-0 refusal path passes its own
-    /// output judge — see ``unsetSetting``.
+    /// How a queued write's outcome is decided — REQUIRED since P39, for the
+    /// same reason `capabilities` (P37) and `isStored` (P38) became required
+    /// on `unsetSetting`: the default was the exit code, the exit code is
+    /// wrong for every verb on this chain, and a default that is wrong is a
+    /// trapdoor the next call site falls through without noticing.
     ///
-    /// The exit-code rule is correct for EVERY `config set` refusal but one:
-    /// `set_config_value` opens with `if is_managed(): managed_error(...);
-    /// return` (`hermes_cli/config.py:3450-3452` @ v2026.9.7, `managed_error`
-    /// printing to stderr and returning at `:453-455`), which Python exits 0
-    /// — so on a managed install every `setSetting` banners "Saved" over a
-    /// key the host never wrote. This doc used to claim `config set` always
-    /// exits 1; it does not. Giving `config set` its own output verdict is the
-    /// pending product decision tracked by the board task "Audit P39:
-    /// managed-install refusals — config set / save_config exit-0 verdicts",
-    /// deliberately not implemented here.
+    /// There is no "historical exit-code rule" arm left. All three verbs this
+    /// chain can carry mutate config.yaml through a handler that prints its
+    /// refusal and bare-`return`s on a managed install, i.e. exits 0:
+    /// `set_config_value` (`hermes_cli/config.py:3450-3452` @ v2026.9.7),
+    /// `unset_config_value` (`:3549-3551`) and `save_config` under
+    /// `hermes memory off` (`:2316-2318`, called from
+    /// `hermes_cli/main_agent_cmds.py:16`). See ``HermesConfigSet``,
+    /// ``HermesConfigUnset`` and ``HermesMemoryOff``.
     typealias WriteVerdict = @Sendable (String, Int32) -> HermesCLIOutcome
 
     /// Append one `hermes …` write to the serialised chain. `arguments` need
@@ -317,8 +356,18 @@ final class SettingsViewModel {
     private func enqueueConfigWrite(
         key: String,
         arguments: [String],
-        verdict: WriteVerdict? = nil
+        verdict: @escaping WriteVerdict
     ) {
+        // P39: a managed host refuses every write anyway — at exit 0, with a
+        // stderr line nobody sees. The pane is already read-only when this is
+        // true (`isManagedHost`), so reaching here means a programmatic or
+        // keyboard-driven write got past a disabled control; refuse it with
+        // the same sentence the banner shows rather than spawning a process
+        // whose only outcome is that refusal.
+        if let refusal = managedBannerText {
+            showSaveFailure(refusal)
+            return
+        }
         let run = cliRunner
         let svc = fileService
         let ctx = context
@@ -330,8 +379,8 @@ final class SettingsViewModel {
             // Re-read only on success, exactly as the synchronous version
             // did: a refused write left `config` untouched, and reloading it
             // would repaint the same values while claiming a failure.
-            let succeeded = verdict.map { $0(result.output, result.exitCode).succeeded }
-                ?? (result.exitCode == 0)
+            let outcome = verdict(result.output, result.exitCode)
+            let succeeded = outcome.succeeded
             let refreshed: (config: HermesConfig, raw: String)? = succeeded
                 ? await Task.detached {
                     (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
@@ -340,7 +389,7 @@ final class SettingsViewModel {
             guard let self else { return }
             self.commitConfigWrite(
                 key: key, arguments: arguments, result: result,
-                succeeded: succeeded, refreshed: refreshed
+                outcome: outcome, refreshed: refreshed
             )
         }
     }
@@ -350,12 +399,12 @@ final class SettingsViewModel {
         key: String,
         arguments: [String],
         result: (output: String, exitCode: Int32),
-        succeeded: Bool,
+        outcome: HermesCLIOutcome,
         refreshed: (config: HermesConfig, raw: String)?
     ) {
         Analytics.record(.settingChanged(
             key: .init(rawKey: key),
-            outcome: .init(succeeded: succeeded)
+            outcome: .init(succeeded: outcome.succeeded)
         ))
         if let refreshed {
             showSuccess(
@@ -382,10 +431,18 @@ final class SettingsViewModel {
             logger.warning(
                 "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
             )
+            // P39: the VERDICT's own quoted refusal wins over the
+            // last-significant-line scan. `format_managed_message` is two
+            // lines and the reason is the FIRST one — `Cannot set
+            // configuration values: … is managed by nixos.` — while the last
+            // is `Use your package manager to upgrade or reinstall Hermes.`,
+            // which names no cause at all. `clearFailureMessage` already had
+            // this shape; `saveFailureMessage` is the fallback for the arms
+            // that print text no marker anchors on.
             showSaveFailure(
                 Self.isUnset(arguments)
                     ? Self.clearFailureMessage(key: key, output: result.output, exitCode: result.exitCode)
-                    : Self.saveFailureMessage(key: key, output: result.output)
+                    : Self.saveFailureMessage(key: key, output: result.output, reason: outcome.detail)
             )
         }
     }
@@ -406,8 +463,12 @@ final class SettingsViewModel {
     ///
     /// `static` and `internal` so tests can drive it with fixture output
     /// without standing up a SettingsViewModel.
-    static func saveFailureMessage(key: String, output: String) -> String {
-        let reason = Self.failureReason(from: output) ?? ""
+    ///
+    /// P39: `reason` lets the caller hand in the verdict's own quoted refusal
+    /// (``HermesCLIOutcome/detail``), which is the RIGHT line rather than the
+    /// last one. Callers without a verdict omit it and get the scan.
+    static func saveFailureMessage(key: String, output: String, reason preferred: String? = nil) -> String {
+        let reason = preferred ?? Self.failureReason(from: output) ?? ""
         return reason.isEmpty
             ? String(localized: "Failed to save \(key)")
             : String(localized: "Couldn’t save \(key): \(reason)")
@@ -481,7 +542,7 @@ final class SettingsViewModel {
 
     /// Sanitizes a `hermes config set/unset` key for `setting_changed`'s
     /// `key` prop — the identifier only, never the value being set (that
-    /// requirement is enforced structurally: `applyConfigWrite` never sees
+    /// requirement is enforced structurally: `enqueueConfigWrite` never sees
     /// the value at all here, only `key`).
     ///
     /// Every `setSetting`/`unsetSetting` call site in this file passes a
@@ -811,7 +872,7 @@ final class SettingsViewModel {
     /// config.yaml write.
     ///
     /// The `off` branch is NOT a `hermes config set`, so it can't ride
-    /// `applyConfigWrite`; it still has to surface a non-zero exit the same
+    /// ``HermesConfigSet``'s verdict; it still has to surface a non-zero exit the same
     /// way — a failed teardown used to reload the unchanged config and
     /// present as a silent success, leaving the picker showing "none" while
     /// the provider was still wired up.
@@ -823,7 +884,14 @@ final class SettingsViewModel {
         // Rides the same serialised, off-main write chain as every other
         // Settings write (charter C10): `hermes memory off` runs a provider
         // teardown, which is the slowest spawn on this screen.
-        enqueueConfigWrite(key: "memory.provider", arguments: ["memory", "off"])
+        // P39: `memory off` is the fourth `save_config` door — it prints
+        // `✓ Memory provider: built-in only` (`main_agent_cmds.py:17`) after
+        // a save the managed arm refused at exit 0. See ``HermesMemoryOff``.
+        enqueueConfigWrite(
+            key: "memory.provider",
+            arguments: HermesMemoryOff.argv,
+            verdict: HermesMemoryOff.judge(output:exitCode:)
+        )
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
     func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }

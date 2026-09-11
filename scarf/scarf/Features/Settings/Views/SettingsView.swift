@@ -89,6 +89,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             pageHeader
             tabStrip
+            managedBanner
             ScrollView {
                 VStack(alignment: .leading, spacing: ScarfSpace.s5) {
                     tabContent(selectedTab)
@@ -97,6 +98,24 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.horizontal, ScarfSpace.s6)
                 .padding(.vertical, ScarfSpace.s6)
+                // P39 (round-4 decision 1): a package-manager-managed Hermes
+                // refuses every config write — at exit 0, with a stderr line
+                // the user never sees. One banner above, and the whole pane is
+                // read-only, instead of thirteen tabs of controls that each
+                // snap back. Untouched on a host with no `.managed` marker.
+                //
+                // The lock covers the DIRECT writers too (the Advanced tab's
+                // raw config.yaml editor, the Secrets tab's `.env` rows),
+                // which do not go through the CLI and would therefore
+                // "succeed". That is deliberate, and it is Hermes's own
+                // posture: `_env_write_blocked` refuses every `.env` write on
+                // a managed install (`hermes_cli/config.py:2556-2558`) and
+                // `save_config` every config.yaml write (`:2316-2318`). On
+                // such a host both files belong to the package manager and
+                // are reinstated at the next activation, so a Scarf write
+                // behind Hermes's back is a change the user watches disappear
+                // — the exact failure this phase is ending, one layer down.
+                .disabled(viewModel.isManagedHost)
             }
         }
         .background(ScarfColor.backgroundPrimary)
@@ -112,6 +131,30 @@ struct SettingsView: View {
             viewModel.hasBuiltinPersonalitiesInCode =
                 capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
             viewModel.load()
+        }
+    }
+
+    /// The ONE managed-install banner. Nothing else in Settings repeats it:
+    /// the pane below is simply disabled. See
+    /// ``SettingsViewModel/managedInstall``.
+    @ViewBuilder
+    private var managedBanner: some View {
+        if let text = viewModel.managedBannerText {
+            HStack(alignment: .top, spacing: ScarfSpace.s2) {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Text(text)
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, ScarfSpace.s6)
+            .padding(.vertical, ScarfSpace.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ScarfColor.backgroundSecondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("This Hermes installation is managed; settings are read-only")
         }
     }
 

@@ -88,7 +88,8 @@ struct MainActorSpawnDisciplineP22Tests {
         // Sequential `config set`, one key/value per spawn: `hermes config
         // set` takes exactly one pair at v2026.9.7 (`hermes_cli/config.py`
         // `_cmd_config_set`), so there is no batch form to collapse them into.
-        #expect(log.calls.allSatisfy { $0.count == 4 && Array($0.prefix(2)) == ["config", "set"] })
+        // P39 put a `--` separator before the positionals: `config set -- <key> <value>`.
+        #expect(log.calls.allSatisfy { $0.count == 5 && Array($0.prefix(3)) == ["config", "set", "--"] })
     }
 
     /// The sweep is the point: every platform form goes through the same

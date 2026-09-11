@@ -82,8 +82,8 @@ import Foundation
     /// The Phase B hazard in one assertion: every invocation carries `-p <bot>`.
     @Test func everyInvocationCarriesTheProfileFlag() {
         let svc = service(root: URL(fileURLWithPath: "/tmp/x"))
-        #expect(svc.argv(forProfile: "scout", args: ["config", "set", "model.default", "m"])
-                == ["-p", "scout", "config", "set", "model.default", "m"])
+        #expect(svc.argv(forProfile: "scout", args: ["config", "set", "--", "model.default", "m"])
+                == ["-p", "scout", "config", "set", "--", "model.default", "m"])
         #expect(svc.argv(forProfile: "scout", args: ["tools", "enable", "web", "--platform", "cli"])
                 == ["-p", "scout", "tools", "enable", "web", "--platform", "cli"])
     }
@@ -121,7 +121,7 @@ import Foundation
             let transport = SSHTransport(contextID: ctx.id, config: config, displayName: "box")
             return transport.composedRemoteCommand(
                 executable: "hermes",
-                args: svc.argv(forProfile: profile, args: ["config", "set", "model.default", "m"])
+                args: svc.argv(forProfile: profile, args: ["config", "set", "--", "model.default", "m"])
             )
         }
 
@@ -334,10 +334,10 @@ import Foundation
         // Provider first, so a mid-failure never leaves a model with no
         // provider to serve it — mirroring `HermesFileService.saveModelConfig`.
         let svc = service(root: URL(fileURLWithPath: "/tmp/x"))
-        #expect(svc.argv(forProfile: "scout", args: ["config", "set", "model.provider", "anthropic"])
-                == ["-p", "scout", "config", "set", "model.provider", "anthropic"])
-        #expect(svc.argv(forProfile: "scout", args: ["config", "unset", "model.default"])
-                == ["-p", "scout", "config", "unset", "model.default"])
+        #expect(svc.argv(forProfile: "scout", args: ["config", "set", "--", "model.provider", "anthropic"])
+                == ["-p", "scout", "config", "set", "--", "model.provider", "anthropic"])
+        #expect(svc.argv(forProfile: "scout", args: ["config", "unset", "--", "model.default"])
+                == ["-p", "scout", "config", "unset", "--", "model.default"])
     }
 
     @Test func refusesValuesAndKeysThatWouldWriteSomethingElse() {

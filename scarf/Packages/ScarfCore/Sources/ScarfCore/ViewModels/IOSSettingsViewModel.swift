@@ -128,7 +128,8 @@ public final class IOSSettingsViewModel {
         // Pass through the same PATH-prefix trick ACPClient+iOS uses
         // (pass-1 M7 #5) so remote non-interactive shells find hermes
         // even when it's in ~/.local/bin or /opt/homebrew/bin.
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) config set \(shellEscape(key)) \(shellEscape(value))"
+        let argv = HermesConfigSet.argv(key: key, value: value).map(shellEscape).joined(separator: " ")
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
 
         let result: ProcessResult = try await Task.detached {
             try ctx.makeTransport().runProcess(
@@ -139,13 +140,18 @@ public final class IOSSettingsViewModel {
             )
         }.value
 
-        if result.exitCode != 0 {
-            let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
-            let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-            let combined = [stderr, stdout].filter { !$0.isEmpty }.joined(separator: "\n")
+        // P39: judged by OUTPUT, exactly like `unsetValue` below and for the
+        // same reason — `set_config_value`'s managed-install arm prints to
+        // stderr and `return`s (`hermes_cli/config.py:3450-3452` @ v2026.9.7),
+        // i.e. exits 0. See ``HermesConfigSet``.
+        let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+        let outcome = HermesConfigSet.judge(output: combined, exitCode: result.exitCode)
+        guard outcome.succeeded else {
             throw SettingsSaveError.commandFailed(
                 exitCode: result.exitCode,
-                message: combined.isEmpty ? "hermes config set exited with code \(result.exitCode)" : combined
+                message: outcome.detail ?? "hermes config set \(key) did not confirm the value was written"
             )
         }
 

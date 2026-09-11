@@ -53,9 +53,10 @@ import ScarfCore
         while log.calls.isEmpty, Date() < deadline {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        guard let argv = log.calls.first, argv.count >= 4,
-              argv[0] == "config", argv[1] == "set" else { return nil }
-        return argv[2]
+        // P39: `config set -- <key> <value>`.
+        guard let argv = log.calls.first, argv.count >= 5,
+              argv[0] == "config", argv[1] == "set", argv[2] == "--" else { return nil }
+        return argv[3]
     }
 
     /// `GatewayConfig.from_dict` resolves this as `data.get("multiplex_profiles")`

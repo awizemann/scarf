@@ -101,7 +101,7 @@ struct HermesP37ConfigUnsetFloorTests {
             stored(vmAt)
             act(vmAt, v0211)
             await Self.settle(atFloor)
-            #expect(atFloor.calls == [["config", "unset", key]], "\(key): did not clear")
+            #expect(atFloor.calls == [["config", "unset", "--", key]], "\(key): did not clear")
         }
     }
 
@@ -112,13 +112,13 @@ struct HermesP37ConfigUnsetFloorTests {
         let vm = Self.viewModel(log)
         vm.setDatabaseWalAutocheckpoint(500, capabilities: v018)
         await Self.settle(log)
-        #expect(log.calls == [["config", "set", "database.wal_autocheckpoint", "500"]])
+        #expect(log.calls == [["config", "set", "--", "database.wal_autocheckpoint", "500"]])
 
         let log2 = CLILog(output: "")
         let vm2 = Self.viewModel(log2)
         vm2.setBrowserCloudProvider("browserbase", capabilities: v018)
         await Self.settle(log2)
-        #expect(log2.calls == [["config", "set", "browser.cloud_provider", "browserbase"]])
+        #expect(log2.calls == [["config", "set", "--", "browser.cloud_provider", "browserbase"]])
     }
 
     /// The gate is inside the shared helper, so it cannot be reached around.

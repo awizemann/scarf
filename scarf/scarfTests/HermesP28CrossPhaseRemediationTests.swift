@@ -70,10 +70,15 @@ struct HermesP28CrossPhaseRemediationTests {
             }
             func runner() -> HermesCLIRunner {
                 { [self] args, _ in
-                    if args.count >= 4, args[0] == "config", args[1] == "set" {
-                        lock.lock(); pairs.append((args[2], args[3])); lock.unlock()
+                    // P39: `config set -- <key> <value>`.
+                    if args.count >= 5, args[0] == "config", args[1] == "set", args[2] == "--" {
+                        lock.lock(); pairs.append((args[3], args[4])); lock.unlock()
                     }
-                    return (output: "", exitCode: 0)
+                    // P39: the form is now OUTPUT-judged, so an empty stdout
+                    // is a refusal. Echo the emitter's own success line
+                    // (`hermes_cli/config.py:3521`).
+                    let key = args.count >= 4 ? args[3] : "?"
+                    return (output: "✓ Set \(key) = x in /tmp/config.yaml", exitCode: 0)
                 }
             }
         }

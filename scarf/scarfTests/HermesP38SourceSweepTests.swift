@@ -100,6 +100,9 @@ struct HermesP38SourceSweepTests {
         "GatewayPairingVerdictP31Tests.swift", "HermesP35MCPTokenProbeTests.swift",
         "HermesP35SelectionAndFloorsTests.swift", "HermesP38SettingsResidueTests.swift",
         "MainActorSpawnDisciplineP22Tests.swift",
+        // P39.
+        "HermesManagedRefusalP39Tests.swift", "HermesConfigSetP39Tests.swift",
+        "HermesManagedInstallP39Tests.swift",
     ]
 
     @Test func noSubscriptFollowsACountExpectation() {

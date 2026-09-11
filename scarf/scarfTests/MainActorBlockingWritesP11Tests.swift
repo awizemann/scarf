@@ -100,7 +100,7 @@ struct MainActorBlockingWritesP11Tests {
 
         await Self.until(timeout: 10) { log.count(of: "config") == 1 }
         #expect(log.ranOnMainThread == false, "`hermes config set` ran on the main actor")
-        #expect(log.calls.first == ["config", "set", "display.streaming", "true"])
+        #expect(log.calls.first == ["config", "set", "--", "display.streaming", "true"])
     }
 
     /// `hermes memory off` (the non-`config set` branch of
@@ -149,8 +149,9 @@ struct MainActorBlockingWritesP11Tests {
         // Second invocation started only after the first returned.
         #expect(spans[1].0 >= spans[0].1, "config writes overlapped — the chain is not serialising")
         // Order is preserved: first enqueued, first run.
-        #expect(log.calls[0][2] == "display.streaming")
-        #expect(log.calls[1][2] == "display.markdown")
+        // P39: `config set -- <key> <value>`, so the key is index 3.
+        #expect(log.calls[0].count == 5 && log.calls[0][3] == "display.streaming")
+        #expect(log.calls[1].count == 5 && log.calls[1][3] == "display.markdown")
     }
 
     /// `config check` / `config migrate` are now `async`, so the Advanced
@@ -186,7 +187,13 @@ struct MainActorBlockingWritesP11Tests {
         try? yaml.write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
 
         let log = CLILog()
-        let vm = SettingsViewModel(context: ctx, cliRunner: log.runner())
+        // P39: the write is OUTPUT-judged, so the fake must print the
+        // emitter's own success line (`hermes_cli/config.py:3521`) — an empty
+        // stdout at exit 0 is now a refusal, which is the whole point.
+        let vm = SettingsViewModel(
+            context: ctx,
+            cliRunner: log.runner(output: "✓ Set personality = scholar in \(ctx.paths.configYAML)")
+        )
         #expect(vm.rawConfigYAML.isEmpty)
 
         vm.setSetting("personality", value: "scholar")

@@ -168,7 +168,7 @@ struct ConfigReadProofP33Tests {
         await Self.until(timeout: 10) { vm.message != nil }
         #expect(log.count(of: "config") == 10)
         #expect(log.calls.contains {
-            $0 == ["config", "set", "platforms.whatsapp_cloud.extra.access_token", "fresh-token"]
+            $0 == ["config", "set", "--", "platforms.whatsapp_cloud.extra.access_token", "fresh-token"]
         })
     }
 

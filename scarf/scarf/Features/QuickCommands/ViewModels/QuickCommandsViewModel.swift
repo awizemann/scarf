@@ -82,8 +82,10 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             // is read-modify-write, so overlapping them would lose one key.
             let (typeResult, cmdResult) = await Task.detached {
                 (
-                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"]),
-                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
+                    ctx.runHermes(HermesConfigSet.argv(
+                        key: "quick_commands.\(sanitizedName).type", value: "exec")),
+                    ctx.runHermes(HermesConfigSet.argv(
+                        key: "quick_commands.\(sanitizedName).command", value: command))
                 )
             }.value
             guard let self else { return }
@@ -103,7 +105,12 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
         typeResult: (output: String, exitCode: Int32),
         cmdResult: (output: String, exitCode: Int32)
     ) {
-        if typeResult.exitCode == 0 && cmdResult.exitCode == 0 {
+        // P39: output-judged. `set_config_value`'s managed-install arm exits
+        // 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7), so both spawns
+        // "succeeded" and the sheet toasted a command that was never saved.
+        let typeOK = HermesConfigSet.judge(output: typeResult.output, exitCode: typeResult.exitCode).succeeded
+        let cmdOK = HermesConfigSet.judge(output: cmdResult.output, exitCode: cmdResult.exitCode).succeeded
+        if typeOK && cmdOK {
             // Toast carries the name the command was actually SAVED under,
             // never the raw CLI segment. `ConfigDottedKeySegment.escaped`
             // backslash-escapes dots on v0.21+ hosts, so "v1.2 deploy" used

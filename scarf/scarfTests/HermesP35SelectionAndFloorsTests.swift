@@ -173,7 +173,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         vm.setApprovalMode("", capabilities: v0211)
         await Self.settle(log)
 
-        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(log.calls == [["config", "unset", "--", "approvals.mode"]])
         #expect(vm.messageIsFailure == false)
     }
 
@@ -215,7 +215,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         vm.setApprovalMode("", capabilities: v0211)
         await Self.settle(log)
 
-        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(log.calls == [["config", "unset", "--", "approvals.mode"]])
         #expect(vm.messageIsFailure, "an exit-0 refusal was reported as a successful clear")
         #expect(vm.message?.contains("managed by NixOS") == true)
     }
@@ -223,8 +223,8 @@ struct HermesP35ApprovalsHostDefaultTests {
     /// `isUnset` is positional, so a `config set` whose VALUE is the word
     /// `unset` is still reported as a save.
     @Test func theUnsetTestIsPositionalNotASubstringSearch() {
-        #expect(SettingsViewModel.isUnset(["config", "unset", "approvals.mode"]))
-        #expect(!SettingsViewModel.isUnset(["config", "set", "model.default", "unset"]))
+        #expect(SettingsViewModel.isUnset(["config", "unset", "--", "approvals.mode"]))
+        #expect(!SettingsViewModel.isUnset(["config", "set", "--", "model.default", "unset"]))
         #expect(!SettingsViewModel.isUnset(["memory", "off"]))
         #expect(!SettingsViewModel.isUnset(["config"]))
     }
@@ -241,7 +241,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         vm.unsetSetting("browser.cloud_provider", capabilities: v0211, isStored: true)
         await Self.settle(log)
 
-        #expect(log.calls == [["config", "unset", "browser.cloud_provider"]])
+        #expect(log.calls == [["config", "unset", "--", "browser.cloud_provider"]])
         #expect(vm.messageIsFailure, "an exit-0 `config unset` refusal was reported as a save")
     }
 
@@ -253,6 +253,6 @@ struct HermesP35ApprovalsHostDefaultTests {
         vm.setApprovalMode("smart", capabilities: v0211)
         await Self.settle(log)
 
-        #expect(log.calls == [["config", "set", "approvals.mode", "smart"]])
+        #expect(log.calls == [["config", "set", "--", "approvals.mode", "smart"]])
     }
 }
