@@ -200,11 +200,26 @@ final class MCPServerEditorViewModel {
         let rewrittenRows = server.transport == .stdio ? envDraft : headersDraft
         let rowLabel = server.transport == .stdio ? "Environment" : "Header"
         for row in rewrittenRows {
-            if bad(row.key) { return "\(rowLabel) name" }
+            // The KEY is checked as `save` WRITES it — trimmed. A tab at
+            // either end never reaches the file (`.whitespaces` contains
+            // the tab), so refusing it would be an over-refusal on a paste
+            // the writer already cleans up; a tab INSIDE the key survives
+            // and is refused.
+            if bad(row.key.trimmingCharacters(in: .whitespaces)) {
+                return "\(rowLabel) name"
+            }
+            // The VALUE is written raw — no trim anywhere on that path.
             if bad(row.value) { return "\(rowLabel) value" }
         }
-        if bad(includeDraft) { return "Include tools" }
-        if bad(excludeDraft) { return "Exclude tools" }
+        // Same rule for the tool filters, which `save` splits on `,` and
+        // trims item by item.
+        func toolItems(_ draft: String) -> [String] {
+            draft.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        if toolItems(includeDraft).contains(where: bad) { return "Include tools" }
+        if toolItems(excludeDraft).contains(where: bad) { return "Exclude tools" }
 
         // Delta-gated, exactly as `save` gates the writes.
         guard server.transport != .stdio else {

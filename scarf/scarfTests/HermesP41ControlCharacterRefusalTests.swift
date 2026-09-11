@@ -80,6 +80,32 @@ struct HermesP41ControlCharacterRefusalTests {
         #expect(exclude.controlCharacterFieldLabel == "Exclude tools")
     }
 
+    /// The refusal is checked on the value as the SAVE writes it. `save`
+    /// trims every env/header key and every tool-filter item, and
+    /// `.whitespaces` contains the tab — so a tab at either END of one of
+    /// those never reaches config.yaml and refusing it would be an
+    /// over-refusal on a paste the writer already cleans up. A tab INSIDE
+    /// survives and is refused; a value is written raw and is refused at
+    /// either end.
+    @Test func aSurroundingTabIsCheckedWhereTheWriterTrimsAndWhereItDoesNot() {
+        let trimmedKey = editor(server(transport: .stdio))
+        trimmedKey.envDraft = [.init(key: "\tTOKEN\t", value: "v")]
+        #expect(trimmedKey.controlCharacterFieldLabel == nil)
+
+        let interiorKey = editor(server(transport: .stdio))
+        interiorKey.envDraft = [.init(key: "TO\tKEN", value: "v")]
+        #expect(interiorKey.controlCharacterFieldLabel == "Environment name")
+
+        let value = editor(server(transport: .stdio))
+        value.envDraft = [.init(key: "TOKEN", value: "v\t")]
+        #expect(value.controlCharacterFieldLabel == "Environment value",
+                "a value is written raw, so a trailing tab DOES reach the file")
+
+        let trimmedTool = editor(server(transport: .stdio))
+        trimmedTool.includeDraft = "read_file, \twrite_file\t"
+        #expect(trimmedTool.controlCharacterFieldLabel == nil)
+    }
+
     @Test(arguments: controls)
     func theCertKeyCAAndIdentityHeaderAreRefused(_ raw: String) throws {
         let cert = editor(server(transport: .http))
