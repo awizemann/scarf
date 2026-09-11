@@ -260,14 +260,27 @@ public enum YAMLScalar {
     /// reader still went through `HermesYAML.stripYAMLQuotes`, which hands a
     /// double-quoted BODY back verbatim — so a route name containing a
     /// backslash came back doubled and grew one `\` per save. This is the
-    /// single decoder every Scarf-written scalar is read back through;
+    /// single decoder every Scarf-written scalar is read back through — and
+    /// P41 is what made that claim TRUE rather than aspirational.
     /// `HermesFileService.unquote` and `HermesBotProfileYAML.unquote` are
-    /// thin forwarders over it, so there is one escape table, not three.
+    /// thin forwarders over it; the MCP emitter behind the first of those is
+    /// ``quoteIfNeeded(_:)`` itself since P41; and the two config.yaml
+    /// blocks Scarf writes through `PowerSettingsWriter` —
+    /// `agent.reasoning_overrides` (`setReasoningOverrides`, KEYS and
+    /// values, via `GatewayConfigWriter.setMapChecked`) and
+    /// `model_catalog.excluded_providers` (`setExcludedProviders`, via
+    /// `setListChecked`) — reach this decoder through
+    /// `HermesYAML.scarfWrittenMapPaths` / `scarfWrittenListPaths`. One
+    /// escape table, not three.
     ///
     /// `HermesYAML.stripYAMLQuotes` is deliberately NOT folded in: it reads
     /// arbitrary HERMES-written config.yaml values, where widening the rule
-    /// would change the meaning of every unrelated `\` in the file. This
-    /// decoder is for the blocks Scarf both reads AND writes.
+    /// would change the meaning of every unrelated `\` in the file. That is
+    /// why those two blocks are a per-KEY opt-in inside `parseNestedYAML`
+    /// rather than a change to `stripYAMLQuotes`, and why
+    /// `gateway.multiplex_profile_allowlist` — which the round-4 finding
+    /// listed as a third Scarf-written block, but which Scarf only READS —
+    /// is NOT opted in. See the opt-in's own doc for that walk.
     ///
     /// Anything that is not a quoted flow scalar comes back unchanged. An
     /// escape Scarf never emits — and a malformed `\xNN` / `\uNNNN`, whose

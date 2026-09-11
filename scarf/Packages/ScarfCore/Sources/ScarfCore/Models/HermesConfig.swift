@@ -1526,8 +1526,19 @@ public struct HermesConfig: Sendable {
     /// every guarded command while a stock v0.19+ host lets the guardian model
     /// decide.
     public var storedApprovalMode: HermesApprovalMode? {
-        let raw = approvalMode.trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw.isEmpty ? nil : HermesApprovalMode.normalize(raw)
+        // Absence is decided on the NORMALISED scalar, so an explicitly
+        // empty `approvals.mode: ""` keeps reading as absent exactly as it
+        // did before P41 (that is a separate question — `IOSSettingsViewModel`
+        // documents Hermes's own answer for it — and P41 does not move it).
+        guard !approvalMode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        // But the MODE is decided on the RAW scalar: a quoted `"no"` is a
+        // `str` to PyYAML and therefore `manual` to Hermes, where a bare
+        // `no` is a bool and therefore `off`. The fallback covers a
+        // hand-built `HermesConfig` that filled only the normalised field.
+        return HermesApprovalMode.normalize(
+            approvalModeRawScalar.isEmpty ? approvalMode : approvalModeRawScalar
+        )
     }
 
     /// The mode the connected host is actually enforcing: the stored value
@@ -1588,6 +1599,17 @@ public struct HermesConfig: Sendable {
     /// with `displayApprovalMode(capabilities:)`; reading this directly as
     /// "manual" understates what a stock v0.19+ host will run unattended.
     public var approvalMode: String
+    /// `approvals.mode` as it stands in config.yaml — QUOTES INTACT, and
+    /// empty for an absent key.
+    ///
+    /// `approvalMode` above is `HermesYAML.normalizedScalar`'d, which is the
+    /// right form for every literal comparison and the WRONG form for the
+    /// one reader that has to tell a quoted scalar from a bare one: PyYAML
+    /// types the scalar before Hermes sees it, so `approvals.mode: "no"` is
+    /// a `str` Hermes resolves to `manual` while a bare `no` is a bool it
+    /// resolves to `off`. `HermesApprovalMode.normalize` needs the raw form
+    /// to make that call; see ``storedApprovalMode`` and that type's doc.
+    public var approvalModeRawScalar: String
     /// `browser.cloud_provider` — the browser automation provider Hermes
     /// dispatches to. Valid ids: `local`, `camofox`, and the plugin-provided
     /// `browser-use` / `browserbase` / `firecrawl`.
@@ -1898,6 +1920,7 @@ public struct HermesConfig: Sendable {
         reasoningEffort: String,
         showCost: Bool,
         approvalMode: String,
+        approvalModeRawScalar: String,
         browserCloudProvider: String,
         memoryProvider: String,
         dockerEnv: [String: String],
@@ -1997,6 +2020,7 @@ public struct HermesConfig: Sendable {
         self.reasoningEffort = reasoningEffort
         self.showCost = showCost
         self.approvalMode = approvalMode
+        self.approvalModeRawScalar = approvalModeRawScalar
         self.browserCloudProvider = browserCloudProvider
         self.memoryProvider = memoryProvider
         self.dockerEnv = dockerEnv
@@ -2079,6 +2103,7 @@ public struct HermesConfig: Sendable {
         reasoningEffort: "",
         showCost: false,
         approvalMode: "",
+        approvalModeRawScalar: "",
         browserCloudProvider: "",
         memoryProvider: "",
         dockerEnv: [:],

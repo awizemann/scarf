@@ -40,6 +40,48 @@ public struct ParsedYAML: Sendable {
 /// Entry points for Hermes-flavored YAML parsing. Stateless, pure
 /// functions — no Foundation types that differ cross-platform.
 public enum HermesYAML {
+    /// The dotted paths whose scalars SCARF ITSELF writes, and which are
+    /// therefore decoded with ``YAMLScalar/unquote(_:)`` — the writers'
+    /// own inverse — rather than with ``stripYAMLQuotes(_:)``.
+    ///
+    /// **Round-4 decision 10.** `YAMLScalar.unquote`'s doc called itself
+    /// "the single decoder every Scarf-written scalar is read back
+    /// through", and for these blocks it was not true: they are emitted by
+    /// `PowerSettingsWriter` through `YAMLScalar.quoteIfNeeded` (which
+    /// escapes `\\`, `\n`, `\xNN`, `\uNNNN` inside double quotes) and read
+    /// back through `stripYAMLQuotes`, which hands a double-quoted BODY
+    /// back verbatim — so a pattern containing a backslash came back
+    /// doubled and grew one `\` per save, exactly the defect P32 found in
+    /// `ProfileRoutesWriter`.
+    ///
+    /// **Per-KEY, not global.** `stripYAMLQuotes` stays the rule everywhere
+    /// else on purpose: it reads arbitrary HERMES-written config.yaml
+    /// values, where widening the escape table would change the meaning of
+    /// every unrelated `\` in the file. Opt a path in only when Scarf is
+    /// the writer.
+    ///
+    /// Writers, cited:
+    /// * `agent.reasoning_overrides` — `PowerSettingsWriter
+    ///   .setReasoningOverrides(in:pairs:capabilities:)` →
+    ///   `GatewayConfigWriter.setMapChecked`, which puts BOTH the key and
+    ///   the value through `YAMLScalar.quoteIfNeeded`. Hence the map arm
+    ///   below decodes both halves.
+    /// * `model_catalog.excluded_providers` — `PowerSettingsWriter
+    ///   .setExcludedProviders(in:providers:capabilities:)` →
+    ///   `GatewayConfigWriter.setListChecked`.
+    ///
+    /// **`gateway.multiplex_profile_allowlist` is deliberately NOT here.**
+    /// The round-4 finding listed it as a third Scarf-written block; it is
+    /// not one. Scarf READS it (`HermesConfig+YAML.multiplexProfileAllowlist`,
+    /// and `SettingsViewModel.multiplexProfileAllowlistWarning` on top of
+    /// that) and writes only the sibling BOOL `multiplex_profiles`, through
+    /// `hermes config set` — a repo-wide grep for the key finds no writer at
+    /// either spelling. Opting a Hermes-written-only list into the wider
+    /// escape table is the exact widening the paragraph above refuses. If a
+    /// writer ever lands, add both spellings here in the same commit.
+    static let scarfWrittenMapPaths: Set<String> = ["agent.reasoning_overrides"]
+    static let scarfWrittenListPaths: Set<String> = ["model_catalog.excluded_providers"]
+
     /// Parse a YAML string into a `ParsedYAML` bundle.
     public static func parseNestedYAML(_ rawYAML: String) -> ParsedYAML {
         // A leading U+FEFF is in NEITHER `.whitespaces` nor
@@ -135,8 +177,13 @@ public enum HermesYAML {
                     if let parent = lastScalarParent {
                         // Re-strip quotes on the FULL value: a quoted scalar
                         // folded across lines only closes its quote on the
-                        // last continuation line.
-                        maps[parent.path, default: [:]][parent.key] = stripYAMLQuotes(joined)
+                        // last continuation line. Decision 10's opt-in
+                        // applies here too — the same key must not decode
+                        // one way folded and another way on one line.
+                        maps[parent.path, default: [:]][parent.key] =
+                            scarfWrittenMapPaths.contains(parent.path)
+                            ? YAMLScalar.unquote(joined)
+                            : stripYAMLQuotes(joined)
                     }
                 }
                 continue
@@ -158,9 +205,13 @@ public enum HermesYAML {
 
             if isListItem {
                 let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                let stripped = stripYAMLQuotes(item)
                 let path = currentPath()
                 guard !path.isEmpty else { continue }
+                // Decision 10: a list Scarf itself writes is decoded with
+                // the writers' own inverse — see `scarfWrittenListPaths`.
+                let stripped = scarfWrittenListPaths.contains(path)
+                    ? YAMLScalar.unquote(item)
+                    : stripYAMLQuotes(item)
                 lists[path, default: []].append(stripped)
                 lastScalarIndent = nil
                 lastScalarPath = nil
@@ -184,7 +235,20 @@ public enum HermesYAML {
                 }
                 let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
                 guard rest.hasPrefix(":") else { continue }
-                key = raw
+                // Decision 10, the KEY half. A single-quoted key is already
+                // fully decoded above (`''` is that style's ONE escape); a
+                // DOUBLE-quoted one was taken verbatim, so a key Scarf wrote
+                // through `YAMLScalar.quoteIfNeeded` — which escapes `\\`,
+                // `\n` and `\xNN`/`\uNNNN` — came back with its escapes
+                // intact and grew one `\` per save. Re-decode it with the
+                // writers' own inverse, but ONLY under a path Scarf writes
+                // (`scarfWrittenMapPaths`), because the same token under a
+                // Hermes-written block must keep reading as it always has.
+                if quote == "\"", scarfWrittenMapPaths.contains(currentPath()) {
+                    key = YAMLScalar.unquote("\"" + raw + "\"")
+                } else {
+                    key = raw
+                }
                 afterColon = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
             } else {
                 // Plain (unquoted) key. YAML's `key: value` separator is a
@@ -324,7 +388,10 @@ public enum HermesYAML {
             // without a separate scan.
             if !stack.isEmpty {
                 let parentPath = currentPath()
-                maps[parentPath, default: [:]][key] = stripYAMLQuotes(afterColon)
+                // Decision 10, the VALUE half — see `scarfWrittenMapPaths`.
+                maps[parentPath, default: [:]][key] = scarfWrittenMapPaths.contains(parentPath)
+                    ? YAMLScalar.unquote(afterColon)
+                    : stripYAMLQuotes(afterColon)
                 lastScalarParent = (path: parentPath, key: key)
             }
         }

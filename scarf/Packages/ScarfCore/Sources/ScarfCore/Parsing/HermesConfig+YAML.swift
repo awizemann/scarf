@@ -824,6 +824,11 @@ public extension HermesConfig {
             // guardian model was actually deciding — the dangerous direction.
             // Resolved by `HermesConfig.displayApprovalMode(capabilities:)`.
             approvalMode: strEnum("approvals.mode"),
+            // The RAW scalar, quotes intact — `HermesApprovalMode.normalize`
+            // needs to tell a quoted `"no"` (a `str`, i.e. `manual` to
+            // Hermes) from a bare `no` (a bool, i.e. `off`). Every other
+            // reader wants the normalised form above.
+            approvalModeRawScalar: values["approvals.mode"] ?? "",
             browserCloudProvider: strEnum("browser.cloud_provider"),
             memoryProvider: strEnum("memory.provider"),
             dockerEnv: dockerEnv,
