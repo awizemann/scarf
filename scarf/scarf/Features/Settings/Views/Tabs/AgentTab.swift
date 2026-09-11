@@ -25,8 +25,12 @@ struct AgentTab: View {
                 range: capabilities.isV0205OrLater ? 0...1000 : 1...1000,
                 valueLabel: { $0 == HermesConfig.maxTurnsUnlimited ? String(localized: "Unlimited") : $0.formatted() }
             ) { viewModel.setMaxTurns($0) }
-            // v0.20 added the `max` and `ultra` tiers (hermes_constants.py
-            // VALID_REASONING_EFFORTS); older hosts keep the shorter list.
+            // `max` and `ultra` are NOT v0.20 — they arrived a release apart
+            // and both well before it. Walked: `VALID_REASONING_EFFORTS`
+            // gains `"max"` at v2026.7.7 (0.18.1, `hermes_constants.py:794`)
+            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`). Those are the
+            // floors `HermesReasoningEffort.levels(capabilities:)` uses;
+            // older hosts keep the shorter list.
             //
             // The leading empty row is the ABSENT key, and absent is not
             // `medium`: `agent.reasoning_effort` is in no schema layer at any

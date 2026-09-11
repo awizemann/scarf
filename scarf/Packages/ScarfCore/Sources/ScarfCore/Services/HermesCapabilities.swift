@@ -181,13 +181,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.13 (v2026.5.7) flags
 
     /// `/goal` slash command + Persistent Goals + Checkpoints v2 single-store
-    /// (v0.13+). Used by RichChatViewModel to add `/goal` to the
-    /// non-interruptive command list and to render the "Goal locked" pill in
-    /// the chat header.
+    /// (v0.13+).
+    ///
+    /// **CLI/gateway only.** This doc used to say `RichChatViewModel` adds
+    /// `/goal` to the non-interruptive command list; it does not, and has not
+    /// since the ACP roster was reconciled — `/goal` is not an
+    /// `acp_adapter/` name at any tag, so a row for it would no-op against an
+    /// ACP host. The consumers are the optimistic goal PILL
+    /// (`ChatViewModel.swift:1269`, iOS `ChatView.swift:56`) and the
+    /// typed-command path that feeds it.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
 
     /// `/queue` slash command in the ACP adapter (v0.13+). Queues a prompt
     /// to run after the current turn completes without interrupting.
+    ///
+    /// Walked, not asserted — the same two-tag citation as ``hasACPSteer``,
+    /// because the two arrived in the same commit: `queue` first appears at
+    /// **v2026.5.7** (0.13.0) in `acp_adapter/server.py:171`, on the line
+    /// below `steer` (`:170`), and `acp_adapter/` at **v2026.4.30** (0.12.x)
+    /// has no `queue` slash command anywhere.
     public var hasACPQueue: Bool { atLeastSemver(0, 13, 0) }
 
     /// `/steer` EXISTS as an ACP slash command (v0.13+).

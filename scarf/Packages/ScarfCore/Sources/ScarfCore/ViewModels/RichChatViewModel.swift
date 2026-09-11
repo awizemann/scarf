@@ -650,27 +650,26 @@ public final class RichChatViewModel {
     /// dedup logic.
     public private(set) var globalScopedCommands: [ProjectSlashCommand] = []
 
-    /// Hardcoded ACP-native commands that don't interrupt the current
-    /// turn. v2.5 ships `/steer` as the flagship — applies user
-    /// guidance after the next tool call without aborting. Fronted by
-    /// Hermes v2026.4.23+ but listed here unconditionally so older
-    /// hosts that don't advertise it still surface the trigger; the
-    /// agent will respond appropriately or no-op gracefully.
+    /// The ACP-native commands that don't interrupt the current turn:
+    /// `/steer` (apply guidance after the next tool call without aborting)
+    /// and `/queue` (run a prompt after the current turn finishes).
     ///
-    /// v2.8 / Hermes v0.13 adds `/goal` (lock the agent on a target
-    /// across turns) and `/queue` (queue a prompt for after the current
-    /// turn). Both ride the same `.acpNonInterruptive` source — Hermes
-    /// parses them server-side, the wire shape is plain
-    /// `session/prompt`, and the chat UI keeps the "Agent working…"
-    /// indicator off when they're sent. They're listed unconditionally
-    /// here; capability filtering happens in `availableCommands` so
-    /// pre-v0.13 hosts don't see `/goal` or `/queue` in the slash menu.
-    // TODO(WS-2-Q7): verify against a real v0.13 ACP host that `/goal`
-    // is in fact non-interruptive on the wire. If Hermes treats it as a
-    // regular prompt that flips "Agent working…", drop it from this
-    // list and route it through the standard send path (the pill
-    // bookkeeping in `recordActiveGoal` is independent of the
-    // interruptive classification).
+    /// **Floor v0.13 (`v2026.5.7`), not v2026.4.23.** Both names enter
+    /// `SlashCommandsMixin._SLASH_COMMANDS` together at
+    /// `acp_adapter/server.py:170-171` @ `v2026.5.7`, and `acp_adapter/` at
+    /// `v2026.4.30` has neither. The gates are ``HermesCapabilities
+    /// .hasACPSteer`` and ``HermesCapabilities.hasACPQueue``, applied in
+    /// `availableCommands` — this list is unfiltered.
+    ///
+    /// **They do not "no-op gracefully" below the floor.** An ACP name the
+    /// adapter does not know is not an error: `_handle_slash` returns `None`
+    /// and the raw text falls through to the LLM as a prompt
+    /// (`acp_adapter/commands.py:88-95` @ `v2026.9.7`). A dead row therefore
+    /// burns a turn asking the model about "/steer", which is why the
+    /// capability gate is load-bearing rather than cosmetic.
+    ///
+    /// `/goal` and `/subgoal` are deliberately NOT here — see
+    /// ``HermesCapabilities.hasGoals``.
     // NOTE: `/goal` and `/subgoal` are NOT advertised here. They are
     // gateway-only verbs — the ACP adapter does not advertise them in its
     // command set (re-verified against Hermes v0.16), so surfacing them in
@@ -738,20 +737,29 @@ public final class RichChatViewModel {
     /// and the text falls through to the LLM (`commands.py:88-95`), so a
     /// dead row silently burns a turn.
     ///
-    /// The set splits on whether a session is active:
-    /// - **Always** (no session AND active session): `/new`. It is
+    /// The set does NOT split on whether a session is active — it used to,
+    /// and the doc described that split long after P2 of the projects fix
+    /// removed it. Every row below is returned in both states; the
+    /// session-only ones are surfaced ALWAYS and greyed PRE-SESSION, because
+    /// the chat view hands the menu `disabledCommandNames` from
+    /// ``sessionRequiredCommandNames``. Hiding them outright made the menu
+    /// look broken on a fresh launch. (The `hasActiveSession` parameter this
+    /// function used to take was never read; it is gone.)
+    ///
+    /// - **`/new`**: it is
     ///   CLIENT-SIDE — `clientSideSlashCommand(for:)` intercepts it before
     ///   the wire (the adapter has never had a `new`); it's the "open a
     ///   session" affordance and arms the v0.13+ `[<name>]` argument hint
     ///   via `hasNewWithSessionName`.
-    /// - **Active-session-only**, all sent to the transport verbatim and
+    /// - **Session-REQUIRING**, all sent to the transport verbatim and
     ///   all dispatched by the adapter on every supported host (they are in
     ///   `_SLASH_COMMANDS` from v2026.3.17, below Scarf's v0.6.0 floor, so
     ///   no capability flag applies): `/help`, `/model`, `/tools`,
     ///   `/context`, `/reset`, the version-appropriate
     ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
-    ///   `/version`. Each requires a live session; surfacing them
-    ///   pre-session would mislead.
+    ///   `/version`. Each needs a live session, which is what
+    ///   ``sessionRequiredCommandNames`` greys out — not what this function
+    ///   filters.
     ///
     /// Deliberately NOT here (P34): `clear`, `cost`, `reload-skills`,
     /// `exit`, `yolo`, `sessions`, `codex-runtime`. None is an ACP name at
@@ -764,8 +772,7 @@ public final class RichChatViewModel {
     /// conversation history") is the ACP replacement for the `/clear`
     /// gesture users knew.
     public static func alwaysAvailableCommands(
-        capabilities: HermesCapabilities,
-        hasActiveSession: Bool
+        capabilities: HermesCapabilities
     ) -> [HermesSlashCommand] {
         var result: [HermesSlashCommand] = [
             HermesSlashCommand(
@@ -993,10 +1000,8 @@ public final class RichChatViewModel {
         // session starts and the ACP server advertises its richer
         // versions, the ACP-sourced entry wins.
         noteSlashCommandFallbackIfNeeded()
-        let alwaysAvailable = Self.alwaysAvailableCommands(
-            capabilities: capabilitiesGate,
-            hasActiveSession: sessionId != nil
-        ).filter { !occupied.contains($0.name) }
+        let alwaysAvailable = Self.alwaysAvailableCommands(capabilities: capabilitiesGate)
+            .filter { !occupied.contains($0.name) }
         return acpCommands + projectAsHermes + globalAsHermes + quicks + nonInterruptive + alwaysAvailable
     }
 

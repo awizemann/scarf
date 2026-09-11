@@ -1545,10 +1545,8 @@ import Foundation
                 RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
                     == "/compact auth"
             )
-            let names = RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps,
-                hasActiveSession: true
-            ).map(\.name)
+            let names = RichChatViewModel.alwaysAvailableCommands(capabilities: caps)
+                .map(\.name)
             #expect(names.contains("compact"), "\(caps.versionLine)")
             #expect(!names.contains("compress"), "\(caps.versionLine)")
         }
@@ -1567,10 +1565,8 @@ import Foundation
                 RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
                     == "/compress auth"
             )
-            let names = RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps,
-                hasActiveSession: true
-            ).map(\.name)
+            let names = RichChatViewModel.alwaysAvailableCommands(capabilities: caps)
+                .map(\.name)
             #expect(names.contains("compress"), "\(caps.versionLine)")
             #expect(!names.contains("compact"), "\(caps.versionLine)")
         }

@@ -615,17 +615,35 @@ import Foundation
     ///   (0.19.0) and `compress` from v2026.7.30 (0.19.1) — see
     ///   ``HermesCapabilities/hasACPCompressSpelling``.
     /// - at v2026.9.7 the dict moves to `acp_adapter/commands.py:44-66`
-    ///   (`SlashCommandsMixin._COMMANDS`) with the same nine names, and
+    ///   (`SlashCommandsMixin._COMMANDS`) with the same nine names — nine at
+    ///   any ONE version, ten in total, because `compact` and `compress` are
+    ///   the same slot spelled two ways and no tag has both — and
     ///   `_available_commands()` (`:69-74`) advertises exactly those.
     ///
     /// Unknown names are NOT errors: `_handle_slash_command` returns `None`
     /// for anything outside the dict and the text falls through to the LLM
     /// (`acp_adapter/commands.py:88-95` @ v2026.9.7), which is why a dead
     /// menu row costs a turn instead of showing a mistake.
-    static let acpDispatchedNames: Set<String> = [
+    /// The cross-version UNION: ten names, because it holds BOTH spellings
+    /// of the compress slot. Useful for "was this name ever an ACP command",
+    /// useless for "is this the right name at THIS version" — see
+    /// ``acpDispatchedNames(at:)``.
+    static let acpDispatchedNamesUnion: Set<String> = [
         "help", "model", "tools", "context", "reset",
         "compact", "compress", "steer", "queue", "version"
     ]
+
+    /// The nine names the adapter dispatches AT one version. The compress
+    /// slot is resolved through the same function the roster uses, so a
+    /// roster that offered `compact` on a v0.19.1 host (or `compress` on a
+    /// v0.19.0 one) fails here instead of being waved through by the union.
+    static func acpDispatchedNames(at caps: HermesCapabilities) -> Set<String> {
+        [
+            "help", "model", "tools", "context", "reset",
+            RichChatViewModel.compressSlashName(capabilities: caps),
+            "steer", "queue", "version"
+        ]
+    }
 
     /// Names Scarf used to offer that the ACP adapter has never dispatched
     /// at any of the 32 tags. `cost` never existed anywhere (the CLI verb is
@@ -645,10 +663,7 @@ import Foundation
     @Test func acpFallbackRosterMatchesTheAdapterAtV0211() {
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         let names = Set(
-            RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps,
-                hasActiveSession: true
-            ).map(\.name)
+            RichChatViewModel.alwaysAvailableCommands(capabilities: caps).map(\.name)
         )
         #expect(names == ["new", "help", "model", "tools", "context", "reset", "compress", "version"])
     }
@@ -665,9 +680,14 @@ import Foundation
             HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         ]
         for caps in hosts {
-            for cmd in RichChatViewModel.alwaysAvailableCommands(
-                capabilities: caps, hasActiveSession: true
-            ) {
+            let roster = RichChatViewModel.alwaysAvailableCommands(capabilities: caps)
+            // The compress row must BE the version-appropriate spelling —
+            // the point of making the expected set per-version.
+            let compressRows = roster.map(\.name)
+                .filter { $0 == "compact" || $0 == "compress" }
+            #expect(compressRows == [RichChatViewModel.compressSlashName(capabilities: caps)],
+                    "\(caps.versionLine): \(compressRows)")
+            for cmd in roster {
                 if cmd.name == "new" {
                     // Client-side: intercepted before the wire.
                     #expect(
@@ -682,8 +702,11 @@ import Foundation
                     RichChatViewModel.clientSideSlashCommand(for: "/\(cmd.name)") == nil,
                     "\(cmd.name) @ \(caps.versionLine)"
                 )
+                // Per-VERSION, not the union: the union holds both
+                // `compact` and `compress`, so it could never catch a
+                // roster offering the wrong spelling for the host.
                 #expect(
-                    Self.acpDispatchedNames.contains(cmd.name),
+                    Self.acpDispatchedNames(at: caps).contains(cmd.name),
                     "\(cmd.name) @ \(caps.versionLine)"
                 )
             }
@@ -701,9 +724,7 @@ import Foundation
         ]
         for caps in hosts {
             let names = Set(
-                RichChatViewModel.alwaysAvailableCommands(
-                    capabilities: caps, hasActiveSession: true
-                ).map(\.name)
+                RichChatViewModel.alwaysAvailableCommands(capabilities: caps).map(\.name)
             )
             for dead in Self.neverDispatchedByACP {
                 #expect(!names.contains(dead), "\(dead) @ \(caps.versionLine)")
@@ -727,9 +748,7 @@ import Foundation
         ]
         for caps in hosts {
             let names = Set(
-                RichChatViewModel.alwaysAvailableCommands(
-                    capabilities: caps, hasActiveSession: true
-                ).map(\.name)
+                RichChatViewModel.alwaysAvailableCommands(capabilities: caps).map(\.name)
             )
             for live in ["reset", "context", "version"] {
                 #expect(names.contains(live), "\(live) @ \(caps.versionLine)")
