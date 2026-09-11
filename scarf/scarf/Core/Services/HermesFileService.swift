@@ -2277,67 +2277,39 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Emit one MCP scalar VALUE — a thin forwarder over
+    /// ``YAMLScalar/quoteIfNeeded(_:)``, which is the one emission rule
+    /// every config.yaml writer in Scarf shares.
+    ///
+    /// **It used to be a fourth copy of that rule, and it was the copy that
+    /// was wrong.** Its double-quoted arm escaped exactly `\\` and `\"`, so
+    /// any C0/C1 control, DEL, NEL or U+2028/U+2029 a user pasted into an
+    /// MCP `env:` / `headers:` value, a tool name, a cert path or a
+    /// `command` went out RAW inside the quotes — and PyYAML's READER
+    /// refuses those in EVERY quoting style ("unacceptable character
+    /// #x0001: special characters are not allowed"), so Hermes swallowed
+    /// the error and discarded the WHOLE config.yaml layer
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`). Fuzzed 7 000 inputs
+    /// through PyYAML 6.0.3: `quoteIfNeeded` 0 failures, this routine 3 953.
+    /// `patchMCPServerField(expecting:)` could not see it either — the
+    /// expected rows are built by the same `subMapRows`, so the literal
+    /// match succeeds on a file PyYAML rejects (P19's lesson, applied to a
+    /// scalar the verifier itself emits).
+    ///
+    /// Two emission differences fall out of the unification, both safe
+    /// because ``unquote(_:)`` (i.e. ``YAMLScalar/unquote(_:)``) reverses
+    /// both: a safe-but-quotable scalar comes out SINGLE-quoted rather than
+    /// double-quoted, and an empty value comes out `''` rather than `""`.
+    /// PyYAML loads either spelling as the same string.
+    ///
+    /// `ssl_verify` still must not reach here for its BOOL form — a quoted
+    /// `"true"` is a CA-bundle path named `true` to Hermes. That carve-out
+    /// lives at the call site (`setMCPServerSSLVerify`), where the bool and
+    /// path forms are told apart.
     nonisolated static func yamlScalar(_ value: String) -> String {
-        if value.isEmpty { return "\"\"" }
-        // YAML 1.2 reserved indicators that change meaning at the start of a
-        // scalar: @ * & ? | > ! % , [ ] { } < ` ' " — plus space (would be
-        // trimmed) and dash (looks like a sequence). Anything starting with
-        // one of these must be quoted or YAML treats the value as an alias,
-        // tag, flow collection, etc., and parsing breaks.
-        let reservedFirstChars: Set<Character> = [
-            "@", "*", "&", "?", "|", ">", "!", "%", ",",
-            "[", "]", "{", "}", "<", "`", "'", "\""
-        ]
-        // A value carrying a line break cannot sit on one row at all:
-        // emitted bare it produced a column-0 fragment, and
-        // `verifyPatchedConfig` only noticed when the damaged entry was not
-        // the LAST in `mcp_servers`. `GatewayConfigWriter` has had this
-        // guard since P10 (`containsLineBreak`); this twin never did. The
-        // double-quoted form is the only YAML style that can carry the
-        // break inline, and `unquote` decodes `\\n` / `\\r` back, so the
-        // value round-trips instead of being refused or truncated.
-        if YAMLScalar.containsLineBreak(value) { return YAMLScalar.doubleQuoted(value) }
-        let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
-        let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
-            || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
-            // A TAB anywhere in the scalar. YAML forbids the tab as
-            // indentation and PyYAML's scanner rejects the row outright
-            // ("found character '\t' that cannot start any token"), which
-            // discards the WHOLE config.yaml layer, not just this value.
-            // `YAMLScalar.quoteIfNeeded` — which the KEY on the very same
-            // emitted row goes through — has had this arm all along
-            // (`YAMLScalar.swift:119`); the value half never did, so one row
-            // would quote its key for a tab and not its value.
-            //
-            // `patchMCPServerField(expecting:)` cannot catch it either: the
-            // expected rows are built by the same `subMapRows`, so the literal
-            // match succeeds on a file PyYAML rejects. A structural verifier
-            // cannot see damage that leaves the structure intact.
-            || value.contains("\t")
-            // Every plain spelling PyYAML's implicit resolvers would RETYPE
-            // — `~`, `null`, `on`, `007`, `0x1F`, `.inf`, `2026-09-09` —
-            // not just the five bool/null words this used to list. An env
-            // value of `007` loaded as the int 7.
-            || YAMLScalar.resolvesToNonString(value)
-            || firstCharNeedsQuoting
-        if needsQuoting {
-            let escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        }
-        return value
+        YAMLScalar.quoteIfNeeded(value)
     }
 
-    /// The inverse of ``yamlScalar``.
-    ///
-    /// It used to strip the quotes and stop, which made the pair asymmetric
-    /// for the one thing quoting exists to carry: `yamlScalar` writes
-    /// `\\` for a backslash and `\"` for a quote, and reading them back
-    /// verbatim turned `/a\b` into `/a\\b` one save later, and again the
-    /// save after that. The registrar compares this value against a real
-    /// filesystem path, so an unescape that doesn't undo the escape is a
-    /// permanent "the command moved" — a rewrite of a file Hermes watches,
-    /// every launch, forever.
     // MARK: - Boolish scalars
 
     /// The two word sets `_parse_boolish` accepts

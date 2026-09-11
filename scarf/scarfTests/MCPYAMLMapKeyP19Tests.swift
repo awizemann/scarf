@@ -295,12 +295,23 @@ struct MCPYAMLMapKeyP19Tests {
 
     /// An implicitly-typed scalar VALUE is quoted too: an env value of
     /// `007` used to load as the int 7.
-    @Test func yamlScalarQuotesImplicitlyTypedValues() {
-        #expect(HermesFileService.yamlScalar("007") == "\"007\"")
-        #expect(HermesFileService.yamlScalar("~") == "\"~\"")
-        #expect(HermesFileService.yamlScalar("0x1F") == "\"0x1F\"")
-        #expect(HermesFileService.yamlScalar("2026-09-09") == "\"2026-09-09\"")
-        // Plain values still go bare.
+    ///
+    /// P41 moved `yamlScalar` onto `YAMLScalar.quoteIfNeeded`, so the
+    /// SPELLING of the quote changed (single, not double) while the rule did
+    /// not. The assertion is therefore "quoted, and PyYAML reads the string
+    /// back" rather than a byte-exact double-quoted form — pinning the
+    /// spelling would pin the copy P41 deleted.
+    @Test(arguments: ["007", "~", "0x1F", "2026-09-09", "on", ".inf"])
+    func yamlScalarQuotesImplicitlyTypedValues(_ raw: String) {
+        let emitted = HermesFileService.yamlScalar(raw)
+        #expect(emitted != raw, "`\(raw)` went out bare and PyYAML would retype it")
+        #expect(emitted == YAMLScalar.quoteIfNeeded(raw))
+        #expect(YAMLScalar.unquote(emitted) == raw)
+    }
+
+    /// Plain values still go bare — the unification must not churn every
+    /// config in the world.
+    @Test func yamlScalarLeavesAPlainValueAlone() {
         #expect(HermesFileService.yamlScalar("abc123") == "abc123")
     }
 
