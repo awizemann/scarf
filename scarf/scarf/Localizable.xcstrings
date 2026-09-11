@@ -110987,31 +110987,373 @@
 
     },
     "No future occurrences — edit the schedule to run it again." : {
-      "comment" : "Shown in place of the cron recovery buttons for a recurring job that reached the completed state; no Hermes activation door accepts it, so the schedule itself has to change."
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job that reached the completed state; no Hermes activation door accepts it, so the schedule itself has to change.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine weiteren Ausführungen — bearbeite den Zeitplan, um sie erneut auszuführen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay próximas ejecuciones: edita la programación para volver a ejecutarla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus aucune exécution prévue — modifiez la planification pour la relancer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今後の実行予定はありません。もう一度実行するにはスケジュールを編集してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem execuções futuras — edite o agendamento para executá-la novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有后续执行计划 — 请编辑排程以再次运行。"
+          }
+        }
+      }
     },
     "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it." : {
-      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0."
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Auftrag konnte nicht geplant werden. Hermes v0.21.0 oder neuer kann ihn fortsetzen — bis dahin bearbeite den Zeitplan, um ihn neu zu aktivieren."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo programar esta tarea. Hermes v0.21.0 o posterior puede reanudarla; hasta entonces, edita la programación para reactivarla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche n'a pas pu être planifiée. Hermes v0.21.0 ou plus récent peut la reprendre — en attendant, modifiez la planification pour la réarmer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブのスケジュール設定に失敗しました。Hermes v0.21.0 以降なら再開できます。それまではスケジュールを編集して再設定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível agendar esta tarefa. O Hermes v0.21.0 ou mais recente pode retomá-la — até então, edite o agendamento para reativá-la."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请编辑排程以重新启用。"
+          }
+        }
+      }
     },
     "This Hermes is older than v0.19, which added `hermes config unset`. To go back to the host default, remove the `%@` line from config.yaml on the host." : {
-      "comment" : "Save failure for the “Host default” settings row on a Hermes host that lacks `hermes config unset`. %@ is the config key, e.g. approvals.mode."
+      "comment" : "Save failure for the “Host default” settings row on a Hermes host that lacks `hermes config unset`. %@ is the config key, e.g. approvals.mode.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Hermes ist älter als v0.19, das `hermes config unset` eingeführt hat. Um zur Host-Voreinstellung zurückzukehren, entferne die Zeile `%@` aus der config.yaml auf dem Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes es anterior a v0.19, que añadió `hermes config unset`. Para volver al valor predeterminado del host, elimina la línea `%@` de config.yaml en el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce Hermes est antérieur à v0.19, qui a introduit `hermes config unset`. Pour revenir à la valeur par défaut de l'hôte, supprimez la ligne `%@` du fichier config.yaml sur l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は `hermes config unset` が追加された v0.19 より前のバージョンです。ホストの既定値に戻すには、ホストの config.yaml から `%@` の行を削除してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes é anterior à v0.19, que adicionou `hermes config unset`. Para voltar ao padrão do host, remova a linha `%@` do config.yaml no host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 版本早于引入 `hermes config unset` 的 v0.19。要恢复为主机默认值，请从主机上的 config.yaml 中删除 `%@` 这一行。"
+          }
+        }
+      }
     },
     "Cleared %@ — the host default applies" : {
-      "comment" : "Confirmation after clearing an explicit config key so the Hermes host default applies again. %@ is the config key."
+      "comment" : "Confirmation after clearing an explicit config key so the Hermes host default applies again. %@ is the config key.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ zurückgesetzt — die Host-Voreinstellung gilt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se borró %@: se aplica el valor predeterminado del host"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ effacé — la valeur par défaut de l'hôte s'applique"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ をクリアしました — ホストの既定値が適用されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ removido — o padrão do host se aplica"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已清除 %@ — 现使用主机默认值"
+          }
+        }
+      }
     },
     "Couldn’t clear %@" : {
-      "comment" : "Failure after trying to clear an explicit config key, with no reason available. %@ is the config key."
+      "comment" : "Failure after trying to clear an explicit config key, with no reason available. %@ is the config key.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ konnte nicht zurückgesetzt werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo borrar %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d'effacer %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ をクリアできませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível remover %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法清除 %@"
+          }
+        }
+      }
     },
     "Couldn’t clear %@: %@" : {
-      "comment" : "Failure after trying to clear an explicit config key. The first %@ is the config key, the second is Hermes’s own refusal line."
+      "comment" : "Failure after trying to clear an explicit config key. The first %@ is the config key, the second is Hermes’s own refusal line.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ konnte nicht zurückgesetzt werden: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo borrar %@: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d'effacer %@ : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ をクリアできませんでした: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível remover %@: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法清除 %@：%@"
+          }
+        }
+      }
     },
     "“%@” contains a tab or a control character. Remove it, then save." : {
-      "comment" : "Bot editor validation error. %@ is the name of the offending field, e.g. “Name”."
+      "comment" : "Bot editor validation error. %@ is the name of the offending field, e.g. “Name”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält einen Tabulator oder ein Steuerzeichen. Entferne es und speichere dann."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contiene un tabulador o un carácter de control. Elimínalo y luego guarda."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » contient une tabulation ou un caractère de contrôle. Supprimez-le, puis enregistrez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」にタブまたは制御文字が含まれています。削除してから保存してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contém uma tabulação ou um caractere de controle. Remova-o e salve."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”包含制表符或控制字符。请删除后再保存。"
+          }
+        }
+      }
     },
     "“%@” contains a tab or a control character. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save." : {
-      "comment" : "Profile-route editor validation error. %@ is the name of the offending field, e.g. “Name”."
+      "comment" : "Profile-route editor validation error. %@ is the name of the offending field, e.g. “Name”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält einen Tabulator oder ein Steuerzeichen. Hermes kann eine config.yaml damit nicht lesen — es greift auf deine .env-Werte zurück und ignoriert die ganze Datei. Entferne es und speichere dann."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contiene un tabulador o un carácter de control. Hermes no puede leer un config.yaml que lo contenga: recurre a tus valores de .env e ignora todo el archivo. Elimínalo y luego guarda."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » contient une tabulation ou un caractère de contrôle. Hermes ne peut pas lire un config.yaml qui en contient — il se replie sur vos valeurs .env et ignore tout le fichier. Supprimez-le, puis enregistrez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」にタブまたは制御文字が含まれています。Hermes はそれを含む config.yaml を読み取れず、.env の値にフォールバックしてファイル全体を無視します。削除してから保存してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contém uma tabulação ou um caractere de controle. O Hermes não consegue ler um config.yaml com isso — ele recorre aos valores do seu .env e ignora o arquivo inteiro. Remova-o e salve."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”包含制表符或控制字符。Hermes 无法读取含有它的 config.yaml — 会退回到你的 .env 值并忽略整个文件。请删除后再保存。"
+          }
+        }
+      }
     },
     "Validation error: %@ contains a tab or a control character. Remove it, then save." : {
-      "comment" : "Accessibility label for the profile-route editor validation error. %@ is the name of the offending field."
+      "comment" : "Accessibility label for the profile-route editor validation error. %@ is the name of the offending field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Validierungsfehler: %@ enthält einen Tabulator oder ein Steuerzeichen. Entferne es und speichere dann."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error de validación: %@ contiene un tabulador o un carácter de control. Elimínalo y luego guarda."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erreur de validation : %@ contient une tabulation ou un caractère de contrôle. Supprimez-le, puis enregistrez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検証エラー: %@ にタブまたは制御文字が含まれています。削除してから保存してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erro de validação: %@ contém uma tabulação ou um caractere de controle. Remova-o e salve."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证错误：%@ 包含制表符或控制字符。请删除后再保存。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"
