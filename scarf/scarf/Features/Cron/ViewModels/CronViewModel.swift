@@ -387,7 +387,7 @@ final class CronViewModel {
     /// block (`_reject_terminal_activation`'s `and not
     /// _is_recoverable_error_job(job)`, `cron/jobs.py:1865-1878` @
     /// `v2026.9.7`), so plain `cron resume` recovers it — but only from
-    /// v0.21.0 on (`:2369-2375` @ `v2026.8.27` has no exemption).
+    /// v0.21.0 on (`:2367-2375` @ `v2026.8.27` has no exemption).
     var isV021OrLater = false
 
     /// What Scarf may offer this job — the shared, cross-platform answer.

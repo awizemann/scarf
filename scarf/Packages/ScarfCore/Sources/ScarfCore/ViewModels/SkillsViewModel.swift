@@ -647,7 +647,7 @@ public final class SkillsViewModel {
                 timeout: 30
             )
         }.value
-        // `do_audit` is `-> None` (skills_hub.py:879-880) so its exit code is 0
+        // `do_audit` is `-> None` (hermes_cli/skills_hub.py:879-880) so its exit code is 0
         // even for the unknown-name refusal (:891). `Auditing <n> skill(s)...`
         // (:893) is the only line that says the scanner ran; the empty-hub
         // line (:887) is a legitimate no-op. Both byte-identical back to
@@ -740,7 +740,7 @@ public final class SkillsViewModel {
     /// "Error: 'x' is not a hub-installed skill" comes back with exit 0
     /// (verified at v0.21.0) — so the exit code alone cannot be the
     /// verdict (charter C5). A rejection is an `Error:` line in the output.
-    /// `do_uninstall` (skills_hub.py:909-918) is also `-> None`: a declined
+    /// `do_uninstall` (hermes_cli/skills_hub.py:909-918) is also `-> None`: a declined
     /// confirmation returns silently, and `_report_pair` (:144-150) prints
     /// `Error: …` for a refusal — both at exit 0. Success is the green
     /// `Uninstalled '<name>' from <path>` line
@@ -751,7 +751,7 @@ public final class SkillsViewModel {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsUninstallSuccess,
             failureMarkers: HermesCLIMarkers.skillsUninstallFailure,
-            // `_report_pair` prints it at column 0 (skills_hub.py:146).
+            // `_report_pair` prints it at column 0 (hermes_cli/skills_hub.py:146).
             successAnchored: true
         )
     }
@@ -919,7 +919,7 @@ public final class SkillsViewModel {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsAuditSuccess,
             failureMarkers: HermesCLIMarkers.skillsAuditFailure,
-            // Both lines are printed at column 0 (skills_hub.py:887, :893),
+            // Both lines are printed at column 0 (hermes_cli/skills_hub.py:887, :893),
             // and the per-skill scan reports that follow can quote anything.
             successAnchored: true
         )
@@ -938,7 +938,7 @@ public final class SkillsViewModel {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsInstallSuccess,
             failureMarkers: HermesCLIMarkers.skillsInstallFailure,
-            // `Installed:` is printed at column 0 (skills_hub.py:720), and
+            // `Installed:` is printed at column 0 (hermes_cli/skills_hub.py:720), and
             // anchoring matters most here: `_print_tier1_advisory` (:704)
             // quotes SKILL.md-derived findings into the report BEFORE
             // `install_from_quarantine` can raise (:714-720), so a bare

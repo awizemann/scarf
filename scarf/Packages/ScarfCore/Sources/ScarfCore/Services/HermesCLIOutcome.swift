@@ -119,7 +119,7 @@ public enum HermesCLIVerdict {
     ///     A bare substring is not safe there: with the usual
     ///     `failureWins: false`, a success PHRASE quoted inside a report body
     ///     outranks a real refusal. `do_install` is the live case —
-    ///     `_print_tier1_advisory` (skills_hub.py:704, 726-747) prints
+    ///     `_print_tier1_advisory` (hermes_cli/skills_hub.py:704, 726-747) prints
     ///     SKILL.md-derived findings BEFORE `install_from_quarantine` can
     ///     raise (:714-720), so a skill whose own text contains
     ///     `Installed: …` used to be reported installed after it was refused.
@@ -161,12 +161,12 @@ public enum HermesCLIVerdict {
 public enum HermesCLIMarkers {
     // MARK: skills install / uninstall — hermes_cli/skills_hub.py
 
-    /// `c.print(f"[bold green]Installed:[/] {…}")` — skills_hub.py:720.
+    /// `c.print(f"[bold green]Installed:[/] {…}")` — hermes_cli/skills_hub.py:720.
     /// (Same line, same prefix, at v2026.6.19:691 through v2026.8.31:799.)
     public static let skillsInstallSuccess = ["Installed:"]
 
     /// Every refusal `do_install` can print, in source order:
-    /// - `Error:` — `_print_error` (skills_hub.py:134-135), reached from
+    /// - `Error:` — `_print_error` (hermes_cli/skills_hub.py:134-135), reached from
     ///   `_pinned_sources` (:582) and `_print_fetch_failure` (:592).
     /// - `Installation blocked:` — `_install_blocked` (:498), reached from the
     ///   scan verdict (:699) and `_invalid_path` (:506).
@@ -186,11 +186,11 @@ public enum HermesCLIMarkers {
 
     /// `_report_pair` prints `uninstall_skill`'s message green on success —
     /// `Uninstalled '<name>' from <path>` (tools/skills_hub_install.py:220),
-    /// via skills_hub.py:917,144-150.
+    /// via hermes_cli/skills_hub.py:917,144-150.
     public static let skillsUninstallSuccess = ["Uninstalled"]
 
     /// `_report_pair`'s failure arm is `_print_error` → `Error: …`
-    /// (skills_hub.py:149, 134-135). `Uninstall '<name>'?` cancelled prints
+    /// (hermes_cli/skills_hub.py:149, 134-135). `Uninstall '<name>'?` cancelled prints
     /// nothing at all, which the "no success marker" rule already catches.
     public static let skillsUninstallFailure = ["Error:"]
 
@@ -392,7 +392,7 @@ public enum HermesCLIMarkers {
 
     // MARK: skills audit / update — hermes_cli/skills_hub.py
 
-    /// `do_audit` is `-> None` (skills_hub.py:879-880) and exits 0 on its
+    /// `do_audit` is `-> None` (hermes_cli/skills_hub.py:879-880) and exits 0 on its
     /// refusal too. `Auditing <n> skill(s)...` (:893) is the only line that says
     /// the scan actually ran; `No hub-installed skills to audit.` (:887) is a
     /// legitimate empty run, not a failure. Both byte-identical back to
@@ -402,14 +402,14 @@ public enum HermesCLIMarkers {
         "No hub-installed skills to audit.",
     ]
 
-    /// `_print_error` (skills_hub.py:134-135) via the unknown-name arm (:891).
+    /// `_print_error` (hermes_cli/skills_hub.py:134-135) via the unknown-name arm (:891).
     public static let skillsAuditFailure = ["Error:"]
 
-    /// `do_update`'s nothing-to-do line (skills_hub.py:849), verbatim and
+    /// `do_update`'s nothing-to-do line (hermes_cli/skills_hub.py:849), verbatim and
     /// byte-identical back to v2026.6.19.
     public static let skillsUpdateNoUpdates = "No updates available."
 
-    /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:864). It is printed
+    /// `do_update`'s per-skill ATTEMPT line (hermes_cli/skills_hub.py:864). It is printed
     /// before `do_install` runs, so it proves an attempt and nothing more.
     public static let skillsUpdateAttempt = "Updating:"
 
@@ -417,7 +417,7 @@ public enum HermesCLIMarkers {
     /// minus the two lines `do_install` can only print for a *plain* install.
     ///
     /// `do_update` always calls `do_install(..., force=True)`
-    /// (skills_hub.py:868), and `do_install` prints
+    /// (hermes_cli/skills_hub.py:868), and `do_install` prints
     /// `Warning: '<name>' is already installed at <path>` (:682)
     /// **unconditionally** whenever the lock has an entry — which, for an
     /// update, it always does — and only THEN checks `if not force` (:683).

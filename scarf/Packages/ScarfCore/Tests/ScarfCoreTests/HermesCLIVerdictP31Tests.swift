@@ -155,7 +155,7 @@ struct HermesCLIVerdictP31Tests {
     // MARK: - skills update failure detail
 
     /// The P21 regression. `do_update` calls `do_install(..., force=True)`
-    /// (skills_hub.py:868) and `do_install` prints
+    /// (hermes_cli/skills_hub.py:868) and `do_install` prints
     /// `Warning: '<name>' is already installed at <path>` (:682)
     /// unconditionally — the lock ALWAYS has an entry for a skill being
     /// updated — before it checks `force` at :683. With that string in the

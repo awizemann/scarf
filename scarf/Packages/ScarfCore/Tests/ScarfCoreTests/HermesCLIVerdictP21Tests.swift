@@ -11,7 +11,7 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - Anchored success markers
 
-    /// `do_install` runs `_print_tier1_advisory` (skills_hub.py:704) BEFORE
+    /// `do_install` runs `_print_tier1_advisory` (hermes_cli/skills_hub.py:704) BEFORE
     /// `install_from_quarantine` can raise (:714-720), and that advisory
     /// quotes the skill's OWN SKILL.md text into the report. With the default
     /// `failureWins: false`, a bare-substring success marker let that quoted
@@ -147,7 +147,7 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - skills update: `Updated N skill(s).` counts attempts
 
-    /// `do_update` (skills_hub.py:848-872) prints
+    /// `do_update` (hermes_cli/skills_hub.py:848-872) prints
     /// `Updated {len(updates) - len(skipped_local)} skill(s).` after the loop
     /// no matter what each nested `do_install` did — and `do_install` is
     /// itself `-> None`, so a blocked scan prints its refusal and returns at
@@ -210,7 +210,7 @@ struct HermesCLIVerdictP21Tests {
 
     // MARK: - skills audit (the Skills "Reload" button)
 
-    /// `do_audit` is `-> None` (skills_hub.py:878): the unknown-name refusal
+    /// `do_audit` is `-> None` (hermes_cli/skills_hub.py:878): the unknown-name refusal
     /// (:890) exits 0 too, so the exit code cannot be the verdict. Judged by
     /// `Auditing <n> skill(s)...` (:891) / `No hub-installed skills to audit.`
     /// (:886), both byte-identical back to v2026.6.19.
