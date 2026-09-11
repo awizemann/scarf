@@ -175,35 +175,50 @@ struct AdvancedTab: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 160, alignment: .trailing)
                 Button("Check") {
-                    // Both verbs spawn `hermes` (an SSH round-trip on a
-                    // remote host); running them from the Button action
-                    // froze the window until the CLI returned. The output
-                    // panel opens immediately and fills in when it lands.
+                    // `config check` spawns `hermes` (an SSH round-trip on a
+                    // remote host); running it from the Button action froze
+                    // the window until the CLI returned. The output panel
+                    // opens immediately and fills in when it lands. It is
+                    // read-only (`_cmd_config_check`,
+                    // `hermes_cli/config.py:3693-3720` @ v2026.9.7), so it
+                    // stays enabled on a managed host too.
                     diagnosticsOutput = String(localized: "Running…")
                     showDiagnostics = true
                     Task { diagnosticsOutput = await viewModel.runConfigCheck() }
                 }
                 .controlSize(.small)
-                Button("Migrate") {
-                    // Both verbs spawn `hermes` (an SSH round-trip on a
-                    // remote host); running them from the Button action
-                    // froze the window until the CLI returned. The output
-                    // panel opens immediately and fills in when it lands.
-                    diagnosticsOutput = String(localized: "Running…")
-                    showDiagnostics = true
-                    Task { diagnosticsOutput = await viewModel.runConfigMigrate() }
-                }
-                .controlSize(.small)
-                // `config migrate` is the one WRITE in this section:
-                // `_cmd_config_migrate` (`hermes_cli/config.py:3653`) reaches
-                // `save_config`, whose managed arm refuses at exit 0. "Check"
-                // beside it is read-only (`:3693-3720`) and stays enabled.
-                .disabled(viewModel.isManagedHost)
                 Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.quaternary.opacity(0.3))
+
+            // `hermes config migrate` has no button (round-4 decision 4).
+            // `_cmd_config_migrate` runs `migrate_config(interactive=True)`
+            // (`hermes_cli/config.py:3653-3690` @ v2026.9.7), which reaches
+            // `_prompt_and_save_env` → `line_input` → a bare `input()` with no
+            // `EOFError` guard (`:1289-1297`, `:1354-1369`;
+            // `hermes_cli/cli_output.py:29-37`). Scarf gives the CLI no stdin,
+            // so the prompt raises and the run dies AFTER the migrations have
+            // been applied and BEFORE `_config_version` is stamped
+            // (`:1374-1378`) — a half-migrated config.yaml with the old
+            // version number on it. Alan's call: no piped defaults (blank
+            // lines are answers to questions we cannot read), so the pane
+            // points at the one place the prompts can be answered.
+            HStack {
+                Text("Migrate")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 160, alignment: .trailing)
+                Text(migrateHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
 
             if showDiagnostics {
                 Text(diagnosticsOutput.isEmpty ? "(no output)" : diagnosticsOutput)
@@ -219,6 +234,15 @@ struct AdvancedTab: View {
         pathsSection
         ScarfMonDiagnosticsSection()
         rawConfigSection
+    }
+
+    /// The one-line hint that replaces the old Migrate button. It names the
+    /// host the command has to be typed on, because on a remote context the
+    /// user's own Mac is the wrong machine.
+    private var migrateHint: String {
+        viewModel.context.isRemote
+            ? String(localized: "Run `hermes config migrate` in a terminal on \(viewModel.context.displayName) — it asks questions Scarf can't answer for you.")
+            : String(localized: "Run `hermes config migrate` in a terminal — it asks questions Scarf can't answer for you.")
     }
 
     /// v0.21.1 knobs that have no older home: the passive update check and

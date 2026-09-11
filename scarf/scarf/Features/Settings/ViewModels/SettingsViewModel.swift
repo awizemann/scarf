@@ -1235,8 +1235,8 @@ final class SettingsViewModel {
         // interleave with a toggle's write/re-read pair: a `config set` that
         // lands between this frame's guarded load and its publish is
         // overwritten by the splice, and the toggle then visibly snaps back
-        // — the exact race `writeChain` was built for, which `runConfigMigrate`
-        // already joins and this one did not. The guarded lock underneath
+        // — the exact race `writeChain` was built for, which the toggles
+        // join and this one did not. The guarded lock underneath
         // protects the BYTES from a second process; the chain is what orders
         // this process's own writes against each other.
         let previous = writeChain
@@ -1379,32 +1379,6 @@ final class SettingsViewModel {
         let run = cliRunner
         let timeout = Self.configCommandTimeout
         return await Task.detached { run(["config", "check"], timeout) }.value.output
-    }
-
-    /// `hermes config migrate`. Rewrites config.yaml, so it joins the same
-    /// serialised write chain as the toggles — a migrate interleaved with a
-    /// toggle's write/re-read pair is exactly the race `writeChain` exists
-    /// to prevent — and refreshes the derived raw YAML/personality state.
-    func runConfigMigrate() async -> String {
-        let run = cliRunner
-        let svc = fileService
-        let ctx = context
-        let timeout = Self.configCommandTimeout
-        let previous = writeChain
-        let migrate = Task { [weak self] () -> String in
-            _ = await previous?.value
-            let result = await Task.detached { run(["config", "migrate"], timeout) }.value
-            let refreshed = await Task.detached {
-                (config: svc.loadConfig(), raw: ctx.readText(ctx.paths.configYAML) ?? "")
-            }.value
-            guard let self else { return result.output }
-            self.config = refreshed.config
-            self.rawConfigYAML = refreshed.raw
-            self.personalities = self.parsePersonalities()
-            return result.output
-        }
-        writeChain = Task { _ = await migrate.value }
-        return await migrate.value
     }
 
     // MARK: - Backup & Restore (v0.9.0)
