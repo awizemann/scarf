@@ -90,21 +90,14 @@ public extension HermesConfig {
                 // keeps as a map rather than dotted keys.
                 values["\(section).\(key)"] ?? maps[section]?[key]
             }
-            func isBlock(_ section: String) -> Bool {
-                if maps[section]?.isEmpty == false { return true }
-                let dot = section + "."
-                return values.keys.contains { $0.hasPrefix(dot) }
-                    || lists.keys.contains { $0.hasPrefix(dot) }
-                    || maps.keys.contains { $0.hasPrefix(dot) }
-            }
-            let bridgeSource: String
-            if isBlock(plat) {
-                bridgeSource = plat
-            } else if isBlock("gateway.platforms.\(plat)") {
-                bridgeSource = "gateway.platforms.\(plat)"
-            } else {
-                bridgeSource = "platforms.\(plat)"
-            }
+            // Step 1 lives in `HermesPlatformSharedKeys` since P44, because
+            // the WRITE side needs the same answer (`t-6fa3fc84`) and a
+            // second copy of `platform_section` is how the two halves got
+            // out of phase in the first place.
+            let bridgeSource = HermesPlatformSharedKeys.bridgeSourcePrefix(
+                platform: plat,
+                in: parsed
+            )
             return raw(bridgeSource)
                 ?? raw("platforms.\(plat).extra")
                 ?? raw("gateway.platforms.\(plat).extra")
