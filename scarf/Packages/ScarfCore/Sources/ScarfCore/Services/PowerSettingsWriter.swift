@@ -117,7 +117,7 @@ public enum PowerSettingsWriter {
     /// document because it is too long to be a mapping key, or `nil`.
     ///
     /// **Round-4, P41b.** The pattern becomes a config.yaml map KEY, and
-    /// PyYAML's scanner caps a simple key at 1024 characters of emitted
+    /// PyYAML's scanner caps a simple key at 1024 unicode scalars of emitted
     /// token (``YAMLScalar/simpleKeyLimit``) — quoting does not buy headroom,
     /// it spends two characters of it. Unlike the control-character refusal
     /// this one is not about visibility: an over-long key makes `load_config`

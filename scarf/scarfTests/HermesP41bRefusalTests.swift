@@ -269,65 +269,157 @@ struct HermesP41bRefusalTests {
         #expect(vm.isSaving == false)
         let message = try #require(vm.saveError)
         #expect(message.contains("Environment name"))
-        #expect(message.contains("1024"))
+        // P41c: the copy no longer names 1024 — the budget is the emitted
+        // token, not a character count the user could check.
+        #expect(message.contains("too long"))
+        #expect(message.contains("1024") == false)
         #expect(try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
                 == before, "config.yaml was touched by a refused save")
     }
 
-    /// PyYAML itself is the authority on the boundary. Skipped with a
-    /// reported known issue when PyYAML is absent rather than passing
-    /// vacuously — same lane as `HermesP41MCPScalarTests`.
-    @Test func pyYAMLAgreesOnWhereTheLimitFalls() {
-        func loads(_ key: String) -> Bool? {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            proc.arguments = ["python3", "-c", """
-            import sys, yaml
-            try:
-                yaml.safe_load(sys.stdin.read())
-                print("OK")
-            except Exception:
-                print("NO")
-            """]
-            let out = Pipe(), err = Pipe(), input = Pipe()
-            proc.standardOutput = out
-            proc.standardError = err
-            proc.standardInput = input
-            do { try proc.run() } catch { return nil }
-            let doc = "env:\n  \(YAMLScalar.quoteIfNeeded(key)): v\n"
-            input.fileHandleForWriting.write(Data(doc.utf8))
-            input.fileHandleForWriting.closeFile()
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            _ = err.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
-            return String(decoding: data, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines) == "OK"
-        }
+    /// PyYAML itself is the authority on the boundary.
+    ///
+    /// P41c: the first cut wrapped the four boundary `#expect`s in
+    /// `withKnownIssue(…, isIntermittent: true)` alongside the availability
+    /// probe, so a disagreement with PyYAML was recorded as a known issue
+    /// and the test could not fail — the lane was decorative. Only the
+    /// PROBE is guarded now, exactly as `HermesP41MCPScalarTests`
+    /// (`pyYAMLRoundTripLaneIsPresent`) does it; the boundaries are asserted
+    /// unguarded, and the whole test returns early when python3/PyYAML is
+    /// genuinely absent.
+    private static func pyYAMLLoads(_ key: String) -> Bool? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = ["python3", "-c", """
+        import sys, yaml
+        try:
+            yaml.safe_load(sys.stdin.read())
+            print("OK")
+        except Exception:
+            print("NO")
+        """]
+        let out = Pipe(), err = Pipe(), input = Pipe()
+        proc.standardOutput = out
+        proc.standardError = err
+        proc.standardInput = input
+        do { try proc.run() } catch { return nil }
+        let doc = "env:\n  \(YAMLScalar.quoteIfNeeded(key)): v\n"
+        input.fileHandleForWriting.write(Data(doc.utf8))
+        input.fileHandleForWriting.closeFile()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        _ = err.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text == "OK" || text == "NO" else { return nil }
+        return text == "OK"
+    }
 
+    /// Named so the lane's ABSENCE is a reported known issue rather than a
+    /// silent vacuous pass — and so that nothing else in this file is.
+    @Test func pyYAMLBoundaryLaneIsPresent() {
+        withKnownIssue(
+            """
+            PyYAML is not installed for `python3` on this machine — the \
+            simple-key boundary lane of HermesP41bRefusalTests did NOT run. \
+            Install it (`python3 -m pip install pyyaml`) to exercise the \
+            lane that proves the refusal falls exactly where PyYAML does.
+            """,
+            isIntermittent: true
+        ) {
+            #expect(Self.pyYAMLLoads("ok") == true)
+        }
+    }
+
+    // MARK: - Finding 5 (P41c): the MCP server NAME on the add path
+
+    /// The add path shells `hermes mcp add`, and Hermes writes the server
+    /// name through PyYAML's own EMITTER
+    /// (`hermes_cli/mcp_config.py:_save_mcp_server` → `hermes_cli/config.py:save_config`
+    /// → `utils.py:atomic_yaml_write`, which is `yaml.dump` @ `v2026.9.7`).
+    /// The emitter does not produce a simple key it could not read back: past
+    /// its line width it switches to the EXPLICIT `? key` / `: value` form,
+    /// which carries no simple-key limit at all. So an over-long name is
+    /// neither refused by Hermes nor written as a file Hermes cannot reload —
+    /// `hermes mcp add` succeeds and every sibling entry survives.
+    ///
+    /// That is why the add path gets NO length pre-check: the refusal the
+    /// editor carries exists because SCARF emits those keys itself
+    /// (`env`/`headers` names, reasoning-override patterns) as simple keys;
+    /// the server name is not one Scarf emits, and refusing it would be the
+    /// over-refusal P19 named. `mcp_security.validate_mcp_server_entry`
+    /// (`hermes_cli/mcp_security.py:89`) has no length rule either, so there
+    /// is no Hermes refusal to judge the output of.
+    @Test func anOverLongServerNameSurvivesHermesOwnEmitter() throws {
+        guard Self.pyYAMLLoads("ok") == true else { return }
+        let name = String(repeating: "A", count: 1100)
+        let script = """
+        import sys, yaml, json
+        name = sys.stdin.read()
+        doc = yaml.dump(
+            {"mcp_servers": {name: {"command": "x"}, "ok": {"command": "y"}}},
+            default_flow_style=False, sort_keys=False, allow_unicode=True)
+        back = yaml.safe_load(doc)
+        print(json.dumps({
+            "explicit": doc.startswith("mcp_servers:\\n  ? "),
+            "keys": sorted(len(k) for k in back["mcp_servers"]),
+        }))
+        """
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = ["python3", "-c", script]
+        let out = Pipe(), err = Pipe(), input = Pipe()
+        proc.standardOutput = out
+        proc.standardError = err
+        proc.standardInput = input
+        try proc.run()
+        input.fileHandleForWriting.write(Data(name.utf8))
+        input.fileHandleForWriting.closeFile()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        _ = err.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        #expect(proc.terminationStatus == 0)
+        let text = String(decoding: data, as: UTF8.self)
+        // The emitter chose `? key`, and BOTH entries reload.
+        #expect(text.contains("\"explicit\": true"), "emitter did not use the explicit-key form: \(text)")
+        #expect(text.contains("[2, 1100]"), "the document did not reload intact: \(text)")
+
+        // Scarf's own simple-key rule still says this name would be illegal
+        // if Scarf emitted it as `name:` — which is exactly why the rule is
+        // applied where Scarf emits and not where Hermes does.
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(name))
+    }
+
+    @Test func pyYAMLAgreesOnWhereTheLimitFalls() throws {
+        // The ZWJ family is one Character and seven unicode scalars; the
+        // combining pair is one Character and two. PyYAML counts scalars,
+        // which is why `String.count` was the wrong measure (P41c).
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"
         // One case per side of each boundary: (key, does PyYAML load it?).
         let cases: [(String, Bool)] = [
             (String(repeating: "a", count: 1024), true),
             (String(repeating: "a", count: 1025), false),
             ("A: " + String(repeating: "a", count: 1019), true),    // emits 1024
             ("A: " + String(repeating: "a", count: 1020), false),   // emits 1025
+            (String(repeating: "e\u{301}", count: 512), true),      // 1024 scalars, 512 Characters
+            (String(repeating: "e\u{301}", count: 513), false),     // 1026 scalars, 513 Characters
+            (String(repeating: family, count: 146), true),          // 1022 scalars, 146 Characters
+            (String(repeating: family, count: 147), false),         // 1029 scalars, 147 Characters
         ]
-        let observed = cases.map { loads($0.0) }
 
-        withKnownIssue(
-            "PyYAML is not installed for `python3` — the boundary lane did NOT run.",
-            isIntermittent: true
-        ) {
-            for (index, expected) in cases.enumerated() {
-                guard let actual = observed[index] else {
-                    Issue.record("python3 could not be run for \(expected.1)")
-                    return
-                }
-                #expect(actual == expected.1,
-                        "PyYAML disagrees at \(YAMLScalar.quoteIfNeeded(expected.0).count) emitted characters")
-                #expect(YAMLScalar.exceedsSimpleKeyLimit(expected.0) == !expected.1,
-                        "the refusal disagrees with PyYAML at \(YAMLScalar.quoteIfNeeded(expected.0).count) emitted characters")
-            }
+        // Absence is reported by `pyYAMLBoundaryLaneIsPresent`; here it only
+        // decides whether there is anything to compare against.
+        guard Self.pyYAMLLoads("ok") == true else { return }
+
+        for (key, expected) in cases {
+            let emitted = YAMLScalar.quoteIfNeeded(key).unicodeScalars.count
+            let actual = try #require(Self.pyYAMLLoads(key),
+                                      "python3 could not be run for the \(emitted)-scalar case")
+            #expect(actual == expected,
+                    "PyYAML disagrees at \(emitted) emitted scalars")
+            #expect(YAMLScalar.exceedsSimpleKeyLimit(key) == !expected,
+                    "the refusal disagrees with PyYAML at \(emitted) emitted scalars")
         }
     }
 }

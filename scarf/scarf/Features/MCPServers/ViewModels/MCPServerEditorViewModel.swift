@@ -268,7 +268,7 @@ final class MCPServerEditorViewModel {
     /// `nil`.
     ///
     /// **Round-4, P41b.** Env names and header names become map KEYS, and
-    /// PyYAML's scanner caps a simple key at 1024 characters of EMITTED
+    /// PyYAML's scanner caps a simple key at 1024 unicode scalars of EMITTED
     /// token (``YAMLScalar/simpleKeyLimit``) — quoting spends two characters
     /// of that budget rather than buying headroom. Past it the document
     /// raises `ScannerError`, `load_config` discards the entire config.yaml
@@ -338,7 +338,7 @@ final class MCPServerEditorViewModel {
         if let field = oversizedKeyFieldLabel {
             isSaving = false
             saveError = String(
-                localized: "“\(field)” is longer than 1024 characters. Hermes can't read a config.yaml with a key that long — it falls back to your .env values and ignores the whole file. Shorten it, then save."
+                localized: "“\(field)” is too long for Hermes to read as a config.yaml key once Scarf quotes it. Hermes falls back to your .env values and ignores the whole file. Shorten it, then save."
             )
             completion(false)
             return

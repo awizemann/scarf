@@ -112666,125 +112666,125 @@
         }
       }
     },
-    "“%@” is longer than 1024 characters. Hermes can't read a config.yaml with a key that long — it falls back to your .env values and ignores the whole file. Shorten it, then save." : {
+    "“%@” is too long for Hermes to read as a config.yaml key once Scarf quotes it. Hermes falls back to your .env values and ignores the whole file. Shorten it, then save." : {
       "comment" : "MCP server editor validation error. %@ is the name of the offending field, e.g. “Environment name”.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%@“ ist länger als 1024 Zeichen. Hermes kann eine config.yaml mit einem so langen Schlüssel nicht lesen – es greift auf deine .env-Werte zurück und ignoriert die ganze Datei. Kürze ihn und speichere dann."
+            "value" : "„%@“ ist zu lang, als dass Hermes es – einmal von Scarf in Anführungszeichen gesetzt – als Schlüssel in der config.yaml lesen könnte. Hermes greift auf deine .env-Werte zurück und ignoriert die ganze Datei. Kürze ihn und speichere dann."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” tiene más de 1024 caracteres. Hermes no puede leer un config.yaml con una clave tan larga: recurre a tus valores de .env e ignora todo el archivo. Acórtala y luego guarda."
+            "value" : "“%@” es demasiado largo para que Hermes lo lea como clave de config.yaml una vez que Scarf lo entrecomilla. Hermes recurre a tus valores de .env e ignora todo el archivo. Acórtala y luego guarda."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "« %@ » dépasse 1024 caractères. Hermes ne peut pas lire un config.yaml comportant une clé aussi longue : il se rabat sur vos valeurs .env et ignore tout le fichier. Raccourcissez-la, puis enregistrez."
+            "value" : "« %@ » est trop long pour que Hermes le lise comme clé de config.yaml une fois mis entre guillemets par Scarf. Hermes se rabat sur vos valeurs .env et ignore tout le fichier. Raccourcissez-la, puis enregistrez."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」が1024文字を超えています。これほど長いキーがあるconfig.yamlはHermesが読み取れず、.envの値にフォールバックしてファイル全体を無視します。短くしてから保存してください。"
+            "value" : "「%@」は、Scarfが引用符で囲んだ状態ではconfig.yamlのキーとして長すぎ、Hermesが読み取れません。Hermesは.envの値にフォールバックし、ファイル全体を無視します。短くしてから保存してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” tem mais de 1024 caracteres. O Hermes não consegue ler um config.yaml com uma chave tão longa — ele recorre aos seus valores do .env e ignora o arquivo inteiro. Encurte-a e salve."
+            "value" : "“%@” é longo demais para o Hermes ler como chave do config.yaml depois que o Scarf a coloca entre aspas. O Hermes recorre aos seus valores do .env e ignora o arquivo inteiro. Encurte-a e salve."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@”超过 1024 个字符。Hermes 无法读取包含如此长的键的 config.yaml，它会回退到你的 .env 值并忽略整个文件。请缩短后再保存。"
+            "value" : "经 Scarf 加上引号后，“%@”作为 config.yaml 的键过长，Hermes 无法读取。Hermes 会回退到你的 .env 值并忽略整个文件。请缩短后再保存。"
           }
         }
       }
     },
-    "“%@” is longer than 1024 characters. Hermes can't read a config.yaml with a key that long — it ignores the whole file. Shorten it, then add." : {
+    "“%@” is too long for Hermes to read as a config.yaml key once Scarf quotes it. Hermes ignores the whole file. Shorten it, then add." : {
       "comment" : "Reasoning-overrides validation error. %@ is the name of the offending field, e.g. “Model pattern”.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%@“ ist länger als 1024 Zeichen. Hermes kann eine config.yaml mit einem so langen Schlüssel nicht lesen – es ignoriert die ganze Datei. Kürze ihn und füge ihn dann hinzu."
+            "value" : "„%@“ ist zu lang, als dass Hermes es – einmal von Scarf in Anführungszeichen gesetzt – als Schlüssel in der config.yaml lesen könnte. Hermes ignoriert die ganze Datei. Kürze ihn und füge ihn dann hinzu."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” tiene más de 1024 caracteres. Hermes no puede leer un config.yaml con una clave tan larga: ignora todo el archivo. Acórtala y luego añádela."
+            "value" : "“%@” es demasiado largo para que Hermes lo lea como clave de config.yaml una vez que Scarf lo entrecomilla. Hermes ignora todo el archivo. Acórtala y luego añádela."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "« %@ » dépasse 1024 caractères. Hermes ne peut pas lire un config.yaml comportant une clé aussi longue : il ignore tout le fichier. Raccourcissez-la, puis ajoutez-la."
+            "value" : "« %@ » est trop long pour que Hermes le lise comme clé de config.yaml une fois mis entre guillemets par Scarf. Hermes ignore tout le fichier. Raccourcissez-la, puis ajoutez-la."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」が1024文字を超えています。これほど長いキーがあるconfig.yamlはHermesが読み取れず、ファイル全体を無視します。短くしてから追加してください。"
+            "value" : "「%@」は、Scarfが引用符で囲んだ状態ではconfig.yamlのキーとして長すぎ、Hermesが読み取れません。Hermesはファイル全体を無視します。短くしてから追加してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” tem mais de 1024 caracteres. O Hermes não consegue ler um config.yaml com uma chave tão longa — ele ignora o arquivo inteiro. Encurte-a e adicione."
+            "value" : "“%@” é longo demais para o Hermes ler como chave do config.yaml depois que o Scarf a coloca entre aspas. O Hermes ignora o arquivo inteiro. Encurte-a e adicione."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@”超过 1024 个字符。Hermes 无法读取包含如此长的键的 config.yaml，它会忽略整个文件。请缩短后再添加。"
+            "value" : "经 Scarf 加上引号后，“%@”作为 config.yaml 的键过长，Hermes 无法读取。Hermes 会忽略整个文件。请缩短后再添加。"
           }
         }
       }
     },
-    "Validation error: %@ is longer than 1024 characters. Shorten it, then add." : {
+    "Validation error: %@ is too long to use as a config.yaml key. Shorten it, then add." : {
       "comment" : "Accessibility label for the reasoning-overrides over-long-key validation error.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Validierungsfehler: %@ ist länger als 1024 Zeichen. Kürze es und füge es dann hinzu."
+            "value" : "Validierungsfehler: %@ ist zu lang für einen Schlüssel in der config.yaml. Kürze es und füge es dann hinzu."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Error de validación: %@ tiene más de 1024 caracteres. Acórtalo y luego añádelo."
+            "value" : "Error de validación: %@ es demasiado largo para usarlo como clave de config.yaml. Acórtalo y luego añádelo."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Erreur de validation : %@ dépasse 1024 caractères. Raccourcissez-le, puis ajoutez-le."
+            "value" : "Erreur de validation : %@ est trop long pour servir de clé dans config.yaml. Raccourcissez-le, puis ajoutez-le."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "検証エラー: %@ が1024文字を超えています。短くしてから追加してください。"
+            "value" : "検証エラー: %@ はconfig.yamlのキーとして長すぎます。短くしてから追加してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Erro de validação: %@ tem mais de 1024 caracteres. Encurte-o e adicione."
+            "value" : "Erro de validação: %@ é longo demais para servir de chave no config.yaml. Encurte-o e adicione."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "验证错误：%@ 超过 1024 个字符。请缩短后再添加。"
+            "value" : "验证错误：%@ 作为 config.yaml 的键过长。请缩短后再添加。"
           }
         }
       }

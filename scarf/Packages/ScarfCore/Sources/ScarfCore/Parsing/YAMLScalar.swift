@@ -65,7 +65,8 @@ public enum YAMLScalar {
 
     /// PyYAML's simple-key length limit: a `key: value` mapping key is a
     /// "simple key", and the scanner refuses one whose token runs more than
-    /// 1024 characters before the `:` — `self.index - key.index > 1024`
+    /// 1024 characters before the `:` — `self.index - key.index > 1024`,
+    /// where `index` counts PYTHON characters, i.e. unicode code points —
     /// raises `ScannerError` (`yaml/scanner.py:283-291`, the comment at
     /// `:91`). Quoting does not help: the limit is measured over the EMITTED
     /// token, so the two quote characters count toward it.
@@ -80,13 +81,19 @@ public enum YAMLScalar {
     /// ``simpleKeyLimit`` and make PyYAML refuse the document.
     ///
     /// Measured on the emitted form, because that is the token PyYAML
-    /// scans: an unquoted 1024-character key loads, the same key quoted is
+    /// scans: an unquoted 1024-scalar key loads, the same key quoted is
     /// 1026 and does not. Verified against PyYAML 6.0.3 locally — bare 1024
     /// OK / 1025 refused, `'…'` with 1022 inside OK / 1023 refused.
     ///
-    /// Characters, not bytes: PyYAML's `index` counts unicode characters.
+    /// Unicode SCALARS, not bytes and not grapheme clusters: PyYAML's
+    /// `index` counts Python characters, i.e. unicode code points, so
+    /// `e` + U+0301 spends TWO of the budget while Swift's `String.count`
+    /// sees one Character. 600 `e\u{301}` pairs are 600 Swift Characters
+    /// and 1200 PyYAML characters — `.count` passed them and PyYAML
+    /// refused the document. Same for an emoji ZWJ sequence, which is one
+    /// Character and five-plus scalars.
     public static func exceedsSimpleKeyLimit(_ key: String) -> Bool {
-        quoteIfNeeded(key).count > simpleKeyLimit
+        quoteIfNeeded(key).unicodeScalars.count > simpleKeyLimit
     }
 
     /// The Unicode byte-order mark, which YAML permits at the start of a

@@ -546,10 +546,18 @@ public enum HermesYAML {
     /// ``YAMLScalar/quoteIfNeeded(_:)``) and read back as the key `'A` with the
     /// value `B': v`, which the next save then persisted.
     ///
-    /// A quoted key ends at its closing quote and the colon may follow
-    /// immediately; a PLAIN key ends at the first colon followed by whitespace
-    /// or end-of-line, per ``plainKeySeparatorIndex(in:)`` — a colon with a
-    /// non-space successor belongs to the key (`llama3:8b: high`).
+    /// A quoted key ends at its closing quote, and the colon after it must be
+    /// followed by whitespace or end the line: PyYAML's parser demands a
+    /// space after the value indicator whenever the key is not plain, so
+    /// `'a':b` raises `ParserError` while `'a': b` and `'a':` both load
+    /// (verified against PyYAML 6.0.3). Accepting `'a':b` here meant reading
+    /// a row Hermes cannot load at all. A TAB is accepted as the separator
+    /// for symmetry with the plain arm; PyYAML refuses a tab there too, but
+    /// as a scanner-wide rule about tabs rather than anything about keys,
+    /// and no Scarf writer emits one. A PLAIN key ends at the first colon
+    /// followed by whitespace or end-of-line, per
+    /// ``plainKeySeparatorIndex(in:)`` — there a colon with a non-space
+    /// successor belongs to the key (`llama3:8b: high`).
     public static func blockKeySpan(
         in trimmed: String
     ) -> (key: Substring, afterColon: Substring)? {
@@ -559,7 +567,11 @@ public enum HermesYAML {
             let afterQuote = body.index(after: close)
             let rest = body[afterQuote...].drop(while: { $0 == " " || $0 == "\t" })
             guard rest.first == ":" else { return nil }
-            return (trimmed[trimmed.startIndex..<afterQuote], rest.dropFirst())
+            let afterColon = rest.dropFirst()
+            // PyYAML: after a non-plain key the `:` needs a space or the end
+            // of the line. `'a':b` is a ParserError, not a row.
+            if let next = afterColon.first, next != " ", next != "\t" { return nil }
+            return (trimmed[trimmed.startIndex..<afterQuote], afterColon)
         }
         guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { return nil }
         return (

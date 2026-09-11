@@ -86,7 +86,8 @@ struct HermesP41bYAMLTests {
         ("llama3:8b: high", "llama3:8b", "high"),
         ("command: /usr/local/bin/tool", "command", "/usr/local/bin/tool"),
         ("url: https://mcp.example.com", "url", "https://mcp.example.com"),
-        ("'quoted':v", "'quoted'", "v"),
+        ("'quoted':", "'quoted'", ""),
+        ("'quoted':\tv", "'quoted'", "v"),   // tab: lenient, see blockKeySpan
     ])
     func blockKeySpanSplitsTheseShapes(
         _ line: String, _ expectedKey: String, _ expectedValue: String
@@ -97,7 +98,15 @@ struct HermesP41bYAMLTests {
     }
 
     /// And the shapes that are not a `key: value` row at all.
-    @Test(arguments: ["'unterminated: v", "\"trailing backslash\\", "novaluehere"])
+    /// `'a':b` is in this list because PyYAML's parser refuses it — after a
+    /// non-plain key the value indicator needs a space or the end of the
+    /// line (`ParserError`, PyYAML 6.0.3) — so it is not a row Hermes can
+    /// load, and reading it as one meant Scarf showed a row that made Hermes
+    /// discard the whole config.yaml layer.
+    @Test(arguments: [
+        "'unterminated: v", "\"trailing backslash\\", "novaluehere",
+        "'a':b", "\"a\":b", "'A: B':v",
+    ])
     func blockKeySpanRefusesANonRow(_ line: String) {
         #expect(HermesYAML.blockKeySpan(in: line) == nil)
     }
@@ -120,9 +129,31 @@ struct HermesP41bYAMLTests {
         // Quoted — a name carrying a colon is emitted `'…'`, so the two
         // quote characters count and the content budget is 1022.
         let colonKey = { (n: Int) in "A: " + String(repeating: "a", count: n - 3) }
-        #expect(YAMLScalar.quoteIfNeeded(colonKey(1022)).count == 1024)
+        #expect(YAMLScalar.quoteIfNeeded(colonKey(1022)).unicodeScalars.count == 1024)
         #expect(YAMLScalar.exceedsSimpleKeyLimit(colonKey(1022)) == false)
         #expect(YAMLScalar.exceedsSimpleKeyLimit(colonKey(1023)))
+
+        // P41c: PyYAML counts unicode CODE POINTS (Python characters), and
+        // Swift's `String.count` counts grapheme CLUSTERS. `e` + U+0301 is
+        // one Character and two scalars, so 600 of them are 600 by `.count`
+        // and 1200 to PyYAML — under the old measure the guard passed and
+        // PyYAML refused the whole document.
+        let combining = String(repeating: "e\u{301}", count: 600)
+        #expect(combining.count == 600, "600 grapheme clusters")
+        #expect(combining.unicodeScalars.count == 1200)
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(combining))
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(String(repeating: "e\u{301}", count: 512)) == false,
+                "1024 scalars exactly — refusing them is over-refusal")
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(String(repeating: "e\u{301}", count: 513)))
+
+        // An emoji ZWJ sequence is one Character and SEVEN scalars.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"
+        #expect(family.count == 1)
+        #expect(family.unicodeScalars.count == 7)
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(String(repeating: family, count: 147)),
+                "1029 scalars, and only 147 Characters")
+        #expect(YAMLScalar.exceedsSimpleKeyLimit(String(repeating: family, count: 146)) == false,
+                "1022 scalars")
     }
 
     /// The reasoning-override pattern is a map key too, and it is checked in
