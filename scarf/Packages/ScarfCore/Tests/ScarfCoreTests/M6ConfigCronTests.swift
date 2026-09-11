@@ -376,7 +376,7 @@ import Foundation
         // `parse_reasoning_effort`'s disable aliases are accepted for a
         // hand-edited row but never offered.
         for alias in expected.union(HermesReasoningEffort.disableAliases) {
-            #expect(HermesReasoningEffort.isValid(alias), alias)
+            #expect(HermesReasoningEffort.isValid(alias), Comment(rawValue: alias))
         }
     }
 
