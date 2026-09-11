@@ -110985,6 +110985,33 @@
     },
     "ScarfGo" : {
 
+    },
+    "No future occurrences — edit the schedule to run it again." : {
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job that reached the completed state; no Hermes activation door accepts it, so the schedule itself has to change."
+    },
+    "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it." : {
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0."
+    },
+    "This Hermes is older than v0.19, which added `hermes config unset`. To go back to the host default, remove the `%@` line from config.yaml on the host." : {
+      "comment" : "Save failure for the “Host default” settings row on a Hermes host that lacks `hermes config unset`. %@ is the config key, e.g. approvals.mode."
+    },
+    "Cleared %@ — the host default applies" : {
+      "comment" : "Confirmation after clearing an explicit config key so the Hermes host default applies again. %@ is the config key."
+    },
+    "Couldn’t clear %@" : {
+      "comment" : "Failure after trying to clear an explicit config key, with no reason available. %@ is the config key."
+    },
+    "Couldn’t clear %@: %@" : {
+      "comment" : "Failure after trying to clear an explicit config key. The first %@ is the config key, the second is Hermes’s own refusal line."
+    },
+    "“%@” contains a tab or a control character. Remove it, then save." : {
+      "comment" : "Bot editor validation error. %@ is the name of the offending field, e.g. “Name”."
+    },
+    "“%@” contains a tab or a control character. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save." : {
+      "comment" : "Profile-route editor validation error. %@ is the name of the offending field, e.g. “Name”."
+    },
+    "Validation error: %@ contains a tab or a control character. Remove it, then save." : {
+      "comment" : "Accessibility label for the profile-route editor validation error. %@ is the name of the offending field."
     }
   },
   "version" : "1.1"

@@ -389,11 +389,11 @@ private struct ProfileRouteEditorSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if let field = controlCharacterField {
-                Text("“\(field)” contains a tab or line break. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save.")
+                Text("“\(field)” contains a tab or a control character. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.danger)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Validation error: \(field) contains a tab or line break. Remove it, then save.")
+                    .accessibilityLabel("Validation error: \(field) contains a tab or a control character. Remove it, then save.")
             }
 
             if !trimmedProfile.isEmpty, !HermesProfileName.isValid(trimmedProfile) {
