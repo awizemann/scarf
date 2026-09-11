@@ -1637,6 +1637,11 @@ final class ChatController {
 
         let sessionId = vm.sessionId ?? ""
         guard !sessionId.isEmpty else { return }
+        // Captured BEFORE the local echo below: `addUserMessage` sets
+        // `isAgentWorking = true` itself, so reading the flag after it
+        // always answers "working" and the `/queue`-on-idle arm could never
+        // fire. Mac's `sendViaACP` snapshots the same way.
+        let wasAgentWorking = vm.isAgentWorking
         let images = attachments
         attachments = []
         draft = ""
@@ -1661,6 +1666,15 @@ final class ChatController {
         // ran `/goal` then opened the same session on Mac would see
         // an empty pill until they typed `/goal` again.
         let parsedSlash = RichChatViewModel.parseSlashName(text)
+        // See `idleQueueFallbackText`: a typed `/queue <text>` with nothing
+        // running is sent as an ordinary prompt, because leaving the prefix
+        // on the wire would hand it back to `_cmd_queue`.
+        let idleQueueText = RichChatViewModel.idleQueueFallbackText(
+            name: parsedSlash.name,
+            args: parsedSlash.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: vm.capabilitiesGate
+        )
         switch parsedSlash.name {
         case "goal":
             // TODO(WS-2-Q7): verify on a real v0.13 host.
@@ -1676,7 +1690,14 @@ final class ChatController {
                 vm.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "queue" where vm.isDispatchedNonInterruptiveSlash(text):
+        // `wasAgentWorking` is the second gate (round-4, P44b): the queue
+        // mirror and the "runs after current turn" hint are only true of a
+        // session with a turn in flight. On an idle session the adapter
+        // appends the prompt and returns `end_turn` before the only drain
+        // (`acp_adapter/server.py:793-799` vs `:908-915` @ `v2026.9.7`), so
+        // it would run two turns from now — `idleQueueText` below sends the
+        // argument as an ordinary prompt instead.
+        case "queue" where vm.isDispatchedNonInterruptiveSlash(text) && wasAgentWorking:
             let queuedText = parsedSlash.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 vm.recordQueuedPrompt(text: queuedText)
@@ -1722,6 +1743,9 @@ final class ChatController {
             ) {
                 vm.transientHint = notice
                 scheduleTransientHintClear(snapshot: vm.transientHint)
+            } else if idleQueueText != nil {
+                vm.transientHint = RichChatViewModel.idleQueueNotice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
             }
         }
         // Project-scoped slash commands expand client-side: the user
@@ -1729,7 +1753,7 @@ final class ChatController {
         // Hermes receives the expanded prompt template body. Other
         // command sources (ACP, quick_commands) keep going to Hermes
         // literally. v2.5.
-        let wireText = expandIfProjectScoped(text)
+        let wireText = idleQueueText ?? expandIfProjectScoped(text)
         do {
             let result = try await client.sendPrompt(
                 sessionId: sessionId,

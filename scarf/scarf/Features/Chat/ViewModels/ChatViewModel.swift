@@ -1203,6 +1203,17 @@ final class ChatViewModel {
     ) {
         ScarfMon.event(.chatStream, "mac.sendViaACP", count: 1, bytes: text.utf8.count)
 
+        // Whether a turn was ALREADY in flight when this send started —
+        // captured before the local echo below, because `addUserMessage`
+        // sets `isAgentWorking = true` itself, so reading the flag after it
+        // always answers "working" and the `/queue`-on-idle arm could never
+        // fire. The `localEchoAlreadyAdded` callers echoed a moment earlier
+        // for the same reason; both of them (autostart's queued prompt and
+        // the project-wizard kickoff) are fresh sessions with nothing
+        // running, so they read as idle rather than inheriting their own
+        // echo.
+        let wasAgentWorking = richChatViewModel.isAgentWorking && !localEchoAlreadyAdded
+
         // Client-side slash intercept. Hermes ACP doesn't intercept
         // `/new` server-side — sending it as a prompt routes to the
         // LLM, which responds in-character ("/new is a TUI slash
@@ -1254,7 +1265,22 @@ final class ChatViewModel {
         // prompt template. The literal slash is meaningless to Hermes
         // for project-scoped commands; this is what makes them portable
         // and Hermes-version-independent. v2.5.
-        let wireText = richChatViewModel.expandIfProjectScoped(text, context: context)
+        let parsedForWire = RichChatViewModel.parseSlashName(text)
+        // A typed `/queue <text>` with NOTHING running is not a queue: the
+        // adapter appends it to `queued_prompts` and returns `end_turn`
+        // before the only drain (`acp_adapter/server.py:793-799` vs
+        // `:908-915` @ `v2026.9.7`), so it would run two turns from now.
+        // Send the argument as an ordinary prompt instead — leaving the
+        // `/queue` prefix on the wire would hand it straight back to
+        // `_cmd_queue` and make the notice a lie.
+        let idleQueueText = RichChatViewModel.idleQueueFallbackText(
+            name: parsedForWire.name,
+            args: parsedForWire.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: richChatViewModel.capabilitiesGate
+        )
+        let wireText = idleQueueText
+            ?? richChatViewModel.expandIfProjectScoped(text, context: context)
 
         // Non-interruptive slash commands keep the "Agent working…"
         // indicator off and surface a transient toast confirming the
@@ -1276,8 +1302,11 @@ final class ChatViewModel {
         // neither). So that turn is a REAL turn: no queue chip, no
         // "runs after current turn" hint, the normal working indicator, and
         // a one-line notice saying what Scarf actually sent.
+        // An idle `/queue` is an ordinary turn now (see `idleQueueText`), so
+        // it must NOT suppress the working indicator either.
         let isNonInterruptive = richChatViewModel.isDispatchedNonInterruptiveSlash(text)
-        let parsed = RichChatViewModel.parseSlashName(text)
+            && idleQueueText == nil
+        let parsed = parsedForWire
         switch parsed.name {
         case "goal":
             // TODO(WS-2-Q7): once a v0.13 host confirms the
@@ -1302,7 +1331,10 @@ final class ChatViewModel {
                 richChatViewModel.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleHintClear()
-        case "queue" where isNonInterruptive:
+        // `wasAgentWorking` is the second gate: the queue chip and the
+        // "runs after current turn" hint are only true of a session with a
+        // turn in flight.
+        case "queue" where isNonInterruptive && wasAgentWorking:
             let queuedText = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 richChatViewModel.recordQueuedPrompt(text: queuedText)
@@ -1348,6 +1380,9 @@ final class ChatViewModel {
                 capabilities: richChatViewModel.capabilitiesGate
             ) {
                 richChatViewModel.transientHint = notice
+                scheduleHintClear()
+            } else if idleQueueText != nil {
+                richChatViewModel.transientHint = RichChatViewModel.idleQueueNotice
                 scheduleHintClear()
             }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }

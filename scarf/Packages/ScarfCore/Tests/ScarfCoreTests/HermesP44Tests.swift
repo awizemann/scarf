@@ -121,7 +121,8 @@ struct IdleSlashGreyOutP44Tests {
 
     /// The arm that replaced it. `_cmd_queue` appends to
     /// `state.queued_prompts` whatever the session is doing
-    /// (`acp_adapter/commands.py:285-289` @ `v2026.9.7`), and the only drain
+    /// (`_queue_prompt`, `acp_adapter/commands.py:33-36` @ `v2026.9.7`,
+    /// called by `_cmd_queue` at `:285-290`), and the only drain
     /// is the tail of a running turn (`server.py:908-915`) — so on an idle
     /// session the prompt runs two turns later, not "after the current turn".
     @Test func queueIsGreyedOnAnIdleButOpenSession() {
@@ -213,16 +214,24 @@ struct ReasoningEffortWideningP44Tests {
     }
 
     /// The affordance says what Hermes DOES, walked at the tag:
-    /// `parse_reasoning_effort` returns `None` for an unrecognised value and
-    /// the caller then uses the provider default
+    /// `parse_reasoning_effort` returns `None` for an unrecognised value
     /// (`hermes_constants.py:876-889` @ `v2026.9.7`, `:797-812` @
-    /// `v2026.7.1`, `:797-820` @ `v2026.7.7`, `:840-864` @ `v2026.7.20`).
+    /// `v2026.7.1`, `:797-820` @ `v2026.7.7`, `:840-864` @ `v2026.7.20`) and
+    /// `resolve_reasoning_config` then logs `Unknown reasoning_effort '%s',
+    /// using default (medium)` (`:975-976`) — and the chat-completions
+    /// transport substitutes that `medium` EXPLICITLY
+    /// (`agent/transports/chat_completions.py:420-422`). P44b: it is
+    /// Hermes's own default, NOT "the model provider's own default", which
+    /// is what this used to say and assert.
     @Test func theAffordanceNamesTheFallbackAndOnlyWhenUnsupported() throws {
         let notice = try #require(HermesReasoningEffort.unsupportedLevelNotice(
             for: "ultra", capabilities: Self.v0181
         ))
         #expect(notice.contains("ultra"))
-        #expect(notice.lowercased().contains("provider"))
+        #expect(notice.lowercased().contains("medium"))
+        #expect(notice.lowercased().contains("own default"))
+        #expect(!notice.lowercased().contains("provider"),
+                "the notice must not credit the model provider — Hermes substitutes medium itself")
         #expect(!notice.contains("\n"))
 
         #expect(HermesReasoningEffort.unsupportedLevelNotice(for: "max", capabilities: Self.v0181) == nil)
@@ -235,8 +244,13 @@ struct ReasoningEffortWideningP44Tests {
         }
     }
 
-    /// The widening and the affordance are two halves of one rule: a level is
+    /// The widening and the affordance are two halves of one rule: a LEVEL is
     /// prepended if and only if it draws a notice.
+    ///
+    /// The disable aliases are the deliberate exception P44b added — they are
+    /// widened (a stored value always needs a row) but draw no notice on a
+    /// host that accepts them, because they are reasoning off, not an
+    /// ignored value. `ReasoningDisableAliasP44bTests` owns that half.
     @Test func wideningAndTheAffordanceAgree() {
         let hosts = [Self.v0180, Self.v0181, Self.v0190, HermesCapabilities.empty]
         for caps in hosts {

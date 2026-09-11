@@ -1421,11 +1421,14 @@ public final class RichChatViewModel {
     ///   Surfacing them greyed gives the user a visible "what's
     ///   coming once you open a chat" instead of an empty menu.
     /// - **Idle session**: `/queue` needs a turn in flight to queue behind.
-    ///   `_cmd_queue` appends to `state.queued_prompts` unconditionally
-    ///   (`acp_adapter/commands.py:285-289` @ `v2026.9.7`), but the only
-    ///   drain is the tail of a running turn (`server.py:908-915`), so on an
-    ///   idle session the prompt sits there until the user's NEXT turn ends
-    ///   and then runs behind it — two turns away from what the row promises.
+    ///   `_queue_prompt` appends to `state.queued_prompts` unconditionally
+    ///   (`acp_adapter/commands.py:33-36` @ `v2026.9.7`; `_cmd_queue` calls
+    ///   it at `:285-290` after rejecting an empty argument), but the only
+    ///   drain is the tail of a running turn (`server.py:908-915`) — and a
+    ///   dispatched slash command returns `end_turn` at `server.py:793-799`,
+    ///   BEFORE that drain. So on an idle session the prompt sits there
+    ///   until the user's NEXT turn ends and then runs behind it — two turns
+    ///   away from what the row promises.
     ///
     /// There is deliberately no pre-v0.13 `/steer` arm any more (round-4
     /// decision 14). It asked `hasACPSteerOnIdle`, which was `hasACPSteer`
@@ -1477,7 +1480,7 @@ public final class RichChatViewModel {
         capabilities: HermesCapabilities
     ) -> String? {
         if !hasActiveSession {
-            return "Available once a chat is open. Press Return on `/new` (or click an existing session) to start one."
+            return String(localized: "Available once a chat is open. Press Return on `/new` (or click an existing session) to start one.")
         }
         let disabled = disabledSlashCommandNames(
             isAgentWorking: isAgentWorking,
@@ -1485,7 +1488,51 @@ public final class RichChatViewModel {
             capabilities: capabilities
         )
         guard !disabled.isEmpty else { return nil }
-        return "Use `/queue` while the agent is working — on an idle session Hermes holds the prompt until your next turn finishes, then runs it."
+        return String(localized: "Use `/queue` while the agent is working — on an idle session Hermes holds the prompt until your next turn finishes, then runs it.")
+    }
+
+    /// A typed `/queue <text>` on an IDLE session: the plain prompt to send
+    /// in its place, or `nil` to send the text unchanged.
+    ///
+    /// The menu row greys out on an idle session (see
+    /// ``disabledSlashCommandNames(isAgentWorking:hasActiveSession:capabilities:)``),
+    /// but typing the command was never gated, and both send paths painted
+    /// "Queued — runs after current turn." over something that does not
+    /// happen: `_queue_prompt` appends unconditionally
+    /// (`acp_adapter/commands.py:33-36` @ `v2026.9.7`) while the only drain
+    /// is the tail of a running turn (`server.py:908-915`), which the
+    /// dispatched slash command never reaches — it returns `end_turn` at
+    /// `server.py:793-799`. So the prompt would sit in `queued_prompts`
+    /// until the NEXT turn ended, and run two turns from now.
+    ///
+    /// Sending the argument as an ordinary prompt is what makes the notice
+    /// true; leaving the `/queue` prefix on the wire would hand it back to
+    /// `_cmd_queue`. An EMPTY argument is left alone on purpose — Hermes
+    /// answers `Usage: /queue <prompt>` (`commands.py:286-288`), which is
+    /// the honest response to a command with nothing to queue, and there is
+    /// no plain prompt to send instead.
+    ///
+    /// Only for a host that WOULD dispatch it: below the v0.13 floor the
+    /// text already goes to the LLM verbatim and
+    /// ``subFloorSlashNotice(name:capabilities:)`` owns that case.
+    public static func idleQueueFallbackText(
+        name: String?,
+        args: String,
+        isAgentWorking: Bool,
+        capabilities: HermesCapabilities
+    ) -> String? {
+        guard name == "queue",
+              !isAgentWorking,
+              nonInterruptiveSlashIsDispatched(name, capabilities: capabilities)
+        else { return nil }
+        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The one-line notice that accompanies
+    /// ``idleQueueFallbackText(name:args:isAgentWorking:capabilities:)``.
+    public static var idleQueueNotice: String {
+        String(localized: "Nothing is running — sent as a normal prompt instead of queueing it.")
     }
 
     /// Expand `/<name> args` when `<name>` matches a loaded project-

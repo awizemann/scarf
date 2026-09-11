@@ -69,12 +69,30 @@ public enum HermesPlatformSharedKeys {
     /// with no children is `None` to PyYAML and is NOT a dict, which here is
     /// "the flat parse has no `slack.*` key and no `slack` map".
     ///
+    /// The one shape that divergence missed is an EXPLICITLY empty flow map,
+    /// `slack: {}`. PyYAML loads that as `{}`, `isinstance({}, dict)` is
+    /// `True`, and `platform_section` (`gateway/config_loader.py:175`) takes
+    /// it as the top-level block — so the nested `platforms.slack.*` shared
+    /// keys are never bridged, exactly as if the block had children. Scarf's
+    /// flat parse DOES record it — `maps["slack"] = [:]` — but `isBlock`
+    /// asked `?.isEmpty == false`, so an empty one answered false and both
+    /// halves resolved to `platforms.slack`: the form read a value the
+    /// adapter never sees and wrote back to a section Hermes does not bridge
+    /// from. The fix is to stop asking whether the map has
+    /// MEMBERS and ask whether the parse recorded one at all:
+    /// `parseNestedYAML` sets `maps[path]` for an inline flow map (`{…}`,
+    /// empty or not, `HermesYAML.swift:343-354`) and for a block with scalar
+    /// children, while a bare `slack:` header records neither — it only
+    /// pushes the stack. So `maps[section] != nil` is exactly Hermes's
+    /// `isinstance(section, dict)`, empty case included, and the bare header
+    /// still loses.
+    ///
     /// The `platforms.<p>` fall-through is also the answer for a config that
     /// mentions the platform nowhere: a first-run write has to land
     /// somewhere, and the nested spelling is the modern one Hermes documents.
     public static func bridgeSourcePrefix(platform: String, in parsed: ParsedYAML) -> String {
         func isBlock(_ section: String) -> Bool {
-            if parsed.maps[section]?.isEmpty == false { return true }
+            if parsed.maps[section] != nil { return true }
             let dot = section + "."
             return parsed.values.keys.contains { $0.hasPrefix(dot) }
                 || parsed.lists.keys.contains { $0.hasPrefix(dot) }

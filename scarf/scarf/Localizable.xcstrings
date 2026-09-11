@@ -134,6 +134,47 @@
         }
       }
     },
+    "Available once a chat is open. Press Return on `/new` (or click an existing session) to start one." : {
+      "comment" : "Help text beside greyed-out slash-menu rows when no chat session is open yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verfügbar, sobald ein Chat geöffnet ist. Drücke bei `/new` die Eingabetaste (oder klicke auf eine vorhandene Sitzung), um einen zu starten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disponible cuando haya un chat abierto. Pulsa Intro en `/new` (o haz clic en una sesión existente) para iniciar uno."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disponible une fois une conversation ouverte. Appuyez sur Entrée sur `/new` (ou cliquez sur une session existante) pour en démarrer une."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャットを開くと使用できます。`/new` で Return キーを押す（または既存のセッションをクリック）と開始できます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disponível quando um chat estiver aberto. Pressione Return em `/new` (ou clique em uma sessão existente) para iniciar um."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开聊天后即可使用。在 `/new` 上按回车键（或点按已有会话）即可开始。"
+          }
+        }
+      }
+    },
     "Create a new job pre-filled from this one — the only thing Hermes accepts for a job it won't re-activate." : {
       "comment" : "Tooltip on the Duplicate button in the cron detail pane; explains that duplicating is the only remedy Hermes accepts for a finished job.",
       "extractionState" : "manual",
@@ -302,6 +343,88 @@
         }
       }
     },
+    "Not supported on this host: %@" : {
+      "comment" : "VoiceOver label for the caption under a reasoning-effort picker whose stored level this host does not accept. %@ is the full notice sentence.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Host nicht unterstützt: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No compatible con este host: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Non pris en charge sur cet hôte : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストでは未対応: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem suporte neste host: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此主机不支持：%@"
+          }
+        }
+      }
+    },
+    "Nothing is running — sent as a normal prompt instead of queueing it." : {
+      "comment" : "Transient chat notice after the user typed /queue on a session with no turn in flight; the text was sent as an ordinary prompt.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es läuft nichts — als normaler Prompt gesendet statt in die Warteschlange gestellt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay nada en ejecución: se envió como un prompt normal en lugar de ponerlo en cola."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rien n’est en cours — envoyé comme une invite ordinaire au lieu d’être mis en file d’attente."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行中の処理はありません。キューに入れず通常のプロンプトとして送信しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada em execução — enviado como um prompt normal em vez de ser colocado na fila."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前没有正在运行的任务 — 已作为普通提示发送，而非加入队列。"
+          }
+        }
+      }
+    },
     "This copy won't carry: %@. Set those with `hermes cron edit` on the host." : {
       "comment" : "Warning in the Duplicate sheet listing the settings the create form cannot express (model pin, monitor source, continuity); %@ is the comma-separated list.",
       "extractionState" : "manual",
@@ -340,6 +463,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此副本不会保留：%@。请在主机上用 `hermes cron edit` 设置这些项。"
+          }
+        }
+      }
+    },
+    "Use `/queue` while the agent is working — on an idle session Hermes holds the prompt until your next turn finishes, then runs it." : {
+      "comment" : "Help text beside the greyed-out /queue slash-menu row on a session with no turn in flight.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verwende `/queue`, während der Agent arbeitet — in einer untätigen Sitzung hält Hermes den Prompt zurück, bis dein nächster Zug endet, und führt ihn dann aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usa `/queue` mientras el agente trabaja: en una sesión inactiva, Hermes retiene el prompt hasta que termine tu siguiente turno y luego lo ejecuta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utilisez `/queue` pendant que l’agent travaille — dans une session inactive, Hermes conserve l’invite jusqu’à la fin de votre prochain tour, puis l’exécute."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`/queue` はエージェントの実行中に使ってください。アイドル状態のセッションでは、Hermes は次のターンが終わるまでプロンプトを保持してから実行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use `/queue` enquanto o agente estiver trabalhando — em uma sessão ociosa, o Hermes segura o prompt até o seu próximo turno terminar e só então o executa."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在代理运行时使用 `/queue` — 在空闲会话中，Hermes 会保留该提示，直到你的下一轮结束后才运行它。"
           }
         }
       }
@@ -775,6 +939,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "· 已记住(探测不可用)"
+          }
+        }
+      }
+    },
+    "“%@” isn’t supported on this Hermes — it ignores it and uses its own default effort (medium)." : {
+      "comment" : "Shown under a reasoning-effort picker when the level stored in config.yaml is one this host does not accept. Hermes logs 'Unknown reasoning_effort' and substitutes its own default, medium. %@ is the stored level, e.g. ultra.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wird von diesem Hermes nicht unterstützt — es ignoriert den Wert und verwendet seinen eigenen Standardaufwand (medium)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» no es compatible con este Hermes: lo ignora y usa su propio esfuerzo predeterminado (medium)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » n’est pas pris en charge par ce Hermes — il l’ignore et utilise son propre effort par défaut (medium)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は「%@」に対応していません。値は無視され、Hermes 自身の既定の推論量（medium）が使われます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” não é compatível com este Hermes — ele ignora o valor e usa o próprio esforço padrão (medium)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 不支持“%@” — 它会忽略该值并使用自身的默认推理强度（medium）。"
           }
         }
       }
@@ -113270,47 +113475,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "经 Scarf 加上引号后，“%@”作为 config.yaml 的键过长，Hermes 无法读取。Hermes 会忽略整个文件。请缩短后再添加。"
-          }
-        }
-      }
-    },
-    "“%@” isn’t supported on this Hermes — it ignores the value and uses the model provider’s own default." : {
-      "comment" : "Shown under a reasoning-effort picker when the level stored in config.yaml is above this host's supported set. %@ is the stored level, e.g. ultra.",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "„%@“ wird von diesem Hermes nicht unterstützt — es ignoriert den Wert und verwendet die Standardeinstellung des Modellanbieters."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "«%@» no es compatible con este Hermes: ignora el valor y usa el valor predeterminado del proveedor del modelo."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "« %@ » n’est pas pris en charge par ce Hermes — il ignore la valeur et utilise la valeur par défaut du fournisseur du modèle."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この Hermes は「%@」に対応していません。値は無視され、モデルプロバイダーの既定値が使われます。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%@” não é compatível com este Hermes — ele ignora o valor e usa o padrão do provedor do modelo."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此 Hermes 不支持“%@” — 它会忽略该值并使用模型提供方的默认设置。"
           }
         }
       }

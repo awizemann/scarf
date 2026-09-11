@@ -1,5 +1,11 @@
 # WS-2 Plan: Persistent Goals + ACP `/queue`
 
+> **Historical plan — `hasACPSteerOnIdle` was retired in round 4** (decision 14; see
+> `.memory/decisions/hermes-v0-21-1-compatibility-decisions.md`). The flag was `hasACPSteer`
+> expressed a second time — `/steer`'s idle fallback shipped in its own commit
+> (`acp_adapter/server.py:812-820` @ `v2026.5.7`) — so the idle-steer grey-out arm below could
+> never fire and both the flag and the arm are gone. The rest of the plan stands as shipped.
+
 Branch suggestion: `ws-2-goals-and-queue-v0.13`. Depends on WS-1 (`ws-1-capabilities-v0.13`, PR #80) for the three v0.13 capability flags consumed below.
 
 ## Goals (what this PR ships)

@@ -993,6 +993,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// rendering change, not a C1 degradation (round-3 decision 5).
     public var hasReasoningEffortMax: Bool { isV0181OrLater }
 
+    /// The `false` / `disabled` spellings of "reasoning off" in
+    /// `agent.reasoning_effort` / `agent.reasoning_overrides` — and, by way
+    /// of YAML's bool coercion, bare `off`.
+    ///
+    /// **Floor v0.18.1, the same tag `max` arrived on — walked, not
+    /// assumed.** `parse_reasoning_effort` is typed `(effort: str)` through
+    /// **v2026.7.1** (0.18.0, `hermes_constants.py:797-812`) and disables on
+    /// `effort == "none"` ALONE (`:809`); `"false"` / `"disabled"` fall past
+    /// `VALID_REASONING_EFFORTS` to the closing `return None`, and a YAML
+    /// `false` (which is what bare `off` loads as) is caught by the leading
+    /// `if not effort` and returns `None` too. At tag **v2026.7.7** (0.18.1)
+    /// the signature widens to `(effort)`, the body gains
+    /// `str(effort).strip().lower()` and the alias set becomes
+    /// `{"none", "false", "disabled"}` (`:816`) — byte-identical at every
+    /// tag from there to `v2026.9.7` (`:885`).
+    ///
+    /// So below this floor those three spellings do NOT disable reasoning:
+    /// the host logs `Unknown reasoning_effort` and uses its own default.
+    /// That is exactly the difference
+    /// ``HermesReasoningEffort/unsupportedLevelNotice(for:capabilities:)``
+    /// renders.
+    public var hasReasoningDisableAliases: Bool { isV0181OrLater }
+
     /// `ultra` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
     ///
     /// **Floor v0.19.0, not v0.20.** `VALID_REASONING_EFFORTS` still ends at

@@ -28,6 +28,15 @@ public enum HermesReasoningEffort {
     /// `off` is NOT — it only disables by way of YAML bool coercion, so the
     /// writer canonicalises it (see `canonicalDisableSpelling`). The UI never
     /// offers any of the three, but must not reject a row that uses them.
+    ///
+    /// All three are v0.18.1-and-later spellings — see
+    /// ``HermesCapabilities/hasReasoningDisableAliases`` for the tag walk —
+    /// so whether one of them is "reasoning off" or "an unsupported value
+    /// Hermes ignores" is a capability question, which is why
+    /// ``disablingSpellings(capabilities:)`` and not this list is what the
+    /// affordance asks. ``isValid(_:)`` stays capability-free on purpose: it
+    /// guards a hand-edited row against being REJECTED, and a value the host
+    /// merely ignores is not a value Scarf should refuse to write back.
     public static let disableAliases = ["disabled", "false", "off"]
 
     /// Effort options to offer for the given host generation.
@@ -69,19 +78,61 @@ public enum HermesReasoningEffort {
     /// `:797-812` @ `v2026.7.1` (the five-level tuple at `:794`),
     /// `:797-820` @ `v2026.7.7` (which adds `max` at `:794`) and
     /// `:840-864` @ `v2026.7.20` (which adds `ultra` at `:835-837`).
-    /// So an unknown level is not an error and not a clamp to
-    /// the nearest tier: the host silently falls back to the model
-    /// provider's own default, which is exactly what the empty "Provider
-    /// default" row means.
+    /// So an unknown level is not an error and not a clamp to the nearest
+    /// tier. It is also NOT "the model provider's own default", which is
+    /// what this notice claimed until P44b — the consumers were walked:
+    /// `resolve_reasoning_config` logs `Unknown reasoning_effort '%s', using
+    /// default (medium)` and returns `None` (`hermes_constants.py:957-979`,
+    /// the warning at `:975-976`); `agent_runtime_helpers.py:2145-2147`
+    /// stores that `None` on `agent.reasoning_config`; and the
+    /// chat-completions transport then substitutes `medium` EXPLICITLY —
+    /// `_effort = (reasoning_config.get("effort", "medium") or "medium") if
+    /// reasoning_config and isinstance(reasoning_config, dict) else "medium"`
+    /// (`agent/transports/chat_completions.py:420-422`), with the iteration
+    /// summary doing the same (`agent/chat_completion_helpers.py:2020`:
+    /// `{"enabled": True, "effort": "medium"}`). Only the Anthropic adapter
+    /// omits the parameter, leaving the model's own default
+    /// (`agent/anthropic_adapter.py:570` — `_thinking_kwargs` runs only for a
+    /// truthy dict). Hermes's OWN default is therefore the honest word, and
+    /// it is NOT what the empty "Provider default" row means.
     ///
-    /// `nil` when the level IS in the host's vocabulary, and for the empty
-    /// sentinel.
+    /// `nil` when the level IS in the host's vocabulary, when the value
+    /// DISABLES reasoning on this host (see ``disablingSpellings``), and for
+    /// the empty sentinel.
     public static func unsupportedLevelNotice(
         for selected: String,
         capabilities: HermesCapabilities
     ) -> String? {
-        guard !selected.isEmpty, !levels(capabilities: capabilities).contains(selected) else { return nil }
-        return String(localized: "“\(selected)” isn’t supported on this Hermes — it ignores the value and uses the model provider’s own default.")
+        guard !selected.isEmpty,
+              !levels(capabilities: capabilities).contains(selected),
+              !disablingSpellings(capabilities: capabilities).contains(
+                  selected.trimmingCharacters(in: .whitespaces).lowercased()
+              )
+        else { return nil }
+        return String(localized: "“\(selected)” isn’t supported on this Hermes — it ignores it and uses its own default effort (medium).")
+    }
+
+    /// Values that mean "reasoning off" to THIS host, lowercased.
+    ///
+    /// The picker never offers `disabled` / `false` / `off`, but config.yaml
+    /// may already carry one — and on a host that accepts it, that is
+    /// reasoning off exactly as asked, not an unsupported level. P44 gated
+    /// the affordance on ``levels(capabilities:)`` alone, which excludes all
+    /// three, so `agent.reasoning_effort: disabled` rendered a false "isn't
+    /// supported" notice under a picker that had (correctly) widened to show
+    /// it.
+    ///
+    /// `none` is in ``baseLevels`` and is accepted at every supported tag.
+    /// The other three are gated on
+    /// ``HermesCapabilities/hasReasoningDisableAliases`` (v0.18.1), where
+    /// that flag's doc carries the tag walk. Below the floor they are
+    /// genuinely unsupported and the notice is correct.
+    public static func disablingSpellings(capabilities: HermesCapabilities) -> Set<String> {
+        var spellings: Set<String> = ["none"]
+        if capabilities.hasReasoningDisableAliases {
+            spellings.formUnion(disableAliases)
+        }
+        return spellings
     }
 
     /// Whether Hermes's `parse_reasoning_effort` would accept this value.
