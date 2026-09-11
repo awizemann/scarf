@@ -317,12 +317,6 @@ struct FleetApplyExecutor: Sendable {
                 monitorSkipped += 1
                 continue
             }
-            // `--continuity` is a downgrade, not a refusal: it is stored as
-            // `"self"` in `context_from` (`tools/cronjob_job_args.py:313-321`),
-            // so the copy just starts its own run history — which is what the
-            // FIRST run of a continuity job does anyway
-            // (`subcommands/cron.py:76-84`). Counted and surfaced, not skipped.
-            if job.hasRunToRunContinuity { continuityDowngrades += 1 }
             // `sourceJobs` is already the partitioned copy set, so a nil here
             // can only mean the caller handed us an unpartitioned list — count
             // it as a failure WITH a reason rather than a bare tally.
@@ -347,6 +341,16 @@ struct FleetApplyExecutor: Sendable {
                 created += 1
                 createdNames.append(job.name)
                 if droppedDeliverAll { deliverAllDowngrades += 1 }
+                // `--continuity` is a downgrade, not a refusal: it is stored
+                // as `"self"` in `context_from`
+                // (`tools/cronjob_job_args.py:313-321` @ `v2026.9.7`), so the
+                // copy just starts its own run history — which is what the
+                // FIRST run of a continuity job does anyway
+                // (`subcommands/cron.py:76-84`). Counted on the SUCCESS arm
+                // with the deliver downgrade: a job that never landed was not
+                // degraded, it failed, and reporting both would double-count
+                // the same job in two different notes.
+                if job.hasRunToRunContinuity { continuityDowngrades += 1 }
             } else {
                 failed += 1
                 if firstFailureDetail == nil {

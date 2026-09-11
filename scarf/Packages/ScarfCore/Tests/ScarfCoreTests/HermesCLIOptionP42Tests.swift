@@ -25,7 +25,7 @@ import Foundation
 
     // MARK: - The primitive
 
-    @Test func theJoinedFormIsOneTokenSplitOnTheFirstEquals() {
+    @Test func theJoinedFormIsOneTokenSplitOnTheFirstEquals() throws {
         #expect(HermesCLIOption.joined("--name", "-nightly") == "--name=-nightly")
         // An empty value is a real gesture (`cron edit --workdir ""` clears
         // the field, `subcommands/cron.py:126-128` @ v2026.9.7) and must not
@@ -34,9 +34,9 @@ import Foundation
         // A value that itself contains `=` keeps every later `=`, because
         // argparse splits on the FIRST one only.
         let token = HermesCLIOption.joined("--metadata", #"{"a":"b=c"}"#)
-        let parts = try? #require(HermesCLIOption.split(token))
-        #expect(parts?.flag == "--metadata")
-        #expect(parts?.value == #"{"a":"b=c"}"#)
+        let parts = try #require(HermesCLIOption.split(token))
+        #expect(parts.flag == "--metadata")
+        #expect(parts.value == #"{"a":"b=c"}"#)
     }
 
     @Test func splitIgnoresTokensThatAreNotEqualsBearingLongOptions() {

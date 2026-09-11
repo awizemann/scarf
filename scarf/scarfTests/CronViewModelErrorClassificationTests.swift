@@ -62,18 +62,31 @@ import ScarfCore
 
     // MARK: - Terminal-job activation (Hermes v0.20.6+, W7)
 
-    /// `update_job` raises "Cannot activate terminal cron job …"
-    /// (cron/jobs.py:2593/2694) and `trigger_job` raises "Cannot run:
-    /// … (terminal)" (:2760). Both must land as one plain sentence, not
-    /// a Python traceback tail.
+    /// `update_job` raises "Cannot activate terminal cron job …" through
+    /// `_reject_terminal_activation` (`cron/jobs.py:1865-1878`, armed at
+    /// `:1941` and `:1965`) and `trigger_job` raises "Cannot run: …
+    /// (terminal)" (`:2012-2016`), both at `v2026.9.7`. Both must land as one
+    /// plain sentence, not a Python traceback tail.
+    ///
+    /// P42: neither call here passes an offer, and with no offer the sentence
+    /// may no longer name "Resume & Run Now" — for a recurring job that
+    /// button is a guaranteed exit 1 (`_REARM_RECURRING_ERROR`, `:2065-2066`)
+    /// and "we can't tell" is not a licence to guess. The remedy it CAN
+    /// always assert is duplicating, which no terminal guard touches.
+    /// `CronRecoveryP42Tests` owns the offer-bearing arms.
     @Test func terminalRefusalsGetAFriendlyMessage() {
         let updateErr = "ValueError: Cannot activate terminal cron job 'Nightly' "
             + "through update_job; use cron resume --run-now or --at."
-        #expect(CronViewModel.friendlyCronFailure(updateErr)?.contains("Resume & Run Now") == true)
-
         let triggerErr = "ValueError: Cannot run: job 'Nightly' is completed (terminal). "
             + "Create a new occurrence with 'hermes cron resume Nightly --run-now'."
-        #expect(CronViewModel.friendlyCronFailure(triggerErr)?.contains("Resume & Run Now") == true)
+        for output in [updateErr, triggerErr] {
+            let message = CronViewModel.friendlyCronFailure(output)
+            #expect(message != nil)
+            // Not a traceback tail.
+            #expect(message?.contains("ValueError") == false)
+            #expect(message?.contains("Resume & Run Now") == false)
+            #expect(message?.lowercased().contains("duplicate") == true)
+        }
 
         // Everything else keeps the raw-output path.
         #expect(CronViewModel.friendlyCronFailure("error: no such job 'x'") == nil)
