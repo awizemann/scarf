@@ -382,7 +382,7 @@ struct AdvancedTab: View {
                 range: 0...1_000_000,
                 step: 100,
                 customSeed: Self.walAutocheckpointSQLiteDefault,
-                onChange: { viewModel.setDatabaseWalAutocheckpoint($0) }
+                onChange: { viewModel.setDatabaseWalAutocheckpoint($0, capabilities: capabilities) }
             )
             optionalIntRow(
                 label: "Journal Size Limit (bytes)",
@@ -390,7 +390,7 @@ struct AdvancedTab: View {
                 value: viewModel.config.database.journalSizeLimit,
                 range: 0...1_073_741_824,
                 step: 1_048_576,
-                onChange: { viewModel.setDatabaseJournalSizeLimit($0) }
+                onChange: { viewModel.setDatabaseJournalSizeLimit($0, capabilities: capabilities) }
             )
         }
         HStack {

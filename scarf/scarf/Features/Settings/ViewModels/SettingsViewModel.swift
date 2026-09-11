@@ -227,7 +227,19 @@ final class SettingsViewModel {
     /// `:8870-8872` @ v2026.7.20), and Python makes that exit 0 — so a
     /// refused clear was banner'd "Saved <key>" over a key still on disk, for
     /// all six call sites. See ``HermesConfigUnset`` (charter C5).
-    func unsetSetting(_ key: String) {
+    ///
+    /// P37: `capabilities` is REQUIRED, and the `hasConfigUnset` floor
+    /// (v0.19.0) is checked HERE rather than at each caller. P35 gated only
+    /// `setApprovalMode` and left six rows shelling a verb a v0.18 host does
+    /// not have (C5): `browser.cloud_provider`, `stt.provider`, two
+    /// `auxiliary.*.max_concurrency` and two `database.*`. With the gate in
+    /// the one helper, a seventh row cannot forget it — the compiler asks
+    /// for capabilities before it can clear anything.
+    func unsetSetting(_ key: String, capabilities: HermesCapabilities) {
+        guard capabilities.hasConfigUnset else {
+            showSaveFailure(HermesConfigUnset.belowFloorHint(key: key))
+            return
+        }
         enqueueConfigWrite(
             key: key,
             arguments: HermesConfigUnset.argv(key: key),
@@ -600,11 +612,9 @@ final class SettingsViewModel {
             return
         }
         guard config.storedApprovalMode != nil else { return }
-        guard capabilities.hasConfigUnset else {
-            showSaveFailure(HermesConfigUnset.belowFloorHint(key: "approvals.mode"))
-            return
-        }
-        unsetSetting("approvals.mode")
+        // The floor gate lives in `unsetSetting` since P37 — every clear row
+        // gets it, not just this one.
+        unsetSetting("approvals.mode", capabilities: capabilities)
     }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the
@@ -651,9 +661,9 @@ final class SettingsViewModel {
     /// `"cloud_provider" in browser_cfg`, so a present-but-empty value
     /// normalizes to `local` and silently disables cloud dispatch, which is
     /// not what "auto-detect" means.
-    func setBrowserCloudProvider(_ value: String) {
+    func setBrowserCloudProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("browser.cloud_provider")
+            unsetSetting("browser.cloud_provider", capabilities: capabilities)
         } else {
             setSetting("browser.cloud_provider", value: value)
         }
@@ -714,9 +724,9 @@ final class SettingsViewModel {
     /// Writes `stt.provider`. The empty selection removes the key rather than
     /// writing `""` — on v0.20.5+ an absent key is the autodetect ladder while
     /// a present value (empty included) is an explicit pin.
-    func setSTTProvider(_ value: String) {
+    func setSTTProvider(_ value: String, capabilities: HermesCapabilities) {
         if value.isEmpty {
-            unsetSetting("stt.provider")
+            unsetSetting("stt.provider", capabilities: capabilities)
         } else {
             setSetting("stt.provider", value: value)
         }
@@ -788,18 +798,18 @@ final class SettingsViewModel {
     /// field (config_defaults.py has every task default to `""`), so
     /// writing an empty scalar here is safe and behaves the same as an
     /// absent key — this is NOT one of the empty-vs-unset hazard keys.
-    /// Valid non-empty values: `AuxiliaryReasoningEffort.allCases`.
+    /// Valid non-empty values: `HermesReasoningEffort.levels(capabilities:)`.
     func setAuxiliaryReasoningEffort(_ task: String, value: String) {
         setSetting("auxiliary.\(task).reasoning_effort", value: value)
     }
     /// `auxiliary.<task>.max_concurrency` (v0.20.4+, isV0204OrLater) —
     /// true-optional cap on simultaneous calls for that task. Currently
     /// only surfaced for `compression`. Empty clears back to unlimited.
-    func setAuxiliaryMaxConcurrency(_ task: String, value: Int?) {
+    func setAuxiliaryMaxConcurrency(_ task: String, value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("auxiliary.\(task).max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.\(task).max_concurrency")
+            unsetSetting("auxiliary.\(task).max_concurrency", capabilities: capabilities)
         }
     }
     /// `auxiliary.background_review.enabled` (v0.20.4+, isV0204OrLater) —
@@ -838,11 +848,11 @@ final class SettingsViewModel {
     }
     /// `auxiliary.title_generation.max_concurrency` (v0.20.4+,
     /// isV0204OrLater) — true-optional cap on simultaneous title calls.
-    func setTitleGenerationMaxConcurrency(_ value: Int?) {
+    func setTitleGenerationMaxConcurrency(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("auxiliary.title_generation.max_concurrency", value: String(value))
         } else {
-            unsetSetting("auxiliary.title_generation.max_concurrency")
+            unsetSetting("auxiliary.title_generation.max_concurrency", capabilities: capabilities)
         }
     }
 
@@ -936,22 +946,22 @@ final class SettingsViewModel {
     /// autocheckpoint); a concrete value, including `0`, writes a scalar.
     /// Do NOT collapse this to an empty-string write — `0` and "absent"
     /// are different Hermes behaviors here.
-    func setDatabaseWalAutocheckpoint(_ value: Int?) {
+    func setDatabaseWalAutocheckpoint(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("database.wal_autocheckpoint", value: String(value))
         } else {
-            unsetSetting("database.wal_autocheckpoint")
+            unsetSetting("database.wal_autocheckpoint", capabilities: capabilities)
         }
     }
 
     /// `database.journal_size_limit` (bytes) — true optional, same
     /// unset-vs-empty hazard as `setDatabaseWalAutocheckpoint`. `nil`
     /// clears the key (SQLite default: no limit).
-    func setDatabaseJournalSizeLimit(_ value: Int?) {
+    func setDatabaseJournalSizeLimit(_ value: Int?, capabilities: HermesCapabilities) {
         if let value {
             setSetting("database.journal_size_limit", value: String(value))
         } else {
-            unsetSetting("database.journal_size_limit")
+            unsetSetting("database.journal_size_limit", capabilities: capabilities)
         }
     }
 

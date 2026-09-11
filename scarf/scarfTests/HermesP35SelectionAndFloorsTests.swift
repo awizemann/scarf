@@ -235,7 +235,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         )
         let vm = Self.viewModel(log, storedMode: nil)
 
-        vm.unsetSetting("browser.cloud_provider")
+        vm.unsetSetting("browser.cloud_provider", capabilities: v0211)
         await Self.settle(log)
 
         #expect(log.calls == [["config", "unset", "browser.cloud_provider"]])

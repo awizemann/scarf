@@ -6,6 +6,7 @@ import ScarfDesign
 struct VoiceTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     /// STT providers, with the "Auto (unset)" row dropped on hosts without
     /// `hermes config unset` (pre-v0.19) — same shape as BrowserTab's
@@ -112,7 +113,7 @@ struct VoiceTab: View {
                 optionLabel: { id in
                     sttProviderOptions.first { $0.id == id }?.label ?? id
                 }
-            ) { viewModel.setSTTProvider($0) }
+            ) { viewModel.setSTTProvider($0, capabilities: capabilities) }
             // v0.19.1: global language hint applied to every provider unless a
             // per-provider language overrides it — hidden below v0.19.1
             // (hasSTTUnifiedLanguage). Default "en"; empty restores auto-detect.
