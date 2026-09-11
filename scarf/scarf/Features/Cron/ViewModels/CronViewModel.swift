@@ -850,7 +850,10 @@ final class CronViewModel {
             else { args.append("--agent") }
         }
         args.append(contentsOf: ["--", id])
-        runAndReload(args, success: "Updated")
+        // The record `cron edit` addresses, when it is still on screen —
+        // so a refusal on a RECURRING job does not name a re-arm
+        // `_REARM_RECURRING_ERROR` would refuse.
+        runAndReload(args, success: "Updated", job: jobs.first { $0.id == id })
     }
 
     // MARK: - Private

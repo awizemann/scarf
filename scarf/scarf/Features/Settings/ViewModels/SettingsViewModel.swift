@@ -260,6 +260,13 @@ final class SettingsViewModel {
         // Nothing on disk to remove: the row is already in the state the
         // click asks for. Shelling `config unset` here only ever produced
         // `Config key not set: <key>` and a red banner.
+        //
+        // Every caller derives `isStored` from `config`, which is `.empty`
+        // until the first load lands — so a clear pressed before then is a
+        // no-op. That is the same posture `setApprovalMode` has had since
+        // P35, and it is harmless because the row RENDERS from that same
+        // `config`: a pre-load form already shows "not set", so there is no
+        // stored value on screen for the user to be clearing.
         guard isStored else { return }
         enqueueConfigWrite(
             key: key,
