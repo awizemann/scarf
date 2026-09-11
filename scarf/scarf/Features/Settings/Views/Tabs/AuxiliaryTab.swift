@@ -269,15 +269,25 @@ struct AuxiliaryTab: View {
     /// every host that renders this row — `hasAuxiliaryReasoningEffort` is
     /// itself 0.19.0, the tag that added `ultra` — but expressing it through
     /// the shared source is what stops the two lists drifting again.
+    ///
+    /// Round-4 decision 13: the options are widened to the stored value so a
+    /// hand-edited level never renders a blank control, with
+    /// ``UnsupportedEffortNote`` beneath saying what the host does with it.
+    /// Moot here for the same reason the narrowing is — but the three
+    /// pickers now answer this question in ONE place, which is the point.
     @ViewBuilder
     private func reasoningEffortPicker(value: String, onChange: @escaping (String) -> Void) -> some View {
         PickerRow(
             label: "Reasoning Effort",
             selection: value,
-            options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
+            options: [""] + HermesReasoningEffort.levels(
+                capabilities: capabilities,
+                selected: value
+            ),
             optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )
+        UnsupportedEffortNote(selected: value, capabilities: capabilities)
     }
 
     /// `auxiliary.title_generation` rows. Distinct from `auxRows` because

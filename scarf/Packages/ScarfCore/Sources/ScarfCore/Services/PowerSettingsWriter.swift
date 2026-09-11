@@ -38,6 +38,52 @@ public enum HermesReasoningEffort {
         return levels
     }
 
+    /// The host's options WIDENED to include `selected`, so a value already
+    /// on disk always has a row to select (round-4 decision 13).
+    ///
+    /// A SwiftUI `Picker` whose selection matches no tag renders blank — so
+    /// a config carrying `ultra` on a 0.18.x host showed an empty control,
+    /// and the first unrelated save on that tab wrote whatever the user
+    /// nudged it to. Widening is not an endorsement: the value is
+    /// out-of-vocabulary for that host and ``unsupportedLevelNotice`` is
+    /// what says so.
+    ///
+    /// The out-of-range value is PREPENDED rather than appended, matching
+    /// `AgentTab`'s `effortOptions(current:)` — the shape this unifies.
+    /// An empty `selected` (the "provider default" sentinel, which the two
+    /// top-level pickers prepend themselves) widens nothing.
+    public static func levels(capabilities: HermesCapabilities, selected: String) -> [String] {
+        let base = levels(capabilities: capabilities)
+        guard !selected.isEmpty, !base.contains(selected) else { return base }
+        return [selected] + base
+    }
+
+    /// The affordance beside a widened picker: what Hermes on THIS host
+    /// actually does with the stored value, not a bare "unsupported".
+    ///
+    /// Walked at the tag rather than assumed. `parse_reasoning_effort`
+    /// returns `None` for anything outside `VALID_REASONING_EFFORTS` and the
+    /// disable aliases, and its own docstring says the caller then uses the
+    /// default — `hermes_constants.py:876-889` @ `v2026.9.7`, and the same
+    /// closing `return None` across the whole window this matters in:
+    /// `:797-812` @ `v2026.7.1` (the five-level tuple at `:794`),
+    /// `:797-820` @ `v2026.7.7` (which adds `max` at `:794`) and
+    /// `:840-864` @ `v2026.7.20` (which adds `ultra` at `:835-837`).
+    /// So an unknown level is not an error and not a clamp to
+    /// the nearest tier: the host silently falls back to the model
+    /// provider's own default, which is exactly what the empty "Provider
+    /// default" row means.
+    ///
+    /// `nil` when the level IS in the host's vocabulary, and for the empty
+    /// sentinel.
+    public static func unsupportedLevelNotice(
+        for selected: String,
+        capabilities: HermesCapabilities
+    ) -> String? {
+        guard !selected.isEmpty, !levels(capabilities: capabilities).contains(selected) else { return nil }
+        return String(localized: "“\(selected)” isn’t supported on this Hermes — it ignores the value and uses the model provider’s own default.")
+    }
+
     /// Whether Hermes's `parse_reasoning_effort` would accept this value.
     public static func isValid(_ effort: String) -> Bool {
         let normalized = effort.trimmingCharacters(in: .whitespaces).lowercased()

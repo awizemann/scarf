@@ -323,8 +323,13 @@ struct HermesP37EffortVocabularyTests {
             .deletingLastPathComponent()
             .appendingPathComponent("scarf/Features/Settings/Views/Tabs/AuxiliaryTab.swift")
         let src = try String(contentsOf: tab, encoding: .utf8)
-        #expect(src.contains("HermesReasoningEffort.levels(capabilities:"),
+        // P44 / round-4 decision 13 wrapped the call across lines to pass
+        // `selected:`, so the pin is on the shared TYPE plus the widening
+        // argument rather than on one call's formatting.
+        #expect(src.contains("HermesReasoningEffort.levels("),
                 "the picker does not build its options from the shared vocabulary")
+        #expect(src.contains("selected: value"),
+                "the picker does not widen to the stored level (decision 13)")
         // No MEMBER access on the retired enum (`hasAuxiliaryReasoningEffort`
         // is the surface's capability flag and stays).
         #expect(!src.contains("AuxiliaryReasoningEffort.allCases"),

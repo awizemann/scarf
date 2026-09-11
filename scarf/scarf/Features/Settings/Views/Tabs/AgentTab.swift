@@ -28,9 +28,18 @@ struct AgentTab: View {
             // `max` and `ultra` are NOT v0.20 — they arrived a release apart
             // and both well before it. Walked: `VALID_REASONING_EFFORTS`
             // gains `"max"` at v2026.7.7 (0.18.1, `hermes_constants.py:794`)
-            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`). Those are the
-            // floors `HermesReasoningEffort.levels(capabilities:)` uses;
-            // older hosts keep the shorter list.
+            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`), so the two
+            // floors are `hasReasoningEffortMax` (0.18.1) and
+            // `hasReasoningEffortUltra` (0.19.0) — NOT "v0.20 for both",
+            // which is what this comment used to claim. Those are the floors
+            // `HermesReasoningEffort.levels(capabilities:)` uses; older hosts
+            // keep the shorter list.
+            //
+            // Round-4 decision 13: the list is WIDENED to include whatever is
+            // already on disk, because a `Picker` whose selection matches no
+            // tag renders blank — a 0.18.x host with `ultra` in config.yaml
+            // showed an empty control. Widening is not an endorsement, so the
+            // row carries `unsupportedLevelNotice` beneath it.
             //
             // The leading empty row is the ABSENT key, and absent is not
             // `medium`: `agent.reasoning_effort` is in no schema layer at any
@@ -41,9 +50,16 @@ struct AgentTab: View {
             PickerRow(
                 label: "Reasoning Effort",
                 selection: viewModel.config.reasoningEffort,
-                options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
+                options: [""] + HermesReasoningEffort.levels(
+                    capabilities: capabilities,
+                    selected: viewModel.config.reasoningEffort
+                ),
                 optionLabel: { $0.isEmpty ? String(localized: "Provider default") : $0 }
             ) { viewModel.setReasoningEffort($0) }
+            UnsupportedEffortNote(
+                selected: viewModel.config.reasoningEffort,
+                capabilities: capabilities
+            )
             PickerRow(label: "Tool Use Enforcement", selection: viewModel.config.toolUseEnforcement, options: ["auto", "true", "false"]) { viewModel.setToolUseEnforcement($0) }
         }
 
@@ -250,6 +266,7 @@ private struct ReasoningOverridesSection: View {
                     pattern: pair.key,
                     effort: pair.value,
                     options: effortOptions(current: pair.value),
+                    capabilities: capabilities,
                     onEffortChange: { newEffort in
                         changeEffort(pattern: pair.key, to: newEffort)
                     },
@@ -263,7 +280,10 @@ private struct ReasoningOverridesSection: View {
                     .textFieldStyle(.roundedBorder)
                     .font(ScarfFont.monoSmall)
                 Picker("", selection: $newEffort) {
-                    ForEach(HermesReasoningEffort.levels(capabilities: capabilities), id: \.self) { Text($0).tag($0) }
+                    ForEach(
+                        HermesReasoningEffort.levels(capabilities: capabilities, selected: newEffort),
+                        id: \.self
+                    ) { Text($0).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 110)
@@ -344,9 +364,12 @@ private struct ReasoningOverridesSection: View {
     /// Existing rows may carry a value outside the picker vocabulary (a
     /// hand-edited alias like "disabled") — keep it selectable so the picker
     /// doesn't silently rewrite it.
+    /// The picker's options for an EXISTING override row, widened to
+    /// whatever is on disk. This is where round-4 decision 13's widening was
+    /// first written; it now lives in `HermesReasoningEffort` so the two
+    /// top-level pickers share it instead of re-deriving it.
     private func effortOptions(current: String) -> [String] {
-        let base = HermesReasoningEffort.levels(capabilities: capabilities)
-        return base.contains(current) ? base : [current] + base
+        HermesReasoningEffort.levels(capabilities: capabilities, selected: current)
     }
 
     private func changeEffort(pattern: String, to newEffort: String) {
@@ -379,10 +402,23 @@ private struct OverrideRow: View {
     let pattern: String
     let effort: String
     let options: [String]
+    let capabilities: HermesCapabilities
     let onEffortChange: (String) -> Void
     let onRemove: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            // Round-4 decision 13. `options` is widened to `effort`, so a
+            // level above this host's floor is selectable here rather than
+            // blank — this is what stops the widening from reading as
+            // support.
+            UnsupportedEffortNote(selected: effort, capabilities: capabilities)
+        }
+        .background(ScarfColor.backgroundTertiary.opacity(0.5))
+    }
+
+    private var row: some View {
         HStack {
             Text(pattern)
                 .font(ScarfFont.monoSmall)
@@ -406,6 +442,5 @@ private struct OverrideRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(ScarfColor.backgroundTertiary.opacity(0.5))
     }
 }
