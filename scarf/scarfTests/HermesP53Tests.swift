@@ -75,3 +75,71 @@ struct AuthLogoutUnconfirmedP53Tests {
         }
     }
 }
+
+/// Round-6 P53 — decision 15's remaining local claim on a remote context.
+///
+/// Decision 15 gated the Signal pairing BUTTONS on `remotePairingNotice`
+/// because the embedded terminal spawns on this Mac and writes the link into
+/// the LOCAL `~/.hermes`, which a remote gateway never reads. The
+/// prerequisite status row above them kept rendering `detectSignalCLI()`,
+/// which probes this Mac's login-shell PATH — a fact about the wrong machine
+/// on a remote window, and one that reads as an instruction ("install it
+/// first") the user cannot usefully follow.
+@Suite("The Signal prerequisite row follows the host (P53)")
+struct SignalPrerequisiteRowP53Tests {
+
+    private static func viewSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // scarfTests
+            .deletingLastPathComponent()   // scarf
+            .appendingPathComponent(
+                "scarf/Features/Platforms/Views/PlatformSetup/SignalSetupView.swift")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// The row's body, sliced so a mention anywhere else in the file (the
+    /// buttons already key on the notice) cannot satisfy this.
+    private static func prerequisiteRow(_ source: String) throws -> String {
+        let start = try #require(
+            source.range(of: "private var prerequisiteStatus: some View {"),
+            "the prerequisite row is gone")
+        let rest = source[start.upperBound...]
+        let end = try #require(rest.range(of: "\n    private var "), "no following member")
+        return String(rest[..<end.lowerBound])
+    }
+
+    @Test("the row keys on the remote notice before the local probe")
+    func theRowAsksWhichHostFirst() throws {
+        let row = try Self.prerequisiteRow(try Self.viewSource())
+        #expect(row.contains("viewModel.remotePairingNotice"), """
+            The prerequisite row still reports the LOCAL `detectSignalCLI()` \
+            result on a remote context. Decision 15 fixed the buttons and \
+            left the sentence above them making the same wrong claim.
+            """)
+        // And it must be the GATE, not an extra line beside the probe: the
+        // local verdict may not render at all on a remote context.
+        let probeIndex = try #require(row.range(of: "viewModel.signalCLIInstalled"))
+        let noticeIndex = try #require(row.range(of: "viewModel.remotePairingNotice"))
+        #expect(noticeIndex.lowerBound < probeIndex.lowerBound,
+                "the local probe is read before the host is decided")
+    }
+
+    @Test("the row reuses the shared host sentence, it does not invent one")
+    func theRowReusesTheSharedNotice() throws {
+        let row = try Self.prerequisiteRow(try Self.viewSource())
+        // `remotePairingNotice` is `PlatformSetupHelpers.remoteOnlyHostNotice`,
+        // which names the host. A second hand-written sentence here would
+        // drift from the buttons' one.
+        #expect(!row.contains("Text(\"Pairing needs a terminal"),
+                "the row hand-wrote its own host sentence instead of using the shared one")
+    }
+
+    /// The notice itself still names the host, which is the whole point of
+    /// showing it instead of the PATH verdict.
+    @Test("the shared notice names the host and only fires on a remote context")
+    @MainActor
+    func theSharedNoticeNamesTheHost() {
+        #expect(PlatformSetupHelpers.remoteOnlyHostNotice(ServerContext.local) == nil,
+                "a local context must still show the real PATH verdict")
+    }
+}

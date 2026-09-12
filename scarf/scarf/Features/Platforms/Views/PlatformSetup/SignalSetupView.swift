@@ -49,16 +49,34 @@ struct SignalSetupView: View {
         }
     }
 
+    /// Round-5 decision 15 gated the BUTTONS on `remotePairingNotice` and
+    /// left this row alone — but the row is the same claim the buttons make,
+    /// stated as a fact. `detectSignalCLI()` probes THIS Mac's login-shell
+    /// PATH, so on a remote context "signal-cli is available on PATH" is a
+    /// true sentence about the wrong machine, and the orange
+    /// "install it first" is a false one: installing signal-cli here would
+    /// change nothing, because the daemon and the link have to exist where
+    /// Hermes runs. The row shows the host sentence the buttons already key
+    /// on instead, which is the honest answer and the one the view model
+    /// already computes (round-6 P53).
     @ViewBuilder
     private var prerequisiteStatus: some View {
         HStack(spacing: 8) {
-            Image(systemName: viewModel.signalCLIInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(viewModel.signalCLIInstalled ? .green : .orange)
-            (viewModel.signalCLIInstalled
-                ? Text("signal-cli is available on PATH")
-                : Text("signal-cli not found on PATH — install it first"))
-                .font(.caption)
-                .foregroundStyle(viewModel.signalCLIInstalled ? Color.primary : Color.orange)
+            if let notice = viewModel.remotePairingNotice {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(.secondary)
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: viewModel.signalCLIInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(viewModel.signalCLIInstalled ? .green : .orange)
+                (viewModel.signalCLIInstalled
+                    ? Text("signal-cli is available on PATH")
+                    : Text("signal-cli not found on PATH — install it first"))
+                    .font(.caption)
+                    .foregroundStyle(viewModel.signalCLIInstalled ? Color.primary : Color.orange)
+            }
             Spacer()
         }
         .padding(8)
