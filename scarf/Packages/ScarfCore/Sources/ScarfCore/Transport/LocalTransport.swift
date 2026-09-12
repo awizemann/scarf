@@ -365,6 +365,10 @@ public struct LocalTransport: ServerTransport {
         return AsyncThrowingStream { $0.finish() }
         #else
         return AsyncThrowingStream { continuation in
+            // The consumer letting go must stop the child — see
+            // `StreamingChild` (round-5 decision 6).
+            let child = StreamingChild()
+            continuation.onTermination = { _ in child.cancel() }
             Task.detached {
                 let proc = Process()
                 proc.executableURL = URL(fileURLWithPath: executable)
@@ -379,6 +383,15 @@ public struct LocalTransport: ServerTransport {
                     continuation.finish(throwing: error)
                     return
                 }
+                child.adopt(proc)
+                // Drain stderr CONCURRENTLY with the stdout loop below. It
+                // used to be read with `readToEnd()` AFTER the wait, and only
+                // on a non-zero exit — so a child with more than 64 KB of
+                // stderr (an `ssh -v` over a slow ProxyCommand, any hermes
+                // verb that logs) blocked in `write()` while this task was
+                // still pulling stdout, and neither side moved again
+                // (round-5 decision 6).
+                let errDrain = Process.startDraining(pipes: [errPipe])
                 try? outPipe.fileHandleForWriting.close()
                 try? errPipe.fileHandleForWriting.close()
                 let handle = outPipe.fileHandleForReading
@@ -387,19 +400,19 @@ public struct LocalTransport: ServerTransport {
                     if chunk.isEmpty { break }
                     continuation.yield(chunk)
                 }
-                proc.waitUntilExit()
-                let stderrTail: String
-                if proc.terminationStatus != 0 {
-                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
-                        .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                } else {
-                    stderrTail = ""
-                }
+                // Bounded, and the child is reaped rather than orphaned:
+                // stdout has reached EOF, so a healthy child is milliseconds
+                // from exiting and this ceiling is for the one that is not.
+                _ = proc.waitUntilExit(timeout: StreamingChild.reapCeiling)
+                child.finish()
+                let stderrText = String(
+                    data: errDrain.collect().first ?? Data(), encoding: .utf8) ?? ""
+                // The stdout read end is ours; the stderr read end belongs to
+                // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()
-                try? errPipe.fileHandleForReading.close()
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.commandFailed(
-                        exitCode: proc.terminationStatus, stderr: stderrTail
+                        exitCode: proc.terminationStatus, stderr: stderrText
                     ))
                 } else {
                     continuation.finish()
@@ -419,6 +432,10 @@ public struct LocalTransport: ServerTransport {
         return AsyncThrowingStream { $0.finish() }
         #else
         return AsyncThrowingStream { continuation in
+            // The consumer letting go must stop the child — see
+            // `StreamingChild` (round-5 decision 6).
+            let child = StreamingChild()
+            continuation.onTermination = { _ in child.cancel() }
             Task.detached {
                 let proc = Process()
                 proc.executableURL = URL(fileURLWithPath: executable)
@@ -433,6 +450,15 @@ public struct LocalTransport: ServerTransport {
                     continuation.finish(throwing: error)
                     return
                 }
+                child.adopt(proc)
+                // Drain stderr CONCURRENTLY with the stdout loop below. It
+                // used to be read with `readToEnd()` AFTER the wait, and only
+                // on a non-zero exit — so a child with more than 64 KB of
+                // stderr (an `ssh -v` over a slow ProxyCommand, any hermes
+                // verb that logs) blocked in `write()` while this task was
+                // still pulling stdout, and neither side moved again
+                // (round-5 decision 6).
+                let errDrain = Process.startDraining(pipes: [errPipe])
                 // Parent's copy of the writing ends — the child has its
                 // own; close ours so EOF reaches the reader after exit.
                 try? outPipe.fileHandleForWriting.close()
@@ -451,19 +477,19 @@ public struct LocalTransport: ServerTransport {
                         }
                     }
                 }
-                proc.waitUntilExit()
-                let stderrTail: String
-                if proc.terminationStatus != 0 {
-                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
-                        .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                } else {
-                    stderrTail = ""
-                }
+                // Bounded, and the child is reaped rather than orphaned:
+                // stdout has reached EOF, so a healthy child is milliseconds
+                // from exiting and this ceiling is for the one that is not.
+                _ = proc.waitUntilExit(timeout: StreamingChild.reapCeiling)
+                child.finish()
+                let stderrText = String(
+                    data: errDrain.collect().first ?? Data(), encoding: .utf8) ?? ""
+                // The stdout read end is ours; the stderr read end belongs to
+                // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()
-                try? errPipe.fileHandleForReading.close()
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.commandFailed(
-                        exitCode: proc.terminationStatus, stderr: stderrTail
+                        exitCode: proc.terminationStatus, stderr: stderrText
                     ))
                 } else {
                     continuation.finish()

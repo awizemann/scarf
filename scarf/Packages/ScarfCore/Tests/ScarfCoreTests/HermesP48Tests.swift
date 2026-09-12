@@ -176,3 +176,123 @@ struct TransportDrainP48Tests {
     }
 }
 #endif
+
+#if !os(iOS)
+/// Round-5 P48, decision 6: the four streaming spawns.
+///
+/// Both defects are properties of a real child and a real pipe, so both tests
+/// here spawn one. Each hangs forever against the pre-P48 code, which is why
+/// each carries its own time limit.
+@Suite("Streaming spawns own their child (P48)")
+struct StreamingSpawnP48Tests {
+
+    /// Code text with comment-only lines dropped.
+    static func codeOnly(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+    }
+
+    static var transportSources: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ScarfCore/Transport")
+    }
+
+    /// A child that writes 200 KB of stderr — past the 64 KB pipe buffer —
+    /// BEFORE it writes anything to stdout.
+    ///
+    /// Against the old code this is a deadlock by construction: nothing drains
+    /// stderr during the run (it was `readToEnd()` after the wait, and only on
+    /// a non-zero exit), so the child blocks in `write()` at 64 KB while the
+    /// producer task sits in `availableData` on a stdout that will never
+    /// produce. `ssh -v` on a slow ProxyCommand reaches that size, and a log
+    /// tail is exactly this shape.
+    @Test("a child with more than a pipe buffer of stderr still streams its stdout",
+          .timeLimit(.minutes(1)))
+    func stderrPastThePipeBufferDoesNotWedgeTheStream() async throws {
+        let script = "head -c 200000 /dev/zero | tr '\\000' 'x' 1>&2; echo alpha; echo beta"
+        var lines: [String] = []
+        for try await line in LocalTransport().streamLines(
+            executable: "/bin/sh", args: ["-c", script]
+        ) {
+            lines.append(line)
+        }
+        #expect(lines == ["alpha", "beta"])
+    }
+
+    /// A consumer that stops iterating must stop the child. Without
+    /// `onTermination` the spawn was simply orphaned: still running, still
+    /// holding its pipes, with nobody left to read them — and on the SSH
+    /// transport that is an `ssh` holding a ControlMaster channel.
+    @Test("abandoning the stream reaps the child", .timeLimit(.minutes(1)))
+    func abandoningTheStreamReapsTheChild() async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("p48-stream-\(UUID().uuidString).pid")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        // Announce the pid, then talk forever. `trap '' TERM` is deliberate:
+        // the reap has to be an ESCALATION, not a polite request.
+        let script = """
+            trap '' TERM
+            printf '%s' "$$" > \(pidFile.path)
+            while :; do echo tick; sleep 0.05; done
+            """
+        var seen = 0
+        for try await _ in LocalTransport().streamRawBytes(
+            executable: "/bin/sh", args: ["-c", script]
+        ) {
+            seen += 1
+            if seen >= 2 { break }  // the consumer gives up
+        }
+        #expect(seen >= 2)
+
+        let text = try #require(try? String(contentsOf: pidFile, encoding: .utf8))
+        let pid = try #require(pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        // Bounded poll: SIGTERM is ignored, so this is waiting for the
+        // primitive's grace window to run out and SIGKILL to land.
+        let deadline = Date().addingTimeInterval(30)
+        var alive = true
+        while Date() < deadline {
+            if kill(pid, 0) != 0 { alive = false; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        if alive { kill(pid, SIGKILL) }
+        #expect(alive == false, "child \(pid) outlived the abandoned stream")
+    }
+
+    /// Neither transport reaches for the unbounded spelling any more — the
+    /// four streaming spawns were the last four sites.
+    @Test("neither transport calls the unbounded waitUntilExit")
+    func noBareWaitInEitherTransport() throws {
+        var scanned = 0
+        for name in ["LocalTransport.swift", "SSHTransport.swift"] {
+            let text = try String(
+                contentsOf: Self.transportSources.appendingPathComponent(name),
+                encoding: .utf8)
+            scanned += 1
+            #expect(
+                !Self.codeOnly(text).contains("waitUntilExit()"),
+                "\(name) still calls the unbounded waitUntilExit()")
+        }
+        #expect(scanned == 2)
+    }
+
+    /// All four streaming spawns install the termination hook — the count is
+    /// the guard against a fifth being added without one.
+    @Test("every streaming spawn installs a termination hook")
+    func everyStreamingSpawnHasATerminationHook() throws {
+        var hooks = 0
+        for name in ["LocalTransport.swift", "SSHTransport.swift"] {
+            let text = Self.codeOnly(try String(
+                contentsOf: Self.transportSources.appendingPathComponent(name),
+                encoding: .utf8))
+            hooks += text.components(separatedBy: "child.cancel()").count - 1
+            #expect(text.components(separatedBy: "child.adopt(proc)").count - 1 == 2,
+                    "\(name) should adopt its child in both streaming spawns")
+        }
+        #expect(hooks == 4, "expected four streaming spawns, found \(hooks)")
+    }
+}
+#endif
