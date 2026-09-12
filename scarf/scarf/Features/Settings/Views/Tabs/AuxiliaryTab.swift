@@ -26,6 +26,24 @@ struct AuxiliaryTab: View {
     @State private var subscription: NousSubscriptionState = .absent
     @State private var showNousSignIn: Bool = false
 
+    /// Read `auth.json` off the main actor (C10) and hand back the small
+    /// value type. Both call sites — the view-load `.task` and the sign-in
+    /// sheet's completion — go through this one function so neither can drift
+    /// back onto a main-actor `readFile`.
+    ///
+    /// ``OffPool/run(_:)``, not `Task { }` and not `Task.detached`: this view
+    /// is main-actor isolated, so an unstructured `Task` would inherit that
+    /// isolation and run the SSH read on it anyway — the trap
+    /// `PlatformSetupHelpers.detached` documents. `Task.detached` clears the
+    /// isolation but not the COOPERATIVE POOL, and `loadState()` blocks its
+    /// thread on an SSH `readFile` (round-5 P52).
+    private static func loadSubscription(
+        _ context: ServerContext
+    ) async -> NousSubscriptionState {
+        let service = NousSubscriptionService(context: context)
+        return await OffPool.run { service.loadState() }
+    }
+
     // Keyed by the config path name — matches `auxiliary.<task>.*` in config.yaml.
     // Static base list; version-conditional rows (`web_extract`, `curator`,
     // `flush_memories`) are spliced in at render time when the target Hermes
@@ -217,12 +235,25 @@ struct AuxiliaryTab: View {
             }
         }
         Color.clear.frame(height: 0)
-            .onAppear {
-                subscription = NousSubscriptionService(context: serverContext).loadState()
+            // C10. `NousSubscriptionService.loadState()` is a `readFile` of
+            // `auth.json` through the CONTEXT's transport — a local read on a
+            // local server, a full SSH round trip on a remote one, and it was
+            // running synchronously on the main actor from `onAppear`. The
+            // shape is `ModelPickerSheet`'s: an `OffPool.run` hop whose
+            // result is a small `Sendable` value assigned back on the main
+            // actor. `.task` rather than `.onAppear` for the reason the
+            // "Prefer .task over .onAppear" note gives — it fires once per
+            // view instance and cancels on disappear, where `onAppear`
+            // re-fires the remote read on every re-entry into this tab.
+            .task {
+                subscription = await Self.loadSubscription(serverContext)
             }
             .sheet(isPresented: $showNousSignIn) {
                 NousSignInSheet {
-                    subscription = NousSubscriptionService(context: serverContext).loadState()
+                    // The idle twin: the same synchronous read, on the sheet's
+                    // completion. Refreshing after a sign-in is exactly when
+                    // the token round trip is slowest.
+                    Task { subscription = await Self.loadSubscription(serverContext) }
                 }
             }
     }

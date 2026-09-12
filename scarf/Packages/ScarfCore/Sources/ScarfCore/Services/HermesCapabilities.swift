@@ -302,8 +302,20 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hermes profile create --no-skills` flag for empty profiles (v0.13+).
     public var hasProfileNoSkills: Bool { atLeastSemver(0, 13, 0) }
 
-    /// Context compression count surfaced in the status feed (v0.13+). Scarf
-    /// renders it next to the token count in the chat status bar.
+    /// Context compression count surfaced in the status feed (v0.13+).
+    ///
+    /// **Never reaches Scarf over ACP.** The adapter's `session/prompt`
+    /// response builds `Usage` from five fields only — `prompt_tokens`,
+    /// `completion_tokens`, `total_tokens`, `reasoning_tokens` and
+    /// `cache_read_tokens`/`cached_tokens` — with no compression count at any
+    /// tag: `acp_adapter/server.py:325-336` @ v2026.3.30 (0.6.0),
+    /// `:1050-1059` @ v2026.5.7 (0.13.0, the claimed floor), `:917-924` @
+    /// v2026.9.7 (0.21.1). So the chip this flag gates
+    /// (`SessionInfoBar.swift`) is unreachable over ACP regardless of host
+    /// version; the count stays 0 and the `> 0` test hides it. The flag and
+    /// the tolerant decode in `ACPClient.prompt` are kept as the landing pad
+    /// for a future gateway/`session/update` path — not because a v0.13 host
+    /// sends the field.
     public var hasContextCompressionCount: Bool { atLeastSemver(0, 13, 0) }
 
     /// `/new` slash command accepts an optional session-name argument (v0.13+).
@@ -345,12 +357,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// this file); the earlier claim that it did was wrong.
     public var hasTransformLLMOutputHook: Bool { atLeastSemver(0, 13, 0) }
 
-    /// ACP `session/set_model` JSON-RPC method (v0.13+). Lets Scarf
-    /// switch the model on a live session — used at session boot to
-    /// apply a project's bound model preset, and at user-tap time
-    /// from the chat header to swap mid-conversation. Pre-v0.13
-    /// hosts ignore the call and stay on the config.yaml default.
-    public var hasACPSetSessionModel: Bool { atLeastSemver(0, 13, 0) }
+    // NOTE: `hasACPSetSessionModel` was RETIRED in P49 (round-5 decision 9).
+    // ACP `session/set_model` is not a v0.13 surface: `set_session_model` is
+    // defined in the adapter at the EARLIEST adapter tag and at every tag
+    // since — `acp_adapter/server.py:466` @ v2026.3.17 (0.3.0), `:482` @
+    // v2026.3.30 (0.6.0, Scarf's supported floor), `:929` @ v2026.9.7 — so
+    // the flag's false branch only hid the model chip and the project model
+    // binding from 0.6.0–0.12 hosts that have the RPC. A floor below the
+    // v0.6.0 supported minimum is no floor at all (the P23/P15 rule), so the
+    // model surfaces are unfloored like `reset` / `context` / `version`.
 
     // MARK: v0.14 (v2026.5.16) flags
     //
@@ -365,7 +380,8 @@ public struct HermesCapabilities: Sendable, Equatable {
     // command catalog (it hands the session off to a *messaging platform*,
     // not to a different model), so Scarf doesn't surface it in the ACP
     // chat menu. Model switching mid-chat remains the `session/set_model`
-    // path under `hasACPSetSessionModel` (v0.13).
+    // path, which is ungated (present at every adapter tag — see the
+    // retirement note in the v0.13 group).
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,
@@ -377,25 +393,12 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 
-    /// `/yolo` slash command — toggles YOLO mode (skip all dangerous
-    /// command approvals) for the current session (v0.14+). Pairs with the
-    /// YOLO warning banner driven by `hasYOLOWarning`.
-    ///
-    /// **CLI/gateway only, NOT ACP.** The old doc comment here said
-    /// "Available in ACP" and was wrong (C2): `yolo` appears nowhere under
-    /// `acp_adapter/` at ANY `v2026.*` tag — the adapter's whole slash dict
-    /// is `help model tools context reset compact|compress steer queue
-    /// version` (`acp_adapter/commands.py:44-66` @ v2026.9.7,
-    /// `acp_adapter/server.py:453-463` @ v2026.7.20). The real definition is
-    /// a CommandDef in the CLI/gateway catalog
-    /// (`hermes_cli/commands.py:181` @ v2026.9.7).
-    ///
-    /// **No consumer** — P34 removed the slash-menu row it used to gate
-    /// (`RichChatViewModel.alwaysAvailableCommands`), because the ACP
-    /// composer sending `/yolo` just fell through to the LLM. Kept because
-    /// the floor is source-verified and rediscovering it costs a tag walk;
-    /// a future CLI/gateway-fronted surface can gate on it.
-    public var hasYOLOSlashCommand: Bool { atLeastSemver(0, 14, 0) }
+    // NOTE: `hasYOLOSlashCommand` was DELETED in P49 (round-5 decision 10).
+    // It had no consumer after P34 removed the slash-menu row, and `/yolo` is
+    // absent from `acp_adapter/` at every tag — so nothing in Scarf's ACP
+    // surface could ever gate on it. Its floor, if it is ever needed again:
+    // `CommandDef("yolo")` first appears at v2026.4.3 (0.7.0) and is absent
+    // at v2026.3.30 (0.6.0).
 
     /// `/sessions` slash command — browse and resume previous sessions
     /// from inside an active chat (v0.14+).
@@ -405,7 +408,8 @@ public struct HermesCapabilities: Sendable, Equatable {
     ///
     /// **No consumer** — P34 removed its slash-menu row. Scarf exposes
     /// session browse via the sidebar, which is the native equivalent.
-    /// Kept for the same reason as ``hasYOLOSlashCommand``.
+    /// Kept because the floor is source-verified and rediscovering it costs
+    /// a tag walk.
     public var hasSessionsSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/codex-runtime` slash command — toggle Codex app-server runtime
@@ -416,8 +420,8 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v2026.9.7, alias `codex_runtime`; absent from `acp_adapter/` at
     /// every tag).
     ///
-    /// **No consumer** — P34 removed its slash-menu row. Kept for the same
-    /// reason as ``hasYOLOSlashCommand``.
+    /// **No consumer** — P34 removed its slash-menu row. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCodexRuntimeSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// xAI Grok OAuth (SuperGrok) provider — overlay-only, OAuth-external
@@ -662,6 +666,50 @@ public struct HermesCapabilities: Sendable, Equatable {
     public static let ntfyPlatformFloor = SemVer(major: 0, minor: 15, patch: 0)
 
 
+    /// `discord.allow_any_attachment` is read by the adapter — a WINDOW, not
+    /// a floor. Round-5, P51.
+    ///
+    /// This is the first flag in the file whose upper bound is load-bearing,
+    /// so the walk is written out. `_discord_allow_any_attachment` is defined
+    /// AND CALLED (`plugins/platforms/discord/adapter.py:3622`, called at
+    /// `:4608` and `:4717`, gating at `:4719`) from **v2026.5.28 (0.15.0)**;
+    /// it is absent at v2026.5.16 and before. At **v2026.7.1 (0.18.0)** the
+    /// two call sites are GONE while the getter itself lingers, so the key
+    /// stops deciding anything — and at `v2026.9.7` the getter is deleted
+    /// too: the key survives only as a schema default
+    /// (`hermes_cli/config_defaults.py:1448`), and the tag's own docs say so
+    /// in as many words (`website/docs/user-guide/messaging/discord.md:703`:
+    /// the flag "is now a no-op — any file type is always accepted").
+    ///
+    /// Counted by CALL SITE, not by definition: a getter nothing calls is
+    /// exactly the dead row C1 exists to keep off screen, and grepping the
+    /// symbol would have put the window's end three releases late. Tags
+    /// walked one by one, `self._discord_allow_any_attachment()` call count:
+    /// v2026.5.16 → absent, v2026.5.28 → 2, v2026.5.29 → 2, v2026.6.5 → 2,
+    /// v2026.6.19 → 2, v2026.7.1 → 0, and 0 at every tag through v2026.9.7.
+    ///
+    /// Retiring the row outright was the alternative and it is the wrong one:
+    /// a v0.15–v0.17 host honours the toggle, and C1's "a pre-target host
+    /// must render byte-identical to the prior Scarf release" is exactly
+    /// about those users. The row hides where it does nothing, and the
+    /// writer follows the row (`DiscordSetupViewModel.save`).
+    ///
+    /// **What this REMOVES, owned plainly (round-5 P52).** The row was
+    /// previously ungated, so it rendered on every host — and this window
+    /// takes it away at BOTH ends, not just above v0.18. On a v0.18+ host and
+    /// on a ≤v0.14 host alike, a control the previous Scarf release showed is
+    /// now gone. That is intended, and it is not a C1 violation, because C1
+    /// protects a host that HONOURS a setting: at ≤v0.14 the getter does not
+    /// exist to read the key, and at v0.18+ nothing calls it — Hermes ships
+    /// the key as a schema default whose own comment says
+    /// `# DEPRECATED no-op (uploads are always cached; messaging auth is the
+    /// gate). Kept so existing configs don't error.`
+    /// (`hermes_cli/config_defaults.py:1446-1448` @ v2026.9.7). A toggle that
+    /// writes a key nobody reads is the dead row, not the preserved one.
+    public var hasDiscordAllowAnyAttachment: Bool {
+        atLeastSemver(0, 15, 0) && !atLeastSemver(0, 18, 0)
+    }
+
     /// Opt-in `tts.xai.auto_speech_tags` — inserts light `[pause]` tags
     /// between sentences/paragraphs for more natural xAI TTS. Default OFF.
     public var hasXAITTSAutoSpeechTags: Bool { atLeastSemver(0, 15, 0) }
@@ -736,21 +784,28 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// is currently unread. Kept as the verified floor for a future one.
     public var hasKanbanGoalMode: Bool { atLeastSemver(0, 16, 0) }
 
-    /// `hermes insights` — on-demand analytics verb showing agent usage
-    /// statistics across all sessions and projects (v0.16+). Surfaced in a
-    /// dedicated sidebar destination alongside existing reports.
-    ///
-    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
-    /// floor is source-verified and rediscovering it costs a tag walk.
-    public var hasInsightsCommand: Bool { atLeastSemver(0, 16, 0) }
+    // NOTE: `hasInsightsCommand` was DELETED in P49's re-walk of this MARK
+    // group. `hermes insights` is NOT a v0.16 surface: `cmd_insights` is
+    // `hermes_cli/main.py:4634` (registered at `:4627`, and in the verb list
+    // at `:3291`) at **v2026.3.30 = 0.6.0**, Scarf's supported minimum — so
+    // the flag was false for no supported host. A floor below the supported
+    // minimum is no floor at all (the P15/P23 rule) and the flag had no
+    // consumer, so it is gone rather than re-floored.
 
     /// `hermes dashboard` — web-UI backend verb for the desktop dashboard
-    /// application (v0.16+). Scarf doesn't directly invoke this; it documents
-    /// the version boundary for dashboard-aware installs.
+    /// application. Scarf doesn't directly invoke this; it documents the
+    /// version boundary for dashboard-aware installs.
+    ///
+    /// **Floor v0.9.0, not v0.16.** `def cmd_dashboard(args)` is
+    /// `hermes_cli/main.py:4458` at tag **v2026.4.13** (`pyproject.toml` =
+    /// `0.9.0`), with the subcommand registered at `:4180` / `:5978`; the
+    /// string `dashboard` occurs nowhere in `hermes_cli/main.py` at
+    /// v2026.4.8 (0.8.0). The v0.16 floor came from the MARK group's name,
+    /// which the P23 lesson says is not evidence for its members.
     ///
     /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
     /// floor is source-verified and rediscovering it costs a tag walk.
-    public var hasDashboardCommand: Bool { atLeastSemver(0, 16, 0) }
+    public var hasDashboardCommand: Bool { atLeastSemver(0, 9, 0) }
 
     // MARK: v0.17 (v2026.6.19) flags
 

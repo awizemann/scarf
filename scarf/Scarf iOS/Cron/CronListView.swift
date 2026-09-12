@@ -88,6 +88,21 @@ struct CronListView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                            // Round-5 review (P50b). Every refusal sentence
+                            // this screen shows in its top banner names
+                            // Duplicate as the remedy
+                            // (`IOSCronViewModel.resumeRefusalMessage` →
+                            // "Duplicate it to schedule a new run."), and the
+                            // only way to reach it was a long press. A hint
+                            // that names a gesture must put that gesture
+                            // within reach of the row it is about. Same
+                            // action as the context menu's, no new logic.
+                            Button {
+                                duplicatingJob = job
+                            } label: {
+                                Label("Duplicate", systemImage: "plus.square.on.square")
+                            }
+                            .tint(ScarfColor.accent)
                         }
                         .contextMenu {
                             // The SAME shared offer the Mac's detail pane and
@@ -151,7 +166,12 @@ struct CronListView: View {
         .onChange(of: hasCronRecoverableErrorResume) { _, _ in mirrorCapabilities() }
         .onChange(of: hasCronPastOneShotResumeRefusal) { _, _ in mirrorCapabilities() }
         .sheet(item: $editingJob) { job in
-            CronEditorView(initial: job, title: "Edit cron job") { edited in
+            CronEditorView(
+                initial: job, title: "Edit cron job",
+                // The edit sheet is the one arm with a real record behind it,
+                // so it is the one arm that can refuse Enabled.
+                recoveryOffer: vm.recoveryOffer(for: job)
+            ) { edited in
                 Task { await vm.upsert(edited) }
             }
             // Cron editor is a Form with ~6 fields; .large gives room
@@ -170,7 +190,10 @@ struct CronListView: View {
                 initial: job.duplicatedAsNewJob(
                         id: "job_\(UUID().uuidString.prefix(8))",
                         existingNames: vm.jobs.map(\.name)),
-                title: "Duplicate cron job"
+                title: "Duplicate cron job",
+                // A duplicate's seed is `enabled: true, state: "scheduled"`
+                // — a fresh record refuses nothing.
+                recoveryOffer: .none
             ) { created in
                 Task { await vm.upsert(created) }
             }
@@ -178,7 +201,9 @@ struct CronListView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingNewJob) {
-            CronEditorView(initial: nil, title: "New cron job") { created in
+            CronEditorView(
+                initial: nil, title: "New cron job", recoveryOffer: .none
+            ) { created in
                 Task { await vm.upsert(created) }
             }
             .presentationDetents([.large])
@@ -263,14 +288,23 @@ struct CronEditorView: View {
 
     private let existing: HermesCronJob?
 
+    /// The SAME shared offer the row toggle gates on
+    /// (`IOSCronViewModel.recoveryOffer(for:)` → `HermesCronJob.recoveryOffer`),
+    /// handed in because this sheet has no view model. Round-5 review (P50b):
+    /// no default, because this parameter IS the fix — a caller that forgets
+    /// it must not silently get the ungated editor back.
+    private let recoveryOffer: CronRecoveryOffer
+
     init(
         initial: HermesCronJob?,
         title: String,
+        recoveryOffer: CronRecoveryOffer,
         onSave: @escaping (HermesCronJob) -> Void
     ) {
         self.title = title
         self.onSave = onSave
         self.existing = initial
+        self.recoveryOffer = recoveryOffer
         _id = State(initialValue: initial?.id ?? "job_\(UUID().uuidString.prefix(8))")
         _name = State(initialValue: initial?.name ?? "")
         _prompt = State(initialValue: initial?.prompt ?? "")
@@ -297,10 +331,23 @@ struct CronEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Job") {
+                Section {
                     TextField("Name", text: $name)
                         .autocorrectionDisabled()
                     Toggle("Enabled", isOn: $enabled)
+                        .disabled(enabledIsLocked)
+                } header: {
+                    Text("Job")
+                } footer: {
+                    if enabledIsLocked, let existing {
+                        // The same REASON the row toggle gives, worded for a
+                        // modal: `resumeRefusalMessage`'s two remedies name
+                        // "Resume & Run Now" and "duplicate it", and neither
+                        // is reachable from inside this sheet — both live on
+                        // the list row the sheet is covering (round-6 P53).
+                        Text(IOSCronViewModel.editorEnabledLockNote(
+                            existing, offer: recoveryOffer))
+                    }
                 }
 
                 Section("Prompt") {
@@ -384,15 +431,68 @@ struct CronEditorView: View {
     /// host's. An EMPTY time is unusable for the same reason (a `once` with no
     /// `run_at` has no `next_run_at` to compute) and that string-level helper
     /// answers `false` for one, so it is checked here.
-    /// Applies to `.edit` as well as the duplicate that motivated it: the
-    /// write is the same `jobs.json` rewrite either way, and re-saving a
-    /// `once` record whose time is spent re-writes the same ghost. Switching
-    /// the kind, or supplying a future time, is what unblocks Save.
+    /// **Scoped to a create or a duplicate — round-5 decision 13.** It used
+    /// to fire on an edit too, which blocked a user from fixing the PROMPT of
+    /// a record whose one-shot time had already passed: the schedule field
+    /// was never touched, yet Save stayed grey with nothing on screen naming
+    /// the reason. The axis is the SCHEDULE, not the sheet: a spent time is
+    /// refused unless it is the record's OWN already-stored value, unedited.
+    /// That admits the prompt-only edit and still refuses every write that
+    /// puts a spent time somewhere it was not — a create (no `existing`), a
+    /// duplicate (whose seed is blanked by `duplicateSeedSchedule`, so a
+    /// spent value there is one the user just typed), a kind switch, and a
+    /// re-typed dead timestamp.
+    ///
+    /// Hermes agrees for the case this admits. `cron edit <id> --prompt …` on
+    /// a one-shot that actually RAN is accepted at `v2026.9.7`: the record is
+    /// `enabled=False, state="completed", next_run_at=None`
+    /// (`_complete_job_record`, `cron/jobs.py:1463-1465`), so
+    /// `_reject_terminal_activation` (`:1865-1878`) sees `state` in the
+    /// terminal set, `enabled` not `True` and `next_run_at` nil and does not
+    /// raise, `_apply_schedule_update` never runs without `--schedule`, and
+    /// `_fill_missing_next_run` (`:1912-1927`) returns on the first line
+    /// because the record is disabled. The one shape Hermes would still
+    /// refuse is a never-run GHOST (`state="scheduled", enabled=True`, no
+    /// `next_run_at`), where `_fill_missing_next_run` raises "Requested
+    /// one-shot time … is in the past" — but that record can only exist
+    /// because an older Scarf wrote it, this gate is what stops a new one,
+    /// and re-saving its prompt writes back the ghost that is already there
+    /// rather than creating a second. iOS never shells `cron edit` anyway
+    /// (`IOSCronViewModel.saveJobs` rewrites `cron/jobs.json`), so this form
+    /// is the only validation either way.
     private var oneShotTimeIsUnusable: Bool {
         guard scheduleKind == "once" else { return false }
         let raw = scheduleRunAt.trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.isEmpty { return true }
+        // The record's own stored time, unchanged: this write re-states what
+        // `jobs.json` already holds, so it cannot create a ghost that is not
+        // already there.
+        if existing?.schedule.kind == "once",
+           let stored = existing?.schedule.runAt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           stored == raw {
+            return false
+        }
         return HermesCronJob.oneShotScheduleIsPastGrace(raw)
+    }
+
+    /// Round-5 review (P50b). Decision 13 widened `isValid` so a spent
+    /// one-shot's PROMPT can be saved — which newly put Save within reach of
+    /// a record whose `Enabled` toggle was never gated. Flipping it on a
+    /// `completed` one-shot would write `enabled: true, state: "completed"`
+    /// into `cron/jobs.json`: exactly the shape
+    /// `_reject_terminal_activation` refuses (`cron/jobs.py:1865-1878` @
+    /// `v2026.9.7` — `state` in the terminal set AND `enabled is True`), and
+    /// the shape the list row's own toggle already declines via
+    /// `IOSCronViewModel.setEnabled`'s `offer.refusesResume` gate. iOS
+    /// persists by rewriting `jobs.json` (`IOSCronViewModel.saveJobs`), so
+    /// no CLI stands behind this form to refuse it — the two doors into the
+    /// same write must agree, and this is the second one.
+    ///
+    /// Only an EDIT is gated: a new job has no record and a duplicate's seed
+    /// is `enabled: true, state: "scheduled"`
+    /// (`HermesCronJob.duplicatedAsNewJob`), so neither refuses anything.
+    private var enabledIsLocked: Bool {
+        existing != nil && recoveryOffer.refusesResume
     }
 
     private var isValid: Bool {
@@ -457,7 +557,14 @@ struct CronEditorView: View {
             skills: skillList.isEmpty ? nil : skillList,
             model: emptyToNil(model),
             schedule: schedule,
-            enabled: enabled,
+            // A locked toggle keeps the value it HELD, and what it holds is
+            // whatever `jobs.json` already says — the P47 lesson that a
+            // `.disabled` control still reports its binding, applied by
+            // writing the record's own stored flag rather than the sheet's.
+            // Forcing `false` would be its own bug: a recurring job in
+            // `error` is terminal AND enabled, and a prompt-only save must
+            // not quietly disable it.
+            enabled: enabledIsLocked ? (existing?.enabled ?? enabled) : enabled,
             state: existing?.state ?? "scheduled",
             deliver: emptyToNil(deliver),
             // Preserve runtime state fields from the existing job so

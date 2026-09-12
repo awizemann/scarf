@@ -53,7 +53,7 @@ struct CatalogViewModelTests {
         ])
 
         let visible = vm.displayedEntries
-        #expect(visible.count == 3)
+        try #require(visible.count == 3)
         #expect(visible[0].id.hasPrefix("awizemann/"))
         #expect(visible[1].id.hasPrefix("awizemann/"))
         #expect(visible[2].id == "community/zebra")

@@ -161,14 +161,28 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 @Observable
 final class AppCoordinator {
     var selectedSection: SidebarSection = .dashboard {
-        didSet { Self.recordSectionViewed(selectedSection) }
+        didSet { recordSectionViewed(selectedSection) }
     }
+
+    /// Where this coordinator's own `section_viewed` events go.
+    ///
+    /// `nil` in the app — the events route through `Analytics`, which owns
+    /// the installed process tracker. A TEST passes its own capturing tracker
+    /// instead of reaching for `Analytics.install(_:)`, which is a
+    /// process-global slot: two suites installing into it at once clobber
+    /// each other, and any OTHER test that happens to build an
+    /// `AppCoordinator` (`CronViewAccessibilityTreeTests`,
+    /// `SidebarRestructureTests`) emits into whatever is installed. That
+    /// coupling is what `.serialized` was buying, and a parameter buys it
+    /// more cheaply (round-5 P48).
+    private let usageTracker: (any UsageTracking)?
 
     /// Every window starts on `.dashboard`, but a property initializer's
     /// default value never runs `didSet` — so without this the very first
     /// section a user sees would never be recorded.
-    init() {
-        Self.recordSectionViewed(selectedSection)
+    init(usageTracker: (any UsageTracking)? = nil) {
+        self.usageTracker = usageTracker
+        recordSectionViewed(selectedSection)
     }
 
     /// Report `section_viewed` once per section per app *process*.
@@ -185,9 +199,18 @@ final class AppCoordinator {
     /// taps, programmatic hand-offs (kanban, credential re-auth, the settings
     /// command) and re-selecting the current section all assign
     /// `selectedSection`.
-    static func recordSectionViewed(_ section: SidebarSection) {
+    /// The dedupe state lives on whichever tracker receives the event, so an
+    /// injected one starts from a clean slate and "once per process" is
+    /// "once per tracker" — which is what the process tracker being a
+    /// singleton made it mean all along.
+    func recordSectionViewed(_ section: SidebarSection) {
         let token = section.analyticsToken
-        Analytics.recordOnce(.sectionViewed(section: section), key: "section_viewed:\(token)")
+        let key = "section_viewed:\(token)"
+        if let usageTracker {
+            _ = usageTracker.recordOnce(.sectionViewed(section: section), key: key)
+        } else {
+            Analytics.recordOnce(.sectionViewed(section: section), key: key)
+        }
     }
 
     var selectedSessionId: String?

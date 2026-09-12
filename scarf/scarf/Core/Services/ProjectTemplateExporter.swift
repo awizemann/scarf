@@ -123,7 +123,7 @@ struct ProjectTemplateExporter: Sendable {
     nonisolated func export(
         inputs: ExportInputs,
         outputZipPath: String
-    ) throws {
+    ) async throws {
         let stagingDir = NSTemporaryDirectory() + "scarf-template-export-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: stagingDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: stagingDir) }
@@ -277,7 +277,7 @@ struct ProjectTemplateExporter: Sendable {
         let manifestData = try manifestEncoder.encode(manifest)
         try manifestData.write(to: URL(fileURLWithPath: stagingDir + "/template.json"))
 
-        try zip(stagingDir: stagingDir, outputPath: outputZipPath)
+        try await zip(stagingDir: stagingDir, outputPath: outputZipPath)
     }
 
     // MARK: - Private
@@ -343,7 +343,7 @@ struct ProjectTemplateExporter: Sendable {
     /// Shell out to `/usr/bin/zip -r` so the file ordering is deterministic
     /// and the archive is standard — Apple-provided tools (and the system
     /// `unzip` the installer uses) will read it without trouble.
-    nonisolated private func zip(stagingDir: String, outputPath: String) throws {
+    nonisolated private func zip(stagingDir: String, outputPath: String) async throws {
         // `zip` writes relative paths based on the cwd it's invoked in. Chdir
         // via Process.currentDirectoryURL so entries are `template.json`,
         // `AGENTS.md`, etc., not absolute paths.
@@ -380,7 +380,7 @@ struct ProjectTemplateExporter: Sendable {
         // ``Process.waitDraining(timeout:pipes:)`` for why the old
         // run → wait → readToEnd order is a deadlock waiting for a chatty
         // child. A template with thousands of files is exactly that child.
-        let (exited, drained) = process.waitDraining(
+        let (exited, drained) = await process.waitDrainingAsync(
             timeout: Self.zipTimeout, pipes: [errPipe, outPipe])
         let errData = drained.first
         closePipes()

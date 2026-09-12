@@ -37,7 +37,7 @@ struct GwF1RefusalOrderingTests {
     private static func installMinimal(
         home: TempHermesHome,
         scratch: String
-    ) throws -> (entry: ProjectEntry, projectDir: String) {
+    ) async throws -> (entry: ProjectEntry, projectDir: String) {
         let parentDir = scratch + "/parent"
         try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
@@ -46,7 +46,7 @@ struct GwF1RefusalOrderingTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let entry = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
@@ -81,14 +81,14 @@ struct GwF1RefusalOrderingTests {
     /// The attack, end to end: an unreadable MEMORY.md must not buy the
     /// template's secrets another day in the login Keychain, and must not
     /// leave the sidebar row behind either.
-    @Test func unreadableMemoryDoesNotPreserveTemplateSecretsOrTheRegistryRow() throws {
+    @Test func unreadableMemoryDoesNotPreserveTemplateSecretsOrTheRegistryRow() async throws {
         try #require(!Self.runningAsRoot)
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let installed = try Self.installMinimal(home: home, scratch: scratch)
+        let installed = try await Self.installMinimal(home: home, scratch: scratch)
         let blockId = "tester/minimal"
 
         // A secret this template "installed", in an isolated Keychain.
@@ -140,13 +140,13 @@ struct GwF1RefusalOrderingTests {
 
     /// Healthy-path parity: a readable MEMORY.md still plans and performs the
     /// strip exactly as before.
-    @Test func aReadableMemoryBlockIsStillPlannedAndStripped() throws {
+    @Test func aReadableMemoryBlockIsStillPlannedAndStripped() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let installed = try Self.installMinimal(home: home, scratch: scratch)
+        let installed = try await Self.installMinimal(home: home, scratch: scratch)
         let blockId = "tester/minimal"
         try Self.amendLock(at: installed.projectDir, memoryBlockId: blockId, keychainURIs: [])
 
@@ -173,13 +173,13 @@ struct GwF1RefusalOrderingTests {
 
     /// An absent MEMORY.md is still "nothing to strip", not a warning — the
     /// discrimination the plan now makes has to cut both ways.
-    @Test func anAbsentMemoryFileIsNotReportedAsUnreadable() throws {
+    @Test func anAbsentMemoryFileIsNotReportedAsUnreadable() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let installed = try Self.installMinimal(home: home, scratch: scratch)
+        let installed = try await Self.installMinimal(home: home, scratch: scratch)
         try Self.amendLock(
             at: installed.projectDir, memoryBlockId: "tester/minimal", keychainURIs: []
         )

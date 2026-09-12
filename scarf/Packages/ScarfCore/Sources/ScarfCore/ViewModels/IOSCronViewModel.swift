@@ -303,33 +303,115 @@ public final class IOSCronViewModel {
     /// affordance for the same job — which is what
     /// `CronRecoveryOfferP30Tests`'s parity test is for.
     public static func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+        terminalRefusalParts(job, offer: offer).sentence
+    }
+
+    /// A refusal as the two pieces it is made of, so a second surface can
+    /// reframe the REMEDY without having to reverse-engineer where the
+    /// reason ends.
+    ///
+    /// P53 built ``editorEnabledLockNote`` by trimming the assembled
+    /// sentence at its first `" — "`, which is only the seam on the arms
+    /// whose reason happens to carry no dash of its own — the past-deadline
+    /// one-shot's reason ("… — the one-shot time (…) is in the past …") got
+    /// cut in half by its own punctuation. The seam is a field now.
+    public struct ResumeRefusal: Sendable, Equatable {
+        /// Why the door is shut. Carries no trailing punctuation.
+        public let reason: String
+        /// What to do about it, ending in a full stop.
+        public let remedy: String
+        /// The punctuation the two are joined by — an em dash where the
+        /// remedy continues the sentence, a full stop where it starts a new
+        /// one. Part of the copy, not of the seam.
+        public let joiner: String
+
+        public var sentence: String { reason + joiner + remedy }
+    }
+
+    static func terminalRefusalParts(
+        _ job: HermesCronJob, offer: CronRecoveryOffer
+    ) -> ResumeRefusal {
         let state = job.effectiveState == "error" ? "failed" : "finished"
         let lead = "\"\(job.name)\" has \(state) and can't just be resumed"
         if offer.canRearm {
-            return lead + " — use Resume & Run Now to re-arm it."
+            return ResumeRefusal(
+                reason: lead, remedy: "use Resume & Run Now to re-arm it.", joiner: " — ")
         }
-        return lead + ". " + (offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint)
+        return ResumeRefusal(
+            reason: lead,
+            remedy: offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint,
+            joiner: ". ")
     }
 
     /// The sentence for any job whose Resume door the offer just shut —
     /// terminal or merely past its one-shot deadline. One entry point so the
     /// two shapes cannot be wired to the wrong wording again.
     public static func resumeRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+        resumeRefusalParts(job, offer: offer).sentence
+    }
+
+    /// The same routing, as pieces.
+    static func resumeRefusalParts(
+        _ job: HermesCronJob, offer: CronRecoveryOffer
+    ) -> ResumeRefusal {
         job.isTerminal
-            ? terminalRefusalMessage(job, offer: offer)
-            : oneShotRefusalMessage(job, offer: offer)
+            ? terminalRefusalParts(job, offer: offer)
+            : oneShotRefusalParts(job, offer: offer)
+    }
+
+    /// The same refusal, worded for the MODAL EDITOR's locked `Enabled`
+    /// toggle.
+    ///
+    /// ``resumeRefusalMessage(_:offer:)`` is written for the list's top
+    /// banner, where both of its remedies are one gesture away: "Resume &
+    /// Run Now" is in the row's context menu and "duplicate it" is the row's
+    /// trailing swipe action (P50b put it there for exactly this reason —
+    /// round-5 lesson 4, "a hint that names a remedy is walked like a
+    /// button"). Inside the editor sheet NEITHER is reachable: the sheet
+    /// covers the list, and its only controls are Cancel and Save. P50b's
+    /// footer rendered the banner's sentence there anyway, so the copy named
+    /// two gestures the user could not perform without first dismissing the
+    /// thing they were reading.
+    ///
+    /// The cheaper honest answer of the two on offer: keep the REASON, which
+    /// is what the footer is for, and point at where the remedy lives rather
+    /// than duplicating the row's actions into a sheet toolbar. The reason
+    /// clause is taken verbatim from the banner's sentence — one rule, two
+    /// framings — by trimming at the em dash or full stop the remedy clause
+    /// begins after.
+    public static func editorEnabledLockNote(
+        _ job: HermesCronJob, offer: CronRecoveryOffer
+    ) -> String {
+        // The reason is a FIELD, not a prefix guessed at by punctuation:
+        // two of the three arms carry an em dash inside their own reason.
+        let reason = resumeRefusalParts(job, offer: offer).reason
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        if offer.canRearm {
+            return reason + ". Close this editor, then press and hold the job to Resume & Run Now."
+        }
+        return reason + ". Close this editor, then swipe the job to Duplicate it."
     }
 
     static func oneShotRefusalMessage(
         _ job: HermesCronJob,
         offer: CronRecoveryOffer = .none
     ) -> String {
+        oneShotRefusalParts(job, offer: offer).sentence
+    }
+
+    static func oneShotRefusalParts(
+        _ job: HermesCronJob,
+        offer: CronRecoveryOffer
+    ) -> ResumeRefusal {
         // Keyed on the same predicate `oneShotIsUnresumable` now uses: a
         // spent one-shot is refused because its record is TERMINAL (Hermes's
         // `_reject_terminal_activation`), not merely because `last_run_at` is
         // set — a re-armed one-shot carries that timestamp and resumes fine.
         if job.isTerminal {
-            return "\"\(job.name)\" has already finished — a completed one-shot can't be resumed. Duplicate it to schedule a new run."
+            return ResumeRefusal(
+                reason: "\"\(job.name)\" has already finished — a completed one-shot can't be resumed",
+                remedy: "Duplicate it to schedule a new run.",
+                joiner: ". ")
         }
         let when = job.schedule.runAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "its scheduled time"
         let lead = "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire"
@@ -338,9 +420,13 @@ public final class IOSCronViewModel {
         // `--run-now` is a Mac affordance, so point there rather than telling
         // the user to duplicate a job Hermes can still re-arm.
         if offer.canRearm {
-            return lead + " — use Resume & Run Now to re-arm it."
+            return ResumeRefusal(
+                reason: lead, remedy: "use Resume & Run Now to re-arm it.", joiner: " — ")
         }
-        return lead + ". " + (offer.hint ?? CronRecoveryOffer.pastDeadlineOneShotHint)
+        return ResumeRefusal(
+            reason: lead,
+            remedy: offer.hint ?? CronRecoveryOffer.pastDeadlineOneShotHint,
+            joiner: ". ")
     }
 
     // MARK: - CLI route

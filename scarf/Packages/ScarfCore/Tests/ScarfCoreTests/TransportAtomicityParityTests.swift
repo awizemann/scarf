@@ -66,7 +66,7 @@ import Foundation
         func listDirectory(_ path: String) throws -> [String] { [] }
         func createDirectory(_ path: String) throws {}
         func removeFile(_ path: String) throws { _ = lock.withLock { files.removeValue(forKey: path) } }
-        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
             ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
         #if !os(iOS)

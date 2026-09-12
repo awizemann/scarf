@@ -846,6 +846,15 @@ public final class RemoteRestoreService: @unchecked Sendable {
         #if os(iOS)
         throw RestoreError.archiveUnreadable("Restore unzip is not supported on iOS — run the restore from the Mac app.")
         #else
+        // **The clock starts BEFORE `run()`.** `timeout` is the caller's
+        // wall-clock ceiling on the whole operation, and a fork+exec is part
+        // of that operation — starting the budget after the spawn quietly
+        // grants the child however long the machine took to start it, which
+        // under load is the difference between a bounded wait and a generous
+        // one. It also lets the overrun tests use a fixture sized to the
+        // BOUND rather than one large enough to outrun a free head start
+        // (round-5 decision 8).
+        let started = Date()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         proc.arguments = ["-q", archive.path, "-d", dest.path]
@@ -868,7 +877,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // reads only after the wait. The archive here is the USER'S file,
         // chosen in an open panel: the one input Scarf trusts least.
         let (exited, drained) = await proc.waitDrainingAsync(
-            timeout: timeout, pipes: [errPipe, outPipe])
+            timeout: max(0, timeout - Date().timeIntervalSince(started)),
+            pipes: [errPipe, outPipe])
         try? errPipe.fileHandleForWriting.close()
         try? outPipe.fileHandleForWriting.close()
         guard exited else {

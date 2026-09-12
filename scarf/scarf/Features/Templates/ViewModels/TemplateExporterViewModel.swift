@@ -76,7 +76,7 @@ final class TemplateExporterViewModel {
         let inputs = currentInputs
         Task.detached { [weak self] in
             do {
-                try exporter.export(inputs: inputs, outputZipPath: outputPath)
+                try await exporter.export(inputs: inputs, outputZipPath: outputPath)
                 await MainActor.run { [weak self] in
                     self?.stage = .succeeded(path: outputPath)
                 }

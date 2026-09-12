@@ -28,7 +28,7 @@ import ScarfCore
 
         let registry = try JSONDecoder().decode(ProjectRegistry.self, from: json)
 
-        #expect(registry.projects.count == 2)
+        try #require(registry.projects.count == 2)
         #expect(registry.projects[0].name == "Legacy")
         #expect(registry.projects[0].path == "/Users/x/legacy")
         // Defaults hydrate for absent v2.3 fields.
@@ -49,7 +49,7 @@ import ScarfCore
 
         let registry = try JSONDecoder().decode(ProjectRegistry.self, from: json)
 
-        #expect(registry.projects.count == 3)
+        try #require(registry.projects.count == 3)
         #expect(registry.projects[0].folder == "Clients")
         #expect(registry.projects[0].archived == false)
         #expect(registry.projects[1].folder == "Clients")
@@ -107,7 +107,7 @@ import ScarfCore
         let encoded = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ProjectRegistry.self, from: encoded)
 
-        #expect(decoded.projects.count == 4)
+        try #require(decoded.projects.count == 4)
         #expect(decoded.projects[0].folder == nil && decoded.projects[0].archived == false)
         #expect(decoded.projects[1].folder == "Work" && decoded.projects[1].archived == false)
         #expect(decoded.projects[2].folder == nil && decoded.projects[2].archived == true)

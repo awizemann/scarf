@@ -120,7 +120,7 @@ final class SplitStreamTransport: ServerTransport, @unchecked Sendable {
     func listDirectory(_ path: String) throws -> [String] { [] }
     func createDirectory(_ path: String) throws {}
     func removeFile(_ path: String) throws {}
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         lastArgs = args
         return ProcessResult(exitCode: code, stdout: Data(out.utf8), stderr: Data(err.utf8))
     }

@@ -169,6 +169,20 @@ final class FleetApplyViewModel {
             if !crossJobContext.isEmpty {
                 out.append("\(crossJobContext.count) cron job\(crossJobContext.count == 1 ? "" : "s") read another job's output; that link can't be copied (no CLI flag sets it, and the job ids are this host's).")
             }
+            // Round-5 decision 12 — a DOWNGRADE at the same seam, for the
+            // same reason as the cross-job note above: the job is still
+            // copied. `cron create` does take `--script`
+            // (`hermes_cli/subcommands/cron.py:41-46` @ `v2026.9.7`) and
+            // validates nothing at create time (`hermes_cli/cron.py:540`;
+            // the only existence check is `cron doctor`'s
+            // `_script_health_issue`, `:453-465`), so forwarding the path
+            // would land a green "created" job pointing at a file only THIS
+            // host has. Replicating the file is `t-848d3adc`; until then,
+            // say so here.
+            let preRunScript = cronCopySet.copyable.filter(\.hasPreRunScript)
+            if !preRunScript.isEmpty {
+                out.append("\(preRunScript.count) cron job\(preRunScript.count == 1 ? "" : "s") run a pre-run script whose output is injected into the prompt; the script file stays on this host, so the copy runs without it.")
+            }
             if !cronCopySet.unsupportedSchedule.isEmpty {
                 out.append("\(cronCopySet.unsupportedSchedule.count) cron job\(cronCopySet.unsupportedSchedule.count == 1 ? "" : "s") have a schedule that can't be recreated from the CLI.")
             }

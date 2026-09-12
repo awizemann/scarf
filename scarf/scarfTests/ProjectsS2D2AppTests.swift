@@ -16,7 +16,7 @@ struct ProjectsS2D2AppTests {
 
     static func installedProject(
         _ home: TempHermesHome, scratch: String
-    ) throws -> (entry: ProjectEntry, projectDir: String) {
+    ) async throws -> (entry: ProjectEntry, projectDir: String) {
         let parentDir = scratch + "/parent"
         try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
@@ -25,7 +25,7 @@ struct ProjectsS2D2AppTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let entry = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
@@ -39,13 +39,13 @@ struct ProjectsS2D2AppTests {
     /// had any — and `LocalTransport.removeFile` is `removeItem`, which is
     /// recursive. So a slash command the user wrote, or a mini-app, was
     /// deleted by a folder removal that believed the folder was empty.
-    @Test func uninstallPreservesUntrackedScarfContent() throws {
+    @Test func uninstallPreservesUntrackedScarfContent() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let (entry, projectDir) = try Self.installedProject(home, scratch: scratch)
+        let (entry, projectDir) = try await Self.installedProject(home, scratch: scratch)
         let commandsDir = projectDir + "/.scarf/slash-commands"
         try FileManager.default.createDirectory(atPath: commandsDir, withIntermediateDirectories: true)
         let command = commandsDir + "/mine.md"
@@ -73,13 +73,13 @@ struct ProjectsS2D2AppTests {
     /// just uninstalled, with its original uuid, which re-attaches its
     /// `[proj:<uuid>]` cron jobs. The record's meaning is "this folder is a
     /// registered project"; it must leave with the row.
-    @Test func uninstallLeavesNoOrphanTheDoctorWouldOfferToAdopt() throws {
+    @Test func uninstallLeavesNoOrphanTheDoctorWouldOfferToAdopt() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let (entry, projectDir) = try Self.installedProject(home, scratch: scratch)
+        let (entry, projectDir) = try await Self.installedProject(home, scratch: scratch)
         // User content keeps the folder alive past the uninstall — the
         // interesting case, since a folder that is deleted outright can't
         // be adopted either way.
@@ -99,13 +99,13 @@ struct ProjectsS2D2AppTests {
 
     /// The folder-goes-away case still goes away — the extras rule must not
     /// have turned every uninstall into a leftover directory.
-    @Test func uninstallOfAProjectWithNoUserContentStillRemovesTheFolder() throws {
+    @Test func uninstallOfAProjectWithNoUserContentStillRemovesTheFolder() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let (entry, projectDir) = try Self.installedProject(home, scratch: scratch)
+        let (entry, projectDir) = try await Self.installedProject(home, scratch: scratch)
         let uninstaller = ProjectTemplateUninstaller(context: home.context)
         let plan = try uninstaller.loadUninstallPlan(for: entry)
         #expect(plan.projectDirBecomesEmpty)
@@ -115,13 +115,13 @@ struct ProjectsS2D2AppTests {
 
     /// Grants belonging to the uninstalled project are revoked, so a folder
     /// re-used later (ids being derived from host+path) can't inherit them.
-    @Test func uninstallRevokesTheProjectsMiniAppGrants() throws {
+    @Test func uninstallRevokesTheProjectsMiniAppGrants() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
 
-        let (entry, projectDir) = try Self.installedProject(home, scratch: scratch)
+        let (entry, projectDir) = try await Self.installedProject(home, scratch: scratch)
         let record = try #require(ProjectStore(context: home.context).load(projectPath: projectDir))
         let grants = MiniAppGrantStore(context: home.context)
         try grants.setGrant(
@@ -141,7 +141,7 @@ struct ProjectsS2D2AppTests {
     /// `hermes cron create`, so a template that starts either with `-`
     /// reconfigures the job argparse-side — past the preview sheet the user
     /// approved. Refused at inspect time, before any plan exists.
-    @Test func aTemplateWithAFlagShapedCronScheduleIsRefused() throws {
+    @Test func aTemplateWithAFlagShapedCronScheduleIsRefused() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -159,12 +159,12 @@ struct ProjectsS2D2AppTests {
             """#
         ], includeManifest: false)
 
-        #expect(throws: ProjectTemplateError.self) {
-            _ = try ProjectTemplateService(context: home.context).inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            _ = try await ProjectTemplateService(context: home.context).inspect(zipPath: bundle)
         }
     }
 
-    @Test func aTemplateWithAFlagShapedCronSkillIsRefused() throws {
+    @Test func aTemplateWithAFlagShapedCronSkillIsRefused() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -182,13 +182,13 @@ struct ProjectsS2D2AppTests {
             """#
         ], includeManifest: false)
 
-        #expect(throws: ProjectTemplateError.self) {
-            _ = try ProjectTemplateService(context: home.context).inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            _ = try await ProjectTemplateService(context: home.context).inspect(zipPath: bundle)
         }
     }
 
     /// The guard must not reject an ordinary cron spec.
-    @Test func anOrdinaryTemplateCronJobStillInspects() throws {
+    @Test func anOrdinaryTemplateCronJobStillInspects() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -207,7 +207,7 @@ struct ProjectsS2D2AppTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         #expect(inspection.cronJobs.count == 1)
     }

@@ -37,9 +37,9 @@ struct ProjectTemplateService: Sendable {
     /// validate the manifest, and walk the contents. Throws on any
     /// inconsistency. On success, the caller owns `inspection.unpackedDir`
     /// and must remove it once they're done.
-    nonisolated func inspect(zipPath: String) throws -> TemplateInspection {
+    nonisolated func inspect(zipPath: String) async throws -> TemplateInspection {
         let unpackedDir = try makeTempDir()
-        try unzip(zipPath: zipPath, intoDir: unpackedDir)
+        try await unzip(zipPath: zipPath, intoDir: unpackedDir)
 
         let manifestPath = unpackedDir + "/template.json"
         guard FileManager.default.fileExists(atPath: manifestPath) else {
@@ -345,8 +345,9 @@ struct ProjectTemplateService: Sendable {
     /// an `inspect()` that would unpack them.
     nonisolated func enforceArchiveBounds(
         zipPath: String,
-        listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout
-    ) throws {
+        listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout,
+        unpackedCeiling: Int64 = ProjectTemplateService.maxTemplateUnpackedBytes
+    ) async throws {
         let attrs = try? FileManager.default.attributesOfItem(atPath: zipPath)
         if let size = attrs?[.size] as? Int64, size > Self.maxTemplateArchiveBytes {
             throw ProjectTemplateError.unzipFailed(
@@ -358,7 +359,7 @@ struct ProjectTemplateService: Sendable {
         }
         let listing: String
         do {
-            listing = try Self.runToolCapturingOutput(
+            listing = try await Self.runToolCapturingOutput(
                 "/usr/bin/unzip", ["-Zt", zipPath], timeout: listingTimeout
             )
         } catch {
@@ -378,7 +379,7 @@ struct ProjectTemplateService: Sendable {
                 )
             )
         }
-        if claims.uncompressedBytes > Self.maxTemplateUnpackedBytes {
+        if claims.uncompressedBytes > unpackedCeiling {
             throw ProjectTemplateError.unzipFailed(
                 String(
                     localized: "This template would expand to \(claims.uncompressedBytes / 1_048_576) MB. Templates are a few kilobytes; refusing to open it.",
@@ -432,9 +433,15 @@ struct ProjectTemplateService: Sendable {
     /// wedged one.
     nonisolated static let listingTimeout: TimeInterval = 20
 
+    /// `async`, and a `waitDrainingAsync` inside, because every caller is
+    /// `async`. The synchronous `waitDraining` is a `Thread.sleep` poll loop:
+    /// from `async` code it parks a COOPERATIVE-POOL thread for the whole
+    /// budget, and `Task.detached` — which is what the enclosing view model
+    /// used — is that same pool, so the block was relabelled rather than
+    /// moved (round-5 P48, t-12d04477).
     nonisolated static func runToolCapturingOutput(
         _ executable: String, _ args: [String], timeout: TimeInterval
-    ) throws -> String {
+    ) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
@@ -463,7 +470,8 @@ struct ProjectTemplateService: Sendable {
         // caller's `try?` — turned the bomb check into a no-op. Which is
         // precisely what an archive would want. See
         // ``Process.waitDraining(timeout:pipes:)``.
-        let (exited, drained) = process.waitDraining(timeout: timeout, pipes: [outPipe, errPipe])
+        let (exited, drained) = await process.waitDrainingAsync(
+            timeout: timeout, pipes: [outPipe, errPipe])
         closeWriteEnds()
         guard exited else {
             throw ProjectTemplateError.unzipFailed("timed out reading the template archive")
@@ -480,8 +488,8 @@ struct ProjectTemplateService: Sendable {
         return String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
     }
 
-    private nonisolated func unzip(zipPath: String, intoDir: String) throws {
-        try enforceArchiveBounds(zipPath: zipPath)
+    private nonisolated func unzip(zipPath: String, intoDir: String) async throws {
+        try await enforceArchiveBounds(zipPath: zipPath)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         process.arguments = ["-qq", "-o", zipPath, "-d", intoDir]
@@ -522,7 +530,7 @@ struct ProjectTemplateService: Sendable {
         // prints a line per problem entry, so a corrupt or hostile archive
         // can fill the 64 KB pipe buffer and deadlock a parent that reads
         // only after the wait — see ``Process.waitDraining(timeout:pipes:)``.
-        let (exited, drained) = process.waitDraining(
+        let (exited, drained) = await process.waitDrainingAsync(
             timeout: Self.unzipTimeout, pipes: [errPipe, outPipe])
         let errData = drained.first
         closePipes()

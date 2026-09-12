@@ -947,7 +947,7 @@ struct BotsViewModelTests {
     }
 
     @Test("the roster publishes identities before avatar bytes or activity")
-    func rosterPaintsBeforeTheExpensiveWork() async {
+    func rosterPaintsBeforeTheExpensiveWork() async throws {
         let backend = MockBotsBackend([Self.bot("ops", title: "Ops")])
         try? backend.writeAvatar(Data(repeating: 7, count: 128), forProfile: "ops")
         backend.activities = ["ops": BotActivity(lastMessageAt: Date(), preview: "later")]
@@ -958,7 +958,7 @@ struct BotsViewModelTests {
         for _ in 0..<200 where viewModel.rows.isEmpty {
             try? await Task.sleep(for: .milliseconds(1))
         }
-        #expect(viewModel.rows.count == 1)
+        try #require(viewModel.rows.count == 1)
         #expect(viewModel.isLoading == false)
         #expect(viewModel.rows[0].identity.resolvedTitle == "Ops")
         #expect(viewModel.rows[0].avatarStat != nil, "the stat rides along with the scan")

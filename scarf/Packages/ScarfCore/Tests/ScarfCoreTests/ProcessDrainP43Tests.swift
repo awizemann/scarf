@@ -165,28 +165,47 @@ struct ProcessDrainP43Tests {
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         // Incompressible, so `zip` cannot shortcut its way under the budget.
         //
-        // **64 MB against a 300 ms budget, not 24 MB against 1 ms** (round-4
-        // P43c). The old pair was a bet that one poll turn (50 ms, per
-        // `waitUntilExit`'s own note) outruns a freshly exec'd `zip`, and once
-        // the reap moved onto a detached task the scheduling hop in front of
-        // it was enough to lose that bet: `zip` had already finished by the
-        // time the wait began. Measured: 64 MB of `/dev/urandom` takes `zip`
-        // about 1.5 s, so the budget is beaten by 5x and a hop of a few
-        // milliseconds cannot change the answer.
+        // **8 MB against a 25 ms budget** (round-5 decision 8), down from
+        // P43c's 64 MB against 300 ms. Two things changed. The budget now
+        // starts BEFORE `Process.run()`, so the scheduling hop in front of
+        // the reap is spent out of the budget rather than handed to `zip` as
+        // a free head start — which is the bet P43c was losing when it had to
+        // reach for 64 MB. And the fixture is sized to the BOUND rather than
+        // to that head start: `zip` takes ~200 ms over 8 MB of
+        // `/dev/urandom`, so the budget is still beaten by 8x, while writing
+        // and compressing the fixture costs an eighth of what it did. The
+        // suite's own wall time is the reason — these four fixture-heavy
+        // suites were about half the serial run.
         let urandom = try #require(FileHandle(forReadingAtPath: "/dev/urandom"))
         defer { try? urandom.close() }
-        let bytes = urandom.readData(ofLength: 64 * 1024 * 1024)
+        let bytes = urandom.readData(ofLength: 8 * 1024 * 1024)
         try bytes.write(to: work.appendingPathComponent("noise.bin"))
 
+        // **What this proves, exactly.** The budget now starts BEFORE
+        // `Process.run()` (decision 8), so on a loaded machine the 25 ms can
+        // be spent on the fork+exec rather than on `zip`'s compression — the
+        // refusal is then of a child that had barely started. That is still
+        // the property under test: the call REFUSES within a bounded time
+        // instead of running to completion or hanging, wherever the budget
+        // went. It is not a measurement of `zip`'s throughput, and the
+        // comment above about 8 MB taking ~200 ms is why the fixture is
+        // sized as it is, not a claim about which side of the budget won
+        // (round-5 P48b).
         var thrown: Error?
+        let started = Date()
         do {
             try await RemoteBackupService.zipDirectory(
-                workDir: work, into: dir.appendingPathComponent("o.zip"), timeout: 0.3)
+                workDir: work, into: dir.appendingPathComponent("o.zip"), timeout: 0.025)
         } catch {
             thrown = error
         }
-        let error = try #require(thrown, "zipping 64 MB of noise cannot finish inside 300 ms")
+        let elapsed = Date().timeIntervalSince(started)
+        let error = try #require(thrown, "zipping 8 MB of noise cannot finish inside 25 ms")
         #expect("\(error)".contains("did not finish"))
+        // The bound is the point: a refusal that took as long as the work
+        // would have is not a bound. Generous against the primitive's two
+        // signal graces plus the drain grace.
+        #expect(elapsed < 8, "the refusal took \(elapsed)s — that is not a bounded budget")
     }
 
     @Test("the archive budgets are named and ordered")

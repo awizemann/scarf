@@ -27,7 +27,7 @@ import Foundation
         #expect(bundle.displayFingerprint.contains("…"))
     }
 
-    @Test func ed25519PublicKeyLineIsDeterministic() {
+    @Test func ed25519PublicKeyLineIsDeterministic() throws {
         // Pin the OpenSSH wire format — wrong encoding would silently
         // break every authorized_keys paste.
         let fakePubKey = Data(repeating: 0xAB, count: 32)
@@ -36,7 +36,10 @@ import Foundation
             comment: "hello"
         )
         let parts = line.split(separator: " ")
-        #expect(parts.count == 3)
+        // `#expect` RECORDS and continues, so a short split would run
+        // straight into an out-of-bounds trap and take the host with it —
+        // the shape `HermesP38SourceSweepTests` sweeps for.
+        try #require(parts.count == 3)
         #expect(String(parts[0]) == "ssh-ed25519")
         #expect(String(parts[2]) == "hello")
         // Base64 blob decodes to:

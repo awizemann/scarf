@@ -40,6 +40,58 @@ public struct ParsedYAML: Sendable {
 /// Entry points for Hermes-flavored YAML parsing. Stateless, pure
 /// functions — no Foundation types that differ cross-platform.
 public enum HermesYAML {
+    /// The ONLY characters this parser may trim off a YAML token: SPACE and
+    /// TAB. Round-5 decision 14.
+    ///
+    /// Foundation's `.whitespaces` is *Unicode* `Zs` plus tab, so it also
+    /// contains U+00A0, U+1680, U+2000…U+200A, U+202F, U+205F and U+3000.
+    /// PyYAML's scanner does not: its whitespace is `'\0 \t\r\n\x85  '`
+    /// (`yaml/scanner.py`), and everything in the `Zs` list above is ORDINARY
+    /// CONTENT to it — part of the plain scalar, the key, or the flow entry.
+    /// Verified against PyYAML 6.0.3, every case loading cleanly and KEEPING
+    /// the character:
+    ///
+    /// ```text
+    /// model: gpt\u{A0}          -> {'model': 'gpt\xa0'}
+    /// model: \u{A0}gpt          -> {'model': '\xa0gpt'}
+    /// model: gpt\u{3000}        -> {'model': 'gpt　'}
+    /// model: gpt\u{2009}        -> {'model': 'gpt '}
+    /// model: gpt\u{1680}        -> {'model': 'gpt '}
+    /// mo\u{A0}del: x            -> {'mo\xa0del': 'x'}
+    /// model\u{A0}: x            -> {'model\xa0': 'x'}
+    /// - a\u{A0}                 -> ['a\xa0']
+    /// xs: [a\u{A0}, \u{A0}b]    -> ['a\xa0', '\xa0b']
+    /// m: {k: v\u{A0}}           -> {'k': 'v\xa0'}
+    /// model: gpt                -> {'model': 'gpt'}      (plain spaces DO go)
+    /// ```
+    ///
+    /// The consequence of trimming them anyway was a silent edit of the
+    /// user's file: `yaml.safe_dump` emits such a value BARE, so a value
+    /// Hermes wrote rendered short in Scarf, and the next save persisted the
+    /// trimmed form over the one the agent was actually using.
+    ///
+    /// TAB stays in the set although PyYAML refuses one in every position
+    /// this parser would trim it from (`model: gpt\t` and `model:\tgpt` are
+    /// both `ScannerError`, 6.0.3): such a document does not load at all —
+    /// `load_config` discards the whole config.yaml layer
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`) — so trimming it decides
+    /// nothing, and keeping it matches ``plainKeySeparatorIndex``'s existing
+    /// note.
+    ///
+    /// Two characters go the OTHER way and are deliberately left alone:
+    /// PyYAML treats NEL (U+0085) and U+2028 as LINE BREAKS and strips them,
+    /// while neither is in `.whitespaces` — so this set is no worse than the
+    /// one it replaces, and no Scarf writer emits either bare
+    /// (``YAMLScalar/quoteIfNeeded`` quotes and escapes them).
+    ///
+    /// This is a PARSER rule. It is NOT the rule for a value NORMALISER that
+    /// models a Python `.strip()` — ``normalizedScalar(_:)`` (and
+    /// `HermesReasoningEffort.normalizedLevel`) keep the wider trim on
+    /// purpose, because the Hermes readers they mirror call `.strip()` on the
+    /// loaded string and Python's `str.strip()` DOES remove U+00A0 and the
+    /// rest of the `Zs` block. See ``normalizedScalar(_:)``.
+    static let yamlWhitespace = CharacterSet(charactersIn: " \t")
+
     /// The dotted paths whose scalars SCARF ITSELF writes, and which are
     /// therefore decoded with ``YAMLScalar/unquote(_:)`` — the writers'
     /// own inverse — rather than with ``stripYAMLQuotes(_:)``.
@@ -156,7 +208,7 @@ public enum HermesYAML {
         for rawLine in rawLines {
             let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
             // Skip comment-only and blank lines but preserve indent semantics.
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = line.trimmingCharacters(in: yamlWhitespace)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
 
             let indent = line.prefix(while: { $0 == " " }).count
@@ -204,7 +256,7 @@ public enum HermesYAML {
             }
 
             if isListItem {
-                let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: yamlWhitespace)
                 let path = currentPath()
                 guard !path.isEmpty else { continue }
                 // Decision 10: a list Scarf itself writes is decoded with
@@ -247,7 +299,7 @@ public enum HermesYAML {
                 } else {
                     key = raw
                 }
-                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
+                afterColon = String(span.afterColon).trimmingCharacters(in: yamlWhitespace)
             } else {
                 // Plain (unquoted) key. YAML's `key: value` separator is a
                 // colon followed by whitespace (or end-of-line); a colon NOT
@@ -255,8 +307,8 @@ public enum HermesYAML {
                 // emits Ollama-style ids like `llama3:8b: high` unquoted.
                 // Splitting at the first bare colon used to shear that into
                 // key "llama3" + value "8b: high".
-                key = rawKeySpan.trimmingCharacters(in: .whitespaces)
-                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
+                key = rawKeySpan.trimmingCharacters(in: yamlWhitespace)
+                afterColon = String(span.afterColon).trimmingCharacters(in: yamlWhitespace)
             }
 
             let path = currentPath(joinedWith: key)
@@ -343,10 +395,10 @@ public enum HermesYAML {
             if afterColon.hasPrefix("{"),
                let close = afterColon.lastIndex(of: "}"),
                afterColon[afterColon.index(after: close)...]
-                   .trimmingCharacters(in: .whitespaces)
+                   .trimmingCharacters(in: yamlWhitespace)
                    .isEmpty
                    || afterColon[afterColon.index(after: close)...]
-                       .trimmingCharacters(in: .whitespaces)
+                       .trimmingCharacters(in: yamlWhitespace)
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
@@ -364,10 +416,10 @@ public enum HermesYAML {
             if afterColon.hasPrefix("["),
                let close = afterColon.lastIndex(of: "]"),
                afterColon[afterColon.index(after: close)...]
-                   .trimmingCharacters(in: .whitespaces)
+                   .trimmingCharacters(in: yamlWhitespace)
                    .isEmpty
                    || afterColon[afterColon.index(after: close)...]
-                       .trimmingCharacters(in: .whitespaces)
+                       .trimmingCharacters(in: yamlWhitespace)
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
@@ -403,7 +455,7 @@ public enum HermesYAML {
         guard let first = afterColon.first, first == "|" || first == ">" else { return false }
         var rest = Substring(afterColon.dropFirst())
         if let hash = rest.firstIndex(of: "#") { rest = rest[rest.startIndex..<hash] }
-        let body = rest.trimmingCharacters(in: .whitespaces)
+        let body = rest.trimmingCharacters(in: yamlWhitespace)
         if body.isEmpty { return true }
         guard body.count <= 2 else { return false }
         var sawDigit = false
@@ -468,12 +520,12 @@ public enum HermesYAML {
     /// `cAd` — one key, two answers, decided by which shape the host's
     /// config.yaml happened to use.
     private static func parseFlatFlowMap(_ inner: String, unquoting: Bool = false) -> [String: String]? {
-        let body = inner.trimmingCharacters(in: .whitespaces)
+        let body = inner.trimmingCharacters(in: yamlWhitespace)
         if body.isEmpty { return [:] }
         if body.contains("{") || body.contains("[") { return nil }
         var result: [String: String] = [:]
         for part in splitFlowEntries(body) {
-            let entry = part.trimmingCharacters(in: .whitespaces)
+            let entry = part.trimmingCharacters(in: yamlWhitespace)
             if entry.isEmpty { continue }
             guard let (k, v) = splitFlowEntry(entry, unquoting: unquoting), !k.isEmpty, !v.isEmpty else { return nil }
             result[k] = v
@@ -501,7 +553,7 @@ public enum HermesYAML {
     /// reachable in practice.
     public static func parseFlatFlowList(_ inner: String, unquoting: Bool = false) -> [String] {
         splitFlowEntries(inner).compactMap { part in
-            let raw = part.trimmingCharacters(in: .whitespaces)
+            let raw = part.trimmingCharacters(in: yamlWhitespace)
             let value = unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
             return value.isEmpty ? nil : value
         }
@@ -581,14 +633,14 @@ public enum HermesYAML {
             } else if unquoting {
                 key = YAMLScalar.unquote("\"" + key + "\"")
             }
-            let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
+            let rest = body[body.index(after: close)...].trimmingCharacters(in: yamlWhitespace)
             guard rest.hasPrefix(":") else { return nil }
-            let value = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
+            let value = String(rest.dropFirst()).trimmingCharacters(in: yamlWhitespace)
             return (key, decode(value))
         }
         guard let colon = entry.firstIndex(of: ":") else { return nil }
-        let key = String(entry[entry.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
-        let value = String(entry[entry.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        let key = String(entry[entry.startIndex..<colon]).trimmingCharacters(in: yamlWhitespace)
+        let value = String(entry[entry.index(after: colon)...]).trimmingCharacters(in: yamlWhitespace)
         return (key, decode(value))
     }
 
@@ -706,6 +758,24 @@ public enum HermesYAML {
     /// `a#b`, per YAML), and inside quotes nothing is a comment: for a
     /// quoted scalar the quoted span wins and any trailing text is
     /// discarded.
+    ///
+    /// **Round-5 decision 14: this one keeps the WIDE trim, and that is not
+    /// an oversight.** ``yamlWhitespace`` narrowed the PARSER because PyYAML
+    /// keeps U+00A0 and friends inside a scalar. This function is not the
+    /// parser: it is the last step before a TYPED comparison, and every
+    /// Hermes reader on the other side of that comparison calls Python's
+    /// `.strip()` on the loaded string — `_bool_token`'s
+    /// `str(value).strip().lower()` (`gateway/config.py:31` @
+    /// `v2026.9.7`, the caller of ``boolishValue(_:)``),
+    /// `_normalize_approval_mode`'s `mode.strip().lower()`
+    /// (`tools/approval_context.py:207`) and `parse_reasoning_effort`'s
+    /// `str(effort).strip().lower()` (`hermes_constants.py:884`). Python's
+    /// `str.strip()` removes all 29 characters for which `c.isspace()` is
+    /// true, U+00A0, U+1680, U+2000…U+200A, U+2028, U+2029, U+202F, U+205F
+    /// and U+3000 among them — so `agent.reasoning_effort: high\u{A0}` reads
+    /// as `high` to Hermes, and narrowing here would make Scarf claim the
+    /// host ignores a value it honours. Parser trims and `.strip()` mirrors
+    /// answer to different sources; do not unify them.
     public static func normalizedScalar(_ s: String) -> String {
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if let quote = trimmed.first, quote == "'" || quote == "\"" {
@@ -758,6 +828,146 @@ public enum HermesYAML {
         if ["true", "1", "yes", "on"].contains(v) { return true }
         if ["false", "0", "no", "off"].contains(v) { return false }
         return nil
+    }
+
+    // MARK: - Mattermost's own boolean vocabulary
+
+    /// Hermes's mattermost falsy set. **Three words, not four** — `off` is
+    /// NOT in it (`plugins/platforms/mattermost/adapter.py:504-505` @
+    /// `v2026.9.7`:
+    /// `str(self._extra_or_env("require_mention", …, "true")).lower() not in
+    /// {"false", "0", "no"}`), while slack, discord and telegram all spell
+    /// theirs `{"false", "0", "no", "off"}`. It is the ONE platform whose
+    /// vocabulary differs, and the difference is load-bearing on the `.env`
+    /// side, where no YAML resolver stands between the user's text and that
+    /// comparison.
+    static let mattermostFalsy: Set<String> = ["false", "0", "no"]
+
+    /// The YAML 1.1 spellings PyYAML's bool resolver actually matches. Case
+    /// is significant: `yes`/`Yes`/`YES` resolve, `yEs` does not and stays a
+    /// string. Bare `y` / `n` are NOT in the resolver's regex either, whatever
+    /// the YAML 1.1 spec says.
+    private static let pyYAMLTrue: Set<String> = ["yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
+    private static let pyYAMLFalse: Set<String> = ["no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
+
+    /// `mattermost.require_mention` as read from a config.yaml scalar.
+    ///
+    /// This is ``boolishValue(_:)``'s job for every other key and it is the
+    /// WRONG function here, twice over: its falsy set contains `off`, and it
+    /// answers `nil` for anything outside its two lists, where Hermes answers
+    /// TRUE for anything outside three words.
+    ///
+    /// The chain the value actually travels, which is what this mirrors:
+    /// PyYAML loads the scalar into a Python object, `_extra_or_env` hands
+    /// that object back untouched (`adapter.py:491-494`), and `str(...)` then
+    /// stringifies it before the comparison at `:504-505`. So:
+    ///
+    ///   - a QUOTED scalar is a Python `str` and never a bool — `"OFF"` is
+    ///     the string `OFF`, which is not one of the three words, so it is
+    ///     **true**; bare `off` resolves to `False`, stringifies to `"false"`
+    ///     and is **false**. The quotes are the whole difference;
+    ///   - a bare bool spelling becomes `True`/`False` → `"true"`/`"false"`;
+    ///   - an integer becomes `str(int)`, so `0` is false and `1`, `2`, `-1`
+    ///     are true;
+    ///   - anything else is its own text, true unless it IS one of the three.
+    ///
+    /// This is the same species of exception ``HermesConfig`` documents for
+    /// `display.busy_ack_enabled` — a key whose effective vocabulary is not
+    /// the universal boolish set because of what happens between the YAML and
+    /// the comparison. Round-6 P53.
+    ///
+    /// - Returns: `nil` when the key is absent, so the caller can fall back
+    ///   to `.env` (config.yaml wins where it is set — `adapter.py:491-494`).
+    public static func mattermostRequireMention(configScalar raw: String?) -> Bool? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let quoted = (trimmed.first == "'" || trimmed.first == "\"")
+        if !quoted {
+            if pyYAMLTrue.contains(trimmed) { return true }
+            if pyYAMLFalse.contains(trimmed) { return false }
+            // `str()` of a Python int drops a leading `+` and any `_`
+            // separators; only the value `0` stringifies to a falsy word.
+            if let asInt = pyYAMLIntIsZero(trimmed) { return !asInt }
+        }
+        // A quoted scalar, or a plain one PyYAML leaves as text: compare the
+        // STRING, which is what `str()` returns unchanged.
+        return !mattermostFalsy.contains(normalizedScalar(trimmed).lowercased())
+    }
+
+    /// Whether a bare scalar is an integer to PyYAML's `int` resolver AND
+    /// that integer is zero — `nil` when the resolver leaves it a string.
+    ///
+    /// `Int(_:)` is not that resolver. Round-6 P53b: `0x0` and `0b0` load as
+    /// the int `0` (falsy to Hermes's three-word compare) while `Int("0x0")`
+    /// is nil, so both fell through to the STRING compare and read TRUE — the
+    /// inversion this whole reader exists to prevent. `0_0` and `0x_0` did
+    /// the same via the `_` separators.
+    ///
+    /// The resolver, verbatim (`yaml/resolver.py`, the `tag:yaml.org,2002:int`
+    /// pattern), is five alternatives after an optional sign: `0b[0-1_]+`,
+    /// `0[0-7_]+` (octal — note there is NO `0o` form, so `0o0` really does
+    /// stay a string and really is TRUE), `0|[1-9][0-9_]*`, `0x[0-9a-fA-F_]+`,
+    /// and the sexagesimal `[1-9][0-9_]*(:[0-5]?[0-9])+`. The last cannot be
+    /// zero, and every non-zero value is true under BOTH readings, so only
+    /// the zero answer is load-bearing here.
+    static func pyYAMLIntIsZero(_ scalar: String) -> Bool? {
+        var body = Substring(scalar)
+        if body.first == "+" || body.first == "-" { body = body.dropFirst() }
+        func digitsAreZero(_ rest: Substring, of set: Set<Character>) -> Bool? {
+            guard !rest.isEmpty else { return nil }
+            var sawDigit = false
+            for c in rest {
+                if c == "_" { continue }
+                guard set.contains(c) else { return nil }
+                sawDigit = true
+                if c != "0" { return false }
+            }
+            return sawDigit ? true : nil
+        }
+        if body.hasPrefix("0b") || body.hasPrefix("0B") {
+            // PyYAML's pattern is lower-case `0b` only.
+            guard body.hasPrefix("0b") else { return nil }
+            return digitsAreZero(body.dropFirst(2), of: ["0", "1"])
+        }
+        if body.hasPrefix("0x") || body.hasPrefix("0X") {
+            guard body.hasPrefix("0x") else { return nil }
+            return digitsAreZero(body.dropFirst(2), of: Set("0123456789abcdefABCDEF"))
+        }
+        if body.first == "0", body.count > 1 {
+            // Octal `0[0-7_]+`. The leading `0` is itself a digit, so an
+            // all-underscore tail (`0_`) is still the value zero — which is
+            // what `int("0_".replace("_", ""), 8)` gives.
+            let tail = body.dropFirst()
+            guard tail.allSatisfy({ Set("01234567_").contains($0) }) else { return nil }
+            return !tail.contains(where: { $0 != "0" && $0 != "_" })
+        }
+        if body == "0" { return true }
+        // `[1-9][0-9_]*` — never zero — and the sexagesimal form. Anything
+        // that is an integer here is non-zero; anything else is a string,
+        // and the string compare is the right answer for both.
+        guard let first = body.first, first.isASCII, first.isNumber, first != "0" else { return nil }
+        guard body.allSatisfy({ ($0.isASCII && $0.isNumber) || $0 == "_" || $0 == ":" })
+        else { return nil }
+        return false
+    }
+
+    /// `MATTERMOST_REQUIRE_MENTION` as read from `.env`.
+    ///
+    /// No YAML resolver stands here — `get_scoped_secret`
+    /// (`gateway/platforms/_shared.py:17-30`) returns the raw string, and
+    /// `str()` leaves it alone — so the rule is the bare three-word set. An
+    /// ABSENT key is the adapter's `"true"` default; an EMPTY one is the
+    /// empty string, which is not one of the three words and is therefore
+    /// **true** (`get_scoped_secret` returns `val if val is not None else
+    /// default`, so `""` is a value, not a miss).
+    ///
+    /// `PlatformSetupHelpers.parseEnvBool` is a truthy ALLOWLIST and was the
+    /// wrong shape for this key in both directions: it read `off`, `y` and
+    /// `maybe` as false where Hermes reads all three as true.
+    public static func mattermostRequireMention(envValue raw: String?) -> Bool {
+        guard let raw else { return true }
+        return !mattermostFalsy.contains(raw.lowercased())
     }
 
     /// Strip one layer of surrounding quotes, reversing the writers' escape.

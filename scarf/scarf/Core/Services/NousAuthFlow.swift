@@ -47,6 +47,11 @@ final class NousAuthFlow {
 
     private var process: Process?
     private var stdoutPipe: Pipe?
+    /// The hop that resolves the login-shell environment before the local
+    /// spawn (C10). Held so ``cancel()`` can stop a start that has not
+    /// reached `proc.run()` yet — otherwise a cancel during the environment
+    /// warm-up would be followed by a process nothing owns.
+    private var startTask: Task<Void, Never>?
 
     init(context: ServerContext = .local) {
         self.context = context
@@ -61,6 +66,37 @@ final class NousAuthFlow {
         cancel()
         output = ""
         state = .starting
+        // C10. The LOCAL branch below needs `HermesFileService
+        // .enrichedEnvironment()`, whose backing `enrichedShellEnv` is a
+        // `static let` initialised by two `zsh` probes at 5 s + 3 s
+        // (`HermesFileService.swift:2566-2583`, probes at `:2575` and
+        // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
+        // launch, but a `static let` initialiser is a `swift_once`: a
+        // main-actor reader arriving while the warm-up is still running
+        // BLOCKS on it — up to eight seconds of frozen window, on the click
+        // that opens the sign-in sheet. Resolved on an `OffPool.run` hop
+        // first — blocking for eight seconds is precisely what must not
+        // happen on a cooperative-pool thread (round-5 P52) — and the spawn
+        // then happens back on the main actor with the value in hand.
+        //
+        // The REMOTE branch needs none of it (it wraps the command in `env
+        // PYTHONUNBUFFERED=1 …` because ssh forwards no environment), so it
+        // pays nothing for this.
+        guard !context.isRemote else {
+            launch(localEnvironment: nil)
+            return
+        }
+        startTask = Task { [weak self] in
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+            guard let self, !Task.isCancelled else { return }
+            self.launch(localEnvironment: env)
+        }
+    }
+
+    /// Spawn the `hermes auth add nous --no-browser` subprocess.
+    /// `localEnvironment` is the pre-resolved login-shell environment for a
+    /// local context, and `nil` on a remote one — see ``start()``.
+    private func launch(localEnvironment: [String: String]?) {
 
         // Python block-buffers stdout when it's a pipe (not a TTY). The
         // device-code flow prints the verification URL + user code, then
@@ -91,7 +127,7 @@ final class NousAuthFlow {
                 executable: context.paths.hermesBinary,
                 args: ["auth", "add", "nous", "--no-browser"]
             )
-            var env = HermesFileService.enrichedEnvironment()
+            var env = localEnvironment ?? [:]
             env["PYTHONUNBUFFERED"] = "1"
             proc.environment = env
         }
@@ -119,7 +155,7 @@ final class NousAuthFlow {
             let code = p.terminationStatus
             Task { @MainActor [weak self] in
                 outPipe.fileHandleForReading.readabilityHandler = nil
-                self?.handleTermination(exitCode: code)
+                await self?.handleTermination(exitCode: code)
             }
         }
 
@@ -140,6 +176,8 @@ final class NousAuthFlow {
     /// the sheet dismisses on cancel via its own binding, and re-opening
     /// calls `start()` which does a fresh reset.
     func cancel() {
+        startTask?.cancel()
+        startTask = nil
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminate()
         process = nil
@@ -163,7 +201,7 @@ final class NousAuthFlow {
         }
     }
 
-    private func handleTermination(exitCode: Int32) {
+    private func handleTermination(exitCode: Int32) async {
         // Subscription-required is a specific failure path that hermes
         // signals both via an exit code and a unique billing-URL message.
         // It overrides other checks because we want the Subscribe affordance
@@ -180,7 +218,14 @@ final class NousAuthFlow {
             // authoritative signal is that providers.nous has an access token
             // AND active_provider flipped to nous. Anything short of that is
             // a silent failure on the hermes side.
-            let sub = subscriptionService.loadState()
+            // C10, the third instance of this shape in the sign-in path
+            // (P51 moved `start()`'s environment probe and
+            // `AuxiliaryTab`/`ModelPickerSheet`'s reads): `loadState()` is a
+            // `readFile` of `auth.json` through the CONTEXT's transport, so on
+            // a remote server this is a full SSH round trip — landing on the
+            // main actor at the moment the sheet reports its result.
+            let svc = subscriptionService
+            let sub = await OffPool.run { svc.loadState() }
             if sub.subscribed {
                 state = .success
             } else if sub.present {

@@ -8,8 +8,9 @@ import ScarfDesign
 /// `session/set_model` RPC). "Use global default" is encoded as a nil
 /// callback argument.
 ///
-/// Capability-gated by the bar (`hasACPSetSessionModel`) so this view
-/// never renders on hosts that can't actually switch.
+/// Ungated (P49): `set_session_model` is defined in `acp_adapter/server.py`
+/// at every tag in the supported window (`:482` @ v2026.3.30 = 0.6.0,
+/// `:929` @ v2026.9.7), so every supported host can actually switch.
 struct ChatModelBadge: View {
     let preset: ModelPreset?
     let onSwitch: ((ModelPreset?) -> Void)?

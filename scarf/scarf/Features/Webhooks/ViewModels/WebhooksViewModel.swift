@@ -227,12 +227,23 @@ final class WebhooksViewModel {
     }
 
     func remove(_ webhook: HermesWebhook) {
-        runAndReload(["webhook", "remove", webhook.name], success: "Removed")
+        // P47: `--` before the positional. `name` is the subparser's only
+        // positional and it carries no flags
+        // (`hermes_cli/subcommands/webhook.py:42-43` @ `v2026.9.7`), so a
+        // route name beginning with a dash exited 2 instead of being removed.
+        runAndReload(["webhook", "remove", "--", webhook.name], success: "Removed")
     }
 
     func test(_ webhook: HermesWebhook) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["webhook", "test", webhook.name], timeout: 30)
+            // P47: `--` before the positional, as on `remove`. `webhook test`
+            // takes `name` then an optional `--payload`
+            // (`hermes_cli/subcommands/webhook.py:45-48` @ `v2026.9.7`);
+            // Scarf passes no payload, so the separator is the last token
+            // before the name.
+            let result = fileService.runHermesCLI(
+                args: ["webhook", "test", "--", webhook.name], timeout: 30
+            )
             await MainActor.run {
                 self.message = result.exitCode == 0 ? "Test fired — check logs" : "Test failed"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

@@ -48,14 +48,14 @@ struct HermesPluginCompatTests {
     }
     """
 
-    @Test func parsesAffectedPlugins() {
+    @Test func parsesAffectedPlugins() throws {
         let report = HermesPluginCompatReport.parse(Self.fixture)
         #expect(report?.removalDate == "2026-09-14")
         #expect(report?.inEffect == false)
         #expect(report?.isAffected == true)
         #expect(report?.affectedNames == ["acme-notes", "zeta"])
         let hits = report?.hits(for: "acme-notes") ?? []
-        #expect(hits.count == 2)
+        try #require(hits.count == 2)
         #expect(hits[0].file == "plugin.py")
         #expect(hits[0].line == 12)
         #expect(hits[0].old == "hermes_state.open_state")

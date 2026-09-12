@@ -25,7 +25,7 @@ import ScarfCore
 
         let vm = ProjectsViewModel(context: home.context)
         vm.load()
-        #expect(vm.projects.count == 2)
+        try #require(vm.projects.count == 2)
 
         await vm.moveProject(vm.projects[0], toFolder: "Clients")
 
@@ -67,7 +67,7 @@ import ScarfCore
 
         let ok = await vm.renameProject(vm.projects[0], to: "NewName")
         #expect(ok == true)
-        #expect(vm.projects.count == 1)
+        try #require(vm.projects.count == 1)
         #expect(vm.projects[0].name == "NewName")
         #expect(vm.projects[0].folder == "Work")
         #expect(vm.projects[0].archived == false)

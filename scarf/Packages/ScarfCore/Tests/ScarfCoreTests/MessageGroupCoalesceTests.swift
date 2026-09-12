@@ -50,7 +50,7 @@ import Foundation
 
     // MARK: - Coalescing behavior
 
-    @Test func twoPureTextAssistantsMergeIntoOneBubble() {
+    @Test func twoPureTextAssistantsMergeIntoOneBubble() throws {
         // The screenshot case: agent emits two consecutive pure-text
         // assistant messages with no tool call between them. They
         // should render as one bubble.
@@ -59,7 +59,7 @@ import Foundation
             Self.assistant(id: -1, content: "Part two continuing the table")
         ])
         let bubbles = g.coalescedAssistantBubbles
-        #expect(bubbles.count == 1)
+        try #require(bubbles.count == 1)
         #expect(bubbles[0].content == "Part one of the table\n\nPart two continuing the table")
         // Identity is the LAST source's id so the metadata footer
         // (token count, finishReason) stays attached to the
@@ -81,7 +81,7 @@ import Foundation
         #expect(bubbles.map(\.id) == [-3, -2, -1])
     }
 
-    @Test func streamingBubbleIsNeverCoalesced() {
+    @Test func streamingBubbleIsNeverCoalesced() throws {
         // [settled-text, streaming] → 2 bubbles. Coalescing across
         // the streaming boundary would let mid-stream body re-evals
         // churn the merged content; the standalone streaming bubble
@@ -91,12 +91,12 @@ import Foundation
             Self.assistant(id: 0, content: "Streaming chunk so far")
         ])
         let bubbles = g.coalescedAssistantBubbles
-        #expect(bubbles.count == 2)
+        try #require(bubbles.count == 2)
         #expect(bubbles[0].id == -1)
         #expect(bubbles[1].id == 0)
     }
 
-    @Test func reasoningChannelsAreConcatenated() {
+    @Test func reasoningChannelsAreConcatenated() throws {
         // Each source carries its own reasoning blob — preserve
         // both in the merged bubble so the disclosure renders
         // the full thought trace.
@@ -105,7 +105,7 @@ import Foundation
             Self.assistant(id: -1, content: "Second", reasoning: "thought 2")
         ])
         let bubbles = g.coalescedAssistantBubbles
-        #expect(bubbles.count == 1)
+        try #require(bubbles.count == 1)
         #expect(bubbles[0].reasoning == "thought 1\n\nthought 2")
     }
 
@@ -122,7 +122,7 @@ import Foundation
         #expect(bubbles[0].hasReasoning == false)
     }
 
-    @Test func emptyContentStringsAreFilteredFromJoin() {
+    @Test func emptyContentStringsAreFilteredFromJoin() throws {
         // A pure-text assistant with empty content (rare — recovered
         // from a finalize-with-tool-only turn) shouldn't introduce
         // leading/trailing blank-line gaps in the merged output.
@@ -132,18 +132,18 @@ import Foundation
             Self.assistant(id: -1, content: "")
         ])
         let bubbles = g.coalescedAssistantBubbles
-        #expect(bubbles.count == 1)
+        try #require(bubbles.count == 1)
         #expect(bubbles[0].content == "Real content")
     }
 
-    @Test func singleAssistantPassesThroughUnchanged() {
+    @Test func singleAssistantPassesThroughUnchanged() throws {
         // No coalescing required — return the source message
         // identity-preserved (not a synthesized clone). The bubble's
         // Equatable can short-circuit on `===`-like comparisons.
         let original = Self.assistant(id: -1, content: "Just one")
         let g = Self.group([original])
         let bubbles = g.coalescedAssistantBubbles
-        #expect(bubbles.count == 1)
+        try #require(bubbles.count == 1)
         #expect(bubbles[0].id == original.id)
         #expect(bubbles[0].content == original.content)
     }

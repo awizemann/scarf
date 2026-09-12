@@ -179,24 +179,26 @@ final class HealthViewModel {
             // output — so they run CONCURRENTLY rather than as five serial
             // remote round-trips. On a remote host this is the difference
             // between ~5×RTT and ~1×RTT on every Health visit (C10).
-            // Each rides its own `Task.detached` because the underlying calls
-            // block (process spawn / SSH exec); running them as bare
-            // `async let` would park five cooperative-pool threads.
-            async let pidProbe        = Task.detached { svc.hermesPID() }.value
-            async let versionProbe    = Task.detached { Self.probeVersion(ctx) }.value
+            // Each rides its own ``OffPool/run(_:)`` because the underlying
+            // calls BLOCK (process spawn / SSH exec); running them as bare
+            // `async let` would park seven cooperative-pool threads — and so
+            // did the `Task.detached` this said before round-5 P52, since a
+            // detached task is off the main actor but still ON that pool.
+            async let pidProbe        = OffPool.run { svc.hermesPID() }
+            async let versionProbe    = OffPool.run { Self.probeVersion(ctx) }
             // Every `runHermes` NAMES its timeout (P22's rule): the 60 s
             // default in `ServerContext+Mac.swift:21` is silent, so a site
             // that omits it cannot be read as having chosen anything. These
             // two are read-only probes behind a spinner.
-            async let statusProbe     = Task.detached { ctx.runHermes(["status"], timeout: 60).output }.value
-            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"], timeout: 60).output }.value
-            async let subscriptionRead = Task.detached { subSvc.loadState() }.value
-            async let configRead      = Task.detached { svc.loadConfig() }.value
+            async let statusProbe     = OffPool.run { ctx.runHermes(["status"], timeout: 60).output }
+            async let doctorProbe     = OffPool.run { ctx.runHermes(["doctor"], timeout: 60).output }
+            async let subscriptionRead = OffPool.run { subSvc.loadState() }
+            async let configRead      = OffPool.run { svc.loadConfig() }
             // v0.18+ — `computer-use permissions status --json` exits 1
             // when not ready, which is a STATE, not a failure, so the
             // stdout is parsed regardless of exit code. Skipped entirely
             // on hosts without the flag so no extra round-trip is spent.
-            async let computerUseProbe = Task.detached { () -> HermesComputerUseStatus? in
+            async let computerUseProbe = OffPool.run { () -> HermesComputerUseStatus? in
                 guard caps.hasComputerUsePermissionsJSON else { return nil }
                 // cua-driver's own probes cap at ~12s + ~10s + 5s inside
                 // Hermes, so 45 bounds the whole thing without truncating a
@@ -205,7 +207,7 @@ final class HealthViewModel {
                 // line carrying a `}` would truncate a brace-sliced payload.
                 return HermesComputerUseStatus.parse(
                     ctx.runHermesSplit(["computer-use", "permissions", "status", "--json"], timeout: 45).stdout)
-            }.value
+            }
 
             let pid = await pidProbe
             let versionOutput = await versionProbe
@@ -888,21 +890,62 @@ final class HealthViewModel {
         isRunningSessionsOptimize = true
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["sessions", "optimize"], timeout: 120)
+            let result = fileService.runHermesCLI(
+                args: HermesSessionsOptimizeVerdict.argv, timeout: 120
+            )
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if result.exitCode == 0 {
-                    // Prefer a concise tail of the output (the summary line)
-                    // over the full report — the panel-less inline strip is short.
-                    let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
-                } else {
-                    let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = String(localized: "Optimize failed (exit \(result.exitCode)). \(tail)")
-                }
+                // P47: judged by OUTPUT. `_cmd_optimize` catches every
+                // exception from `db.vacuum()`, prints
+                // `Error: optimization failed: {e}` and RETURNS — exit 0
+                // (`hermes_cli/sessions_cmd.py:809-819` @ `v2026.9.7`) — so
+                // the pane rendered a failed VACUUM as its summary. The
+                // success line is `Optimized {n} FTS index(es).` (`:817`).
+                let outcome = HermesSessionsOptimizeVerdict.judge(
+                    output: result.output, exitCode: result.exitCode
+                )
+                self.sessionsOptimizeMessage = Self.sessionsOptimizeSummary(
+                    outcome: outcome, exitCode: result.exitCode, trimmed: trimmed
+                )
             }
         }
+    }
+
+    /// The one place the `sessions optimize` strip's text is decided, lifted
+    /// out of the detached hop so it can be exercised without a live host.
+    ///
+    /// Three answers, not two — the verdict has three states (P47b review,
+    /// finding 1). A `.unconfirmed` run is exit 0 with neither
+    /// `Optimized {n} FTS index(es).` (`hermes_cli/sessions_cmd.py:817` @
+    /// `v2026.9.7`) nor `Error: optimization failed:` (`:815`): the verdict
+    /// has just declared the status meaningless, so naming it would be the
+    /// original bug in a new voice, and where the run printed nothing at all
+    /// `"Optimize failed. "` with an empty tail said less than nothing. It
+    /// says Hermes printed no result instead — the same sentence both
+    /// memory-reset sites give (`MemoryView`, iOS `MemoryListView`).
+    static func sessionsOptimizeSummary(
+        outcome: HermesCLIOutcome, exitCode: Int32, trimmed: String
+    ) -> String {
+        if outcome.succeeded {
+            // Prefer a concise tail of the output (the summary line)
+            // over the full report — the panel-less inline strip is short.
+            let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
+            return tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
+        }
+        if exitCode != 0 {
+            let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
+            return String(localized: "Optimize failed (exit \(exitCode)). \(tail)")
+        }
+        // Exit 0 and no success line: quoting "(exit 0)" here would be the
+        // old bug in a new voice. A `.failed` verdict at exit 0 matched
+        // `Error: optimization failed:` — Hermes's own reason line is the
+        // whole message. `.unconfirmed` matched neither marker, so there is
+        // no failure to report and nothing recognisable to quote.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty else {
+            return String(localized: "hermes sessions optimize printed no result. Check the host.")
+        }
+        return String(localized: "Optimize failed. \(detail)")
     }
 
     /// Run `hermes migrate xai --apply` (v0.15) off MainActor to move a retired
@@ -1213,7 +1256,7 @@ final class HealthViewModel {
             await Task.detached {
                 if terminateOwned {
                     owned?.terminate()
-                } else if let pid = Self.dashboardListenerPID(port: port) {
+                } else if let pid = await Self.dashboardListenerPID(port: port) {
                     // External instance — signal only the process actually
                     // bound to our dashboard port, not anything that happens
                     // to mention "hermes dashboard" in its argv.
@@ -1247,7 +1290,7 @@ final class HealthViewModel {
     /// `nonisolated`: the only caller is inside `Task.detached` (see
     /// `stopDashboard`), so this must not be main-actor work — and now that the
     /// body is four lines there is nothing left to justify an isolation hop.
-    private nonisolated static func dashboardListenerPID(port: Int) -> pid_t? {
+    private nonisolated static func dashboardListenerPID(port: Int) async -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN"]
@@ -1263,7 +1306,8 @@ final class HealthViewModel {
             // bounded drain grace — plus the read-end close this version never
             // did. An overrun is reported as "no listener", the same answer a
             // failed lsof has always given.
-            let (exited, data) = lsof.waitDraining(timeout: Self.lsofTimeout, pipes: [output])
+            let (exited, data) = await lsof.waitDrainingAsync(
+                timeout: Self.lsofTimeout, pipes: [output])
             guard exited else {
                 Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
                 return nil

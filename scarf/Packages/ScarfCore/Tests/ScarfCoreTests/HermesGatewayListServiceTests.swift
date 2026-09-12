@@ -6,7 +6,7 @@ import Foundation
 /// no `--json` flag). Pure — no transport, no process calls.
 @Suite struct HermesGatewayListServiceTests {
 
-    @Test func parsesLiveSampleOneRunningTwoStopped() {
+    @Test func parsesLiveSampleOneRunningTwoStopped() throws {
         // The exact live v0.16 output: 1 running default + 2 stopped.
         let text = """
         Gateways:
@@ -15,7 +15,7 @@ import Foundation
           ✗ scarfbox-test            — not running
         """
         let snap = HermesGatewayListService.parse(text)
-        #expect(snap?.profiles.count == 3)
+        try #require(snap?.profiles.count == 3)
 
         #expect(snap?.profiles[0].profile == "default")
         #expect(snap?.profiles[0].isRunning == true)
@@ -30,25 +30,25 @@ import Foundation
         #expect(snap?.profiles[2].pid == nil)
     }
 
-    @Test func parsesSingleRunningProfile() {
+    @Test func parsesSingleRunningProfile() throws {
         let text = """
         Gateways:
           ✓ default        — PID 1234
         """
         let snap = HermesGatewayListService.parse(text)
-        #expect(snap?.profiles.count == 1)
+        try #require(snap?.profiles.count == 1)
         #expect(snap?.profiles[0].profile == "default")
         #expect(snap?.profiles[0].pid == 1234)
         #expect(snap?.profiles[0].isRunning == true)
             }
 
-    @Test func parsesSingleStoppedProfile() {
+    @Test func parsesSingleStoppedProfile() throws {
         let text = """
         Gateways:
           ✗ default        — not running
         """
         let snap = HermesGatewayListService.parse(text)
-        #expect(snap?.profiles.count == 1)
+        try #require(snap?.profiles.count == 1)
         #expect(snap?.profiles[0].profile == "default")
         #expect(snap?.profiles[0].isRunning == false)
         #expect(snap?.profiles[0].pid == nil)

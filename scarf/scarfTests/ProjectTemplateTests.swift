@@ -18,7 +18,7 @@ import ScarfCore
         #expect(manifest.slug == "template")
     }
 
-    @Test func inspectRejectsMissingManifest() throws {
+    @Test func inspectRejectsMissingManifest() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
 
@@ -30,12 +30,12 @@ import ScarfCore
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: .local)
-        #expect(throws: ProjectTemplateError.self) {
-            try service.inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            try await service.inspect(zipPath: bundle)
         }
     }
 
-    @Test func inspectRejectsMissingAgentsMd() throws {
+    @Test func inspectRejectsMissingAgentsMd() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
 
@@ -45,12 +45,12 @@ import ScarfCore
         ])
 
         let service = ProjectTemplateService(context: .local)
-        #expect(throws: ProjectTemplateError.self) {
-            try service.inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            try await service.inspect(zipPath: bundle)
         }
     }
 
-    @Test func inspectAcceptsMinimalValidBundle() throws {
+    @Test func inspectAcceptsMinimalValidBundle() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
 
@@ -61,7 +61,7 @@ import ScarfCore
         ])
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         #expect(inspection.manifest.id == "test/example")
@@ -70,7 +70,7 @@ import ScarfCore
         #expect(inspection.files.contains("AGENTS.md"))
     }
 
-    @Test func inspectRejectsContentClaimMismatch() throws {
+    @Test func inspectRejectsContentClaimMismatch() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
 
@@ -87,8 +87,8 @@ import ScarfCore
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: .local)
-        #expect(throws: ProjectTemplateError.self) {
-            try service.inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            try await service.inspect(zipPath: bundle)
         }
     }
 
@@ -270,7 +270,7 @@ struct ProjectTemplateInstallerTests {
     /// way rather than with threads: hold the lock file the way another
     /// process would, and the install must REPORT `registryBusy` instead of
     /// walking through the window.
-    @Test func installRefusesWhileAnotherProcessHoldsTheRegistryLock() throws {
+    @Test func installRefusesWhileAnotherProcessHoldsTheRegistryLock() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -284,7 +284,7 @@ struct ProjectTemplateInstallerTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -305,7 +305,7 @@ struct ProjectTemplateInstallerTests {
         #expect(FileManager.default.fileExists(atPath: lockPath))
     }
 
-    @Test func installsMinimalBundleAndWritesLockFile() throws {
+    @Test func installsMinimalBundleAndWritesLockFile() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -320,7 +320,7 @@ struct ProjectTemplateInstallerTests {
         ])
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -355,7 +355,7 @@ struct ProjectTemplateInstallerTests {
         #expect(record.templateLockRef == plan.projectDir + "/.scarf/template.lock.json")
     }
 
-    @Test func preflightRejectsExistingProjectDir() throws {
+    @Test func preflightRejectsExistingProjectDir() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -370,7 +370,7 @@ struct ProjectTemplateInstallerTests {
         ])
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -383,7 +383,7 @@ struct ProjectTemplateInstallerTests {
         }
     }
 
-    @Test func buildPlanRefusesDuplicateProjectDir() throws {
+    @Test func buildPlanRefusesDuplicateProjectDir() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -398,7 +398,7 @@ struct ProjectTemplateInstallerTests {
         ])
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         // Pre-create the slugged project dir so buildPlan's collision check
@@ -473,7 +473,7 @@ struct ProjectTemplateUninstallerTests {
     /// read-modify-write and now takes the same cross-process lock, so a
     /// concurrent registration can't be erased by a list loaded before it
     /// landed. Same deterministic proof as the installer's.
-    @Test func uninstallRegistryRemovalRefusesWhileTheLockIsHeld() throws {
+    @Test func uninstallRegistryRemovalRefusesWhileTheLockIsHeld() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -487,7 +487,7 @@ struct ProjectTemplateUninstallerTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -510,7 +510,7 @@ struct ProjectTemplateUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: lockPath))
     }
 
-    @Test func roundTripsInstallThenUninstall() throws {
+    @Test func roundTripsInstallThenUninstall() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -525,7 +525,7 @@ struct ProjectTemplateUninstallerTests {
         ])
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -552,7 +552,7 @@ struct ProjectTemplateUninstallerTests {
         #expect(registryAfter.projects.contains(where: { $0.path == entry.path }) == false)
     }
 
-    @Test func preservesUserAddedFiles() throws {
+    @Test func preservesUserAddedFiles() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -567,7 +567,7 @@ struct ProjectTemplateUninstallerTests {
         ])
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -607,7 +607,7 @@ struct ProjectTemplateUninstallerTests {
     /// carrying the ORIGINAL uuid, which is why the resurrected row
     /// looked untouched. `ProjectStore.save` now refuses to save a
     /// project whose root is gone.
-    @Test func cockpitStyleRefreshAfterUninstallDoesNotResurrectProject() throws {
+    @Test func cockpitStyleRefreshAfterUninstallDoesNotResurrectProject() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -621,7 +621,7 @@ struct ProjectTemplateUninstallerTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let installer = ProjectTemplateInstaller(context: home.context)
@@ -693,7 +693,7 @@ struct ProjectTemplateUninstallerTests {
     /// A registry write failure used to be logged and swallowed, so the
     /// sheet showed "uninstalled" while the sidebar row survived. It now
     /// throws so the VM lands on `.failed`.
-    @Test func surfacesRegistryWriteFailure() throws {
+    @Test func surfacesRegistryWriteFailure() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -707,7 +707,7 @@ struct ProjectTemplateUninstallerTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let installer = ProjectTemplateInstaller(context: home.context)
@@ -740,7 +740,7 @@ struct ProjectTemplateUninstallerTests {
     /// uninstall. Mirrors `ProjectsViewModel.removeProject`'s presence
     /// check. Removing nothing is a no-op, not a failure: everything else
     /// about the uninstall succeeded.
-    @Test func uninstallWithNoMatchingRegistryRowLeavesTheRegistryAlone() throws {
+    @Test func uninstallWithNoMatchingRegistryRowLeavesTheRegistryAlone() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -754,7 +754,7 @@ struct ProjectTemplateUninstallerTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let installer = ProjectTemplateInstaller(context: home.context)
@@ -832,7 +832,7 @@ struct ProjectTemplateConfigInstallTests {
         )
     }
 
-    @Test func inspectAcceptsSchemaV2Bundle() throws {
+    @Test func inspectAcceptsSchemaV2Bundle() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -850,14 +850,14 @@ struct ProjectTemplateConfigInstallTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         #expect(inspection.manifest.schemaVersion == 2)
         #expect(inspection.manifest.config?.fields.count == 2)
     }
 
-    @Test func buildPlanSurfacesSchemaAndQueuesConfigFiles() throws {
+    @Test func buildPlanSurfacesSchemaAndQueuesConfigFiles() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -872,7 +872,7 @@ struct ProjectTemplateConfigInstallTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: scratch)
 
@@ -885,7 +885,7 @@ struct ProjectTemplateConfigInstallTests {
         #expect(destinations.contains { $0.hasSuffix("/.scarf/manifest.json") })
     }
 
-    @Test func verifyClaimsRejectsConfigCountMismatch() throws {
+    @Test func verifyClaimsRejectsConfigCountMismatch() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -917,12 +917,12 @@ struct ProjectTemplateConfigInstallTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        #expect(throws: ProjectTemplateError.self) {
-            try service.inspect(zipPath: bundle)
+        await #expect(throws: ProjectTemplateError.self) {
+            try await service.inspect(zipPath: bundle)
         }
     }
 
-    @Test func installWritesConfigJsonAndManifestCache() throws {
+    @Test func installWritesConfigJsonAndManifestCache() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -939,7 +939,7 @@ struct ProjectTemplateConfigInstallTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         var plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -1006,7 +1006,7 @@ struct ProjectTemplateConfigInstallTests {
         }
     }
 
-    @Test func uninstallDeletesKeychainItemsViaLock() throws {
+    @Test func uninstallDeletesKeychainItemsViaLock() async throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -1023,7 +1023,7 @@ struct ProjectTemplateConfigInstallTests {
         ], includeManifest: false)
 
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         var plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
 
@@ -1174,11 +1174,11 @@ struct ProjectTemplateConfigInstallTests {
 /// out of sync will fail here — so shipped templates can't silently rot.
 @Suite struct ProjectTemplateExampleTemplateTests {
 
-    @Test func siteStatusCheckerParsesAndPlans() throws {
+    @Test func siteStatusCheckerParsesAndPlans() async throws {
         let bundle = try Self.locateExample(author: "awizemann", name: "site-status-checker")
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         #expect(inspection.manifest.id == "awizemann/site-status-checker")
@@ -1284,11 +1284,11 @@ struct ProjectTemplateConfigInstallTests {
     /// behind the richer example template. Also asserts the skill lands
     /// under the expected namespaced path so Hermes's recursive skill
     /// discovery finds it.
-    @Test func templateAuthorParsesAndPlans() throws {
+    @Test func templateAuthorParsesAndPlans() async throws {
         let bundle = try Self.locateExample(author: "awizemann", name: "template-author")
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         // Manifest shape: schemaVersion 2 (contains `skills` claim, which
@@ -1363,7 +1363,7 @@ struct ProjectTemplateConfigInstallTests {
 /// ~/.hermes) — it verifies the produced bundle is valid, and stops there.
 @Suite struct ProjectTemplateExportTests {
 
-    @Test func roundTripsMinimalProject() throws {
+    @Test func roundTripsMinimalProject() async throws {
         let fakeProject = NSTemporaryDirectory() + "scarf-project-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: fakeProject + "/.scarf", withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: fakeProject) }
@@ -1397,11 +1397,11 @@ struct ProjectTemplateConfigInstallTests {
             memoryAppendix: nil
         )
 
-        try exporter.export(inputs: inputs, outputZipPath: outputPath)
+        try await exporter.export(inputs: inputs, outputZipPath: outputPath)
         #expect(FileManager.default.fileExists(atPath: outputPath))
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: outputPath)
+        let inspection = try await service.inspect(zipPath: outputPath)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         #expect(inspection.manifest.id == "tester/round-trip")
         #expect(inspection.files.contains("dashboard.json"))
@@ -1447,7 +1447,7 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
         }
     }
 
-    private static func makeFixture() throws -> Fixture {
+    private static func makeFixture() async throws -> Fixture {
         let home = try TempHermesHome()
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         let parentDir = scratch + "/parent"
@@ -1458,7 +1458,7 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
             "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
         ])
         let service = ProjectTemplateService(context: home.context)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
         let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
         let entry = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
@@ -1473,8 +1473,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
 
     // MARK: H1 — project files
 
-    @Test func lockPathOutsideTheProjectIsRefusedAndSurvives() throws {
-        let fixture = try Self.makeFixture()
+    @Test func lockPathOutsideTheProjectIsRefusedAndSurvives() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         let victim = fixture.scratch + "/precious.txt"
@@ -1494,8 +1494,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
         #expect(FileManager.default.fileExists(atPath: victim))
     }
 
-    @Test func lockPathEscapingViaDotDotIsRefused() throws {
-        let fixture = try Self.makeFixture()
+    @Test func lockPathEscapingViaDotDotIsRefused() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         let victim = fixture.scratch + "/escape.txt"
@@ -1516,8 +1516,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
     /// (`<project>/data/secrets.txt`) but reaches outside because `data`
     /// is a symlink. Lexical containment alone passes it; the physical
     /// re-derivation is what refuses it.
-    @Test func lockPathThroughSymlinkedDirectoryIsRefused() throws {
-        let fixture = try Self.makeFixture()
+    @Test func lockPathThroughSymlinkedDirectoryIsRefused() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         let outsideDir = fixture.scratch + "/outside"
@@ -1543,8 +1543,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
 
     // MARK: H1 — skills namespace dir
 
-    @Test func skillsNamespaceDirOutsideTemplatesRootIsRefused() throws {
-        let fixture = try Self.makeFixture()
+    @Test func skillsNamespaceDirOutsideTemplatesRootIsRefused() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         let victimDir = fixture.scratch + "/not-a-skill"
@@ -1566,8 +1566,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
     /// A legitimate namespace dir that contains a symlink to somewhere
     /// else. The recursive delete must unlink the link and stop — not
     /// walk through it and delete the linked tree's contents.
-    @Test func recursiveSkillsRemovalUnlinksSymlinksInsteadOfFollowingThem() throws {
-        let fixture = try Self.makeFixture()
+    @Test func recursiveSkillsRemovalUnlinksSymlinksInsteadOfFollowingThem() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         let namespaceDir = fixture.home.context.paths.skillsDir + "/templates/" + fixture.slug
@@ -1601,8 +1601,8 @@ struct ProjectTemplateUninstallTrustBoundaryTests {
 
     // MARK: H3 — keychain items
 
-    @Test func foreignKeychainRefInLockIsNotDeleted() throws {
-        let fixture = try Self.makeFixture()
+    @Test func foreignKeychainRefInLockIsNotDeleted() async throws {
+        let fixture = try await Self.makeFixture()
         defer { fixture.cleanup() }
 
         // A secret belonging to a DIFFERENT project, stored for real.

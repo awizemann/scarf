@@ -1965,3 +1965,180 @@ public enum HermesPluginsUpdateVerdict {
         return HermesCLIOutcome(succeeded: true, detail: nil, warning: warning)
     }
 }
+
+// MARK: - auth logout — hermes_cli/auth.py
+
+/// `hermes auth logout <provider>`, judged by output.
+///
+/// P47, round-5 decision 2. `logout_command` (`hermes_cli/auth.py:2173-2196`
+/// @ `v2026.9.7`) is a `-> None` with **two exit-0 arms that clear nothing**:
+///
+/// - `No provider is currently logged in.` (`:2180`) — no `--provider`
+///   argument, no active provider and no config default.
+/// - `No auth state found for {provider_name}.` (`:2185`) — the provider is
+///   known, but `clear_provider_auth` found nothing to clear and no config
+///   reset was due.
+///
+/// Both `return`, so Python exits 0 and `CredentialPoolsViewModel` reported
+/// `Removed OAuth provider <p>` over a run that removed nothing. The only
+/// nonzero exit on the verb is the unknown-provider guard
+/// (`:2177-2179`, `raise SystemExit(1)`), which the exit code already covers.
+///
+/// Success is `Logged out of {provider_name}.` (`:2189`) — column 0, no glyph,
+/// byte-identical from `v2026.6.19` through `v2026.9.7` (walked at
+/// `v2026.6.19`, `v2026.7.30`, `v2026.8.19`, `v2026.9.7`).
+///
+/// **Decision 2: the no-op arms are a SUCCESS with a neutral note**, the same
+/// shape ``HermesGatewayServiceVerdict/nothingWasRunningNote`` uses for
+/// "nothing was running": the user asked for the provider to be logged out
+/// and it is. The note is what stops the banner claiming a removal happened.
+///
+/// The success line echoes the provider's DISPLAY NAME, which is Hermes's own
+/// text rather than the user's, so nothing here needs the anchored-failure
+/// treatment `config set` does — but the markers are matched anchored anyway,
+/// because every one of the three lines is printed at column 0.
+public enum HermesAuthLogoutVerdict {
+    /// `auth logout -- <provider>`. `provider` is the subparser's only
+    /// positional and no flag follows it
+    /// (`hermes_cli/subcommands/auth.py:59-61` @ `v2026.9.7`), so `--` is
+    /// accepted and stops a provider id that begins with a dash from being
+    /// read as an option (argparse would exit 2).
+    public static func argv(provider: String) -> [String] {
+        ["auth", "logout", "--", provider]
+    }
+
+    /// `Logged out of {provider_name}.` (`auth.py:2189`).
+    static let successPrefix = "Logged out of "
+
+    /// The two arms that cleared nothing (`:2180`, `:2185`).
+    static let nothingToClear = [
+        "No provider is currently logged in.",
+        "No auth state found for ",
+    ]
+
+    /// The neutral note decision 2 asks for.
+    public static let nothingToClearNote = String(
+        localized: "There was no stored auth state for this provider."
+    )
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        if lines.contains(where: { HermesCLIVerdict.unglyphed($0).hasPrefix(successPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        let idle = lines.contains { line in
+            let head = HermesCLIVerdict.unglyphed(line)
+            return nothingToClear.contains { head.hasPrefix($0) }
+        }
+        if idle { return HermesCLIOutcome(succeeded: true, detail: nil, warning: nothingToClearNote) }
+        // Exit 0, no success line, neither idle arm: C5's "we do not know".
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}
+
+// MARK: - memory reset — hermes_cli/main_agent_cmds.py
+
+/// `hermes memory reset --yes`, judged by output.
+///
+/// P47, round-5 decision 3. `_cmd_memory_reset`
+/// (`hermes_cli/main_agent_cmds.py:21-56` @ `v2026.9.7`) is a `-> None` whose
+/// **nothing-to-do arm exits 0**:
+/// `Nothing to reset — no memory files found in {home}/memories/` (`:32-33`),
+/// then a bare `return`. Both Mac (`MemoryView.resetMemoryRemotely`) and iOS
+/// (`MemoryListView.resetMemory`) judged that by exit code and then reloaded
+/// as though the wipe had happened.
+///
+/// Success is `Memory reset complete. New sessions will start with a blank
+/// slate.` (`:55`). Every line this handler prints is indented two spaces;
+/// ``HermesCLIVerdict/significantLines`` trims, so both markers are anchored
+/// after the trim.
+///
+/// The `Cancelled.` arms (`:46`, `:48`) are unreachable from Scarf — both
+/// callers pass `--yes`, which short-circuits the `input()` (`:43`).
+///
+/// **Decision 3: nothing-to-reset is a SUCCESS with a neutral note**, the
+/// same shape as decision 2's `auth logout` and round-4 decision 2's gateway
+/// stop.
+public enum HermesMemoryResetVerdict {
+    /// `memory reset --yes`. There is no positional to separate, so no `--`.
+    public static let argv = ["memory", "reset", "--yes"]
+
+    /// `Memory reset complete.` (`main_agent_cmds.py:55`).
+    static let successPrefix = "Memory reset complete."
+
+    /// `Nothing to reset — no memory files found in …` (`:33`). Matched on
+    /// the ASCII head alone: the em dash and the interpolated home path are
+    /// downstream of it, and the head is unique in the file.
+    static let nothingToResetPrefix = "Nothing to reset"
+
+    /// The neutral note decision 3 asks for.
+    public static let nothingToResetNote = String(
+        localized: "There were no memory files to reset."
+    )
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        if lines.contains(where: { HermesCLIVerdict.unglyphed($0).hasPrefix(successPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        if lines.contains(where: { HermesCLIVerdict.unglyphed($0).hasPrefix(nothingToResetPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil, warning: nothingToResetNote)
+        }
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}
+
+// MARK: - sessions optimize — hermes_cli/sessions_cmd.py
+
+/// `hermes sessions optimize`, judged by output.
+///
+/// P47. `_cmd_optimize` (`hermes_cli/sessions_cmd.py:809-819` @ `v2026.9.7`)
+/// catches every exception from `db.vacuum()`, prints
+/// `Error: optimization failed: {e}` (`:815`) and **returns** — exit 0. The
+/// Health pane rendered the last two lines of that output as its summary, so
+/// a failed VACUUM read as an optimisation report.
+///
+/// Success is `Optimized {n} FTS index(es).` (`:817`), followed by
+/// `_print_size_change`'s `Database size: … -> … (…)` (`:806`). The summary
+/// the pane shows is still the output tail; this decides only whether it is
+/// presented as one.
+public enum HermesSessionsOptimizeVerdict {
+    public static let argv = ["sessions", "optimize"]
+
+    /// `Optimized {n} FTS index(es).` (`sessions_cmd.py:817`) — column 0, no
+    /// glyph. The trailing space is load-bearing: it is what separates the
+    /// line from any other word beginning "Optimiz…", in particular the
+    /// in-progress `Optimizing session store (FTS merge + VACUUM)…` (`:811`)
+    /// that every run prints FIRST.
+    static let successPrefix = "Optimized "
+
+    /// `Error: optimization failed: {e}` (`:815`).
+    static let failurePrefix = "Error: optimization failed:"
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        let refusal = lines.first { HermesCLIVerdict.unglyphed($0).hasPrefix(failurePrefix) }
+        // `failureWins` in spirit: the two arms are exclusive branches, but a
+        // refusal is a positive signal and must outrank a stray prefix match.
+        if let refusal { return HermesCLIOutcome(succeeded: false, detail: refusal) }
+        if lines.contains(where: { HermesCLIVerdict.unglyphed($0).hasPrefix(successPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}

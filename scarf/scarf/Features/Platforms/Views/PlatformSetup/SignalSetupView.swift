@@ -49,16 +49,34 @@ struct SignalSetupView: View {
         }
     }
 
+    /// Round-5 decision 15 gated the BUTTONS on `remotePairingNotice` and
+    /// left this row alone — but the row is the same claim the buttons make,
+    /// stated as a fact. `detectSignalCLI()` probes THIS Mac's login-shell
+    /// PATH, so on a remote context "signal-cli is available on PATH" is a
+    /// true sentence about the wrong machine, and the orange
+    /// "install it first" is a false one: installing signal-cli here would
+    /// change nothing, because the daemon and the link have to exist where
+    /// Hermes runs. The row shows the host sentence the buttons already key
+    /// on instead, which is the honest answer and the one the view model
+    /// already computes (round-6 P53).
     @ViewBuilder
     private var prerequisiteStatus: some View {
         HStack(spacing: 8) {
-            Image(systemName: viewModel.signalCLIInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(viewModel.signalCLIInstalled ? .green : .orange)
-            (viewModel.signalCLIInstalled
-                ? Text("signal-cli is available on PATH")
-                : Text("signal-cli not found on PATH — install it first"))
-                .font(.caption)
-                .foregroundStyle(viewModel.signalCLIInstalled ? Color.primary : Color.orange)
+            if let notice = viewModel.remotePairingNotice {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(.secondary)
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: viewModel.signalCLIInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(viewModel.signalCLIInstalled ? .green : .orange)
+                (viewModel.signalCLIInstalled
+                    ? Text("signal-cli is available on PATH")
+                    : Text("signal-cli not found on PATH — install it first"))
+                    .font(.caption)
+                    .foregroundStyle(viewModel.signalCLIInstalled ? Color.primary : Color.orange)
+            }
             Spacer()
         }
         .padding(8)
@@ -92,10 +110,15 @@ struct SignalSetupView: View {
                 Spacer()
                 switch viewModel.activeTask {
                 case .none:
+                    // Round-5 decision 15: the embedded terminal spawns on
+                    // THIS Mac and writes the link into the LOCAL ~/.hermes,
+                    // which a remote gateway never reads. `signalCLIInstalled`
+                    // probes the local PATH, so on a remote context it is a
+                    // fact about the wrong machine — the notice decides.
                     Button("Link Device") { viewModel.startLink() }.controlSize(.small)
-                        .disabled(!viewModel.signalCLIInstalled)
+                        .disabled(viewModel.remotePairingNotice != nil || !viewModel.signalCLIInstalled)
                     Button("Start Daemon") { viewModel.startDaemon() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
-                        .disabled(!viewModel.signalCLIInstalled || viewModel.account.isEmpty)
+                        .disabled(viewModel.remotePairingNotice != nil || !viewModel.signalCLIInstalled || viewModel.account.isEmpty)
                 case .link:
                     Text("Linking…").font(.caption).foregroundStyle(.secondary)
                     Button("Stop") { viewModel.stopTerminal() }.controlSize(.small)
@@ -104,12 +127,18 @@ struct SignalSetupView: View {
                     Button("Stop") { viewModel.stopTerminal() }.controlSize(.small)
                 }
             }
-            Text("Link the device first to generate and scan a QR code. Once linked, start the daemon — it must keep running for hermes to send/receive messages.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            EmbeddedSetupTerminal(controller: viewModel.terminalController)
-                .frame(minHeight: 260, maxHeight: 360)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            if let notice = viewModel.remotePairingNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Link the device first to generate and scan a QR code. Once linked, start the daemon — it must keep running for hermes to send/receive messages.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                EmbeddedSetupTerminal(controller: viewModel.terminalController)
+                    .frame(minHeight: 260, maxHeight: 360)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
         }
     }
 }

@@ -109,7 +109,7 @@ import Foundation
             let preset = ModelPreset(name: "Sonnet", modelID: "claude-sonnet-4.6", providerID: "anthropic")
             try await svc.upsert(preset)
             let presets = try await svc.list()
-            #expect(presets.count == 1)
+            try #require(presets.count == 1)
             #expect(presets[0].id == preset.id)
             #expect(presets[0].name == "Sonnet")
             #expect(presets[0].modelID == "claude-sonnet-4.6")
@@ -128,7 +128,7 @@ import Foundation
                 ModelPreset(id: id, name: "Sonnet (renamed)", modelID: "claude-sonnet-4.6", providerID: "anthropic", notes: "now with notes")
             )
             let presets = try await svc.list()
-            #expect(presets.count == 1)
+            try #require(presets.count == 1)
             #expect(presets[0].name == "Sonnet (renamed)")
             #expect(presets[0].notes == "now with notes")
         }

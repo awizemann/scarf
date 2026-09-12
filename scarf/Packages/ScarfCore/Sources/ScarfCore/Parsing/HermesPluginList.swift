@@ -230,7 +230,9 @@ public enum HermesPluginList {
 /// whether the plugin ended up enabled. `cmd_install` prints one of two
 /// mutually exclusive lines, and Scarf reported "Installed" for both.
 public struct HermesPluginInstallOutcome: Sendable, Equatable {
-    /// True when the CLI confirmed `Plugin <name> enabled.`
+    /// True when the CLI confirmed `Plugin <name> enabled.` **and** no
+    /// config-write refusal was printed alongside it — see
+    /// ``configWriteRefusal``, which is why the line alone is not enough.
     public let enabled: Bool
     /// True when it printed `Plugin installed but not enabled.`
     public let installedDisabled: Bool
@@ -249,6 +251,30 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     /// The plugin's `after-install.md` (or default confirmation) and any
     /// dependency notes, verbatim, for display.
     public let notes: String
+    /// The refusal line `install --enable` printed when Hermes declined to
+    /// write the enable into config.yaml — `nil` when nothing was refused.
+    ///
+    /// **P47 / round-5 decision 1: `plugins install --enable` is a sixth
+    /// `save_config` door.** `cmd_install` (`plugins_cmd.py:702`) calls
+    /// `_set_plugin_enabled` (`:754`) → `_write_config_value` (`:115-120`) →
+    /// `save_config`, whose managed arm prints
+    /// `Cannot save configuration: …` and bare-`return`s
+    /// (`hermes_cli/config.py:2315-2318` @ `v2026.9.7`) — and `:755` then
+    /// prints `✓ Plugin <name> enabled.` regardless, at exit 0. The Plugins
+    /// pane now renders read-only on a host whose `.managed` marker Scarf can
+    /// see; this field is the FALLTHROUGH for the env-var-only
+    /// (`HERMES_MANAGED`) managed host, which the marker probe cannot detect
+    /// (see ``HermesManagedInstall``).
+    ///
+    /// Matched with ``HermesCLIMarkers/managedRefusalAnchored`` — anchored at
+    /// column 0 after glyph-stripping, never as a bare substring, because
+    /// `cmd_install` echoes text Hermes does not author at column 0: the
+    /// `[dim]` community-index lines carry the entry's own `ref` and
+    /// `install_identifier` straight through (`:694-697`). The plugin's
+    /// `after-install.md` is NOT that hazard — `_display_after_install`
+    /// (`:391-404`) renders it inside a rich `Panel`, so every line of it
+    /// arrives behind a `│` and could never anchor (P47b review, finding 4).
+    public let configWriteRefusal: String?
 
     public init(
         enabled: Bool,
@@ -256,7 +282,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         missingEnvVars: [String],
         needsGatewayRestart: Bool,
         notes: String,
-        capabilitiesNotGranted: Bool = false
+        capabilitiesNotGranted: Bool = false,
+        configWriteRefusal: String? = nil
     ) {
         self.enabled = enabled
         self.installedDisabled = installedDisabled
@@ -264,6 +291,7 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         self.needsGatewayRestart = needsGatewayRestart
         self.notes = notes
         self.capabilitiesNotGranted = capabilitiesNotGranted
+        self.configWriteRefusal = configWriteRefusal
     }
 
     /// Parses `hermes plugins install` stdout.
@@ -276,9 +304,18 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     /// stable substrings only.
     public static func parse(_ output: String) -> HermesPluginInstallOutcome {
         let lower = output.lowercased()
-        let enabled = lower.contains("] enabled.")
+        let printedEnabled = lower.contains("] enabled.")
             || lower.range(of: "plugin .* enabled\\.", options: .regularExpression) != nil
         let disabled = lower.contains("installed but not enabled")
+        // P47: `failureWins`, applied here rather than at the call site. The
+        // refusal and the `✓ Plugin <name> enabled.` line arrive in the SAME
+        // run at exit 0 (`plugins_cmd.py:754-755`), so the printed success
+        // line is not evidence on its own. See ``configWriteRefusal``.
+        let refusal = HermesCLIVerdict.significantLines(output).first { line in
+            let head = HermesCLIVerdict.unglyphed(line)
+            return HermesCLIMarkers.managedRefusalAnchored.contains { head.hasPrefix($0) }
+        }
+        let enabled = printedEnabled && refusal == nil
         var missing: [String] = []
         for raw in output.components(separatedBy: "\n") {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -294,7 +331,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
             missingEnvVars: missing,
             needsGatewayRestart: lower.contains("restart the gateway"),
             notes: output.trimmingCharacters(in: .whitespacesAndNewlines),
-            capabilitiesNotGranted: output.contains(HermesCLIMarkers.pluginsConsentRefusal)
+            capabilitiesNotGranted: output.contains(HermesCLIMarkers.pluginsConsentRefusal),
+            configWriteRefusal: refusal
         )
     }
 }

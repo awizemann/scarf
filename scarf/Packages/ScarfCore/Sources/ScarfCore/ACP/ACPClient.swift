@@ -532,11 +532,16 @@ public actor ACPClient {
         let result = try await sendRequest(method: "session/prompt", params: params)
         let dict = result?.dictValue ?? [:]
         let usage = dict["usage"] as? [String: Any] ?? [:]
-        // TODO(WS-8-Q1): Confirm wire field name once v0.13 Hermes is
-        // available. We tolerate camelCase + snake_case to match the rest
-        // of the ACP payload's mixed conventions; if Hermes routes the
-        // count through a `session/update` notification instead, this
-        // decode is a no-op and the ACPEvent path takes over.
+        // Hermes does NOT send a compression count in the ACP usage payload
+        // at any tag: the adapter builds `Usage` from `prompt_tokens`,
+        // `completion_tokens`, `total_tokens`, `reasoning_tokens` and
+        // `cache_read_tokens`/`cached_tokens` only —
+        // `acp_adapter/server.py:325-336` @ v2026.3.30 (0.6.0),
+        // `:1050-1059` @ v2026.5.7 (0.13.0), `:917-924` @ v2026.9.7 (0.21.1).
+        // This tolerant decode therefore always yields 0 today; it is kept as
+        // the landing pad for a future field (either spelling) rather than as
+        // a claim that one exists. The `> 0` test at the chip hides it
+        // meanwhile.
         let compression = (usage["compressionCount"] as? Int)
             ?? (usage["compression_count"] as? Int)
             ?? 0
@@ -603,10 +608,13 @@ public actor ACPClient {
     ///
     /// Used both at session boot (immediately after `newSession` to apply
     /// a project's bound preset before the user's first prompt) and at
-    /// user-tap time from the chat header to swap mid-conversation. The
-    /// caller is responsible for capability-gating on
-    /// `HermesCapabilities.hasACPSetSessionModel` — calling this against
-    /// a pre-v0.13 host throws because the method doesn't exist.
+    /// user-tap time from the chat header to swap mid-conversation.
+    ///
+    /// No capability gate is required: `set_session_model` is defined in
+    /// `acp_adapter/server.py` at the earliest adapter tag (`:466` @
+    /// v2026.3.17) and at every tag since, including Scarf's v0.6.0
+    /// supported floor (`:482` @ v2026.3.30) and the target
+    /// (`:929` @ v2026.9.7).
     public func setSessionModel(
         sessionId: String,
         modelID: String,

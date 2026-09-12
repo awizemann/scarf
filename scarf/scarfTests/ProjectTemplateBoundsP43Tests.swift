@@ -28,7 +28,7 @@ struct ProjectTemplateBoundsP43Tests {
     // MARK: - The refusal
 
     @Test("a file unzip cannot list is refused, not waved through")
-    func unlistableArchiveIsRefused() throws {
+    func unlistableArchiveIsRefused() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let bogus = dir.appendingPathComponent("not-really.scarftemplate")
@@ -38,7 +38,7 @@ struct ProjectTemplateBoundsP43Tests {
 
         var thrown: Error?
         do {
-            _ = try ProjectTemplateService().inspect(zipPath: bogus.path)
+            _ = try await ProjectTemplateService().inspect(zipPath: bogus.path)
         } catch {
             thrown = error
         }
@@ -82,7 +82,7 @@ struct ProjectTemplateBoundsP43Tests {
     /// everything is not a guard, and nothing pinned that a legitimate
     /// multi-file template still passes both ceilings.
     @Test("a legitimate multi-file template passes the bounds")
-    func realTemplatePassesTheBounds() throws {
+    func realTemplatePassesTheBounds() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let archive = try Self.makeZip(in: dir, named: "ok.scarftemplate", contents: [
@@ -91,12 +91,12 @@ struct ProjectTemplateBoundsP43Tests {
             ("skills/demo/SKILL.md", 4096),
             ("project/src/main.swift", 1024),
         ])
-        try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path)
+        try await ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path)
     }
 
     /// The entry-count ceiling, on a real archive rather than a parsed string.
     @Test("an archive past the entry ceiling is refused")
-    func entryCeilingRefuses() throws {
+    func entryCeilingRefuses() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let count = ProjectTemplateService.maxTemplateEntries + 1
@@ -104,7 +104,7 @@ struct ProjectTemplateBoundsP43Tests {
         let archive = try Self.makeZip(in: dir, named: "many.scarftemplate", contents: members)
 
         var thrown: Error?
-        do { try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
+        do { try await ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
         catch { thrown = error }
         let error = try #require(thrown, "\(count) entries is past the ceiling")
         #expect("\(error)".contains("files"), "\(error)")
@@ -112,30 +112,56 @@ struct ProjectTemplateBoundsP43Tests {
                 "refused for the wrong reason — the listing was readable: \(error)")
     }
 
-    /// The unpacked-size ceiling: one member of zeros that expands to 300 MB
-    /// and compresses to a few hundred KB. This is the bomb the guard exists
-    /// for, and `unzip -Zt` says `1 file,` — singular — for it, which is the
-    /// spelling the old parser did not know.
+    /// The unpacked-size ceiling, and the `1 file,` spelling `unzip -Zt`
+    /// prints for a single-entry archive — which is the spelling the old
+    /// parser did not know.
+    ///
+    /// **6 MB against a 4 MB ceiling, not 300 MB against the shipped 256 MB**
+    /// (round-5 decision 8). The guard reads a DECLARED size out of the
+    /// listing and compares it to a number; the size of that number is not
+    /// the mechanism. The old fixture allocated, wrote and compressed 300 MB
+    /// of zeros on every run to clear a constant, which was several seconds
+    /// of the serial suite for no extra proof. The ceiling is a parameter
+    /// now — the same test seam `listingTimeout` already had — and the
+    /// shipped value is pinned separately below, so both halves are still
+    /// covered and neither costs 300 MB.
     @Test("a one-member decompression bomb is refused on size")
-    func unpackedSizeCeilingRefuses() throws {
+    func unpackedSizeCeilingRefuses() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let bomb = 300 * 1024 * 1024
-        #expect(Int64(bomb) > ProjectTemplateService.maxTemplateUnpackedBytes)
+        let ceiling: Int64 = 4 * 1024 * 1024
+        let bomb = 6 * 1024 * 1024
+        #expect(Int64(bomb) > ceiling)
         let archive = try Self.makeZip(
             in: dir, named: "bomb.scarftemplate", contents: [("payload.bin", bomb)])
         // The premise: it got PAST the archive-size cap, so the refusal below
-        // can only come from the declared unpacked size.
+        // can only come from the declared unpacked size. Zeros compress to
+        // almost nothing, so this holds by a wide margin.
         let onDisk = (try FileManager.default.attributesOfItem(atPath: archive.path)[.size]
                       as? Int64) ?? 0
         #expect(onDisk < ProjectTemplateService.maxTemplateArchiveBytes,
                 "the zip is \(onDisk) bytes — it would be refused on file size instead")
 
         var thrown: Error?
-        do { try ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
-        catch { thrown = error }
-        let error = try #require(thrown, "300 MB unpacked is past the ceiling")
+        do {
+            try await ProjectTemplateService().enforceArchiveBounds(
+                zipPath: archive.path, unpackedCeiling: ceiling)
+        } catch { thrown = error }
+        let error = try #require(thrown, "6 MB unpacked is past a 4 MB ceiling")
         #expect("\(error)".contains("expand to"), "\(error)")
+
+        // And the same archive passes when the ceiling is above it — so the
+        // refusal is the SIZE comparison and not the one-member listing.
+        try await ProjectTemplateService().enforceArchiveBounds(
+            zipPath: archive.path, unpackedCeiling: Int64(bomb) * 2)
+    }
+
+    /// The parameter above is a test seam; the value Scarf actually ships is
+    /// what protects a user, so it is pinned on its own.
+    @Test("the shipped unpacked ceiling is unchanged")
+    func shippedUnpackedCeilingIsPinned() {
+        #expect(ProjectTemplateService.maxTemplateUnpackedBytes == 256 * 1024 * 1024)
+        #expect(ProjectTemplateService.maxTemplateArchiveBytes == 64 * 1024 * 1024)
     }
 
     /// `openRemoteURL` downloads to its own temp file and hands it to
@@ -225,7 +251,7 @@ struct ProjectTemplateBoundsP43Tests {
     /// The parser's premise, checked against the real tool rather than a
     /// remembered format string.
     @Test("real unzip -Zt on a one-entry archive parses")
-    func realSingleEntryListingParses() throws {
+    func realSingleEntryListingParses() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let staging = dir.appendingPathComponent("s")
@@ -241,7 +267,7 @@ struct ProjectTemplateBoundsP43Tests {
         try zip.run()
         #expect(zip.waitUntilExit(timeout: 30))
 
-        let listing = try ProjectTemplateService.runToolCapturingOutput(
+        let listing = try await ProjectTemplateService.runToolCapturingOutput(
             "/usr/bin/unzip", ["-Zt", archive.path], timeout: 30)
         let claims = try #require(
             ProjectTemplateService.parseArchiveListing(listing),
@@ -256,8 +282,8 @@ struct ProjectTemplateBoundsP43Tests {
     /// budget runs out. With the drain running concurrently with the wait it
     /// finishes normally and its stdout comes back whole.
     @Test("a child with 200 KB of stderr still returns its stdout in time")
-    func chattyStderrDoesNotEatTheBudget() throws {
-        let out = try ProjectTemplateService.runToolCapturingOutput(
+    func chattyStderrDoesNotEatTheBudget() async throws {
+        let out = try await ProjectTemplateService.runToolCapturingOutput(
             "/bin/sh",
             ["-c", "head -c 200000 /dev/zero | tr '\\000' 'x' 1>&2; echo listed"],
             timeout: 20)
@@ -265,11 +291,11 @@ struct ProjectTemplateBoundsP43Tests {
     }
 
     @Test("a child that never exits is refused inside its budget")
-    func hangingListingIsBounded() throws {
+    func hangingListingIsBounded() async throws {
         let started = Date()
         var thrown: Error?
         do {
-            _ = try ProjectTemplateService.runToolCapturingOutput(
+            _ = try await ProjectTemplateService.runToolCapturingOutput(
                 "/bin/sh", ["-c", "sleep 30"], timeout: 0.5)
         } catch {
             thrown = error
@@ -279,10 +305,10 @@ struct ProjectTemplateBoundsP43Tests {
     }
 
     @Test("a non-zero exit is a throw, not an empty listing")
-    func nonZeroExitThrows() {
+    func nonZeroExitThrows() async {
         var thrown: Error?
         do {
-            _ = try ProjectTemplateService.runToolCapturingOutput(
+            _ = try await ProjectTemplateService.runToolCapturingOutput(
                 "/bin/sh", ["-c", "exit 9"], timeout: 20)
         } catch {
             thrown = error

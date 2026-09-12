@@ -29,7 +29,7 @@ import os
 ///
 /// **Blocking bridge to async.** `ServerTransport` protocol methods are
 /// synchronous, by design — services don't become `async` end-to-end.
-/// Citadel is `async` everywhere. The `runSync(_:)` helper uses a
+/// Citadel is `async` everywhere. The `runSync(deadline:_:)` helper uses a
 /// `DispatchSemaphore` to block the caller thread until the async
 /// operation finishes. This matches how the macOS `SSHTransport` blocks
 /// on its `/usr/bin/ssh` subprocess; semantically identical.
@@ -105,34 +105,50 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         await connectionHolder.closeIfOpen()
     }
 
+    // MARK: - Bridge ceilings
+
+    /// How much longer than the caller's own timeout the synchronous bridge
+    /// waits before giving up on the detached task (see ``runSync``). Long
+    /// enough that a run finishing exactly on its budget is never pre-empted
+    /// by the backstop, short enough that a wedged connection is a bounded
+    /// stall rather than a permanent one.
+    nonisolated static let syncGrace: TimeInterval = 10
+
+    /// The ceiling for the SFTP operations, which carry no caller budget —
+    /// `ServerTransport`'s file verbs take no `timeout` (unlike
+    /// `runProcess`, whose one became non-optional in round-5 P48). A remote
+    /// `readFile` of a Hermes JSON file is a sub-second round trip; sixty
+    /// seconds is "the connection is gone", not "the file is big".
+    nonisolated static let sftpCeiling: TimeInterval = 60
+
     // MARK: - ServerTransport: files
 
     public func readFile(_ path: String) throws -> Data {
-        try runSync { try await self.asyncReadFile(path) }
+        try runSync(deadline: Self.sftpCeiling) { try await self.asyncReadFile(path) }
     }
 
     public func unguardedWriteFile(_ path: String, data: Data) throws {
-        try runSync { try await self.asyncWriteFile(path, data: data) }
+        try runSync(deadline: Self.sftpCeiling) { try await self.asyncWriteFile(path, data: data) }
     }
 
     public func fileExists(_ path: String) -> Bool {
-        (try? runSync { try await self.asyncFileExists(path) }) ?? false
+        (try? runSync(deadline: Self.sftpCeiling) { try await self.asyncFileExists(path) }) ?? false
     }
 
     public func stat(_ path: String) -> FileStat? {
-        try? runSync { try await self.asyncStat(path) }
+        try? runSync(deadline: Self.sftpCeiling) { try await self.asyncStat(path) }
     }
 
     public func listDirectory(_ path: String) throws -> [String] {
-        try runSync { try await self.asyncListDirectory(path) }
+        try runSync(deadline: Self.sftpCeiling) { try await self.asyncListDirectory(path) }
     }
 
     public func createDirectory(_ path: String) throws {
-        try runSync { try await self.asyncCreateDirectory(path) }
+        try runSync(deadline: Self.sftpCeiling) { try await self.asyncCreateDirectory(path) }
     }
 
     public func removeFile(_ path: String) throws {
-        try runSync { try await self.asyncRemoveFile(path) }
+        try runSync(deadline: Self.sftpCeiling) { try await self.asyncRemoveFile(path) }
     }
 
     // MARK: - ServerTransport: processes
@@ -141,7 +157,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         executable: String,
         args: [String],
         stdin: Data?,
-        timeout: TimeInterval?
+        timeout: TimeInterval
     ) throws -> ProcessResult {
         if stdin != nil {
             // Citadel's `executeCommand` doesn't accept stdin. None of
@@ -150,7 +166,9 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             // fail loudly rather than silently drop.
             throw TransportError.other(message: "CitadelServerTransport.runProcess does not support stdin yet")
         }
-        return try runSync {
+        // The async op owns `timeout`; the bridge's ceiling only has to
+        // outlive it (see `runSync`).
+        return try runSync(deadline: timeout + Self.syncGrace) {
             try await self.asyncRunProcess(executable: executable, args: args, timeout: timeout)
         }
     }
@@ -216,72 +234,176 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     }
 
     private func runScript(_ cmd: String, timeout: TimeInterval) async throws -> ProcessResult {
-        let client = try await connectionHolder.ssh()
-        let stream: AsyncThrowingStream<ExecCommandOutput, Error>
         do {
-            stream = try await client.executeCommandStream(cmd)
-        } catch {
-            throw TransportError.other(message: "Failed to start exec stream: \(error.localizedDescription)")
+            return try await runExec(cmd, timeout: timeout, midStream: .typedError)
+        } catch let start as ExecStartFailure {
+            throw TransportError.other(
+                message: "Failed to start exec stream: \(start.underlying.localizedDescription)")
         }
-        // Drain in a child task and race against a sleep so a wedged remote
-        // sqlite3 (or a mid-stream Citadel transport failure) can't hang the
-        // caller indefinitely. Mirrors the busy-wait deadline that
-        // SSHScriptRunner enforces on Mac.
-        return try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
-            group.addTask {
-                var stdout = Data()
-                var stderr = Data()
-                var exitCode: Int32 = 0
-                do {
-                    for try await chunk in stream {
-                        try Task.checkCancellation()
-                        switch chunk {
-                        case .stdout(var buf):
-                            if let s = buf.readString(length: buf.readableBytes) {
-                                stdout.append(Data(s.utf8))
-                            }
-                        case .stderr(var buf):
-                            if let s = buf.readString(length: buf.readableBytes) {
-                                stderr.append(Data(s.utf8))
-                            }
-                        }
+    }
+
+    // MARK: - The one remote-exec drain
+
+    /// What a mid-stream transport failure means to the caller.
+    enum MidStreamFailure {
+        /// Keep the partial output and report exit `-1`, so the caller can
+        /// tell a broken channel from a clean non-zero remote exit
+        /// (`asyncRunProcess`).
+        case exitMinusOne
+        /// Throw a typed `TransportError.other`, so `RemoteSQLiteBackend`
+        /// routes it to `.transport` rather than misreading it as a sqlite
+        /// crash (`runScript`).
+        case typedError
+    }
+
+    /// The exec never started — the caller decides what that looks like.
+    private struct ExecStartFailure: Error { let underlying: any Error }
+
+    /// Citadel's `TTYOutput` is not `Sendable`; exactly one task ever reads it.
+    private struct UncheckedBox<T>: @unchecked Sendable { let value: T }
+
+    /// Run `cmd` on the remote, collect stdout/stderr regardless of exit code,
+    /// and give up after `timeout` — **closing the SSH channel when it does**.
+    ///
+    /// Both remote execs used `executeCommandStream`, which hands back only
+    /// the `AsyncThrowingStream` and DISCARDS the `Channel`
+    /// `_executeCommandStream` created for it (Citadel
+    /// `Sources/Citadel/TTY/Client/TTY.swift:269-339`). That stream has no
+    /// `onTermination`, so cancelling the task that reads it stops the READER
+    /// and nothing else: the remote command kept running and its channel
+    /// stayed open until the command finished on its own, one orphan per
+    /// timed-out call, on a phone whose whole reason for the timeout is that
+    /// the remote has stopped answering (round-5 P48b).
+    ///
+    /// `withExec` is the public API that OWNS the channel — it closes it when
+    /// the closure returns and when the closure throws — so the timeout is
+    /// thrown from inside the closure rather than raced outside it. Same call
+    /// Citadel's own docs use, and the one `SSHExecACPChannel` already drives.
+    private func runExec(
+        _ cmd: String,
+        timeout: TimeInterval,
+        midStream: MidStreamFailure
+    ) async throws -> ProcessResult {
+        let client = try await connectionHolder.ssh()
+        var started = false
+        var collected: ProcessResult?
+        do {
+            try await client.withExec(cmd) { inbound, _ in
+                started = true
+                let boxed = UncheckedBox(value: inbound)
+                // The bytes the drain has accumulated SO FAR, readable from
+                // the timeout arm. Without it the two arms each built a
+                // different error: the drain's `CancellationError` catch
+                // raised `.timeout(partialStdout: stdout)` with everything it
+                // had read, and the budget arm — the one that actually wins a
+                // timeout, since `group.next()` returns the FIRST arm and the
+                // drain's throw is then discarded by `cancelAll()` — raised
+                // `.timeout(partialStdout: Data())`. Every iOS timeout
+                // therefore reported empty output, while `SSHTransport`'s
+                // timeout arm hands back `drain.collect()` (round-5 P53).
+                let partial = PartialStdout()
+                collected = try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
+                    group.addTask {
+                        try await Self.drain(
+                            boxed, timeout: timeout, midStream: midStream, partial: partial)
                     }
-                } catch let failed as SSHClient.CommandFailed {
-                    // Genuine remote non-zero exit — surface as
-                    // ProcessResult so the caller's existing exit-code
-                    // handling fires (mapped to BackendError.sqlite by
-                    // RemoteSQLiteBackend).
-                    exitCode = Int32(failed.exitCode)
-                } catch is CancellationError {
-                    throw TransportError.timeout(seconds: timeout, partialStdout: stdout)
-                } catch {
-                    // Transport-level failure (host unreachable, channel
-                    // dropped, ControlMaster died, NIO read error). Throw
-                    // as a typed TransportError so RemoteSQLiteBackend
-                    // routes it to BackendError.transport rather than
-                    // misclassifying as a sqlite crash via a fake -1 exit.
-                    throw TransportError.other(
-                        message: "SSH stream failed: \(error.localizedDescription)"
-                    )
+                    group.addTask {
+                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        return nil
+                    }
+                    guard let first = try await group.next() else {
+                        group.cancelAll()
+                        throw TransportError.other(message: "SSH exec produced no result")
+                    }
+                    group.cancelAll()
+                    return first
                 }
-                return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
+                if collected == nil {
+                    // The budget went first. THROWING is what closes the
+                    // channel: `withExec` closes it on the way out either way,
+                    // and returning normally here would hand the caller a
+                    // success it does not have. The partial stdout is the
+                    // whole value of this arm — a `hermes` run that printed
+                    // half a JSON payload before the connection wedged is
+                    // diagnosable, an empty `Data()` is not.
+                    throw TransportError.timeout(
+                        seconds: timeout, partialStdout: partial.bytes())
+                }
             }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            guard let first = try await group.next() else {
-                group.cancelAll()
-                throw TransportError.other(message: "SSH stream produced no result")
-            }
-            group.cancelAll()
-            if let result = first {
-                return result
-            }
-            // Timeout fired first — drain task gets cancelled by the
-            // group cancel above; surface as a typed timeout.
-            throw TransportError.timeout(seconds: timeout, partialStdout: Data())
+        } catch {
+            if !started { throw ExecStartFailure(underlying: error) }
+            throw error
         }
+        guard let collected else {
+            throw TransportError.other(message: "SSH exec produced no result")
+        }
+        return collected
+    }
+
+    /// Read the exec stream to EOF. Cancellation (the timeout arm cancelling
+    /// the group) surfaces as a typed timeout carrying whatever had arrived.
+    private static func drain(
+        _ boxed: UncheckedBox<TTYOutput>,
+        timeout: TimeInterval,
+        midStream: MidStreamFailure,
+        partial: PartialStdout
+    ) async throws -> ProcessResult {
+        try await absorb(boxed.value, timeout: timeout, midStream: midStream, partial: partial)
+    }
+
+    /// The loop itself, over ANY sequence of exec chunks.
+    ///
+    /// Split out from ``drain(_:timeout:midStream:partial:)`` — whose only
+    /// job is now unwrapping the non-`Sendable` `TTYOutput` — so the mirror
+    /// into `partial` can be proved by RUNNING it. P53's test asserted the
+    /// mirror by grepping this file for `partial.append(bytes)`, which says
+    /// nothing about which arm the call sits in or whether the timeout arm
+    /// can see the bytes (round-6 P53b).
+    static func absorb<S: AsyncSequence>(
+        _ chunks: S,
+        timeout: TimeInterval,
+        midStream: MidStreamFailure,
+        partial: PartialStdout
+    ) async throws -> ProcessResult where S.Element == ExecCommandOutput {
+        var stdout = Data()
+        var stderr = Data()
+        var exitCode: Int32 = 0
+        do {
+            for try await chunk in chunks {
+                try Task.checkCancellation()
+                switch chunk {
+                case .stdout(var buf):
+                    if let s = buf.readString(length: buf.readableBytes) {
+                        let bytes = Data(s.utf8)
+                        stdout.append(bytes)
+                        // Mirrored into the shared accumulator as it arrives,
+                        // so the sibling timeout arm can report it.
+                        partial.append(bytes)
+                    }
+                case .stderr(var buf):
+                    if let s = buf.readString(length: buf.readableBytes) {
+                        stderr.append(Data(s.utf8))
+                    }
+                }
+            }
+        } catch let failed as SSHClient.CommandFailed {
+            // A genuine remote non-zero exit — surfaced as a ProcessResult so
+            // the caller's exit-code handling fires (mapped to
+            // BackendError.sqlite by RemoteSQLiteBackend).
+            exitCode = Int32(failed.exitCode)
+        } catch is CancellationError {
+            throw TransportError.timeout(seconds: timeout, partialStdout: stdout)
+        } catch {
+            switch midStream {
+            case .exitMinusOne:
+                stderr.append(Data(error.localizedDescription.utf8))
+                exitCode = -1
+            case .typedError:
+                throw TransportError.other(
+                    message: "SSH stream failed: \(error.localizedDescription)")
+            }
+        }
+        return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
     // MARK: - ServerTransport: watching
@@ -528,9 +650,8 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     private func asyncRunProcess(
         executable: String,
         args: [String],
-        timeout: TimeInterval?
+        timeout: TimeInterval
     ) async throws -> ProcessResult {
-        let client = try await connectionHolder.ssh()
         // Citadel's raw exec channel doesn't source the user's shell rc
         // files, so non-interactive SSH sessions land with a stripped
         // PATH (typically just `/usr/bin:/bin`). pipx installs `hermes`
@@ -559,45 +680,25 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // accumulated ByteBuffer is lost). That breaks legitimate cases
         // like `hermes skills browse` printing a full table and *then*
         // exiting non-zero — callers see nothing and report "Browse
-        // failed". Drive `executeCommandStream` directly so we can
-        // collect stdout + stderr regardless of exit code, and surface
-        // the real exit status.
-        let stream: AsyncThrowingStream<ExecCommandOutput, Error>
+        // failed". `runExec` drives the stream directly so we collect
+        // stdout + stderr regardless of exit code, and surface the real exit
+        // status.
+        //
+        // `timeout` was accepted and then IGNORED here until round-5 P48 —
+        // every arm simply drained the stream to its end, so a remote that
+        // stopped producing hung the iOS caller with no ceiling at all. C10
+        // says every subprocess has a timeout and a remote exec is one. P48b
+        // moved both execs onto `withExec` so the ceiling also CLOSES the
+        // channel instead of abandoning it; see `runExec`.
         do {
-            stream = try await client.executeCommandStream(cmd)
-        } catch {
+            return try await runExec(cmd, timeout: timeout, midStream: .exitMinusOne)
+        } catch let start as ExecStartFailure {
             return ProcessResult(
                 exitCode: -1,
                 stdout: Data(),
-                stderr: Data(error.localizedDescription.utf8)
+                stderr: Data(start.underlying.localizedDescription.utf8)
             )
         }
-        var stdout = Data()
-        var stderr = Data()
-        var exitCode: Int32 = 0
-        do {
-            for try await chunk in stream {
-                switch chunk {
-                case .stdout(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        stdout.append(Data(s.utf8))
-                    }
-                case .stderr(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        stderr.append(Data(s.utf8))
-                    }
-                }
-            }
-        } catch let failed as SSHClient.CommandFailed {
-            exitCode = Int32(failed.exitCode)
-        } catch {
-            // Network / channel-level failure mid-stream — preserve any
-            // partial output and report -1 so callers can distinguish
-            // from a clean non-zero remote exit.
-            stderr.append(Data(error.localizedDescription.utf8))
-            exitCode = -1
-        }
-        return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
     // MARK: - Shell helpers
@@ -635,7 +736,34 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// task. Transport users in this codebase already do this (every
     /// service touches disk in a `Task.detached` or on a nonisolated
     /// actor method).
+    ///
+    /// **The wait is BOUNDED (charter C10, round-5 P53).** It was a bare
+    /// `semaphore.wait()`, which is the one shape C10 has no answer for: the
+    /// work runs on a `Task.detached` — a COOPERATIVE-POOL task, one thread
+    /// per core and unable to grow — while the caller's thread blocks on the
+    /// semaphore. If the caller is itself on a pool thread, the two are
+    /// competing for the same fixed set, and if Citadel never resumes (a
+    /// half-open TCP connection with no keepalive, the iOS analogue of the
+    /// wedged `ProxyCommand` `SSHTransport.runLocal` bounds) nothing on
+    /// either side ever times out. Every macOS spawn has a ceiling; this is
+    /// the iOS one.
+    ///
+    /// The deadline is the CALLER's budget plus ``syncGrace``: the async op
+    /// owns the timeout (`asyncRunProcess` races the drain against
+    /// `timeout`), so this ceiling only has to outlive it far enough not to
+    /// pre-empt a legitimate slow-but-succeeding run — it is a backstop for
+    /// an op that never returns at all, not a second timeout.
+    ///
+    /// **The seam, stated plainly:** the right fix is for `runProcess` to be
+    /// `async` so there is no blocking bridge at all — `t-02f830f4`. Until
+    /// then the bridge exists and is bounded, and on expiry the result is
+    /// ABANDONED, not cancelled: the detached task keeps running and writes
+    /// into a `ResultBox` nobody reads. That is the same contract
+    /// ``ScarfCore/OffPool`` documents ("the result is dropped, never the
+    /// work"), written down here because a caller that reads a timeout as
+    /// "the remote command stopped" would be wrong.
     nonisolated private func runSync<T: Sendable>(
+        deadline: TimeInterval,
         _ op: @escaping @Sendable () async throws -> T
     ) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
@@ -649,8 +777,35 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             }
             semaphore.signal()
         }
-        semaphore.wait()
+        if semaphore.wait(timeout: .now() + deadline) == .timedOut {
+            throw TransportError.timeout(seconds: deadline, partialStdout: Data())
+        }
         return try resultBox.get()
+    }
+}
+
+/// The stdout bytes an exec drain has read so far, shared with its sibling
+/// timeout arm.
+///
+/// `SSHTransport.runLocal`'s timeout arm reports `drain.collect()` — whatever
+/// the concurrent drain had accumulated when the budget ran out. The iOS
+/// exec had no equivalent, so its timeout reported `Data()` while the drain
+/// task held the bytes and was then cancelled. One lock, append-only, read
+/// once.
+final class PartialStdout: @unchecked Sendable {
+    private var data = Data()
+    private let lock = NSLock()
+
+    func append(_ bytes: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        data.append(bytes)
+    }
+
+    func bytes() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
     }
 }
 

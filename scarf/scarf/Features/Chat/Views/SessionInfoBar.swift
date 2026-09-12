@@ -65,15 +65,15 @@ struct SessionInfoBar: View {
     /// Model preset currently applied to the session via
     /// `session/set_model` (or nil when the session is running on the
     /// config.yaml default). Drives the model badge in the bar — tap
-    /// opens a popover with the preset list. Capability-gated by the
-    /// chip itself on `capabilities.hasACPSetSessionModel`.
+    /// opens a popover with the preset list. Ungated — `session/set_model`
+    /// exists at every supported adapter tag.
     var modelPreset: ModelPreset? = nil
 
     /// Mid-chat model switch handler. Tap on the model badge presents
     /// the preset popover; selecting a preset (or "Use global default"
     /// — encoded as `nil`) fires this callback. Nil hides the popover
-    /// entirely, so the badge stays read-only on pre-v0.13 hosts or
-    /// when the caller doesn't wire it.
+    /// entirely, so the badge stays read-only when the caller doesn't
+    /// wire it.
     var onSwitchModel: ((ModelPreset?) -> Void)? = nil
 
     /// Live ACP session edit auto-approval mode (Hermes v0.15+
@@ -246,10 +246,10 @@ struct SessionInfoBar: View {
                 // Model badge — renders the active preset name when
                 // session/set_model was used to override the global
                 // default. Tap opens a popover for mid-chat switching.
-                // Capability-gated on `hasACPSetSessionModel` so
-                // pre-v0.13 hosts neither see a stale chip nor get a
-                // popover that wouldn't actually switch the session.
-                if capabilities.hasACPSetSessionModel, modelPreset != nil || onSwitchModel != nil {
+                // Ungated: `session/set_model` exists in the adapter at
+                // every supported tag (`acp_adapter/server.py:482` @
+                // v2026.3.30 = 0.6.0; `:929` @ v2026.9.7). P49.
+                if modelPreset != nil || onSwitchModel != nil {
                     ChatModelBadge(
                         preset: modelPreset,
                         onSwitch: onSwitchModel
@@ -372,11 +372,17 @@ struct SessionInfoBar: View {
                         .fixedSize()
                 }
 
-                // v0.13: Hermes surfaces a running count of automatic
-                // context compactions. Render only when the host is on
-                // v0.13+ AND the count is non-zero, so a pre-v0.13 host
-                // (which always reports 0) sees no chip, and a v0.13 host
-                // sees the chip the first time the agent compacts.
+                // Context-compaction chip. NO Hermes tag sends a compaction
+                // count under `acp_adapter/`: the adapter builds `Usage` from
+                // `prompt_tokens`, `completion_tokens`, `total_tokens`,
+                // `reasoning_tokens` and `cache_read_tokens`/`cached_tokens`
+                // only — `acp_adapter/server.py:1050-1059` @ v2026.5.7
+                // (0.13.0, the flag's nominal floor) and `:917-924` @
+                // v2026.9.7 (0.21.1) — and `_build_usage_update` carries none
+                // either. So `acpCompressionCount` is 0 on EVERY host, v0.13+
+                // included, and the `> 0` test — not the capability flag — is
+                // what hides the chip. Both are kept as the landing pad for a
+                // future gateway/`session/update` field.
                 if capabilities.hasContextCompressionCount && acpCompressionCount > 0 {
                     Label(
                         "×\(acpCompressionCount)",

@@ -327,7 +327,7 @@ private final class ProbeSpyTransport: ServerTransport, @unchecked Sendable {
     func createDirectory(_ path: String) throws {}
     func removeFile(_ path: String) throws {}
     func runProcess(
-        executable: String, args: [String], stdin: Data?, timeout: TimeInterval?
+        executable: String, args: [String], stdin: Data?, timeout: TimeInterval
     ) throws -> ProcessResult {
         ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
     }

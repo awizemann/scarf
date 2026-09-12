@@ -207,9 +207,9 @@ import Foundation
           2 incident(s)  |  ack one with: hermes cron incidents ack <id>
         """
 
-    @Test func parsesIncidentsListing() {
+    @Test func parsesIncidentsListing() throws {
         let incidents = HermesCronIncidentsParser.parse(text: Self.incidentsOutput)
-        #expect(incidents.count == 2)
+        try #require(incidents.count == 2)
         let first = incidents[0]
         #expect(first.id == "inc-aaa")
         #expect(first.state == "detected")
@@ -238,12 +238,12 @@ import Foundation
 
     /// Defensive: a tty-allocating transport (or a future FORCE_COLOR)
     /// would wrap the id/state in SGR codes.
-    @Test func stripsANSIFromIncidents() {
+    @Test func stripsANSIFromIncidents() throws {
         let colored = "\u{1B}[33minc-ccc\u{1B}[0m  \u{1B}[31mdetected\u{1B}[0m\n"
             + "    Job:        job-9\n    Type:       auth\n"
             + "    First seen: t1\n    Last seen:  t2\n    Error:      401\n"
         let incidents = HermesCronIncidentsParser.parse(text: colored)
-        #expect(incidents.count == 1)
+        try #require(incidents.count == 1)
         #expect(incidents[0].id == "inc-ccc")
         #expect(incidents[0].state == "detected")
         #expect(incidents[0].failureType == "auth")
@@ -433,14 +433,14 @@ import Foundation
     /// Byte-for-byte the f-string `hermes_cli/cron.py::cron_runs` prints
     /// at v0.21.0 — identical to v0.20, so `HermesCronRunsParser` needs
     /// no change. This test is the drift alarm.
-    @Test func cronRunsFormatUnchangedAtV021() {
+    @Test func cronRunsFormatUnchangedAtV021() throws {
         let output = """
             e1  completed  job=job-1  source=scheduler  2026-08-31T09:00:00
             e2  failed     job=job-1  source=manual  2026-08-30T09:00:00
                 boom: provider 500
             """
         let runs = HermesCronRunsParser.parse(text: output)
-        #expect(runs.count == 2)
+        try #require(runs.count == 2)
         #expect(runs[0].id == "e1")
         #expect(runs[0].status == "completed")
         #expect(runs[0].source == "scheduler")

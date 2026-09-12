@@ -93,14 +93,26 @@ struct WhatsAppSetupView: View {
                     Button("Start Pairing") { viewModel.startPairing() }
                         .buttonStyle(ScarfPrimaryButton())
                         .controlSize(.small)
+                        // Round-5 decision 15: the embedded terminal spawns
+                        // on THIS Mac, and `hermesBinary` is the remote path.
+                        .disabled(viewModel.remotePairingNotice != nil)
                 }
             }
-            Text("A QR code will appear below. Scan it with WhatsApp on your phone. The session is saved to ~/.hermes/platforms/whatsapp/ so you won't need to scan again after restarts.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            EmbeddedSetupTerminal(controller: viewModel.terminalController)
-                .frame(minHeight: 260, maxHeight: 360)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            // On a remote context the terminal below can only mislead, so the
+            // sentence naming the host REPLACES the how-to rather than
+            // sitting beside it.
+            if let notice = viewModel.remotePairingNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("A QR code will appear below. Scan it with WhatsApp on your phone. The session is saved to ~/.hermes/platforms/whatsapp/ so you won't need to scan again after restarts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                EmbeddedSetupTerminal(controller: viewModel.terminalController)
+                    .frame(minHeight: 260, maxHeight: 360)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
         }
     }
 }

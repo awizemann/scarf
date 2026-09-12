@@ -66,7 +66,8 @@ final class SignalSetupViewModel: PlatformSetupForm {
         // NOT inside the apply closure above: that closure runs on the main
         // actor, and `detectSignalCLI` reads `HermesFileService.enrichedEnvironment()`,
         // whose backing `enrichedShellEnv` is a `static let` initialised by two
-        // `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2468-2484`).
+        // `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2566-2583`,
+        // probes at `:2575` and `:2580`).
         // `scarfApp.swift:89-91` warms it on a detached task at launch, but a
         // `static let` initialiser is a `swift_once`: a main-actor reader that
         // arrives while the warm-up is still running BLOCKS on it, for up to
@@ -107,8 +108,23 @@ final class SignalSetupViewModel: PlatformSetupForm {
         commitSave(envPairs: envPairs, configKV: configKV)
     }
 
+    /// Non-nil on a remote context: the signal-cli steps cannot run from
+    /// this window. Round-5 decision 15 — see
+    /// ``PlatformSetupHelpers/remoteOnlyHostNotice(_:)``.
+    ///
+    /// It also answers for ``signalCLIInstalled``, which probes the LOCAL
+    /// login shell's PATH: on a remote context that flag is a fact about the
+    /// wrong machine, so the notice — not the probe — is what the buttons
+    /// key on.
+    var remotePairingNotice: String? {
+        PlatformSetupHelpers.remoteOnlyHostNotice(context)
+    }
+
     /// Run `signal-cli link -n HermesAgent` to generate a QR code.
     func startLink() {
+        // A LOCAL spawn writing a link into the LOCAL ~/.hermes, which the
+        // remote gateway never reads. Guarded here as well as at the button.
+        guard remotePairingNotice == nil else { return }
         guard signalCLIInstalled else {
             showSaveFailure(String(localized: "signal-cli not found on PATH — install it first"))
             return
@@ -123,6 +139,7 @@ final class SignalSetupViewModel: PlatformSetupForm {
 
     /// Run the signal-cli daemon. Users can stop it by closing the panel.
     func startDaemon() {
+        guard remotePairingNotice == nil else { return }
         guard !account.isEmpty else {
             showSaveFailure(String(localized: "Enter your Signal account (E.164 format) first"))
             return

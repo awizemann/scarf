@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import SwiftTerm
 import os
+import ScarfCore
 
 /// Inline SwiftTerm terminal for platform pairing wizards that genuinely require
 /// a TTY (WhatsApp QR, Signal `signal-cli link`). This is a lightweight sibling
@@ -41,6 +42,9 @@ final class EmbeddedSetupTerminalController {
     /// process doesn't leave stale buffer state mixed with new output.
     private var terminalView: LocalProcessTerminalView?
     private var coordinator: Coordinator?
+    /// The hop that resolves the login-shell environment before the spawn
+    /// (C10). Held so ``stop()`` cancels a start that has not spawned yet.
+    private var startTask: Task<Void, Never>?
 
     /// Invoked when the spawned process exits. The `Int32` is the exit code
     /// (`0` success, non-zero failure). Runs on the main actor.
@@ -52,8 +56,41 @@ final class EmbeddedSetupTerminalController {
     /// it is terminated first to avoid orphans.
     func start(executable: String, arguments: [String], environment: [String: String] = [:]) {
         stop()
-        guard let container else {
+        guard container != nil else {
             logger.warning("start() called before terminal was attached to a container")
+            return
+        }
+        // C10. `HermesFileService.enrichedEnvironment()` reads a `static let`
+        // backed by two `zsh` probes at 5 s + 3 s
+        // (`HermesFileService.swift:2566-2583`, probes at `:2575` and
+        // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
+        // launch, but a `static let` initialiser is a `swift_once`, so a
+        // main-actor reader that arrives while the warm-up is still running
+        // BLOCKS on it — and this one sat on the click that starts a pairing.
+        // Resolve it on an `OffPool.run` hop — off the main actor AND off the
+        // cooperative pool, since eight seconds of blocking is what a
+        // fixed-width pool must never be handed (round-5 P52) — then attach
+        // on the main actor with the value in hand. `launch` re-checks
+        // `container`: this hop yields, and the view can be gone by the time
+        // it lands.
+        startTask?.cancel()
+        startTask = Task { [weak self] in
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+            guard let self, !Task.isCancelled else { return }
+            self.launch(executable: executable, arguments: arguments, environment: environment, shellEnv: env)
+        }
+    }
+
+    /// The main-actor half of ``start(executable:arguments:environment:)``,
+    /// once the login-shell environment has been resolved off it.
+    private func launch(
+        executable: String,
+        arguments: [String],
+        environment: [String: String],
+        shellEnv: [String: String]
+    ) {
+        guard let container else {
+            logger.warning("terminal was detached while its environment was resolving")
             return
         }
 
@@ -70,7 +107,7 @@ final class EmbeddedSetupTerminalController {
 
         // Merge caller-provided env over the enriched shell env so `npx`, `node`,
         // `signal-cli`, etc. resolve from PATH.
-        var env = HermesFileService.enrichedEnvironment()
+        var env = shellEnv
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         for (k, v) in environment { env[k] = v }
@@ -101,6 +138,11 @@ final class EmbeddedSetupTerminalController {
 
     /// Kill the running process (if any). Safe to call when nothing is running.
     func stop() {
+        // Also stops a start still resolving its environment — without this a
+        // "Stop" during the warm-up would be followed by the spawn it was
+        // meant to prevent.
+        startTask?.cancel()
+        startTask = nil
         terminalView?.terminate()
         terminalView?.removeFromSuperview()
         terminalView = nil

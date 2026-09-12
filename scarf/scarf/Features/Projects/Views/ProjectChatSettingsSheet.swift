@@ -20,11 +20,12 @@ import ScarfDesign
 /// ``ProjectAutoAcceptEditsStore`` for why a bypass of the edit prompt
 /// can't live anywhere the agent being approved can write.
 ///
-/// Each section is capability-gated on its own RPC —
-/// `hasACPSetSessionModel` (v0.13+) and `hasSessionEditAutoApproval`
-/// (v0.15+) — because on an older host the setting simply wouldn't apply
-/// at runtime, and a control that silently does nothing is worse than no
-/// control. The entry point hides when neither is available.
+/// The auto-accept section is capability-gated on `hasSessionEditAutoApproval`
+/// (v0.15+), because on an older host the setting simply wouldn't apply at
+/// runtime and a control that silently does nothing is worse than no control.
+/// The model section is UNGATED (P49 / round-5 decision 9): ACP
+/// `session/set_model` is defined in the adapter at every supported tag
+/// (`acp_adapter/server.py:482` @ v2026.3.30 = 0.6.0; `:929` @ v2026.9.7).
 struct ProjectChatSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let context: ServerContext
@@ -61,15 +62,13 @@ struct ProjectChatSettingsSheet: View {
                             autoAcceptRow
                         }
 
-                        if capabilities.hasACPSetSessionModel {
-                            defaultRow
+                        defaultRow
 
-                            if presets.isEmpty {
-                                emptyPresetsRow
-                            } else {
-                                ForEach(presets) { preset in
-                                    presetRow(preset)
-                                }
+                        if presets.isEmpty {
+                            emptyPresetsRow
+                        } else {
+                            ForEach(presets) { preset in
+                                presetRow(preset)
                             }
                         }
 
@@ -206,11 +205,6 @@ struct ProjectChatSettingsSheet: View {
         // capability-degraded host still shows the truth.
         autoAcceptEdits = autoAcceptStore.isEnabled(projectId: project.path)
 
-        guard capabilities.hasACPSetSessionModel else {
-            isLoading = false
-            return
-        }
-
         let service = ModelPresetService.shared(for: context)
         do {
             let loaded = try await service.list()
@@ -260,12 +254,6 @@ struct ProjectChatSettingsSheet: View {
                 errorMessage = "Couldn't save the auto-accept setting: this Mac's Keychain wouldn't provide the key Scarf signs it with. Unlock your login keychain and try again."
                 return
             }
-        }
-
-        guard capabilities.hasACPSetSessionModel else {
-            isSaving = false
-            dismiss()
-            return
         }
 
         let ctx = context

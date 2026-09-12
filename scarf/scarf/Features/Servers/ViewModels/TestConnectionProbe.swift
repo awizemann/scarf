@@ -10,6 +10,12 @@ import ScarfCore
 struct TestConnectionProbe {
     let config: SSHConfig
 
+    /// How long the probe gives `ssh` before giving up. A named budget so the
+    /// deadline and the message the user reads can never drift apart — they
+    /// were two independent literals, `20` and the string "Timed out after
+    /// 20s" (round-5 P48).
+    static let probeTimeout: TimeInterval = 20
+
     func run() async -> AddServerViewModel.TestResult {
         let host = config.host.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else {
@@ -163,6 +169,20 @@ struct TestConnectionProbe {
         // paste into Terminal to compare.
         let displayCommand = "/usr/bin/ssh " + sshArgs.map { Self.shellDisplayQuote($0) }.joined(separator: " ")
 
+        // The login-shell env probe, hoisted OUT of the detached closure.
+        // Everything else in that closure suspends rather than blocks (the
+        // `Task.sleep` poll and `waitDrainingAsync` below, both deliberate),
+        // but `enrichedEnvironment()` reads a `static let` whose `swift_once`
+        // initialiser is two `zsh` probes at 5 s + 3 s
+        // (`HermesFileService.swift`, `runShellProbe(script:`) — it BLOCKS,
+        // and a detached task is off the MAIN actor but still on the
+        // cooperative pool, one thread per core and unable to grow. So the
+        // one blocking call gets a thread of its own and the closure stays
+        // the suspending thing it was written to be (charter C10, round-5
+        // P53). One read, before the spawn, so it is also one probe instead
+        // of one per attempt.
+        let shellEnv = await OffPool.run { HermesFileService.enrichedEnvironment() }
+
         let probe = await Task.detached { () -> (Int32, String, String) in
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
@@ -171,7 +191,6 @@ struct TestConnectionProbe {
             // Without this, GUI-launched Scarf can't see the user's
             // ssh-add'd keys (terminal works because shell sets the var).
             var env = ProcessInfo.processInfo.environment
-            let shellEnv = HermesFileService.enrichedEnvironment()
             for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
                 if env[key] == nil, let value = shellEnv[key], !value.isEmpty {
                     env[key] = value
@@ -186,24 +205,45 @@ struct TestConnectionProbe {
             do {
                 try proc.run()
             } catch {
+                // Nothing spawned and no drain is running, so these are the
+                // explicit release. (`Pipe.deinit` closes them anyway —
+                // measured; the release is stated rather than implied.)
+                try? stdoutPipe.fileHandleForReading.close()
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForReading.close()
+                try? stderrPipe.fileHandleForWriting.close()
                 return (-1, "", "Failed to launch /usr/bin/ssh: \(error.localizedDescription)")
             }
-            // Bound the probe so a hung connection doesn't lock the UI.
-            let deadline = Date().addingTimeInterval(20)
+            // Drain BOTH pipes for the whole run, never with a `readToEnd()`
+            // after the wait. This probe runs `ssh -vvv`, so a stderr trace
+            // past the 64 KB pipe buffer is the EXPECTED case and not the
+            // corner: undrained, ssh blocked in `write()`, the poll below ran
+            // its full twenty seconds, and a connection that was working
+            // reported "Timed out after 20s" — the probe manufacturing the
+            // failure it exists to diagnose (round-5 P48, t-10eb7c17 item 4).
+            let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
+            // Bound the probe so a hung connection doesn't lock the UI. The
+            // poll SUSPENDS rather than blocking — this closure is `async`,
+            // and `Process.waitDraining` is a `Thread.sleep` loop that would
+            // park a cooperative-pool thread for the whole budget (P43c).
+            let deadline = Date().addingTimeInterval(Self.probeTimeout)
             while proc.isRunning && Date() < deadline {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                proc.terminate()
-                let partial = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-                return (-1, "", "Timed out after 20s.\n\nssh trace so far:\n" + (String(data: partial, encoding: .utf8) ?? ""))
+                // Bounded escalation, not a bare `terminate()`: a wedged
+                // ProxyCommand ignores it, and the trace collected so far is
+                // the whole value of this arm.
+                let partial = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
+                let trace = String(
+                    data: partial.count > 1 ? partial[1] : Data(), encoding: .utf8) ?? ""
+                return (-1, "", "Timed out after \(Int(Self.probeTimeout))s.\n\nssh trace so far:\n" + trace)
             }
-            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
             return (
                 proc.terminationStatus,
-                String(data: out, encoding: .utf8) ?? "",
-                String(data: err, encoding: .utf8) ?? ""
+                String(data: collected.first ?? Data(), encoding: .utf8) ?? "",
+                String(data: collected.count > 1 ? collected[1] : Data(), encoding: .utf8) ?? ""
             )
         }.value
 

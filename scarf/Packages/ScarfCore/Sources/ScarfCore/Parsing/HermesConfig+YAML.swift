@@ -104,11 +104,26 @@ public extension HermesConfig {
         }
         /// A `_SHARED_KEYS` boolean with a TRUE host default, read through
         /// `sharedPlatformScalar`'s precedence and Hermes's boolish sets.
+        ///
+        /// NOT for `mattermost.require_mention` — that key's reader has its
+        /// own three-word falsy set (see `mattermostRequireMention` below).
         func sharedPlatformBool(_ plat: String, _ key: String, default def: Bool) -> Bool {
             HermesYAML.boolishValue(sharedPlatformScalar(plat, key)) ?? def
         }
-        // `display.busy_ack_enabled` is the ONE boolean key in config.yaml whose
-        // effective vocabulary is NOT the universal boolish set, because it
+        /// `mattermost.require_mention`, which reaches its comparison as a
+        /// `str()` of whatever PyYAML loaded rather than as a boolish scalar
+        /// — so `"OFF"` (quoted) is TRUE and bare `off` is false, and
+        /// `boolishValue` is wrong on both. The rule and its citation live in
+        /// ``HermesYAML/mattermostRequireMention(configScalar:)``; the
+        /// precedence (the bridged section, not the flat spelling) is
+        /// `sharedPlatformScalar`'s, unchanged.
+        func mattermostRequireMention(default def: Bool) -> Bool {
+            HermesYAML.mattermostRequireMention(
+                configScalar: sharedPlatformScalar("mattermost", "require_mention")) ?? def
+        }
+        // `display.busy_ack_enabled` and `mattermost.require_mention` are the
+        // TWO boolean keys in config.yaml whose effective vocabulary is NOT
+        // the universal boolish set, each for its own reason. This one
         // reaches its reader through an env bridge that stringifies:
         //
         //   gateway/run.py:1813  `_DISPLAY_ENV_BRIDGE` maps it to
@@ -612,7 +627,19 @@ public extension HermesConfig {
         )
 
         let mattermost = MattermostSettings(
-            requireMention: boolTrueDefault("mattermost.require_mention"),
+            // `require_mention` is a `_SHARED_KEYS` member
+            // (`gateway/config_loader.py:197-213` @ `v2026.9.7`), so the
+            // section Hermes bridges it from is the one `platform_section`
+            // picks (`:171-180`) — NOT the top-level spelling unconditionally.
+            // Reading it flat was the reader half of P51's write: the form
+            // wrote bare `mattermost.require_mention`, which CREATES the
+            // top-level block on a nested-only host and un-bridges every
+            // `platforms.mattermost.<shared key>` beside it (P46b's "leaving a
+            // write on its bare spelling is not neutral" lesson). Read and
+            // write move together — the pair is on
+            // `HermesPlatformSharedKeys.bridgeResolvedKeys` now, so the write
+            // lands wherever the bridge source already is.
+            requireMention: mattermostRequireMention(default: true),
             // `platforms.mattermost.extra.reply_mode`, NOT the top-level
             // `mattermost.reply_mode` Scarf used to read. The adapter reads
             // `config.extra` only —
@@ -624,7 +651,23 @@ public extension HermesConfig {
             // (`MATTERMOST_REPLY_MODE`, which is what `MattermostSetupView`
             // actually edits) lives in `.env`, outside this parse; an absent
             // YAML key reads as the same `off` it always did.
-            replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off")
+            replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off"),
+            // Presence, not value. `sharedPlatformBool` above resolves the key
+            // the way the adapter does; this says whether the key is THERE,
+            // which is what lets `MattermostSetupViewModel` fall back to
+            // `MATTERMOST_REQUIRE_MENTION` exactly when Hermes would
+            // (`plugins/platforms/mattermost/adapter.py:491-494`, `:504` @
+            // `v2026.9.7`) instead of showing config's resolved default over
+            // a live `.env` value.
+            // Presence is asked at the SAME precedence as the value, or the
+            // fallback would fire for a key that is there (nested) and not
+            // fire for one that is not.
+            // Same coercion as `requireMention` above — the mattermost one,
+            // not the universal boolish set — or the form's fallback arm
+            // would show a value the gateway does not hold (round-6 P53).
+            requireMentionIsSet: sharedPlatformScalar("mattermost", "require_mention") != nil
+                ? mattermostRequireMention(default: true)
+                : nil
         )
 
         let whatsapp = WhatsAppSettings(

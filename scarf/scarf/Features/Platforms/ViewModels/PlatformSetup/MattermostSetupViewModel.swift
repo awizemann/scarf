@@ -48,8 +48,41 @@ final class MattermostSetupViewModel: PlatformSetupForm {
             freeResponseChannels = env["MATTERMOST_FREE_RESPONSE_CHANNELS"] ?? ""
             replyMode = env["MATTERMOST_REPLY_MODE"] ?? "off"
 
-            guard let cfg = snapshot.config?.mattermost else { return }
-            requireMention = cfg.requireMention
+            // NO early `guard` on the config half. P37 finding 5's mirror
+            // image, the shape P51 fixed in `NtfySetupViewModel` and left
+            // here: an early `guard let cfg = snapshot.config?.mattermost
+            // else { return }` over ONE of two independently-proven reads
+            // throws the other one away — an unreadable config.yaml would
+            // discard the `MATTERMOST_REQUIRE_MENTION` value Scarf had just
+            // proved and show the resolved default instead. The latched
+            // `loadRefusal` still refuses the Save.
+            //
+            // config.yaml WINS and `.env` is only the fallback — the adapter's
+            // own precedence (`_extra_or_env("require_mention",
+            // "MATTERMOST_REQUIRE_MENTION", "true")`,
+            // `plugins/platforms/mattermost/adapter.py:504`, helper at
+            // `:491-494` @ `v2026.9.7`). So an ABSENT config key is the only
+            // case where the `.env` value is what Hermes is actually using,
+            // and reading config's resolved default over it would show the
+            // user the wrong state of their own gateway.
+            //
+            // Nothing is migrated silently: the `.env` half is READ as the
+            // fallback, and only a Save writes the config key (which is also
+            // where the value starts winning).
+            //
+            // `mattermostRequireMention(envValue:)`, NOT `parseEnvBool`. The
+            // adapter's rule is `str(...).lower() not in {"false","0","no"}`
+            // (`adapter.py:504-505` @ `v2026.9.7`) — a three-word DENYlist
+            // with no `off` in it, unlike slack/discord/telegram — while
+            // `parseEnvBool` is a four-word truthy ALLOWlist. It read `off`,
+            // `y` and every other spelling as FALSE where Hermes reads them
+            // as true, so the toggle showed the opposite of the gateway's
+            // behaviour (round-6 P53). Absent → the adapter's `"true"`
+            // default; empty → the empty string, which is not one of the
+            // three words and so is true.
+            requireMention = snapshot.config?.mattermost.requireMentionIsSet
+                ?? HermesYAML.mattermostRequireMention(
+                    envValue: env["MATTERMOST_REQUIRE_MENTION"])
         }
     }
 
@@ -60,9 +93,17 @@ final class MattermostSetupViewModel: PlatformSetupForm {
             "MATTERMOST_ALLOWED_USERS": allowedUsers,
             "MATTERMOST_HOME_CHANNEL": homeChannel,
             "MATTERMOST_FREE_RESPONSE_CHANNELS": freeResponseChannels,
-            "MATTERMOST_REPLY_MODE": replyMode == "off" ? "" : replyMode,
-            "MATTERMOST_REQUIRE_MENTION": PlatformSetupHelpers.envBool(requireMention)
+            "MATTERMOST_REPLY_MODE": replyMode == "off" ? "" : replyMode
         ]
-        commitSave(envPairs: envPairs, configKV: [:])
+        // `require_mention` goes to config.yaml, NOT `.env`. The form READ it
+        // from config and WROTE it to `.env`, so the toggle appeared to snap
+        // back on the next load — and on a config that carries the key at
+        // all, the `.env` write was inert, because `_extra_or_env` consults
+        // `config.extra` FIRST (`adapter.py:491-494`, `:504` @ `v2026.9.7`).
+        // One side, both directions: the side Hermes prefers.
+        let configKV: [String: String] = [
+            "mattermost.require_mention": PlatformSetupHelpers.envBool(requireMention)
+        ]
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

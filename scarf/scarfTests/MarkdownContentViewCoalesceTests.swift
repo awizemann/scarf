@@ -45,7 +45,7 @@ import Testing
         #expect(units == [.paragraphGroup(["First paragraph.", "Second paragraph."])])
     }
 
-    @Test func headingBreaksTheParagraphRun() {
+    @Test func headingBreaksTheParagraphRun() throws {
         let units = MarkdownContentView.coalesceParagraphs([
             .paragraph("Intro."),
             .blank,
@@ -55,47 +55,47 @@ import Testing
         // Intro is its own group; heading is its own block; body is
         // its own group. Trailing blank before the heading is rendered
         // as a vertical gap so the visual spacing matches pre-fix.
-        #expect(units.count == 4)
+        try #require(units.count == 4)
         #expect(units[0] == .paragraphGroup(["Intro."]))
         #expect(units[1] == .block(.blank))
         #expect(units[2] == .block(.heading(2, "Section")))
         #expect(units[3] == .paragraphGroup(["Body."]))
     }
 
-    @Test func codeBlockBreaksTheParagraphRun() {
+    @Test func codeBlockBreaksTheParagraphRun() throws {
         let units = MarkdownContentView.coalesceParagraphs([
             .paragraph("Run this:"),
             .codeBlock("ls -la", language: "bash"),
             .paragraph("Then check the output.")
         ])
-        #expect(units.count == 3)
+        try #require(units.count == 3)
         #expect(units[0] == .paragraphGroup(["Run this:"]))
         #expect(units[1] == .block(.codeBlock("ls -la", language: "bash")))
         #expect(units[2] == .paragraphGroup(["Then check the output."]))
     }
 
-    @Test func bulletListBreaksTheParagraphRun() {
+    @Test func bulletListBreaksTheParagraphRun() throws {
         let units = MarkdownContentView.coalesceParagraphs([
             .paragraph("Options:"),
             .bulletItem("First", indent: 0),
             .bulletItem("Second", indent: 0),
             .paragraph("Pick one.")
         ])
-        #expect(units.count == 4)
+        try #require(units.count == 4)
         #expect(units[0] == .paragraphGroup(["Options:"]))
         #expect(units[1] == .block(.bulletItem("First", indent: 0)))
         #expect(units[2] == .block(.bulletItem("Second", indent: 0)))
         #expect(units[3] == .paragraphGroup(["Pick one."]))
     }
 
-    @Test func leadingBlankRendersAsGap() {
+    @Test func leadingBlankRendersAsGap() throws {
         let units = MarkdownContentView.coalesceParagraphs([
             .blank,
             .paragraph("After a gap.")
         ])
         // Blank before any paragraph run — emit as a gap, not absorbed
         // into a group (there's no preceding paragraph to absorb into).
-        #expect(units.count == 2)
+        try #require(units.count == 2)
         #expect(units[0] == .block(.blank))
         #expect(units[1] == .paragraphGroup(["After a gap."]))
     }
@@ -113,7 +113,7 @@ import Testing
         #expect(units == [.paragraphGroup(["Last paragraph."]), .block(.blank)])
     }
 
-    @Test func interleavedParagraphBlankBlockProducesSeparateGroupsAndGap() {
+    @Test func interleavedParagraphBlankBlockProducesSeparateGroupsAndGap() throws {
         // Two paragraph runs separated by a heading — each run gets
         // its own selection scope; both `.blank`s are emitted verbatim
         // (one absorbs into the flushed pendingBlank before the
@@ -128,7 +128,7 @@ import Testing
             .blank,
             .paragraph("p2a")
         ])
-        #expect(units.count == 5)
+        try #require(units.count == 5)
         #expect(units[0] == .paragraphGroup(["p1a", "p1b"]))
         #expect(units[1] == .block(.blank))
         #expect(units[2] == .block(.heading(1, "Title")))

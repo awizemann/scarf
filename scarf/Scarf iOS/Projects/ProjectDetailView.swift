@@ -75,8 +75,9 @@ struct ProjectDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let modelPresetName,
-               capabilitiesStore?.capabilities.hasACPSetSessionModel ?? false {
+            // Ungated (P49): `session/set_model` is in the adapter at every
+            // supported tag (`acp_adapter/server.py:482` @ v2026.3.30 = 0.6.0).
+            if let modelPresetName {
                 modelBadge(modelPresetName)
             }
             tabPicker

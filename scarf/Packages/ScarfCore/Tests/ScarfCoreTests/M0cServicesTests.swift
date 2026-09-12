@@ -54,7 +54,7 @@ import Foundation
         await service.openLog(path: tmp.path)
         defer { Task { await service.closeLog() } }
         let entries = await service.readLastLines(count: 10)
-        #expect(entries.count == 3)
+        try #require(entries.count == 3)
 
         // v0.9.0+ line with session tag
         let tagged = entries[0]
@@ -171,14 +171,14 @@ import Foundation
         // to the catalog half here so the assertion is independent of the
         // overlay table evolving.
         let providers = svc.loadProviders().filter { !$0.isOverlay }
-        #expect(providers.count == 2)
+        try #require(providers.count == 2)
         // Alphabetical by display name → Anthropic, OpenAI.
         #expect(providers[0].providerID == "anthropic")
         #expect(providers[0].modelCount == 1)
         #expect(providers[1].providerID == "openai")
 
         let anthropicModels = svc.loadModels(for: "anthropic")
-        #expect(anthropicModels.count == 1)
+        try #require(anthropicModels.count == 1)
         #expect(anthropicModels[0].modelName == "Claude Opus 4.7")
         #expect(anthropicModels[0].reasoning == true)
 

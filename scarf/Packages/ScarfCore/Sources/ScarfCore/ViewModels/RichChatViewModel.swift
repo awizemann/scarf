@@ -623,9 +623,14 @@ public final class RichChatViewModel {
     public private(set) var acpCachedReadTokens = 0
     /// Running count of context compactions Hermes has performed on this
     /// session. Surfaced as the `🗜 ×N` chip in `SessionInfoBar` when > 0
-    /// and `HermesCapabilities.hasContextCompressionCount` is true. Each
-    /// `session/prompt` response carries the latest server-side total, so
-    /// we replace (with a `max` guard) rather than accumulate.
+    /// and `HermesCapabilities.hasContextCompressionCount` is true.
+    ///
+    /// **Always 0 over ACP today** — no Hermes tag puts a compression count
+    /// in the `session/prompt` usage payload (`acp_adapter/server.py:325-336`
+    /// @ v2026.3.30, `:917-924` @ v2026.9.7), so the chip never fires. The
+    /// plumbing is kept for a future field: each response would carry the
+    /// latest server-side total, so we replace (with a `max` guard) rather
+    /// than accumulate.
     public private(set) var acpCompressionCount = 0
 
     /// Slash commands advertised by the ACP server via `available_commands_update`.

@@ -190,10 +190,12 @@ struct ModelPickerSheet: View {
             }
             // subscriptionService.loadState() reads auth.json — tiny
             // on local but still SSH-backed on remote, so route it
-            // through a detached task too. The result is a small
-            // value type; safe to assign back onto MainActor.
+            // off-main too. `OffPool.run`, not `Task.detached`: an SSH
+            // readFile BLOCKS its thread, and the cooperative pool has
+            // one per core (round-5 P52). The result is a small value
+            // type; safe to assign back onto MainActor.
             let svc = subscriptionService
-            subscription = await Task.detached { svc.loadState() }.value
+            subscription = await OffPool.run { svc.loadState() }
             await loadModelsForSelectionAsync()
             isLoadingCatalog = false
         }
@@ -202,7 +204,13 @@ struct ModelPickerSheet: View {
                 // Refresh subscription immediately so the right-column
                 // status row flips to "active" without waiting for the
                 // picker to be re-opened.
-                subscription = subscriptionService.loadState()
+                //
+                // P51: the idle twin of the `.task` read 20 lines above,
+                // which has been detached since P43 — this one was still a
+                // synchronous SSH `readFile` on the main actor (C10), and a
+                // sign-in is exactly when that round trip is slowest.
+                let svc = subscriptionService
+                Task { subscription = await OffPool.run { svc.loadState() } }
                 // Sign-in unlocked the bearer token — kick a fresh
                 // model-list fetch so the picker populates without the
                 // user needing to hit Refresh manually.

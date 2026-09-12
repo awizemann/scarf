@@ -39,6 +39,7 @@ struct PluginsView: View {
             compatBanner
                 .padding(.horizontal)
                 .padding(.top, ScarfSpace.s2)
+            managedBanner
             if viewModel.isLoading && viewModel.plugins.isEmpty {
                 ProgressView().padding()
             } else if viewModel.plugins.isEmpty {
@@ -191,6 +192,31 @@ struct PluginsView: View {
         .padding()
     }
 
+    /// The ONE managed-install banner (P47 / round-5 decision 1). Nothing
+    /// else in the pane repeats it; the two activation controls are simply
+    /// disabled. See ``PluginsViewModel/managedBannerText`` for why the lock
+    /// is scoped to activation rather than to the whole pane.
+    @ViewBuilder
+    private var managedBanner: some View {
+        if let text = viewModel.managedBannerText {
+            HStack(alignment: .top, spacing: ScarfSpace.s2) {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Text(text)
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, ScarfSpace.s2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ScarfColor.backgroundSecondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("This Hermes installation is managed; plugin activation is read-only")
+        }
+    }
+
     /// v0.21.1 — `hermes plugins compat`: installed plugins still importing
     /// module paths the Sep 2026 decomposition removes. After the removal
     /// date those plugins are simply not loaded, so this is the only warning
@@ -326,6 +352,11 @@ struct PluginsView: View {
                 }
             }
             .controlSize(.small)
+            // P47: activation is the one plugin action `is_managed()` refuses
+            // (`_set_plugin_enabled` → `save_config`). Update and Remove work
+            // on the plugin directory, which Hermes never guards, so they stay
+            // live — see `PluginsViewModel.managedBannerText`.
+            .disabled(viewModel.isManagedHost)
             // Every row repeats these three verbs; the plugin name is what
             // makes them distinguishable to Voice Control and VoiceOver.
             .accessibilityLabel(
@@ -384,7 +415,18 @@ struct PluginsView: View {
                 .accessibilityLabel(Text("Plugin repository"))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
-            Toggle("Enable after installing", isOn: $enableOnInstall)
+            // P47: the same refused write, one step earlier — `cmd_install`'s
+            // `--enable` arm is a `save_config` door
+            // (`hermes_cli/plugins_cmd.py:754-755`). A `.disabled` toggle keeps
+            // whatever value it held, and this one DEFAULTS to on, so the
+            // binding reads `false` on a managed host rather than leaving a
+            // greyed-out switch that still sends `--enable`. `enableOnInstall`
+            // itself is untouched, so unlocking restores the user's choice.
+            Toggle("Enable after installing", isOn: Binding(
+                get: { viewModel.isManagedHost ? false : enableOnInstall },
+                set: { enableOnInstall = $0 }
+            ))
+                .disabled(viewModel.isManagedHost)
                 .accessibilityHint("Passes --enable to hermes plugins install. Turn off to install the plugin without activating it.")
             Text("Hermes installs plugins disabled unless told otherwise. Portable Agent Plugin packages always install disabled.")
                 .font(.caption2)
@@ -393,7 +435,10 @@ struct PluginsView: View {
                 Spacer()
                 Button("Cancel") { showInstall = false }
                 Button("Install") {
-                    viewModel.install(installIdentifier, enable: enableOnInstall)
+                    viewModel.install(
+                        installIdentifier,
+                        enable: enableOnInstall && !viewModel.isManagedHost
+                    )
                     showInstall = false
                 }
                 .buttonStyle(.borderedProminent)

@@ -91,6 +91,46 @@
         }
       }
     },
+    "Installed, but it could not be enabled: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installiert, konnte aber nicht aktiviert werden: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalado, pero no se pudo activar: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installé, mais n'a pas pu être activé : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストールされましたが、有効化できませんでした: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalado, mas não foi possível ativá-lo: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装，但无法启用：%@"
+          }
+        }
+      }
+    },
     "Nothing is running — Hermes runs this as a normal prompt instead of steering." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -128,6 +168,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前没有正在运行的任务——Hermes 会将其作为普通提示运行，而不是进行引导。"
+          }
+        }
+      }
+    },
+    "Optimize failed. %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimierung fehlgeschlagen. %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error al optimizar. %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de l'optimisation. %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最適化に失敗しました。%@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha ao otimizar. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "优化失败。%@"
           }
         }
       }
@@ -251,6 +331,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "该任务已完成——使用“恢复并立即运行”重新启用它，或复制它。"
+          }
+        }
+      }
+    },
+    "There was no stored auth state for this provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für diesen Anbieter war kein Authentifizierungsstatus gespeichert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No había estado de autenticación almacenado para este proveedor."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun état d'authentification n'était enregistré pour ce fournisseur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーに保存された認証情報はありませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não havia estado de autenticação armazenado para este provedor."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该提供方没有已存储的认证状态。"
+          }
+        }
+      }
+    },
+    "There were no memory files to reset." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es gab keine Memory-Dateien zum Zurücksetzen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No había archivos de memoria que restablecer."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Il n'y avait aucun fichier de mémoire à réinitialiser."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リセットするメモリファイルはありませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não havia arquivos de memória para redefinir."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可重置的记忆文件。"
+          }
+        }
+      }
+    },
+    "This Hermes installation is managed; plugin activation is read-only" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird verwaltet; die Plugin-Aktivierung ist schreibgeschützt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalación de Hermes está gestionada; la activación de complementos es de solo lectura"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette installation Hermes est gérée ; l'activation des plugins est en lecture seule"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes インストールは管理されています。プラグインの有効化は読み取り専用です"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalação do Hermes é gerenciada; a ativação de plugins é somente leitura"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 安装受管理；插件启用为只读"
+          }
+        }
+      }
+    },
+    "This Hermes is managed by %@. Enabling and disabling plugins is read-only here — change it in your package manager's configuration and re-deploy." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird von %@ verwaltet. Das Aktivieren und Deaktivieren von Plugins ist hier schreibgeschützt — ändere es in der Konfiguration deines Paketmanagers und deploye erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes está gestionado por %@. Activar y desactivar complementos es de solo lectura aquí: cámbialo en la configuración de tu gestor de paquetes y vuelve a desplegar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet Hermes est géré par %@. L'activation et la désactivation des plugins sont en lecture seule ici — modifiez-les dans la configuration de votre gestionnaire de paquets, puis redéployez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は %@ によって管理されています。プラグインの有効化と無効化はここでは読み取り専用です。パッケージマネージャーの設定で変更して再デプロイしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes é gerenciado por %@. Ativar e desativar plugins é somente leitura aqui — altere na configuração do seu gerenciador de pacotes e reimplante."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 由 %@ 管理。此处无法启用或停用插件，请在软件包管理器的配置中修改并重新部署。"
           }
         }
       }
@@ -3901,6 +4141,48 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个不含运行间连续性"
+          }
+        }
+      }
+    },
+    "%lld w/o their pre-run script (the file stays on this host)" : {
+      "comment" : "Fleet-apply result note: N copied cron jobs run a pre-run script whose file is not replicated to the target host.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ohne ihr Pre-Run-Skript (die Datei bleibt auf diesem Host)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sin su script previo a la ejecución (el archivo se queda en este host)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sans leur script de pré-exécution (le fichier reste sur cet hôte)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件は事前実行スクリプトなし (ファイルはこのホストに残ります)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sem o script de pré-execução (o arquivo fica neste host)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 项缺少运行前脚本（文件仍留在此主机上）"
           }
         }
       }
@@ -40839,6 +41121,46 @@
         }
       }
     },
+    "hermes auth logout printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes auth logout` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "Hermes auto-compacted this session's context ^[%lld time](inflect: true)" : {
       "localizations" : {
         "de" : {
@@ -41778,6 +42100,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hermes 运行中"
+          }
+        }
+      }
+    },
+    "hermes sessions optimize printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` 未输出任何结果。请检查主机。"
           }
         }
       }
@@ -67238,6 +67600,47 @@
         }
       }
     },
+    "Pairing needs a terminal on %@, where Hermes runs — run this step there over SSH." : {
+      "comment" : "Shown under a disabled Signal/WhatsApp pairing button when the window is bound to a remote Hermes. The embedded terminal spawns on the user's own Mac, so pairing there would link the wrong machine. %@ is the server's display name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kopplung braucht ein Terminal auf %@, wo Hermes läuft — führe diesen Schritt dort über SSH aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El emparejamiento necesita un terminal en %@, donde se ejecuta Hermes: realiza este paso allí por SSH."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’association nécessite un terminal sur %@, là où Hermes s’exécute — effectuez cette étape là-bas via SSH."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペアリングには Hermes が動作している %@ 上のターミナルが必要です。この手順は SSH でそちらから実行してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O pareamento precisa de um terminal em %@, onde o Hermes é executado — faça esta etapa lá por SSH."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对需要在运行 Hermes 的 %@ 上使用终端——请通过 SSH 在那里执行此步骤。"
+          }
+        }
+      }
+    },
     "Parent directory" : {
       "localizations" : {
         "de" : {
@@ -77323,6 +77726,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "移除条目"
+          }
+        }
+      }
+    },
+    "Remove failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entfernen fehlgeschlagen: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error al eliminar: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la suppression : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除に失敗しました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha ao remover: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除失败：%@"
+          }
+        }
+      }
+    },
+    "Remove failed: exit %d" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entfernen fehlgeschlagen: Exit-Code %d"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error al eliminar: código de salida %d"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la suppression : code de sortie %d"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除に失敗しました: 終了コード %d"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha ao remover: código de saída %d"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除失败：退出码 %d"
           }
         }
       }
@@ -113273,43 +113756,43 @@
         }
       }
     },
-    "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it." : {
-      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0.",
+    "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, duplicate it to schedule a new one." : {
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0. Names Duplicate, the only gesture those hosts accept for the record.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dieser Auftrag konnte nicht geplant werden. Hermes v0.21.0 oder neuer kann ihn fortsetzen — bis dahin bearbeite den Zeitplan, um ihn neu zu aktivieren."
+            "value" : "Dieser Auftrag konnte nicht geplant werden. Hermes v0.21.0 oder neuer kann ihn fortsetzen — bis dahin dupliziere ihn, um eine neue Ausführung zu planen."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No se pudo programar esta tarea. Hermes v0.21.0 o posterior puede reanudarla; hasta entonces, edita la programación para reactivarla."
+            "value" : "No se pudo programar esta tarea. Hermes v0.21.0 o posterior puede reanudarla; hasta entonces, duplícala para programar una nueva."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cette tâche n'a pas pu être planifiée. Hermes v0.21.0 ou plus récent peut la reprendre — en attendant, modifiez la planification pour la réarmer."
+            "value" : "Cette tâche n'a pas pu être planifiée. Hermes v0.21.0 ou plus récent peut la reprendre — en attendant, dupliquez-la pour en planifier une nouvelle."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このジョブのスケジュール設定に失敗しました。Hermes v0.21.0 以降なら再開できます。それまではスケジュールを編集して再設定してください。"
+            "value" : "このジョブのスケジュール設定に失敗しました。Hermes v0.21.0 以降なら再開できます。それまでは複製して新しい実行を予約してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Não foi possível agendar esta tarefa. O Hermes v0.21.0 ou mais recente pode retomá-la — até então, edite o agendamento para reativá-la."
+            "value" : "Não foi possível agendar esta tarefa. O Hermes v0.21.0 ou mais recente pode retomá-la — até então, duplique-a para agendar uma nova."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请编辑排程以重新启用。"
+            "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请复制它以安排新的运行。"
           }
         }
       }
@@ -113597,6 +114080,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "验证错误：%@ 包含制表符或控制字符。请删除后再保存。"
+          }
+        }
+      }
+    },
+    "“%@” contains a control character. Hermes would store it as an invisible escape that never matches — remove it and save again." : {
+      "comment" : "Shown on a platform setup form's save bar when a config.yaml value carries a C0/C1 control character. Hermes writes it losslessly as an escape, so the file stays valid but the value is invisible and never matches. %@ is the config key, e.g. whatsapp.reply_prefix.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält ein Steuerzeichen. Hermes würde es als unsichtbare Escape-Sequenz speichern, die nie zutrifft — entferne es und speichere erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» contiene un carácter de control. Hermes lo guardaría como un escape invisible que nunca coincide: elimínalo y vuelve a guardar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » contient un caractère de contrôle. Hermes l’enregistrerait comme une séquence d’échappement invisible qui ne correspondra jamais — supprimez-le et enregistrez à nouveau."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」に制御文字が含まれています。Hermes はこれを不可視のエスケープとして保存するため、決して一致しません。削除してから保存し直してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contém um caractere de controle. O Hermes o armazenaria como um escape invisível que nunca corresponde — remova-o e salve novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”包含控制字符。Hermes 会将其存储为永远无法匹配的不可见转义序列——请删除后重新保存。"
           }
         }
       }

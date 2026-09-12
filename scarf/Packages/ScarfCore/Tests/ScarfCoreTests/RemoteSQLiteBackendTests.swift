@@ -53,7 +53,7 @@ private struct LocalSQLite3Transport: ServerTransport {
         try FileManager.default.removeItem(atPath: path)
     }
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         throw TransportError.other(message: "LocalSQLite3Transport.runProcess unused in tests")
     }
 
@@ -407,7 +407,7 @@ private struct LocalSQLite3Transport: ServerTransport {
         _ = await backend.open()
 
         let rows = try await backend.query("SELECT id FROM sessions", params: [])
-        #expect(rows.count == 1)
+        try #require(rows.count == 1)
         if case .text(let id) = rows[0][0] {
             #expect(id == "s1")
         } else {
@@ -486,7 +486,7 @@ private struct LocalSQLite3Transport: ServerTransport {
             "SELECT id, ended_at, end_reason FROM sessions WHERE id = ?",
             params: [.text("s1")]
         )
-        #expect(rows.count == 1)
+        try #require(rows.count == 1)
         // ended_at and end_reason are NULL in the fixture row.
         #expect(rows[0].isNull(at: 1))
         #expect(rows[0].isNull(at: 2))
@@ -510,9 +510,9 @@ private struct LocalSQLite3Transport: ServerTransport {
             (sql: "SELECT id FROM messages WHERE session_id = ?", params: [.text("s1")]),
             (sql: "SELECT COUNT(*) FROM sessions", params: [])
         ])
-        #expect(results.count == 3)
+        try #require(results.count == 3)
         // Slot 0: one session row.
-        #expect(results[0].count == 1)
+        try #require(results[0].count == 1)
         if case .text(let sid) = results[0][0][0] {
             #expect(sid == "s1")
         } else {
@@ -521,7 +521,7 @@ private struct LocalSQLite3Transport: ServerTransport {
         // Slot 1: one message row.
         #expect(results[1].count == 1)
         // Slot 2: one count row with integer 1.
-        #expect(results[2].count == 1)
+        try #require(results[2].count == 1)
         if case .integer(let n) = results[2][0][0] {
             #expect(n == 1)
         } else {
@@ -547,7 +547,7 @@ private struct LocalSQLite3Transport: ServerTransport {
             (sql: "SELECT id FROM messages WHERE session_id = ?", params: [.text("does-not-exist")]),
             (sql: "SELECT COUNT(*) FROM messages", params: [])
         ])
-        #expect(results.count == 3)
+        try #require(results.count == 3)
         #expect(results[0].count == 1)
         #expect(results[1].isEmpty)
         #expect(results[2].count == 1)
@@ -629,7 +629,7 @@ private struct LocalSQLite3Transport: ServerTransport {
             "SELECT id, role, content, tool_calls, token_count FROM messages WHERE id = 99",
             params: []
         )
-        #expect(rows.count == 1)
+        try #require(rows.count == 1)
         let row = rows[0]
         // Positional access proves the key order survived parsing.
         #expect(row.int(at: 0) == 99)
@@ -675,7 +675,7 @@ private struct LocalSQLite3Transport: ServerTransport {
             "SELECT id, tool_calls FROM messages WHERE id = 100",
             params: []
         )
-        #expect(rows.count == 1)
+        try #require(rows.count == 1)
         #expect(rows[0].int(at: 0) == 100)
         if case .text(let tc) = rows[0][1] {
             #expect(tc == toolCalls)
@@ -743,7 +743,7 @@ private struct RecordingTransport: ServerTransport {
     func listDirectory(_ path: String) throws -> [String] { [] }
     func createDirectory(_ path: String) throws {}
     func removeFile(_ path: String) throws {}
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         throw TransportError.other(message: "unused")
     }
     #if !os(iOS)
@@ -998,7 +998,7 @@ private struct RecordingTransport: ServerTransport {
             (sql: "SELECT id FROM sessions", params: []),
             (sql: "SELECT id FROM messages", params: []),
         ])
-        #expect(batch.count == 2)
+        try #require(batch.count == 2)
         #expect(batch[0].count == 1)
         #expect(batch[1].count == 1)
 

@@ -507,17 +507,15 @@ struct SidebarProjectsWell: View {
             }
             Divider()
         }
-        // Same gate the old second sidebar used: at least ONE of the RPCs
-        // the sheet configures has to exist on the host, or nobody gets an
-        // option that wouldn't apply at runtime.
-        if let caps = capabilitiesStore?.capabilities,
-           caps.hasACPSetSessionModel || caps.hasSessionEditAutoApproval {
-            Button("Chat Settings…", systemImage: "bubble.left.and.text.bubble.right") {
-                chatSettingsTarget = project
-            }
-            .accessibilityIdentifier("projects.contextMenu.chatSettings")
-            Divider()
+        // Ungated since P49: the sheet's model section applies on every
+        // supported host (`session/set_model` at `acp_adapter/server.py:482`
+        // @ v2026.3.30 = 0.6.0), so the entry always leads to a working
+        // control. The auto-accept section keeps its own v0.15 gate inside.
+        Button("Chat Settings…", systemImage: "bubble.left.and.text.bubble.right") {
+            chatSettingsTarget = project
         }
+        .accessibilityIdentifier("projects.contextMenu.chatSettings")
+        Divider()
         Button("Rename…", systemImage: "pencil") { renameTarget = project }
         Button("Move to Folder…", systemImage: "folder") { moveTarget = project }
         if project.archived {

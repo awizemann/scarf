@@ -21,11 +21,12 @@ struct HermesP38SourceSweepTests {
             .deletingLastPathComponent()   // repo root
     }
 
-    private static let testRoots = [
-        "scarf/scarfTests",
-        "scarf/Scarf iOSTests",
-        "scarf/Packages/ScarfCore/Tests/ScarfCoreTests",
-    ]
+    /// The `try! #require` sweep walks the SAME roots as its two siblings.
+    /// It used to carry its own list, which named ScarfCore's inner
+    /// `ScarfCoreTests` directory (missing the package's second test target)
+    /// and omitted `scarf/Packages/ScarfIOS/Tests` entirely, and it asserted
+    /// nothing about how much it had read (round-6 P53b).
+    private static var testRoots: [String] { phaseSuiteRoots }
 
     private static func swiftFiles(under relative: String) -> [URL] {
         let root = repoRoot.appendingPathComponent(relative)
@@ -39,7 +40,13 @@ struct HermesP38SourceSweepTests {
     }
 
     /// These sweeps match on source text, so they would match themselves.
-    private static let ownFileName = URL(fileURLWithPath: #filePath).lastPathComponent
+    ///
+    /// Exempted by PATH, not by basename: a basename exemption covers every
+    /// file that happens to share the name, anywhere under the three roots,
+    /// and would quietly stop sweeping a future same-named file. The ScarfCore
+    /// P49b sweep already does it this way (round-5 P52).
+    private static let ownPath = URL(fileURLWithPath: #filePath)
+        .standardizedFileURL.path
 
     private static func isComment(_ line: String) -> Bool {
         let bare = line.trimmingCharacters(in: .whitespaces)
@@ -59,9 +66,11 @@ struct HermesP38SourceSweepTests {
     /// `try! #require` traps on exactly the condition under test.
     @Test func noTestForceTriesARequire() {
         var offenders: [String] = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.testRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
+                scannedByRoot[root, default: 0] += 1
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try! #require") && !Self.isComment(line) {
@@ -70,6 +79,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             `try! #require` traps on failure and a trap takes the whole test \
             host down. Make the test `throws` and use `try #require`: \
@@ -84,224 +94,193 @@ struct HermesP38SourceSweepTests {
     /// failure and execution continues into an out-of-bounds index. Either
     /// `guard xs.count == 1 else { Issue.record(…); return }` or
     /// `try #require(xs.first)`.
-    /// **Scoped to the phase suites**, not the whole tree: every file whose
-    /// name carries a phase number (`…P39Tests.swift`, `HermesP44bTests.swift`,
-    /// `…P0Tests.swift`) under any of ``phaseSuiteRoots`` — the app target,
-    /// the iOS target, and the ScarfCore package.
-    /// A repo-wide run reports ~100 pre-existing sites in non-phase files,
-    /// and fixing those is a separate mechanical pass (filed as `t-f43f0af5`)
-    /// — a sweep that fails on day one is a sweep somebody disables. What it
-    /// does buy: every suite the audit branches wrote is held to the rule,
-    /// and a new phase suite that reintroduces the shape fails here.
+    /// **Repo-wide since round-5 P48 (decision 7).** Every `.swift` file
+    /// under ``phaseSuiteRoots`` — the app target, the iOS target and the
+    /// ScarfCore package — is swept, with no scope predicate at all.
     ///
-    /// Round 4 replaced a hand-kept allowlist with this pattern. The
-    /// allowlist had stopped at P39 — P40–P44 and every ScarfCore package
-    /// test file were silently unscanned — and its only self-check caught
-    /// deletions, never omissions. `legacySuiteFiles` keeps the old names as
-    /// a floor (each must still be found), and `phaseSuiteFloor` keeps the
-    /// population from collapsing if the matcher ever stops matching.
-    static func isPhaseSuite(_ name: String) -> Bool {
-        guard name.hasSuffix("Tests.swift") else { return false }
-        return name.range(of: "P[0-9]+[a-z]?", options: .regularExpression) != nil
-    }
+    /// The scoping is worth remembering as a sequence of honest compromises
+    /// rather than as a mistake. P38 hand-listed 17 phase suites; P45
+    /// replaced the list with a phase-NAME pattern, which finds new phase
+    /// suites by construction but reads nothing a phase writes in an
+    /// ordinarily-named file; P46 added the branch's own touched files by
+    /// PATH, which closed that and found seven more sites. Each step was
+    /// bounded by the same fact: a repo-wide run reported ~90 pre-existing
+    /// sites, and a sweep that fails on day one is a sweep somebody disables.
+    /// P48 is the day the 90 were fixed, so the scope is gone and future
+    /// phases append nothing. `t-f43f0af5` closed with it.
 
-    /// The round-3/round-4 names the pattern replaced. Every one must still
-    /// be scanned; a rename that drops the phase number fails here.
-    static let legacySuiteFiles: Set<String> = [
-        "HermesCLIVerdictP31Tests.swift", "HermesConfigUnsetP35Tests.swift",
-        "HermesCronRecoveryP30Tests.swift", "HermesCronRecoveryP38Tests.swift",
-        "HermesP32YAMLUnificationTests.swift", "HermesP37RemediationTests.swift",
-        "HermesP38YAMLPurgeTests.swift", "SettingsEditorClearP35Tests.swift",
-        "BotDraftControlCharacterP32Tests.swift", "ConfigReadProofP33Tests.swift",
-        "CronRecoveryOfferP30Tests.swift", "CronRecoveryP38Tests.swift",
-        "GatewayPairingVerdictP31Tests.swift", "HermesP35MCPTokenProbeTests.swift",
-        "HermesP35SelectionAndFloorsTests.swift", "HermesP38SettingsResidueTests.swift",
-        "MainActorSpawnDisciplineP22Tests.swift",
-        "HermesManagedRefusalP39Tests.swift", "HermesConfigSetP39Tests.swift",
-        "HermesManagedInstallP39Tests.swift",
+    /// Premise floor. A sweep that reads nothing "passes".
+    ///
+    /// The real population, counted at round-5 P52: **335 `.swift` files**
+    /// across the three roots (134 + 4 + 197). The "484" this said before was
+    /// wrong, and so was the thing it was compared against — the sweep
+    /// counted a `Set` of BASENAMES, which collapses 335 files to 322 and
+    /// would have kept passing while a whole root stopped enumerating. It
+    /// counts URLs now, and each root is asserted non-empty separately.
+    ///
+    /// The floor is well under 335 so ordinary deletion cannot make the floor
+    /// the thing that fails, and well over zero so a broken enumeration
+    /// cannot hide.
+    static let testFileFloor = 250
+
+    /// Per-root floors. A shared `> 0` is not a floor — `scarf/Scarf
+    /// iOSTests` is four files and `scarf/Packages/ScarfIOS/Tests` eleven,
+    /// so a root that half-stopped enumerating would still clear a total of
+    /// 250 on the strength of the two big roots alone (round-6 P53b). Each
+    /// floor is set well under the root's real population so ordinary
+    /// deletion cannot make the floor the thing that fails.
+    ///
+    /// Populations at P53b: 136 / 4 / 199 / 11.
+    static let perRootFloor: [String: Int] = [
+        "scarf/scarfTests": 100,
+        "scarf/Scarf iOSTests": 3,
+        "scarf/Packages/ScarfCore/Tests": 150,
+        "scarf/Packages/ScarfIOS/Tests": 8,
     ]
 
-    /// Scope (ii), P46 finding 3: **every test file this branch touched**,
-    /// whether or not its name carries a phase number.
+    /// The premise floor, shared by all three sweeps over these roots.
     ///
-    /// The name pattern alone is not a scope. P45 replaced a hand-kept
-    /// allowlist with `isPhaseSuite`, which finds new PHASE suites by
-    /// construction — but a phase that fixes sites in an existing,
-    /// ordinarily-named suite (`M5FeatureVMTests.swift`, which P45 itself
-    /// edited) writes code no sweep reads. Scoping by PATH — what the branch
-    /// changed — closes that.
+    /// It was inline in `noSubscriptFollowsACountExpectation` and NOWHERE in
+    /// its two siblings, which walk exactly the same roots for exactly the
+    /// same reason (round-6 P53): `noTestOptionalTriesARequire` and
+    /// `noTestSleepsAFixedHalfSecondOrMore` both `continue` past an
+    /// unreadable file and past a `nil` enumerator, so a renamed root left
+    /// them green and empty. A sweep that reads nothing "passes".
     ///
-    /// P46b: the list is CHECKED IN and read unconditionally. It was pinned
-    /// against `git diff --name-only 5be08f2e..HEAD` by a test, which made a
-    /// unit test depend on repository topology: it fails on a shallow clone
-    /// or any checkout without that commit, and once the branch merges it
-    /// goes red on `main` the first time anyone edits a test file, for a
-    /// reason that has nothing to do with the rule being swept. The list
-    /// below was generated from exactly that diff at `b44dfefd` and frozen.
-    /// A later phase that touches an ordinarily-named test file APPENDS its
-    /// basename here — that is the maintenance the git call was buying, and
-    /// it is one line.
-    ///
-    /// A phase-numbered suite needs no entry: ``isPhaseSuite`` already finds
-    /// it by construction.
-    ///
-    /// Basenames, because the same suite name appears under two targets and
-    /// both are in scope either way.
-    static let branchTouchedTestFiles: Set<String> = [
-        "AuditF2ArgvAndSecretSurfacingTests.swift",
-        "BotAgentViewModelTests.swift",
-        "BotModePhaseBP0Tests.swift",
-        "BotRoutinesViewModelTests.swift",
-        "ConfigReadProofP33Tests.swift",
-        "CronArgvP42Tests.swift",
-        "CronP15EditArgvTests.swift",
-        "CronP18ClearGestureTests.swift",
-        "CronRecoveryP38Tests.swift",
-        "CronRecoveryP42Tests.swift",
-        "CronRecoveryP42bTests.swift",
-        "CronScheduleDisplayP42cTests.swift",
-        "CronViewModelErrorClassificationTests.swift",
-        "FleetApplyPlanTests.swift",
-        "GatewayAndPluginsVerdictP40Tests.swift",
-        "GatewayAndPluginsVerdictP40bTests.swift",
-        "GatewayAndPluginsVerdictP40cTests.swift",
-        "HermesCLIOptionP42Tests.swift",
-        "HermesCLIVerdictP40Tests.swift",
-        "HermesCapabilitiesTests.swift",
-        "HermesConfigSetP39Tests.swift",
-        "HermesConfigUnsetP35Tests.swift",
-        "HermesCronKanbanP42bTests.swift",
-        "HermesFileServiceConfigParityTests.swift",
-        "HermesGatewayVerdictP40bTests.swift",
-        "HermesGatewayVerdictP40cTests.swift",
-        "HermesManagedInstallP39Tests.swift",
-        "HermesManagedLockP39cTests.swift",
-        "HermesManagedRefusalP39Tests.swift",
-        "HermesManagedRefusalP39bTests.swift",
-        "HermesManagedRefusalP39cTests.swift",
-        "HermesP17RemediationTests.swift",
-        "HermesP26CitationSweepTests.swift",
-        "HermesP28CrossPhaseRemediationTests.swift",
-        "HermesP35SelectionAndFloorsTests.swift",
-        "HermesP37RemediationTests.swift",
-        "HermesP38SettingsResidueTests.swift",
-        "HermesP38SourceSweepTests.swift",
-        "HermesP41ControlCharacterRefusalTests.swift",
-        "HermesP41MCPScalarTests.swift",
-        "HermesP41YAMLDecoderTests.swift",
-        "HermesP41bRefusalTests.swift",
-        "HermesP41bYAMLTests.swift",
-        "HermesP44Tests.swift",
-        "HermesP44bTests.swift",
-        "HermesP45Tests.swift",
-        "HermesP46Tests.swift",
-        "HermesV0204SkillsParityTests.swift",
-        "HermesV0211CronParityTests.swift",
-        "KanbanModelsTests.swift",
-        "LocalModelConfigPlanTests.swift",
-        "LocalizationCatalogTests.swift",
-        "M0bTransportTests.swift",
-        "M5FeatureVMTests.swift",
-        "MCPYAMLMapKeyP19Tests.swift",
-        "MainActorBlockingWritesP11Tests.swift",
-        "MainActorSpawnDisciplineP22Tests.swift",
-        "OAuthFlowDrainP40Tests.swift",
-        "ProcessAsyncWaitP43cTests.swift",
-        "ProcessDrainP43Tests.swift",
-        "ProjectTemplateBoundsP43Tests.swift",
-        "SectionAuditF5KanbanTests.swift",
-        "SectionAuditF5ManageAppTests.swift",
-        "SettingsP20ConfigDefaultsTests.swift",
-        "SlashMenuLogicTests.swift",
-        "SpawnDisciplineP43Tests.swift",
-    ]
-
-    /// Scope = the phase-name pattern OR the branch's own touched files.
-    static func isInSweepScope(_ name: String) -> Bool {
-        isPhaseSuite(name) || branchTouchedTestFiles.contains(name)
+    /// Per root AND a total, because neither catches the other's failure: a
+    /// total cannot say which root went quiet, and a per-root `> 0` passes on
+    /// one file.
+    static func assertTheSweepRead(
+        _ scannedByRoot: [String: Int],
+        fileID: String = #fileID, filePath: String = #filePath,
+        line: Int = #line, column: Int = #column
+    ) {
+        let location = SourceLocation(
+            fileID: fileID, filePath: filePath, line: line, column: column)
+        for root in phaseSuiteRoots {
+            let floor = perRootFloor[root] ?? 1
+            #expect((scannedByRoot[root] ?? 0) >= floor, Comment(rawValue:
+                "the sweep read \(scannedByRoot[root] ?? 0) test files under "
+                + "\(root) (floor \(floor)) — the walk is broken"),
+                sourceLocation: location)
+        }
+        let scanned = scannedByRoot.values.reduce(0, +)
+        #expect(scanned >= testFileFloor, Comment(rawValue:
+            "the sweep read only \(scanned) test files "
+            + "(floor \(testFileFloor)) — it cannot have covered the roots"),
+            sourceLocation: location)
     }
 
-    /// Premise floor: 78 phase suites matched when round 4 widened the sweep.
-    static let phaseSuiteFloor = 70
-
-    /// The roots the phase sweep walks — the same three the `try! #require`
+    /// The roots the phase sweep walks — the same ones the `try! #require`
     /// sweep above uses, spelled separately because ScarfCore's root is the
     /// whole `Tests` directory (it holds two test targets), not just
     /// `ScarfCoreTests`.
-    private static let phaseSuiteRoots = [
+    ///
+    /// `scarf/Packages/ScarfIOS/Tests` was missing until round-6 P53b. P53
+    /// had just taught the three C10 sweeps that omitting
+    /// `Packages/ScarfIOS/Sources` blessed the iOS SSH runtime by omission;
+    /// its TEST tree was blessed the same way by this one, which is why the
+    /// roots carry per-root floors now — the lesson is that a root's absence
+    /// is invisible, so each root has to say how much it expects to read.
+    static let phaseSuiteRoots = [
         "scarf/scarfTests",
         "scarf/Scarf iOSTests",
         "scarf/Packages/ScarfCore/Tests",
+        "scarf/Packages/ScarfIOS/Tests",
     ]
+
+    /// The matcher, hoisted out of the sweep so it can be CALIBRATED.
+    ///
+    /// It was inline, and the optional-chain exemption P48 added to it went in
+    /// with nothing exercising either arm: a matcher that silently stopped
+    /// matching would have left the sweep green and empty. Hoisted, its three
+    /// interesting cases are pinned next door in
+    /// `SubscriptAfterCountMatcherP48bTests` — the way
+    /// `FixedSleepMatcherP46bTests` pins the sleep matcher (round-5 P48b).
+    ///
+    /// - Returns: the 1-based line numbers of offending subscripts, each with
+    ///   the offending text.
+    static func subscriptAfterCountOffenses(in source: String) -> [(line: Int, text: String)] {
+        var offenders: [(line: Int, text: String)] = []
+        let lines = source.components(separatedBy: "\n")
+        for (i, line) in lines.enumerated() {
+            guard !Self.isComment(line),
+                  line.contains("#expect("), line.contains(".count")
+            else { continue }
+            // The receiver whose count was asserted: the token right before
+            // `.count`.
+            guard let dot = line.range(of: ".count") else { continue }
+            let receiver = String(line[line.startIndex..<dot.lowerBound])
+                .split(whereSeparator: { " (!=<>&|,".contains($0) })
+                .last.map(String.init) ?? ""
+            guard !receiver.isEmpty else { continue }
+            // Look at the next few statements for a bare subscript on that
+            // same receiver.
+            for j in (i + 1)..<min(i + 5, lines.count) {
+                let next = lines[j]
+                guard !Self.isComment(next) else { continue }
+                // A `guard`/`#require` in between is the correct fix and ends
+                // the window.
+                if next.contains("guard ") || next.contains("#require(") { break }
+                guard let open = next.range(of: receiver + "[") else { continue }
+                // A string-keyed lookup (`findings["File"]`) is a dictionary
+                // read: it returns nil, it does not trap.
+                if next[open.upperBound...].hasPrefix("\"") { break }
+                // So is an OPTIONAL-CHAINED one (`map[1]?.first`):
+                // `Dictionary.subscript` returns an Optional, and the `?`
+                // right after the closing bracket is the proof — an Array
+                // subscript is non-optional and cannot be chained that way.
+                // P46's note listed this shape as a known false positive;
+                // round-5 P48 tightens the matcher rather than exempting the
+                // file it lives in.
+                if let close = next.range(of: "]", range: open.upperBound..<next.endIndex),
+                   next[close.upperBound...].hasPrefix("?") { break }
+                offenders.append(
+                    (line: j + 1, text: next.trimmingCharacters(in: .whitespaces)))
+                break
+            }
+        }
+        return offenders
+    }
+
+    /// Deleting a root deletes its floor with it, so the roster is pinned
+    /// the way `MainActorSpawnDisciplineP22Tests` pins the C10 sweeps'
+    /// roots: by MEMBERSHIP (round-6 P53b).
+    @Test("every test root is walked, and every walked root has a floor")
+    func theRootRosterIsComplete() {
+        for root in ["scarf/scarfTests",
+                     "scarf/Scarf iOSTests",
+                     "scarf/Packages/ScarfCore/Tests",
+                     "scarf/Packages/ScarfIOS/Tests"] {
+            #expect(Self.phaseSuiteRoots.contains(root), Comment(rawValue:
+                "\(root) dropped out of the sweep's roots — it is blessed by "
+                + "omission the way ScarfIOS was for five rounds"))
+            #expect(Self.perRootFloor[root] != nil, Comment(rawValue:
+                "\(root) has no per-root floor, so a half-broken walk there "
+                + "passes on the big roots' counts"))
+        }
+    }
 
     @Test func noSubscriptFollowsACountExpectation() {
         var offenders: [String] = []
-        var scanned: Set<String> = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
-                scanned.insert(url.lastPathComponent)
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
+                scannedByRoot[root, default: 0] += 1
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                let lines = src.components(separatedBy: "\n")
-                for (i, line) in lines.enumerated() {
-                    guard !Self.isComment(line),
-                          line.contains("#expect("), line.contains(".count")
-                    else { continue }
-                    // The receiver whose count was asserted: the token right
-                    // before `.count`.
-                    guard let dot = line.range(of: ".count") else { continue }
-                    let receiver = String(line[line.startIndex..<dot.lowerBound])
-                        .split(whereSeparator: { " (!=<>&|,".contains($0) })
-                        .last.map(String.init) ?? ""
-                    guard !receiver.isEmpty else { continue }
-                    // Look at the next few statements for a bare subscript on
-                    // that same receiver.
-                    for j in (i + 1)..<min(i + 5, lines.count) {
-                        let next = lines[j]
-                        guard !Self.isComment(next) else { continue }
-                        // A `guard`/`#require` in between is the correct fix
-                        // and ends the window.
-                        if next.contains("guard ") || next.contains("#require(") { break }
-                        guard let open = next.range(of: receiver + "[") else { continue }
-                        // A string-keyed lookup (`findings["File"]`) is a
-                        // dictionary read: it returns nil, it does not trap.
-                        if next[open.upperBound...].hasPrefix("\"") { break }
-                        offenders.append("\(url.lastPathComponent):\(j + 1) — "
-                                         + next.trimmingCharacters(in: .whitespaces))
-                        break
-                    }
+                for hit in Self.subscriptAfterCountOffenses(in: src) {
+                    offenders.append("\(url.lastPathComponent):\(hit.line) — \(hit.text)")
                 }
             }
         }
-        #expect(scanned.count >= Self.phaseSuiteFloor, Comment(rawValue:
-            "the phase-suite matcher found only \(scanned.count) files "
-            + "(floor \(Self.phaseSuiteFloor)) — it has stopped matching"))
-        #expect(Self.legacySuiteFiles.subtracting(scanned).isEmpty, Comment(rawValue:
-            "legacy phase suites are no longer being scanned: "
-            + Self.legacySuiteFiles.subtracting(scanned).sorted().joined(separator: ", ")))
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             A subscript follows a count `#expect` with no guard between them. \
             `#expect` records and CONTINUES, so a wrong count runs straight \
             into an out-of-bounds trap and kills the test host: \
             \(offenders.joined(separator: "; "))
             """))
-    }
-
-    /// Deletion floor for scope (ii): every branch-touched file must still be
-    /// found, or a rename has silently dropped it out of the sweep.
-    @Test func theBranchScopeIsFullyScanned() {
-        var scanned: Set<String> = []
-        for root in Self.phaseSuiteRoots {
-            for url in Self.swiftFiles(under: root)
-            where Self.isInSweepScope(url.lastPathComponent) {
-                scanned.insert(url.lastPathComponent)
-            }
-        }
-        let missing = Self.branchTouchedTestFiles.subtracting(scanned)
-        #expect(missing.isEmpty, Comment(rawValue:
-            "branch-touched test files are no longer being scanned: "
-            + missing.sorted().joined(separator: ", ")))
     }
 
     // MARK: - 22b: `try? #require` swallows the requirement
@@ -313,11 +292,12 @@ struct HermesP38SourceSweepTests {
     /// assertion that vacuously holds. The point of `#require` is to stop.
     @Test func noTestOptionalTriesARequire() {
         var offenders: [String] = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                scannedByRoot[root, default: 0] += 1
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try? #require") && !Self.isComment(line) {
                     offenders.append("\(url.lastPathComponent):\(i + 1) — "
@@ -325,6 +305,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             `try? #require` discards the requirement and continues with nil. \
             Make the test `throws` and use `try #require`: \
@@ -339,11 +320,19 @@ struct HermesP38SourceSweepTests {
     /// waiting to be lost on a loaded machine or half a second of wall clock
     /// added to every serial run — usually both. Poll an observable instead.
     ///
-    /// Two sites are allowed, with reasons, because their sleep is not a wait
-    /// for an observable but the FIXTURE itself or a deliberate "nothing
-    /// happened" window, which by construction has nothing to observe.
+    /// Allowed sites, each with a written reason, because each sleep is not a
+    /// wait for an observable: it is the FIXTURE, a deliberate "nothing
+    /// happened" window (which by construction has nothing to poll for), or a
+    /// watchdog that a healthy run cancels before it ever elapses.
+    ///
+    /// Round-5 P48 widened this rule from the branch-scoped files to the whole
+    /// test tree, so the list below is now the repo-wide answer. Everything
+    /// that COULD be polled was converted rather than allowed — the FSEvents
+    /// naps in `HermesFileWatcherAtomicReplaceTests`, the mtime gap in
+    /// `KeychainEnvMirrorTests`, and `GwF4OutcomeMessageChannelTests`'s one
+    /// auto-clear that actually fires.
     static let allowedFixedSleeps: [String: String] = [
-        "ProcessAsyncWaitP43cTests.swift:339":
+        "ProcessAsyncWaitP43cTests.swift:614":
             "the 3 s is the FIXTURE — EOF deliberately lands between the two "
             + "graces (1 s and 6 s) so the latch race is decided by construction, "
             + "not by luck; it runs on a background queue, not in the test body",
@@ -351,6 +340,23 @@ struct HermesP38SourceSweepTests {
             "the assertion is that the cancelled load did NOT reach its third "
             + "probe, so there is no observable to poll for; the window is one "
             + "probe delay (0.3 s) times three",
+        "PreReleaseFixupTests.swift:28":
+            "the assertion is that a FAILURE did not auto-clear after the "
+            + "success path's 3 s TTL — a non-event, so there is nothing to "
+            + "poll; the wait must outlast the real timer to mean anything",
+        "GwF4OutcomeMessageChannelTests.swift:64":
+            "same non-event: a failure must still be on screen after the "
+            + "success TTL has elapsed. The sibling that asserts a success DOES "
+            + "clear polls for it instead",
+        "GwF4OutcomeMessageChannelTests.swift:94":
+            "same non-event, with the extra condition that an EARLIER success's "
+            + "pending timer must not wipe the refusal that landed after it",
+        "ProcessACPChannelTests.swift:80":
+            "a WATCHDOG, not a wait: the sleep runs in a task the test cancels "
+            + "as soon as the echo arrives, so a healthy run never spends any "
+            + "of it — it exists to turn a hang into a failure",
+        "ProcessACPChannelTests.swift:136":
+            "the same watchdog on the stdout/stderr interleaving test",
     ]
 
     /// The seconds a sleep on this line lasts, or `nil` if the line is not a
@@ -385,11 +391,12 @@ struct HermesP38SourceSweepTests {
     @Test func noTestSleepsAFixedHalfSecondOrMore() {
         var offenders: [String] = []
         var allowancesSeen: Set<String> = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                scannedByRoot[root, default: 0] += 1
                 for (i, line) in src.components(separatedBy: "\n").enumerated() {
                     guard !Self.isComment(line) else { continue }
                     for seconds in Self.fixedSleepSeconds(in: line) {
@@ -404,6 +411,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             A test sleeps a fixed half second or more. Poll the observable the \
             work produces instead, or add the site to `allowedFixedSleeps` with \
@@ -478,7 +486,7 @@ struct HermesP38SourceSweepTests {
 /// test is a matcher that can stop matching in silence.
 /// This suite lives in the sweep's own file ON PURPOSE: its calibration
 /// cases are sleep spellings written as string literals, and any other file
-/// in scope would have the sweep read them as real sleeps. `ownFileName` is
+/// in scope would have the sweep read them as real sleeps. `ownPath` is
 /// already excluded, so the cases sit where they cannot trip the rule they
 /// calibrate.
 @Suite("P46b · the fixed-sleep matcher is calibrated")
@@ -520,5 +528,61 @@ struct FixedSleepMatcherP46bTests {
         #expect(HermesP38SourceSweepTests.fixedSleepSeconds(
             in: "try await Task.sleep(nanoseconds: 10_000_000)").first == 0.01)
         #expect(HermesP38SourceSweepTests.fixedSleepSeconds(in: "await settle()").isEmpty)
+    }
+}
+
+/// Round-5 P48b — calibration for the subscript-after-count matcher.
+///
+/// The sweep's other matcher got this treatment in P46b and this one did not,
+/// even as P48 added an exemption arm to it. A source sweep that stops
+/// matching reports nothing and looks exactly like a clean tree, so the arms
+/// are exercised here against hand-written snippets rather than against
+/// whatever the repo happens to contain today.
+@Suite("The subscript-after-count matcher is calibrated (P48b)")
+struct SubscriptAfterCountMatcherP48bTests {
+
+    /// The shape the sweep exists for: `#expect` RECORDS and continues, so a
+    /// wrong count runs into the subscript and traps the host.
+    @Test func anArraySubscriptAfterACountIsAHit() {
+        let source = """
+            #expect(items.count == 2)
+            let first = items[0]
+            """
+        let hits = HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source)
+        #expect(hits.count == 1, "expected one hit, got \(hits)")
+        #expect(hits.first?.line == 2)
+    }
+
+    /// A string-keyed lookup is a `Dictionary` read: it returns `nil`, it does
+    /// not trap.
+    @Test func aStringKeyedDictionaryReadIsNotAHit() {
+        let source = """
+            #expect(findings.count == 2)
+            let one = findings["Transport.swift"]
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+    }
+
+    /// So is an optional-chained one — the `?` right after the bracket is the
+    /// proof, since an Array subscript is non-optional and cannot be chained
+    /// that way. This is the arm P48 added; without it the sweep fires on a
+    /// safe line, with it inverted the sweep misses a real trap.
+    @Test func anOptionalChainedSubscriptIsNotAHit() {
+        let source = """
+            #expect(byLine.count == 2)
+            #expect(byLine[1]?.first == "a")
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+    }
+
+    /// …and the `#require` the sweep asks for really does end the window,
+    /// or every correctly-fixed site in the tree would be reported.
+    @Test func aRequireBetweenThemEndsTheWindow() {
+        let source = """
+            #expect(items.count == 2)
+            let first = try #require(items.first)
+            let second = items[1]
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
     }
 }

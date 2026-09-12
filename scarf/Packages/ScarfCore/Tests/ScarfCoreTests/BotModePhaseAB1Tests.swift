@@ -110,7 +110,7 @@ import SwiftUI
     /// (`4 + floor(rng()*3)`), no ring. Spot-checks segment count, the first
     /// stroke pair (main + mirror), the trailing spine stroke every variant
     /// gets, and the ring flag.
-    @Test func sigilGeometryMatchesJSVectorAgentSeed0() {
+    @Test func sigilGeometryMatchesJSVectorAgentSeed0() throws {
         let g = BotAvatarGenerator.sigilGeometry(name: "agent", seed: 0)
 
         #expect(g.hasRing == false)
@@ -119,7 +119,7 @@ import SwiftUI
         // 6 segments: 2 strokes each (main+mirror) plus a tie whenever
         // rng() > 0.6 rolled true, plus 1 trailing spine stroke.
         // JS trace: 14 total strokes for this seed.
-        #expect(g.strokes.count == 14)
+        try #require(g.strokes.count == 14)
 
         #expect(g.strokes[0] == BotAvatarGenerator.SigilStroke(x1: 13, y1: 32, x2: 20, y2: 32))
         #expect(g.strokes[1] == BotAvatarGenerator.SigilStroke(x1: 27, y1: 32, x2: 20, y2: 32))
@@ -131,14 +131,14 @@ import SwiftUI
 
     /// Pinned against `node`'s `sigilGeometry("Scout", 3)`: 5 body segments,
     /// ring present (rng() > 0.45 rolled true).
-    @Test func sigilGeometryMatchesJSVectorScoutSeed3() {
+    @Test func sigilGeometryMatchesJSVectorScoutSeed3() throws {
         let g = BotAvatarGenerator.sigilGeometry(name: "Scout", seed: 3)
 
         #expect(g.hasRing == true)
         #expect(g.ringCorners.map(\.x) == [20, 36, 20, 4])
         #expect(g.ringCorners.map(\.y) == [4, 20, 36, 20])
 
-        #expect(g.strokes.count == 12)
+        try #require(g.strokes.count == 12)
         #expect(g.strokes[0] == BotAvatarGenerator.SigilStroke(x1: 20, y1: 8, x2: 20, y2: 14))
         #expect(g.strokes.last == BotAvatarGenerator.SigilStroke(x1: 20, y1: 8, x2: 20, y2: 32))
     }

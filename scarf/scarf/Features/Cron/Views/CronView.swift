@@ -670,6 +670,14 @@ struct CronView: View {
                 Label("Run now", systemImage: "play.fill")
             }
             .buttonStyle(ScarfPrimaryButton())
+            // `trigger_job` uses the BARE `is_terminal_job`
+            // (`cron/jobs.py:2012` @ `v2026.9.7`) — no
+            // `_is_recoverable_error_job` exemption, unlike the resume door —
+            // so Run Now on a terminal job is a guaranteed exit 1. The row
+            // context menu (`:494`) and `BotRoutinesView` (`:201-203`) already
+            // disabled it; this pane's PRIMARY button was the one left live,
+            // which is the loudest place to offer a refusal.
+            .disabled(viewModel.refusesTerminalJobLocally(job))
 
             // The offer is computed once, from the two Hermes predicates —
             // `_is_recoverable_error_job` and `rearm_oneshot`'s

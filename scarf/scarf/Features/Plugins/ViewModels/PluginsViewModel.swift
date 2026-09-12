@@ -49,6 +49,37 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// distinct from a report with no affected plugins. The banner only
     /// renders for the latter's opposite; nothing is claimed on nil.
     var compatReport: HermesPluginCompatReport?
+    /// Whether this host is a package-manager-managed Hermes, from the one
+    /// `.managed` probe P39 added (``HermesManagedInstall``).
+    ///
+    /// P47 / round-5 decision 1 — the Plugins pane is the second surface
+    /// under the read-only lock (`t-8f55df7d`, this pane's half). Activation
+    /// is a config write: `cmd_enable` (`hermes_cli/plugins_cmd.py:987`) and
+    /// `cmd_disable` (`:1182`) call `_save_plugin_sets` directly (`:1022`,
+    /// `:1196`) → `_save_enabled_set` / `_save_disabled_set` (`:910`, `:906`)
+    /// → `_write_config_value` (`:115-120`) → `save_config`, whose managed
+    /// arm refuses at exit 0 and lets the caller print its success line
+    /// anyway (`hermes_cli/config.py:2315-2318` @ `v2026.9.7`).
+    /// `_set_plugin_enabled` (`:944`) is a SIBLING caller of the same door,
+    /// reached from `cmd_install` (`:754`), `_rescan_after_update` (`:847`)
+    /// and the dashboard APIs (`:1711`, `:1786`) — the door is
+    /// `_save_plugin_sets` (`:914-916`), not any one of its callers
+    /// (P47b review, finding 2).
+    ///
+    /// `.notManaged` until the probe lands, so the pane renders writable and
+    /// then locks — never the reverse flash. A host WITHOUT the marker file
+    /// is byte-identical to before (charter C1), and an env-var-only
+    /// (`HERMES_MANAGED`) managed host — which Scarf's transport cannot see —
+    /// also renders unchanged and falls through to the verdicts
+    /// (``HermesPluginInstallOutcome/configWriteRefusal`` and the anchored
+    /// markers on enable/disable/update).
+    /// Written in exactly ONE production place — `load()`'s detached hop,
+    /// from ``HermesManagedInstallCache/shared``. The setter is internal
+    /// rather than private only so a test can exercise the lock's real
+    /// consumers (`enable` / `disable` / `install`) without a `.managed` file
+    /// on disk; `HermesP47Tests.theProbeIsReadInLoadAndNowhereElse` fails if
+    /// a second production writer appears.
+    var managedInstall: HermesManagedInstall = .notManaged
     var isLoading = false
     var message: String?
     /// Outcome of `message` (GW-F4). This channel carried "Install failed"
@@ -56,6 +87,38 @@ final class PluginsViewModel: OutcomeMessageHosting {
     var messageIsFailure = false
 
     private var pluginsDir: String { context.paths.pluginsDir }
+
+    var isManagedHost: Bool { managedInstall.isManaged }
+
+    /// The ONE managed-install banner this pane shows. Names the package
+    /// manager `get_managed_system` resolved, because "use your package
+    /// manager" is useless without it — the same rule as
+    /// `SettingsViewModel.managedBannerText`, with this pane's own scope in
+    /// the sentence.
+    ///
+    /// The scope is deliberately ACTIVATION, not the whole pane. Install,
+    /// Update and Remove write the plugin DIRECTORY
+    /// (`_install_plugin_core`, `_remove_plugin_core`, the `git pull` in
+    /// `cmd_update` — `hermes_cli/plugins_cmd.py:740`, `:893`, `:794-830` @
+    /// `v2026.9.7`), which `is_managed()` never guards, and those directory
+    /// writes are the whole of what the three verbs do on their own account.
+    /// They are not `save_config`-free: `cmd_update` (`:794`) →
+    /// `_rescan_after_update` (`:810`) → `_set_plugin_enabled(name,
+    /// enable=False)` (`:847`) on a `dangerous` scan verdict, and it prints
+    /// `Plugin '<name>' has been disabled.` (`:848-851`) whether or not the
+    /// write landed. That refusal is caught by the VERDICT
+    /// (``HermesPluginsUpdateVerdict/judge``, whose `managedRefusalAnchored`
+    /// match wins over the success line), not by the lock — P47's rationale
+    /// that "only `_set_plugin_enabled` reaches `save_config`" was false
+    /// (P47b review, finding 3). Locking a control Hermes
+    /// would honour is the round-4-review mistake in reverse, and a managed
+    /// host has more reason to manage its plugin directory, not less. What
+    /// the lock covers: the Enable/Disable buttons and the install sheet's
+    /// "Enable after installing" toggle, whose write is the refused one.
+    var managedBannerText: String? {
+        guard let system = managedInstall.system else { return nil }
+        return String(localized: "This Hermes is managed by \(system). Enabling and disabling plugins is read-only here — change it in your package manager's configuration and re-deploy.")
+    }
 
     /// Activation state comes from Hermes, never from the filesystem.
     ///
@@ -125,9 +188,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
                 ? HermesPluginCompatReport.parse(
                     svc.runHermesCLISplit(args: ["plugins", "compat", "--json"], timeout: 45).stdout)
                 : nil
+            // P47: one `.managed` stat+read per home, memoized process-wide,
+            // on the same detached hop as the roster (charter C10). The
+            // capabilities decide how the marker is READ — below v0.20.5
+            // `get_managed_system` never opens the file and ANY marker means
+            // managed (`hermes_cli/config.py:327-330` @ `v2026.6.19`).
+            let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
             await MainActor.run { [weak self] in
                 self?.plugins = result
                 self?.compatReport = compat
+                self?.managedInstall = managed
                 self?.isLoading = false
             }
         }
@@ -280,10 +350,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
         // In-progress, not an outcome — nothing has failed yet.
         message = String(localized: "Installing \(identifier)…")
         messageIsFailure = false
-        Task.detached { [weak self, fileService] in
-            let result = fileService.runHermesCLI(
-                args: ["plugins", "install", enable ? "--enable" : "--no-enable", "--", identifier],
-                timeout: 180
+        // P47: through `cliRunner`, the same injectable seam `enable` /
+        // `disable` / `update` use. The verdict rule that matters here — a
+        // refusal outranks the `✓ Plugin <name> enabled.` line printed on top
+        // of it — lives on this path, so a test that cannot reach the real
+        // path proves nothing about the shipped behaviour.
+        let run = cliRunner
+        Task.detached { [weak self] in
+            let result = run(
+                ["plugins", "install", enable ? "--enable" : "--no-enable", "--", identifier],
+                180
             )
             let outcome = HermesPluginInstallOutcome.parse(result.output)
             await MainActor.run { [weak self] in
@@ -303,6 +379,18 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     self.applySaveOutcome(.failure(
                         Self.friendlyPluginFailure(HermesCLIMarkers.pluginsConsentRefusal)
                             ?? String(localized: "Installed, but its capabilities were not granted")
+                    ))
+                } else if !failed, enable, let refusal = outcome.configWriteRefusal {
+                    // P47 / decision 1, the FALLTHROUGH half: an env-var-only
+                    // managed host is invisible to the `.managed` probe, so
+                    // the lock above never armed and `--enable` really did
+                    // reach `save_config`'s refusal — which printed
+                    // `✓ Plugin <name> enabled.` on top of it at exit 0
+                    // (`plugins_cmd.py:754-755`). The clone DID happen, so
+                    // this is a partial write, not a failed install; it is
+                    // never "Installed and enabled".
+                    self.applySaveOutcome(.failure(
+                        String(localized: "Installed, but it could not be enabled: \(refusal)")
                     ))
                 } else {
                     self.applySaveOutcome(
@@ -385,6 +473,13 @@ final class PluginsViewModel: OutcomeMessageHosting {
         // Flags first, then `--`, then the positional: argparse reads
         // everything after the first `--` as a positional, so a flag appended
         // afterwards would exit 2.
+        // P47: the lock disables the control, so reaching here means a
+        // programmatic or keyboard path around it. Refuse locally rather than
+        // shelling a command whose only outcome is Hermes's exit-0 refusal.
+        if let refusal = managedBannerText {
+            applySaveOutcome(.failure(refusal))
+            return
+        }
         var args = ["plugins", "enable"]
         if let allowToolOverride, supportsToolOverrideFlags {
             args.append(allowToolOverride ? "--allow-tool-override" : "--no-allow-tool-override")
@@ -418,6 +513,11 @@ final class PluginsViewModel: OutcomeMessageHosting {
     }
 
     func disable(_ plugin: HermesPlugin) {
+        // P47: same local refusal as `enable` — one door, both directions.
+        if let refusal = managedBannerText {
+            applySaveOutcome(.failure(refusal))
+            return
+        }
         runAndReload(
             ["plugins", "disable", "--", plugin.name],
             success: "Disabled",

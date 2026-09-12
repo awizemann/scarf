@@ -1,8 +1,11 @@
 import Foundation
 
 /// One event from the `task_events` log — emitted by `hermes kanban show`
-/// (within a `HermesKanbanTaskDetail`) and streamed live by
-/// `hermes kanban watch --json`. Event kinds are open-ended on the Hermes
+/// (within a `HermesKanbanTaskDetail`). There is NO machine-readable live
+/// stream to decode from: `hermes kanban watch` takes
+/// `--assignee/--tenant/--kinds/--interval` and nothing else, and its help is
+/// "Live-stream task_events to the terminal" (`hermes_cli/kanban_parser.py:359-365`
+/// @ `v2026.9.7`) — no `--json`. Event kinds are open-ended on the Hermes
 /// side; v0.12 emits a small known set listed in `KanbanEventKind`. Unknown
 /// kinds map to `.unknown` so new Hermes builds don't break decoding.
 public struct HermesKanbanEvent: Sendable, Equatable, Identifiable, Codable {

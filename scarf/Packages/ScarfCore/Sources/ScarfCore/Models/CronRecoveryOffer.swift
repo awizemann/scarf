@@ -75,8 +75,23 @@ public struct CronRecoveryOffer: Sendable, Equatable {
     /// `_reject_terminal_activation` has no `_is_recoverable_error_job`
     /// exemption yet (`cron/jobs.py:2367-2375` @ `v2026.8.27` vs
     /// `:2583-2595` @ `v2026.8.31`).
+    ///
+    /// **The remedy is Duplicate, not "edit the schedule".** This sentence
+    /// used to name editing the schedule, and that gesture is REFUSED on
+    /// exactly the hosts it is shown on: `update_job` @ `v2026.8.27` writes
+    /// `next_run_at` for any record whose `state != "paused"`
+    /// (`cron/jobs.py:2310`, `:2322`, `:2345`) — an `error` job qualifies —
+    /// and the terminal guard immediately below then raises, because
+    /// `is_terminal_job` is the bare `state in {completed, error}`
+    /// (`:638-640`) with no `_is_recoverable_error_job` exemption at that tag
+    /// and `next_run_at is not None` (`:2367-2375`). `cron create` carries no
+    /// terminal guard at all (`create_job`, `:1915`), so duplicating is the
+    /// one door open — and a Duplicate button is rendered on every surface
+    /// that renders this hint: the Mac detail pane and the Bots routines list
+    /// both show it for `offer.isDeadEnd`, and the Mac row context menu and
+    /// iOS's row context menu show it unconditionally.
     public static let errorNeedsNewerHermesHint =
-        String(localized: "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it.")
+        String(localized: "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, duplicate it to schedule a new one.")
 
     /// True when the only thing to show is the hint.
     public var isDeadEnd: Bool { !canResume && !canRearm && hint != nil }

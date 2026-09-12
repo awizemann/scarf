@@ -70,7 +70,7 @@ import Foundation
 
     // MARK: - fetchSessions
 
-    @Test func fetchSessionsEmitsExpectedSQLPrefixAndDefaultLimit() async {
+    @Test func fetchSessionsEmitsExpectedSQLPrefixAndDefaultLimit() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -78,7 +78,7 @@ import Foundation
         _ = await service.fetchSessions()
 
         let log = await mock.queryLog
-        #expect(log.count == 1)
+        try #require(log.count == 1)
         let first = log[0]
         #expect(first.sql.hasPrefix("SELECT id, source"))
         #expect(first.sql.contains("FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
@@ -159,7 +159,7 @@ import Foundation
 
     // MARK: - fetchSession(id:)
 
-    @Test func fetchSessionByIdBindsTextParam() async {
+    @Test func fetchSessionByIdBindsTextParam() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -174,14 +174,14 @@ import Foundation
         #expect(session?.id == "s1") // From the seeded row.
 
         let log = await mock.queryLog
-        #expect(log.count == 1)
+        try #require(log.count == 1)
         #expect(log[0].sql.contains("FROM sessions WHERE id = ? LIMIT 1"))
         #expect(log[0].params == [.text("abc-123")])
     }
 
     // MARK: - fetchMessages
 
-    @Test func fetchMessagesWithoutBeforeBindsSessionAndLimit() async {
+    @Test func fetchMessagesWithoutBeforeBindsSessionAndLimit() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -189,13 +189,13 @@ import Foundation
         _ = await service.fetchMessages(sessionId: "s1", limit: 25, before: nil)
 
         let log = await mock.queryLog
-        #expect(log.count == 1)
+        try #require(log.count == 1)
         #expect(!log[0].sql.contains("id < ?"))
         #expect(log[0].sql.contains("WHERE session_id = ? ORDER BY id DESC LIMIT ?"))
         #expect(log[0].params == [.text("s1"), .integer(25)])
     }
 
-    @Test func fetchMessagesWithBeforeIncludesIdLessThanClause() async {
+    @Test func fetchMessagesWithBeforeIncludesIdLessThanClause() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -203,7 +203,7 @@ import Foundation
         _ = await service.fetchMessages(sessionId: "s1", limit: 25, before: 999)
 
         let log = await mock.queryLog
-        #expect(log.count == 1)
+        try #require(log.count == 1)
         #expect(log[0].sql.contains("WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?"))
         #expect(log[0].params == [.text("s1"), .integer(999), .integer(25)])
     }
@@ -348,7 +348,7 @@ import Foundation
 
     // MARK: - dashboardSnapshot
 
-    @Test func dashboardSnapshotUsesQueryBatchNotIndividualQueries() async {
+    @Test func dashboardSnapshotUsesQueryBatchNotIndividualQueries() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -358,11 +358,11 @@ import Foundation
         let queries = await mock.queryLog
         let batches = await mock.batchLog
         #expect(queries.isEmpty)
-        #expect(batches.count == 1)
+        try #require(batches.count == 1)
         #expect(batches[0].count == 4)
     }
 
-    @Test func dashboardSnapshotBatchOrderIsStatsRecentSessionsPreviewsToolCalls() async {
+    @Test func dashboardSnapshotBatchOrderIsStatsRecentSessionsPreviewsToolCalls() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -370,7 +370,7 @@ import Foundation
         _ = await service.dashboardSnapshot()
 
         let batches = await mock.batchLog
-        #expect(batches.count == 1)
+        try #require(batches.count == 1)
         let stmts = batches[0]
         // 0: stats — selects COUNT(*), SUM(...) from sessions.
         #expect(stmts[0].sql.contains("COUNT(*)"))
@@ -387,7 +387,7 @@ import Foundation
         #expect(stmts[3].sql.contains("WHERE tool_calls IS NOT NULL"))
     }
 
-    @Test func dashboardSnapshotAssemblesDataFromFourResultSets() async {
+    @Test func dashboardSnapshotAssemblesDataFromFourResultSets() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -430,7 +430,7 @@ import Foundation
         #expect(snapshot.stats.totalMessages == 50)
         #expect(snapshot.recentSessions.map { $0.id } == ["sess-A"])
         #expect(snapshot.sessionPreviews["sess-A"] == "first user msg")
-        #expect(snapshot.recentToolCalls.count == 1)
+        try #require(snapshot.recentToolCalls.count == 1)
         #expect(snapshot.recentToolCalls[0].id == 99)
     }
 
@@ -448,7 +448,7 @@ import Foundation
         #expect(log.isEmpty)
     }
 
-    @Test func searchMessagesWrapsTokensInDoubleQuotes() async {
+    @Test func searchMessagesWrapsTokensInDoubleQuotes() async throws {
         let mock = MockHermesQueryBackend()
         let service = HermesDataService(context: context, backend: mock)
         _ = await service.open()
@@ -459,7 +459,7 @@ import Foundation
         // The MATCH pass, then the one-time v0.21.1 bounded-tool marker
         // probe (`state_meta.fts_tool_full_content_high_water`). The probe
         // finds nothing here, so no LIKE fallback is issued.
-        #expect(log.count == 2)
+        try #require(log.count == 2)
         #expect(log[1].sql.contains("state_meta"))
         // FTS query is the first param.
         guard case .text(let fts) = log[0].params[0] else {
@@ -667,8 +667,8 @@ import Foundation
         let map = await service.hydrateAssistantToolCalls(messageIds: ids)
 
         let batchLog = await mock.batchLog
-        #expect(batchLog.count == 1)
-        #expect(batchLog[0].count == 3)  // three pages in one batch
+        try #require(batchLog.count == 1)
+        try #require(batchLog[0].count == 3)  // three pages in one batch
         // Pages are iterated newest-first (reversed), so the 2-id page
         // [11,12] is slot 0 and the 5-id page [1..5] is slot 2.
         #expect(batchLog[0][0].sql.hasPrefix("SELECT id, tool_calls FROM messages WHERE id IN (?,?)"))

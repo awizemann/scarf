@@ -152,19 +152,19 @@ import Foundation
         #expect(explicit.contextID != ServerContext.local.id)
     }
 
+    /// 256 KB on each pipe — four times the 64 KB buffer, which is what makes
+    /// the deadlock reachable. What changed in round-5 P48 (t-d964ab17) is
+    /// how the bytes are produced: this used to be two `seq 1 256` loops each
+    /// calling `seq 1 1018` again, i.e. **512 shell forks**, and on a machine
+    /// running the rest of the suite in parallel those forks — not the drain —
+    /// were what consumed the 10 s ceiling. The test failed with
+    /// `.timeout(partialStdout: 102405 bytes)` for a transport that was
+    /// working. `head -c … /dev/zero | tr` is two processes per stream and
+    /// produces the same volume in milliseconds.
     @Test func localTransportRunProcessDrainsLargeStdoutAndStderr() throws {
-        let script = """
-        for i in $(seq 1 256); do
-            printf '%04d:' "$i"
-            printf '%.0sx' $(seq 1 1018)
-            printf '\\n'
-        done
-        for i in $(seq 1 256); do
-            printf '%04d:' "$i" >&2
-            printf '%.0sy' $(seq 1 1018) >&2
-            printf '\\n' >&2
-        done
-        """
+        let bytes = 256 * 1024
+        let script = "head -c \(bytes) /dev/zero | tr '\\000' 'x'; "
+            + "head -c \(bytes) /dev/zero | tr '\\000' 'y' 1>&2"
 
         let result = try LocalTransport().runProcess(
             executable: "/bin/sh",
@@ -174,8 +174,8 @@ import Foundation
         )
 
         #expect(result.exitCode == 0)
-        #expect(result.stdout.count >= 256 * 1024)
-        #expect(result.stderr.count >= 256 * 1024)
+        #expect(result.stdout.count == bytes)
+        #expect(result.stderr.count == bytes)
     }
 
     @Test func sshTransportStaticPathsAreStable() {

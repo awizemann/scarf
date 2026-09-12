@@ -278,8 +278,16 @@ final class SpotifyAuthFlow {
     /// Stop `proc` off the main actor, with the helper's SIGTERM → SIGKILL
     /// escalation. `nonisolated` so the synchronous wait inside never runs on
     /// the main actor (charter C10 / the P22 sweep).
+    ///
+    /// A THREAD, not `Task.detached`. P43c named this site as "right for its
+    /// own purpose (getting off the MAIN actor) and wrong for" the
+    /// cooperative-pool one — and it was both at once: `Task.detached` is the
+    /// same cooperative pool the caller was on, so the `Thread.sleep` poll
+    /// inside parked a pool thread for up to the budget plus two signal
+    /// graces. Round-5 P48's widened `ProcessAsyncWait` sweep, which now
+    /// reads `Task { … }` closures, is what surfaced it.
     private nonisolated static func reapDetached(_ proc: Process) {
-        Task.detached(priority: .utility) {
+        Thread.detachNewThread {
             // A budget, not a grace: the child is being stopped, so the only
             // question is whether it goes quietly. `waitUntilExit(timeout:)`
             // escalates to SIGKILL by itself when it does not.

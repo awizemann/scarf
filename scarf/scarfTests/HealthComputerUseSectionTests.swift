@@ -130,20 +130,20 @@ import ScarfCore
         #expect(health?.detail?.contains("linux") == true)
     }
 
-    @Test func missingDriverIsOneRowNotTwoFalseDenials() {
+    @Test func missingDriverIsOneRowNotTwoFalseDenials() throws {
         let section = HealthViewModel.computerUseSection(
             status(installed: false, version: nil, ready: nil, accessibility: nil, screenRecording: nil))
-        #expect(section.checks.count == 1)
+        try #require(section.checks.count == 1)
         #expect(section.checks[0].label == "cua-driver not installed")
         #expect(section.checks[0].status == .warning)
     }
 
-    @Test func unsupportedPlatformSaysSoAndStopsThere() {
+    @Test func unsupportedPlatformSaysSoAndStopsThere() throws {
         let section = HealthViewModel.computerUseSection(
             status(platform: "freebsd13", supported: false, installed: false,
                    version: nil, ready: nil, canGrant: false,
                    accessibility: nil, screenRecording: nil))
-        #expect(section.checks.count == 1)
+        try #require(section.checks.count == 1)
         #expect(section.checks[0].label.contains("freebsd13"))
     }
 

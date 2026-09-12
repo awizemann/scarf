@@ -52,21 +52,16 @@ public enum SSHScriptRunner {
     ///
     /// Why this exists (issue #77): the previous implementation read
     /// stdout/stderr via `readToEnd()` *after* the subprocess exited.
-    /// On macOS pipes default to a 16–64 KB kernel buffer; once
-    /// `sqlite3 -json` writes more than that, the SSH client back-
-    /// pressures over the wire, the remote sqlite3 blocks, the script
-    /// never finishes, the 30 s timeout fires, and the caller sees
+    /// **The pipe-buffer back-story.** On macOS pipes default to a 16–64 KB
+    /// kernel buffer; once `sqlite3 -json` writes more than that, the SSH
+    /// client back-pressures over the wire, the remote sqlite3 blocks, the
+    /// script never finishes, the 30 s timeout fires, and the caller sees
     /// "Script timed out" + an empty result set. v2.7's
-    /// `sessionListSnapshot(limit: 500)` crossed that threshold for
-    /// any user with ~150+ sessions. Draining concurrently with
-    /// `readabilityHandler` removes the back-pressure.
-    private final class LockedData: @unchecked Sendable {
-        // os_unfair_lock (via OSAllocatedUnfairLock) per the project's lock
-        // convention. (t-aud15)
-        private let lock = OSAllocatedUnfairLock(initialState: Data())
-        func append(_ chunk: Data) { lock.withLock { $0.append(chunk) } }
-        func snapshot() -> Data { lock.withLock { $0 } }
-    }
+    /// `sessionListSnapshot(limit: 500)` crossed that threshold for any user
+    /// with ~150+ sessions. Both arms below drain concurrently with the run,
+    /// through `Process.startDraining` — the app's one drain primitive — which
+    /// replaced a hand-rolled `readabilityHandler` pair whose snapshot was
+    /// taken at EXIT rather than at EOF (round-5 P48).
 
     public enum Outcome: Sendable {
         /// Couldn't even reach the remote (process spawn failed,
@@ -98,7 +93,7 @@ public enum SSHScriptRunner {
             let cancelFlag = CancelFlag()
             return await withTaskCancellationHandler(
                 operation: {
-                    #if os(macOS)
+                    #if !os(iOS)
                     switch context.kind {
                     case .local:
                         return await runLocally(script: script, timeout: timeout, cancelFlag: cancelFlag)
@@ -119,7 +114,7 @@ public enum SSHScriptRunner {
 
     // MARK: - SSH path
 
-    #if os(macOS)
+    #if !os(iOS)
     private static func runOverSSH(script: String, config: SSHConfig, timeout: TimeInterval, cancelFlag: CancelFlag) async -> Outcome {
         // Per-host circuit breaker (gh#138): fail fast without spawning
         // ssh while the gate is open, and feed connection-level outcomes
@@ -197,37 +192,39 @@ public enum SSHScriptRunner {
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
 
-            // Drain stdout/stderr concurrently with the running process —
-            // see the LockedData docstring above for the issue-#77
-            // back-story. Without these handlers a >64 KB script output
-            // wedges the pipe + ssh + remote sqlite3 chain and the only
-            // visible symptom is a timeout.
-            let outBuf = LockedData()
-            let errBuf = LockedData()
-            stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    outBuf.append(chunk)
-                }
-            }
-            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    errBuf.append(chunk)
-                }
-            }
+            // Without a drain running for the whole spawn a >64 KB script
+            // output wedges the pipe + ssh + remote sqlite3 chain and the
+            // only visible symptom is a timeout (issue #77). The drain is
+            // installed BEFORE the stdin write below, which is the P43b rule:
+            // the reader must be in place before the parent's LAST write to
+            // the child, not merely before its first read.
+            // One drain, EOF-exact and bounded: `Process.startDraining`
+            // installs a reader per pipe at spawn and `collect(grace:)` waits
+            // for the LAST EOF, not merely for the process to go.
+            //
+            // The readabilityHandler pair this replaces judged too early. It
+            // nilled both handlers the moment `isRunning` went false and
+            // snapshotted whatever had landed — but exit is not EOF: a chunk
+            // still on the pipe's queue was silently dropped, and the line a
+            // failing script prints immediately before exiting is exactly the
+            // one at risk. That is the P40 OAuthFlowController class of bug,
+            // third site (round-5 P48).
+            let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
 
             do {
                 try proc.run()
             } catch {
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                try? stdinPipe.fileHandleForReading.close()
+                try? stdinPipe.fileHandleForWriting.close()
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForWriting.close()
+                _ = drain.collect()
                 return .connectFailure("Failed to launch ssh: \(error.localizedDescription)")
             }
+            // Parent's copies of the ends the child owns, so EOF lands.
+            try? stdinPipe.fileHandleForReading.close()
+            try? stdoutPipe.fileHandleForWriting.close()
+            try? stderrPipe.fileHandleForWriting.close()
 
             if let data = script.data(using: .utf8) {
                 try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
@@ -243,38 +240,26 @@ public enum SSHScriptRunner {
                 // the load-bearing path; Task.isCancelled is harmless
                 // belt-and-suspenders.
                 if cancelFlag.isCancelled || Task.isCancelled {
-                    proc.terminate()
-                    stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                    stderrPipe.fileHandleForReading.readabilityHandler = nil
-                    try? stdoutPipe.fileHandleForReading.close()
-                    try? stderrPipe.fileHandleForReading.close()
+                    // Bounded escalation, and the drain owns the read ends —
+                    // closing them here would raise while a reader is still
+                    // blocked on one.
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                     return .connectFailure("Script cancelled")
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                proc.terminate()
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                // Pipe fds leak otherwise — closing on the timeout branch
-                // matches the success-path discipline (see CLAUDE.md
-                // "Always close both fileHandleForReading and
-                // fileHandleForWriting on Pipe objects").
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForReading.close()
+                _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                 return .connectFailure("Script timed out after \(Int(timeout))s")
             }
-            // Detach the readabilityHandlers and capture whatever the
-            // accumulator has. The handler may have already seen EOF
-            // (`chunk.isEmpty`) and self-cleared, but assigning nil is
-            // idempotent and guards against a late tick from the queue.
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
-            let out = outBuf.snapshot()
-            let err = errBuf.snapshot()
-            // Best-effort fd close — Pipe leaks fd's otherwise.
-            try? stdoutPipe.fileHandleForReading.close()
-            try? stderrPipe.fileHandleForReading.close()
+            // Wait for the LAST EOF, not merely for the process to go.
+            // `waitDrainingAsync` with a spent budget: the child has already
+            // gone, so this is the drain collection alone — but on a dedicated
+            // thread, because `collect(grace:)` still blocks for up to its
+            // grace and this closure runs on the cooperative pool.
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
+            let out = collected.first ?? Data()
+            let err = collected.count > 1 ? collected[1] : Data()
             return .completed(
                 stdout: String(data: out, encoding: .utf8) ?? "",
                 stderr: String(data: err, encoding: .utf8) ?? "",
@@ -296,62 +281,54 @@ public enum SSHScriptRunner {
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
 
-            // Drain concurrently — same pipe-buffer fix as runOverSSH.
-            // Local scripts can also blow past the 16–64 KB pipe buffer
-            // (e.g. local `sqlite3 -json` over a fat result set) and
-            // would wedge in exactly the same way.
-            let outBuf = LockedData()
-            let errBuf = LockedData()
-            stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    outBuf.append(chunk)
-                }
-            }
-            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    errBuf.append(chunk)
-                }
-            }
+            // Same pipe-buffer fix as runOverSSH. Local scripts can also
+            // blow past the 16–64 KB pipe buffer (e.g. local `sqlite3 -json`
+            // over a fat result set) and would wedge in exactly the same way.
+            // One drain, EOF-exact and bounded: `Process.startDraining`
+            // installs a reader per pipe at spawn and `collect(grace:)` waits
+            // for the LAST EOF, not merely for the process to go.
+            //
+            // The readabilityHandler pair this replaces judged too early. It
+            // nilled both handlers the moment `isRunning` went false and
+            // snapshotted whatever had landed — but exit is not EOF: a chunk
+            // still on the pipe's queue was silently dropped, and the line a
+            // failing script prints immediately before exiting is exactly the
+            // one at risk. That is the P40 OAuthFlowController class of bug,
+            // third site (round-5 P48).
+            let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
 
             do {
                 try proc.run()
             } catch {
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForWriting.close()
+                _ = drain.collect()
                 return .connectFailure("Failed to launch /bin/sh: \(error.localizedDescription)")
             }
+            try? stdoutPipe.fileHandleForWriting.close()
+            try? stderrPipe.fileHandleForWriting.close()
             let deadline = Date().addingTimeInterval(timeout)
             while proc.isRunning && Date() < deadline {
                 if cancelFlag.isCancelled || Task.isCancelled {
-                    proc.terminate()
-                    stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                    stderrPipe.fileHandleForReading.readabilityHandler = nil
-                    try? stdoutPipe.fileHandleForReading.close()
-                    try? stderrPipe.fileHandleForReading.close()
+                    // Bounded escalation, and the drain owns the read ends —
+                    // closing them here would raise while a reader is still
+                    // blocked on one.
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                     return .connectFailure("Script cancelled")
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                proc.terminate()
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForReading.close()
+                _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                 return .connectFailure("Script timed out after \(Int(timeout))s")
             }
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
-            let out = outBuf.snapshot()
-            let err = errBuf.snapshot()
-            try? stdoutPipe.fileHandleForReading.close()
-            try? stderrPipe.fileHandleForReading.close()
+            // `waitDrainingAsync` with a spent budget: the child has already
+            // gone, so this is the drain collection alone — but on a dedicated
+            // thread, because `collect(grace:)` still blocks for up to its
+            // grace and this closure runs on the cooperative pool.
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
+            let out = collected.first ?? Data()
+            let err = collected.count > 1 ? collected[1] : Data()
             return .completed(
                 stdout: String(data: out, encoding: .utf8) ?? "",
                 stderr: String(data: err, encoding: .utf8) ?? "",
@@ -359,5 +336,5 @@ public enum SSHScriptRunner {
             )
         }.value
     }
-    #endif // os(macOS)
+    #endif // !os(iOS)
 }

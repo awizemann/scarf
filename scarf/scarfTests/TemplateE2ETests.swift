@@ -27,11 +27,11 @@ import ScarfCore
 
     /// Parse + plan the shipped HN Digest bundle, assert its shape, and
     /// confirm the cron prompt + dashboard contract are intact.
-    @Test func hackernewsDigestParsesAndPlans() throws {
+    @Test func hackernewsDigestParsesAndPlans() async throws {
         let bundle = try Self.locateExample(author: "awizemann", name: "hackernews-digest")
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         // Manifest shape — mirror the install-time invariants the catalog
@@ -103,7 +103,7 @@ import ScarfCore
         // Three sections: Today's Digest (3 stat widgets), Top Stories
         // (1 list widget), How to Use (1 text widget). No webview —
         // this template intentionally doesn't expose a Site tab.
-        #expect(dashboard.sections.count == 3)
+        try #require(dashboard.sections.count == 3)
 
         let statsSection = dashboard.sections[0]
         #expect(statsSection.title == "Today's Digest")

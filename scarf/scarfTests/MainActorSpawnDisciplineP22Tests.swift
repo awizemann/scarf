@@ -413,6 +413,13 @@ struct MainActorSpawnDisciplineP22Tests {
         ("scarf/scarf", true),
         ("scarf/Scarf iOS", true),
         ("scarf/Packages/ScarfCore/Sources/ScarfCore", false),
+        // Round-6 P53: the iOS runtime package was in NONE of the three C10
+        // sweeps' roots — this one, `ProcessAsyncWaitP43cTests` and
+        // `OffPoolDisciplineP52Tests` — so `CitadelServerTransport`'s
+        // unbounded `semaphore.wait()` was invisible to all of them. It is a
+        // SwiftPM library, not an app target, so nothing is main-actor by
+        // default: `@MainActor` must be said, exactly like ScarfCore.
+        ("scarf/Packages/ScarfIOS/Sources/ScarfIOS", false),
     ]
 
     /// P40's lesson, applied here: `FileManager.enumerator` returns `nil` for
@@ -420,6 +427,11 @@ struct MainActorSpawnDisciplineP22Tests {
     /// target must break this test, not quietly halve the sweep.
     @Test("every root the sweep walks exists")
     func sweepRootsExist() throws {
+        // Membership, not just existence: a root can be DELETED from the list
+        // and every per-root floor below disappears with it, which is exactly
+        // how ScarfIOS was absent without any test going red (round-6 P53).
+        #expect(Self.sweepRoots.contains { $0.path == "scarf/Packages/ScarfIOS/Sources/ScarfIOS" },
+                "the iOS runtime package is no longer swept")
         for (relative, _) in Self.sweepRoots {
             var isDir: ObjCBool = false
             let path = Self.repoRoot.appendingPathComponent(relative).path
@@ -581,6 +593,17 @@ struct MainActorSpawnDisciplineP22Tests {
                         }
                         minIndent = indent
                         if trimmed.contains("nonisolated") { optedOut = true; break }
+                        // A `Thread.detachNewThread { … }` body is not the
+                        // main actor, whatever the enclosing declaration says
+                        // — a fresh thread has no actor at all. It is the
+                        // primitive `Process.waitDrainingAsync` and
+                        // `SpotifyAuthFlow.reapDetached` both use, precisely
+                        // because `Task.detached` (which the walk correctly
+                        // does NOT treat as an opt-out, since it stays on the
+                        // cooperative pool) would not do. Added in round-5
+                        // P48, when `HermesProxyService.stop()` gained a
+                        // bounded escalation on one.
+                        if trimmed.contains("Thread.detachNewThread") { optedOut = true; break }
                         needDeclarationStart = !declarationStarts.contains { trimmed.contains($0) }
                             && !trimmed.hasPrefix("//")
                         // Column 0 with a body brace: we have left the type.
@@ -601,10 +624,20 @@ struct MainActorSpawnDisciplineP22Tests {
         // 210 = 559 `.swift` files. The floor is deliberately well under that
         // so ordinary growth or a deleted feature cannot trip it, and well
         // over zero so a broken enumeration cannot hide.
+        // Per-root floors, because the roots are not the same size: ScarfIOS
+        // is a 14-file package, so a shared `> 20` would have made the floor
+        // itself the thing that failed the day it was added (round-6 P53).
+        let floors: [String: Int] = [
+            "scarf/scarf": 20,
+            "scarf/Scarf iOS": 20,
+            "scarf/Packages/ScarfCore/Sources/ScarfCore": 20,
+            "scarf/Packages/ScarfIOS/Sources/ScarfIOS": 5,
+        ]
         for (relative, _) in roots {
-            #expect((filesScannedByRoot[relative] ?? 0) > 20,
+            let floor = floors[relative] ?? 20
+            #expect((filesScannedByRoot[relative] ?? 0) > floor,
                     Comment(rawValue: "the sweep read \(filesScannedByRoot[relative] ?? 0)"
-                            + " Swift files under \(relative)"))
+                            + " Swift files under \(relative) (floor \(floor))"))
         }
         let filesScanned = filesScannedByRoot.values.reduce(0, +)
         #expect(filesScanned > 450, """

@@ -59,7 +59,7 @@ import Foundation
 
     @Test func ollamaTagsParseCarriesIDAndHumanDetail() throws {
         let models = try #require(LocalModelEnumerator.parseOllamaTags(Self.ollamaTagsJSON))
-        #expect(models.count == 2)
+        try #require(models.count == 2)
         // The id is the tag verbatim — it's what T3 writes to model.default.
         #expect(models[0].modelID == "llama3:8b")
         #expect(models[0].name == "llama3:8b")
@@ -915,7 +915,7 @@ private final class RecordingTransport: ServerTransport, @unchecked Sendable {
         self.init(results: [.failure(error)], isRemote: isRemote, contextID: contextID)
     }
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         calls.append(Call(executable: executable, args: args, timeout: timeout))
         return try script[min(calls.count - 1, script.count - 1)].get()
     }

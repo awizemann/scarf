@@ -300,7 +300,7 @@ struct SpawnDisciplineP43Tests {
         #expect(src.contains("try? stdoutPipe.fileHandleForWriting.close()"))
         // It must NOT close the read ends on the success path: `waitDraining`
         // owns those, and closing a handle a reader is blocked on raises.
-        let afterWait = try #require(src.range(of: "let (exited, drained) = proc.waitDraining"))
+        let afterWait = try #require(src.range(of: "let (exited, drained) = await proc.waitDrainingAsync"))
         let tail = String(src[afterWait.upperBound...])
         #expect(!tail.contains("stderrPipe.fileHandleForReading.close()"))
     }
@@ -311,10 +311,13 @@ struct SpawnDisciplineP43Tests {
     @Test("the relaunch wait is off the main actor")
     func relaunchIsNonisolated() throws {
         let src = try Self.source("Core/Services/AppRelauncher.swift")
-        #expect(src.contains("nonisolated static func relaunch() throws {"))
+        // `async` since round-5 P48 (t-12d04477): `nonisolated` got it off the
+        // MAIN actor, and `waitDrainingAsync` gets the block off the
+        // cooperative POOL, which the caller's `Task.detached` never did.
+        #expect(src.contains("nonisolated static func relaunch() async throws {"))
         // Its one caller must not have put it back inside a `MainActor.run`.
         let caller = try Self.source("Features/Profiles/ViewModels/ProfilesViewModel.swift")
-        let call = try #require(caller.range(of: "try AppRelauncher.relaunch()"))
+        let call = try #require(caller.range(of: "try await AppRelauncher.relaunch()"))
         let before = String(caller[..<call.lowerBound])
         let lastRun = before.range(of: "await MainActor.run", options: .backwards)
         let lastClose = before.range(of: "guard switched else { return }", options: .backwards)

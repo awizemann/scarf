@@ -243,6 +243,27 @@ struct SettingsView: View {
                 value: HermesReasoningEffort.pickerSelection(for: vm.config.reasoningEffort).isEmpty
                     ? String(localized: "Hermes default") : vm.config.reasoningEffort
             )
+            // Round-5 decision 17. The Mac renders this beside its picker
+            // (`UnsupportedEffortNote`, `SettingsComponents.swift:395-415`);
+            // iOS is READ-ONLY here, which makes the affordance MORE needed,
+            // not less — with no control to move, a value the host ignores is
+            // otherwise indistinguishable from one it honours, and there is
+            // nothing on screen to hint otherwise.
+            //
+            // Same capability question, same ScarfCore function, so the two
+            // platforms cannot drift: `unsupportedLevelNotice` is `nil` for a
+            // level in this host's vocabulary, for the disable spellings it
+            // accepts, and for the empty sentinel. No new string — the
+            // sentence and its six locales already exist.
+            if let notice = HermesReasoningEffort.unsupportedLevelNotice(
+                for: vm.config.reasoningEffort,
+                capabilities: caps
+            ) {
+                Text(verbatim: notice)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel(Text(verbatim: notice))
+            }
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)
             }

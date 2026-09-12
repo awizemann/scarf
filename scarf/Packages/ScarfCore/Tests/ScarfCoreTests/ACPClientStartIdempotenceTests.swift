@@ -66,16 +66,41 @@ import Foundation
         func record(_ channel: GatedChannel) { spawned.append(channel) }
         var count: Int { spawned.count }
         func openGate() { gateOpen = true }
+        /// Bounded. This spun forever: a test whose gate is never opened —
+        /// because an assertion above it failed and the `openGate()` call was
+        /// never reached — hung the whole `swift test` run instead of failing,
+        /// and under parallel load that is indistinguishable from the flake
+        /// this suite is filed for (t-f3820038, round-5 P48).
         func waitForGate() async {
+            let deadline = Date().addingTimeInterval(Self.gateCeiling)
             while !gateOpen {
+                if Date() >= deadline {
+                    Issue.record("the spawn gate was never opened")
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000)
             }
         }
+
+        /// Generous: it bounds a HANG, it does not measure anything. Every
+        /// healthy run opens the gate in milliseconds.
+        static let gateCeiling: TimeInterval = 30
+
+        /// A one-way latch a test can await.
+        actor Flag {
+            private(set) var value = false
+            func set() { value = true }
+        }
     }
 
+    /// A ceiling, not a measurement — so it is generous. At 3 s this suite
+    /// was the ScarfCore run's standing "load flake" (t-f3820038): every
+    /// reported failure was `timed out waiting for condition` on a machine
+    /// running 3000 other tests, and every one of them passed 5/5 in
+    /// isolation. Nothing here is asserting that the client is FAST.
     private func waitFor(
         _ condition: @Sendable () async -> Bool,
-        timeout: TimeInterval = 3
+        timeout: TimeInterval = 30
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -104,10 +129,26 @@ import Foundation
         try await waitFor { await ledger.count == 1 }
         #expect(await client.state == .starting)
 
-        let second = Task { try await client.start() }
-        try await Task.sleep(nanoseconds: 50_000_000)
-        // The second call must NOT have entered the factory.
-        #expect(await ledger.count == 1)
+        // The flag proves the second task's BODY ran. Without it the check
+        // below was vacuous: a 50 ms nap on a loaded machine can end before
+        // the task is ever scheduled, and "no second channel yet" is then a
+        // statement about the scheduler rather than about the client
+        // (round-5 P48).
+        let secondEntered = SpawnLedger.Flag()
+        let second = Task {
+            await secondEntered.set()
+            try await client.start()
+        }
+        try await waitFor { await secondEntered.value }
+        // And the invariant is CHECKED for a window rather than sampled once
+        // at the end of a nap: if a second channel ever appears, this fails.
+        // The real proof is the `ledger.count == 1` after both starts have
+        // completed, at the bottom of this test.
+        let settle = Date().addingTimeInterval(0.25)
+        while Date() < settle {
+            #expect(await ledger.count == 1)
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
 
         await ledger.openGate()
         // Answer `initialize` so both starts can complete.
@@ -235,7 +276,13 @@ import Foundation
         func arrive(_ channel: GatedChannel) async -> Int {
             spawned.append(channel)
             let index = spawned.count - 1
+            // Bounded, for the same reason as `SpawnLedger.waitForGate`.
+            let deadline = Date().addingTimeInterval(SpawnLedger.gateCeiling)
             while !open.contains(index) {
+                if Date() >= deadline {
+                    Issue.record("gate \(index) was never opened")
+                    return index
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000)
             }
             return index

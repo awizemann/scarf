@@ -31,7 +31,7 @@ import Foundation
     }
 
     @Test("Happy path: CLI targets a /tmp scratch tar.gz, bytes land verbatim, scratch is removed")
-    func happyPath() async {
+    func happyPath() async throws {
         let recorder = Recorder()
         let dest = Self.tempDestination()
         defer { try? FileManager.default.removeItem(at: dest) }
@@ -52,7 +52,7 @@ import Foundation
 
         // The CLI must be pointed at a generated scratch path on the host,
         // never at the Mac-side destination (the gh#129 bug class).
-        #expect(recorder.cliArgs.count == 1)
+        try #require(recorder.cliArgs.count == 1)
         let args = recorder.cliArgs[0]
         // `--` before the profile name so a name can never be read as a flag.
         #expect(args.prefix(2) == ["profile", "export"])

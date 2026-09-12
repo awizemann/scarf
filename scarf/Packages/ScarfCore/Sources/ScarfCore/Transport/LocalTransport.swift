@@ -257,7 +257,7 @@ public struct LocalTransport: ServerTransport {
 
     // MARK: - Processes
 
-    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         #if os(iOS)
         // iOS can't spawn processes. Callers on iOS use `CitadelServerTransport`
         // (from the ScarfIOS package) instead; reaching here is a wiring bug.
@@ -279,23 +279,36 @@ public struct LocalTransport: ServerTransport {
         proc.environment = Self.subprocessEnvironment(forExecutable: executable)
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        let stdinPipe = Pipe()
+        // Created only when there is something to send. The old
+        // unconditional `Pipe()` was never ATTACHED on the stdin-less path
+        // and had only one of its ends closed, which reads like a leak and
+        // was filed as one — but measured, it is not: a `Pipe` nobody keeps
+        // closes both descriptors in `deinit` (50 dropped pipes leave
+        // `/dev/fd` at 4). What does leak is a pipe attached to a process
+        // that spawned, which is why the closes below matter. This is the
+        // simpler shape, not a leak fix (round-5 P48).
+        let stdinPipe: Pipe? = stdin != nil ? Pipe() : nil
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
-        if stdin != nil { proc.standardInput = stdinPipe }
-        let pipeCapture = ProcessPipeDrainer.start(
-            stdout: stdoutPipe.fileHandleForReading,
-            stderr: stderrPipe.fileHandleForReading
-        )
+        if let stdinPipe { proc.standardInput = stdinPipe }
+        // One drain primitive in the app, `ProcessPipeDrain` (round-5
+        // decision 4). The `ProcessPipeDrainer` that used to live here was a
+        // second implementation carrying both defects P43c had already fixed
+        // in this one: its `Capture.wait()` was an UNBOUNDED `group.wait()`,
+        // so an inherited write end (an ssh ControlMaster, a hermes worker)
+        // hung the timeout path forever after its budget was spent; and its
+        // readers sat on the fixed-width `.utility` global queue, where
+        // several piped spawns in flight park every thread and leave the next
+        // spawn's drain unscheduled.
+        let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
         do {
             try proc.run()
         } catch {
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
-            if stdin != nil {
-                try? stdinPipe.fileHandleForReading.close()
-            }
-            _ = pipeCapture.wait()
+            try? stdinPipe?.fileHandleForReading.close()
+            try? stdinPipe?.fileHandleForWriting.close()
+            _ = drain.collect()
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
         }
         // Parent has its own copy of every pipe end after fork. The child
@@ -303,38 +316,28 @@ public struct LocalTransport: ServerTransport {
         // reading end of stdin; the parent must close its own copies of
         // those so EOF reaches the parent's reader once the child exits
         // (otherwise the kernel keeps each fd open as long as any process
-        // holds a reference, and we leak fds).
+        // holds a reference, and we leak fds). The READ ends of stdout and
+        // stderr belong to the drain, which closes each one in the reader
+        // that drained it — closing them here would raise while a reader is
+        // still blocked on them.
         try? stdoutPipe.fileHandleForWriting.close()
         try? stderrPipe.fileHandleForWriting.close()
-        if stdin != nil {
-            try? stdinPipe.fileHandleForReading.close()
-        }
-        if let stdin {
+        try? stdinPipe?.fileHandleForReading.close()
+        if let stdin, let stdinPipe {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
             try? stdinPipe.fileHandleForWriting.close()
         }
-        // Timeout handling: poll every 100ms up to timeout, kill on overrun.
-        if let timeout {
-            let deadline = Date().addingTimeInterval(timeout)
-            while proc.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.1)
-            }
-            if proc.isRunning {
-                proc.terminate()
-                proc.waitUntilExit()
-                let captured = pipeCapture.wait()
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForReading.close()
-                throw TransportError.timeout(seconds: timeout, partialStdout: captured.stdout)
-            }
-        } else {
-            proc.waitUntilExit()
+        // Bounded, and bounded on the overrun arm too: `waitDraining` is
+        // `waitUntilExit(timeout:)`, i.e. poll → SIGTERM → bounded poll →
+        // pid-guarded SIGKILL → bounded poll, never a bare `waitUntilExit()`
+        // after `terminate()`.
+        let (exited, captured) = proc.waitDraining(timeout: timeout, drain: drain)
+        let capturedStdout = captured.first ?? Data()
+        let capturedStderr = captured.count > 1 ? captured[1] : Data()
+        if !exited {
+            throw TransportError.timeout(seconds: timeout, partialStdout: capturedStdout)
         }
-        let captured = pipeCapture.wait()
-        try? stdoutPipe.fileHandleForReading.close()
-        try? stderrPipe.fileHandleForReading.close()
-        try? stdinPipe.fileHandleForWriting.close()
-        return ProcessResult(exitCode: proc.terminationStatus, stdout: captured.stdout, stderr: captured.stderr)
+        return ProcessResult(exitCode: proc.terminationStatus, stdout: capturedStdout, stderr: capturedStderr)
         #endif
     }
 
@@ -365,6 +368,10 @@ public struct LocalTransport: ServerTransport {
         return AsyncThrowingStream { $0.finish() }
         #else
         return AsyncThrowingStream { continuation in
+            // The consumer letting go must stop the child — see
+            // `StreamingChild` (round-5 decision 6).
+            let child = StreamingChild()
+            continuation.onTermination = { _ in child.cancel() }
             Task.detached {
                 let proc = Process()
                 proc.executableURL = URL(fileURLWithPath: executable)
@@ -376,9 +383,27 @@ public struct LocalTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these. The explicit release rather than relying on
+                    // `Pipe.deinit` — which measurably does close them — so
+                    // the fd goes back at a point the code states (round-5
+                    // P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
+                child.adopt(proc)
+                // Drain stderr CONCURRENTLY with the stdout loop below. It
+                // used to be read with `readToEnd()` AFTER the wait, and only
+                // on a non-zero exit — so a child with more than 64 KB of
+                // stderr (an `ssh -v` over a slow ProxyCommand, any hermes
+                // verb that logs) blocked in `write()` while this task was
+                // still pulling stdout, and neither side moved again
+                // (round-5 decision 6).
+                let errDrain = Process.startDraining(pipes: [errPipe])
                 try? outPipe.fileHandleForWriting.close()
                 try? errPipe.fileHandleForWriting.close()
                 let handle = outPipe.fileHandleForReading
@@ -387,19 +412,20 @@ public struct LocalTransport: ServerTransport {
                     if chunk.isEmpty { break }
                     continuation.yield(chunk)
                 }
-                proc.waitUntilExit()
-                let stderrTail: String
-                if proc.terminationStatus != 0 {
-                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
-                        .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                } else {
-                    stderrTail = ""
-                }
+                // Bounded, and the child is reaped rather than orphaned:
+                // stdout has reached EOF, so a healthy child is milliseconds
+                // from exiting and this ceiling is for the one that is not.
+                let reaped = await proc.waitDrainingAsync(
+                    timeout: StreamingChild.reapCeiling, drain: errDrain)
+                child.finish()
+                let stderrText = String(
+                    data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
+                // The stdout read end is ours; the stderr read end belongs to
+                // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()
-                try? errPipe.fileHandleForReading.close()
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.commandFailed(
-                        exitCode: proc.terminationStatus, stderr: stderrTail
+                        exitCode: proc.terminationStatus, stderr: stderrText
                     ))
                 } else {
                     continuation.finish()
@@ -419,6 +445,10 @@ public struct LocalTransport: ServerTransport {
         return AsyncThrowingStream { $0.finish() }
         #else
         return AsyncThrowingStream { continuation in
+            // The consumer letting go must stop the child — see
+            // `StreamingChild` (round-5 decision 6).
+            let child = StreamingChild()
+            continuation.onTermination = { _ in child.cancel() }
             Task.detached {
                 let proc = Process()
                 proc.executableURL = URL(fileURLWithPath: executable)
@@ -430,9 +460,27 @@ public struct LocalTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these. The explicit release rather than relying on
+                    // `Pipe.deinit` — which measurably does close them — so
+                    // the fd goes back at a point the code states (round-5
+                    // P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
+                child.adopt(proc)
+                // Drain stderr CONCURRENTLY with the stdout loop below. It
+                // used to be read with `readToEnd()` AFTER the wait, and only
+                // on a non-zero exit — so a child with more than 64 KB of
+                // stderr (an `ssh -v` over a slow ProxyCommand, any hermes
+                // verb that logs) blocked in `write()` while this task was
+                // still pulling stdout, and neither side moved again
+                // (round-5 decision 6).
+                let errDrain = Process.startDraining(pipes: [errPipe])
                 // Parent's copy of the writing ends — the child has its
                 // own; close ours so EOF reaches the reader after exit.
                 try? outPipe.fileHandleForWriting.close()
@@ -451,19 +499,20 @@ public struct LocalTransport: ServerTransport {
                         }
                     }
                 }
-                proc.waitUntilExit()
-                let stderrTail: String
-                if proc.terminationStatus != 0 {
-                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
-                        .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                } else {
-                    stderrTail = ""
-                }
+                // Bounded, and the child is reaped rather than orphaned:
+                // stdout has reached EOF, so a healthy child is milliseconds
+                // from exiting and this ceiling is for the one that is not.
+                let reaped = await proc.waitDrainingAsync(
+                    timeout: StreamingChild.reapCeiling, drain: errDrain)
+                child.finish()
+                let stderrText = String(
+                    data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
+                // The stdout read end is ours; the stderr read end belongs to
+                // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()
-                try? errPipe.fileHandleForReading.close()
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.commandFailed(
-                        exitCode: proc.terminationStatus, stderr: stderrTail
+                        exitCode: proc.terminationStatus, stderr: stderrText
                     ))
                 } else {
                     continuation.finish()

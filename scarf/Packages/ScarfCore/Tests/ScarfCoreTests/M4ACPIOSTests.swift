@@ -114,8 +114,13 @@ import Foundation
         #expect(result.inputTokens == 3)
         #expect(result.outputTokens == 2)
 
-        // Let the event task drain the two chunk events.
-        try await Task.sleep(nanoseconds: 50_000_000)
+        // Wait for the event task to drain BOTH chunk events, rather than
+        // napping 50 ms and hoping. The nap was a bet on the machine: under
+        // parallel load the collector had often seen one chunk or none when
+        // `cancel()` landed, and the assertion below then failed for a
+        // reason that had nothing to do with the code (round-5 P48). The
+        // helper's own 2 s ceiling is the bound.
+        try await waitFor { await eventsCollected.count >= 2 }
         eventTask.cancel()
 
         let events = await eventsCollected.value
