@@ -84,10 +84,21 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
         commitSave(envPairs: envPairs, configKV: configKV)
     }
 
+    /// Non-nil on a remote context: pairing cannot run from this window.
+    /// Round-5 decision 15 — see
+    /// ``PlatformSetupHelpers/remoteOnlyHostNotice(_:)``.
+    var remotePairingNotice: String? {
+        PlatformSetupHelpers.remoteOnlyHostNotice(context)
+    }
+
     /// Launch `hermes whatsapp` in the embedded terminal. The user scans the QR
     /// code; hermes writes the session to `~/.hermes/platforms/whatsapp/session`
     /// and exits when pairing is complete.
     func startPairing() {
+        // The terminal is a LOCAL spawn and `hermesBinary` is the REMOTE
+        // path — guarded here as well as at the button so the refusal does
+        // not depend on one view remembering to disable a control.
+        guard remotePairingNotice == nil else { return }
         pairingInProgress = true
         terminalController.onExit = { [weak self] _ in
             self?.pairingInProgress = false

@@ -172,6 +172,70 @@ enum PlatformSetupHelpers {
         NSWorkspace.shared.open(url)
     }
 
+    /// Label of the first `(label, value)` pair whose value would reach
+    /// config.yaml carrying a control character, or `nil` when all are clean.
+    ///
+    /// **Round-5, P51 — round-4 decision 9's rule, reaching the platform
+    /// setup forms.** The MCP entry editor and the reasoning-override editor
+    /// have refused these since P41; the fifteen forms never did, although
+    /// three of them put free text into config.yaml through the same door.
+    ///
+    /// This is the VISIBILITY guard, not the parse guard, and the reason is
+    /// the EMITTER: a form's config keys go out through `hermes config set`,
+    /// so HERMES writes them with PyYAML's own emitter
+    /// (`hermes_cli/config.py:2307` `save_config` → `utils.py:262`
+    /// `atomic_yaml_write` = `yaml.dump` @ `v2026.9.7`), which represents a
+    /// control losslessly as a double-quoted escape. The file stays loadable;
+    /// what the user gets is a value they cannot see and Hermes will never
+    /// match — a `reply_prefix` with a pasted ESC in it, a channel id that
+    /// silently belongs to no channel. Refusing up front beats writing a
+    /// value whose damage is invisible on both sides.
+    ///
+    /// Checked on the value as the save WRITES it. The three call sites pass
+    /// raw text because `saveForm` writes these scalars untrimmed — P41b's
+    /// "a refusal must run on the value the WRITER emits", in the direction
+    /// that keeps the check from being stricter than the write.
+    /// Ordered by LABEL, not by the caller's iteration order: the batch
+    /// arrives as a `Dictionary`, whose order is unspecified and changes
+    /// between runs, so a form with two bad fields would otherwise name a
+    /// different one each time the user pressed Save.
+    static func controlCharacterFieldLabel(_ fields: [(String, String)]) -> String? {
+        for (label, value) in fields.sorted(by: { $0.0 < $1.0 })
+        where YAMLScalar.containsControlCharacter(value) {
+            return label
+        }
+        return nil
+    }
+
+    /// One sentence naming the host, or `nil` on a local context: why an
+    /// interactive pairing step is unavailable from this window.
+    ///
+    /// **Round-5 decision 15.** `EmbeddedSetupTerminal` is a
+    /// `LocalProcessTerminalView` — it spawns on THIS Mac, always, with no
+    /// transport in the path. On a remote context that made three buttons
+    /// lie in three different ways:
+    ///
+    /// * WhatsApp's "Start Pairing" ran `context.paths.hermesBinary`, i.e.
+    ///   the REMOTE absolute path, as a local executable — usually "no such
+    ///   file", and on a Mac that happens to have hermes at the same path,
+    ///   a QR code that pairs the WRONG agent.
+    /// * Signal's "Link Device" and "Start Daemon" ran the local
+    ///   `signal-cli` and wrote the link to the LOCAL `~/.hermes`, which the
+    ///   remote gateway never reads — the pairing appeared to succeed and
+    ///   the platform stayed dead.
+    /// * `signalCLIInstalled` probes the local login shell's PATH, so the
+    ///   buttons' own enablement was answering about the wrong machine.
+    ///
+    /// The posture is `SettingsViewModel.runBackup`'s: the gesture is a
+    /// LOCAL-only affordance, so on a remote context say plainly where the
+    /// work has to happen instead of failing in the terminal pane. The
+    /// buttons are disabled and this sentence sits under them.
+    static func remoteOnlyHostNotice(_ context: ServerContext) -> String? {
+        guard context.isRemote else { return nil }
+        let host = context.displayName
+        return String(localized: "Pairing needs a terminal on \(host), where Hermes runs — run this step there over SSH.")
+    }
+
     /// Bool <-> "true"/"false" round-trip for env vars. Hermes accepts both
     /// "true"/"false" and "1"/"0"; we emit the string form for readability.
     static func envBool(_ on: Bool) -> String { on ? "true" : "false" }
@@ -401,9 +465,11 @@ extension PlatformSetupForm {
             //
             // The guard is on `envFailure`, NOT on `loadFailure`, because the
             // two halves are not symmetric. `config` / `rawConfigText` are
-            // `nil` on a refusal and every form's `apply` already opens with
-            // `guard let cfg = snapshot.config?.<platform> else { return }`,
-            // so the config half declines itself. `env` is `[:]`, which is
+            // `nil` on a refusal and every form's `apply` either opens with
+            // `guard let cfg = snapshot.config?.<platform> else { return }`
+            // or (`NtfySetupViewModel`, P51) binds it optionally and applies
+            // the proven `.env` half first, so the config half declines
+            // itself either way. `env` is `[:]`, which is
             // indistinguishable from "nothing is set yet", so only it needs
             // stopping here. Guarding on `loadFailure` would suppress a
             // PROVEN `.env` because the OTHER file was unreadable — which is
@@ -423,6 +489,25 @@ extension PlatformSetupForm {
         // bug. Cleared by the next proven load — the message names Reload.
         if let refusal = loadRefusal {
             showSaveFailure(refusal)
+            return
+        }
+        // Round-4 decision 9's control-character refusal, reaching the setup
+        // forms (P51). Placed HERE, at the one door all fifteen share, rather
+        // than in the three forms the finding named: the hazard is a property
+        // of "free text into a config.yaml scalar", and a per-form check
+        // would be fifteen chances to forget the sixteenth. The `.env` half
+        // is NOT checked — `HermesEnvService` is a different file format with
+        // its own quoting, and no finding has been made against it.
+        //
+        // The key is the label because it is the truthful one: these values
+        // arrive here as a `[key: value]` batch with the form's field names
+        // already gone. See
+        // ``PlatformSetupHelpers/controlCharacterFieldLabel(_:)`` for why this
+        // is a visibility guard and not a parse guard.
+        if let key = PlatformSetupHelpers.controlCharacterFieldLabel(
+            configKV.map { ($0.key, $0.value) }
+        ) {
+            showSaveFailure(String(localized: "“\(key)” contains a control character. Hermes would store it as an invisible escape that never matches — remove it and save again."))
             return
         }
         isSaving = true

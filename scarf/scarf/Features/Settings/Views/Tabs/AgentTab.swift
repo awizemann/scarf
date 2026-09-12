@@ -430,9 +430,19 @@ private struct ReasoningOverridesSection: View {
     private func addNew() {
         let pattern = newPattern.trimmingCharacters(in: .whitespaces)
         guard !pattern.isEmpty else { return }
-        // Case-insensitive replace-on-add so "Claude-Opus" doesn't sit
-        // alongside an existing "claude-opus" row.
-        var pairs = sortedOverrides.filter { $0.key.caseInsensitiveCompare(pattern) != .orderedSame }
+        // EXACT replace-on-add. Round-5 decision 16.
+        //
+        // The case-insensitive filter that used to stand here DELETED a live
+        // override: Hermes's lookup is a plain dict membership test,
+        // `variant in overrides` inside `resolve_per_model_reasoning_effort`
+        // (`hermes_constants.py:929-941` @ `v2026.9.7`), over the variants
+        // `_canonical_model_variants` derives (`:892-926`) — which recover
+        // dots↔dashes and add/strip provider prefixes but NEVER change case.
+        // So `Claude-Opus` and `claude-opus` are two distinct entries, each
+        // live for the model whose id it actually spells, and adding one was
+        // silently removing the other from the file (`setReasoningOverrides`
+        // rewrites the block from what the editor holds).
+        var pairs = sortedOverrides.filter { $0.key != pattern }
         pairs.append((key: pattern, value: newEffort))
         save(pairs)
         newPattern = ""
