@@ -455,13 +455,45 @@ final class CredentialPoolsViewModel {
                 self.message = outcome.warning ?? "Removed OAuth provider \(provider)"
                 self.load()
             } else {
-                // Surface the CLI's own reason so the user can tell a refusal
-                // from a missing verb (older builds may not have
-                // `auth logout`). `judge` quotes the last significant line
-                // when nothing more specific matched.
-                self.message = "Remove failed: \(outcome.detail ?? "exit \(exitCode)")"
+                self.message = Self.removeFailureSummary(outcome: outcome, exitCode: exitCode)
             }
         }
+    }
+
+    /// The text a FAILED `auth logout` shows, decided in one place.
+    ///
+    /// **Three branches, not two** — the P47b lesson ("a three-state verdict
+    /// needs three branches at the call site"), applied to the verdict that
+    /// grew the third state. ``HermesAuthLogoutVerdict/judge(output:exitCode:)``
+    /// returns `.unconfirmed` for exit 0 with neither
+    /// `Logged out of {provider}.` (`hermes_cli/auth.py:2189` @ `v2026.9.7`)
+    /// nor either idle line (`:2180`, `:2185`) — C5's "we do not know". This
+    /// pane had a two-way `if`, so that arm fell through to the failure
+    /// branch and, when the run printed nothing at all, `detail` was nil and
+    /// the user read **"Remove failed: exit 0"** — the exact shape decision 2
+    /// exists to stop, since quoting an exit code the verdict has just
+    /// declared meaningless is the original bug in a new voice.
+    ///
+    /// A `static` formatter rather than an inline branch for the same reason
+    /// `HealthViewModel.sessionsOptimizeSummary` is one: `runMutation` runs
+    /// its closure after a detached CLI hop with no injectable runner, so
+    /// inline this text is only reachable through a live `hermes`.
+    static func removeFailureSummary(outcome: HermesCLIOutcome, exitCode: Int32) -> String {
+        // Exit 0 and nothing recognisable in the output: there is no failure
+        // to report and nothing to quote. Same sentence shape the other
+        // unconfirmed verdicts give.
+        if outcome.confidence == .unconfirmed, (outcome.detail ?? "").isEmpty {
+            return String(localized: "hermes auth logout printed no result. Check the host.")
+        }
+        // Surface the CLI's own reason so the user can tell a refusal from a
+        // missing verb (older builds may not have `auth logout`). `judge`
+        // quotes the last significant line when nothing more specific
+        // matched — and on an `.unconfirmed` verdict that line is the only
+        // thing worth showing, so the exit code stays out of it.
+        if let detail = outcome.detail, !detail.isEmpty {
+            return String(localized: "Remove failed: \(detail)")
+        }
+        return String(localized: "Remove failed: exit \(exitCode)")
     }
 
     func resetProvider(_ provider: String) {
