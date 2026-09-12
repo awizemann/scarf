@@ -71,3 +71,55 @@ struct HermesProxyLifecycleP48Tests {
         #expect(HermesProxyService.stopCeiling <= 10)
     }
 }
+
+/// Round-5 P48: the SSH connection probe.
+///
+/// `TestConnectionProbe.run()` dials a real host, so the behaviour cannot be
+/// driven from a unit test. What is pinned is the shape that made the bug —
+/// two `readToEnd()` calls AFTER the wait, on pipes nothing drained during
+/// the run — and the named budget that replaced the two drifting literals.
+@Suite("Connection probe drains while it runs (P48)")
+struct ConnectionProbeDrainP48Tests {
+
+    private static var probeSource: String {
+        (try? String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent(
+                    "scarf/Features/Servers/ViewModels/TestConnectionProbe.swift"),
+            encoding: .utf8)) ?? ""
+    }
+
+    private static func codeOnly(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+    }
+
+    /// The probe runs `ssh -vvv`, so a stderr trace past the 64 KB pipe
+    /// buffer is the EXPECTED case: undrained, ssh blocked in `write()`, the
+    /// poll ran its full twenty seconds, and a working connection was
+    /// reported as "Timed out after 20s" — the probe manufacturing the
+    /// failure it exists to diagnose.
+    @Test("both pipes are drained for the whole run, not read after the wait")
+    func probeDrainsDuringTheRun() throws {
+        let code = Self.codeOnly(Self.probeSource)
+        #expect(code.contains("Process.startDraining(pipes: [stdoutPipe, stderrPipe])"))
+        #expect(!code.contains("readToEnd()"))
+        // Bounded escalation on the overrun arm, not a bare `terminate()`.
+        #expect(code.contains("proc.waitUntilExit(timeout: 0)"))
+        #expect(!code.contains("proc.terminate()"))
+    }
+
+    /// The deadline and the sentence the user reads were two independent
+    /// literals — `20` and "Timed out after 20s" — and
+    /// `AnalyticsConnectionEventsTests` classifies a timeout by that prefix.
+    @Test("the probe budget is one named constant")
+    func theBudgetIsNamed() throws {
+        #expect(TestConnectionProbe.probeTimeout == 20)
+        let code = Self.codeOnly(Self.probeSource)
+        #expect(code.contains("Self.probeTimeout"))
+        #expect(!code.contains("\"Timed out after 20s"))
+    }
+}

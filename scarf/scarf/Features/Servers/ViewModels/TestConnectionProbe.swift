@@ -10,6 +10,12 @@ import ScarfCore
 struct TestConnectionProbe {
     let config: SSHConfig
 
+    /// How long the probe gives `ssh` before giving up. A named budget so the
+    /// deadline and the message the user reads can never drift apart — they
+    /// were two independent literals, `20` and the string "Timed out after
+    /// 20s" (round-5 P48).
+    static let probeTimeout: TimeInterval = 20
+
     func run() async -> AddServerViewModel.TestResult {
         let host = config.host.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else {
@@ -188,22 +194,37 @@ struct TestConnectionProbe {
             } catch {
                 return (-1, "", "Failed to launch /usr/bin/ssh: \(error.localizedDescription)")
             }
-            // Bound the probe so a hung connection doesn't lock the UI.
-            let deadline = Date().addingTimeInterval(20)
+            // Drain BOTH pipes for the whole run, never with a `readToEnd()`
+            // after the wait. This probe runs `ssh -vvv`, so a stderr trace
+            // past the 64 KB pipe buffer is the EXPECTED case and not the
+            // corner: undrained, ssh blocked in `write()`, the poll below ran
+            // its full twenty seconds, and a connection that was working
+            // reported "Timed out after 20s" — the probe manufacturing the
+            // failure it exists to diagnose (round-5 P48, t-10eb7c17 item 4).
+            let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
+            // Bound the probe so a hung connection doesn't lock the UI. The
+            // poll SUSPENDS rather than blocking — this closure is `async`,
+            // and `Process.waitDraining` is a `Thread.sleep` loop that would
+            // park a cooperative-pool thread for the whole budget (P43c).
+            let deadline = Date().addingTimeInterval(Self.probeTimeout)
             while proc.isRunning && Date() < deadline {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                proc.terminate()
-                let partial = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-                return (-1, "", "Timed out after 20s.\n\nssh trace so far:\n" + (String(data: partial, encoding: .utf8) ?? ""))
+                // Bounded escalation, not a bare `terminate()`: a wedged
+                // ProxyCommand ignores it, and the trace collected so far is
+                // the whole value of this arm.
+                _ = proc.waitUntilExit(timeout: 0)
+                let partial = drain.collect()
+                let trace = String(
+                    data: partial.count > 1 ? partial[1] : Data(), encoding: .utf8) ?? ""
+                return (-1, "", "Timed out after \(Int(Self.probeTimeout))s.\n\nssh trace so far:\n" + trace)
             }
-            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+            let collected = drain.collect()
             return (
                 proc.terminationStatus,
-                String(data: out, encoding: .utf8) ?? "",
-                String(data: err, encoding: .utf8) ?? ""
+                String(data: collected.first ?? Data(), encoding: .utf8) ?? "",
+                String(data: collected.count > 1 ? collected[1] : Data(), encoding: .utf8) ?? ""
             )
         }.value
 

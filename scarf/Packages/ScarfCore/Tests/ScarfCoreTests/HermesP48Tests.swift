@@ -296,3 +296,77 @@ struct StreamingSpawnP48Tests {
     }
 }
 #endif
+
+#if !os(iOS)
+/// Round-5 P48: `SSHScriptRunner`'s two arms move onto the one drain
+/// primitive.
+///
+/// **What these prove, honestly.** The defect fixed is that the old code
+/// judged at EXIT rather than at EOF — it nilled both `readabilityHandler`s
+/// the instant `isRunning` went false and snapshotted whatever had landed, so
+/// a chunk still on the pipe's queue was dropped. That is a RACE, and it did
+/// not reproduce on demand: both behavioural tests below pass against the
+/// pre-P48 code as well. They are kept as regression guards on the
+/// replacement — a drain that collected short, or collected the pipes in the
+/// wrong order, would fail them — and the shape sweep is what actually goes
+/// red on the old code. The SSH arm needs a remote, so the local arm carries
+/// the behaviour and the sweep carries the pair.
+@Suite("SSHScriptRunner drains to EOF (P48)")
+struct ScriptRunnerDrainP48Tests {
+
+    /// Exit is not EOF; `collect(grace:)` waits for the last EOF. The script
+    /// writes several pipe-buffers' worth and then a marker, immediately
+    /// before exiting — the window the old snapshot-at-exit could miss.
+    @Test("output written immediately before exit arrives whole", .timeLimit(.minutes(1)))
+    func theLastChunkSurvivesTheExit() async throws {
+        // 400 KB: several pipe-buffers' worth, so there is always a chunk in
+        // flight when the process goes.
+        let script = "head -c 400000 /dev/zero | tr '\\000' 'z'; printf 'FINAL-LINE'"
+        let outcome = await SSHScriptRunner.run(
+            script: script, context: .local, timeout: 30)
+        guard case .completed(let stdout, _, let exitCode) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        #expect(exitCode == 0)
+        #expect(stdout.count == 400_010, "got \(stdout.count) bytes")
+        #expect(stdout.hasSuffix("FINAL-LINE"))
+    }
+
+    /// Repeated so a drop that only happens sometimes cannot pass by luck.
+    @Test("the tail survives across repeated runs", .timeLimit(.minutes(2)))
+    func theTailSurvivesRepeatedly() async throws {
+        for i in 0..<8 {
+            let outcome = await SSHScriptRunner.run(
+                script: "head -c 100000 /dev/zero | tr '\\000' 'z'; printf 'TAIL-\(i)'",
+                context: .local,
+                timeout: 30)
+            guard case .completed(let stdout, _, _) = outcome else {
+                Issue.record("run \(i): expected .completed, got \(outcome)")
+                return
+            }
+            #expect(stdout.hasSuffix("TAIL-\(i)"), "run \(i) lost its tail")
+        }
+    }
+
+    /// Both arms are on the primitive, and neither hand-rolls a reader any
+    /// more — the accumulator class that went with them is gone too.
+    @Test("neither arm hand-rolls a reader")
+    func bothArmsUseTheSharedDrain() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ScarfCore/Transport/SSHScriptRunner.swift")
+        let code = StreamingSpawnP48Tests.codeOnly(try String(contentsOf: url, encoding: .utf8))
+        #expect(code.components(separatedBy: "Process.startDraining").count - 1 == 2)
+        #expect(!code.contains("readabilityHandler"))
+        #expect(!code.contains("LockedData"))
+        // One guard spelling per file. ScarfCore's spawn files are all
+        // `#if !os(iOS)`; this one alone said `#if os(macOS)`, which is the
+        // same set today and a different one the moment ScarfCore builds for
+        // anything else.
+        #expect(!code.contains("#if os(macOS)"))
+    }
+}
+#endif
