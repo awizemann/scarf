@@ -520,25 +520,41 @@ public enum HermesYAML {
     /// `stripYAMLQuotes` keeping the stray quote) to decide, exactly as
     /// before.
     ///
+    /// A quote only OPENS a scalar where a scalar can BEGIN — at the start
+    /// of the content, after a `,` (a new entry) or after a `:` (a map
+    /// entry's value). Everywhere else it is an ordinary character in a
+    /// plain scalar, the way YAML reads it: PyYAML 6.0.3 loads `[a'b, c]` as
+    /// two PLAIN scalars, `["a'b", "c"]`, so an apostrophe inside a bare word
+    /// must not swallow the separator after it — and `{a: "x,y"}` must still
+    /// have its value quoted, which is why "start of an entry" alone is the
+    /// wrong test.
+    ///
     /// Empty entries survive as empty substrings; both callers drop them.
     static func splitFlowEntries(_ inner: String) -> [Substring] {
         var out: [Substring] = []
         var start = inner.startIndex
         var i = inner.startIndex
+        var previousSignificant: Character?
         while i < inner.endIndex {
             let c = inner[i]
-            if c == "'" || c == "\"" {
+            let opensScalar = previousSignificant == nil
+                || previousSignificant == ","
+                || previousSignificant == ":"
+            if opensScalar, c == "'" || c == "\"" {
                 let body = inner[inner.index(after: i)...]
                 guard let close = closingQuoteIndex(in: body, quote: c) else { break }
                 i = inner.index(after: close)
+                previousSignificant = c
                 continue
             }
             if c == "," {
                 out.append(inner[start..<i])
                 i = inner.index(after: i)
                 start = i
+                previousSignificant = ","
                 continue
             }
+            if c != " ", c != "\t" { previousSignificant = c }
             i = inner.index(after: i)
         }
         out.append(inner[start...])

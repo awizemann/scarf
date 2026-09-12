@@ -370,3 +370,30 @@ struct DuplicateNamingP46bTests {
     }
 }
 
+
+// MARK: - P46b fresh-eyes: a quote only opens a scalar at an entry's start
+
+/// The first draft of `splitFlowEntries` treated a quote ANYWHERE as opening
+/// a quoted scalar, so a bare word carrying an apostrophe swallowed the
+/// separator after it. PyYAML 6.0.3 reads `[a'b, c]` as two PLAIN scalars.
+@Suite("P46b · a mid-word quote is not a quoted scalar")
+struct FlowPlainScalarP46bTests {
+
+    @Test func anApostropheInsideABareWordDoesNotSwallowTheComma() {
+        #expect(HermesYAML.parseFlatFlowList("a'b, c") == ["a'b", "c"])
+        #expect(HermesYAML.parseFlatFlowList(#"a"b, c"#) == [#"a"b"#, "c"])
+    }
+
+    /// …while leading whitespace before a real quoted entry is still skipped.
+    @Test func aQuotedEntryMayBeIndented() {
+        #expect(HermesYAML.parseFlatFlowList("x,   'a,b'") == ["x", "a,b"])
+    }
+
+    /// And a quoted map KEY carrying a comma — the other half of the same
+    /// bug, since `splitFlowEntry` never saw a whole entry to split.
+    /// PyYAML 6.0.3: `{'a,b': x}` is one pair.
+    @Test func aQuotedMapKeyMayCarryAComma() throws {
+        let map = try #require(HermesYAML.parseNestedYAML("m: {'a,b': x}").maps["m"])
+        #expect(map == ["a,b": "x"])
+    }
+}
