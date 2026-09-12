@@ -114,6 +114,17 @@ struct ReasoningEffortNormalisationP45Tests {
         #expect(notice.contains("Turbo"), "the notice must quote what is on disk")
     }
 
+    /// Emptiness is still asked of the raw string: a whitespace-only value
+    /// is what a `Picker` has to find a tag for, or it renders blank — the
+    /// failure decision 13 exists to prevent.
+    @Test func aWhitespaceOnlyValueStillGetsARow() {
+        #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "  ")
+            .first == "  ")
+        // …and the empty sentinel still widens nothing.
+        #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "")
+            == HermesReasoningEffort.levels(capabilities: Self.target))
+    }
+
     /// The widened row displays the RAW string — that is what config.yaml
     /// holds, and the picker has to match it to select it.
     @Test func theWidenedRowKeepsTheRawSpelling() {

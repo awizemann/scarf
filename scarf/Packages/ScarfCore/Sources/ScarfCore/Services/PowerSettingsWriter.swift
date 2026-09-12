@@ -63,8 +63,11 @@ public enum HermesReasoningEffort {
     /// top-level pickers prepend themselves) widens nothing.
     public static func levels(capabilities: HermesCapabilities, selected: String) -> [String] {
         let base = levels(capabilities: capabilities)
-        let normalized = normalizedLevel(selected)
-        guard !normalized.isEmpty, !base.contains(normalized) else { return base }
+        // Emptiness is asked of the RAW string and membership of the
+        // normalised one: a whitespace-only value is pathological but it IS
+        // what a `Picker` has to find a tag for, while `Max` must not earn a
+        // second row beside `max`.
+        guard !selected.isEmpty, !base.contains(normalizedLevel(selected)) else { return base }
         return [selected] + base
     }
 
