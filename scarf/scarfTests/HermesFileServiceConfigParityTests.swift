@@ -702,6 +702,20 @@ struct AllConfigWritersParityTests {
             // `SettingsEditorSpecParityTests` already pins those.
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/ViewModels/IOSSettingsViewModel.swift",
                    nonLiteralKeySites: 2, computedKeys: []),
+            // iOS chat's model preflight. Newly VISIBLE rather than newly
+            // written (P46 finding 12): it has always written these two keys,
+            // but through a hand-rolled shell string
+            // (`"\(hermes) config set 'model.provider' '…'"`) that no marker
+            // could see — and, being hand-rolled, without the `--` and judged
+            // by exit code. Routing it through `HermesConfigSet.argv`/`.judge`
+            // put it in the discovered set, where it belongs. One non-literal
+            // site (the shared `runConfigSet(_:hermes:key:value:)` helper,
+            // whose `key` is a parameter); its two concrete keys are declared
+            // here because the callers pass them as arguments, not as argv
+            // literals the scan can read.
+            Writer(path: "Scarf iOS/Chat/ChatView.swift",
+                   nonLiteralKeySites: 1,
+                   computedKeys: ["model.provider", "model.default"]),
             Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Core/Services/HermesFileService.swift",

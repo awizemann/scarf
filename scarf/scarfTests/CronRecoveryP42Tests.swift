@@ -191,7 +191,12 @@ import ScarfCore
         // write loses nothing.
         #expect(copy.model == "kimi-k2")
         #expect(copy.monitorScript == "/s/check.sh")
-        #expect(copy.name == spent.name)
+        // …except the NAME, which may not survive: `resolve_job_ref` matches
+        // on a case-folded name and raises `AmbiguousJobReference` for BOTH
+        // jobs once two share one (`cron/jobs.py:1840-1845` @ `v2026.9.7`),
+        // so a verbatim copy broke `hermes cron run <name>` for the source
+        // too (P46 finding 9).
+        #expect(copy.name == spent.name + " (copy)")
         #expect(copy.prompt == spent.prompt)
         // The repeat LIMIT stays; the run COUNT resets, or the copy would be
         // retired by `_advance_after_run` on its very first run.
