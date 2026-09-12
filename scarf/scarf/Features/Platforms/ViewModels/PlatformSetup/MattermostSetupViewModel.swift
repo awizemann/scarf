@@ -48,7 +48,15 @@ final class MattermostSetupViewModel: PlatformSetupForm {
             freeResponseChannels = env["MATTERMOST_FREE_RESPONSE_CHANNELS"] ?? ""
             replyMode = env["MATTERMOST_REPLY_MODE"] ?? "off"
 
-            guard let cfg = snapshot.config?.mattermost else { return }
+            // NO early `guard` on the config half. P37 finding 5's mirror
+            // image, the shape P51 fixed in `NtfySetupViewModel` and left
+            // here: an early `guard let cfg = snapshot.config?.mattermost
+            // else { return }` over ONE of two independently-proven reads
+            // throws the other one away — an unreadable config.yaml would
+            // discard the `MATTERMOST_REQUIRE_MENTION` value Scarf had just
+            // proved and show the resolved default instead. The latched
+            // `loadRefusal` still refuses the Save.
+            //
             // config.yaml WINS and `.env` is only the fallback — the adapter's
             // own precedence (`_extra_or_env("require_mention",
             // "MATTERMOST_REQUIRE_MENTION", "true")`,
@@ -61,7 +69,7 @@ final class MattermostSetupViewModel: PlatformSetupForm {
             // Nothing is migrated silently: the `.env` half is READ as the
             // fallback, and only a Save writes the config key (which is also
             // where the value starts winning).
-            requireMention = cfg.requireMentionIsSet
+            requireMention = snapshot.config?.mattermost.requireMentionIsSet
                 ?? PlatformSetupHelpers.parseEnvBool(env["MATTERMOST_REQUIRE_MENTION"] ?? "true")
         }
     }

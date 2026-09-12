@@ -467,7 +467,8 @@ extension PlatformSetupForm {
             // two halves are not symmetric. `config` / `rawConfigText` are
             // `nil` on a refusal and every form's `apply` either opens with
             // `guard let cfg = snapshot.config?.<platform> else { return }`
-            // or (`NtfySetupViewModel`, P51) binds it optionally and applies
+            // or (`NtfySetupViewModel`, P51; `MattermostSetupViewModel`,
+            // P51b) binds it optionally and applies
             // the proven `.env` half first, so the config half declines
             // itself either way. `env` is `[:]`, which is
             // indistinguishable from "nothing is set yet", so only it needs
@@ -495,8 +496,8 @@ extension PlatformSetupForm {
         // forms (P51). Placed HERE, at the one door all fifteen share, rather
         // than in the three forms the finding named: the hazard is a property
         // of "free text into a config.yaml scalar", and a per-form check
-        // would be fifteen chances to forget the sixteenth. The `.env` half
-        // is NOT checked — `HermesEnvService` is a different file format with
+        // would be fifteen chances to forget the sixteenth.
+        // The `.env` half is NOT checked — `HermesEnvService` is a different file format with
         // its own quoting, and no finding has been made against it.
         //
         // The key is the label because it is the truthful one: these values

@@ -612,7 +612,19 @@ public extension HermesConfig {
         )
 
         let mattermost = MattermostSettings(
-            requireMention: boolTrueDefault("mattermost.require_mention"),
+            // `require_mention` is a `_SHARED_KEYS` member
+            // (`gateway/config_loader.py:197-213` @ `v2026.9.7`), so the
+            // section Hermes bridges it from is the one `platform_section`
+            // picks (`:171-180`) — NOT the top-level spelling unconditionally.
+            // Reading it flat was the reader half of P51's write: the form
+            // wrote bare `mattermost.require_mention`, which CREATES the
+            // top-level block on a nested-only host and un-bridges every
+            // `platforms.mattermost.<shared key>` beside it (P46b's "leaving a
+            // write on its bare spelling is not neutral" lesson). Read and
+            // write move together — the pair is on
+            // `HermesPlatformSharedKeys.bridgeResolvedKeys` now, so the write
+            // lands wherever the bridge source already is.
+            requireMention: sharedPlatformBool("mattermost", "require_mention", default: true),
             // `platforms.mattermost.extra.reply_mode`, NOT the top-level
             // `mattermost.reply_mode` Scarf used to read. The adapter reads
             // `config.extra` only —
@@ -625,15 +637,18 @@ public extension HermesConfig {
             // actually edits) lives in `.env`, outside this parse; an absent
             // YAML key reads as the same `off` it always did.
             replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off"),
-            // Presence, not value. `boolTrueDefault` above resolves the key
+            // Presence, not value. `sharedPlatformBool` above resolves the key
             // the way the adapter does; this says whether the key is THERE,
             // which is what lets `MattermostSetupViewModel` fall back to
             // `MATTERMOST_REQUIRE_MENTION` exactly when Hermes would
             // (`plugins/platforms/mattermost/adapter.py:491-494`, `:504` @
             // `v2026.9.7`) instead of showing config's resolved default over
             // a live `.env` value.
-            requireMentionIsSet: values["mattermost.require_mention"] != nil
-                ? boolTrueDefault("mattermost.require_mention")
+            // Presence is asked at the SAME precedence as the value, or the
+            // fallback would fire for a key that is there (nested) and not
+            // fire for one that is not.
+            requireMentionIsSet: sharedPlatformScalar("mattermost", "require_mention") != nil
+                ? sharedPlatformBool("mattermost", "require_mention", default: true)
                 : nil
         )
 

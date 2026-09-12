@@ -266,13 +266,13 @@ public enum HermesPlatformSharedKeys {
     ///
     /// This list is short on purpose, and the shortness is the finding, not
     /// the fix. `HermesConfig+YAML` reads slack's `require_mention` /
-    /// `reply_in_thread` and telegram's `require_mention` through
-    /// `sharedPlatformScalar` (P20); every other shared key is
-    /// read from ONE hard-coded spelling —
+    /// `reply_in_thread`, telegram's `require_mention` and mattermost's
+    /// `require_mention` through `sharedPlatformScalar` (P20; mattermost in P51b);
+    /// every other shared key is read from ONE hard-coded spelling —
     /// `platforms.signal.extra.require_mention`,
     /// `platforms.whatsapp_cloud.extra.dm_policy` / `.allow_from`,
     /// `discord.require_mention` / `.free_response_channels`,
-    /// `matrix.require_mention`, `mattermost.require_mention`,
+    /// `matrix.require_mention`,
     /// `whatsapp.unauthorized_dm_behavior` / `.reply_prefix`.
     ///
     /// Rewriting those writes without fixing those reads would trade one
@@ -291,5 +291,6 @@ public enum HermesPlatformSharedKeys {
         SharedKeyRef(platform: "telegram", key: "require_mention"),
         SharedKeyRef(platform: "slack", key: "gateway_restart_notification"),
         SharedKeyRef(platform: "telegram", key: "gateway_restart_notification"),
+        SharedKeyRef(platform: "mattermost", key: "require_mention"),
     ]
 }

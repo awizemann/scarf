@@ -288,7 +288,7 @@ struct MattermostRequireMentionSideP51Tests {
     @Test("the .env half is still read as the fallback")
     func envIsStillTheFallback() throws {
         let s = try source()
-        #expect(s.contains("cfg.requireMentionIsSet"))
+        #expect(s.contains("snapshot.config?.mattermost.requireMentionIsSet"))
         #expect(s.contains("env[\"MATTERMOST_REQUIRE_MENTION\"]"))
     }
 }
