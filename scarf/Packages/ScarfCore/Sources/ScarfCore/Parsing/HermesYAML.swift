@@ -888,11 +888,68 @@ public enum HermesYAML {
             if pyYAMLFalse.contains(trimmed) { return false }
             // `str()` of a Python int drops a leading `+` and any `_`
             // separators; only the value `0` stringifies to a falsy word.
-            if let asInt = Int(trimmed) { return asInt != 0 }
+            if let asInt = pyYAMLIntIsZero(trimmed) { return !asInt }
         }
         // A quoted scalar, or a plain one PyYAML leaves as text: compare the
         // STRING, which is what `str()` returns unchanged.
         return !mattermostFalsy.contains(normalizedScalar(trimmed).lowercased())
+    }
+
+    /// Whether a bare scalar is an integer to PyYAML's `int` resolver AND
+    /// that integer is zero — `nil` when the resolver leaves it a string.
+    ///
+    /// `Int(_:)` is not that resolver. Round-6 P53b: `0x0` and `0b0` load as
+    /// the int `0` (falsy to Hermes's three-word compare) while `Int("0x0")`
+    /// is nil, so both fell through to the STRING compare and read TRUE — the
+    /// inversion this whole reader exists to prevent. `0_0` and `0x_0` did
+    /// the same via the `_` separators.
+    ///
+    /// The resolver, verbatim (`yaml/resolver.py`, the `tag:yaml.org,2002:int`
+    /// pattern), is five alternatives after an optional sign: `0b[0-1_]+`,
+    /// `0[0-7_]+` (octal — note there is NO `0o` form, so `0o0` really does
+    /// stay a string and really is TRUE), `0|[1-9][0-9_]*`, `0x[0-9a-fA-F_]+`,
+    /// and the sexagesimal `[1-9][0-9_]*(:[0-5]?[0-9])+`. The last cannot be
+    /// zero, and every non-zero value is true under BOTH readings, so only
+    /// the zero answer is load-bearing here.
+    static func pyYAMLIntIsZero(_ scalar: String) -> Bool? {
+        var body = Substring(scalar)
+        if body.first == "+" || body.first == "-" { body = body.dropFirst() }
+        func digitsAreZero(_ rest: Substring, of set: Set<Character>) -> Bool? {
+            guard !rest.isEmpty else { return nil }
+            var sawDigit = false
+            for c in rest {
+                if c == "_" { continue }
+                guard set.contains(c) else { return nil }
+                sawDigit = true
+                if c != "0" { return false }
+            }
+            return sawDigit ? true : nil
+        }
+        if body.hasPrefix("0b") || body.hasPrefix("0B") {
+            // PyYAML's pattern is lower-case `0b` only.
+            guard body.hasPrefix("0b") else { return nil }
+            return digitsAreZero(body.dropFirst(2), of: ["0", "1"])
+        }
+        if body.hasPrefix("0x") || body.hasPrefix("0X") {
+            guard body.hasPrefix("0x") else { return nil }
+            return digitsAreZero(body.dropFirst(2), of: Set("0123456789abcdefABCDEF"))
+        }
+        if body.first == "0", body.count > 1 {
+            // Octal `0[0-7_]+`. The leading `0` is itself a digit, so an
+            // all-underscore tail (`0_`) is still the value zero — which is
+            // what `int("0_".replace("_", ""), 8)` gives.
+            let tail = body.dropFirst()
+            guard tail.allSatisfy({ Set("01234567_").contains($0) }) else { return nil }
+            return !tail.contains(where: { $0 != "0" && $0 != "_" })
+        }
+        if body == "0" { return true }
+        // `[1-9][0-9_]*` — never zero — and the sexagesimal form. Anything
+        // that is an integer here is non-zero; anything else is a string,
+        // and the string compare is the right answer for both.
+        guard let first = body.first, first.isASCII, first.isNumber, first != "0" else { return nil }
+        guard body.allSatisfy({ ($0.isASCII && $0.isNumber) || $0 == "_" || $0 == ":" })
+        else { return nil }
+        return false
     }
 
     /// `MATTERMOST_REQUIRE_MENTION` as read from `.env`.

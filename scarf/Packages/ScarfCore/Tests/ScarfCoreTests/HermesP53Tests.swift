@@ -124,6 +124,67 @@ struct MattermostRequireMentionP53Tests {
         #expect(HermesYAML.mattermostRequireMention(configScalar: "-1") == true)
     }
 
+    /// The radix forms, against a PyYAML oracle.
+    ///
+    /// Every pair below was produced by running
+    /// `str(yaml.safe_load("k: <scalar>")["k"]).lower() not in
+    /// {"false", "0", "no"}` under PyYAML (round-6 P53b) — the real chain
+    /// `adapter.py:491-505` walks. `Int(_:)` is not PyYAML's `int` resolver:
+    /// `0x0` and `0b0` are the int ZERO there and fell through to the string
+    /// compare here, reading TRUE where Hermes reads false.
+    ///
+    /// The near-misses are the point of the table: `0X0` and `0B0` are
+    /// upper-case and the resolver's pattern is lower-case only, `0o0` has
+    /// no `0o` alternative at all (`0[0-7_]+` does not admit an `o`), and
+    /// `08` is not octal — all four stay STRINGS and are therefore true.
+    @Test("the radix forms agree with PyYAML, near-misses included")
+    func theRadixFormsMatchTheOracle() {
+        let oracle: [(String, Bool)] = [
+        ("0", false),
+        ("1", true),
+        ("2", true),
+        ("-1", true),
+        ("0x0", false),
+        ("0X0", true),
+        ("0b0", false),
+        ("0B0", true),
+        ("0o0", true),
+        ("0x10", true),
+        ("0b1", true),
+        ("00", false),
+        ("010", true),
+        ("08", true),
+        ("0_", false),
+        ("0__0", false),
+        ("0_0", false),
+        ("-0_0", false),
+        ("0x_0", false),
+        ("0x00", false),
+        ("0b00", false),
+        ("-0x0", false),
+        ("+0b0", false),
+        ("0x", true),
+        ("0b", true),
+        ("0o", true),
+        ("0xG", true),
+        ("_0", true),
+        ("0.0", true),
+        ("0e0", true),
+        ("1:00", true),
+        ("0x0_0", false),
+        ("+0", false),
+        ("-0", false),
+        ("12_3", true),
+        ]
+        for (scalar, expected) in oracle {
+            #expect(HermesYAML.mattermostRequireMention(configScalar: scalar) == expected, """
+                `\(scalar)` reads \
+                \(String(describing: HermesYAML.mattermostRequireMention(configScalar: scalar))) \
+                where PyYAML + the three-word compare give \(expected)
+                """)
+        }
+    }
+
     @Test("absent stays absent, so the caller can fall back to .env")
     func absentIsNil() {
         #expect(HermesYAML.mattermostRequireMention(configScalar: nil) == nil)
