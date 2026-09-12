@@ -89,7 +89,12 @@ final class CronViewAccessibilityTreeTests: XCTestCase {
         ]
         if selected { viewModel.selectedJob = viewModel.jobs[0] }
         return CronView(viewModel: viewModel)
-            .environment(AppCoordinator())
+            // A throwaway tracker, not the process-global `Analytics` slot:
+            // building an `AppCoordinator` emits `section_viewed`, and with no
+            // tracker of its own that event lands in whatever another suite
+            // installed — which is exactly the equality
+            // `AnalyticsFeatureUsageEventsTests` asserts (round-5 P48b).
+            .environment(AppCoordinator(usageTracker: NoopUsageTracker()))
             .environment(HermesFileWatcher())
     }
 

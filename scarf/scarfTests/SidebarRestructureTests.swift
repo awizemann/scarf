@@ -116,7 +116,10 @@ struct SidebarRestructureTests {
 
     @Test("picking a project in the well selects it AND navigates to the Projects area")
     func selectRoutesToProjectsArea() {
-        let coordinator = AppCoordinator()
+        // Its own tracker: an `AppCoordinator` with none emits
+        // `section_viewed` into the process-global `Analytics` slot another
+        // suite is asserting exact equality against (round-5 P48b).
+        let coordinator = AppCoordinator(usageTracker: NoopUsageTracker())
         coordinator.selectedSection = .chat
         let viewModel = ProjectsViewModel(context: .local)
         let project = ProjectEntry(name: "atlas", path: "/tmp/atlas")
@@ -134,7 +137,10 @@ struct SidebarRestructureTests {
 
     @Test("selecting a different project replaces the previous selection")
     func selectReplacesPreviousSelection() {
-        let coordinator = AppCoordinator()
+        // Its own tracker: an `AppCoordinator` with none emits
+        // `section_viewed` into the process-global `Analytics` slot another
+        // suite is asserting exact equality against (round-5 P48b).
+        let coordinator = AppCoordinator(usageTracker: NoopUsageTracker())
         let viewModel = ProjectsViewModel(context: .local)
         let first = ProjectEntry(name: "atlas", path: "/tmp/atlas")
         let second = ProjectEntry(name: "borealis", path: "/tmp/borealis")
