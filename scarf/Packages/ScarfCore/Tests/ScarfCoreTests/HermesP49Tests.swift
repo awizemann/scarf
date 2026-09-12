@@ -53,8 +53,11 @@ struct RetiredCapabilityFlagsP49Tests {
         "scarf/Packages/ScarfCore/Tests/ScarfCoreTests",
     ]
 
-    /// This file names both flags in prose, so it would match itself.
-    private static let ownFileName = URL(fileURLWithPath: #filePath).lastPathComponent
+    /// This file names both flags in prose, so it would match itself. Exempt
+    /// it by FULL PATH, not by basename: `scarf/scarfTests/HermesP49Tests.swift`
+    /// has the same basename, and a basename exemption would silently excuse
+    /// that file too (P49b).
+    private static let ownFilePath = URL(fileURLWithPath: #filePath).standardizedFileURL.path
 
     private static func swiftFiles(under relative: String) -> [URL] {
         let root = repoRoot.appendingPathComponent(relative)
@@ -72,6 +75,23 @@ struct RetiredCapabilityFlagsP49Tests {
         return bare.hasPrefix("//") || bare.hasPrefix("*")
     }
 
+    /// Blank out double-quoted string literals before matching. A sibling
+    /// source-sweep suite spells a retired flag inside a `#expect(...)`
+    /// string — that is an assertion ABOUT the flag's absence, not a
+    /// consumer of it, and must not trip this sweep (P49b).
+    private static func strippingStringLiterals(_ line: String) -> String {
+        var out = ""
+        var inString = false
+        var escaped = false
+        for ch in line {
+            if escaped { escaped = false; continue }
+            if ch == "\\" && inString { escaped = true; continue }
+            if ch == "\"" { inString.toggle(); continue }
+            if !inString { out.append(ch) }
+        }
+        return out
+    }
+
     /// Non-comment hits for `needle` across every scanned target, as
     /// `path:line` strings. Comment lines are exempt so the retirement NOTEs
     /// left behind in `HermesCapabilities.swift` (which are the record of the
@@ -80,11 +100,12 @@ struct RetiredCapabilityFlagsP49Tests {
     static func codeHits(for needle: String) -> [String] {
         var hits: [String] = []
         for root in scanRoots {
-            for file in swiftFiles(under: root) where file.lastPathComponent != ownFileName {
+            for file in swiftFiles(under: root)
+            where file.standardizedFileURL.path != ownFilePath {
                 guard let source = try? String(contentsOf: file, encoding: .utf8),
                       source.contains(needle) else { continue }
                 for (idx, line) in source.components(separatedBy: "\n").enumerated()
-                where !isComment(line) && line.contains(needle) {
+                where !isComment(line) && strippingStringLiterals(line).contains(needle) {
                     hits.append("\(file.lastPathComponent):\(idx + 1): \(line.trimmingCharacters(in: .whitespaces))")
                 }
             }

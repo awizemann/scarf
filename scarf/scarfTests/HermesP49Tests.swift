@@ -85,7 +85,19 @@ struct ModelSurfaceUngatingP49Tests {
         let source = try Self.source("scarf/scarf/Features/Chat/Views/SessionInfoBar.swift")
         // The gate stays (the plumbing is a landing pad, not dead code), but
         // no Hermes tag puts a compression count in the ACP usage payload —
-        // `acp_adapter/server.py:325-336` @ v2026.3.30, `:917-924` @ v2026.9.7.
+        // `acp_adapter/server.py:1050-1059` @ v2026.5.7, `:917-924` @ v2026.9.7.
         #expect(source.contains("capabilities.hasContextCompressionCount && acpCompressionCount > 0"))
+
+        // P49 corrected the CONSUMER comment, which is the only place that
+        // claimed a v0.13 host sends the field. The old text must be gone…
+        #expect(!source.contains("v0.13: Hermes surfaces a running count"))
+        #expect(!source.contains("sees the chip the first time the agent compacts"))
+        #expect(!source.contains("(which always reports 0) sees no chip"))
+        // …and the corrected fact, with its citations, must be present.
+        #expect(source.contains("NO Hermes tag sends a compaction"))
+        #expect(source.contains("`acp_adapter/server.py:1050-1059` @ v2026.5.7"))
+        #expect(source.contains("`:917-924` @"))
+        #expect(source.contains("`_build_usage_update` carries none"))
+        #expect(source.contains("the `> 0` test — not the capability flag — is"))
     }
 }

@@ -372,11 +372,17 @@ struct SessionInfoBar: View {
                         .fixedSize()
                 }
 
-                // v0.13: Hermes surfaces a running count of automatic
-                // context compactions. Render only when the host is on
-                // v0.13+ AND the count is non-zero, so a pre-v0.13 host
-                // (which always reports 0) sees no chip, and a v0.13 host
-                // sees the chip the first time the agent compacts.
+                // Context-compaction chip. NO Hermes tag sends a compaction
+                // count under `acp_adapter/`: the adapter builds `Usage` from
+                // `prompt_tokens`, `completion_tokens`, `total_tokens`,
+                // `reasoning_tokens` and `cache_read_tokens`/`cached_tokens`
+                // only — `acp_adapter/server.py:1050-1059` @ v2026.5.7
+                // (0.13.0, the flag's nominal floor) and `:917-924` @
+                // v2026.9.7 (0.21.1) — and `_build_usage_update` carries none
+                // either. So `acpCompressionCount` is 0 on EVERY host, v0.13+
+                // included, and the `> 0` test — not the capability flag — is
+                // what hides the chip. Both are kept as the landing pad for a
+                // future gateway/`session/update` field.
                 if capabilities.hasContextCompressionCount && acpCompressionCount > 0 {
                     Label(
                         "×\(acpCompressionCount)",

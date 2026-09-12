@@ -608,7 +608,8 @@ public actor ACPClient {
     ///
     /// Used both at session boot (immediately after `newSession` to apply
     /// a project's bound preset before the user's first prompt) and at
-    /// user-tap time from the chat header to swap mid-conversation. The
+    /// user-tap time from the chat header to swap mid-conversation.
+    ///
     /// No capability gate is required: `set_session_model` is defined in
     /// `acp_adapter/server.py` at the earliest adapter tag (`:466` @
     /// v2026.3.17) and at every tag since, including Scarf's v0.6.0
