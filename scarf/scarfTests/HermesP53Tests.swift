@@ -141,5 +141,17 @@ struct SignalPrerequisiteRowP53Tests {
     func theSharedNoticeNamesTheHost() {
         #expect(PlatformSetupHelpers.remoteOnlyHostNotice(ServerContext.local) == nil,
                 "a local context must still show the real PATH verdict")
+        // The half that was missing (round-6 P53b): asserting only the nil
+        // arm leaves a notice that fires correctly but says nothing about
+        // WHICH machine — the defect the row was changed to fix.
+        let remote = ServerContext(
+            id: UUID(), displayName: "Box",
+            kind: .ssh(SSHConfig(host: "box.local")))
+        let notice = PlatformSetupHelpers.remoteOnlyHostNotice(remote)
+        #expect(notice != nil, "a remote context shows no host notice at all")
+        #expect(notice?.contains("Box") == true, """
+            The notice does not name the host, so the row's sentence is as \
+            ambiguous as the PATH verdict it replaced: \(notice ?? "nil")
+            """)
     }
 }

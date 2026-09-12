@@ -131,8 +131,10 @@ struct CitadelTransportP53Tests {
                     sent = true
                     return .stdout(ByteBuffer(string: OneChunkThenHang.chunk))
                 }
-                try await Task.sleep(nanoseconds: 30_000_000_000)
-                return nil
+                // Hang until cancelled, in short ticks: a single long
+                // `Task.sleep` is the fixed-sleep shape
+                // `HermesP38SourceSweepTests` sweeps for.
+                while true { try await Task.sleep(nanoseconds: 10_000_000) }
             }
         }
         func makeAsyncIterator() -> Iterator { Iterator() }
