@@ -121,10 +121,6 @@ struct HermesP38SourceSweepTests {
         "HermesManagedInstallP39Tests.swift",
     ]
 
-    /// The base of `fix/whole-surface-audit-r4`. The branch scope below is
-    /// `git diff --name-only <this>..HEAD -- '*Tests.swift'`.
-    static let branchBase = "5be08f2e"
-
     /// Scope (ii), P46 finding 3: **every test file this branch touched**,
     /// whether or not its name carries a phase number.
     ///
@@ -133,8 +129,21 @@ struct HermesP38SourceSweepTests {
     /// construction — but a phase that fixes sites in an existing,
     /// ordinarily-named suite (`M5FeatureVMTests.swift`, which P45 itself
     /// edited) writes code no sweep reads. Scoping by PATH — what the branch
-    /// changed — closes that, and ``theBranchScopeMatchesGit`` keeps the list
-    /// honest against `git` rather than against itself.
+    /// changed — closes that.
+    ///
+    /// P46b: the list is CHECKED IN and read unconditionally. It was pinned
+    /// against `git diff --name-only 5be08f2e..HEAD` by a test, which made a
+    /// unit test depend on repository topology: it fails on a shallow clone
+    /// or any checkout without that commit, and once the branch merges it
+    /// goes red on `main` the first time anyone edits a test file, for a
+    /// reason that has nothing to do with the rule being swept. The list
+    /// below was generated from exactly that diff at `b44dfefd` and frozen.
+    /// A later phase that touches an ordinarily-named test file APPENDS its
+    /// basename here — that is the maintenance the git call was buying, and
+    /// it is one line.
+    ///
+    /// A phase-numbered suite needs no entry: ``isPhaseSuite`` already finds
+    /// it by construction.
     ///
     /// Basenames, because the same suite name appears under two targets and
     /// both are in scope either way.
@@ -295,41 +304,6 @@ struct HermesP38SourceSweepTests {
             + missing.sorted().joined(separator: ", ")))
     }
 
-    /// And the list is checked against `git`, not against itself — the exact
-    /// self-check P45's `phaseSuiteFiles` was missing. A test file this
-    /// branch touches without being added here fails right here.
-    ///
-    /// `git` unavailable (a sandbox with no binary, or a checkout without the
-    /// base commit) records an issue rather than passing quietly: a scope pin
-    /// that can silently no-op is the failure mode this test exists for.
-    @Test func theBranchScopeMatchesGit() throws {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["git", "-C", Self.repoRoot.path, "diff", "--name-only",
-                          "\(Self.branchBase)..HEAD", "--", "*Tests.swift"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        try proc.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        proc.waitUntilExit()
-        guard proc.terminationStatus == 0 else {
-            Issue.record("git could not diff \(Self.branchBase)..HEAD — the branch scope is unpinned")
-            return
-        }
-        let reported = Set(
-            String(decoding: data, as: UTF8.self)
-                .split(separator: "\n")
-                .map { URL(fileURLWithPath: String($0)).lastPathComponent }
-        )
-        #expect(!reported.isEmpty, "the git diff reported nothing — the pin has broken")
-        let unlisted = reported.subtracting(Self.branchTouchedTestFiles)
-        #expect(unlisted.isEmpty, Comment(rawValue:
-            "this branch touched test files that are not in `branchTouchedTestFiles`, "
-            + "so the stability sweeps do not read them: "
-            + unlisted.sorted().joined(separator: ", ")))
-    }
-
     // MARK: - 22b: `try? #require` swallows the requirement
 
     /// `try? #require(x)` is `try! #require(x)`'s quiet twin: the `#require`
@@ -379,12 +353,36 @@ struct HermesP38SourceSweepTests {
             + "probe delay (0.3 s) times three",
     ]
 
-    @Test func noTestSleepsAFixedHalfSecondOrMore() {
-        let pattern = #"(?:Task|Thread)\.sleep\([^)]*?([0-9][0-9_]*)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            Issue.record("the sleep sweep's pattern does not compile")
-            return
+    /// The seconds a sleep on this line lasts, or `nil` if the line is not a
+    /// fixed sleep the sweep can read.
+    ///
+    /// P46b: the capture was `([0-9][0-9_]*)` — INTEGER digits only — so
+    /// `Thread.sleep(forTimeInterval: 0.9)` read as `0` and `.seconds(0.5)`
+    /// as `0`, and both fell under the half-second floor the rule exists to
+    /// enforce. The two spellings that happened to be in scope were both
+    /// whole-number nanosecond counts, which is why nobody noticed. The
+    /// fraction is part of the number now, and the unit is read from the
+    /// argument LABEL as well as the duration spelling: `forTimeInterval:`
+    /// is `Thread.sleep`'s seconds label and has no `.seconds` token on the
+    /// line to fall through to.
+    static func fixedSleepSeconds(in line: String) -> [Double] {
+        let pattern = #"(?:Task|Thread)\.sleep\([^)]*?([0-9][0-9_]*(?:\.[0-9]+)?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = line as NSString
+        var out: [Double] = []
+        for m in regex.matches(in: line, range: NSRange(location: 0, length: ns.length))
+        where m.numberOfRanges > 1 {
+            let digits = ns.substring(with: m.range(at: 1)).replacingOccurrences(of: "_", with: "")
+            guard let raw = Double(digits) else { continue }
+            if line.contains("nanoseconds") { out.append(raw / 1_000_000_000) }
+            else if line.contains("microseconds") { out.append(raw / 1_000_000) }
+            else if line.contains("milliseconds") { out.append(raw / 1_000) }
+            else { out.append(raw) }   // `.seconds(…)` and `forTimeInterval:`
         }
+        return out
+    }
+
+    @Test func noTestSleepsAFixedHalfSecondOrMore() {
         var offenders: [String] = []
         var allowancesSeen: Set<String> = []
         for root in Self.phaseSuiteRoots {
@@ -394,16 +392,7 @@ struct HermesP38SourceSweepTests {
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated() {
                     guard !Self.isComment(line) else { continue }
-                    let ns = line as NSString
-                    for m in regex.matches(in: line, range: NSRange(location: 0, length: ns.length))
-                    where m.numberOfRanges > 1 {
-                        let digits = ns.substring(with: m.range(at: 1)).replacingOccurrences(of: "_", with: "")
-                        guard let raw = Double(digits) else { continue }
-                        let seconds: Double
-                        if line.contains("nanoseconds") { seconds = raw / 1_000_000_000 }
-                        else if line.contains("microseconds") { seconds = raw / 1_000_000 }
-                        else if line.contains("milliseconds") { seconds = raw / 1_000 }
-                        else { seconds = raw }
+                    for seconds in Self.fixedSleepSeconds(in: line) {
                         guard seconds >= 0.5 else { continue }
                         let site = "\(url.lastPathComponent):\(i + 1)"
                         if Self.allowedFixedSleeps[site] != nil {
@@ -476,5 +465,60 @@ struct HermesP38SourceSweepTests {
         }
         #expect(readEnv > 0, "the `snapshot.env` matcher stopped matching")
         #expect(offenders.isEmpty, Comment(rawValue: offenders.joined(separator: "; ")))
+    }
+}
+
+// MARK: - P46b finding 4: the fixed-sleep matcher is calibrated
+
+/// The rule's number-matcher captured INTEGER digits only, so
+/// `Thread.sleep(forTimeInterval: 0.9)` measured as 0 seconds and
+/// `.seconds(0.5)` as 0 — both under the half-second floor the rule exists to
+/// enforce. Calibrated here rather than only over the tree, because the tree
+/// happened to contain no fractional spelling: a matcher with no calibration
+/// test is a matcher that can stop matching in silence.
+/// This suite lives in the sweep's own file ON PURPOSE: its calibration
+/// cases are sleep spellings written as string literals, and any other file
+/// in scope would have the sweep read them as real sleeps. `ownFileName` is
+/// already excluded, so the cases sit where they cannot trip the rule they
+/// calibrate.
+@Suite("P46b · the fixed-sleep matcher is calibrated")
+struct FixedSleepMatcherP46bTests {
+
+    @Test func everyDurationSpellingIsConverted() {
+        let cases: [(String, Double)] = [
+            ("try await Task.sleep(nanoseconds: 500_000_000)", 0.5),
+            ("try await Task.sleep(for: .milliseconds(900))", 0.9),
+            ("try await Task.sleep(for: .seconds(0.5))", 0.5),
+            ("Thread.sleep(forTimeInterval: 0.9)", 0.9),
+            ("Thread.sleep(forTimeInterval: 3)", 3),
+            ("try await Task.sleep(for: .microseconds(750_000))", 0.75),
+        ]
+        for (line, expected) in cases {
+            let found = HermesP38SourceSweepTests.fixedSleepSeconds(in: line)
+            #expect(found.first == expected,
+                    Comment(rawValue: "`\(line)` measured \(found), expected [\(expected)]"))
+        }
+    }
+
+    /// The fraction is the fix: these four all read as `0` before it, i.e.
+    /// the rule silently passed them.
+    @Test func aFractionalSleepIsNoLongerReadAsZero() {
+        for line in ["Thread.sleep(forTimeInterval: 0.9)",
+                     "try await Task.sleep(for: .seconds(0.5))",
+                     "try await Task.sleep(for: .seconds(1.5))"] {
+            let found = HermesP38SourceSweepTests.fixedSleepSeconds(in: line)
+            #expect(found.first ?? 0 >= 0.5,
+                    Comment(rawValue: "`\(line)` measured \(found) — under the floor"))
+        }
+    }
+
+    /// …and a genuinely short sleep still passes, or the rule would fire on
+    /// every poll interval in the suite.
+    @Test func aShortSleepIsStillShort() {
+        #expect(HermesP38SourceSweepTests.fixedSleepSeconds(
+            in: "try await Task.sleep(for: .milliseconds(50))").first == 0.05)
+        #expect(HermesP38SourceSweepTests.fixedSleepSeconds(
+            in: "try await Task.sleep(nanoseconds: 10_000_000)").first == 0.01)
+        #expect(HermesP38SourceSweepTests.fixedSleepSeconds(in: "await settle()").isEmpty)
     }
 }
