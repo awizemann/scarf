@@ -493,10 +493,23 @@ extension PlatformSetupForm {
             return
         }
         // Round-4 decision 9's control-character refusal, reaching the setup
-        // forms (P51). Placed HERE, at the one door all fifteen share, rather
-        // than in the three forms the finding named: the hazard is a property
-        // of "free text into a config.yaml scalar", and a per-form check
-        // would be fifteen chances to forget the sixteenth.
+        // forms (P51). Placed HERE, at the one door all fifteen SETUP FORMS
+        // share, rather than in the three forms the finding named: the hazard
+        // is a property of "free text into a config.yaml scalar", and a
+        // per-form check would be fifteen chances to forget the sixteenth.
+        //
+        // "All fifteen" is the honest scope and not "every config write in
+        // the app" (P51b finding 5): `GatewayBehaviorViewModel.save` calls
+        // `PlatformSetupHelpers.saveForm` directly, because its save is two
+        // steps (a direct-YAML list write, then the scalars) and it is not a
+        // `PlatformSetupForm`. It is the ONLY production caller of `saveForm`
+        // outside this door — pinned by
+        // `GatewayBehaviourIsTheOnlyDirectSaveFormCallerP51bTests` — and the
+        // scalars it sends are booleans (`PlatformSetupHelpers.envBool`), so
+        // no free text reaches `hermes config set` through it. Its free-text
+        // half is the allowlist, which goes to `GatewayConfigWriter.saveList`
+        // and is a different write path with its own quoting.
+        //
         // The `.env` half is NOT checked — `HermesEnvService` is a different file format with
         // its own quoting, and no finding has been made against it.
         //

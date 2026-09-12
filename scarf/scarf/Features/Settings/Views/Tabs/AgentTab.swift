@@ -442,9 +442,13 @@ private struct ReasoningOverridesSection: View {
         // live for the model whose id it actually spells, and adding one was
         // silently removing the other from the file (`setReasoningOverrides`
         // rewrites the block from what the editor holds).
-        var pairs = sortedOverrides.filter { $0.key != pattern }
-        pairs.append((key: pattern, value: newEffort))
-        save(pairs)
+        // The rule itself lives in `HermesReasoningEffort
+        // .overridesAfterAdding` so a test can exercise the code this view
+        // runs (P51b): the inline copy that used to stand here left
+        // decision 16 pinned only by a source grep.
+        save(HermesReasoningEffort.overridesAfterAdding(
+            pattern: pattern, effort: newEffort, to: sortedOverrides
+        ))
         newPattern = ""
     }
 

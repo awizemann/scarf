@@ -107,6 +107,40 @@ public enum HermesReasoningEffort {
         normalizedLevel(raw).isEmpty ? "" : raw
     }
 
+    /// The `agent.reasoning_overrides` rows that result from adding
+    /// `pattern` at `effort` to `existing`, applying round-5 decision 16's
+    /// EXACT replace-on-add.
+    ///
+    /// Extracted in P51b because it was not extracted in P51: the rule lived
+    /// inline in `AgentTab.addNew` and the test that was supposed to cover it
+    /// had a private RE-IMPLEMENTATION beside a comment calling itself "the
+    /// function the view now uses". A re-implementation cannot fail when the
+    /// view drifts, so decision 16's only real signal was a
+    /// `caseInsensitiveCompare` grep — a pin on one spelling of the bug
+    /// rather than on the rule.
+    ///
+    /// The rule: a key already present with the SAME spelling is replaced
+    /// (so adding a pattern twice does not duplicate the row); a key that
+    /// differs only in CASE is a different override and survives. Hermes's
+    /// lookup is a plain dict membership test — `variant in overrides` in
+    /// `resolve_per_model_reasoning_effort` (`hermes_constants.py:929-941` @
+    /// `v2026.9.7`) over the variants `_canonical_model_variants` derives
+    /// (`:892-926`), which recover dots↔dashes and add/strip provider
+    /// prefixes but NEVER change case. `Claude-Opus` and `claude-opus` are
+    /// two live entries, and the case-insensitive filter that used to stand
+    /// in the view deleted one of them from the FILE, because
+    /// ``PowerSettingsWriter/setReasoningOverrides(in:pairs:capabilities:)`` rewrites the whole
+    /// block from what the editor holds.
+    public static func overridesAfterAdding(
+        pattern: String,
+        effort: String,
+        to existing: [(key: String, value: String)]
+    ) -> [(key: String, value: String)] {
+        var pairs = existing.filter { $0.key != pattern }
+        pairs.append((key: pattern, value: effort))
+        return pairs
+    }
+
     /// What Hermes itself does to the stored value before it compares:
     /// `effort = str(effort).strip().lower()` — `hermes_constants.py:884` @
     /// `v2026.9.7`, and the same line at `:807` @ `v2026.7.1`, i.e. on both
@@ -239,7 +273,17 @@ public enum PowerSettingsWriter {
     ) -> String? {
         guard capabilities.isV020OrLater else { return nil }
         // The key is TRIMMED for the write, not only for the emptiness
-        // test. It used to be trimmed for the `isEmpty` filter and written
+        // test — and with the WIDE `.whitespaces`, which stays wide
+        // (P51b finding 7, disagreed with). This is a writer-side cleanup of
+        // a field the USER typed, not a parser trim: decision 14 narrowed
+        // `HermesYAML`'s reader to space+tab because PyYAML keeps a `Zs`
+        // character as scalar CONTENT. Here that same fidelity would be the
+        // bug — Hermes compares an override key EXACTLY (`variant in
+        // overrides`, `hermes_constants.py:929-941` @ `v2026.9.7`, over
+        // `_canonical_model_variants` at `:892-926`, which never strips), so
+        // a pattern pasted with a trailing U+00A0 and left untrimmed is
+        // written quoted and matches no model for the life of the entry.
+        // "Exact" in decision 16 is about CASE, not about whitespace. It used to be trimmed for the `isEmpty` filter and written
         // untrimmed, so a pattern pasted with a trailing space went into
         // config.yaml quoted (`YAMLScalar.quoteIfNeeded` quotes a trailing
         // space, correctly) and never matched a model name — while the row

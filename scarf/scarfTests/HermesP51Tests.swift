@@ -98,12 +98,15 @@ struct RemotePairingNoticeP51Tests {
 @Suite("P51 · reasoning-override keys are deduped exactly")
 struct ReasoningOverrideExactDedupeP51Tests {
 
-    /// The editor's rule, extracted as the function the view now uses.
+    /// The function `AgentTab.addNew` ACTUALLY calls (P51b). This used to be
+    /// a private re-implementation of the rule with a comment claiming it was
+    /// the extracted one; it could not fail when the view drifted.
     private func afterAdding(_ pattern: String, to existing: [String]) -> [String] {
-        var pairs = existing.map { (key: $0, value: "high") }
-            .filter { $0.key != pattern }
-        pairs.append((key: pattern, value: "low"))
-        return pairs.map(\.key)
+        HermesReasoningEffort.overridesAfterAdding(
+            pattern: pattern,
+            effort: "low",
+            to: existing.map { (key: $0, value: "high") }
+        ).map(\.key)
     }
 
     /// The bug: adding `Claude-Opus` used to remove `claude-opus`.

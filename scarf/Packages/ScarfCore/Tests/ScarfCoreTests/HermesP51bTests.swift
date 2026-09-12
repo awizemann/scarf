@@ -106,3 +106,111 @@ struct MattermostRequireMentionBridgeP51bTests {
     }
 }
 
+// MARK: - P51b finding 3: decision 16's rule is a function, not a grep
+
+/// P51's `ReasoningOverridesSection.addNew` kept the replace-on-add rule
+/// inline and the test beside it re-implemented the rule privately under a
+/// comment calling itself "the function the view now uses". A
+/// re-implementation cannot fail when the view drifts, so decision 16's only
+/// real signal was a `caseInsensitiveCompare` source grep — a pin on one
+/// spelling of the bug rather than on the rule. The rule is
+/// `HermesReasoningEffort.overridesAfterAdding` now, and the view calls it.
+@Suite("P51b · the override dedupe rule is exercised, not re-implemented")
+struct ReasoningOverrideRuleIsExtractedP51bTests {
+
+    private func keys(_ pattern: String, _ existing: [String]) -> [String] {
+        HermesReasoningEffort.overridesAfterAdding(
+            pattern: pattern,
+            effort: "low",
+            to: existing.map { (key: $0, value: "high") }
+        ).map(\.key)
+    }
+
+    @Test("a different casing does not evict the existing row")
+    func differentCasingCoexists() {
+        #expect(keys("Claude-Opus", ["claude-opus"]) == ["claude-opus", "Claude-Opus"])
+    }
+
+    @Test("an exact match is replaced, not duplicated")
+    func exactMatchReplaces() {
+        #expect(keys("claude-opus", ["claude-opus"]) == ["claude-opus"])
+        // …and the new EFFORT wins, which is what replace-on-add means.
+        #expect(HermesReasoningEffort.overridesAfterAdding(
+            pattern: "claude-opus", effort: "low", to: [(key: "claude-opus", value: "high")]
+        ).map(\.value) == ["low"])
+    }
+
+    @Test("unrelated rows keep their order")
+    func unrelatedRowsAreUntouched() {
+        #expect(keys("c", ["a", "b"]) == ["a", "b", "c"])
+    }
+
+    /// The source pin stays as the belt: the view must not reintroduce the
+    /// case-insensitive comparison, and it must not grow a second inline copy
+    /// of the rule.
+    @Test("AgentTab calls the rule rather than restating it")
+    func theViewCallsTheExtractedRule() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // ScarfCoreTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // ScarfCore
+            .deletingLastPathComponent()   // Packages
+            .deletingLastPathComponent()   // scarf
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("scarf/scarf/Features/Settings/Views/Tabs/AgentTab.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        #expect(!source.contains("caseInsensitiveCompare"))
+        #expect(source.contains("HermesReasoningEffort.overridesAfterAdding("))
+        #expect(!source.contains("pairs.append((key: pattern, value: newEffort))"),
+                "AgentTab grew a second inline copy of decision 16's rule")
+    }
+}
+
+// MARK: - P51b finding 7 (disagreed with): the override-pattern trim stays WIDE
+
+/// The review asked for `setReasoningOverrides`'s `.whitespaces` trim to be
+/// narrowed to decision 14's space+tab set "for consistency". It is not the
+/// same question. Decision 14 narrowed a PARSER, because PyYAML keeps a `Zs`
+/// character as scalar content and Scarf was reading Hermes's own values
+/// short. This is a writer-side cleanup of a field the USER typed, and
+/// Hermes compares an override key EXACTLY — `variant in overrides`
+/// (`hermes_constants.py:929-941` @ `v2026.9.7`) over
+/// `_canonical_model_variants` (`:892-926`), which recovers dots↔dashes and
+/// provider prefixes but never strips. So an untrimmed trailing U+00A0 is
+/// written quoted and matches no model for the life of the entry: narrowing
+/// the trim would CREATE dead overrides. "Exact" in decision 16 is about
+/// case, not whitespace.
+@Suite("P51b · the override pattern's writer-side trim stays wide")
+struct OverridePatternTrimStaysWideP51bTests {
+
+    private static let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+
+    private func written(_ pattern: String) -> String? {
+        PowerSettingsWriter.setReasoningOverrides(
+            in: "agent:\n  model: gpt\n",
+            pairs: [(key: pattern, value: "high")],
+            capabilities: Self.caps
+        )
+    }
+
+    @Test("a pasted U+00A0 is trimmed off the pattern, not quoted into the file")
+    func nbspIsTrimmed() throws {
+        let yaml = try #require(written("claude-opus\u{00A0}"))
+        #expect(yaml.contains("claude-opus"))
+        #expect(!yaml.contains("\u{00A0}"),
+                "the pattern kept a U+00A0 Hermes will never match: \(yaml)")
+    }
+
+    @Test("an ordinary trailing space is trimmed too")
+    func spaceIsTrimmed() throws {
+        let yaml = try #require(written("claude-opus "))
+        #expect(!yaml.contains("\"claude-opus \""))
+    }
+
+    /// The clamp on the other side: case is still preserved exactly.
+    @Test("case is preserved")
+    func caseIsPreserved() throws {
+        let yaml = try #require(written("Claude-Opus"))
+        #expect(yaml.contains("Claude-Opus"))
+    }
+}

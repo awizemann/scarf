@@ -63,3 +63,44 @@ struct MattermostEnvFallbackSurvivesP51bTests {
     }
 }
 
+// MARK: - P51b finding 5: "all fifteen share one door" is true of the SETUP FORMS only
+
+/// `commitSave` carries round-4 decision 9's control-character refusal and
+/// its doc comment claimed every config write goes through it.
+/// `GatewayBehaviorViewModel` does not — it calls
+/// `PlatformSetupHelpers.saveForm` directly, because its save is two steps
+/// and it is not a `PlatformSetupForm`. That is allowed (it sends booleans,
+/// not free text) but it must stay the ONLY one, or the claim decays again.
+@Suite("P51b · gateway behaviour is the only direct saveForm caller")
+struct GatewayBehaviourIsTheOnlyDirectSaveFormCallerP51bTests {
+
+    private static var appRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()      // scarfTests
+            .deletingLastPathComponent()      // scarf
+            .appendingPathComponent("scarf")  // the app target
+    }
+
+    @Test func exactlyOneProductionCallerBypassesCommitSave() throws {
+        let fm = FileManager.default
+        var callers: [String] = []
+        let root = Self.appRoot
+        let walker = try #require(fm.enumerator(at: root, includingPropertiesForKeys: nil))
+        for case let url as URL in walker where url.pathExtension == "swift" {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            for line in source.split(separator: "\n", omittingEmptySubsequences: false)
+            where line.contains("PlatformSetupHelpers.saveForm(")
+                && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+                && !line.trimmingCharacters(in: .whitespaces).hasPrefix("///") {
+                callers.append(url.lastPathComponent)
+            }
+        }
+        #expect(callers == ["GatewayBehaviorViewModel.swift"], """
+            `PlatformSetupHelpers.saveForm` is called directly from \(callers). \
+            Every setup form must go through `commitSave`, which carries the \
+            latched-refusal and control-character guards; a new direct caller \
+            either joins that door or documents why its batch carries no free \
+            text.
+            """)
+    }
+}
