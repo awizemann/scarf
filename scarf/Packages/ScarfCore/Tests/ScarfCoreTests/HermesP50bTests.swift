@@ -59,8 +59,26 @@ struct CronEditorEnabledGateP50bTests {
                 "the editor's Enabled gate is gone — a terminal record can be re-enabled from the sheet again")
         #expect(source.contains("recoveryOffer.refusesResume"),
                 "the gate no longer keys on the shared offer's refusesResume, which is what setEnabled refuses on")
-        #expect(source.contains("Toggle(\"Enabled\", isOn: $enabled)\n                        .disabled(enabledIsLocked)"),
-                "the Enabled toggle is not disabled by the gate")
+        // Two tokens, matched independently and then ORDERED — the literal
+        // this replaced pinned the toggle, a newline and TWENTY-FOUR SPACES,
+        // so re-indenting the file by one level (a `Form` gaining a wrapper)
+        // would have reported the gate as gone (round-6 P53). What the test
+        // is about is that the gate reaches the toggle, not the column the
+        // toggle sits in.
+        let toggle = try #require(
+            source.range(of: "Toggle(\"Enabled\", isOn: $enabled)"),
+            "the Enabled toggle is gone")
+        let after = source[toggle.upperBound...]
+        let disabled = try #require(
+            after.range(of: ".disabled(enabledIsLocked)"),
+            "the Enabled toggle is not disabled by the gate")
+        // Nothing but whitespace between them: a `.disabled` three modifiers
+        // down is on a different control.
+        let between = String(after[..<disabled.lowerBound])
+        #expect(between.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, """
+            `.disabled(enabledIsLocked)` is no longer the toggle's own \
+            modifier — something sits between them.
+            """)
     }
 
     /// The P47 lesson that a `.disabled` control still reports its binding:
@@ -85,11 +103,36 @@ struct CronEditorEnabledGateP50bTests {
                 "the offer is no longer a stored property of the editor")
         #expect(source.contains("recoveryOffer: CronRecoveryOffer = ") == false,
                 "the offer parameter grew a default — a forgetful caller gets the ungated editor back")
-        let sites = source.components(separatedBy: "CronEditorView(").count - 1
-        let passed = source.components(separatedBy: "recoveryOffer: ").count - 1
-        // One declaration (`init`), one stored property, plus one per sheet.
+        // Counted INSIDE each `CronEditorView(` argument list, not over the
+        // whole file. `passed >= sites` was vacuous: `recoveryOffer: ` also
+        // matches the `init` parameter and the stored property, so it read 5
+        // against 3 and would have held with every call site bare
+        // (round-6 P53).
+        var sites = 0
+        var bare: [String] = []
+        var search = source.startIndex
+        while let call = source.range(of: "CronEditorView(", range: search..<source.endIndex) {
+            sites += 1
+            search = call.upperBound
+            // Brace/paren-match the argument list so a nested call cannot
+            // lend its argument to this one.
+            var depth = 1
+            var i = call.upperBound
+            var args = ""
+            while i < source.endIndex, depth > 0 {
+                let c = source[i]
+                if c == "(" { depth += 1 }
+                if c == ")" { depth -= 1; if depth == 0 { break } }
+                args.append(c)
+                i = source.index(after: i)
+            }
+            if !args.contains("recoveryOffer:") {
+                bare.append(args.prefix(60).trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
         #expect(sites == 3, "expected three CronEditorView call sites, found \(sites)")
-        #expect(passed >= sites, "a CronEditorView call site does not pass an offer")
+        #expect(bare.isEmpty, Comment(rawValue:
+            "a CronEditorView call site passes no offer: \(bare.joined(separator: " | "))"))
         #expect(source.contains("recoveryOffer: vm.recoveryOffer(for: job)"),
                 "the edit sheet no longer passes the record's own offer")
     }
@@ -114,12 +157,20 @@ struct CronEditorEnabledGateP50bTests {
         #expect(block.contains("Label(\"Delete\""))
     }
 
-    /// The refusal sentence the footer renders is the SAME one the row toggle
-    /// shows, so the two doors cannot drift into two wordings.
+    /// The refusal the footer renders is the SAME rule the row toggle shows,
+    /// so the two doors cannot drift into two wordings.
+    ///
+    /// Round-6 P53 moved the footer from `resumeRefusalMessage` to
+    /// `editorEnabledLockNote`, which DERIVES its reason clause from that
+    /// same sentence and then names a remedy the sheet can actually reach —
+    /// `resumeRefusalMessage`'s two remedies are both on the list row the
+    /// sheet is covering. What this test guards is unchanged: the editor must
+    /// not invent its own copy. That the two stay one rule is pinned
+    /// behaviourally in `CronEditorLockNoteP53Tests`.
     @Test func theLockedToggleExplainsItselfWithTheRowsOwnSentence() throws {
         let source = try Self.cronListView
-        #expect(source.contains("IOSCronViewModel.resumeRefusalMessage(") ,
-                "the editor invented its own refusal copy instead of reusing the row's")
+        #expect(source.contains("IOSCronViewModel.editorEnabledLockNote("),
+                "the editor invented its own refusal copy instead of deriving the row's")
     }
 }
 
@@ -150,6 +201,67 @@ struct KanbanWatchJSONClaimP50bTests {
         return out
     }
 
+    /// A `--json` claimed on `kanban watch`, within a PROXIMITY window.
+    ///
+    /// Per-LINE was the shape P50b shipped, and it is the same mistake one
+    /// level down from the one P50b fixed: the claim it exists to stop is as
+    /// easily written as a wrapped doc comment or a multi-line argv array,
+    /// and neither puts the two tokens on one line (round-6 P53). Four lines
+    /// after the verb, because the real doc comment that carried the false
+    /// claim wrapped across three.
+    ///
+    /// A DENIAL is not a claim: the CORRECT doc comment in
+    /// `HermesKanbanEvent.swift` says "no `--json`" inside that same window,
+    /// so the negation has to be read rather than the flag alone. The list is
+    /// the markers that actually occur, not a general negation heuristic —
+    /// and ``theProximityMatcherIsCalibrated`` exercises both arms, because a
+    /// matcher that silently stops matching reports nothing and looks exactly
+    /// like a clean tree.
+    static func kanbanWatchJSONClaims(in text: String) -> [String] {
+        let negations = ["no `--json`", "not `--json`", "never `--json`",
+                         "no --json", "without --json", "without `--json`"]
+        let lines = text.components(separatedBy: "\n")
+        var out: [String] = []
+        for (i, line) in lines.enumerated() where line.contains("kanban watch") {
+            let window = Array(lines[i..<min(i + 5, lines.count)])
+            let claimed = window.contains { candidate in
+                guard candidate.contains("--json") else { return false }
+                let lowered = candidate.lowercased()
+                return !negations.contains { lowered.contains($0) }
+            }
+            guard claimed else { continue }
+            out.append("\(i + 1): "
+                       + window.joined(separator: " ⏎ ").trimmingCharacters(in: .whitespaces))
+        }
+        return out
+    }
+
+    @Test func theProximityMatcherIsCalibrated() {
+        // The shape the per-line matcher missed: a wrapped argv.
+        let wrapped = """
+            let argv = [
+                "kanban", "watch",
+                "--json",
+            ]
+            """
+        #expect(Self.kanbanWatchJSONClaims(in: wrapped.replacingOccurrences(
+            of: "\"kanban\", \"watch\"", with: "// kanban watch")).count == 1,
+            "the matcher no longer sees a claim a few lines under the verb")
+        // The shape it must NOT report: the correct doc comment.
+        let denial = """
+            /// `hermes kanban watch` takes
+            /// `--assignee/--tenant/--kinds/--interval` and nothing else
+            /// — no `--json`.
+            """
+        #expect(Self.kanbanWatchJSONClaims(in: denial).isEmpty,
+                "the matcher reports the sentence that states the fact correctly")
+        // And distance still bounds it: a `--json` on an unrelated verb five
+        // lines down is not this verb's flag.
+        let faraway = "// kanban watch\n\n\n\n\n// tasks export --json\n"
+        #expect(Self.kanbanWatchJSONClaims(in: faraway).isEmpty,
+                "the window is no longer bounded")
+    }
+
     @Test func noSourceFileClaimsAJSONFlagOnKanbanWatch() throws {
         let files = try Self.swiftFiles()
         #expect(files.count > 100, "the scan found \(files.count) files — the roots moved")
@@ -158,9 +270,14 @@ struct KanbanWatchJSONClaimP50bTests {
             let text = try String(contentsOf: url, encoding: .utf8)
             guard text.contains("kanban watch") else { continue }
             // The verb may be NAMED; what it may not be given is a --json.
-            for line in text.components(separatedBy: "\n")
-            where line.contains("kanban watch") && line.contains("--json") {
-                offenders.append("\(url.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces))")
+            //
+            // A per-LINE match was the P50b alarm's own mistake one level
+            // down: the claim it exists to stop is just as easily written as
+            // a wrapped doc comment or a multi-line argv array, and neither
+            // puts the two tokens on one line. A PROXIMITY window instead —
+            // a `--json` within four lines of a `kanban watch` (round-6 P53).
+            for hit in Self.kanbanWatchJSONClaims(in: text) {
+                offenders.append("\(url.lastPathComponent):\(hit)")
             }
         }
         #expect(offenders.isEmpty, "a --json is claimed on `kanban watch`: \(offenders)")

@@ -119,6 +119,37 @@ struct HermesP38SourceSweepTests {
     /// cannot hide.
     static let testFileFloor = 250
 
+    /// The premise floor, shared by all three sweeps over these roots.
+    ///
+    /// It was inline in `noSubscriptFollowsACountExpectation` and NOWHERE in
+    /// its two siblings, which walk exactly the same roots for exactly the
+    /// same reason (round-6 P53): `noTestOptionalTriesARequire` and
+    /// `noTestSleepsAFixedHalfSecondOrMore` both `continue` past an
+    /// unreadable file and past a `nil` enumerator, so a renamed root left
+    /// them green and empty. A sweep that reads nothing "passes".
+    ///
+    /// Per root AND a total, because neither catches the other's failure: a
+    /// total cannot say which root went quiet, and a per-root `> 0` passes on
+    /// one file.
+    static func assertTheSweepRead(
+        _ scannedByRoot: [String: Int],
+        fileID: String = #fileID, filePath: String = #filePath,
+        line: Int = #line, column: Int = #column
+    ) {
+        let location = SourceLocation(
+            fileID: fileID, filePath: filePath, line: line, column: column)
+        for root in phaseSuiteRoots {
+            #expect((scannedByRoot[root] ?? 0) > 0, Comment(rawValue:
+                "the sweep read no test files under \(root) — the walk is broken"),
+                sourceLocation: location)
+        }
+        let scanned = scannedByRoot.values.reduce(0, +)
+        #expect(scanned >= testFileFloor, Comment(rawValue:
+            "the sweep read only \(scanned) test files "
+            + "(floor \(testFileFloor)) — it cannot have covered the roots"),
+            sourceLocation: location)
+    }
+
     /// The roots the phase sweep walks — the same three the `try! #require`
     /// sweep above uses, spelled separately because ScarfCore's root is the
     /// whole `Tests` directory (it holds two test targets), not just
@@ -196,15 +227,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
-        // Per root, because a total can hide a root that enumerated nothing.
-        for root in Self.phaseSuiteRoots {
-            #expect((scannedByRoot[root] ?? 0) > 0, Comment(rawValue:
-                "the sweep read no test files under \(root) — the walk is broken"))
-        }
-        let scanned = scannedByRoot.values.reduce(0, +)
-        #expect(scanned >= Self.testFileFloor, Comment(rawValue:
-            "the sweep read only \(scanned) test files "
-            + "(floor \(Self.testFileFloor)) — it cannot have covered the roots"))
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             A subscript follows a count `#expect` with no guard between them. \
             `#expect` records and CONTINUES, so a wrong count runs straight \
@@ -222,10 +245,12 @@ struct HermesP38SourceSweepTests {
     /// assertion that vacuously holds. The point of `#require` is to stop.
     @Test func noTestOptionalTriesARequire() {
         var offenders: [String] = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
                 guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                scannedByRoot[root, default: 0] += 1
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try? #require") && !Self.isComment(line) {
                     offenders.append("\(url.lastPathComponent):\(i + 1) — "
@@ -233,6 +258,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             `try? #require` discards the requirement and continues with nil. \
             Make the test `throws` and use `try #require`: \
@@ -259,7 +285,7 @@ struct HermesP38SourceSweepTests {
     /// `KeychainEnvMirrorTests`, and `GwF4OutcomeMessageChannelTests`'s one
     /// auto-clear that actually fires.
     static let allowedFixedSleeps: [String: String] = [
-        "ProcessAsyncWaitP43cTests.swift:603":
+        "ProcessAsyncWaitP43cTests.swift:614":
             "the 3 s is the FIXTURE — EOF deliberately lands between the two "
             + "graces (1 s and 6 s) so the latch race is decided by construction, "
             + "not by luck; it runs on a background queue, not in the test body",
@@ -318,10 +344,12 @@ struct HermesP38SourceSweepTests {
     @Test func noTestSleepsAFixedHalfSecondOrMore() {
         var offenders: [String] = []
         var allowancesSeen: Set<String> = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
                 guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                scannedByRoot[root, default: 0] += 1
                 for (i, line) in src.components(separatedBy: "\n").enumerated() {
                     guard !Self.isComment(line) else { continue }
                     for seconds in Self.fixedSleepSeconds(in: line) {
@@ -336,6 +364,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             A test sleeps a fixed half second or more. Poll the observable the \
             work produces instead, or add the site to `allowedFixedSleeps` with \

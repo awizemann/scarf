@@ -21,15 +21,31 @@ struct AnalyticsSeamInjectionP48bTests {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     }
 
+    /// This file names the offending spelling in its own prose and in its
+    /// failure message, so it must exempt itself — by PATH, never by
+    /// BASENAME (P49b's lesson, restated by P52 and applied here in round-6
+    /// P53: a basename exemption silently covers any future same-named file
+    /// in a subdirectory this sweep now walks).
+    private static let ownPath = URL(fileURLWithPath: #filePath)
+        .standardizedFileURL.path
+
     @Test("no test builds an AppCoordinator without its own tracker")
     func noBareCoordinatorInTests() throws {
-        let files = try FileManager.default
-            .contentsOfDirectory(at: Self.testRoot, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "swift" }
+        // RECURSIVE. `contentsOfDirectory` reads one level, so a test moved
+        // into a subdirectory of `scarfTests` left the sweep — and the sweep
+        // exists because "the next bare construction will be written by
+        // someone who has never read this note" (round-6 P53).
+        let walker = try #require(
+            FileManager.default.enumerator(at: Self.testRoot, includingPropertiesForKeys: nil),
+            "could not enumerate \(Self.testRoot.path)")
+        var files: [URL] = []
+        while let url = walker.nextObject() as? URL {
+            if url.pathExtension == "swift" { files.append(url) }
+        }
         #expect(files.count >= 100, "the sweep read only \(files.count) files — it cannot have covered scarfTests")
 
         var offenders: [String] = []
-        for url in files where url.lastPathComponent != "AnalyticsSeamInjectionP48bTests.swift" {
+        for url in files where url.standardizedFileURL.path != Self.ownPath {
             guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
             for (i, line) in src.components(separatedBy: "\n").enumerated() {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
