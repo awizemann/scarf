@@ -198,13 +198,17 @@ struct CronEditorLockNoteP53Tests {
                       CronRecoveryOffer(canResume: false, canRearm: true)] {
             let note = IOSCronViewModel.editorEnabledLockNote(job(), offer: offer)
             // Every gesture the note names must be prefixed by the dismissal
-            // it requires, so the copy is walkable as written.
-            if note.contains("Duplicate") || note.contains("Resume & Run Now") {
-                #expect(note.contains("Close this editor"), """
-                    The note names a list-row gesture without saying the \
-                    editor has to be dismissed first: \(note)
-                    """)
-            }
+            // it requires, so the copy is walkable as written. Both arms DO
+            // name one, so the assertion is unconditional — an `if` that
+            // guards it lets a note that names no gesture at all pass as if
+            // it had been checked.
+            #expect(note.contains("Duplicate") || note.contains("Resume & Run Now"), """
+                The note names neither remedy: \(note)
+                """)
+            #expect(note.contains("Close this editor"), """
+                The note names a list-row gesture without saying the \
+                editor has to be dismissed first: \(note)
+                """)
         }
     }
 
@@ -256,6 +260,42 @@ struct CronEditorLockNoteP53Tests {
         #expect(note.hasSuffix("."), "got: \(note)")
         #expect(!note.contains(" ."), "a stray space before a full stop: \(note)")
         #expect(!note.contains(".."), "a doubled full stop: \(note)")
+    }
+
+    /// The past-deadline one-shot's REASON carries an em dash of its own
+    /// ("Can't resume \"X\" — the one-shot time (…) is in the past …"), so a
+    /// note built by trimming the assembled sentence at its first `" — "`
+    /// kept only the three words before it. The reason is a field now.
+    @Test("the past-deadline arm keeps the whole reason, dash and all")
+    func thePastDeadlineArmKeepsItsReason() {
+        // Not terminal, paused, one-shot whose time has passed, and no
+        // re-arm door: `refusesResume && !canRearm`.
+        let past = job(kind: "once",
+                       runAt: "2020-01-01T00:00:00Z",
+                       state: "paused",
+                       enabled: false)
+        #expect(past.isTerminal == false, "the arm under test needs a NON-terminal job")
+        let note = IOSCronViewModel.editorEnabledLockNote(past, offer: .none)
+        #expect(note.contains("the one-shot time"), """
+            The reason was cut at its own em dash — the note no longer says \
+            WHY the toggle is locked: \(note)
+            """)
+        #expect(note.contains("is in the past"), "got: \(note)")
+        #expect(note.contains("Close this editor"), "got: \(note)")
+    }
+
+    /// The terminal one-shot wording (`oneShotRefusalMessage`'s terminal
+    /// arm) also carries an em dash mid-reason, and lost the clause after it
+    /// the same way. Asserted on the pieces, because `resumeRefusalMessage`
+    /// routes a terminal job to `terminalRefusalMessage`.
+    @Test("the terminal one-shot's reason survives its own em dash")
+    func theTerminalOneShotArmKeepsItsReason() {
+        let parts = IOSCronViewModel.oneShotRefusalParts(job(), offer: .none)
+        #expect(parts.reason.contains("a completed one-shot can't be resumed"), """
+            The reason clause stops at the em dash: \(parts.reason)
+            """)
+        #expect(parts.remedy == "Duplicate it to schedule a new run.")
+        #expect(parts.sentence == IOSCronViewModel.oneShotRefusalMessage(job(), offer: .none))
     }
 
     /// The list banner is unchanged — it is the surface where both remedies
