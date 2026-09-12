@@ -66,7 +66,7 @@ import Foundation
     /// new time to still announced 2020 to every reader, including `cron
     /// list`. Now it is dropped, and Hermes re-derives it.
     @Test func theDuplicateNoLongerCarriesTheDerivedLabel() throws {
-        let copy = try Self.decoded().duplicatedAsNewJob(id: "job_new")
+        let copy = try Self.decoded().duplicatedAsNewJob(id: "job_new", existingNames: [])
         #expect(copy.extra["schedule_display"] == nil)
         // The rest of P42b's contract is unchanged.
         #expect(copy.schedule.runAt == nil)
@@ -91,7 +91,7 @@ import Foundation
         """#
         let job = try JSONDecoder().decode(HermesCronJob.self, from: Data(json.utf8))
         #expect(job.extra["schedule_display"] == .string("stale label"))
-        #expect(job.duplicatedAsNewJob(id: "j2").extra["schedule_display"] == nil)
+        #expect(job.duplicatedAsNewJob(id: "j2", existingNames: []).extra["schedule_display"] == nil)
     }
 
     // MARK: - The iOS editor's ordinary save

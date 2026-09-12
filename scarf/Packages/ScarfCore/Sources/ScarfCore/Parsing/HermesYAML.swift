@@ -472,7 +472,7 @@ public enum HermesYAML {
         if body.isEmpty { return [:] }
         if body.contains("{") || body.contains("[") { return nil }
         var result: [String: String] = [:]
-        for part in body.split(separator: ",") {
+        for part in splitFlowEntries(body) {
             let entry = part.trimmingCharacters(in: .whitespaces)
             if entry.isEmpty { continue }
             guard let (k, v) = splitFlowEntry(entry, unquoting: unquoting), !k.isEmpty, !v.isEmpty else { return nil }
@@ -490,12 +490,59 @@ public enum HermesYAML {
     /// It defaults to false so the one external caller
     /// (`ProjectSkillsScanner.parseTrustedProjectDirs`, a key Scarf does not
     /// write through ``YAMLScalar``) keeps the rule that applies everywhere else.
+    ///
+    /// P46b: the split is QUOTE-AWARE. A bare `inner.split(separator: ",")`
+    /// cut inside a quoted scalar, so PyYAML's one-item `["a,b"]` came back
+    /// as the two items `"a` and `b"` — and, once ``stripYAMLQuotes`` had
+    /// eaten the stray quotes, as the plausible-looking `["a", "b"]` that
+    /// nothing downstream could tell from a real pair. Verified against
+    /// PyYAML 6.0.3. P46 made the flow path authoritative for decision 10's
+    /// `unquote` opt-in, which is what makes a comma inside a quoted entry
+    /// reachable in practice.
     public static func parseFlatFlowList(_ inner: String, unquoting: Bool = false) -> [String] {
-        inner.split(separator: ",").compactMap { part in
+        splitFlowEntries(inner).compactMap { part in
             let raw = part.trimmingCharacters(in: .whitespaces)
             let value = unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
             return value.isEmpty ? nil : value
         }
+    }
+
+    /// Split flow content on the commas that are actually SEPARATORS — i.e.
+    /// not the ones inside a quoted scalar.
+    ///
+    /// The quote scan is ``closingQuoteIndex``, the same one
+    /// ``splitFlowEntry`` uses for a quoted KEY, so `'a,b'` (single-quoted,
+    /// `''` doubling) and `"a\",b"` (double-quoted, backslash escapes) are
+    /// both one entry here and one entry to PyYAML. An UNCLOSED quote is not
+    /// an error this function may invent: the scan falls through to the end
+    /// of the content and the remainder is one entry, which leaves the
+    /// caller's own validation (`parseFlatFlowMap` returning nil, or
+    /// `stripYAMLQuotes` keeping the stray quote) to decide, exactly as
+    /// before.
+    ///
+    /// Empty entries survive as empty substrings; both callers drop them.
+    static func splitFlowEntries(_ inner: String) -> [Substring] {
+        var out: [Substring] = []
+        var start = inner.startIndex
+        var i = inner.startIndex
+        while i < inner.endIndex {
+            let c = inner[i]
+            if c == "'" || c == "\"" {
+                let body = inner[inner.index(after: i)...]
+                guard let close = closingQuoteIndex(in: body, quote: c) else { break }
+                i = inner.index(after: close)
+                continue
+            }
+            if c == "," {
+                out.append(inner[start..<i])
+                i = inner.index(after: i)
+                start = i
+                continue
+            }
+            i = inner.index(after: i)
+        }
+        out.append(inner[start...])
+        return out
     }
 
     /// Split one `key: value` flow entry, honoring a quoted key that may

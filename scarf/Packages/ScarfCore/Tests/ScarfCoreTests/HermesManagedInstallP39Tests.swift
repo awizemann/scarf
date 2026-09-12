@@ -69,12 +69,12 @@ struct HermesManagedInstallP39Tests {
         let cache = HermesManagedInstallCache(probe: { _ in "nixos" })
         let ctx = Self.host(home: "/tmp/p39-home")
 
-        #expect(cache.cached(for: ctx).isManaged == false)
+        #expect(cache.cached(for: ctx, capabilities: Self.modern).isManaged == false)
         _ = cache.managedInstall(for: ctx, capabilities: Self.modern)
-        #expect(cache.cached(for: ctx).isManaged)
+        #expect(cache.cached(for: ctx, capabilities: Self.modern).isManaged)
 
         cache.invalidate(for: ctx)
-        #expect(cache.cached(for: ctx).isManaged == false)
+        #expect(cache.cached(for: ctx, capabilities: Self.modern).isManaged == false)
     }
 
     @Test func aHostWithNoMarkerStaysWritable() {

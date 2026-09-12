@@ -11,14 +11,18 @@ import Testing
 @Suite("P46 · platform shared-key write scoping")
 struct SharedKeyWriteScopeP46Tests {
 
-    /// (a) `gateway_restart_notification` IS a `_SHARED_KEYS` member
-    /// (`gateway/config_loader.py:213`) but its Scarf reader is hard-coded
-    /// top-level — `boolTrueDefault("\(platform).gateway_restart_notification")`,
-    /// `HermesConfig+YAML.swift:695`. The platform-scoped allowlist moved
-    /// `GatewayBehaviorViewModel`'s write to `platforms.<p>.…` on every
-    /// nested-only config, so the toggle wrote where nothing read.
+    /// (a) The allowlist's unit is the `(platform, key)` PAIR, not the
+    /// platform — a key whose reader is hard-coded to one spelling must not
+    /// be moved off it, or the write stops reaching the form.
+    ///
+    /// P46b moved slack's and telegram's `gateway_restart_notification`
+    /// READER onto `sharedPlatformScalar`, so those two pairs now belong on
+    /// the allowlist and this test asserts the invariant over a pair that is
+    /// still hard-coded: `discord.gateway_restart_notification`
+    /// (`HermesConfig+YAML.swift`'s gateway-allowlist loop keeps the flat
+    /// spelling for the six platforms nothing reads through the bridge).
     @Test func aSharedKeyWhoseReaderIsHardCodedTopLevelIsNotMoved() {
-        for platform in ["slack", "telegram"] {
+        for platform in ["discord", "matrix", "mattermost"] {
             let key = "\(platform).gateway_restart_notification"
             #expect(HermesPlatformSharedKeys.split(key: key) == nil,
                     "\(key) has no bridge-resolving reader and must not be split")
@@ -28,6 +32,21 @@ struct SharedKeyWriteScopeP46Tests {
             )
             #expect(resolved[key] == "false", "\(key) was moved off the spelling its reader uses")
             #expect(resolved.count == 1)
+        }
+    }
+
+    /// …and the two pairs whose reader P46b DID move now move with it, which
+    /// is the other half of the same rule.
+    @Test func theRestartToggleMovesNowThatItsReaderDoes() {
+        for platform in ["slack", "telegram"] {
+            let key = "\(platform).gateway_restart_notification"
+            #expect(HermesPlatformSharedKeys.split(key: key) != nil)
+            let resolved = HermesPlatformSharedKeys.resolved(
+                [key: "false"],
+                configText: "platforms:\n  \(platform):\n    reply_to_mode: first\n"
+            )
+            #expect(resolved["platforms.\(platform).gateway_restart_notification"] == "false",
+                    "the toggle still creates a top-level block: \(resolved)")
         }
     }
 

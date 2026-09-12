@@ -236,7 +236,11 @@ struct SettingsView: View {
             // only the Anthropic adapter leaves it to the model).
             LabeledContent(
                 "Reasoning effort",
-                value: vm.config.reasoningEffort.isEmpty
+                // P46b: emptiness is asked of the NORMALISED form, the way
+                // Hermes asks it (`str(effort).strip()`) — a whitespace-only
+                // value is the absent key here too, and read raw it rendered
+                // as a blank value beside the label.
+                value: HermesReasoningEffort.pickerSelection(for: vm.config.reasoningEffort).isEmpty
                     ? String(localized: "Hermes default") : vm.config.reasoningEffort
             )
             if !vm.config.timezone.isEmpty {

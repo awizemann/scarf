@@ -94,7 +94,7 @@ import Foundation
     /// (`cron/scheduler_provider.py:274-279` @ `v2026.9.7` refuses to
     /// resurrect it). `display` goes with it: it is the label OF that time.
     @Test func theIOSDuplicateRecordDropsASpentOneShotTime() {
-        let copy = Self.oneShot(runAt: "2020-01-01T09:00:00Z").duplicatedAsNewJob(id: "job_new")
+        let copy = Self.oneShot(runAt: "2020-01-01T09:00:00Z").duplicatedAsNewJob(id: "job_new", existingNames: [])
         #expect(copy.schedule.kind == "once")
         #expect(copy.schedule.runAt == nil)
         #expect(copy.schedule.display == nil)
@@ -107,7 +107,7 @@ import Foundation
     /// blanking is the exception rather than the rule.
     @Test func theIOSDuplicateKeepsAFutureOneShotTime() {
         let future = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
-        let copy = Self.oneShot(runAt: future, state: "scheduled").duplicatedAsNewJob(id: "job_new")
+        let copy = Self.oneShot(runAt: future, state: "scheduled").duplicatedAsNewJob(id: "job_new", existingNames: [])
         #expect(copy.schedule.runAt == future)
     }
 }

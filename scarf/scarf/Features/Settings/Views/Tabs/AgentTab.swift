@@ -54,7 +54,15 @@ struct AgentTab: View {
             // reads "Hermes default", P45's wording on all four surfaces.
             PickerRow(
                 label: "Reasoning Effort",
-                selection: viewModel.config.reasoningEffort,
+                // P46b: the SELECTION, not just the options. `levels(…)`
+                // treats a whitespace-only stored value as the sentinel and
+                // widens nothing, but this binding handed the picker the raw
+                // `"  "`, which matches neither the sentinel row's `""` tag
+                // nor any level — so the control rendered blank, the exact
+                // failure decision 13 exists to prevent.
+                selection: HermesReasoningEffort.pickerSelection(
+                    for: viewModel.config.reasoningEffort
+                ),
                 options: [""] + HermesReasoningEffort.levels(
                     capabilities: capabilities,
                     selected: viewModel.config.reasoningEffort
@@ -373,11 +381,45 @@ private struct ReasoningOverridesSection: View {
     /// whatever is on disk. This is where round-4 decision 13's widening was
     /// first written; it now lives in `HermesReasoningEffort` so the two
     /// top-level pickers share it instead of re-deriving it.
+    /// P46b: the empty row is CONDITIONAL — it exists only when the stored
+    /// value is empty (or whitespace-only, Hermes's same absent-key case),
+    /// because a `Picker` whose selection matches no tag renders blank and
+    /// an override row has no sentinel of its own the way the two top-level
+    /// pickers do.
+    ///
+    /// It is not offered as a choice on a row that has a real level, and
+    /// that is deliberate: `HermesReasoningEffort.isValid("")` is false, so
+    /// `PowerSettingsWriter.setReasoningOverrides` REFUSES a batch carrying
+    /// an empty value — an always-present "Default" row would be a control
+    /// the user can move and the save then silently declines. Clearing an
+    /// override is the minus button, which is also what selecting this row
+    /// does (`changeEffort`).
+    ///
+    /// What an empty override means is walked rather than assumed:
+    /// `resolve_per_model_reasoning_effort` runs the value through
+    /// `parse_reasoning_effort`, which returns `None` for it, and
+    /// `resolve_reasoning_config` then falls through to the global
+    /// `agent.reasoning_effort` (`hermes_constants.py:935-941`, `:970-976` @
+    /// `v2026.9.7`) — i.e. to the row above this section. "Default" is that
+    /// row's own word for "not set here", which is why it is reused rather
+    /// than "Hermes default" (the global row's claim, which this one does
+    /// not make).
     private func effortOptions(current: String) -> [String] {
-        HermesReasoningEffort.levels(capabilities: capabilities, selected: current)
+        let levels = HermesReasoningEffort.levels(capabilities: capabilities, selected: current)
+        return HermesReasoningEffort.pickerSelection(for: current).isEmpty
+            ? [""] + levels
+            : levels
     }
 
     private func changeEffort(pattern: String, to newEffort: String) {
+        // The sentinel row (P46b) means "no override here", and the only way
+        // to say that in `agent.reasoning_overrides` is to not have the
+        // entry: an empty value fails `HermesReasoningEffort.isValid` and
+        // the writer would refuse the whole save.
+        guard !HermesReasoningEffort.pickerSelection(for: newEffort).isEmpty else {
+            save(sortedOverrides.filter { $0.key != pattern })
+            return
+        }
         var pairs = sortedOverrides
         for i in pairs.indices where pairs[i].key == pattern {
             pairs[i].value = newEffort
@@ -431,9 +473,12 @@ private struct OverrideRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            Picker("", selection: Binding(get: { effort }, set: onEffortChange)) {
+            Picker("", selection: Binding(
+                get: { HermesReasoningEffort.pickerSelection(for: effort) },
+                set: onEffortChange
+            )) {
                 ForEach(options, id: \.self) { option in
-                    Text(option).tag(option)
+                    Text(option.isEmpty ? String(localized: "Default") : option).tag(option)
                 }
             }
             .labelsHidden()

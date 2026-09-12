@@ -103,10 +103,18 @@ struct ReasoningEffortNormalisationP45Tests {
     /// A whitespace-only value is `str(effort).strip()` == "" to Hermes
     /// (`hermes_constants.py:884` @ `v2026.9.7`) — the absent-key case. It is
     /// the "Hermes default" sentinel: no extra row, no notice.
+    ///
+    /// P46b: and therefore no raw SELECTION either. This test pinned half the
+    /// contract — the options — while the binding still handed the `Picker`
+    /// the raw `"   "`, which matches neither the sentinel row's `""` tag nor
+    /// any level, so the control rendered blank anyway. The selection is the
+    /// other half and belongs in the same test.
     @Test func aWhitespaceOnlyValueIsTheSentinel() {
         #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "   ")
                 == HermesReasoningEffort.levels(capabilities: Self.target))
         #expect(HermesReasoningEffort.unsupportedLevelNotice(for: "   ", capabilities: Self.target) == nil)
+        #expect(HermesReasoningEffort.pickerSelection(for: "   ") == "",
+                "the picker is handed a value no tag matches, and renders blank")
     }
 
     @Test func aCasedOrPaddedLevelDrawsNoUnsupportedNotice() {

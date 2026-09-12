@@ -692,7 +692,39 @@ public extension HermesConfig {
             // Upstream default is TRUE (`gateway/config.py` PlatformConfig),
             // so an absent key — and any non-`true` spelling of a truthy
             // value — must NOT read as off. See `boolTrueDefault`.
-            let restartNotice   = boolTrueDefault(prefix + "gateway_restart_notification")
+            // P46b: `gateway_restart_notification` is a `_SHARED_KEYS`
+            // member, and reading it from the bare top-level spelling alone
+            // is what made `GatewayBehaviorViewModel`'s toggle CREATE a
+            // top-level `<platform>:` block on a nested-only host —
+            // `platform_section` then bridges from that block
+            // (`gateway/config_loader.py:171-180` @ `v2026.9.7`) and every
+            // nested shared key beside it (`platforms.slack.require_mention`
+            // …) stops reaching `extra`. Read through the bridge and the
+            // write lands wherever the bridge source already is, creating
+            // nothing.
+            //
+            // Only `slack` and `telegram` are moved, because those are the
+            // platforms whose OTHER shared keys Scarf reads through the
+            // bridge (`HermesPlatformSharedKeys.bridgeResolvedKeys`) and so
+            // the only ones a created block can un-bridge anything on. The
+            // remaining six keep the flat spelling; the general hazard —
+            // ANY bare `<platform>.<unshared>` key creating a block — is
+            // filed, not closed here.
+            let restartRaw: String?
+            switch platform {
+            case "slack":
+                restartRaw = sharedPlatformScalar("slack", "gateway_restart_notification")
+            case "telegram":
+                restartRaw = sharedPlatformScalar("telegram", "gateway_restart_notification")
+            default:
+                restartRaw = values[prefix + "gateway_restart_notification"]
+            }
+            // `boolTrueDefault`'s rule, over a scalar this reader resolved
+            // itself: absent means the host IS notifying, and only an
+            // explicit falsy spelling turns it off.
+            let restartNotice = restartRaw
+                .map(HermesYAML.normalizedScalar)
+                .map { !["false", "0", "no", "off"].contains($0.lowercased()) } ?? true
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
@@ -701,7 +733,7 @@ public extension HermesConfig {
                 && allowedChats.isEmpty
                 && allowedRooms.isEmpty
                 && values[prefix + "busy_ack_enabled"] == nil
-                && values[prefix + "gateway_restart_notification"] == nil
+                && restartRaw == nil
             if !isEmpty {
                 gatewayPlatforms[platform] = GatewayPlatformSettings(
                     allowedChannels: allowedChannels,

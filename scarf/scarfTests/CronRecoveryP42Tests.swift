@@ -180,7 +180,7 @@ import ScarfCore
             extra: #""model":"kimi-k2","monitor_script":"/s/check.sh","paused_at":"2020-01-01T00:00:00Z","repeat":{"times":3,"completed":3},"next_run_at":"2020-01-01T09:00:00Z","last_run_at":"2020-01-01T09:00:00Z""#)
         #expect(spent.isTerminal)
 
-        let copy = spent.duplicatedAsNewJob(id: "job_new")
+        let copy = spent.duplicatedAsNewJob(id: "job_new", existingNames: [])
         #expect(copy.id == "job_new")
         #expect(!copy.isTerminal)
         #expect(copy.effectiveState == "scheduled")

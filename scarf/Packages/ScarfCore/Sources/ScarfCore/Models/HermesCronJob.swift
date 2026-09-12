@@ -540,8 +540,13 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// the source's name verbatim made `hermes cron run <name>` raise
     /// `AmbiguousJobReference` for BOTH jobs the moment the copy was saved
     /// unedited (`cron/jobs.py:1840-1845` @ `v2026.9.7`).
+    /// `existingNames` has no default ON PURPOSE (P46b). It is the whole
+    /// collision fix: a caller that omits it gets `(copy)` unconditionally
+    /// and re-creates the ambiguity on the second duplicate of one job —
+    /// which is the shape `resolve_job_ref` raises `AmbiguousJobReference`
+    /// for. Pass `[]` explicitly to say "nothing to collide with".
     public nonisolated func duplicatedAsNewJob(
-        id newID: String, existingNames: [String] = [], now: Date = Date()
+        id newID: String, existingNames: [String], now: Date = Date()
     ) -> HermesCronJob {
         var carried = extra
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",

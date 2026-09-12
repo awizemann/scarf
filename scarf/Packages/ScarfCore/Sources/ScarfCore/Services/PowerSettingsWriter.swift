@@ -81,19 +81,62 @@ public enum HermesReasoningEffort {
         return [selected] + base
     }
 
+    /// The string a `Picker` must be given as its SELECTION for a stored
+    /// `reasoning_effort`, so that it always matches one of the tags
+    /// ``levels(capabilities:selected:)`` produced.
+    ///
+    /// P46b: ``levels(capabilities:selected:)`` treats a whitespace-only
+    /// value as the "Hermes default" sentinel and widens nothing — correct,
+    /// because `str(effort).strip()` is empty to Hermes
+    /// (`hermes_constants.py:884` @ `v2026.9.7`). But the sentinel ROW the
+    /// two top-level pickers prepend is tagged with the EMPTY string, and
+    /// the binding handed the picker the RAW `"  "`, which matches no tag —
+    /// so the control rendered blank, which is the exact failure decision 13
+    /// exists to prevent, one layer below where P46 fixed it.
+    ///
+    /// Everything else passes through RAW: a widened row's tag is the raw
+    /// stored string (`Max`, `" high "`), and a pick the user makes still
+    /// writes whatever the tag says.
+    ///
+    /// One function rather than three `isEmpty` tests at the call sites —
+    /// `AgentTab`'s top-level picker, `AgentTab`'s per-model override rows
+    /// and `AuxiliaryTab`'s per-task picker — because three copies of this
+    /// question is how the raw/normalised split went wrong in the first
+    /// place.
+    public static func pickerSelection(for raw: String) -> String {
+        normalizedLevel(raw).isEmpty ? "" : raw
+    }
+
     /// What Hermes itself does to the stored value before it compares:
     /// `effort = str(effort).strip().lower()` — `hermes_constants.py:884` @
     /// `v2026.9.7`, and the same line at `:807` @ `v2026.7.1`, i.e. on both
     /// sides of the `max`/`ultra` floors this file gates on.
     ///
     /// So `Max` and `" high "` are ACCEPTED values, and comparing the raw
-    /// string against the vocabulary made the picker widen for one (a second,
-    /// duplicate row beside the canonical level) and
-    /// ``unsupportedLevelNotice`` claim the other was ignored. Normalise once
-    /// and compare normalised; the RAW string is still what the widened row
-    /// and the notice display, because that is what is on disk.
+    /// string against the vocabulary made ``unsupportedLevelNotice`` claim
+    /// `" high "` was ignored.
+    ///
+    /// Which question gets the normalised form is the whole subtlety, and
+    /// P45 got it wrong one way and P46 corrected it:
+    ///
+    /// - The **notice** and the disable-alias check are questions about the
+    ///   HOST, so they compare NORMALISED — `Max` draws no warning.
+    /// - The **row** is a `Picker` tag, and a tag has to equal what is on
+    ///   disk, so ``levels(capabilities:selected:)`` compares RAW. `Max`
+    ///   therefore sits beside the canonical `max` as a second, cased row.
+    ///   That duplicate is BY DESIGN, not the drift P45 read it as: the
+    ///   alternative is a control with no tag for its own value, which
+    ///   renders blank.
+    /// - **Emptiness** is asked of the normalised form on both sides, since
+    ///   a whitespace-only value is Hermes's absent-key case — see
+    ///   ``pickerSelection(for:)``, which is how a binding says so.
+    /// P46b: `.whitespacesAndNewlines`, not `.whitespaces`. Python's
+    /// `str.strip()` with no argument strips every whitespace character,
+    /// newlines and tabs included; `CharacterSet.whitespaces` is spaces and
+    /// tabs only, so a value carrying a newline (a hand-edited block scalar,
+    /// a paste) read as non-empty here and as the ABSENT key to Hermes.
     public static func normalizedLevel(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespaces).lowercased()
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// The affordance beside a widened picker: what Hermes on THIS host

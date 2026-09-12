@@ -323,7 +323,7 @@ struct HermesTransportProbeP39bTests {
         #expect(second.isManaged)
         #expect(second.system == "nixos")
         // And THAT one is cached.
-        #expect(cache.cached(for: ctx).isManaged)
+        #expect(cache.cached(for: ctx, capabilities: Self.modern).isManaged)
         cache.invalidate(for: ctx)
     }
 

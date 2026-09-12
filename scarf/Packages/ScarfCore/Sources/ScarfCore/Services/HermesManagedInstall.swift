@@ -146,10 +146,23 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
     /// capabilities as soon as they land.
     struct MarkerCacheEntry {
         var marker: String?
-        var lastDerived: HermesManagedInstall
     }
 
     private var cached: [String: MarkerCacheEntry] = [:]
+
+    /// Per-key write generation, bumped by every ``invalidate(for:)`` /
+    /// ``invalidateAll()``.
+    ///
+    /// P46b: ``managedInstall(for:capabilities:)`` was a check-then-act over
+    /// a lock it dropped for the whole probe. A host re-provisioned while a
+    /// probe was in flight — `invalidate` between the miss and the
+    /// write-back — had the invalidation silently undone: the probe returned
+    /// with the PRE-provision marker and stored it, so the cache served a
+    /// reading from before the change for the life of the process, which is
+    /// exactly what `invalidate` exists to prevent. Snapshot the generation
+    /// before probing and store only if nobody invalidated meanwhile; the
+    /// caller still gets the answer its own probe bought.
+    private var generation: [String: Int] = [:]
 
     /// - Parameter timeout: the ceiling on one probe. Injectable only so a
     ///   test can prove the fall-open path in milliseconds instead of
@@ -174,6 +187,11 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
         let key = Self.key(for: context)
         lock.lock()
         let hit = cached[key]
+        // Recorded, not just read: `invalidateAll` bumps the keys it knows
+        // about, and a key whose FIRST probe is in flight has to be one of
+        // them or the race reopens for exactly that probe.
+        let entryGeneration = generation[key] ?? 0
+        generation[key] = entryGeneration
         lock.unlock()
 
         let marker: String?
@@ -199,7 +217,12 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
         ))
 
         lock.lock()
-        cached[key] = MarkerCacheEntry(marker: marker, lastDerived: result)
+        // Only if the entry has not been invalidated since the snapshot
+        // above — otherwise this write would resurrect a marker the caller
+        // of `invalidate` has already declared stale.
+        if (generation[key] ?? 0) == entryGeneration {
+            cached[key] = MarkerCacheEntry(marker: marker)
+        }
         lock.unlock()
         return result
     }
@@ -247,23 +270,45 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
     /// The last probed answer without probing. `.notManaged` until one lands,
     /// so a surface renders writable while the read is in flight rather than
     /// flashing a read-only banner it may have to take back.
-    public func cached(for context: ServerContext) -> HermesManagedInstall {
+    ///
+    /// P46b: this used to hand back a STORED verdict, and a verdict is a
+    /// function of the marker AND of `hasManagedMarkerContents` — the very
+    /// coupling P46 broke one method over. A verdict derived while the
+    /// capabilities were still undetected (the `hermes --version` that had
+    /// not landed yet) was handed to every later caller unchanged, so the
+    /// below-floor reading — "any marker ⇒ NixOS",
+    /// `hermes_cli/config.py:327-330` @ `v2026.6.19` — outlived the
+    /// detection that would have corrected it. The entry stores the marker
+    /// only; the verdict is derived here, per call, from the CALLER's
+    /// capabilities.
+    public func cached(
+        for context: ServerContext,
+        capabilities: HermesCapabilities
+    ) -> HermesManagedInstall {
         let key = Self.key(for: context)
         lock.lock()
-        defer { lock.unlock() }
-        return cached[key]?.lastDerived ?? .notManaged
+        let entry = cached[key]
+        lock.unlock()
+        guard let entry else { return .notManaged }
+        return HermesManagedInstall(system: HermesManagedInstall.system(
+            fromMarker: entry.marker,
+            readsMarkerContents: capabilities.hasManagedMarkerContents
+        ))
     }
 
     public func invalidate(for context: ServerContext) {
         let key = Self.key(for: context)
         lock.lock()
         cached.removeValue(forKey: key)
+        generation[key] = (generation[key] ?? 0) + 1
         lock.unlock()
     }
 
     public func invalidateAll() {
         lock.lock()
         cached.removeAll()
+        // `Array(…)`: the dictionary is mutated inside the loop.
+        for key in Array(generation.keys) { generation[key, default: 0] += 1 }
         lock.unlock()
     }
 

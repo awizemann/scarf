@@ -35,6 +35,20 @@ import Foundation
 /// side of the same resolution, in the shape `SettingsViewModel
 /// .setMultiplexProfiles` uses for `multiplex_profiles` — write to whichever
 /// spelling is IN EFFECT.
+///
+/// ## The hazard this type does NOT close
+///
+/// Moving a shared key onto the bridge source stops THAT key creating a
+/// top-level block. It does not stop an UNSHARED one: `hermes config set
+/// telegram.reactions …` writes a bare `telegram:` block on a host that had
+/// none, `platform_section` then takes that block as the bridge source
+/// (`gateway/config_loader.py:171-180` @ `v2026.9.7`), and every nested
+/// `platforms.telegram.<shared key>` beside it stops reaching `extra` — a
+/// setting the user never touched, turned off by a write to an unrelated
+/// key. Every bare `<platform>.<unshared>` key a setup form writes is that
+/// shape. Filed rather than closed here, because closing it means either
+/// writing the unshared keys nested too (each has its own hard-coded
+/// reader) or seeding the new block with what it displaces.
 public enum HermesPlatformSharedKeys {
 
     /// `_SHARED_KEYS` verbatim (`gateway/config_loader.py:197-213` @
@@ -189,10 +203,17 @@ public enum HermesPlatformSharedKeys {
     ) -> [String: String] {
         let parsed = HermesYAML.parseNestedYAML(configText)
         // Platforms the batch itself gives a top-level block to.
+        //
+        // A key this function is about to MOVE does not count: it is not
+        // going to be written at its bare spelling, so it creates no block.
+        // Counting it was P46b's second half of finding 2 — the toggle's own
+        // bare `slack.gateway_restart_notification` pinned the prefix to
+        // `slack`, and the rewrite that was supposed to keep the key off a
+        // fresh top-level block resolved straight back onto one.
         var batchTopLevel: Set<String> = []
         for key in configKV.keys {
             let parts = key.split(separator: ".")
-            guard parts.count == 2 else { continue }
+            guard parts.count == 2, split(key: key) == nil else { continue }
             batchTopLevel.insert(String(parts[0]))
         }
         var prefixes: [String: String] = [:]
@@ -268,5 +289,7 @@ public enum HermesPlatformSharedKeys {
         SharedKeyRef(platform: "slack", key: "require_mention"),
         SharedKeyRef(platform: "slack", key: "reply_in_thread"),
         SharedKeyRef(platform: "telegram", key: "require_mention"),
+        SharedKeyRef(platform: "slack", key: "gateway_restart_notification"),
+        SharedKeyRef(platform: "telegram", key: "gateway_restart_notification"),
     ]
 }

@@ -279,7 +279,11 @@ struct AuxiliaryTab: View {
     private func reasoningEffortPicker(value: String, onChange: @escaping (String) -> Void) -> some View {
         PickerRow(
             label: "Reasoning Effort",
-            selection: value,
+            // P46b: normalise at the SELECTION. A whitespace-only stored
+            // value is the sentinel to `levels(…)`, which widens nothing —
+            // so handing the picker the raw `"  "` left it with no matching
+            // tag and a blank control.
+            selection: HermesReasoningEffort.pickerSelection(for: value),
             options: [""] + HermesReasoningEffort.levels(
                 capabilities: capabilities,
                 selected: value
