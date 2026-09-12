@@ -446,12 +446,19 @@ struct ProcessAsyncWaitP43cTests {
         repoRoot.appendingPathComponent("scarf/Packages/ScarfCore/Sources/ScarfCore")
     }
 
-    /// Two roots since P48. The app target is the second, because
+    /// Three roots since round-6 P53. The app target came in at P48, because
     /// `t-12d04477`'s five sites lived there and P43c had scoped itself to
     /// the package — a sweep that stops at its own module's edge blesses the
-    /// other half of the same codebase by omission.
+    /// other half of the same codebase by omission. The iOS runtime package
+    /// is the same omission one module over: it was in none of the three C10
+    /// sweeps, and `CitadelServerTransport`'s unbounded `semaphore.wait()`
+    /// sat there through five rounds.
     static var sweepRoots: [URL] {
-        [scarfCoreSources, repoRoot.appendingPathComponent("scarf/scarf")]
+        [
+            scarfCoreSources,
+            repoRoot.appendingPathComponent("scarf/scarf"),
+            repoRoot.appendingPathComponent("scarf/Packages/ScarfIOS/Sources/ScarfIOS"),
+        ]
     }
 
     /// The one file where the synchronous form is called on purpose: it
@@ -519,8 +526,12 @@ struct ProcessAsyncWaitP43cTests {
         // cannot make the floor the thing that fails.
         let core = scannedPerRoot["ScarfCore"] ?? 0
         let app = scannedPerRoot["scarf"] ?? 0
+        let ios = scannedPerRoot["ScarfIOS"] ?? 0
         #expect(core > 100, "only \(core) ScarfCore sources scanned")
         #expect(app > 200, "only \(app) app-target sources scanned")
+        // ScarfIOS is a 14-file package: its floor is its own size halved,
+        // not the app target's (round-6 P53).
+        #expect(ios > 5, "only \(ios) ScarfIOS sources scanned")
         #expect(offenders.isEmpty, "\(offenders)")
         // Every allowance must still be a live debt, or it is a stale entry
         // hiding the next violation (the P37 rule).

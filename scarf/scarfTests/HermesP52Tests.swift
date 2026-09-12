@@ -46,10 +46,15 @@ struct OffPoolDisciplineP52Tests {
     private static let ownPath = URL(fileURLWithPath: #filePath)
         .standardizedFileURL.path
 
+    /// Four roots since round-6 P53. `ScarfIOS` is the iOS RUNTIME package
+    /// (Citadel SSH, the transports); it was in none of the three C10 sweeps'
+    /// roots, which is how `CitadelServerTransport.runSync`'s unbounded
+    /// `semaphore.wait()` stayed invisible for five rounds.
     private static let roots = [
         "scarf/scarf",
         "scarf/Scarf iOS",
         "scarf/Packages/ScarfCore/Sources",
+        "scarf/Packages/ScarfIOS/Sources",
     ]
 
     /// The calls whose bodies BLOCK their thread for a user-visible span, and
