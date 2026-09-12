@@ -4145,6 +4145,48 @@
         }
       }
     },
+    "%lld w/o their pre-run script (the file stays on this host)" : {
+      "comment" : "Fleet-apply result note: N copied cron jobs run a pre-run script whose file is not replicated to the target host.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ohne ihr Pre-Run-Skript (die Datei bleibt auf diesem Host)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sin su script previo a la ejecución (el archivo se queda en este host)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sans leur script de pré-exécution (le fichier reste sur cet hôte)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件は事前実行スクリプトなし (ファイルはこのホストに残ります)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sem o script de pré-execução (o arquivo fica neste host)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 项缺少运行前脚本（文件仍留在此主机上）"
+          }
+        }
+      }
+    },
     "%lld warnings" : {
       "localizations" : {
         "de" : {
