@@ -36,12 +36,16 @@ struct HermesProxyLifecycleP48Tests {
 
     private static let proxyPath = "scarf/scarf/Core/Services/HermesProxyService.swift"
 
-    /// `run()` threw, so there was no fork and Foundation closed the parent's
-    /// copy of NEITHER end. Nilling the readability handler — which was the
-    /// whole of the old teardown, under a comment claiming it avoided the
-    /// leak — releases no descriptor at all, so every failed Start (a port
-    /// already in use is the common one) cost two fds for the life of the
-    /// process.
+    /// The old teardown nilled the readability handler under a comment
+    /// claiming it avoided an fd leak, which is not what that line does.
+    ///
+    /// **The leak itself was not real**, and this says so: `run()` threw, so
+    /// nothing spawned, and a `Pipe` nobody keeps closes both descriptors in
+    /// `deinit` — measured at 50 dropped pipes leaving `/dev/fd` at 4. The
+    /// closes are the explicit release at a point the code states, and the
+    /// comment no longer claims something the line does not do. Like the
+    /// ScarfCore twins, this test therefore pins the shape rather than a
+    /// behavioural fix.
     @Test("a failed proxy launch closes both ends of its pipe")
     func failedLaunchClosesThePipe() throws {
         let code = Self.codeOnly(try Self.source(Self.proxyPath))

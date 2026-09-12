@@ -100,9 +100,23 @@ struct TransportDrainP48Tests {
         (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
     }
 
-    /// A spawn that passes no stdin used to build a `Pipe()` anyway and close
-    /// only the arm guarded by `stdin != nil` — so the read end was never
-    /// released on ANY path, once per spawn, for the life of the process.
+    /// **The audit's fd-leak finding was wrong, and this test says so rather
+    /// than pretending otherwise.**
+    ///
+    /// Round 5 filed "the transports' launch-failure arm leaks 2 fds" and "a
+    /// stdin-less spawn leaks its stdin read end". Measured, both are false,
+    /// for the reason P43b already corrected once for a neighbouring claim:
+    /// a `Pipe` closes both its descriptors in `deinit`, so a pipe that is
+    /// merely dropped costs nothing. 50 created-and-dropped `Pipe`s took
+    /// `/dev/fd` from 4 to 4.
+    ///
+    /// What DOES leak is a pipe ATTACHED to a process that actually spawned:
+    /// 50 `/bin/echo` spawns whose `standardOutput` pipe was never closed took
+    /// `/dev/fd` from 4 to 54, one per spawn, because Foundation's reaping
+    /// machinery outlives the caller's reference. That is the case these two
+    /// tests actually cover, and the conditional `stdinPipe` is kept as the
+    /// simpler shape (a pipe built for a caller with nothing to send is a
+    /// pipe that should not exist) rather than as a leak fix.
     @Test("a stdin-less spawn leaks no descriptors")
     func stdinLessSpawnLeaksNothing() throws {
         let transport = LocalTransport()
@@ -120,8 +134,9 @@ struct TransportDrainP48Tests {
         #expect(after - before < 10, "fd count went \(before) → \(after)")
     }
 
-    /// The launch-failure arm: `run()` threw, so there was no fork and
-    /// Foundation closed nothing. Both stdin ends stayed open.
+    /// The launch-failure arm. See the note above: this passes against the
+    /// pre-P48 code too, and is kept as the measurement that keeps the claim
+    /// honest rather than as proof of a fix.
     @Test("a spawn that fails to launch leaks no descriptors")
     func failedLaunchLeaksNothing() throws {
         let transport = LocalTransport()
@@ -367,6 +382,49 @@ struct ScriptRunnerDrainP48Tests {
         // same set today and a different one the moment ScarfCore builds for
         // anything else.
         #expect(!code.contains("#if os(macOS)"))
+    }
+}
+#endif
+
+#if !os(iOS)
+/// P48's own fresh-eyes pass, and its own correction.
+///
+/// The pass noticed that the four streaming spawns' launch-failure arms close
+/// nothing, and the explicit closes went in. Then the claim was MEASURED, and
+/// it does not hold: `run()` threw, so nothing spawned, and a `Pipe` nobody
+/// kept closes both its descriptors in `deinit` — 50 created-and-dropped
+/// `Pipe`s leave `/dev/fd` at 4. The closes are kept as the explicit release
+/// on a path where they are the only one (and because `try?` on an
+/// already-closed handle is a harmless `EBADF`), with the rationale stated
+/// correctly instead of repeating the audit's sentence.
+///
+/// This test therefore passes against the pre-P48 code as well. It is a
+/// measurement that keeps the claim honest, not a proof of a fix — which is
+/// exactly what P43b turned the neighbouring "every relaunch leaked two fds"
+/// rationale into.
+@Suite("Launch-failure arms release their pipes (P48)")
+struct LaunchFailureLeakP48Tests {
+
+    @Test("a streaming spawn that fails to launch leaks no descriptors",
+          .timeLimit(.minutes(1)))
+    func streamingLaunchFailureLeaksNothing() async throws {
+        let transport = LocalTransport()
+        func attempt() async {
+            do {
+                for try await _ in transport.streamLines(
+                    executable: "/nonexistent/binary", args: []) {}
+            } catch {}
+            do {
+                for try await _ in transport.streamRawBytes(
+                    executable: "/nonexistent/binary", args: []) {}
+            } catch {}
+        }
+        await attempt()
+        let before = TransportDrainP48Tests.openFDCount()
+        for _ in 0..<20 { await attempt() }
+        let after = TransportDrainP48Tests.openFDCount()
+        // 20 attempts × 2 streams × 4 ends = 160 against the old code.
+        #expect(after - before < 10, "fd count went \(before) → \(after)")
     }
 }
 #endif

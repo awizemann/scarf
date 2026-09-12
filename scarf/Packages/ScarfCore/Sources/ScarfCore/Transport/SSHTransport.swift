@@ -762,6 +762,13 @@ public struct SSHTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these — an explicit release at a point the code states
+                    // (round-5 P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
@@ -858,6 +865,13 @@ public struct SSHTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these — an explicit release at a point the code states
+                    // (round-5 P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
@@ -1096,9 +1110,9 @@ public struct SSHTransport: ServerTransport {
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         // Created only when there is something to send — see the twin comment
-        // in `LocalTransport.runProcess`. A stdin-less spawn used to leak the
-        // read end for the life of the process, and a failed launch both ends
-        // (round-5 P48).
+        // in `LocalTransport.runProcess`, including the correction: the
+        // stdin-less pipe was never attached and `Pipe.deinit` closed it, so
+        // this is the simpler shape rather than a leak fix (round-5 P48).
         let stdinPipe: Pipe? = stdin != nil ? Pipe() : nil
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe

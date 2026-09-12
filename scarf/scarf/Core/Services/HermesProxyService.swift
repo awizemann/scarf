@@ -135,10 +135,12 @@ final class HermesProxyService {
         } catch {
             lastError = "Could not launch hermes proxy: \(error.localizedDescription)"
             logger.error("hermes proxy launch failed: \(error.localizedDescription, privacy: .public)")
-            // Tear down the half-initialized pipe. `run()` threw, so there
-            // was no fork and Foundation never closed the parent's copy of
-            // EITHER end — nilling the handler alone left both fds open for
-            // the life of the process, once per failed Start (round-5 P48).
+            // Tear down the half-initialized pipe. `run()` threw, so nothing
+            // spawned; `Pipe.deinit` would close both ends on its own
+            // (measured — the audit's "leaks 2 fds" reading of this arm does
+            // not hold), so these are the explicit release at a point the
+            // code states, and the handler must be detached either way
+            // (round-5 P48).
             pipe.fileHandleForReading.readabilityHandler = nil
             try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()

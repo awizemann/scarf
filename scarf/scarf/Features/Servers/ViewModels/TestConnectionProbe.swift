@@ -192,6 +192,13 @@ struct TestConnectionProbe {
             do {
                 try proc.run()
             } catch {
+                // Nothing spawned and no drain is running, so these are the
+                // explicit release. (`Pipe.deinit` closes them anyway —
+                // measured; the release is stated rather than implied.)
+                try? stdoutPipe.fileHandleForReading.close()
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForReading.close()
+                try? stderrPipe.fileHandleForWriting.close()
                 return (-1, "", "Failed to launch /usr/bin/ssh: \(error.localizedDescription)")
             }
             // Drain BOTH pipes for the whole run, never with a `readToEnd()`

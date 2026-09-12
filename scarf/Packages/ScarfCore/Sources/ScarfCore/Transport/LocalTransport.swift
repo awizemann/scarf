@@ -279,11 +279,14 @@ public struct LocalTransport: ServerTransport {
         proc.environment = Self.subprocessEnvironment(forExecutable: executable)
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        // Created only when there is something to send. A `Pipe()` made for a
-        // caller that passes no stdin is two fds nobody ever closes: the read
-        // end was released on the `stdin != nil` arms only, so every
-        // stdin-less spawn leaked one for the life of the process, and a
-        // spawn that failed to LAUNCH leaked both (round-5 P48).
+        // Created only when there is something to send. The old
+        // unconditional `Pipe()` was never ATTACHED on the stdin-less path
+        // and had only one of its ends closed, which reads like a leak and
+        // was filed as one — but measured, it is not: a `Pipe` nobody keeps
+        // closes both descriptors in `deinit` (50 dropped pipes leave
+        // `/dev/fd` at 4). What does leak is a pipe attached to a process
+        // that spawned, which is why the closes below matter. This is the
+        // simpler shape, not a leak fix (round-5 P48).
         let stdinPipe: Pipe? = stdin != nil ? Pipe() : nil
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
@@ -380,6 +383,15 @@ public struct LocalTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these. The explicit release rather than relying on
+                    // `Pipe.deinit` — which measurably does close them — so
+                    // the fd goes back at a point the code states (round-5
+                    // P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
@@ -448,6 +460,15 @@ public struct LocalTransport: ServerTransport {
                 do {
                     try proc.run()
                 } catch {
+                    // `run()` threw, so nothing spawned and no drain owns
+                    // these. The explicit release rather than relying on
+                    // `Pipe.deinit` — which measurably does close them — so
+                    // the fd goes back at a point the code states (round-5
+                    // P48's own fresh-eyes pass).
+                    try? outPipe.fileHandleForReading.close()
+                    try? outPipe.fileHandleForWriting.close()
+                    try? errPipe.fileHandleForReading.close()
+                    try? errPipe.fileHandleForWriting.close()
                     continuation.finish(throwing: error)
                     return
                 }
