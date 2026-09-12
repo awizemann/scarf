@@ -127,9 +127,9 @@ struct HermesV0204SkillsParityTests {
 
     @Test func trustArgsUsePathExplicitly() {
         #expect(ProjectSkillsScanner.trustArgs("/repos/app", trusted: true)
-            == ["skills", "trust", "/repos/app"])
+            == ["skills", "trust", "--", "/repos/app"])
         #expect(ProjectSkillsScanner.trustArgs("/repos/app", trusted: false)
-            == ["skills", "untrust", "/repos/app"])
+            == ["skills", "untrust", "--", "/repos/app"])
     }
 
     @Test func projectSkillSubdirsMatchHermes() {

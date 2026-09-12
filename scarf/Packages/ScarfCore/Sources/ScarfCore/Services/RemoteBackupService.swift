@@ -28,6 +28,15 @@ public final class RemoteBackupService: @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.scarf", category: "RemoteBackupService")
     #endif
 
+    /// Assembling the outer `.scarfbackup` zip from the staged work dir
+    /// (charter C10: every subprocess has a timeout). A ceiling on a wedged
+    /// `zip`, not a budget — the work dir is the user's whole Hermes home,
+    /// so a healthy run on a multi-GB home can legitimately take minutes,
+    /// and a backup killed halfway is worse than one that takes a while.
+    /// Mirrors ``RemoteRestoreService/unzipTimeout``, the same archive in
+    /// the other direction.
+    public static let zipTimeout: TimeInterval = 900
+
     public let context: ServerContext
 
     public init(context: ServerContext) {
@@ -333,7 +342,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         progress(.bundling)
         let tempArchive = archiveURL.deletingLastPathComponent()
             .appendingPathComponent(".\(archiveURL.lastPathComponent).inflight-\(UUID().uuidString).zip")
-        try Self.zipDirectory(workDir: workDir, into: tempArchive)
+        try await Self.zipDirectory(workDir: workDir, into: tempArchive)
         progress(.finalizing)
         do {
             if FileManager.default.fileExists(atPath: archiveURL.path) {
@@ -501,7 +510,11 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// is unavailable in the iOS SDK. The whole backup flow is a Mac-side
     /// operation; the iOS stub throws so any accidental call surfaces a
     /// clear message instead of an opaque link error.
-    private static func zipDirectory(workDir: URL, into archive: URL) throws {
+    static func zipDirectory(
+        workDir: URL,
+        into archive: URL,
+        timeout: TimeInterval = RemoteBackupService.zipTimeout
+    ) async throws {
         #if os(iOS)
         throw BackupError.zipFailed("Backup zip is not supported on iOS — run the backup from the Mac app.")
         #else
@@ -510,17 +523,33 @@ public final class RemoteBackupService: @unchecked Sendable {
         proc.currentDirectoryURL = workDir
         proc.arguments = ["-rqX", archive.path, "."]
         let errPipe = Pipe()
+        let outPipe = Pipe()
         proc.standardError = errPipe
-        proc.standardOutput = Pipe()
+        proc.standardOutput = outPipe
         do {
             try proc.run()
         } catch {
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
+            try? outPipe.fileHandleForReading.close()
+            try? outPipe.fileHandleForWriting.close()
             throw BackupError.zipFailed("Couldn't launch zip: \(error.localizedDescription)")
         }
-        proc.waitUntilExit()
+        // C10: bounded, and drained CONCURRENTLY with the wait. `zip` prints
+        // a warning per unreadable entry, and a Hermes home full of sockets
+        // and permission-denied files produces enough of them to fill the
+        // 64 KB pipe buffer — which deadlocks a parent that reads only after
+        // the wait. See ``Process.waitDrainingAsync(timeout:pipes:drainGrace:)``.
+        let (exited, drained) = await proc.waitDrainingAsync(
+            timeout: timeout, pipes: [errPipe, outPipe])
+        // The write ends stay ours; the drain owns the read ends.
+        try? errPipe.fileHandleForWriting.close()
+        try? outPipe.fileHandleForWriting.close()
+        guard exited else {
+            throw BackupError.zipFailed("zip did not finish within \(Int(timeout))s and was stopped")
+        }
         if proc.terminationStatus != 0 {
-            let tail = (try? errPipe.fileHandleForReading.readToEnd())
-                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let tail = String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
             throw BackupError.zipFailed("zip exited \(proc.terminationStatus): \(tail)")
         }
         #endif

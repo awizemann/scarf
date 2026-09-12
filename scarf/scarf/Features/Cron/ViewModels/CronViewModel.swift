@@ -52,6 +52,11 @@ final class CronViewModel {
 
     var showCreateSheet = false
     var editingJob: HermesCronJob?
+    /// Round-4 decision 5 — the record the Duplicate sheet is pre-filled
+    /// from. Deliberately a SEPARATE slot from `editingJob`: the sheet it
+    /// drives runs `cron create`, and sharing the edit slot would make one
+    /// state carry two different verbs.
+    var duplicatingJob: HermesCronJob?
     var isLoading = false
     /// True when `jobs.json` exists but failed to decode — the Cron view
     /// warns instead of silently showing an empty board. (t-aud09)
@@ -536,12 +541,59 @@ final class CronViewModel {
     ) -> String? {
         if output.contains("Cannot activate terminal cron job")
             || (output.contains("(terminal)") && output.contains("Cannot run")) {
-            // No offer known (a generic `runAndReload` with no job in hand):
-            // keep naming re-arm, since the caller cannot rule it out.
-            let rearmable = offer?.canRearm ?? true
-            return rearmable
-                ? "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
-                : "That job already finished and can't be re-armed — duplicate it to schedule a new one."
+            // Three arms, because there are three things Scarf can know.
+            //
+            // `offer.canRearm` already folds the host floor
+            // (`hasCronResumeRunNow`, v0.20.6) together with
+            // `rearm_oneshot`'s own-schedule guard — it raises
+            // `_REARM_RECURRING_ERROR` for anything but `once`
+            // (`cron/jobs.py:2040-2042`, `:2065-2066` @ `v2026.9.7`, exit 1
+            // through `cron_resume`, `hermes_cli/cron.py:691-695`) — so it is
+            // the predicate to key on, not "the job is terminal".
+            //
+            // With NO offer (the `cron edit` race: the record turned terminal
+            // between load and click, so `jobs.first { $0.id == id }` came
+            // back nil) this used to default to naming "Resume & Run Now"
+            // anyway. That is the one arm that can be WRONG in the unsafe
+            // direction: it points a recurring job at a button Hermes
+            // refuses. Assert only what holds for every terminal record —
+            // duplicating is an ordinary `cron create`, which no terminal
+            // guard touches — and stay silent about a door we cannot prove.
+            guard let offer else {
+                return String(localized: "That job already finished — duplicate it to schedule a new one.")
+            }
+            return offer.canRearm
+                ? String(localized: "That job already finished — use Resume & Run Now to re-arm it, or duplicate it.")
+                : String(localized: "That job already finished and can't be re-armed — duplicate it to schedule a new one.")
+        }
+        // `rearm_oneshot`'s own two refusal families, both of which used to
+        // fall through to the generic `prefix(200)` truncation of raw CLI text.
+        //
+        // 1. `_REARM_RECURRING_ERROR` (`cron/jobs.py:2040-2042` @ `v2026.9.7`,
+        //    raised at `:2054` on the parsed schedule and again at `:2066` on
+        //    the stored record) — re-arm is one-shot-only. Exit 1 through
+        //    `cron_resume`'s `except (AmbiguousJobReference, ValueError)`
+        //    (`hermes_cli/cron.py:693-695`). Reachable when the offer was
+        //    computed against a record that has since been edited to a
+        //    recurring schedule.
+        if output.contains("Cannot re-arm recurring jobs") {
+            return String(localized: "Re-arm is for one-shot jobs only — this one repeats. Use Resume, or Run Now for a single extra run.")
+        }
+        // 2. The live-claim refusals (`:2061-2064`): `_claim_is_live`
+        //    (`:2031-2037`) is true only for a well-formed claim aged within
+        //    `[0, ttl)` — a run claim's TTL is at least 1800s
+        //    (`ONESHOT_RUN_CLAIM_TTL_SECONDS = 1800`, `:154`, which
+        //    `_oneshot_run_claim_ttl_seconds` applies as a FLOOR:
+        //    `max(timeout * 3, 1800)`, `:174`; the 600 nearby is
+        //    `_DEFAULT_CRON_INACTIVITY_TIMEOUT`, `:161`, an inactivity limit,
+        //    not the TTL) and a fire claim's
+        //    is `FIRE_CLAIM_TTL_SECONDS = 300` (`:891`) — and a future-dated
+        //    or malformed claim counts as STALE so it can never wedge a job.
+        //    So the remedy really is "wait": the claim goes when the run
+        //    clears it, and lapses on its own if the run dies. Verified
+        //    against the claim logic before naming it.
+        if output.contains("Cannot re-arm one-shot over a live") {
+            return String(localized: "That job has a run in progress — try again after it finishes.")
         }
         // v0.21.1 (A9): the cron lifecycle guard refuses a `--script` that
         // lives on a cloud-synced FileProvider path WITHOUT opening it
@@ -681,20 +733,20 @@ final class CronViewModel {
     /// can drift from it.
     nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "") -> [String] {
         var args = ["cron", "create"]
-        if !name.isEmpty { args += ["--name", name] }
-        if !deliver.isEmpty { args += ["--deliver", deliver] }
+        if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
+        if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
         // v0.21.1 `--failure-deliver`. The caller (CronView) clears the form
         // value on a host without `hasCronFailureDeliver`, so the unknown flag
         // is never emitted — argparse would fail the whole create.
-        if !failureDeliver.isEmpty { args += ["--failure-deliver", failureDeliver] }
-        if !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
-        for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
-        if !script.isEmpty { args += ["--script", script] }
+        if !failureDeliver.isEmpty { args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver)) }
+        if !repeatCount.isEmpty { args.append(HermesCLIOption.joined("--repeat", repeatCount)) }
+        for skill in skills where !skill.isEmpty { args.append(HermesCLIOption.joined("--skill", skill)) }
+        if !script.isEmpty { args.append(HermesCLIOption.joined("--script", script)) }
         // v0.12+: --workdir injects AGENTS.md/CLAUDE.md context and pins
         // cwd for terminal/file/code_exec tools. Hermes pre-v0.12 doesn't
         // know the flag — argparse rejects unknown args, so the form
         // omits the flag when the field is empty.
-        if !workdir.isEmpty { args += ["--workdir", workdir] }
+        if !workdir.isEmpty { args.append(HermesCLIOption.joined("--workdir", workdir)) }
         // v0.13+: --no-agent runs the pre-run script and skips the AI turn.
         // Caller (CronView) strips this on pre-v0.13 hosts so the flag is
         // never emitted to a Hermes that can't parse it.
@@ -756,10 +808,10 @@ final class CronViewModel {
         }
         var args: [String] = []
         for skill in existingSet where !target.contains(skill) {
-            args += ["--remove-skill", skill]
+            args.append(HermesCLIOption.joined("--remove-skill", skill))
         }
         for skill in target where !existingSet.contains(skill) {
-            args += ["--add-skill", skill]
+            args.append(HermesCLIOption.joined("--add-skill", skill))
         }
         return args
     }
@@ -789,9 +841,9 @@ final class CronViewModel {
     nonisolated static func promptEditArguments(existing: String, newValue: String?) -> [String] {
         guard let newValue else { return [] }   // caller didn't touch the prompt
         if newValue.isEmpty {
-            return existing.isEmpty ? [] : ["--prompt", ""]
+            return existing.isEmpty ? [] : [HermesCLIOption.joined("--prompt", "")]
         }
-        return ["--prompt", newValue]
+        return [HermesCLIOption.joined("--prompt", newValue)]
     }
 
     /// The `--repeat` tail of a `cron edit`.
@@ -818,9 +870,9 @@ final class CronViewModel {
         guard let newValue else { return [] }   // caller didn't touch the field
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            return existing.isEmpty ? [] : ["--repeat", "0"]
+            return existing.isEmpty ? [] : [HermesCLIOption.joined("--repeat", "0")]
         }
-        return ["--repeat", trimmed]
+        return [HermesCLIOption.joined("--repeat", trimmed)]
     }
 
     func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
@@ -828,23 +880,23 @@ final class CronViewModel {
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
         var args = ["cron", "edit"]
-        if let schedule, !schedule.isEmpty { args += ["--schedule", schedule] }
+        if let schedule, !schedule.isEmpty { args.append(HermesCLIOption.joined("--schedule", schedule)) }
         args += Self.promptEditArguments(existing: existingPrompt, newValue: prompt)
-        if let name, !name.isEmpty { args += ["--name", name] }
-        if let deliver { args += ["--deliver", deliver] }
+        if let name, !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
+        if let deliver { args.append(HermesCLIOption.joined("--deliver", deliver)) }
         // v0.21.1: `nil` = untouched (omit the flag); `""` is Hermes's own
         // documented "clear the override" gesture on edit, so it is passed
         // through rather than dropped like an empty create value.
-        if let failureDeliver { args += ["--failure-deliver", failureDeliver] }
+        if let failureDeliver { args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver)) }
         args += Self.repeatEditArguments(existing: existingRepeatCount, newValue: repeatCount)
         args += Self.skillEditArguments(
             existing: existingSkills, newSkills: newSkills, clearSkills: clearSkills
         )
-        if let script { args += ["--script", script] }
+        if let script { args.append(HermesCLIOption.joined("--script", script)) }
         // `nil` = caller didn't touch the field (omit the flag). Empty string
         // = user cleared an existing workdir; Hermes documents `--workdir ""`
         // on edit as the explicit clear gesture, mirroring the `--script` shape.
-        if let workdir { args += ["--workdir", workdir] }
+        if let workdir { args.append(HermesCLIOption.joined("--workdir", workdir)) }
         if let noAgent {
             if noAgent { args.append("--no-agent") }
             else { args.append("--agent") }

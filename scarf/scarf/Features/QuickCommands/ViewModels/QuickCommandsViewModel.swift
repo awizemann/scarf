@@ -82,8 +82,10 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             // is read-modify-write, so overlapping them would lose one key.
             let (typeResult, cmdResult) = await Task.detached {
                 (
-                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"]),
-                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
+                    ctx.runHermes(HermesConfigSet.argv(
+                        key: "quick_commands.\(sanitizedName).type", value: "exec")),
+                    ctx.runHermes(HermesConfigSet.argv(
+                        key: "quick_commands.\(sanitizedName).command", value: command))
                 )
             }.value
             guard let self else { return }
@@ -98,12 +100,21 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
     /// on it so the busy state renders.
     private(set) var isSaving = false
 
-    private func applyAddOrUpdateResult(
+    /// Internal, not private, so a test can drive the two results directly —
+    /// the same seam `SettingsViewModel.saveFailureMessage` uses. Which of the
+    /// two writes failed is a verdict question (P39), and getting it wrong
+    /// names the wrong key in the banner.
+    func applyAddOrUpdateResult(
         sanitizedName: String,
         typeResult: (output: String, exitCode: Int32),
         cmdResult: (output: String, exitCode: Int32)
     ) {
-        if typeResult.exitCode == 0 && cmdResult.exitCode == 0 {
+        // P39: output-judged. `set_config_value`'s managed-install arm exits
+        // 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7), so both spawns
+        // "succeeded" and the sheet toasted a command that was never saved.
+        let typeOK = HermesConfigSet.judge(output: typeResult.output, exitCode: typeResult.exitCode).succeeded
+        let cmdOK = HermesConfigSet.judge(output: cmdResult.output, exitCode: cmdResult.exitCode).succeeded
+        if typeOK && cmdOK {
             // Toast carries the name the command was actually SAVED under,
             // never the raw CLI segment. `ConfigDottedKeySegment.escaped`
             // backslash-escapes dots on v0.21+ hosts, so "v1.2 deploy" used
@@ -121,14 +132,25 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             // Surface the CLI's own reason, the way Settings and
             // Personalities do — "Save failed" alone hid the managed-scope
             // refusal that is the common cause here.
-            let failing = typeResult.exitCode != 0 ? typeResult : cmdResult
-            let key = typeResult.exitCode != 0
+            //
+            // P39: which one failed is decided by the VERDICT, not by the
+            // exit code. An exit-0 refusal on the `type` write used to read
+            // as "type is fine", so the banner quoted the `command` key and
+            // the `command` output — naming the wrong key for the wrong
+            // reason.
+            let failing = !typeOK ? typeResult : cmdResult
+            let key = !typeOK
                 ? "quick_commands.\(sanitizedName).type"
                 : "quick_commands.\(sanitizedName).command"
             // GW-F4: a refusal stays on the bar in the failure style until
             // the user dismisses it. It used to render under a green
             // checkmark and vanish after two seconds.
-            showSaveFailure(SettingsViewModel.saveFailureMessage(key: key, output: failing.output))
+            showSaveFailure(SettingsViewModel.saveFailureMessage(
+                key: key,
+                output: failing.output,
+                reason: HermesConfigSet.judge(
+                    output: failing.output, exitCode: failing.exitCode).detail
+            ))
         }
     }
 

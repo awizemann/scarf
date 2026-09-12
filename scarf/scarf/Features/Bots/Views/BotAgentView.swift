@@ -143,7 +143,8 @@ struct BotAgentView: View {
                     if viewModel.isPinned {
                         Button("Use Hermes Default") { showClearConfirm = true }
                             .buttonStyle(ScarfGhostButton())
-                            .disabled(!viewModel.canEditConfig || viewModel.isPinBusy)
+                            // P39: `hermes config unset` is a v0.19.0 verb.
+                            .disabled(!viewModel.canClearModelPin || viewModel.isPinBusy)
                             .accessibilityLabel("Clear this bot's model pin and use Hermes' default")
                     }
                 }

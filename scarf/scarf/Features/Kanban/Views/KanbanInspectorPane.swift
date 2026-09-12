@@ -17,6 +17,11 @@ struct KanbanInspectorPane: View {
     /// those fields, so this is belt-and-suspenders.
     let supportsKanbanV015: Bool
     let supportsKanbanCompletionContract: Bool
+    /// v0.21.1 `provider_override` in the task envelope — its own flag, not
+    /// `supportsKanbanV015`'s, because the KEY landed six releases after
+    /// `model_override` did (`hermes_cli/kanban_output.py:22` first present
+    /// at `v2026.9.7`).
+    let supportsKanbanProviderOverride: Bool
     /// This card's active diagnostics, owned by the board VM (one
     /// `hermes kanban diagnostics --json` per board load — the only surface
     /// that emits them). Task-wide signals render on the header; entries
@@ -48,6 +53,7 @@ struct KanbanInspectorPane: View {
         supportsKanbanDiagnostics: Bool = false,
         supportsKanbanV015: Bool = false,
         supportsKanbanCompletionContract: Bool = false,
+        supportsKanbanProviderOverride: Bool = false,
         diagnostics: [HermesKanbanDiagnostic] = [],
         onClose: @escaping () -> Void,
         onClaim: @escaping () -> Void,
@@ -62,6 +68,7 @@ struct KanbanInspectorPane: View {
         self.supportsKanbanDiagnostics = supportsKanbanDiagnostics
         self.supportsKanbanV015 = supportsKanbanV015
         self.supportsKanbanCompletionContract = supportsKanbanCompletionContract
+        self.supportsKanbanProviderOverride = supportsKanbanProviderOverride
         self.diagnostics = diagnostics
         self.onClose = onClose
         self.onClaim = onClaim
@@ -221,6 +228,18 @@ struct KanbanInspectorPane: View {
                                 ScarfBadge("Model: \(model)", kind: .neutral)
                                     .fixedSize()
                                     .help("Per-task model override set at create time. Read-only — Hermes has no update verb.")
+                            }
+                            // v0.21.1: the provider half of the model pin.
+                            // Read-only for the same reason `Model:` is —
+                            // `kanban edit` takes only `--result` and the
+                            // step-handoff flags at `v2026.9.7`
+                            // (`hermes_cli/kanban_parser.py:287-291`), so
+                            // neither can be changed from here.
+                            if supportsKanbanProviderOverride,
+                               let provider = task.providerOverride, !provider.isEmpty {
+                                ScarfBadge("Provider: \(provider)", kind: .neutral)
+                                    .fixedSize()
+                                    .help("Inference provider paired with the per-task model override, set at create time. Read-only — Hermes has no update verb.")
                             }
                             if supportsKanbanV015, let branch = task.branchName, !branch.isEmpty {
                                 ScarfBadge("Branch: \(branch)", kind: .neutral)

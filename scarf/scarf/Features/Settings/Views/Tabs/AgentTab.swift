@@ -28,22 +28,51 @@ struct AgentTab: View {
             // `max` and `ultra` are NOT v0.20 — they arrived a release apart
             // and both well before it. Walked: `VALID_REASONING_EFFORTS`
             // gains `"max"` at v2026.7.7 (0.18.1, `hermes_constants.py:794`)
-            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`). Those are the
-            // floors `HermesReasoningEffort.levels(capabilities:)` uses;
-            // older hosts keep the shorter list.
+            // and `"ultra"` at v2026.7.20 (0.19.0, `:835-837`), so the two
+            // floors are `hasReasoningEffortMax` (0.18.1) and
+            // `hasReasoningEffortUltra` (0.19.0) — NOT "v0.20 for both",
+            // which is what this comment used to claim. Those are the floors
+            // `HermesReasoningEffort.levels(capabilities:)` uses; older hosts
+            // keep the shorter list.
             //
-            // The leading empty row is the ABSENT key, and absent is not
-            // `medium`: `agent.reasoning_effort` is in no schema layer at any
-            // supported tag, so nothing decides the level but the model
-            // provider itself. Asserting `medium` in the picker claimed a
-            // level Hermes never chose — and the first unrelated save on that
-            // tab wrote it.
+            // Round-4 decision 13: the list is WIDENED to include whatever is
+            // already on disk, because a `Picker` whose selection matches no
+            // tag renders blank — a 0.18.x host with `ultra` in config.yaml
+            // showed an empty control. Widening is not an endorsement, so the
+            // row carries `unsupportedLevelNotice` beneath it.
+            //
+            // The leading empty row is the ABSENT key. It is not a level
+            // the picker may assert — `agent.reasoning_effort` is in no
+            // schema layer at any supported tag, so stamping `medium` into
+            // the control would claim a value Hermes never wrote, and the
+            // first unrelated save on that tab would write it. What the
+            // absent key RESOLVES to is Hermes's own `medium`, not the model
+            // provider's default: the chat-completions transport substitutes
+            // it EXPLICITLY (`agent/transports/chat_completions.py:420-422` @
+            // `v2026.9.7`), and only the Anthropic adapter leaves the choice
+            // to the model (`agent/anthropic_adapter.py:570`). Hence the row
+            // reads "Hermes default", P45's wording on all four surfaces.
             PickerRow(
                 label: "Reasoning Effort",
-                selection: viewModel.config.reasoningEffort,
-                options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
-                optionLabel: { $0.isEmpty ? String(localized: "Provider default") : $0 }
+                // P46b: the SELECTION, not just the options. `levels(…)`
+                // treats a whitespace-only stored value as the sentinel and
+                // widens nothing, but this binding handed the picker the raw
+                // `"  "`, which matches neither the sentinel row's `""` tag
+                // nor any level — so the control rendered blank, the exact
+                // failure decision 13 exists to prevent.
+                selection: HermesReasoningEffort.pickerSelection(
+                    for: viewModel.config.reasoningEffort
+                ),
+                options: [""] + HermesReasoningEffort.levels(
+                    capabilities: capabilities,
+                    selected: viewModel.config.reasoningEffort
+                ),
+                optionLabel: { $0.isEmpty ? String(localized: "Hermes default") : $0 }
             ) { viewModel.setReasoningEffort($0) }
+            UnsupportedEffortNote(
+                selected: viewModel.config.reasoningEffort,
+                capabilities: capabilities
+            )
             PickerRow(label: "Tool Use Enforcement", selection: viewModel.config.toolUseEnforcement, options: ["auto", "true", "false"]) { viewModel.setToolUseEnforcement($0) }
         }
 
@@ -250,6 +279,7 @@ private struct ReasoningOverridesSection: View {
                     pattern: pair.key,
                     effort: pair.value,
                     options: effortOptions(current: pair.value),
+                    capabilities: capabilities,
                     onEffortChange: { newEffort in
                         changeEffort(pattern: pair.key, to: newEffort)
                     },
@@ -263,30 +293,133 @@ private struct ReasoningOverridesSection: View {
                     .textFieldStyle(.roundedBorder)
                     .font(ScarfFont.monoSmall)
                 Picker("", selection: $newEffort) {
-                    ForEach(HermesReasoningEffort.levels(capabilities: capabilities), id: \.self) { Text($0).tag($0) }
+                    ForEach(
+                        HermesReasoningEffort.levels(capabilities: capabilities, selected: newEffort),
+                        id: \.self
+                    ) { Text($0).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 110)
                 Button("Add") { addNew() }
                     .controlSize(.small)
-                    .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty
+                              || controlCharacterFieldLabel != nil
+                              || oversizedKeyFieldLabel != nil)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(ScarfColor.backgroundTertiary.opacity(0.5))
             .help("Overrides the global Reasoning Effort when the active model matches the pattern (exact or common spelling variants — dots/dashes, with/without provider prefix). First match wins.")
+            // Round-4 decision 9: a dead Add button always says what it
+            // wants, in the same shape `BotEditorSheet.cannotSaveReason` uses.
+            if let field = controlCharacterFieldLabel {
+                Text("“\(field)” contains a tab or a control character. Remove it, then add.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .accessibilityLabel(
+                        Text("Validation error: \(field) contains a tab or a control character. Remove it, then add.")
+                    )
+            }
+            // P41b: the other way this field can make Hermes discard the
+            // whole config.yaml — a map key past PyYAML's simple-key limit.
+            // The copy does not name 1024, because the budget the user
+            // would have to count against is the EMITTED token: quoting
+            // spends two of it, and a combining mark or an emoji ZWJ
+            // sequence spends more scalars than it shows Characters (P41c).
+            if let field = oversizedKeyFieldLabel {
+                Text("“\(field)” is too long for Hermes to read as a config.yaml key once Scarf quotes it. Hermes ignores the whole file. Shorten it, then add.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .accessibilityLabel(
+                        Text("Validation error: \(field) is too long to use as a config.yaml key. Shorten it, then add.")
+                    )
+            }
         }
+    }
+
+    /// Round-4 decision 9 — the reasoning-override pattern is the other
+    /// free-text field that reaches config.yaml with no control-character
+    /// refusal, alongside the MCP entry editor. Same shape as round-3
+    /// decision 6 gave `BotsViewModel` / `HermesProfileRoute`: refuse
+    /// visibly rather than reshape, because a pasted ESC that round-trips as
+    /// the literal `a\x1bb` is a pattern the user cannot see and which will
+    /// never match a model name.
+    ///
+    /// Checked on the pattern as ``addNew`` WRITES it — trimmed, matching
+    /// `PowerSettingsWriter.setReasoningOverrides`, which trims the key for
+    /// both the emptiness test and the write since P41.
+    ///
+    /// Deliberately NOT applied to the EXISTING rows, which a re-save
+    /// rewrites: `YAMLScalar.quoteIfNeeded` represents a control character
+    /// losslessly (`YAMLScalar.doubleQuoted` escapes it `\xNN`/`\uNNNN`)
+    /// and `YAMLScalar.unquote` reads it back, so a hand-edited pattern
+    /// survives a save intact — refusing it would make the whole section
+    /// uneditable to fix the very row that carries it, which is the
+    /// over-refusal P19 warned about.
+    private var controlCharacterFieldLabel: String? {
+        PowerSettingsWriter.controlCharacterFieldLabel(pattern: newPattern)
+    }
+
+    /// Round-4, P41b — the pattern is a config.yaml map KEY and PyYAML
+    /// refuses a simple key past 1024 emitted unicode scalars, which makes
+    /// `load_config` discard the whole file. See
+    /// ``PowerSettingsWriter/oversizedKeyFieldLabel(pattern:)``.
+    private var oversizedKeyFieldLabel: String? {
+        PowerSettingsWriter.oversizedKeyFieldLabel(pattern: newPattern)
     }
 
     /// Existing rows may carry a value outside the picker vocabulary (a
     /// hand-edited alias like "disabled") — keep it selectable so the picker
     /// doesn't silently rewrite it.
+    /// The picker's options for an EXISTING override row, widened to
+    /// whatever is on disk. This is where round-4 decision 13's widening was
+    /// first written; it now lives in `HermesReasoningEffort` so the two
+    /// top-level pickers share it instead of re-deriving it.
+    /// P46b: the empty row is CONDITIONAL — it exists only when the stored
+    /// value is empty (or whitespace-only, Hermes's same absent-key case),
+    /// because a `Picker` whose selection matches no tag renders blank and
+    /// an override row has no sentinel of its own the way the two top-level
+    /// pickers do.
+    ///
+    /// It is not offered as a choice on a row that has a real level, and
+    /// that is deliberate: `HermesReasoningEffort.isValid("")` is false, so
+    /// `PowerSettingsWriter.setReasoningOverrides` REFUSES a batch carrying
+    /// an empty value — an always-present "Default" row would be a control
+    /// the user can move and the save then silently declines. Clearing an
+    /// override is the minus button, which is also what selecting this row
+    /// does (`changeEffort`).
+    ///
+    /// What an empty override means is walked rather than assumed:
+    /// `resolve_per_model_reasoning_effort` runs the value through
+    /// `parse_reasoning_effort`, which returns `None` for it, and
+    /// `resolve_reasoning_config` then falls through to the global
+    /// `agent.reasoning_effort` (`hermes_constants.py:935-941`, `:970-976` @
+    /// `v2026.9.7`) — i.e. to the row above this section. "Default" is that
+    /// row's own word for "not set here", which is why it is reused rather
+    /// than "Hermes default" (the global row's claim, which this one does
+    /// not make).
     private func effortOptions(current: String) -> [String] {
-        let base = HermesReasoningEffort.levels(capabilities: capabilities)
-        return base.contains(current) ? base : [current] + base
+        let levels = HermesReasoningEffort.levels(capabilities: capabilities, selected: current)
+        return HermesReasoningEffort.pickerSelection(for: current).isEmpty
+            ? [""] + levels
+            : levels
     }
 
     private func changeEffort(pattern: String, to newEffort: String) {
+        // The sentinel row (P46b) means "no override here", and the only way
+        // to say that in `agent.reasoning_overrides` is to not have the
+        // entry: an empty value fails `HermesReasoningEffort.isValid` and
+        // the writer would refuse the whole save.
+        guard !HermesReasoningEffort.pickerSelection(for: newEffort).isEmpty else {
+            save(sortedOverrides.filter { $0.key != pattern })
+            return
+        }
         var pairs = sortedOverrides
         for i in pairs.indices where pairs[i].key == pattern {
             pairs[i].value = newEffort
@@ -316,10 +449,23 @@ private struct OverrideRow: View {
     let pattern: String
     let effort: String
     let options: [String]
+    let capabilities: HermesCapabilities
     let onEffortChange: (String) -> Void
     let onRemove: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            // Round-4 decision 13. `options` is widened to `effort`, so a
+            // level above this host's floor is selectable here rather than
+            // blank — this is what stops the widening from reading as
+            // support.
+            UnsupportedEffortNote(selected: effort, capabilities: capabilities)
+        }
+        .background(ScarfColor.backgroundTertiary.opacity(0.5))
+    }
+
+    private var row: some View {
         HStack {
             Text(pattern)
                 .font(ScarfFont.monoSmall)
@@ -327,9 +473,12 @@ private struct OverrideRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            Picker("", selection: Binding(get: { effort }, set: onEffortChange)) {
+            Picker("", selection: Binding(
+                get: { HermesReasoningEffort.pickerSelection(for: effort) },
+                set: onEffortChange
+            )) {
                 ForEach(options, id: \.self) { option in
-                    Text(option).tag(option)
+                    Text(option.isEmpty ? String(localized: "Default") : option).tag(option)
                 }
             }
             .labelsHidden()
@@ -343,6 +492,5 @@ private struct OverrideRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(ScarfColor.backgroundTertiary.opacity(0.5))
     }
 }

@@ -51,29 +51,45 @@ public final class ProjectSkillsViewModel {
         let xport = transport
         let args = ProjectSkillsScanner.trustArgs(projectRoot, trusted: trusted)
         Task.detached { [weak self] in
-            let exitCode: Int32
+            let outcome: HermesCLIOutcome
             do {
-                exitCode = try xport.runProcess(
+                let result = try xport.runProcess(
                     executable: bin,
                     args: args,
                     stdin: nil,
                     timeout: 60
-                ).exitCode
+                )
+                // P39: judged by OUTPUT, not the exit code. `_cmd_skills_trust`
+                // edits `skills.trusted_project_dirs` and hands it to
+                // `save_config` (`hermes_cli/main_agent_cmds.py:224`, `:234` @
+                // v2026.9.7), whose managed-install arm prints to stderr and
+                // `return`s (`hermes_cli/config.py:2316-2318`) — and the
+                // handler then prints `Trusted: <root>` anyway (`:235`). Exit
+                // 0, nothing written, and Scarf used to banner the success.
+                // Two of its OWN refusals (`Not a directory:` `:197`, `Not
+                // inside a git checkout.` `:202-204`) are bare `return`s at
+                // exit 0 too. See ``HermesSkillsTrust``.
+                outcome = HermesSkillsTrust.judge(
+                    output: [result.stdoutString, result.stderrString]
+                        .filter { !$0.isEmpty }.joined(separator: "\n"),
+                    exitCode: result.exitCode
+                )
             } catch {
-                exitCode = -1
+                outcome = HermesCLIOutcome(succeeded: false, detail: nil)
             }
-            await self?.finishTrust(trusted: trusted, exitCode: exitCode)
+            await self?.finishTrust(trusted: trusted, outcome: outcome)
         }
     }
 
-    private func finishTrust(trusted: Bool, exitCode: Int32) async {
+    private func finishTrust(trusted: Bool, outcome: HermesCLIOutcome) async {
         isBusy = false
-        if exitCode == 0 {
+        if outcome.succeeded {
             message = trusted
                 ? "Trusted — this repo's skills will load in sessions started here."
                 : "Untrusted — this repo's skills will no longer load."
         } else {
-            message = trusted ? "Trust failed" : "Untrust failed"
+            let base = trusted ? "Trust failed" : "Untrust failed"
+            message = outcome.detail.map { "\(base): \($0)" } ?? base
         }
         await load()
         try? await Task.sleep(nanoseconds: 4_000_000_000)

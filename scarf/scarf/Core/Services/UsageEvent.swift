@@ -357,9 +357,29 @@ nonisolated extension UsageEvent {
     /// The taxonomy's shared succeeded/failed outcome vocabulary.
     enum Outcome: String, CaseIterable, Sendable {
         case succeeded, failed
+        /// The run neither confirmed nor refused: exit 0 with no success line
+        /// and no refusal marker. See ``ScarfCore/HermesCLIOutcome/Confidence``.
+        ///
+        /// **Series break (P40b).** Before this token, a could-not-confirm
+        /// gateway action was recorded as `failed`, so `hermes_control_action`
+        /// rows with `outcome=failed` from earlier builds mix real refusals
+        /// with silent s6 dispatches. Compare `succeeded` across the boundary,
+        /// not `failed`.
+        case unconfirmed
 
         /// The one place a `Bool` becomes an outcome token.
         init(succeeded: Bool) { self = succeeded ? .succeeded : .failed }
+
+        /// The three-state form, for the verdicts that judge Hermes's own
+        /// printed output. Recording "could not confirm" as `failed` made the
+        /// two indistinguishable in the funnel.
+        init(_ confidence: HermesCLIOutcome.Confidence) {
+            switch confidence {
+            case .confirmed: self = .succeeded
+            case .unconfirmed: self = .unconfirmed
+            case .failed: self = .failed
+            }
+        }
     }
 
     enum Transport: String, CaseIterable, Sendable {

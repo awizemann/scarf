@@ -4,15 +4,15 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-4-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPersonalities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift]
 source_paths_inferred: false
-source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-08-20
-updated: 2026-08-20
-reviewed: 2026-09-04
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-10
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
-- [decision] Capability gating is PATCH-level this cycle: isV0204OrLater = atLeastSemver(0,20,4) with 8 flags (cron pause-marker, builtin personalities, curator ledger/purge/entry-rollback, skills project-trust/update-force, MCP identity_header) — isV020OrLater would wrongly light on v0.20.0 hosts. Schema features (hidden, last_read_at, listable-children) use column probes plus a JSON1 probe (remote infers from sqlite3 version ≥3.38). #gating
+- [decision] Capability gating is PATCH-level this cycle: isV0204OrLater = atLeastSemver(0,20,4) with 8 flags (cron pause-marker, builtin personalities, curator ledger/purge/entry-rollback, skills project-trust/update-force, MCP identity_header) — isV020OrLater would wrongly light on v0.20.0 hosts. **RE-FLOORED in P23 (round-2 audit, 2026-09-10):** the "v0.20.4" MARK group was mostly 0.20.1/0.20.3 and only `hasMCPIdentityHeader` is a genuine v0.20.4 floor. `hasCronPauseMarkerGate` and `hasBuiltinPersonalitiesInCode` are now `isV0201OrLater` (`hermes_cli/personality.py` and `cron/jobs.py:482 _has_pause_marker` first exist at v2026.8.13 = 0.20.1); `hasCuratorLedger`/`hasCuratorPurge`/`hasCuratorEntryRollback`/`hasSkillsProjectTrust`/`hasSkillsUpdateForce` are now `isV0203OrLater` (all land together at v2026.8.16.2 = 0.20.3, absent at v2026.8.16 = 0.20.2). A MARK group's NAME is not evidence for its members' floors. Schema features (hidden, last_read_at, listable-children) use column probes plus a JSON1 probe (remote infers from sqlite3 version ≥3.38). #gating
 - [decision] Personalities: 14 built-ins hardcoded (HermesPersonalities.swift) and unioned with agent.personalities entries ONLY when hasBuiltinPersonalitiesInCode — on pre-0.20.4 hosts config is authoritative (a deleted built-in stays deleted). Prompt preview ports render_personality_prompt (system_prompt + Tone/Style lines). Fixed pre-existing prefix bug (agent.personalities.) and system_prompt/bare-string forms. #personalities
 - [decision] iOS cron enable/disable now routes through `hermes cron resume|pause` via CitadelServerTransport (full Hermes semantics: next_run_at recompute, one-shot refusal), JSON write demoted to fallback that clears next_run_at (Hermes recomputes on load) and never runs after a CLI refusal. stateDisplay uses ported effective_job_state (enabled=true never shows paused). Pause-marker writes are UNGATED — markers are native on v0.20.0 too; hasCronPauseMarkerGate exists as documentation only. #cron
 - [decision] Unread indicator uses Hermes-faithful last_active = MAX(last_activity_at, MAX(messages.timestamp)) correlated subquery (heartbeat is rate-limited/best-effort so messages-max dominates); only in the list query, gated on hasLastReadAtColumn; Scarf never writes last_read_at. #sessions

@@ -10,8 +10,11 @@ struct HermesConfigUnsetP35Tests {
     /// `hermes_cli/subcommands/config.py:33-34` @ v2026.9.7 and `:51-54` @
     /// v2026.7.20 (the `hasConfigUnset` floor): `unset` takes exactly one
     /// positional `key` and no flags.
+    ///
+    /// P39 added the `--` separator: `key` is `nargs="?"`, so a key beginning
+    /// with `-` was parsed as an option and exited 2.
     @Test func argvIsTheTaggedSubparserShape() {
-        #expect(HermesConfigUnset.argv(key: "approvals.mode") == ["config", "unset", "approvals.mode"])
+        #expect(HermesConfigUnset.argv(key: "approvals.mode") == ["config", "unset", "--", "approvals.mode"])
     }
 
     @Test func successIsTheEmittersOwnLine() {

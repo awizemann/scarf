@@ -622,18 +622,21 @@ import Foundation
 
     // MARK: - Wire format
 
+    /// P39 put a `--` separator before the positionals (both `nargs="?"`,
+    /// `hermes_cli/subcommands/config.py:24-31` @ v2026.9.7) so a value like
+    /// `-1` is not read as an option.
     @Test func operationsMapToHermesConfigSetArgv() {
         #expect(Op.set(key: "model.provider", value: "ollama").cliArguments
-                == ["config", "set", "model.provider", "ollama"])
+                == ["config", "set", "--", "model.provider", "ollama"])
         // Clear IS `set <key> ""` — Hermes v0.17 has no `config unset`;
         // the runtime reader treats empty strings as unset for the three
         // string keys (see LocalModelConfigPlan doc).
         #expect(Op.clear(key: "model.base_url").cliArguments
-                == ["config", "set", "model.base_url", ""])
+                == ["config", "set", "--", "model.base_url", ""])
         #expect(Op.clear(key: "model.api_key").cliArguments
-                == ["config", "set", "model.api_key", ""])
+                == ["config", "set", "--", "model.api_key", ""])
         #expect(Op.clear(key: "model.api_mode").cliArguments
-                == ["config", "set", "model.api_mode", ""])
+                == ["config", "set", "--", "model.api_mode", ""])
         // model.context_length is the exception: `""` fails the reader's
         // int() and WARNS on every startup, while a non-positive int is
         // silently ignored by every consumer (agent_init.py:1469-1490 +
@@ -641,7 +644,7 @@ import Foundation
         // test_config_context_length_zero_is_ignored). Its unset value
         // is "0".
         #expect(Op.clear(key: "model.context_length").cliArguments
-                == ["config", "set", "model.context_length", "0"])
+                == ["config", "set", "--", "model.context_length", "0"])
     }
 
     @Test func localManagedKeysPinTheClearOnSwitchUnion() {

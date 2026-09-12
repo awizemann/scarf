@@ -75,7 +75,7 @@ struct ChatView: View {
     }
 
     /// Names that render greyed-out + ignore taps. Matches the Mac's
-    /// disabled gating exactly — `/steer` on pre-v0.13 idle sessions
+    /// disabled gating exactly — `/queue` on an idle-but-open session
     /// PLUS every agent-side command when there's no active session
     /// (P2 of the projects-feature fix).
     private var disabledSlashCommandNames: Set<String> {
@@ -1368,24 +1368,27 @@ final class ChatController {
             // uses so non-interactive shells find `hermes` even when
             // it's in ~/.local/bin / /opt/homebrew/bin.
             let hermes = ctx.paths.hermesBinary
-            let providerScript = """
-            PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH" \
-            \(hermes) config set 'model.provider' '\(Self.escapeShellArg(trimmedProvider))'
-            """
-            let provider = Self.runConfigSet(ctx, script: providerScript)
-            let providerOK = provider.result?.exitCode == 0
+            // P39's twin, missed by the branch and caught in P46. This
+            // hand-rolled a `config set` string — no `--`, so a key beginning
+            // with `-` was parsed as an option — and judged it by EXIT CODE,
+            // which `set_config_value`'s managed-install arm exits 0 through
+            // (`hermes_cli/config.py:3450-3452` @ v2026.9.7). Both halves now
+            // come from ``HermesConfigSet``, exactly as
+            // `IOSSettingsViewModel.saveValue` does.
+            let provider = Self.runConfigSet(ctx, hermes: hermes,
+                                             key: "model.provider", value: trimmedProvider)
+            let providerOK = provider.outcome?.succeeded == true
             var modelResult: ProcessResult? = nil
             var modelError: String? = nil
+            var modelOutcome: HermesCLIOutcome? = nil
             var modelOK = true
             if providerOK, !trimmedModel.isEmpty {
-                let modelScript = """
-                PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH" \
-                \(hermes) config set 'model.default' '\(Self.escapeShellArg(trimmedModel))'
-                """
-                let model = Self.runConfigSet(ctx, script: modelScript)
+                let model = Self.runConfigSet(ctx, hermes: hermes,
+                                              key: "model.default", value: trimmedModel)
                 modelResult = model.result
                 modelError = model.error
-                modelOK = modelResult?.exitCode == 0
+                modelOutcome = model.outcome
+                modelOK = modelOutcome?.succeeded == true
             }
 
             // Build the diagnostic message before hopping to MainActor so
@@ -1399,10 +1402,10 @@ final class ChatController {
                 hermes: hermes,
                 providerOK: providerOK,
                 providerResult: provider.result,
-                providerError: provider.error,
+                providerError: provider.error ?? provider.outcome?.detail,
                 modelOK: modelOK,
                 modelResult: modelResult,
-                modelError: modelError
+                modelError: modelError ?? modelOutcome?.detail
             )
 
             // Capture `modelOK` by value (it's a `var` finalized above) so the
@@ -1434,10 +1437,24 @@ final class ChatController {
     /// itself threw before the command could run (a genuine connection
     /// failure). The failure banner distinguishes the two so the user sees
     /// the real reason rather than a generic line.
+    /// One `hermes config set` over the preflight's shell hop, with the argv
+    /// and the verdict both taken from ``HermesConfigSet``.
+    ///
+    /// The PATH prefix is the same one `IOSSettingsViewModel.saveValue` uses
+    /// so a non-interactive remote shell finds `hermes`; everything after it
+    /// is `HermesConfigSet.argv` shell-escaped word by word, which is where
+    /// the `--` comes from.
     nonisolated private static func runConfigSet(
         _ ctx: ServerContext,
-        script: String
-    ) -> (result: ProcessResult?, error: String?) {
+        hermes: String,
+        key: String,
+        value: String
+    ) -> (result: ProcessResult?, error: String?, outcome: HermesCLIOutcome?) {
+        let argv = HermesConfigSet.argv(key: key, value: value)
+            .map(escapeShellArg)
+            .map { "'\($0)'" }
+            .joined(separator: " ")
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
         do {
             let result = try ctx.makeTransport().runProcess(
                 executable: "/bin/sh",
@@ -1445,9 +1462,12 @@ final class ChatController {
                 stdin: nil,
                 timeout: 15
             )
-            return (result, nil)
+            let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+            return (result, nil, HermesConfigSet.judge(output: combined, exitCode: result.exitCode))
         } catch {
-            return (nil, error.localizedDescription)
+            return (nil, error.localizedDescription, nil)
         }
     }
 
@@ -1637,6 +1657,11 @@ final class ChatController {
 
         let sessionId = vm.sessionId ?? ""
         guard !sessionId.isEmpty else { return }
+        // Captured BEFORE the local echo below: `addUserMessage` sets
+        // `isAgentWorking = true` itself, so reading the flag after it
+        // always answers "working" and the `/queue`-on-idle arm could never
+        // fire. Mac's `sendViaACP` snapshots the same way.
+        let wasAgentWorking = vm.isAgentWorking
         let images = attachments
         attachments = []
         draft = ""
@@ -1661,6 +1686,25 @@ final class ChatController {
         // ran `/goal` then opened the same session on Mac would see
         // an empty pill until they typed `/goal` again.
         let parsedSlash = RichChatViewModel.parseSlashName(text)
+        // See `idleQueueFallbackText`: a typed `/queue <text>` with nothing
+        // running is sent as an ordinary prompt, because leaving the prefix
+        // on the wire would hand it back to `_cmd_queue`.
+        let idleQueueText = RichChatViewModel.idleQueueFallbackText(
+            name: parsedSlash.name,
+            args: parsedSlash.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: vm.capabilitiesGate
+        )
+        // See `idleSteerIsOrdinaryPrompt`: an idle `/steer <text>` is an
+        // ordinary turn on Hermes's side, so it gets the ordinary-turn hint
+        // rather than the "guidance queued" promise. The wire text is
+        // unchanged — Hermes strips the prefix itself.
+        let idleSteer = RichChatViewModel.idleSteerIsOrdinaryPrompt(
+            name: parsedSlash.name,
+            args: parsedSlash.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: vm.capabilitiesGate
+        )
         switch parsedSlash.name {
         case "goal":
             // TODO(WS-2-Q7): verify on a real v0.13 host.
@@ -1676,7 +1720,14 @@ final class ChatController {
                 vm.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "queue":
+        // `wasAgentWorking` is the second gate (round-4, P44b): the queue
+        // mirror and the "runs after current turn" hint are only true of a
+        // session with a turn in flight. On an idle session the adapter
+        // appends the prompt and returns `end_turn` before the only drain
+        // (`acp_adapter/server.py:793-799` vs `:908-915` @ `v2026.9.7`), so
+        // it would run two turns from now — `idleQueueText` below sends the
+        // argument as an ordinary prompt instead.
+        case "queue" where vm.isDispatchedNonInterruptiveSlash(text) && wasAgentWorking:
             let queuedText = parsedSlash.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 vm.recordQueuedPrompt(text: queuedText)
@@ -1702,18 +1753,48 @@ final class ChatController {
                 vm.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
             }
             scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "steer" where vm.isNonInterruptiveSlash(text):
+        // `wasAgentWorking` is the second gate, the `/queue` row's shape one
+        // line up: `_rewrite_prompt_for_interrupt` strips a `/steer` prefix
+        // on an IDLE session before the slash dispatch ever sees it
+        // (`acp_adapter/server.py:667-689` run at `:789`, dispatch at
+        // `:792-793` @ `v2026.9.7`; the fallback shipped with `/steer`
+        // itself, `:812-824` @ `v2026.5.7`), so the text runs as an ordinary
+        // turn and "Guidance queued" describes something that is not
+        // happening. `idleSteer` below says what was actually sent.
+        case "steer" where vm.isDispatchedNonInterruptiveSlash(text) && wasAgentWorking:
             vm.transientHint = "Guidance queued — applies after the next tool call."
             scheduleTransientHintClear(snapshot: vm.transientHint)
         default:
-            break
+            // Round-4 decision 12, iOS half. A typed `/steer` / `/queue` on
+            // a host below the v0.13 ACP floor is not dispatched — the
+            // adapter returns `None` for a name outside `_COMMANDS` and the
+            // raw text goes to the LLM as an ordinary prompt
+            // (`acp_adapter/commands.py:88-95` @ `v2026.9.7`; both names
+            // enter the dict at `acp_adapter/server.py:170`/`:171` @
+            // `v2026.5.7` and neither exists at `v2026.4.30`). The two
+            // `where` clauses above keep the optimistic mirrors off that
+            // path; this says what was actually sent. The working indicator
+            // needs no gating here — `addUserMessage` raised it already.
+            if let notice = RichChatViewModel.subFloorSlashNotice(
+                name: parsedSlash.name,
+                capabilities: vm.capabilitiesGate
+            ) {
+                vm.transientHint = notice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
+            } else if idleQueueText != nil {
+                vm.transientHint = RichChatViewModel.idleQueueNotice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
+            } else if idleSteer {
+                vm.transientHint = RichChatViewModel.idleSteerNotice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
+            }
         }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);
         // Hermes receives the expanded prompt template body. Other
         // command sources (ACP, quick_commands) keep going to Hermes
         // literally. v2.5.
-        let wireText = expandIfProjectScoped(text)
+        let wireText = idleQueueText ?? expandIfProjectScoped(text)
         do {
             let result = try await client.sendPrompt(
                 sessionId: sessionId,

@@ -655,9 +655,12 @@ public final class RichChatViewModel {
     /// and `/queue` (run a prompt after the current turn finishes).
     ///
     /// **Floor v0.13 (`v2026.5.7`), not v2026.4.23.** Both names enter
-    /// `SlashCommandsMixin._SLASH_COMMANDS` together at
-    /// `acp_adapter/server.py:170-171` @ `v2026.5.7`, and `acp_adapter/` at
-    /// `v2026.4.30` has neither. The gates are ``HermesCapabilities
+    /// `HermesACPAgent._SLASH_COMMANDS` together — the dict is
+    /// `acp_adapter/server.py:163-173` @ `v2026.5.7`, `steer` at `:170` and
+    /// `queue` at `:171` — and `acp_adapter/` at `v2026.4.30` has neither.
+    /// (At `v2026.9.7` the roster has moved to `acp_adapter/commands.py`,
+    /// `steer` at `:55` and `queue` at `:60`; the FLOOR is what this line
+    /// is about, so it cites the tag the names arrived at.) The gates are ``HermesCapabilities
     /// .hasACPSteer`` and ``HermesCapabilities.hasACPQueue``, applied in
     /// `availableCommands` — this list is unfiltered.
     ///
@@ -976,16 +979,11 @@ public final class RichChatViewModel {
         // surfaced even with no session (P2 of the projects-feature fix —
         // `disabledSlashCommandNames` greys it with an "Available once a
         // chat is open" tooltip instead of hiding it, so a fresh launch does
-        // not show an empty menu), and `hasACPSteerOnIdle` still governs the
-        // active-session-but-idle greying downstream. `/goal` and `/subgoal`
+        // not show an empty menu). `/goal` and `/subgoal`
         // are NOT in `nonInterruptiveCommands` (gateway-only, not advertised
         // by the ACP adapter), so they never reach this filter.
-        let supported: [HermesSlashCommand] = Self.nonInterruptiveCommands.filter { cmd in
-            switch cmd.name {
-            case "queue":   return capabilitiesGate.hasACPQueue
-            case "steer":   return capabilitiesGate.hasACPSteer
-            default:        return true
-            }
+        let supported: [HermesSlashCommand] = Self.nonInterruptiveCommands.filter {
+            Self.nonInterruptiveSlashIsDispatched($0.name, capabilities: capabilitiesGate)
         }
         let nonInterruptive = supported.filter { !occupied.contains($0.name) }
         // Static fallbacks. `/new` always shows; the rest of the agent-
@@ -1171,6 +1169,68 @@ public final class RichChatViewModel {
             name = String(withoutSlash)
         }
         return Self.nonInterruptiveCommands.contains { $0.name == name }
+    }
+
+    /// Whether the host's ACP adapter will DISPATCH this non-interruptive
+    /// slash name, rather than hand the raw text to the LLM.
+    ///
+    /// The one predicate behind both the slash-menu roster
+    /// (``availableCommands``) and the typed-command path
+    /// (``isDispatchedNonInterruptiveSlash(_:)``) — they used to answer the
+    /// floor question independently, and only the roster asked it. `steer`
+    /// and `queue` are adjacent lines in the adapter's command dict and
+    /// arrived at the same tag (`acp_adapter/server.py:170`/`:171` @
+    /// `v2026.5.7`; `acp_adapter/` at `v2026.4.30` has neither).
+    ///
+    /// `nil` and any other name answer `true`: this asks "is THIS name
+    /// floored", not "is this a slash command".
+    public static func nonInterruptiveSlashIsDispatched(
+        _ name: String?,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        switch name {
+        case "queue":   return capabilities.hasACPQueue
+        case "steer":   return capabilities.hasACPSteer
+        default:        return true
+        }
+    }
+
+    /// True when `text` is a non-interruptive command **this host will
+    /// actually dispatch**. The capability-aware twin of
+    /// ``isNonInterruptiveSlash(_:)``, and the one the send paths use.
+    ///
+    /// Below the v0.13 floor a typed `/steer` / `/queue` is not an error and
+    /// not a no-op: `_handle_slash_command` returns `None` for a name outside
+    /// `_COMMANDS` and the raw text falls through to the LLM as an ordinary
+    /// prompt (`acp_adapter/commands.py:88-95` @ `v2026.9.7`). It therefore
+    /// burns a real turn — which must show the normal working indicator and
+    /// must NOT paint a queue chip or a "runs after current turn" hint
+    /// (round-4 decision 12).
+    public func isDispatchedNonInterruptiveSlash(_ text: String) -> Bool {
+        guard isNonInterruptiveSlash(text) else { return false }
+        return Self.nonInterruptiveSlashIsDispatched(
+            Self.parseSlashName(text).name,
+            capabilities: capabilitiesGate
+        )
+    }
+
+    /// The one-line notice shown when a typed non-interruptive slash went to
+    /// the host as an ordinary prompt because its adapter has no such
+    /// command (round-4 decision 12). `nil` for every name that IS
+    /// dispatched, and for every name that was never non-interruptive.
+    ///
+    /// Deliberately says what happened rather than what to do: there is no
+    /// remedy on this host short of upgrading Hermes, and the turn the user
+    /// just spent is already running.
+    public static func subFloorSlashNotice(
+        name: String?,
+        capabilities: HermesCapabilities
+    ) -> String? {
+        guard let name,
+              nonInterruptiveCommands.contains(where: { $0.name == name }),
+              !nonInterruptiveSlashIsDispatched(name, capabilities: capabilities)
+        else { return nil }
+        return String(localized: "This Hermes has no /\(name) — sent as an ordinary prompt.")
     }
 
     /// Look up the full project-scoped command payload by slash trigger.
@@ -1363,12 +1423,23 @@ public final class RichChatViewModel {
     ///   live ACP session to do anything.
     ///   Surfacing them greyed gives the user a visible "what's
     ///   coming once you open a chat" instead of an empty menu.
-    /// - **Pre-v0.13 idle session**: on a pre-v0.13 host `/steer` needs a
-    ///   turn in flight to inject into (the idle fallback arrived with the
-    ///   command's own tag, `acp_adapter/server.py:812-820` @ `v2026.5.7`),
-    ///   so we grey it in that specific window even when a session is
-    ///   active. Reachable only via an ADVERTISED `steer` — since P37 the
-    ///   fallback roster hides the row entirely below `hasACPSteer`.
+    /// - **Idle session**: `/queue` needs a turn in flight to queue behind.
+    ///   `_queue_prompt` appends to `state.queued_prompts` unconditionally
+    ///   (`acp_adapter/commands.py:33-36` @ `v2026.9.7`; `_cmd_queue` calls
+    ///   it at `:285-290` after rejecting an empty argument), but the only
+    ///   drain is the tail of a running turn (`server.py:908-915`) — and a
+    ///   dispatched slash command returns `end_turn` at `server.py:793-799`,
+    ///   BEFORE that drain. So on an idle session the prompt sits there
+    ///   until the user's NEXT turn ends and then runs behind it — two turns
+    ///   away from what the row promises.
+    ///
+    /// There is deliberately no pre-v0.13 `/steer` arm any more (round-4
+    /// decision 14). It asked `hasACPSteerOnIdle`, which was `hasACPSteer`
+    /// expressed once — and since P37 the roster hides `steer` entirely
+    /// below that same floor, so the arm could not fire and its reason
+    /// string could not render. The idle fallback shipped in `/steer`'s own
+    /// commit (`acp_adapter/server.py:812-820` @ `v2026.5.7`): no host has
+    /// the command without it.
     public static func disabledSlashCommandNames(
         isAgentWorking: Bool,
         hasActiveSession: Bool,
@@ -1378,8 +1449,8 @@ public final class RichChatViewModel {
         if !hasActiveSession {
             disabled.formUnion(Self.sessionRequiredCommandNames)
         }
-        if hasActiveSession && !isAgentWorking && !capabilities.hasACPSteerOnIdle {
-            disabled.insert("steer")
+        if hasActiveSession && !isAgentWorking && capabilities.hasACPQueue {
+            disabled.insert("queue")
         }
         return disabled
     }
@@ -1403,17 +1474,16 @@ public final class RichChatViewModel {
     ]
 
     /// Tooltip / inline help text shown next to disabled rows. Returns
-    /// nil when no rows are disabled. Phrased generically so the same
-    /// string applies to both the pre-session "open a chat first" case
-    /// and the pre-v0.13 "wait for the agent's turn" case — both are
-    /// "this command needs a state we're not in yet".
+    /// nil when no rows are disabled. Two cases, two sentences: the
+    /// pre-session "open a chat first" one, and the idle-session `/queue`
+    /// one — both are "this command needs a state we're not in yet".
     public static func disabledSlashCommandReason(
         isAgentWorking: Bool,
         hasActiveSession: Bool,
         capabilities: HermesCapabilities
     ) -> String? {
         if !hasActiveSession {
-            return "Available once a chat is open. Press Return on `/new` (or click an existing session) to start one."
+            return String(localized: "Available once a chat is open. Press Return on `/new` (or click an existing session) to start one.")
         }
         let disabled = disabledSlashCommandNames(
             isAgentWorking: isAgentWorking,
@@ -1421,7 +1491,100 @@ public final class RichChatViewModel {
             capabilities: capabilities
         )
         guard !disabled.isEmpty else { return nil }
-        return "Use `/steer` while the agent is working — your Hermes version doesn't support steering on idle sessions."
+        return String(localized: "Use `/queue` while the agent is working — on an idle session Hermes holds the prompt until your next turn finishes, then runs it.")
+    }
+
+    /// A typed `/queue <text>` on an IDLE session: the plain prompt to send
+    /// in its place, or `nil` to send the text unchanged.
+    ///
+    /// The menu row greys out on an idle session (see
+    /// ``disabledSlashCommandNames(isAgentWorking:hasActiveSession:capabilities:)``),
+    /// but typing the command was never gated, and both send paths painted
+    /// "Queued — runs after current turn." over something that does not
+    /// happen: `_queue_prompt` appends unconditionally
+    /// (`acp_adapter/commands.py:33-36` @ `v2026.9.7`) while the only drain
+    /// is the tail of a running turn (`server.py:908-915`), which the
+    /// dispatched slash command never reaches — it returns `end_turn` at
+    /// `server.py:793-799`. So the prompt would sit in `queued_prompts`
+    /// until the NEXT turn ended, and run two turns from now.
+    ///
+    /// Sending the argument as an ordinary prompt is what makes the notice
+    /// true; leaving the `/queue` prefix on the wire would hand it back to
+    /// `_cmd_queue`. An EMPTY argument is left alone on purpose — Hermes
+    /// answers `Usage: /queue <prompt>` (`commands.py:286-288`), which is
+    /// the honest response to a command with nothing to queue, and there is
+    /// no plain prompt to send instead.
+    ///
+    /// Only for a host that WOULD dispatch it: below the v0.13 floor the
+    /// text already goes to the LLM verbatim and
+    /// ``subFloorSlashNotice(name:capabilities:)`` owns that case.
+    public static func idleQueueFallbackText(
+        name: String?,
+        args: String,
+        isAgentWorking: Bool,
+        capabilities: HermesCapabilities
+    ) -> String? {
+        guard name == "queue",
+              !isAgentWorking,
+              nonInterruptiveSlashIsDispatched(name, capabilities: capabilities)
+        else { return nil }
+        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The one-line notice that accompanies
+    /// ``idleQueueFallbackText(name:args:isAgentWorking:capabilities:)``.
+    public static var idleQueueNotice: String {
+        String(localized: "Nothing is running — sent as a normal prompt instead of queueing it.")
+    }
+
+    /// A typed `/steer <text>` on an IDLE session is an ORDINARY TURN, and
+    /// Scarf must paint it as one.
+    ///
+    /// Walked at `v2026.9.7`. `_rewrite_prompt_for_interrupt`
+    /// (`acp_adapter/server.py:667-689`) runs at `:789` — BEFORE the slash
+    /// dispatch at `:792-793`. For a text-only `/steer` with a non-empty
+    /// argument it takes `_take_interrupted_prompt(state)` and, when the
+    /// session is idle, returns `(steer_text, steer_text)` (`:686`): the
+    /// leading `/steer` is GONE, so `:792`'s `startswith("/")` is false,
+    /// `_handle_slash_command` is never reached, and the text runs as a real
+    /// turn through `_run_agent_turn` (`:812-824`). (After a cancel the same
+    /// arm replays the interrupted prompt with the steer text attached,
+    /// `:684-685` — also a real turn.) The fallback shipped with `/steer`
+    /// itself: `server.py:812-824` @ `v2026.5.7`.
+    ///
+    /// So the pre-P46 idle `/steer` painted "Guidance queued — applies after
+    /// the next tool call." over a turn that was starting right then, with
+    /// the working indicator suppressed and no `turnGeneration` recorded —
+    /// which meant **Stop could not cancel it**. This is the `/queue` shape
+    /// P44b fixed, one row up.
+    ///
+    /// The difference from `/queue` is the WIRE: Hermes strips the prefix
+    /// itself, so the text goes out unchanged as `/steer <args>` and there is
+    /// no fallback text to substitute — only a notice and an ordinary-turn
+    /// treatment. An EMPTY argument is left alone: `:681-682` returns the
+    /// text untouched and the dispatched `_cmd_steer` answers for it.
+    ///
+    /// Only for a host that WOULD dispatch it; below the v0.13 floor the text
+    /// already goes to the LLM verbatim and
+    /// ``subFloorSlashNotice(name:capabilities:)`` owns that case.
+    public static func idleSteerIsOrdinaryPrompt(
+        name: String?,
+        args: String,
+        isAgentWorking: Bool,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        guard name == "steer",
+              !isAgentWorking,
+              nonInterruptiveSlashIsDispatched(name, capabilities: capabilities)
+        else { return false }
+        return !args.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The one-line notice that accompanies
+    /// ``idleSteerIsOrdinaryPrompt(name:args:isAgentWorking:capabilities:)``.
+    public static var idleSteerNotice: String {
+        String(localized: "Nothing is running — Hermes runs this as a normal prompt instead of steering.")
     }
 
     /// Expand `/<name> args` when `<name>` matches a loaded project-

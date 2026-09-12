@@ -67,6 +67,34 @@ struct SettingsView: View {
             }
         }
 
+        /// Whether a managed host may black out this whole tab.
+        ///
+        /// True for the nine tabs that are write controls end to end. False
+        /// for the three that carry a READ the user still needs on a managed
+        /// host — `.disabled` reaches every descendant, so a wholesale lock
+        /// takes the reads with the writes. Each of the three locks its own
+        /// write controls instead:
+        ///
+        /// - `.advanced` — Config Diagnostics' "Check" (`_cmd_config_check`
+        ///   mutates nothing, `hermes_cli/config.py:3693-3720` @ v2026.9.7),
+        ///   "Backup Now", the Raw Config disclosure, ScarfMon's "Copy as
+        ///   JSON" and the text selection in every output panel.
+        /// - `.secrets` — "Check Status" (`bitwardenStatus()` shells
+        ///   `hermes secrets status`, a read) and its selectable output panel.
+        /// - `.security` — the selectable proposal patterns in Allowlist
+        ///   Suggestions, plus the two `ReadOnlyRow`s that are the only way to
+        ///   see the pinned blocklist and command allowlist.
+        ///
+        /// Walked all eleven non-Advanced tabs for the same shape (P39c): no
+        /// other tab has a copy / export / check / open-in-Finder / text
+        /// selection affordance inside the lock.
+        var locksWholeTabWhenManaged: Bool {
+            switch self {
+            case .advanced, .secrets, .security: return false
+            default: return true
+            }
+        }
+
         var icon: String {
             switch self {
             case .general: return "gear"
@@ -89,6 +117,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             pageHeader
             tabStrip
+            managedBanner
             ScrollView {
                 VStack(alignment: .leading, spacing: ScarfSpace.s5) {
                     tabContent(selectedTab)
@@ -97,6 +126,34 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.horizontal, ScarfSpace.s6)
                 .padding(.vertical, ScarfSpace.s6)
+                // P39 (round-4 decision 1): a package-manager-managed Hermes
+                // refuses every config write — at exit 0, with a stderr line
+                // the user never sees. One banner above, and the write
+                // controls are read-only, instead of thirteen tabs of
+                // controls that each snap back. Untouched on a host with no
+                // `.managed` marker.
+                //
+                // The lock covers the DIRECT writers too (the Secrets tab's
+                // `.env` rows), which do not go through the CLI and would
+                // therefore "succeed". That is deliberate, and it is Hermes's
+                // own posture: `_env_write_blocked` refuses every `.env`
+                // write on a managed install (`hermes_cli/config.py:2556-2558`)
+                // and `save_config` every config.yaml write (`:2316-2318`).
+                //
+                // It does NOT cover Advanced, Secrets or Security, the three
+                // tabs that carry reads a managed host still needs — see
+                // `locksWholeTabWhenManaged`. On Advanced those are Config
+                // Diagnostics'
+                // "Check" (`_cmd_config_check` is read-only,
+                // `hermes_cli/config.py:3693-3720`), "Backup Now", the Raw
+                // Config show/hide disclosure, ScarfMon's "Copy as JSON",
+                // and the text selection in all of their output panels.
+                // `.disabled` reaches every descendant and kills all of them,
+                // so a managed host could not even read its own config to
+                // find out what its package manager had pinned (round-4
+                // review). `AdvancedTab`, `SecretsTab` and `SecurityTab` each
+                // apply the same lock to their write controls alone.
+                .disabled(viewModel.isManagedHost && selectedTab.locksWholeTabWhenManaged)
             }
         }
         .background(ScarfColor.backgroundPrimary)
@@ -112,6 +169,30 @@ struct SettingsView: View {
             viewModel.hasBuiltinPersonalitiesInCode =
                 capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
             viewModel.load()
+        }
+    }
+
+    /// The ONE managed-install banner. Nothing else in Settings repeats it:
+    /// the pane below is simply disabled. See
+    /// ``SettingsViewModel/managedInstall``.
+    @ViewBuilder
+    private var managedBanner: some View {
+        if let text = viewModel.managedBannerText {
+            HStack(alignment: .top, spacing: ScarfSpace.s2) {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Text(text)
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, ScarfSpace.s6)
+            .padding(.vertical, ScarfSpace.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ScarfColor.backgroundSecondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("This Hermes installation is managed; settings are read-only")
         }
     }
 

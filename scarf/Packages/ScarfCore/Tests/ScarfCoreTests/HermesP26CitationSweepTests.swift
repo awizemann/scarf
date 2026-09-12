@@ -62,8 +62,10 @@ import Foundation
 
     // MARK: - plainKeySeparatorIndex is the one separator rule
 
-    /// The separator is the first colon followed by whitespace or
-    /// end-of-line, so a colon INSIDE the key does not truncate it. This is
+    /// The separator is the first colon followed by a SPACE or
+    /// end-of-line (P42c narrowed "whitespace" to "space": PyYAML's scanner
+    /// refuses a tab after the value indicator), so a colon INSIDE the key
+    /// does not truncate it. This is
     /// exactly where `firstIndex(of: ":")` disagrees: it would report the
     /// key as `slack`, inventing a platform the file never configured.
     @Test func plainKeySeparatorSkipsColonsInsideTheKey() throws {

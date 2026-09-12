@@ -60,6 +60,12 @@ struct KanbanBoardView: View {
     /// for the `completion_contract` / `last_failure_error` task fields, which
     /// only enter `kanban list --json` at v2026.9.7. Pre-v0.21.1 hosts get the
     /// board unchanged. Missing store treated as "off" (Previews).
+    /// v0.21.1 `provider_override` — its own flag, walked separately from
+    /// the completion contract even though both land at the same release.
+    private var supportsKanbanProviderOverride: Bool {
+        capabilitiesStore?.capabilities.hasKanbanProviderOverride ?? false
+    }
+
     private var supportsKanbanCompletionContract: Bool {
         capabilitiesStore?.capabilities.hasKanbanCompletionContract ?? false
     }
@@ -423,6 +429,7 @@ struct KanbanBoardView: View {
                 supportsKanbanDiagnostics: supportsKanbanDiagnostics,
                 supportsKanbanV015: supportsKanbanV015,
                 supportsKanbanCompletionContract: supportsKanbanCompletionContract,
+                supportsKanbanProviderOverride: supportsKanbanProviderOverride,
                 diagnostics: viewModel.diagnostics(for: task),
                 onClose: { inspectorTaskId = nil },
                 onClaim: {

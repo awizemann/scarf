@@ -304,10 +304,13 @@ final class CredentialPoolsViewModel {
         let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
         let sanitizedProvider = ConfigDottedKeySegment.escaped(provider, capabilities: caps)
         runMutation(
-            ["config", "set", "credential_pool_strategies.\(sanitizedProvider)", strategy]
+            HermesConfigSet.argv(
+                key: "credential_pool_strategies.\(sanitizedProvider)", value: strategy)
         ) { [weak self] output, exitCode in
             guard let self else { return }
-            if exitCode == 0 {
+            // P39: output-judged — `set_config_value`'s managed-install arm
+            // exits 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7).
+            if HermesConfigSet.judge(output: output, exitCode: exitCode).succeeded {
                 self.message = "Strategy updated for \(provider)"
                 self.load()
             } else {

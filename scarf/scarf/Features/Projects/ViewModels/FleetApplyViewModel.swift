@@ -148,6 +148,27 @@ final class FleetApplyViewModel {
             if !cronCopySet.scriptOnly.isEmpty {
                 out.append("\(cronCopySet.scriptOnly.count) script-only cron job\(cronCopySet.scriptOnly.count == 1 ? "" : "s") can't be copied (their script file lives on this host only).")
             }
+            // Round-4 decision 8. Same caveat shape as `scriptOnly`: the
+            // monitor SOURCE doesn't travel (a `--monitor-script` path is on
+            // this host only; a `--monitor-url`'s hash state is per-host), so
+            // a copy would run the agent on every tick instead of only on a
+            // change.
+            if !cronCopySet.monitor.isEmpty {
+                out.append("\(cronCopySet.monitor.count) monitor cron job\(cronCopySet.monitor.count == 1 ? "" : "s") can't be copied (the monitored script or URL state lives on this host only).")
+            }
+            // A DOWNGRADE, not a skip — these jobs are still copied. There
+            // is no `--context-from` on `cron create`/`edit` at `v2026.9.7`
+            // (only `--continuity`/`--no-continuity`,
+            // `hermes_cli/subcommands/cron.py:76-84`, `:115-120`), and
+            // `_validate_context_from_refs`
+            // (`tools/cronjob_job_args.py:326-337`) rejects a ref naming a
+            // job the TARGET profile doesn't have — which every source-host
+            // id is. Say so here rather than let the copy wake up context-less
+            // under a green "created".
+            let crossJobContext = cronCopySet.copyable.filter { !$0.crossJobContextRefs.isEmpty }
+            if !crossJobContext.isEmpty {
+                out.append("\(crossJobContext.count) cron job\(crossJobContext.count == 1 ? "" : "s") read another job's output; that link can't be copied (no CLI flag sets it, and the job ids are this host's).")
+            }
             if !cronCopySet.unsupportedSchedule.isEmpty {
                 out.append("\(cronCopySet.unsupportedSchedule.count) cron job\(cronCopySet.unsupportedSchedule.count == 1 ? "" : "s") have a schedule that can't be recreated from the CLI.")
             }

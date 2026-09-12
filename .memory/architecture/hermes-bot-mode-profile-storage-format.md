@@ -5,11 +5,11 @@ permalink: scarf/architecture/hermes-bot-mode-profile-storage-format
 tags: [hermes, bot-mode, profiles, yaml, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesBotIdentity.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotProfileYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift]
 source_paths_inferred: false
-source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-09-01
 updated: 2026-09-01
-reviewed: 2026-09-08
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 On-disk format of a Hermes bot, source-verified at tag v2026.8.31 (0.21.0). A bot IS a profile: no separate store exists. Identity lives in `<profile_dir>/profile.yaml` — top-level `display_name` / `description` / `description_auto` (owned by `hermes profile describe`/`rename`) plus `ui_meta['hermes-bots']` (owned by the desktop plugin). Avatar bytes live at `<profile_dir>/assets/avatar.{png,jpg,webp}`. The roster is the profile roster: root `~/.hermes` as `"default"` plus sorted directories under `<root>/profiles/`.

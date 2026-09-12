@@ -117,7 +117,11 @@ struct SectionAuditF5KanbanTests {
     @Test func promoteKeepsTheGlobalBoardFlagAheadOfTheVerb() {
         let argv = KanbanService.promoteArgv(board: "release", taskIds: ["t_a", "t_b"])
         #expect(argv == [
-            "kanban", "--board", "release", "promote",
+            // P42: `--board` carries its value in one token; `--ids` stays
+            // two-token because it is `nargs="+"`
+            // (`hermes_cli/kanban_parser.py:64` @ `v2026.9.7`), where the
+            // `=` form could carry only the first element.
+            "kanban", "--board=release", "promote",
             "--json", "--ids", "t_b", "--", "t_a"
         ])
     }
@@ -167,7 +171,7 @@ struct SectionAuditF5KanbanTests {
     @Test func assigneesAlwaysRequestsJSON() {
         #expect(KanbanService.assigneesArgv() == ["kanban", "assignees", "--json"])
         #expect(KanbanService.assigneesArgv(board: "release")
-            == ["kanban", "--board", "release", "assignees", "--json"])
+            == ["kanban", "--board=release", "assignees", "--json"])
     }
 
     /// Verbatim `json.dumps` of `kanban_db.known_assignees`, which returns
@@ -270,14 +274,14 @@ struct SectionAuditF5KanbanTests {
         let argv = KanbanService.listArgv(
             filter: KanbanListFilter(status: .running, tenant: "scarf")
         )
-        #expect(argv == ["kanban", "list", "--json", "--status", "running", "--tenant", "scarf"])
+        #expect(argv == ["kanban", "list", "--json", "--status=running", "--tenant=scarf"])
     }
 
     @Test func listArgvCarriesSessionScope() {
         let argv = KanbanService.listArgv(
             filter: KanbanListFilter(session: "sess_1234")
         )
-        #expect(argv == ["kanban", "list", "--json", "--session", "sess_1234"])
+        #expect(argv == ["kanban", "list", "--json", "--session=sess_1234"])
     }
 
     /// The chat-scoped board view keys on session alone (session ids are
@@ -289,8 +293,8 @@ struct SectionAuditF5KanbanTests {
         )
         #expect(argv == [
             "kanban", "list", "--json",
-            "--tenant", "scarf",
-            "--session", "sess_1234",
+            "--tenant=scarf",
+            "--session=sess_1234",
             "--archived"
         ])
     }

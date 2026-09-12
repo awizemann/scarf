@@ -63,6 +63,39 @@ public enum YAMLScalar {
         }
     }
 
+    /// PyYAML's simple-key length limit: a `key: value` mapping key is a
+    /// "simple key", and the scanner refuses one whose token runs more than
+    /// 1024 characters before the `:` — `self.index - key.index > 1024`,
+    /// where `index` counts PYTHON characters, i.e. unicode code points —
+    /// raises `ScannerError` (`yaml/scanner.py:283-291`, the comment at
+    /// `:91`). Quoting does not help: the limit is measured over the EMITTED
+    /// token, so the two quote characters count toward it.
+    ///
+    /// A refused document is not a refused key. `load_config` discards the
+    /// whole config.yaml layer on a parse error and falls back to `.env`
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`), so one over-long env
+    /// name silently unsets every setting in the file.
+    public static let simpleKeyLimit = 1024
+
+    /// True when `key`, once emitted by ``quoteIfNeeded(_:)``, would run past
+    /// ``simpleKeyLimit`` and make PyYAML refuse the document.
+    ///
+    /// Measured on the emitted form, because that is the token PyYAML
+    /// scans: an unquoted 1024-scalar key loads, the same key quoted is
+    /// 1026 and does not. Verified against PyYAML 6.0.3 locally — bare 1024
+    /// OK / 1025 refused, `'…'` with 1022 inside OK / 1023 refused.
+    ///
+    /// Unicode SCALARS, not bytes and not grapheme clusters: PyYAML's
+    /// `index` counts Python characters, i.e. unicode code points, so
+    /// `e` + U+0301 spends TWO of the budget while Swift's `String.count`
+    /// sees one Character. 600 `e\u{301}` pairs are 600 Swift Characters
+    /// and 1200 PyYAML characters — `.count` passed them and PyYAML
+    /// refused the document. Same for an emoji ZWJ sequence, which is one
+    /// Character and five-plus scalars.
+    public static func exceedsSimpleKeyLimit(_ key: String) -> Bool {
+        quoteIfNeeded(key).unicodeScalars.count > simpleKeyLimit
+    }
+
     /// The Unicode byte-order mark, which YAML permits at the start of a
     /// document and which no Foundation character set trims: it is not in
     /// `.whitespaces` and not in `.whitespacesAndNewlines`, exactly as `\r`
@@ -260,14 +293,27 @@ public enum YAMLScalar {
     /// reader still went through `HermesYAML.stripYAMLQuotes`, which hands a
     /// double-quoted BODY back verbatim — so a route name containing a
     /// backslash came back doubled and grew one `\` per save. This is the
-    /// single decoder every Scarf-written scalar is read back through;
+    /// single decoder every Scarf-written scalar is read back through — and
+    /// P41 is what made that claim TRUE rather than aspirational.
     /// `HermesFileService.unquote` and `HermesBotProfileYAML.unquote` are
-    /// thin forwarders over it, so there is one escape table, not three.
+    /// thin forwarders over it; the MCP emitter behind the first of those is
+    /// ``quoteIfNeeded(_:)`` itself since P41; and the two config.yaml
+    /// blocks Scarf writes through `PowerSettingsWriter` —
+    /// `agent.reasoning_overrides` (`setReasoningOverrides`, KEYS and
+    /// values, via `GatewayConfigWriter.setMapChecked`) and
+    /// `model_catalog.excluded_providers` (`setExcludedProviders`, via
+    /// `setListChecked`) — reach this decoder through
+    /// `HermesYAML.scarfWrittenMapPaths` / `scarfWrittenListPaths`. One
+    /// escape table, not three.
     ///
     /// `HermesYAML.stripYAMLQuotes` is deliberately NOT folded in: it reads
     /// arbitrary HERMES-written config.yaml values, where widening the rule
-    /// would change the meaning of every unrelated `\` in the file. This
-    /// decoder is for the blocks Scarf both reads AND writes.
+    /// would change the meaning of every unrelated `\` in the file. That is
+    /// why those two blocks are a per-KEY opt-in inside `parseNestedYAML`
+    /// rather than a change to `stripYAMLQuotes`, and why
+    /// `gateway.multiplex_profile_allowlist` — which the round-4 finding
+    /// listed as a third Scarf-written block, but which Scarf only READS —
+    /// is NOT opted in. See the opt-in's own doc for that walk.
     ///
     /// Anything that is not a quoted flow scalar comes back unchanged. An
     /// escape Scarf never emits — and a malformed `\xNN` / `\uNNNN`, whose

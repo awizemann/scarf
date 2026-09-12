@@ -49,9 +49,20 @@ import Foundation
 /// `isinstance(mode, bool)` nor `isinstance(mode, str)` matches and Hermes
 /// falls straight through to `return "manual"` (`:214`). `boolishValue`'s set
 /// is Scarf's own liberal boolish set, which is right for the keys Hermes
-/// coerces and wrong for this one key it type-switches on, so the numeric
-/// spellings are excluded below. `~` / `null` are not bools either, and they
-/// reach `manual` the same way.
+/// coerces and wrong for this one key it type-switches on, so the bool arm is
+/// gated on `YAMLScalar.resolvesToBool` — PyYAML's own resolver, which excludes
+/// `0` / `1` without a hand-carved special case. `~` / `null` are not bools
+/// either, and they reach `manual` the same way.
+///
+/// **And QUOTING is the other half of that same type gate** (P41). PyYAML types
+/// the scalar before Hermes sees it, so a quoted `"no"` / `"false"` is a `str`,
+/// not a `bool`: it misses `_VALID_MODES` (`:195`), warns, and lands on
+/// `manual` — while the bare spellings land on `off`. ``normalize`` therefore
+/// takes the scalar with its QUOTES INTACT. Handing it an already-unquoted one
+/// (which `HermesConfig.approvalMode` is, via `HermesYAML.normalizedScalar`)
+/// rendered "Never ask" on a host that asks before every guarded command — the
+/// unsafe direction. `HermesConfig.approvalModeRawScalar` carries the raw form
+/// for exactly this reader.
 public enum HermesApprovalMode: String, CaseIterable, Sendable {
     /// Ask before every guarded command.
     case manual
@@ -69,15 +80,47 @@ public enum HermesApprovalMode: String, CaseIterable, Sendable {
     /// config carrying a stale `auto`, and from claiming a value is live
     /// when the agent has discarded it.
     public static func normalize(_ raw: String) -> HermesApprovalMode {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // `raw` is the scalar as it stands in config.yaml — QUOTES INTACT.
+        // The full table, re-derived from the tagged reader. BARE:
+        // `yes`/`true`/`on` load as bool True → manual; `no`/`false`/`off`
+        // as bool False → off; `0`/`1` as ints, which match neither
+        // `isinstance` arm → manual. QUOTED: all eight are `str`, and only
+        // `"off"` is in `_VALID_MODES` (`tools/approval_context.py:195`),
+        // so `"off"` → off and the other seven warn and land on `manual`
+        // (`:198-214` @ `v2026.9.7`).
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isQuoted = trimmed.first == "\"" || trimmed.first == "'"
+        // What Hermes's STRING arm effectively sees: quotes off, and a
+        // whitespace-preceded trailing comment dropped (PyYAML strips the
+        // comment long before Hermes gets the value).
+        // P41b: the trim has to come AFTER the quotes come off. Hermes's
+        // string arm is `mode.strip().lower()`
+        // (`tools/approval_context.py:207` @ `v2026.9.7`), and PyYAML hands
+        // it the scalar's CONTENT — so `mode: " off"` is the Python string
+        // `" off"`, strips to `off`, and IS in `_VALID_MODES`. Trimming the
+        // raw scalar first only ever removed whitespace OUTSIDE the quotes,
+        // so ` off` never matched and the picker rendered "Ask every time"
+        // for a host that asks for nothing — the unsafe direction again.
+        // A bare scalar is already trimmed, so this is a no-op on that arm.
+        let value = HermesYAML.normalizedScalar(trimmed)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         // A real mode name wins, so `off` reads as the mode and not via the
-        // bool route (the two agree, but the intent is clearer).
+        // bool route (the two agree, but the intent is clearer). This is
+        // also the quoted `"off"` case, which is the one quoted spelling
+        // that is NOT `manual`.
         if let mode = HermesApprovalMode(rawValue: value) { return mode }
         // Otherwise: anything PyYAML would have loaded as a BOOL, resolved the
         // way Hermes resolves it — `"off" if mode is False else "manual"`
-        // (`tools/approval_context.py:205-206`). `0` / `1` load as ints, not
-        // bools, so Hermes gives them `manual`; see the type note above.
-        if value != "0", value != "1", let boolish = HermesYAML.boolishValue(value) {
+        // (`tools/approval_context.py:205-206`). Two gates, both on the RAW
+        // scalar and both before the word match, exactly as
+        // `HermesFileService.boolishOptional` does it for `_parse_boolish`:
+        // a QUOTED scalar is a `str` and never reaches this arm, and
+        // `YAMLScalar.resolvesToBool` is PyYAML's bool resolver exactly, so
+        // `0` / `1` are excluded by the resolver rather than by a
+        // hand-carved special case.
+        if !isQuoted, YAMLScalar.resolvesToBool(value),
+           let boolish = HermesYAML.boolishValue(value) {
             return boolish ? .manual : .off
         }
         return .manual

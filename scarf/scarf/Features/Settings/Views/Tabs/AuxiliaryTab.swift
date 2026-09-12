@@ -269,15 +269,43 @@ struct AuxiliaryTab: View {
     /// every host that renders this row — `hasAuxiliaryReasoningEffort` is
     /// itself 0.19.0, the tag that added `ultra` — but expressing it through
     /// the shared source is what stops the two lists drifting again.
+    ///
+    /// Round-4 decision 13: the options are widened to the stored value so a
+    /// hand-edited level never renders a blank control, with
+    /// ``UnsupportedEffortNote`` beneath saying what the host does with it.
+    /// Moot here for the same reason the narrowing is — but the three
+    /// pickers now answer this question in ONE place, which is the point.
     @ViewBuilder
     private func reasoningEffortPicker(value: String, onChange: @escaping (String) -> Void) -> some View {
         PickerRow(
             label: "Reasoning Effort",
-            selection: value,
-            options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
+            // P46b: normalise at the SELECTION. A whitespace-only stored
+            // value is the sentinel to `levels(…)`, which widens nothing —
+            // so handing the picker the raw `"  "` left it with no matching
+            // tag and a blank control.
+            selection: HermesReasoningEffort.pickerSelection(for: value),
+            options: [""] + HermesReasoningEffort.levels(
+                capabilities: capabilities,
+                selected: value
+            ),
+            // The sentinel row here is NOT the same claim as AgentTab's, and
+            // the difference is walked. An empty `agent.reasoning_effort`
+            // RESOLVES to Hermes's own `medium`
+            // (`agent/transports/chat_completions.py:420-422` @ `v2026.9.7`),
+            // which is why that row reads "Hermes default". An empty
+            // `auxiliary.<task>.reasoning_effort` resolves to NOTHING:
+            // `_get_task_extra_body` returns early on `effort is None or
+            // effort == ""` (`agent/auxiliary_client.py:5700-5702`), so no
+            // `reasoning` key is put in the aux call's `extra_body` at all
+            // and the provider's own default stands. It does not inherit the
+            // global row either — `_get_auxiliary_task_config` (`:5583-5605`)
+            // reads `auxiliary.<task>` plus a plugin's declared defaults, and
+            // never `agent.*`. "Default" is the honest word for a row whose
+            // fallback Scarf cannot name.
             optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )
+        UnsupportedEffortNote(selected: value, capabilities: capabilities)
     }
 
     /// `auxiliary.title_generation` rows. Distinct from `auxRows` because
@@ -344,14 +372,14 @@ struct AuxiliaryTab: View {
             get: { value },
             set: { viewModel.setImageGenModel($0) }
         )) {
-            Text("Provider default").tag("")
+            Text("Hermes default").tag("")
             Divider()
             ForEach(ModelCatalogService.imageGenModels) { model in
                 Text(model.display).tag(model.modelID)
             }
             // User has set a custom value not in the curated list;
             // preserve it as a tagged option so the picker renders the
-            // actual selection rather than collapsing to "Provider
+            // actual selection rather than collapsing to "Hermes
             // default".
             if !value.isEmpty
                 && !ModelCatalogService.imageGenModels.contains(where: { $0.modelID == value }) {
@@ -363,7 +391,7 @@ struct AuxiliaryTab: View {
         EditableTextField(label: "Custom model ID", value: value) { newValue in
             viewModel.setImageGenModel(newValue.trimmingCharacters(in: .whitespaces))
         }
-        Text("Used for image generation calls. Leave as Provider default unless your provider documents a specific model ID for image-gen.")
+        Text("Used for image generation calls. Leave as Hermes default unless your provider documents a specific model ID for image-gen.")
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 12)

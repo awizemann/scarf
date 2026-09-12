@@ -4,11 +4,11 @@ type: note
 permalink: scarf/decisions/aggregator-providers-must-skip-the-model-provider-mismatch
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: 6f67608679153925b5c6d55816c917ddd76bc3a2
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-07-03
-updated: 2026-07-04
-reviewed: 2026-09-01
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-10
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
@@ -32,7 +32,7 @@ reviewed_by: audit:claude-code (background)
 
 ## Verification + mechanical gate (2026-07-04)
 - [fact] The vendored Hermes checkout at ~/Developer/ScarfBox/Vendor/hermes-agent sits exactly on the `v2026.6.5` tag (commit 3c231eb39, "chore: release v0.16.0"), clean tree — the mirrored tables match Scarf's v0.16.0 target precisely, not a newer working copy. #verified
-- [decision] `scripts/check-hermes-tables.py` now mechanically diffs the three hand-mirrored tables against hermes_cli/providers.py (AST-parsed, no imports): providerAliases ↔ ALIASES incl. changed mappings, aggregatorProviders ↔ is_aggregator overlays, overlayOnlyProviders ↔ overlays absent from models.dev. Missing entries FAIL (exit 1); Scarf overlays that models.dev has since absorbed only WARN (dormant fallback — loadProviders() lets the catalog entry win). Wired into the hermes-release-audit skill (surface table + Step 6). #decision
+- [decision] `scripts/check-hermes-tables.py` now mechanically diffs the three hand-mirrored tables against hermes_cli/providers.py (AST-parsed, no imports): providerAliases ↔ ALIASES incl. changed mappings, aggregatorProviders ↔ is_aggregator overlays, overlayOnlyProviders ↔ overlays absent from models.dev. Missing entries FAIL (exit 1); Scarf overlays that models.dev has since absorbed only WARN (dormant fallback — loadProviders() lets the catalog entry win). Wired into the hermes-release-audit skill (surface table + Step 6). **Hardened in P27 (round-2 audit):** the script is five lanes, reads Hermes at a TAG via `git show` by default (`--tag`, defaulting to `HERMES_TARGET_TAG`; `--worktree` opts into the working tree), and a SKIPPED lane is no longer a pass — it prints `SKIPPED lane N: <reason>` and exits **2**, with `lanes=N/5` on the verdict line. `lanes=5/5` + exit 0 is the only result that clears the gate; `--allow-skip` is an escape hatch for a deliberately-partial host, never for the gate. An absent `agent/models_dev.py` SKIPs; a present-but-unparseable one `sys.exit`s. Script tests: `python3 -m unittest discover -s scripts/tests -t .`. #decision
 - [decision] Dormant overlays are KEPT deliberately (d04d5bf): `lmstudio` and `tencent-tokenhub` are now in models.dev so their overlayOnlyProviders entries only merge on stale-cache hosts — but Scarf supports Hermes back to v0.6, Hermes v0.16 still ships both in HERMES_OVERLAYS, and the model-ID validator's overlay fall-through (ModelCatalogService.swift ~L385) was designed for exactly this catalog evolution. Entries are annotated in-source; check-hermes-tables.py WARNs on them by design — a WARN there is policy, not drift. #decision
 
 

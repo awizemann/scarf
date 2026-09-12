@@ -37,6 +37,12 @@ struct BotAgentViewModelTests {
         var toolsetFailure: String?
         var mcpFailure: String?
         var pinFailure: String?
+        /// P46 finding 4: the exit-0 refusal families. A managed host prints
+        /// to stderr and `return`s, so the verdict — not the exit code — is
+        /// the only signal. Set these to the refusal TEXT.
+        var pinExitZeroRefusal: String?
+        var toolsetExitZeroRefusal: String?
+        var mcpExitZeroRefusal: String?
         /// Simulates someone else editing SOUL.md between load and save.
         var soulUnreadable = false
         private(set) var writtenSouls: [String] = []
@@ -105,10 +111,21 @@ struct BotAgentViewModelTests {
 
         func setModelPin(forProfile name: String, provider: String?, model: String?) throws -> [ProcessResult] {
             if let pinFailure { return [Self.fail(pinFailure)] }
+            if let pinExitZeroRefusal { return [Self.refusedAtExitZero(pinExitZeroRefusal)] }
             lock.lock(); defer { lock.unlock() }
-            if let provider { _provider = provider }
-            if let model { _model = model }
-            return [Self.ok(), Self.ok()]
+            var results: [ProcessResult] = []
+            // The real CLI's success line — `HermesConfigSet.judge` is
+            // ANCHORED on it, and exit 0 with no success line is
+            // `.unconfirmed`, never a success (C5).
+            if let provider {
+                _provider = provider
+                results.append(Self.ok("✓ Set model.provider = \(provider) in /p/config.yaml\n"))
+            }
+            if let model {
+                _model = model
+                results.append(Self.ok("✓ Set model.default = \(model) in /p/config.yaml\n"))
+            }
+            return results
         }
 
         func clearModelPin(forProfile name: String) throws -> [ProcessResult] {
@@ -117,7 +134,9 @@ struct BotAgentViewModelTests {
             for key in ["model.default", "model.provider"] {
                 unsetKeys.append(key)
                 let wasSet = key == "model.default" ? _model != nil : _provider != nil
-                results.append(wasSet ? Self.ok() : Self.fail("Config key not set: \(key)"))
+                results.append(wasSet
+                    ? Self.ok("✓ Unset \(key) from /p/config.yaml\n")
+                    : Self.fail("Config key not set: \(key)"))
             }
             _model = nil
             _provider = nil
@@ -126,20 +145,22 @@ struct BotAgentViewModelTests {
 
         func setToolsetEnabled(forProfile name: String, toolset: String, platform: String, enabled: Bool) throws -> ProcessResult {
             if let toolsetFailure { return Self.fail(toolsetFailure) }
+            if let toolsetExitZeroRefusal { return Self.refusedAtExitZero(toolsetExitZeroRefusal, stdout: "✓ Enabled: \(toolset)\n") }
             lock.lock(); defer { lock.unlock() }
             _toolsets[toolset] = enabled
-            return Self.ok()
+            return Self.ok("✓ \(enabled ? "Enabled" : "Disabled"): \(toolset)\n")
         }
 
         func setMCPServerEnabled(forProfile name: String, server: String, enabled: Bool) throws -> ProcessResult {
             if let mcpFailure { return Self.fail(mcpFailure) }
+            if let mcpExitZeroRefusal { return Self.refusedAtExitZero(mcpExitZeroRefusal) }
             lock.lock(); defer { lock.unlock() }
             if let idx = _mcpEnabled.firstIndex(where: { $0.name == server }) {
                 _mcpEnabled[idx].enabled = enabled
             } else {
                 _mcpEnabled.append((name: server, enabled: enabled))
             }
-            return Self.ok()
+            return Self.ok("✓ Set mcp_servers.\(server).enabled = \(enabled) in /p/config.yaml\n")
         }
 
         static func ok(_ stdout: String = "") -> ProcessResult {
@@ -147,6 +168,10 @@ struct BotAgentViewModelTests {
         }
         static func fail(_ stderr: String) -> ProcessResult {
             ProcessResult(exitCode: 1, stdout: Data(), stderr: Data(stderr.utf8))
+        }
+        /// The shape every managed refusal has: stderr, and exit **0**.
+        static func refusedAtExitZero(_ stderr: String, stdout: String = "") -> ProcessResult {
+            ProcessResult(exitCode: 0, stdout: Data(stdout.utf8), stderr: Data(stderr.utf8))
         }
     }
 

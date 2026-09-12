@@ -90,6 +90,26 @@ public enum TransportError: LocalizedError {
         }
     }
 
+    /// What a ``timeout(seconds:partialStdout:)`` captured from stdout before
+    /// the kill landed, decoded as UTF-8. Empty for every other case.
+    ///
+    /// Deliberately NOT folded into ``diagnosticStderr``: that property is
+    /// rendered as *stderr* detail by every one of its callers (and handed to
+    /// `stderr:` parameters by some), and partial stdout is not stderr. The
+    /// one caller that needs it — `HermesFileService.runHermesCLI`, which
+    /// hands its output to a ``HermesCLIVerdict`` — asks for it by name.
+    ///
+    /// A timeout with output is a real shape: `_cmd_restart`'s no-service arm
+    /// prints `Starting gateway...` and then runs the gateway in the
+    /// FOREGROUND (`hermes_cli/gateway.py:6062-6066` @ v2026.9.7), so the run
+    /// only ever ends at Scarf's own timer. Discarding the partial stdout
+    /// there turned an "unconfirmed, gateway is coming up" into a flat
+    /// "restart failed".
+    public var partialStdoutText: String {
+        guard case .timeout(_, let data) = self else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Bounded, non-identifying token for the `error_kind` analytics prop.
     ///
     /// Deliberately derived from the *case*, never from an associated value:

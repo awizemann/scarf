@@ -882,51 +882,38 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Remove one MCP server, judged by what `hermes mcp remove` PRINTED.
+    ///
+    /// P40: `cmd_mcp_remove` is a `-> None` whose not-found arm prints
+    /// `✗ Server '<name>' not found in config.` and returns at exit 0
+    /// (`hermes_cli/mcp_config.py:104`, `:518-519` @ v2026.9.7), and on a
+    /// managed install `save_config` refuses underneath it while `:524` prints
+    /// `✓ Removed …` anyway. See ``HermesMCPRemoveVerdict``.
     @discardableResult
-    nonisolated func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
-        runHermesCLI(args: ["mcp", "remove", name], timeout: 30)
+    nonisolated func removeMCPServer(name: String) -> HermesCLIOutcome {
+        let result = runHermesCLI(args: HermesMCPRemoveVerdict.argv(name: name), timeout: 30)
+        return HermesMCPRemoveVerdict.judge(output: result.output, exitCode: result.exitCode)
     }
 
     nonisolated func testMCPServer(name: String) async -> MCPTestResult {
         let started = Date()
         let service = self
         let result = await Task.detached { () -> (Int32, String) in
-            service.runHermesCLI(args: ["mcp", "test", name], timeout: 30)
+            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: 30)
         }.value
         let elapsed = Date().timeIntervalSince(started)
         let tools = Self.parseToolListFromTestOutput(result.1)
         // hermes mcp test exits 0 even when the inner connection fails — it
-        // reports the failure on stdout instead. Look for explicit failure
-        // markers so the UI doesn't show a green check on a broken server.
+        // reports the failure on stdout instead. Judged by the emitter's own
+        // anchored lines; see ``HermesMCPTestVerdict``.
         let output = result.1
         return MCPTestResult(
             serverName: name,
-            succeeded: result.0 == 0 && !Self.mcpTestReportsFailure(output),
+            succeeded: HermesMCPTestVerdict.judge(output: output, exitCode: result.0).succeeded,
             output: output,
             tools: tools,
             elapsed: elapsed
         )
-    }
-
-    /// Did `hermes mcp test` report a failure?
-    ///
-    /// `mcp test` exits 0 even when the inner connection fails — it reports
-    /// on stdout — so the exit code alone can't decide. But every failure
-    /// path goes through `hermes_cli/mcp_config.py::_error`, which prints
-    /// `  ✗ {text}` (`hermes_cli/mcp_config.py:36`, verified at tag `v2026.9.7`): the ✗ marker
-    /// covers `Connection failed …`, `Server '…' not found …`, and every
-    /// other error the command can emit.
-    ///
-    /// The three prose substrings this used to also match ("Connection
-    /// failed", "No such file or directory", "Error:", all case-insensitive)
-    /// were therefore redundant AND false-positive generators: on a healthy
-    /// server the same output continues with one line per discovered tool,
-    /// `    {tool_name:36s} {description}` — so a filesystem server with a
-    /// tool documented "… returns Error: ENOENT / No such file or directory"
-    /// turned a fully successful probe red. CLI prose is not a protocol; the
-    /// ✗ marker is.
-    nonisolated static func mcpTestReportsFailure(_ output: String) -> Bool {
-        output.contains("✗")
     }
 
     /// Tool names out of `hermes mcp test` output.
@@ -1112,9 +1099,16 @@ struct HermesFileService: Sendable {
         return ok
     }
 
+    /// Restart the gateway, judged by what the backend PRINTED (P40). Same
+    /// walk as ``stopHermes()``: `cmd_gateway` discards `gateway_command`'s
+    /// return (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `_cmd_restart`
+    /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
     @discardableResult
-    nonisolated func restartGateway() -> (exitCode: Int32, output: String) {
-        runHermesCLI(args: ["gateway", "restart"], timeout: 30)
+    nonisolated func restartGateway() -> HermesCLIOutcome {
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 30)
+        return HermesGatewayServiceVerdict.judge(
+            verb: .restart, output: result.output, exitCode: result.exitCode
+        )
     }
 
     // MARK: - MCP YAML: block extractor + parser
@@ -1369,13 +1363,22 @@ struct HermesFileService: Sendable {
         /// `key: value` split shared by every scalar site below: trims CRLF,
         /// unquotes the key (a hand-edited `"command":` is the same key), and
         /// drops an unquoted trailing `# comment` from the value.
+        ///
+        /// The separator comes from `HermesYAML.blockKeySpan`, the one
+        /// block-style key scanner, rather than a second one here. P41b:
+        /// `trimmed.firstIndex(of: ":")` had no quote awareness, so an env or
+        /// header name containing a colon — which the editor writes correctly
+        /// as `'A: B': v` through `YAMLScalar.quoteIfNeeded` — read back as
+        /// the key `'A` with the value `B': v`, and the next save persisted
+        /// that. It also disagreed with the parser on an unquoted
+        /// `llama3:8b: high`-shaped name.
         func keyValue(_ trimmed: String) -> (key: String, value: String)? {
-            guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
+            guard let span = HermesYAML.blockKeySpan(in: trimmed) else { return nil }
             let key = Self.unquote(
-                String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+                String(span.key).trimmingCharacters(in: .whitespacesAndNewlines)
             )
             let value = Self.stripInlineComment(
-                String(trimmed[trimmed.index(after: colonIdx)...])
+                String(span.afterColon)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             )
             return (key, value)
@@ -2283,67 +2286,39 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Emit one MCP scalar VALUE — a thin forwarder over
+    /// ``YAMLScalar/quoteIfNeeded(_:)``, which is the one emission rule
+    /// every config.yaml writer in Scarf shares.
+    ///
+    /// **It used to be a fourth copy of that rule, and it was the copy that
+    /// was wrong.** Its double-quoted arm escaped exactly `\\` and `\"`, so
+    /// any C0/C1 control, DEL, NEL or U+2028/U+2029 a user pasted into an
+    /// MCP `env:` / `headers:` value, a tool name, a cert path or a
+    /// `command` went out RAW inside the quotes — and PyYAML's READER
+    /// refuses those in EVERY quoting style ("unacceptable character
+    /// #x0001: special characters are not allowed"), so Hermes swallowed
+    /// the error and discarded the WHOLE config.yaml layer
+    /// (`gateway/config.py:775-791` @ `v2026.9.7`). Fuzzed 7 000 inputs
+    /// through PyYAML 6.0.3: `quoteIfNeeded` 0 failures, this routine 3 953.
+    /// `patchMCPServerField(expecting:)` could not see it either — the
+    /// expected rows are built by the same `subMapRows`, so the literal
+    /// match succeeds on a file PyYAML rejects (P19's lesson, applied to a
+    /// scalar the verifier itself emits).
+    ///
+    /// Two emission differences fall out of the unification, both safe
+    /// because ``unquote(_:)`` (i.e. ``YAMLScalar/unquote(_:)``) reverses
+    /// both: a safe-but-quotable scalar comes out SINGLE-quoted rather than
+    /// double-quoted, and an empty value comes out `''` rather than `""`.
+    /// PyYAML loads either spelling as the same string.
+    ///
+    /// `ssl_verify` still must not reach here for its BOOL form — a quoted
+    /// `"true"` is a CA-bundle path named `true` to Hermes. That carve-out
+    /// lives at the call site (`setMCPServerSSLVerify`), where the bool and
+    /// path forms are told apart.
     nonisolated static func yamlScalar(_ value: String) -> String {
-        if value.isEmpty { return "\"\"" }
-        // YAML 1.2 reserved indicators that change meaning at the start of a
-        // scalar: @ * & ? | > ! % , [ ] { } < ` ' " — plus space (would be
-        // trimmed) and dash (looks like a sequence). Anything starting with
-        // one of these must be quoted or YAML treats the value as an alias,
-        // tag, flow collection, etc., and parsing breaks.
-        let reservedFirstChars: Set<Character> = [
-            "@", "*", "&", "?", "|", ">", "!", "%", ",",
-            "[", "]", "{", "}", "<", "`", "'", "\""
-        ]
-        // A value carrying a line break cannot sit on one row at all:
-        // emitted bare it produced a column-0 fragment, and
-        // `verifyPatchedConfig` only noticed when the damaged entry was not
-        // the LAST in `mcp_servers`. `GatewayConfigWriter` has had this
-        // guard since P10 (`containsLineBreak`); this twin never did. The
-        // double-quoted form is the only YAML style that can carry the
-        // break inline, and `unquote` decodes `\\n` / `\\r` back, so the
-        // value round-trips instead of being refused or truncated.
-        if YAMLScalar.containsLineBreak(value) { return YAMLScalar.doubleQuoted(value) }
-        let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
-        let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
-            || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
-            // A TAB anywhere in the scalar. YAML forbids the tab as
-            // indentation and PyYAML's scanner rejects the row outright
-            // ("found character '\t' that cannot start any token"), which
-            // discards the WHOLE config.yaml layer, not just this value.
-            // `YAMLScalar.quoteIfNeeded` — which the KEY on the very same
-            // emitted row goes through — has had this arm all along
-            // (`YAMLScalar.swift:119`); the value half never did, so one row
-            // would quote its key for a tab and not its value.
-            //
-            // `patchMCPServerField(expecting:)` cannot catch it either: the
-            // expected rows are built by the same `subMapRows`, so the literal
-            // match succeeds on a file PyYAML rejects. A structural verifier
-            // cannot see damage that leaves the structure intact.
-            || value.contains("\t")
-            // Every plain spelling PyYAML's implicit resolvers would RETYPE
-            // — `~`, `null`, `on`, `007`, `0x1F`, `.inf`, `2026-09-09` —
-            // not just the five bool/null words this used to list. An env
-            // value of `007` loaded as the int 7.
-            || YAMLScalar.resolvesToNonString(value)
-            || firstCharNeedsQuoting
-        if needsQuoting {
-            let escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        }
-        return value
+        YAMLScalar.quoteIfNeeded(value)
     }
 
-    /// The inverse of ``yamlScalar``.
-    ///
-    /// It used to strip the quotes and stop, which made the pair asymmetric
-    /// for the one thing quoting exists to carry: `yamlScalar` writes
-    /// `\\` for a backslash and `\"` for a quote, and reading them back
-    /// verbatim turned `/a\b` into `/a\\b` one save later, and again the
-    /// save after that. The registrar compares this value against a real
-    /// filesystem path, so an unescape that doesn't undo the escape is a
-    /// permanent "the command moved" — a rewrite of a file Hermes watches,
-    /// every launch, forever.
     // MARK: - Boolish scalars
 
     /// The two word sets `_parse_boolish` accepts
@@ -2488,14 +2463,50 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Stop the gateway, judged by what `hermes gateway stop` PRINTED.
+    ///
+    /// P40: the exit code was the whole verdict here, and `_cmd_stop` is a
+    /// `-> None` whose "nothing to stop" arms print `✗ …` and return at exit 0
+    /// (`hermes_cli/gateway.py:5993`, `:5998` @ v2026.9.7) — so every caller
+    /// (two of which report to Analytics) recorded a stop that never happened
+    /// as a success. See ``HermesGatewayServiceVerdict`` for the full walk.
+    ///
+    /// Round-4 decision 2: "nothing was running" is a SUCCESS carrying
+    /// ``HermesCLIOutcome/warning``, not a failure — so the `pgrep`/`kill`
+    /// fallback below is reached only when the CLI genuinely could not stop a
+    /// gateway, which is what it was always for.
+    ///
+    /// **The fallback is gated on a POSITIVE failure signal, never on
+    /// `!succeeded`.** `_dispatch_via_service_manager_if_s6`
+    /// (`hermes_cli/gateway.py:5608-5629` @ v2026.9.7) hands `stop` to the s6
+    /// service manager and prints NOTHING on the success path
+    /// (`hermes_cli/service_manager.py:529-566` prints nothing either), so on
+    /// an s6 container host a real stop lands as
+    /// ``HermesCLIOutcome/Confidence/unconfirmed``. Falling through to
+    /// `pgrep` + `kill -TERM` there is actively harmful: `s6-supervise` reads
+    /// a bare SIGTERM as a crash and restarts the gateway ~1s later — Hermes
+    /// says so itself in `_dispatch_all_via_service_manager_if_s6`'s docstring
+    /// (`:5631-5634`). "Could not confirm" leaves the answer to the reload
+    /// every caller already does; only ``HermesCLIOutcome/Confidence/failed``
+    /// — a matched refusal marker, or a non-zero exit — earns the kill.
     @discardableResult
-    nonisolated func stopHermes() -> Bool {
+    nonisolated func stopHermes() -> HermesCLIOutcome {
         // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
         // waits for exit. Use the CLI to avoid racing launchd's KeepAlive respawn.
-        if runHermesCLI(args: ["gateway", "stop"]).exitCode == 0 {
-            return true
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.stop))
+        let outcome = HermesGatewayServiceVerdict.judge(
+            verb: .stop, output: result.output, exitCode: result.exitCode
+        )
+        if outcome.succeeded { return outcome }
+        // No positive failure signal ⇒ we do not know, and we must not guess
+        // with a signal. See the doc above (s6).
+        guard outcome.confidence == .failed else { return outcome }
+        // The fallback SIGTERM is a real stop when it lands; when it does not,
+        // Hermes's own refusal line is still the better message.
+        func fallback(_ ok: Bool) -> HermesCLIOutcome {
+            ok ? HermesCLIOutcome(succeeded: true, detail: nil) : outcome
         }
-        guard let pid = hermesPID() else { return false }
+        guard let pid = hermesPID() else { return fallback(false) }
         // For remote we can't issue a raw `kill(2)` — route through `kill(1)`
         // via the transport. Local uses the syscall for its minimal overhead.
         if context.isRemote {
@@ -2505,9 +2516,9 @@ struct HermesFileService: Sendable {
                 stdin: nil,
                 timeout: 5
             )
-            return (result?.exitCode ?? -1) == 0
+            return fallback((result?.exitCode ?? -1) == 0)
         }
-        return kill(pid, SIGTERM) == 0
+        return fallback(kill(pid, SIGTERM) == 0)
     }
 
     nonisolated func hermesBinaryPath() -> String? {
@@ -2592,7 +2603,7 @@ struct HermesFileService: Sendable {
     /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
     /// When `interactive` is true, injects env vars that suppress common
     /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
-    nonisolated private static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
+    nonisolated static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
         let pipe = Pipe()
         let errPipe = Pipe()
         let process = Process()
@@ -2615,27 +2626,28 @@ struct HermesFileService: Sendable {
             process.environment = env
         }
 
+        // Only the WRITE ends here: once `waitDraining` has launched its
+        // readers they own the read ends and close each one themselves, and
+        // closing a handle another thread is blocked reading is a raised
+        // exception. The launch-failure path below has no readers, so it
+        // closes all four.
         defer {
-            try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()
-            try? errPipe.fileHandleForReading.close()
             try? errPipe.fileHandleForWriting.close()
         }
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                process.terminate()
-                // Brief grace period for SIGTERM to take; then the defer
-                // cleanup closes the pipes regardless.
-                Thread.sleep(forTimeInterval: 0.1)
-                return nil
-            }
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            // C10, both halves. The old shape polled for the exit and THEN
+            // read stdout, with stderr on a pipe nothing ever read: an rc
+            // file noisy enough to fill the 64 KB stderr buffer — `nvm`
+            // warnings, a `compaudit` complaint per insecure directory —
+            // wedged zsh in `write()` until the budget expired, and the env
+            // probe came back nil for a shell that was working fine. Both
+            // pipes are drained CONCURRENTLY with the wait now.
+            let (exited, drained) = process.waitDraining(
+                timeout: timeout, pipes: [pipe, errPipe])
+            guard exited else { return nil }
+            let data = drained.first ?? Data()
             guard process.terminationStatus == 0, !data.isEmpty else { return nil }
             var result: [String: String] = [:]
             let parts = data.split(separator: 0, omittingEmptySubsequences: false)
@@ -2650,6 +2662,10 @@ struct HermesFileService: Sendable {
             }
             return result.isEmpty ? nil : result
         } catch {
+            // Never launched, so nothing is draining: these two are ours to
+            // close (the write ends are the `defer`'s).
+            try? pipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForReading.close()
             return nil
         }
     }
@@ -2776,7 +2792,9 @@ struct HermesFileService: Sendable {
     /// Wraps two `hermes config set` invocations because Hermes doesn't
     /// expose a combined "set model" command.
     ///
-    /// LEGACY — iOS `ChatView`'s preflight is the only remaining caller
+    /// LEGACY. It has no callers left: iOS `ChatView`'s preflight — the
+    /// last one this doc named — spawns its own `HermesConfigSet.argv` over
+    /// the transport (P46 finding 12) and never came through here.
     /// (t-9657430b). Every Mac writer routes through
     /// `LocalModelConfigPlan` + `applyModelConfigPlan(_:)` instead: this
     /// method never clears the local-managed keys, so switching away
@@ -2794,8 +2812,11 @@ struct HermesFileService: Sendable {
         let trimmedProvider = provider.trimmingCharacters(in: .whitespaces)
         guard !trimmedProvider.isEmpty else { return false }
 
-        let providerResult = runHermesCLI(args: ["config", "set", "model.provider", trimmedProvider], timeout: 30)
-        guard providerResult.exitCode == 0 else {
+        // P39: output-judged, like every other `config set` Scarf shells —
+        // the managed-install arm exits 0 (`hermes_cli/config.py:3450-3452`).
+        let providerResult = runHermesCLI(
+            args: HermesConfigSet.argv(key: "model.provider", value: trimmedProvider), timeout: 30)
+        guard HermesConfigSet.judge(output: providerResult.output, exitCode: providerResult.exitCode).succeeded else {
             Self.logger.warning("hermes config set model.provider failed: \(providerResult.output, privacy: .public)")
             return false
         }
@@ -2806,8 +2827,9 @@ struct HermesFileService: Sendable {
         // catch again on the next start.
         guard !trimmedModel.isEmpty else { return true }
 
-        let modelResult = runHermesCLI(args: ["config", "set", "model.default", trimmedModel], timeout: 30)
-        guard modelResult.exitCode == 0 else {
+        let modelResult = runHermesCLI(
+            args: HermesConfigSet.argv(key: "model.default", value: trimmedModel), timeout: 30)
+        guard HermesConfigSet.judge(output: modelResult.output, exitCode: modelResult.exitCode).succeeded else {
             Self.logger.warning("hermes config set model.default failed: \(modelResult.output, privacy: .public)")
             return false
         }
@@ -2826,10 +2848,13 @@ struct HermesFileService: Sendable {
     nonisolated func applyModelConfigPlan(_ operations: [LocalModelConfigPlan.Operation]) -> Bool {
         for operation in operations {
             let result = runHermesCLI(args: operation.cliArguments, timeout: 30)
-            guard result.exitCode == 0 else {
+            // P39: output-judged (`HermesConfigSet`) — the managed-install arm
+            // of `set_config_value` exits 0, and a model plan that "succeeded"
+            // against an untouched config.yaml is exactly the silent reroute
+            // this plan's ordering exists to prevent.
+            guard HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded else {
                 // Log key only — a .set(model.api_key, …) value is a secret.
-                let key = operation.cliArguments.count > 2 ? operation.cliArguments[2] : "?"
-                Self.logger.warning("hermes config set \(key, privacy: .public) failed (exit \(result.exitCode)): \(result.output, privacy: .public)")
+                Self.logger.warning("hermes config set \(operation.key, privacy: .public) failed (exit \(result.exitCode)): \(result.output, privacy: .public)")
                 return false
             }
         }
@@ -2862,12 +2887,33 @@ struct HermesFileService: Sendable {
             // String so callers that grep through output don't need to
             // change. Stderr after stdout mirrors what the old Process impl
             // produced since both pipes were drained in that order.
-            let combined = result.stdoutString + result.stderrString
+            // A SEPARATOR when stdout does not already end in one. Without
+            // it a stdout with no trailing newline welds its last line to
+            // stderr's first — and every anchored refusal marker
+            // (``HermesCLIMarkers/managedRefusalAnchored`` and friends) asks
+            // whether a line STARTS with the marker, which a welded line
+            // never does. The exit-0 refusal families are exactly the ones
+            // that print to stderr while stdout carries a success line.
+            let stdout = result.stdoutString
+            let separator = (stdout.isEmpty || stdout.hasSuffix("\n")) ? "" : "\n"
+            let combined = stdout + separator + result.stderrString
             return (result.exitCode, combined)
         } catch let error as TransportError {
-            return (-1, error.diagnosticStderr.isEmpty
+            let message = error.diagnosticStderr.isEmpty
                 ? (error.errorDescription ?? "transport error")
-                : error.diagnosticStderr)
+                : error.diagnosticStderr
+            // A `.timeout` carries what the child printed before the kill, and
+            // on this path that partial stdout is EVIDENCE, not noise: the
+            // callers hand `output` to a `HermesCLIVerdict`, and the live
+            // shape is `_cmd_restart`'s no-service arm — `Starting gateway...`
+            // and then a foreground `run_gateway` that never returns
+            // (`hermes_cli/gateway.py:6062-6066` @ v2026.9.7), so the ONLY way
+            // the run ends is this timeout. Dropping it reported a gateway
+            // that was coming up as "restart failed". The message keeps its
+            // place as the last line, so `fallbackDetail` still quotes
+            // something useful when nothing was printed.
+            let partial = error.partialStdoutText
+            return (-1, partial.isEmpty ? message : partial + "\n" + message)
         } catch {
             return (-1, error.localizedDescription)
         }

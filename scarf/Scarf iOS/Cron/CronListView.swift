@@ -10,6 +10,10 @@ struct CronListView: View {
     @State private var vm: IOSCronViewModel
     @State private var editingJob: HermesCronJob?
     @State private var showingNewJob = false
+    /// Round-4 decision 5 — the pre-filled create the recovery hint names.
+    /// A separate slot from `editingJob`, because it seeds a NEW record
+    /// (`HermesCronJob.duplicatedAsNewJob`) rather than editing this one.
+    @State private var duplicatingJob: HermesCronJob?
 
     /// Same mirror the Mac's `CronView` performs onto `CronViewModel`: the
     /// two recovery floors that decide what a wedged job may be offered
@@ -85,6 +89,30 @@ struct CronListView: View {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
+                        .contextMenu {
+                            // The SAME shared offer the Mac's detail pane and
+                            // the Bots routines list render, so all three make
+                            // one offer for one job
+                            // (`HermesCronJob.recoveryOffer`).
+                            let offer = vm.recoveryOffer(for: job)
+                            // Round-4 decision 6: iOS has the re-arm door now
+                            // rather than pointing at the Mac.
+                            if offer.canRearm {
+                                Button {
+                                    Task { await vm.resumeAndRunNow(id: job.id) }
+                                } label: {
+                                    Label("Resume & Run Now", systemImage: "forward.end.fill")
+                                }
+                            }
+                            // Round-4 decision 5: the remedy every hint names.
+                            // Unconditional — a create is accepted for any
+                            // record, terminal or not.
+                            Button {
+                                duplicatingJob = job
+                            } label: {
+                                Label("Duplicate…", systemImage: "plus.square.on.square")
+                            }
+                        }
                     }
                 }
             }
@@ -129,6 +157,23 @@ struct CronListView: View {
             // Cron editor is a Form with ~6 fields; .large gives room
             // without cramping. No peek detent — editing cron jobs is
             // a focused task, not something users want to half-see.
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $duplicatingJob) { job in
+            // An ordinary create, pre-filled: on iOS a create IS a rewrite of
+            // `cron/jobs.json` (see `IOSCronViewModel.saveJobs`), so the seed
+            // is a fresh record rather than a `cron create` argv — and it can
+            // carry every field, including the ones the Mac's create FORM has
+            // no widget for.
+            CronEditorView(
+                initial: job.duplicatedAsNewJob(
+                        id: "job_\(UUID().uuidString.prefix(8))",
+                        existingNames: vm.jobs.map(\.name)),
+                title: "Duplicate cron job"
+            ) { created in
+                Task { await vm.upsert(created) }
+            }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -283,6 +328,12 @@ struct CronEditorView: View {
                         TextField("Run at (ISO8601)", text: $scheduleRunAt)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
+                        if oneShotTimeIsUnusable {
+                            Text("Pick a future time — a one-shot more than \(Int(HermesCronJob.oneShotGraceSeconds)) s in the past can never fire.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .accessibilityIdentifier("cron.editor.pastOneShot")
+                        }
                     }
                 }
 
@@ -316,10 +367,38 @@ struct CronEditorView: View {
         }
     }
 
+    /// A `once` job whose `run_at` is already past Hermes's grace window, as
+    /// the FORM currently reads — i.e. what pressing Save would write.
+    ///
+    /// iOS persists by rewriting `cron/jobs.json` (`IOSCronViewModel.saveJobs`)
+    /// with no `cron create` in the path, so nothing downstream refuses it:
+    /// the record lands `scheduled`, and the misfire backstop then declines to
+    /// resurrect a one-shot more than `ONESHOT_GRACE_SECONDS` overdue
+    /// (`cron/scheduler_provider.py:274-279` @ `v2026.9.7`). A "scheduled" job
+    /// that can never fire is exactly the ghost
+    /// `_next_run_or_reject_past_oneshot` (`cron/jobs.py:1669-1680`) exists to
+    /// stop the CLI writing, so this form is where iOS has to stop it. Reuses
+    /// the Mac's own predicate, `HermesCronJob.oneShotScheduleIsPastGrace` —
+    /// including its conservative +12h window for a naive timestamp: a value
+    /// still future in SOME zone is accepted, because Scarf cannot know the
+    /// host's. An EMPTY time is unusable for the same reason (a `once` with no
+    /// `run_at` has no `next_run_at` to compute) and that string-level helper
+    /// answers `false` for one, so it is checked here.
+    /// Applies to `.edit` as well as the duplicate that motivated it: the
+    /// write is the same `jobs.json` rewrite either way, and re-saving a
+    /// `once` record whose time is spent re-writes the same ghost. Switching
+    /// the kind, or supplying a future time, is what unblocks Save.
+    private var oneShotTimeIsUnusable: Bool {
+        guard scheduleKind == "once" else { return false }
+        let raw = scheduleRunAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return true }
+        return HermesCronJob.oneShotScheduleIsPastGrace(raw)
+    }
+
     private var isValid: Bool {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !n.isEmpty && !p.isEmpty
+        return !n.isEmpty && !p.isEmpty && !oneShotTimeIsUnusable
     }
 
     private func buildJob() -> HermesCronJob {
@@ -352,6 +431,25 @@ struct CronEditorView: View {
             minutes: sameKind ? existing?.schedule.minutes : nil,
             extra: sameKind ? (existing?.schedule.extra ?? [:]) : [:]
         )
+        // The UNMODELED top-level `schedule_display`, which `extra` carries
+        // verbatim and `HermesCronJob.encode` re-emits, is the label of the
+        // schedule the record USED to be on. Hermes's
+        // `_schedule_display_for_job` PREFERS it over everything inside
+        // `schedule` whenever it is non-empty (`cron/jobs.py:438-446` @
+        // `v2026.9.7`) and `_normalize_job_record` stamps the result onto
+        // every record it reads (`:470`) — so forwarding it across a
+        // schedule change does not merely look stale, it SHADOWS the new
+        // time for every reader of the job. Drop it whenever the schedule
+        // moved and let Hermes re-derive from the fields that did.
+        //
+        // This bit ORDINARY edits, not just duplicates: `buildJob` is the
+        // one writer behind both, and it forwarded `existing?.extra`
+        // unconditionally, so re-timing a live job from the iOS editor left
+        // the old label in front of the new time.
+        let scheduleMoved = existing?.schedule != schedule
+        let carriedExtra = scheduleMoved
+            ? HermesCronJob.droppingDerivedScheduleDisplay(existing?.extra ?? [:])
+            : (existing?.extra ?? [:])
         return HermesCronJob(
             id: id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -379,7 +477,7 @@ struct CronEditorView: View {
             contextFrom: existing?.contextFrom,
             noAgent: existing?.noAgent,
             attachToSession: existing?.attachToSession,
-            extra: existing?.extra ?? [:]
+            extra: carriedExtra
         )
     }
 }

@@ -87,46 +87,46 @@ public struct KanbanCreateRequest: Sendable, Equatable {
     public func argv() -> [String] {
         var args: [String] = []
         if let body, !body.isEmpty {
-            args.append(contentsOf: ["--body", body])
+            args.append(HermesCLIOption.joined("--body", body))
         }
         if let assignee, !assignee.isEmpty {
-            args.append(contentsOf: ["--assignee", assignee])
+            args.append(HermesCLIOption.joined("--assignee", assignee))
         }
         for parent in parentIds {
-            args.append(contentsOf: ["--parent", parent])
+            args.append(HermesCLIOption.joined("--parent", parent))
         }
         if let workspace {
-            args.append(contentsOf: ["--workspace", workspace.cliValue])
+            args.append(HermesCLIOption.joined("--workspace", workspace.cliValue))
         }
         if let branch, !branch.isEmpty {
-            args.append(contentsOf: ["--branch", branch])
+            args.append(HermesCLIOption.joined("--branch", branch))
         }
         if let tenant, !tenant.isEmpty {
-            args.append(contentsOf: ["--tenant", tenant])
+            args.append(HermesCLIOption.joined("--tenant", tenant))
         }
         if let priority {
-            args.append(contentsOf: ["--priority", String(priority)])
+            args.append(HermesCLIOption.joined("--priority", String(priority)))
         }
         if triage {
             args.append("--triage")
         }
         if let idempotencyKey, !idempotencyKey.isEmpty {
-            args.append(contentsOf: ["--idempotency-key", idempotencyKey])
+            args.append(HermesCLIOption.joined("--idempotency-key", idempotencyKey))
         }
         if let maxRuntimeSeconds {
-            args.append(contentsOf: ["--max-runtime", "\(maxRuntimeSeconds)s"])
+            args.append(HermesCLIOption.joined("--max-runtime", "\(maxRuntimeSeconds)s"))
         }
         if let maxRetries {
-            args.append(contentsOf: ["--max-retries", String(maxRetries)])
+            args.append(HermesCLIOption.joined("--max-retries", String(maxRetries)))
         }
         if let completionContract, !completionContract.isEmpty {
-            args.append(contentsOf: ["--completion-contract", completionContract])
+            args.append(HermesCLIOption.joined("--completion-contract", completionContract))
         }
         if let createdBy, !createdBy.isEmpty {
-            args.append(contentsOf: ["--created-by", createdBy])
+            args.append(HermesCLIOption.joined("--created-by", createdBy))
         }
         for skill in skills {
-            args.append(contentsOf: ["--skill", skill])
+            args.append(HermesCLIOption.joined("--skill", skill))
         }
         args.append("--json")
         // Title is the positional argument — appended last, behind `--`, so

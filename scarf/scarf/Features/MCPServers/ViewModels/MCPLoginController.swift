@@ -72,7 +72,7 @@ final class MCPLoginController {
     /// own output had drained. That is exactly the success-reported-as-failure
     /// bug P21 fixed. With a fresh inbox per run, a stale reader writes into a
     /// buffer nothing will ever drain.
-    private var inbox = OutputInbox()
+    private var inbox = ProcessOutputInbox()
     /// The exit status, once the termination handler has reported it. Nil
     /// until then — and the verdict waits for BOTH this and EOF.
     private var pendingExit: Int32?
@@ -99,7 +99,7 @@ final class MCPLoginController {
         devicePrompt = nil
         succeeded = nil
         errorMessage = nil
-        let inbox = OutputInbox()
+        let inbox = ProcessOutputInbox()
         self.inbox = inbox
         pendingExit = nil
         didFinish = false
@@ -466,32 +466,4 @@ final class MCPLoginController {
                     : "hermes exited with code \(exitCode)")
         }
     }
-}
-
-/// The reader side's hand-off buffer: text accumulates here in READ order on
-/// the pipe's queue, and the main actor drains it whenever one of its hops
-/// lands. Sequencing the text here rather than in the hops is what makes the
-/// out-of-order `Task { @MainActor }` scheduling harmless.
-private final class OutputInbox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending = ""
-    private var eof = false
-
-    func append(_ text: String) {
-        guard !text.isEmpty else { return }
-        lock.lock(); pending += text; lock.unlock()
-    }
-
-    func markEOF() {
-        lock.lock(); eof = true; lock.unlock()
-    }
-
-    /// Everything buffered since the last drain, plus whether the reader has
-    /// reported EOF.
-    func drain() -> (text: String, sawEOF: Bool) {
-        lock.lock()
-        defer { pending = ""; lock.unlock() }
-        return (pending, eof)
-    }
-
 }

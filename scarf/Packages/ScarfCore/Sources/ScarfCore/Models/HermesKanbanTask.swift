@@ -68,10 +68,50 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     /// Key of the current step within the task's workflow template.
     /// Present in `list --json`; `nil` outside a workflow and pre-v0.15.
     public let currentStepKey: String?
-    /// Per-task model override (e.g. a worker pinned to a specific
-    /// model). Only emitted by `show --json` / tool calls, NOT `list
-    /// --json` — still decoded tolerantly so it's `nil` from list rows.
+    /// Per-task model override (e.g. a worker pinned to a specific model),
+    /// set at create time. Emitted by every `--json` task envelope, `list`
+    /// included — they all go through `_task_to_dict` and
+    /// `_TASK_DICT_FIELDS` (`hermes_cli/kanban_output.py:18-24`,
+    /// `hermes_cli/kanban.py:381`, `:429` @ `v2026.9.7`) — so `nil` means
+    /// "no pin", not "this verb didn't say".
     public let modelOverride: String?
+    /// The inference PROVIDER paired with `modelOverride`
+    /// (`_TASK_DICT_FIELDS`, `hermes_cli/kanban_output.py:22`).
+    ///
+    /// **Floor v0.19.1 (`v2026.7.30`).** P42 first wrote v0.21.1 here by
+    /// grepping `_TASK_DICT_FIELDS`, which dates the FILE MOVE (`kanban.py::
+    /// _task_to_dict` → `kanban_output.py::_TASK_DICT_FIELDS` at `v2026.9.7`)
+    /// and not the KEY. Re-walked by opening `hermes_cli/kanban.py` at every
+    /// `v2026.*` tag: `"provider_override": t.provider_override` enters
+    /// `_task_to_dict` at `v2026.7.30:80` (0.19.1) and is in every later tag
+    /// — `v2026.8.31:80` included — while `v2026.7.20` (0.19.0) has no
+    /// occurrence of the name in the file. `list --json` prints
+    /// `[_task_to_dict(t) for t in tasks]` (`v2026.7.30:1594`), so the key is
+    /// EMITTED from that tag. The inspector gates its chip on
+    /// `HermesCapabilities.hasKanbanProviderOverride`; the DECODE itself
+    /// needs no gate, being `decodeIfPresent`.
+    public let providerOverride: String?
+    /// `project_id` — the optional link to a first-class Hermes Project
+    /// (`hermes_cli/projects_db`), declared on the `tasks` DDL at
+    /// `hermes_cli/kanban_db.py:866-869` and emitted in every task envelope
+    /// (`kanban_output.py:20`) @ `v2026.9.7`.
+    ///
+    /// **No capability flag, deliberately.** Walked the same way as
+    /// `providerOverride`: `"project_id": t.project_id` enters
+    /// `_task_to_dict` at `v2026.7.1:72` (0.18.0) and is absent at
+    /// `v2026.6.19`. Nothing in Scarf's UI is gated on it — it is decode-only
+    /// and `decodeIfPresent`, so a pre-v0.18 row decodes to `nil`, which is
+    /// the same answer an unlinked task gives. A flag would gate nothing, so
+    /// there is none; add one the day a surface renders it.
+    ///
+    /// This is NOT Scarf's project key and cannot become one: `create_task`
+    /// resolves the id against the creator's per-profile `projects.db` and
+    /// silently drops an id that does not resolve (`kanban_db.py:1110-1117`,
+    /// `:1124-1127`), so a Scarf-minted value would evaporate. Scarf keys its
+    /// own projects on `tenant` (see `KanbanTenantResolver`). Decoded so a
+    /// task that IS linked to a real Hermes project can be told apart from
+    /// one that is not, rather than the link being invisible.
+    public let projectId: String?
 
     // v0.21.1 (v2026.9.7) fields. Both are new to the `list --json` task dict
     // at this release (`hermes_cli/kanban_output.py:18-24`) — `_task_to_dict`
@@ -112,7 +152,9 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         currentStepKey: String? = nil,
         modelOverride: String? = nil,
         completionContract: String? = nil,
-        lastFailureError: String? = nil
+        lastFailureError: String? = nil,
+        providerOverride: String? = nil,
+        projectId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -137,6 +179,8 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.modelOverride = modelOverride
         self.completionContract = completionContract
         self.lastFailureError = lastFailureError
+        self.providerOverride = providerOverride
+        self.projectId = projectId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -154,6 +198,8 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         case workflowTemplateId = "workflow_template_id"
         case currentStepKey = "current_step_key"
         case modelOverride = "model_override"
+        case providerOverride = "provider_override"
+        case projectId = "project_id"
         case completionContract = "completion_contract"
         case lastFailureError = "last_failure_error"
     }
@@ -188,8 +234,14 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         // `session_id` key) decode with `sessionId == nil`.
         self.sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
         // v0.15 worktree + workflow fields. All `decodeIfPresent` so
-        // pre-v0.15 rows decode with nil; `modelOverride` is nil from
-        // `list --json` rows even on v0.15 (only `show --json` emits it).
+        // pre-v0.15 rows decode with nil.
+        //
+        // `modelOverride` is NOT show-only, whatever this comment used to
+        // say: `list --json` serialises each task through the same
+        // `_task_to_dict` (`hermes_cli/kanban.py:429` @ `v2026.9.7`, and
+        // `create --json` at `:381`), whose field tuple `_TASK_DICT_FIELDS`
+        // carries `model_override` (`hermes_cli/kanban_output.py:18-24`). A
+        // nil here means the task has no pin, not that the verb withheld it.
         self.branchName = try c.decodeIfPresent(String.self, forKey: .branchName)
         self.workflowTemplateId = try c.decodeIfPresent(String.self, forKey: .workflowTemplateId)
         self.currentStepKey = try c.decodeIfPresent(String.self, forKey: .currentStepKey)
@@ -198,6 +250,10 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         // present) decodes with both nil and every existing surface renders
         // byte-identically.
         self.completionContract = try c.decodeIfPresent(String.self, forKey: .completionContract)
+        // `decodeIfPresent` for both, exactly as every other version-gated
+        // key: a pre-v0.21.1 row carries neither and decodes with both nil.
+        self.providerOverride = try c.decodeIfPresent(String.self, forKey: .providerOverride)
+        self.projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
         self.lastFailureError = try c.decodeIfPresent(String.self, forKey: .lastFailureError)
     }
 

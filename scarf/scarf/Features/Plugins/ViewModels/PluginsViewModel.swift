@@ -331,14 +331,34 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// same shape as `enable`. The consent call arrives at v2026.8.13 and the
     /// two success lines go back to v2026.6.19, so an older host prints a
     /// success line and no refusal and is judged exactly as before (C1).
+    /// P40 / round-4 decision 3: `update` has THREE outcomes. When the
+    /// post-pull security scan returns `dangerous`, `_rescan_after_update`
+    /// DISABLES the plugin (`hermes_cli/plugins_cmd.py:845-851` @ v2026.9.7)
+    /// and `cmd_update` prints `✓ Plugin <name> updated.` (`:828`) anyway —
+    /// both at exit 0. That is neither a failure (the tree really was pulled)
+    /// nor the plain "Updated" Scarf used to claim (the plugin is off now),
+    /// so the banner says so and quotes Hermes's own reason line (`:843`).
+    /// See ``HermesPluginsUpdateVerdict``, which also anchors the success side
+    /// against the raw `git pull` body and the scan report.
     func update(_ plugin: HermesPlugin) {
-        runAndReload(
-            ["plugins", "update", "--", plugin.name],
-            success: "Updated",
-            successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
-            failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
-            failureWins: true
-        )
+        let run = cliRunner
+        let name = plugin.name
+        Task.detached { [weak self] in
+            let result = run(HermesPluginsUpdateVerdict.argv(name: name), 60)
+            let outcome = HermesPluginsUpdateVerdict.judge(
+                output: result.output, exitCode: result.exitCode
+            )
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.applySaveOutcome(
+                    outcome.succeeded
+                        ? .success(outcome.warning ?? String(localized: "Updated"))
+                        : .failure(Self.friendlyPluginFailure(outcome.detail)
+                            ?? String(localized: "Failed"))
+                )
+                self.load(force: true)
+            }
+        }
     }
 
     func remove(_ plugin: HermesPlugin) {
@@ -375,6 +395,14 @@ final class PluginsViewModel: OutcomeMessageHosting {
             success: "Enabled",
             successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
             failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
+            // P39 (round-4 review): the managed refusal is matched ANCHORED.
+            // `plugins update` prints the raw `git pull` output and the
+            // post-update scan report (`hermes_cli/plugins_cmd.py:829`, `:844`)
+            // — text Hermes does not control — and these verdicts run
+            // `failureWins`, so a bare `is managed by` substring in a commit
+            // message or a scan finding turned a completed run into a reported
+            // failure. `save_config`'s refusal is at column 0.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
             // `cmd_enable` prints the green "enabled." line (:1023) BEFORE it
             // runs the consent screen (:1033), so both markers are present by
             // design and the refusal has to win.
@@ -394,7 +422,22 @@ final class PluginsViewModel: OutcomeMessageHosting {
             ["plugins", "disable", "--", plugin.name],
             success: "Disabled",
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
-            failureMarkers: HermesCLIMarkers.pluginsDisableFailure
+            failureMarkers: HermesCLIMarkers.pluginsDisableFailure,
+            // P39 (round-4 review): the managed refusal is matched ANCHORED.
+            // `plugins update` prints the raw `git pull` output and the
+            // post-update scan report (`hermes_cli/plugins_cmd.py:829`, `:844`)
+            // — text Hermes does not control — and these verdicts run
+            // `failureWins`, so a bare `is managed by` substring in a commit
+            // message or a scan finding turned a completed run into a reported
+            // failure. `save_config`'s refusal is at column 0.
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored,
+            // P39: `cmd_disable` writes config.yaml through `save_config`
+            // (`hermes_cli/plugins_cmd.py:115-120`), whose managed-install arm
+            // prints to stderr and RETURNS (`hermes_cli/config.py:2316-2318`,
+            // exit 0) — and `:1196-1198` then prints `⊘ Plugin … disabled.`
+            // anyway. Both markers in one run, so the refusal has to win, the
+            // same shape `enable` already had for the consent screen.
+            failureWins: true
         )
     }
 
@@ -455,6 +498,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
         success: String,
         successMarkers: [String]? = nil,
         failureMarkers: [String] = [],
+        anchoredFailureMarkers: [String] = [],
         failureWins: Bool = false
     ) {
         let run = cliRunner
@@ -466,6 +510,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     exitCode: result.exitCode,
                     successMarkers: markers,
                     failureMarkers: failureMarkers,
+                    anchoredFailureMarkers: anchoredFailureMarkers,
                     failureWins: failureWins
                 )
             } ?? HermesCLIOutcome(

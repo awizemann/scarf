@@ -138,8 +138,19 @@ public enum ProjectSkillsScanner: Sendable {
     /// `hermes skills trust <path>` / `hermes skills untrust <path>`.
     /// The path is always passed explicitly — the CLI's cwd-relative
     /// default would resolve against wherever Scarf happens to run.
+    /// `skills trust|untrust -- <root>`.
+    ///
+    /// The `--` is P40. `path` is the subparser's only positional and it is
+    /// `nargs="?"` with no flag after it
+    /// (`hermes_cli/subcommands/skills.py:29-37` @ v2026.9.7), so a project
+    /// root beginning with `-` — a relative path is never normalised away on
+    /// a remote host — was parsed as an option and exited 2. argparse has
+    /// always honoured `--` as the end-of-options separator, and this
+    /// subparser declares nothing that could swallow it, so the separator is
+    /// inert on every host that has the verb at all (it arrives at
+    /// v2026.8.16.2; charter C1).
     public static func trustArgs(_ root: String, trusted: Bool) -> [String] {
-        ["skills", trusted ? "trust" : "untrust", root]
+        ["skills", trusted ? "trust" : "untrust", "--", root]
     }
 }
 

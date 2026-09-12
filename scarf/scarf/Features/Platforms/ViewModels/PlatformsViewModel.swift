@@ -125,8 +125,9 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // `hasSuffix(":")` test saw neither, so a configured platform
         // rendered as unconfigured. Split at the `key: value` separator
         // colon instead — `HermesYAML.plainKeySeparatorIndex`, the same rule
-        // the parser and the writers use: the first colon followed by
-        // whitespace or end-of-line, so a colon inside the key
+        // the parser and the writers use: the first colon followed by a
+        // SPACE or end-of-line (a tab there is a PyYAML ScannerError, not a
+        // separator — P42c), so a colon inside the key
         // (`slack:dev: {}`) stays part of the key rather than truncating it
         // to a platform name the file never mentioned.
         // (`.whitespacesAndNewlines` so a CRLF config.yaml doesn't leave a
@@ -238,6 +239,30 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Restart the hermes gateway so newly-saved config takes effect. Runs on a
     /// background task so the UI stays responsive during the ~second or two
     /// `hermes gateway restart` takes.
+    /// The banner for a refused restart. The reason is Hermes's own line, so
+    /// it is interpolated into the already-localized stem rather than being
+    /// part of a format key nobody could translate meaningfully.
+    private nonisolated static func restartFailureMessage(_ detail: String?) -> String {
+        let stem = String(localized: "Restart failed")
+        return detail.map { "\(stem): \($0)" } ?? stem
+    }
+
+    /// The bar for a `gateway restart` verdict — THREE arms, not two (P40c).
+    /// A `.unconfirmed` verdict (the s6 dispatch that prints nothing,
+    /// `hermes_cli/gateway.py:5608-5629` @ v2026.9.7; the foreground
+    /// `run_gateway` that never returns, `:6062-6066`) is not a failure: it
+    /// gets the neutral wording and a non-failure bar, and the `load(force:)`
+    /// that follows the call is what tells the real state. Pure and `static`
+    /// so the three arms can be tested without a live `hermes`.
+    static func restartBanner(_ outcome: HermesCLIOutcome) -> OutcomeMessage {
+        if outcome.confidence == .unconfirmed {
+            return .success(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
+        }
+        return outcome.succeeded
+            ? .success(String(localized: "Gateway restarted"))
+            : .failure(Self.restartFailureMessage(outcome.detail))
+    }
+
     func restartGateway() {
         restartInProgress = true
         // In-progress, not an outcome: shown in the success style because
@@ -245,15 +270,15 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         message = String(localized: "Restarting gateway…")
         messageIsFailure = false
         Task.detached { [weak self, fileService] in
-            let result = fileService.runHermesCLI(args: ["gateway", "restart"], timeout: 30)
+            // P40: judged by output, like every other gateway-service call
+            // site — `_cmd_restart` has exit-0 refusal arms
+            // (`hermes_cli/gateway.py:6047` @ v2026.9.7) and `cmd_gateway`
+            // discards the return anyway (`hermes_cli/main.py:1736-1742`).
+            let outcome = fileService.restartGateway()
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
-                self.applySaveOutcome(
-                    result.exitCode == 0
-                        ? .success(String(localized: "Gateway restarted"))
-                        : .failure(String(localized: "Restart failed"))
-                )
+                self.applySaveOutcome(Self.restartBanner(outcome))
                 self.load(force: true)
             }
         }

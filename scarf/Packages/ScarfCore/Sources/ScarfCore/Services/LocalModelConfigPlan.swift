@@ -107,11 +107,25 @@ public enum LocalModelConfigPlan {
         case set(key: String, value: String)
         case clear(key: String)
 
-        /// argv for `runHermesCLI` / `context.runHermes`.
+        /// The dotted config key this operation writes. Read it from HERE,
+        /// never by indexing ``cliArguments`` — P39 put a `--` separator in
+        /// front of the positionals and an index-2 read silently became
+        /// `"--"`.
+        public var key: String {
+            switch self {
+            case .set(let key, _):  return key
+            case .clear(let key):   return key
+            }
+        }
+
+        /// argv for `runHermesCLI` / `context.runHermes`. `config set --
+        /// <key> <value>` — see ``HermesConfigSet/argv(key:value:)`` for why
+        /// the separator is there.
         public var cliArguments: [String] {
             switch self {
-            case .set(let key, let value): return ["config", "set", key, value]
-            case .clear(let key):          return ["config", "set", key, LocalModelConfigPlan.unsetValue(for: key)]
+            case .set(let key, let value): return HermesConfigSet.argv(key: key, value: value)
+            case .clear(let key):
+                return HermesConfigSet.argv(key: key, value: LocalModelConfigPlan.unsetValue(for: key))
             }
         }
     }

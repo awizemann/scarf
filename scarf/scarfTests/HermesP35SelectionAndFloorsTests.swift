@@ -144,17 +144,26 @@ struct HermesP35ApprovalsHostDefaultTests {
         return vm
     }
 
-    /// Let the serialised write chain run. `expectingACall: false` cannot
-    /// wait for evidence — the assertion is that nothing ran — so it settles
-    /// for a fixed beat instead of burning the deadline.
-    private static func settle(_ log: CLILog, expectingACall: Bool = true) async {
-        if expectingACall {
-            let deadline = Date().addingTimeInterval(10)
-            while Date() < deadline, log.calls.isEmpty {
-                try? await Task.sleep(nanoseconds: 20_000_000)
+    /// Wait on the OBSERVABLE, not the clock. `SettingsViewModel.writeChain`
+    /// is the `Task` every settings write is serialised through, and its
+    /// last act is `commitConfigWrite` — the banner these tests assert on —
+    /// so awaiting it is precisely "the write finished and said so". This
+    /// used to poll for a call and then nap a flat 300 ms (P45 finding 12).
+    ///
+    /// `expectingACall: false` is the "nothing must run" shape: there is no
+    /// observable to wait FOR, so it polls to a short deadline, breaking out
+    /// early if a call does appear — the caller's `#expect(log.calls.isEmpty)`
+    /// is what then fails.
+    private static func settle(
+        _ vm: SettingsViewModel, _ log: CLILog, expectingACall: Bool = true
+    ) async {
+        if !expectingACall {
+            let deadline = Date().addingTimeInterval(0.3)
+            while Date() < deadline, log.calls.isEmpty, vm.writeChain == nil {
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        await vm.writeChain?.value
     }
 
     private var v0211: HermesCapabilities {
@@ -171,9 +180,9 @@ struct HermesP35ApprovalsHostDefaultTests {
         #expect(vm.config.storedApprovalMode != nil, "premise: a mode is stored")
 
         vm.setApprovalMode("", capabilities: v0211)
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
-        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(log.calls == [["config", "unset", "--", "approvals.mode"]])
         #expect(vm.messageIsFailure == false)
     }
 
@@ -184,7 +193,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         let vm = Self.viewModel(log, storedMode: "manual")
 
         vm.setApprovalMode("", capabilities: v018)
-        await Self.settle(log, expectingACall: false)
+        await Self.settle(vm, log, expectingACall: false)
 
         #expect(log.calls.isEmpty, "a v0.18 host was asked to run `config unset`")
         #expect(vm.messageIsFailure)
@@ -197,7 +206,7 @@ struct HermesP35ApprovalsHostDefaultTests {
         let vm = Self.viewModel(log, storedMode: nil)
 
         vm.setApprovalMode("", capabilities: v0211)
-        await Self.settle(log, expectingACall: false)
+        await Self.settle(vm, log, expectingACall: false)
 
         #expect(log.calls.isEmpty)
         #expect(vm.message == nil)
@@ -213,9 +222,9 @@ struct HermesP35ApprovalsHostDefaultTests {
         let vm = Self.viewModel(log, storedMode: "manual")
 
         vm.setApprovalMode("", capabilities: v0211)
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
-        #expect(log.calls == [["config", "unset", "approvals.mode"]])
+        #expect(log.calls == [["config", "unset", "--", "approvals.mode"]])
         #expect(vm.messageIsFailure, "an exit-0 refusal was reported as a successful clear")
         #expect(vm.message?.contains("managed by NixOS") == true)
     }
@@ -223,8 +232,8 @@ struct HermesP35ApprovalsHostDefaultTests {
     /// `isUnset` is positional, so a `config set` whose VALUE is the word
     /// `unset` is still reported as a save.
     @Test func theUnsetTestIsPositionalNotASubstringSearch() {
-        #expect(SettingsViewModel.isUnset(["config", "unset", "approvals.mode"]))
-        #expect(!SettingsViewModel.isUnset(["config", "set", "model.default", "unset"]))
+        #expect(SettingsViewModel.isUnset(["config", "unset", "--", "approvals.mode"]))
+        #expect(!SettingsViewModel.isUnset(["config", "set", "--", "model.default", "unset"]))
         #expect(!SettingsViewModel.isUnset(["memory", "off"]))
         #expect(!SettingsViewModel.isUnset(["config"]))
     }
@@ -239,9 +248,9 @@ struct HermesP35ApprovalsHostDefaultTests {
         let vm = Self.viewModel(log, storedMode: nil)
 
         vm.unsetSetting("browser.cloud_provider", capabilities: v0211, isStored: true)
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
-        #expect(log.calls == [["config", "unset", "browser.cloud_provider"]])
+        #expect(log.calls == [["config", "unset", "--", "browser.cloud_provider"]])
         #expect(vm.messageIsFailure, "an exit-0 `config unset` refusal was reported as a save")
     }
 
@@ -251,8 +260,8 @@ struct HermesP35ApprovalsHostDefaultTests {
         let vm = Self.viewModel(log, storedMode: nil)
 
         vm.setApprovalMode("smart", capabilities: v0211)
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
-        #expect(log.calls == [["config", "set", "approvals.mode", "smart"]])
+        #expect(log.calls == [["config", "set", "--", "approvals.mode", "smart"]])
     }
 }

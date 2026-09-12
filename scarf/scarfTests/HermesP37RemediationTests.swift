@@ -28,16 +28,26 @@ struct HermesP37ConfigUnsetFloorTests {
         SettingsViewModel(context: scratchContext(), cliRunner: log.runner())
     }
 
-    /// Let the serialised write chain run. With `expectingACall: false` the
-    /// assertion is that nothing ran, so it settles for a fixed beat.
-    private static func settle(_ log: CLILog, expectingACall: Bool = true) async {
-        if expectingACall {
-            let deadline = Date().addingTimeInterval(10)
-            while Date() < deadline, log.calls.isEmpty {
-                try? await Task.sleep(for: .milliseconds(20))
+    /// Wait on the OBSERVABLE, not the clock. `SettingsViewModel.writeChain`
+    /// is the `Task` every settings write is serialised through, and its
+    /// last act is `commitConfigWrite` — the banner these tests assert on —
+    /// so awaiting it is precisely "the write finished and said so". This
+    /// used to poll for a call and then nap a flat 300 ms (P45 finding 12).
+    ///
+    /// `expectingACall: false` is the "nothing must run" shape: there is no
+    /// observable to wait FOR, so it polls to a short deadline, breaking out
+    /// early if a call does appear — the caller's `#expect(log.calls.isEmpty)`
+    /// is what then fails.
+    private static func settle(
+        _ vm: SettingsViewModel, _ log: CLILog, expectingACall: Bool = true
+    ) async {
+        if !expectingACall {
+            let deadline = Date().addingTimeInterval(0.3)
+            while Date() < deadline, log.calls.isEmpty, vm.writeChain == nil {
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        await vm.writeChain?.value
     }
 
     private var v0211: HermesCapabilities {
@@ -88,7 +98,7 @@ struct HermesP37ConfigUnsetFloorTests {
             let vmBelow = Self.viewModel(belowFloor)
             stored(vmBelow)
             act(vmBelow, v018)
-            await Self.settle(belowFloor, expectingACall: false)
+            await Self.settle(vmBelow, belowFloor, expectingACall: false)
             #expect(belowFloor.calls.isEmpty,
                     "\(key): a v0.18 host was asked to run `config unset`")
             #expect(vmBelow.messageIsFailure, "\(key): the inert row said nothing")
@@ -100,8 +110,8 @@ struct HermesP37ConfigUnsetFloorTests {
             let vmAt = Self.viewModel(atFloor)
             stored(vmAt)
             act(vmAt, v0211)
-            await Self.settle(atFloor)
-            #expect(atFloor.calls == [["config", "unset", key]], "\(key): did not clear")
+            await Self.settle(vmAt, atFloor)
+            #expect(atFloor.calls == [["config", "unset", "--", key]], "\(key): did not clear")
         }
     }
 
@@ -111,14 +121,14 @@ struct HermesP37ConfigUnsetFloorTests {
         let log = CLILog(output: "")
         let vm = Self.viewModel(log)
         vm.setDatabaseWalAutocheckpoint(500, capabilities: v018)
-        await Self.settle(log)
-        #expect(log.calls == [["config", "set", "database.wal_autocheckpoint", "500"]])
+        await Self.settle(vm, log)
+        #expect(log.calls == [["config", "set", "--", "database.wal_autocheckpoint", "500"]])
 
         let log2 = CLILog(output: "")
         let vm2 = Self.viewModel(log2)
         vm2.setBrowserCloudProvider("browserbase", capabilities: v018)
-        await Self.settle(log2)
-        #expect(log2.calls == [["config", "set", "browser.cloud_provider", "browserbase"]])
+        await Self.settle(vm2, log2)
+        #expect(log2.calls == [["config", "set", "--", "browser.cloud_provider", "browserbase"]])
     }
 
     /// The gate is inside the shared helper, so it cannot be reached around.
@@ -126,7 +136,7 @@ struct HermesP37ConfigUnsetFloorTests {
         let log = CLILog()
         let vm = Self.viewModel(log)
         vm.unsetSetting("anything.at.all", capabilities: v018, isStored: true)
-        await Self.settle(log, expectingACall: false)
+        await Self.settle(vm, log, expectingACall: false)
         #expect(log.calls.isEmpty)
         #expect(vm.messageIsFailure)
     }
@@ -323,8 +333,13 @@ struct HermesP37EffortVocabularyTests {
             .deletingLastPathComponent()
             .appendingPathComponent("scarf/Features/Settings/Views/Tabs/AuxiliaryTab.swift")
         let src = try String(contentsOf: tab, encoding: .utf8)
-        #expect(src.contains("HermesReasoningEffort.levels(capabilities:"),
+        // P44 / round-4 decision 13 wrapped the call across lines to pass
+        // `selected:`, so the pin is on the shared TYPE plus the widening
+        // argument rather than on one call's formatting.
+        #expect(src.contains("HermesReasoningEffort.levels("),
                 "the picker does not build its options from the shared vocabulary")
+        #expect(src.contains("selected: value"),
+                "the picker does not widen to the stored level (decision 13)")
         // No MEMBER access on the retired enum (`hasAuxiliaryReasoningEffort`
         // is the surface's capability flag and stays).
         #expect(!src.contains("AuxiliaryReasoningEffort.allCases"),

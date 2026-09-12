@@ -5,11 +5,11 @@ permalink: scarf/architecture/wal-state-db-without-a-shm-sidecar-cannot-be-read-
 tags: [sqlite, state-db, wal, hermes, charter-c3, dashboard]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/LocalSQLiteBackend.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/RemoteSQLiteBackend.swift]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: 479886cf715072b2f386431c01089bbd3e560510
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 Fix for t-281048bc, found by the UI-gate Smoke sweep against the seeded fixture (2026-09-08). Cover: `LocalSQLiteBackendWALOpenTests` (5 tests — WAL-without-sidecars opens and creates -shm, the fallback handle refuses writes, DELETE-mode dbs take the plain READONLY path, a missing file still reports not-found, and the kept-open fallback handle picks up a second connection's WAL writes).

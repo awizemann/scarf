@@ -36,13 +36,13 @@ import ScarfCore
     /// key, and the job still went terminal after N runs.
     @Test func emptiedRepeatClearsToForever() {
         #expect(CronViewModel.repeatEditArguments(existing: "3", newValue: "")
-                == ["--repeat", "0"])
+                == ["--repeat=0"])
     }
 
     /// Whitespace is not a value — the field is a plain `TextField`.
     @Test func whitespaceOnlyRepeatIsAnEmptying() {
         #expect(CronViewModel.repeatEditArguments(existing: "3", newValue: "   ")
-                == ["--repeat", "0"])
+                == ["--repeat=0"])
     }
 
     /// A form that opened blank (`repeatEditValue` is `""` for a job that
@@ -62,7 +62,7 @@ import ScarfCore
     /// would fail argparse.
     @Test func aRealRepeatCountIsForwarded() {
         #expect(CronViewModel.repeatEditArguments(existing: "", newValue: " 5 ")
-                == ["--repeat", "5"])
+                == ["--repeat=5"])
     }
 
     // MARK: - Prompt
@@ -70,7 +70,7 @@ import ScarfCore
     /// The same bug on the prompt field.
     @Test func emptiedPromptClears() {
         #expect(CronViewModel.promptEditArguments(existing: "check the logs", newValue: "")
-                == ["--prompt", ""])
+                == ["--prompt="])
     }
 
     /// A job whose prompt was already empty (script-only, skills-only) must
@@ -87,7 +87,7 @@ import ScarfCore
         // NOT trimmed: a prompt's leading/trailing whitespace is content,
         // and `_scan_cron_prompt` sees exactly what we send.
         #expect(CronViewModel.promptEditArguments(existing: "old", newValue: " new ")
-                == ["--prompt", " new "])
+                == ["--prompt= new "])
     }
 }
 

@@ -223,15 +223,90 @@ public final class IOSCronViewModel {
         }
     }
 
+    /// Round-4 decision 6 — `hermes cron resume <id> --run-now`, the re-arm.
+    ///
+    /// Until now iOS computed `offer.canRearm` and then told the user to go
+    /// to the Mac, which made the whole branch a pointer rather than a door:
+    /// `rearm_oneshot` is a CLI call like any other, iOS already shells
+    /// `cron resume` over the same transport, and `--run-now` is a bare
+    /// switch (`_flag(cron_resume, "--run-now")`,
+    /// `hermes_cli/subcommands/cron.py:147` @ `v2026.9.7`) needing no new
+    /// grammar. Its floor is `hasCronResumeRunNow` (v0.20.6), already
+    /// mirrored onto this VM as `isV0206OrLater` and already folded into
+    /// `offer.canRearm`, so this method is unreachable on a host without it.
+    ///
+    /// There is **no JSON fallback** here, deliberately. `rearm_oneshot`
+    /// clears `repeat.completed`, the claims and the schedule and then sets
+    /// `next_run_at` (`cron/jobs.py:2036-2055`, `:2072-2075`) — a multi-field
+    /// rewrite of a TERMINAL record, which is exactly the state
+    /// `_reject_terminal_activation` exists to stop a client from inventing.
+    /// If the CLI is unreachable the honest answer is "couldn't", not a
+    /// hand-rolled write (C3's spirit: mutations go through the CLI).
+    ///
+    /// The success copy says "next tick", not "running now": unlike `runNow`
+    /// this path never follows up with `cron tick`, so nothing dispatches
+    /// until the scheduler wakes. Byte-identical to the Mac's
+    /// `CronViewModel.resumeAndRunNow` success line.
+    @discardableResult
+    public func resumeAndRunNow(id: String, now: Date = Date()) async -> Bool {
+        guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return false }
+        guard !isSaving else { return false }
+        let job = jobs[idx]
+        lastError = nil
+
+        // The SHARED offer is the gate, as it is in `setEnabled` — never a
+        // locally re-derived "is it a one-shot" test. `canRearm` already
+        // encodes both `rearm_oneshot`'s own-schedule guard
+        // (`_REARM_RECURRING_ERROR` for anything but `once`,
+        // `cron/jobs.py:2040-2042`, `:2065-2066`) and the v0.20.6 floor.
+        let offer = recoveryOffer(for: job, now: now)
+        guard offer.canRearm else {
+            lastToggleRoute = .refused
+            lastError = Self.resumeRefusalMessage(job, offer: offer)
+            return false
+        }
+
+        isSaving = true
+        let outcome: CLIOutcome = context.isRemote
+            ? await Self.runCronCLI("resume", jobID: id, context: context, extraArgs: ["--run-now"])
+            : .unavailable
+        isSaving = false
+
+        switch outcome {
+        case .succeeded:
+            lastToggleRoute = .cli
+            await load()
+            return true
+        case .refused(let message):
+            lastToggleRoute = .refused
+            lastError = message
+            return false
+        case .unavailable:
+            lastToggleRoute = .refused
+            lastError = Self.rearmUnavailableMessage(job)
+            return false
+        }
+    }
+
+    /// Why a re-arm that could not reach the CLI is a refusal, not a
+    /// fallback. Named so both the reason and the copy live in one place.
+    static func rearmUnavailableMessage(_ job: HermesCronJob) -> String {
+        "Couldn't reach hermes on the host to re-arm \"\(job.name)\" — re-arming rewrites a finished job's schedule, which only Hermes may do. Try again, or duplicate the job."
+    }
+
     /// The sentence for a terminal job whose only doors are shut. Mirrors
-    /// the Mac's `CronViewModel.terminalRefusalMessage` — it names
-    /// "Resume & Run Now" only where `rearm_oneshot` would actually accept
-    /// the job, and otherwise quotes the offer's hint.
-    static func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+    /// the Mac's `CronViewModel.terminalRefusalMessage`.
+    ///
+    /// Round-4 decision 6 changed the `canRearm` arm: it used to point at the
+    /// Mac app, because the branch was unreachable on iOS anyway. iOS now has
+    /// the door (`resumeAndRunNow(id:)`), so both platforms name the same
+    /// affordance for the same job — which is what
+    /// `CronRecoveryOfferP30Tests`'s parity test is for.
+    public static func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
         let state = job.effectiveState == "error" ? "failed" : "finished"
         let lead = "\"\(job.name)\" has \(state) and can't just be resumed"
         if offer.canRearm {
-            return lead + " — re-arm it from the Mac app (Resume & Run Now)."
+            return lead + " — use Resume & Run Now to re-arm it."
         }
         return lead + ". " + (offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint)
     }
@@ -263,9 +338,9 @@ public final class IOSCronViewModel {
         // `--run-now` is a Mac affordance, so point there rather than telling
         // the user to duplicate a job Hermes can still re-arm.
         if offer.canRearm {
-            return lead + " — re-arm it from the Mac app (Resume & Run Now)."
+            return lead + " — use Resume & Run Now to re-arm it."
         }
-        return lead + ". Duplicate it with a new time instead."
+        return lead + ". " + (offer.hint ?? CronRecoveryOffer.pastDeadlineOneShotHint)
     }
 
     // MARK: - CLI route
@@ -281,14 +356,25 @@ public final class IOSCronViewModel {
         case unavailable
     }
 
-    static func runCronCLI(_ verb: String, jobID: String, context: ServerContext) async -> CLIOutcome {
+    /// `extraArgs` carries the flags a verb takes AFTER its positional —
+    /// today only `--run-now` on `resume`. The job id stays the last
+    /// POSITIONAL, which is what `cron resume` declares
+    /// (`hermes_cli/subcommands/cron.py:144-147` @ `v2026.9.7`:
+    /// `job_id`, then `--at`, then the `--run-now` switch), and a switch may
+    /// follow a positional freely.
+    static func runCronCLI(
+        _ verb: String,
+        jobID: String,
+        context: ServerContext,
+        extraArgs: [String] = []
+    ) async -> CLIOutcome {
         let ctx = context
         return await Task.detached {
             let result: ProcessResult
             do {
                 result = try ctx.makeTransport().runProcess(
                     executable: ctx.paths.hermesBinary,
-                    args: ["cron", verb, jobID],
+                    args: ["cron", verb, jobID] + extraArgs,
                     stdin: nil,
                     timeout: 30
                 )

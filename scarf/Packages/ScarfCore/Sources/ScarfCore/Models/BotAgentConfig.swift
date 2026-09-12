@@ -4,7 +4,8 @@ import Foundation
 ///
 /// **The layering verdict (source-verified at Hermes v2026.8.31 / 0.21.0).**
 /// A Hermes profile does **not** inherit the root profile's `config.yaml` at
-/// runtime. `_load_config_impl` (`hermes_cli/config.py:3936-4080`) builds the
+/// runtime. `_load_config_impl` (`hermes_cli/config.py:2178-2260` @ v2026.9.7 — P39
+/// re-anchored this from `:3936-4080`) builds the
 /// effective config from exactly three layers:
 ///
 ///   1. `DEFAULT_CONFIG` — Hermes' built-in schema defaults.

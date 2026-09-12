@@ -214,17 +214,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// so the row silently burned a turn (P34's finding, one row late).
     public var hasACPSteer: Bool { atLeastSemver(0, 13, 0) }
 
-    /// `/steer` runs as a regular prompt on an IDLE ACP session, rather than
-    /// needing a turn in flight to inject into
-    /// (`acp_adapter/server.py:812-820` @ `v2026.5.7`).
-    ///
-    /// Same floor as ``hasACPSteer`` and deliberately expressed as it: the
-    /// idle handling shipped in the same commit as the command, so there is
-    /// no host that has `/steer` without it. (The old doc here claimed
-    /// pre-v0.13 hosts "silently no-op `/steer` when no turn is in flight" —
-    /// a CLI/TUI fact, not an ACP one: pre-v0.13 hosts have no `/steer` at
-    /// all. C2.)
-    public var hasACPSteerOnIdle: Bool { hasACPSteer }
+    // `hasACPSteerOnIdle` was RETIRED in P44 (round-4 decision 14). It was
+    // `hasACPSteer` expressed a second time — the idle fallback
+    // (`acp_adapter/server.py:812-820` @ `v2026.5.7`) shipped in the same
+    // commit as the command itself (`:170`), so no host has one without the
+    // other — and its only consumer was an arm of
+    // `RichChatViewModel.disabledSlashCommandNames` that the P37 roster gate
+    // had already made unreachable. A flag whose every reader is dead is not
+    // defence in depth; it is a second place for the floor to drift.
 
     /// Kanban v0.13 reliability surface, as it actually exists at v2026.9.7:
     /// the `kanban diagnostics [--json]` subcommand over the rule engine
@@ -975,6 +972,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// file at v2026.7.7.2 (0.18.2).
     public var hasCronRuns: Bool { isV019OrLater }
 
+    // MARK: v0.18.1 (v2026.7.7) flags — re-floored out of the v0.20 cluster
+    //
+    // Three flags the v0.20 audit filed under v0.20 whose per-flag tag walks
+    // (below) put them at v2026.7.7 = 0.18.1. They stay in this file position
+    // rather than moving up to the `v0.18` MARK: the v0.18 section is the
+    // 0.18.0 tag (v2026.7.1) and these are one release later, and forty
+    // commits of audit docs cite them here. P45 added this header because
+    // `hasReasoningDisableAliases` was landing under a MARK reading "v0.20"
+    // while its own doc floors it at v0.18.1.
+
     /// `hermes sessions export --format md|html|qmd|trace` — additional
     /// session export formats beyond the default.
     ///
@@ -995,6 +1002,31 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Offering the level on a host that accepts it is a permissive
     /// rendering change, not a C1 degradation (round-3 decision 5).
     public var hasReasoningEffortMax: Bool { isV0181OrLater }
+
+    /// The `false` / `disabled` spellings of "reasoning off" in
+    /// `agent.reasoning_effort` / `agent.reasoning_overrides` — and, by way
+    /// of YAML's bool coercion, bare `off`.
+    ///
+    /// **Floor v0.18.1, the same tag `max` arrived on — walked, not
+    /// assumed.** `parse_reasoning_effort` is typed `(effort: str)` through
+    /// **v2026.7.1** (0.18.0, `hermes_constants.py:797-812`) and disables on
+    /// `effort == "none"` ALONE (`:809`); `"false"` / `"disabled"` fall past
+    /// `VALID_REASONING_EFFORTS` to the closing `return None`, and a YAML
+    /// `false` (which is what bare `off` loads as) is caught by the leading
+    /// `if not effort` and returns `None` too. At tag **v2026.7.7** (0.18.1)
+    /// the signature widens to `(effort)`, the body gains
+    /// `str(effort).strip().lower()` and the alias set becomes
+    /// `{"none", "false", "disabled"}` (`:816`) — byte-identical at every
+    /// tag from there to `v2026.9.7` (`:885`).
+    ///
+    /// So below this floor those three spellings do NOT disable reasoning:
+    /// the host logs `Unknown reasoning_effort` and uses its own default.
+    /// That is exactly the difference
+    /// ``HermesReasoningEffort/unsupportedLevelNotice(for:capabilities:)``
+    /// renders.
+    public var hasReasoningDisableAliases: Bool { isV0181OrLater }
+
+    // MARK: v0.19.0 (v2026.7.20) flags — re-floored out of the v0.20 cluster
 
     /// `ultra` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
     ///
@@ -1104,6 +1136,26 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `"no_speech_prob_threshold": 0.6,`, `:1430`
     /// `"logprob_threshold": -1.0,`.
     public var hasSTTLocalVADTuning: Bool { isV0191OrLater }
+
+    /// `provider_override` in the `kanban list --json` task envelope.
+    ///
+    /// **Floor v0.19.1 (`v2026.7.30`), not v0.21.1.** P42 read the FILE move
+    /// for the KEY's birth: the task dict moved out of
+    /// `hermes_cli/kanban.py::_task_to_dict` into
+    /// `hermes_cli/kanban_output.py::_TASK_DICT_FIELDS` at `v2026.9.7`, and
+    /// grepping the new file across the tags found only the new tag. The key
+    /// itself is two releases older. Re-walked by opening
+    /// `hermes_cli/kanban.py` at every `v2026.*` tag: `_task_to_dict` gains
+    /// `"provider_override": t.provider_override` at **`v2026.7.30`**
+    /// (`:80`; `pyproject.toml` = `0.19.1`) and has it at every later tag
+    /// including `v2026.8.31` (`:80`); `v2026.7.20` (0.19.0) has no
+    /// occurrence of the name in the file at all. `list --json` prints
+    /// `[_task_to_dict(t) for t in tasks]` at `v2026.7.30:1594`, so that tag
+    /// is the first that EMITS it, not merely the first that stores it.
+    ///
+    /// Gates the inspector's `Provider:` chip only; the DECODE is
+    /// `decodeIfPresent` and stays ungated (C1).
+    public var hasKanbanProviderOverride: Bool { isV0191OrLater }
 
     /// `gateway.profile_routes` (and the top-level `profile_routes` form) —
     /// per-guild/channel/thread routing of inbound gateway messages to
@@ -1285,6 +1337,31 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasMCPIdentityHeader: Bool { isV0204OrLater }
 
     // MARK: v0.20.5 (v2026.8.19) flags
+
+    /// `get_managed_system()` READS the `.managed` marker file's contents and
+    /// honours `_IGNORED_MANAGED_VALUES` there (v0.20.5+).
+    ///
+    /// Below this floor the marker is a pure existence check: every tag from
+    /// v2026.3.12 through **v2026.8.18** ends `get_managed_system` with
+    /// ```
+    /// managed_marker = get_hermes_home() / ".managed"
+    /// if managed_marker.exists():
+    ///     return "NixOS"
+    /// ```
+    /// (`hermes_cli/config.py:327-330` @ v2026.6.19; byte-identical at
+    /// v2026.7.20 and at v2026.7.30, where `_IGNORED_MANAGED_VALUES` FIRST
+    /// appears but applies only to the `HERMES_MANAGED` env var, never to the
+    /// marker). The contents-reading form — `read_text(...)`, the `OSError`
+    /// → `""` arm, and the ignored-values check on the marker — arrives at
+    /// **v2026.8.19 = 0.20.5**, walked tag by tag over both file locations.
+    ///
+    /// So on a pre-v0.20.5 host a `.managed` file holding `brew` means
+    /// **managed** (system `"NixOS"`, that tag's literal spelling), while on
+    /// v0.20.5+ it means not managed at all. Scarf's probe has to branch, or
+    /// it locks a Homebrew install out of its own Settings on a new host — or
+    /// leaves a genuinely managed old host writable. See
+    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:)``.
+    public var hasManagedMarkerContents: Bool { isV0205OrLater }
 
     /// The bare `hermes version` subcommand was removed (dropped from
     /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:2595` — no `"version"`

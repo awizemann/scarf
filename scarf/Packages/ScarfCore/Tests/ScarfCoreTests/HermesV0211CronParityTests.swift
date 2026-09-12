@@ -165,7 +165,7 @@ import Foundation
     /// no edit — this fixture is the drift alarm, and it pins the new issue
     /// into its own severity so a Slack-delivering job is never headlined
     /// as broken.
-    @Test func parsesTheV0211DoctorIssueSet() {
+    @Test func parsesTheV0211DoctorIssueSet() throws {
         let output = """
             Cron doctor found 3 issue(s) across 2 job(s):
 
@@ -181,16 +181,16 @@ import Foundation
         let findings = HermesCronDoctorParser.parse(text: output)
         #expect(findings.count == 2)
 
-        let digest = try? #require(findings["4f2a9c1b7e03"])
-        #expect(digest?.issues.count == 2)
-        #expect(digest?.problemIssues == ["last delivery failed: telegram 429 Too Many Requests"])
-        #expect(digest?.unverifiedIssues.count == 1)
+        let digest = try #require(findings["4f2a9c1b7e03"])
+        #expect(digest.issues.count == 2)
+        #expect(digest.problemIssues == ["last delivery failed: telegram 429 Too Many Requests"])
+        #expect(digest.unverifiedIssues.count == 1)
 
         // A job whose ONLY finding is an unverified delivery has zero
         // problems — the banner must not claim "1 issue".
-        let ping = try? #require(findings["b71c02da9f10"])
-        #expect(ping?.problemIssues.isEmpty == true)
-        #expect(ping?.unverifiedIssues.count == 1)
+        let ping = try #require(findings["b71c02da9f10"])
+        #expect(ping.problemIssues.isEmpty)
+        #expect(ping.unverifiedIssues.count == 1)
     }
 
     @Test func classifiesDoctorIssueSeverity() {
@@ -214,19 +214,18 @@ import Foundation
         let new = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(new.contains("--failure-deliver"))
-        #expect(new.firstIndex(of: "local") == new.firstIndex(of: "--failure-deliver").map { $0 + 1 })
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: new) == "local")
 
         // A v0.21.0 target would die at argparse on the unknown flag.
         let old = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v021, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(old.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: old) == false)
         // ...and an unprobed host is treated as the oldest one.
         let unknown = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: .empty, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(unknown.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: unknown) == false)
     }
 
     /// `failure_deliver` shares `deliver`'s grammar, so a value the target
@@ -241,14 +240,14 @@ import Foundation
         let result = FleetApplyPlan.cronCreateArgs(
             copying: source, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         )
-        #expect(result.args.contains("bot-chat:coder"))
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: result.args) == "bot-chat:coder")
         #expect(result.droppedDeliverAll == false)
 
         let noOverride = try copyJob(failureDeliver: nil)
         let plain = FleetApplyPlan.cronCreateArgs(
             copying: noOverride, schedule: schedule, caps: v0211, sourceRoot: "/a", targetRoot: "/b"
         ).args
-        #expect(plain.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: plain) == false)
     }
 
     @Test func fleetCopyPausesInOneWriteOnlyOnV0211Hosts() throws {
@@ -289,14 +288,14 @@ import Foundation
     /// `hermes_cli/cron.py::cron_runs` used at v0.21.0 — byte-identical at
     /// v2026.9.7, so `HermesCronRunsParser` needs no edit. Sibling of
     /// `cronRunsFormatUnchangedAtV021`.
-    @Test func cronRunsFormatUnchangedAtV0211() {
+    @Test func cronRunsFormatUnchangedAtV0211() throws {
         let output = """
             e1  completed  job=job-1  source=scheduler  2026-09-07T09:00:00
             e2  failed     job=job-1  source=manual  2026-09-06T09:00:00
                 boom: provider 500
             """
         let runs = HermesCronRunsParser.parse(text: output)
-        #expect(runs.count == 2)
+        try #require(runs.count == 2)
         #expect(runs[0].id == "e1")
         #expect(runs[0].status == "completed")
         #expect(runs[1].error == "boom: provider 500")
@@ -370,7 +369,8 @@ import Foundation
         let end = try #require(args.firstIndex(of: "--"))
         #expect(Array(args[end...]) == ["--", "@daily", "--summarize the inbox"])
         // …and nothing option-shaped follows the marker.
-        #expect(args.firstIndex(of: "--name")! < end)
+        let nameIndex = try #require(HermesCLIOption.index(of: "--name", in: args))
+        #expect(nameIndex < end)
     }
 
     /// The template installer used to hand-roll this argv; both callers now
@@ -384,7 +384,7 @@ import Foundation
         #expect(!dropped)
         #expect(args.contains("--paused"))
         #expect(Array(args.suffix(3)) == ["--", "0 9 * * *", "go"])
-        #expect(args.firstIndex(of: "--repeat").map { args[$0 + 1] } == "3")
+        #expect(HermesCLIOption.value(of: "--repeat", in: args) == "3")
 
         // A pre-v0.14 host can parse neither `--deliver all` nor `--paused`:
         // the deliver value is dropped (reported), the flag is omitted, and
@@ -394,7 +394,7 @@ import Foundation
             name: "nightly", deliver: "all", schedule: "0 9 * * *", prompt: "go",
             caps: old, paused: true)
         #expect(oldDropped)
-        #expect(!oldArgs.contains("--deliver"))
+        #expect(!HermesCLIOption.contains("--deliver", in: oldArgs))
         #expect(!oldArgs.contains("--paused"))
     }
 

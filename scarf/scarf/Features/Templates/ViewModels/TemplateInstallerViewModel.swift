@@ -93,11 +93,26 @@ final class TemplateInstallerViewModel {
     /// - Parameter source: analytics source token; defaults to `"url"` (the
     ///   local-file case). `openRemoteURL` passes its own token through
     ///   when it delegates here for a catalog pick.
-    func openLocalFile(_ zipPath: String, source: UsageEvent.InstallSource = .url) {
+    /// - Parameter removeArchiveWhenDone: delete `zipPath` once the inspect
+    ///   has finished, pass or fail. True only for `openRemoteURL`'s download,
+    ///   which owns its temp file — a refusal used to strand a copy of every
+    ///   downloaded `.scarftemplate` in the temp directory, including the
+    ///   50 MB ones the bomb caps had just refused (round-4 P43b). NEVER true
+    ///   for a file the user picked: that one is theirs.
+    func openLocalFile(
+        _ zipPath: String,
+        source: UsageEvent.InstallSource = .url,
+        removeArchiveWhenDone: Bool = false
+    ) {
         resetTempState()
         stage = .inspecting
         let service = templateService
         Task.detached { [weak self] in
+            defer {
+                if removeArchiveWhenDone {
+                    try? FileManager.default.removeItem(atPath: zipPath)
+                }
+            }
             do {
                 let inspection = try service.inspect(zipPath: zipPath)
                 let readme = Self.readReadme(unpackedDir: inspection.unpackedDir)
@@ -172,7 +187,7 @@ final class TemplateInstallerViewModel {
                     // `source` is the one this call captured, not a VM
                     // property another entry point may have overwritten
                     // while the download was in flight.
-                    self.openLocalFile(tempZip, source: source)
+                    self.openLocalFile(tempZip, source: source, removeArchiveWhenDone: true)
                 }
             } catch {
                 await MainActor.run { [weak self] in

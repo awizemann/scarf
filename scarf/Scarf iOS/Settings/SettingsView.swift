@@ -55,18 +55,39 @@ struct SettingsView: View {
                 v013ActiveBadgeSection
             }
 
+            // P39 (round-4 review): the iOS twin of the Mac's managed-host
+            // banner. A package-manager-managed Hermes refuses every config
+            // write at exit 0, so the editor rows are locked behind ONE
+            // banner rather than each sheet ending in the same refusal.
+            if let managed = vm.managedBannerText {
+                Section {
+                    Label(managed, systemImage: "lock.fill")
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .accessibilityLabel("This Hermes installation is managed; settings are read-only")
+                }
+            }
+
             if !vm.isLoading || vm.config.model != "unknown" {
-                quickEditsSection
-                modelSection
-                agentSection
-                displaySection
-                terminalSection
-                memorySection
-                voiceSection
-                securitySection
-                compressionSection
-                loggingSection
-                platformsSection
+                Group {
+                    quickEditsSection
+                    modelSection
+                    agentSection
+                    displaySection
+                    terminalSection
+                    memorySection
+                    voiceSection
+                    securitySection
+                    compressionSection
+                    loggingSection
+                    platformsSection
+                }
+                // The write rows only. `diagnosticsSection` and
+                // `rawYAMLToggleSection` below are reads, and `.disabled`
+                // reaches every descendant — including text selection — so a
+                // managed host would otherwise lose the ability to read the
+                // config its package manager pinned.
+                .disabled(vm.isManagedHost)
+
                 diagnosticsSection
                 rawYAMLToggleSection
             }
@@ -208,11 +229,19 @@ struct SettingsView: View {
             if !vm.config.provider.isEmpty, vm.config.provider != "unknown" {
                 LabeledContent("Provider", value: vm.config.provider)
             }
-            // Absent key = the model provider's own default, not `medium`.
+            // Absent key = HERMES's own default, not the model provider's
+            // and not `medium` (P44b walked the consumers: the
+            // chat-completions transport substitutes `medium` explicitly,
+            // `agent/transports/chat_completions.py:420-422` @ `v2026.9.7`;
+            // only the Anthropic adapter leaves it to the model).
             LabeledContent(
                 "Reasoning effort",
-                value: vm.config.reasoningEffort.isEmpty
-                    ? "Provider default" : vm.config.reasoningEffort
+                // P46b: emptiness is asked of the NORMALISED form, the way
+                // Hermes asks it (`str(effort).strip()`) — a whitespace-only
+                // value is the absent key here too, and read raw it rendered
+                // as a blank value beside the label.
+                value: HermesReasoningEffort.pickerSelection(for: vm.config.reasoningEffort).isEmpty
+                    ? String(localized: "Hermes default") : vm.config.reasoningEffort
             )
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)

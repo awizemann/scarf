@@ -31,6 +31,42 @@ public final class RemoteRestoreService: @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.scarf", category: "RemoteRestoreService")
     #endif
 
+    // MARK: - Spawn budgets (charter C10)
+    //
+    // Every subprocess here has a timeout, and each one is named after what
+    // it is waiting for rather than sharing one anonymous number. The sizes
+    // come from the archives these spawns actually see: a Hermes-home backup
+    // is the user's whole `~/.hermes` — state.db, logs and every project
+    // tarball — routinely hundreds of MB and occasionally multi-GB.
+    //
+    // These are CEILINGS on a wedged child, not budgets a healthy one spends:
+    // `unzip` on a 2 GB archive to local disk is a couple of minutes, and the
+    // drain now runs concurrently with the wait, so a chatty archive no longer
+    // has to reach the timeout at all. They are deliberately generous — a
+    // restore killed halfway is worse than one that takes a while — and small
+    // enough that a hung `unzip` is a message rather than a frozen app.
+
+    /// Unpacking the outer `.scarfbackup` zip on the local disk.
+    public static let unzipTimeout: TimeInterval = 900
+
+    /// The remote `tar -x` finishing after the tarball's last byte is through
+    /// the pipe. Shorter than ``unzipTimeout`` because the transfer — the slow
+    /// part, and the part that varies with size — has already happened by the
+    /// time the wait begins; what is left is the remote's final writes.
+    public static let remoteExtractTimeout: TimeInterval = 300
+
+    /// How long the tarball pump may make NO progress before the push is
+    /// declared wedged.
+    ///
+    /// This is a stall ceiling, not a transfer budget: a multi-GB tarball over
+    /// a slow link legitimately spends hours in the pump, and any wall-clock
+    /// ceiling on the whole transfer would kill exactly the restores that
+    /// needed it most. What is never legitimate is a pump that writes NOTHING
+    /// for minutes — that is the remote having stopped reading stdin, which is
+    /// what a `tar -x` blocked on its own full stderr buffer looks like from
+    /// this side (round-4 P43b).
+    public static let pumpStallTimeout: TimeInterval = 120
+
     public let context: ServerContext
 
     public init(context: ServerContext) {
@@ -123,9 +159,20 @@ public final class RemoteRestoreService: @unchecked Sendable {
         let workDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("scarf-restore-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        // The caller owns `workDir` only on the SUCCESS path — it is handed
+        // back inside `InspectionResult` for `run()` to reuse. On every
+        // throwing path it is ours, and nothing was removing it: a
+        // `.scarfbackup` whose unzip timed out or was killed left a
+        // `scarf-restore-<uuid>` directory holding however much of a multi-GB
+        // archive had already landed, once per attempt, until the OS swept the
+        // temp dir (round-4 P43b).
+        var handedToCaller = false
+        defer {
+            if !handedToCaller { try? FileManager.default.removeItem(at: workDir) }
+        }
 
         // Unzip outer archive.
-        try Self.unzipArchive(at: archiveURL, into: workDir)
+        try await Self.unzipArchive(at: archiveURL, into: workDir)
 
         // Decode + validate manifest.
         let manifestURL = workDir.appendingPathComponent(BackupArchiveLayout.manifestPath)
@@ -171,6 +218,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         )
         let resolvedVersion = versionProbe?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        handedToCaller = true
         return InspectionResult(
             manifest: manifest,
             workDir: workDir,
@@ -293,6 +341,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         transport: any ServerTransport,
         tarball: URL,
         extractInto target: String,
+        extractTimeout: TimeInterval = RemoteRestoreService.remoteExtractTimeout,
+        stallTimeout: TimeInterval = RemoteRestoreService.pumpStallTimeout,
         onProgress: @Sendable @escaping (Int64) -> Void
     ) async throws {
         #if os(iOS)
@@ -300,7 +350,44 @@ public final class RemoteRestoreService: @unchecked Sendable {
         #else
         let cmd = "tar -xzf - -C \(Self.shellQuote(target))"
         let proc = transport.makeProcess(executable: "/bin/bash", args: ["-lc", cmd])
+        try await Self.streamTarball(
+            into: proc,
+            tarball: tarball,
+            extractTimeout: extractTimeout,
+            stallTimeout: stallTimeout,
+            onProgress: onProgress
+        )
+        #endif
+    }
 
+    #if !os(iOS)
+    /// Pump `tarball` into `proc`'s stdin, then wait for it — the whole piped
+    /// half of ``pushTarball(transport:tarball:extractInto:...)``, split out so
+    /// the tests can drive it with a child of their own choosing instead of a
+    /// real remote `tar`.
+    ///
+    /// **Both drains are installed BEFORE the pump, and the pump has a stall
+    /// ceiling.** The first version installed neither: it pumped the whole
+    /// tarball and only then called `waitDraining`, so nothing was reading
+    /// stderr while the tarball was in flight. A remote `tar -x` that reports a
+    /// problem per member fills its 64 KB stderr buffer, blocks in `write()`,
+    /// stops reading stdin, and the parent blocks forever in `writer.write()` —
+    /// BEFORE the bounded wait that was supposed to rescue it, so
+    /// ``remoteExtractTimeout`` was never reached and `Task.checkCancellation`
+    /// only ran between chunks that had stopped coming. Reproduced with a child
+    /// that writes 200 KB to stderr and then `cat > /dev/null`s its stdin
+    /// (round-4 P43b).
+    ///
+    /// The drained data is handed to the post-pump verdict, so a `tar` that
+    /// explained itself on stderr before the pump finished is still quoted back
+    /// to the user.
+    static func streamTarball(
+        into proc: Process,
+        tarball: URL,
+        extractTimeout: TimeInterval = RemoteRestoreService.remoteExtractTimeout,
+        stallTimeout: TimeInterval = RemoteRestoreService.pumpStallTimeout,
+        onProgress: @Sendable @escaping (Int64) -> Void
+    ) async throws {
         // standardInput: read end of an OS pipe whose write end we
         // pump from the local tarball file. Going through a pipe (vs
         // setting standardInput to a FileHandle directly) gives us
@@ -312,53 +399,278 @@ public final class RemoteRestoreService: @unchecked Sendable {
         proc.standardOutput = outPipe
         proc.standardError = errPipe
 
+        /// Close every handle of every pipe. Only correct BEFORE the drain is
+        /// started — after that the read ends belong to the drain.
+        func closeEverything() {
+            for pipe in [inPipe, outPipe, errPipe] {
+                try? pipe.fileHandleForReading.close()
+                try? pipe.fileHandleForWriting.close()
+            }
+        }
+
         do {
             try proc.run()
         } catch {
+            // The launch-failure path owns all six handles: nothing is
+            // draining anything and there is no child to reap.
+            closeEverything()
             throw RestoreError.remoteCommandFailed("Couldn't start remote tar: \(error.localizedDescription)")
         }
 
+        // BEFORE the pump. See this method's note.
+        let drain = Process.startDraining(pipes: [errPipe, outPipe])
+        /// The caller's half of the pipes: the write ends, which the drain
+        /// never touches. Every exit from here on goes through this.
+        func closeWriteEnds() {
+            try? errPipe.fileHandleForWriting.close()
+            try? outPipe.fileHandleForWriting.close()
+        }
+        /// Bounded reap + drain + close, for the arms that give up mid-pump.
+        /// `terminate()` alone leaves a child that ignores SIGTERM running and
+        /// leaves both read ends draining into nothing.
+        ///
+        /// **Returns what the child had already said**, because that is
+        /// usually the only explanation there is. Every give-up arm here fires
+        /// precisely when the remote `tar` has stopped cooperating — and a
+        /// `tar` stops cooperating by printing WHY and exiting. Throwing away
+        /// the drain (`_ = proc.waitDraining(…)`, which is what these arms did)
+        /// left the user with "Broken pipe" for a run whose stderr said
+        /// `tar: /nope: Cannot open` (round-4 P43c).
+        func abandon() async -> String {
+            let (_, drained) = await proc.waitDrainingAsync(
+                timeout: Self.abandonReapTimeout, drain: drain,
+                drainGrace: Self.drainCollectGrace)
+            closeWriteEnds()
+            return Self.outputTail(drained)
+        }
+
         let writer = inPipe.fileHandleForWriting
+        // **Non-blocking, because a blocked write here cannot be rescued from
+        // outside.** The obvious ceiling — a timer that kills the child when
+        // the pump stops making progress — does not work: a shell child has
+        // grandchildren (`tar` behind a `bash -lc`, the pipeline in the test's
+        // reproduction) that INHERITED this pipe's read end, so killing the
+        // one pid we may signal leaves the write blocked. Signalling the
+        // process GROUP is not an option either: Foundation's children share
+        // Scarf's group, so `kill(-pid, …)` would take Scarf with it. Measured:
+        // an earlier draft of this fix DID carry that timer, and with the
+        // drains moved back after the pump the reproduction still wedged past
+        // three minutes — the kill it can deliver does not free the write.
+        //
+        // With `O_NONBLOCK` the parent is never inside an uninterruptible
+        // write at all: a full pipe returns `EAGAIN`, which is where the stall
+        // ceiling and `Task.checkCancellation()` both get their turn. It also
+        // makes `EPIPE` a return value rather than a SIGPIPE that would kill
+        // Scarf — `F_SETNOSIGPIPE` covers the same ground per-fd and is set
+        // alongside it (round-4 P43b).
+        let writeFD = writer.fileDescriptor
+        _ = fcntl(writeFD, F_SETNOSIGPIPE, 1)
+        _ = fcntl(writeFD, F_SETFL, fcntl(writeFD, F_GETFL) | O_NONBLOCK)
         let reader: FileHandle
         do {
             reader = try FileHandle(forReadingFrom: tarball)
         } catch {
             try? writer.close()
-            proc.terminate()
+            _ = await abandon()
             throw RestoreError.localIO("Couldn't open tarball: \(error.localizedDescription)")
         }
         defer { try? reader.close() }
 
         var written: Int64 = 0
+        var lastProgress = Date()
+        var stalled = false
+        var lastYield: Int64 = 0
         let chunkSize = 64 * 1024
         do {
-            while true {
+            pump: while true {
                 try Task.checkCancellation()
+                // SUSPEND. The happy path — a remote reading as fast as we
+                // write — never hits the `EAGAIN` arm below, so the whole
+                // multi-gigabyte pump ran without a single suspension point:
+                // `Task.checkCancellation()` is synchronous, and `write(2)`
+                // on a drained pipe returns immediately. One cooperative
+                // thread was held for the length of the push.
+                // `Task.yield()` every ``pumpYieldBytes`` gives the pool its
+                // thread back without measurably slowing the copy.
+                if Self.shouldYield(written: written, lastYield: lastYield) {
+                    lastYield = written
+                    await Task.yield()
+                }
                 let chunk = reader.readData(ofLength: chunkSize)
                 if chunk.isEmpty { break }
-                try writer.write(contentsOf: chunk)
-                written += Int64(chunk.count)
-                onProgress(written)
+                var offset = 0
+                while offset < chunk.count {
+                    try Task.checkCancellation()
+                    let sent: Int = chunk.withUnsafeBytes { raw in
+                        guard let base = raw.baseAddress else { return 0 }
+                        return write(writeFD, base + offset, chunk.count - offset)
+                    }
+                    if sent > 0 {
+                        offset += sent
+                        written += Int64(sent)
+                        lastProgress = Date()
+                        onProgress(written)
+                        continue
+                    }
+                    if sent < 0, errno == EINTR { continue }
+                    // `write(2)` returning 0 for a NON-zero count accepted
+                    // nothing and set no errno, so the throw below would
+                    // report whatever `errno` happened to hold from an
+                    // earlier call. It is the same condition `EAGAIN` names —
+                    // no progress — so it gets the same treatment, under the
+                    // same stall budget, which is what stops it spinning.
+                    if sent == 0 || (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                        // The remote has stopped reading. Give it room, but
+                        // not forever: see ``pumpStallTimeout``.
+                        let stalledFor = Date().timeIntervalSince(lastProgress)
+                        if stalledFor >= stallTimeout {
+                            stalled = true
+                            break pump
+                        }
+                        // **`poll(2)`, not a fixed sleep.** A flat 20 ms nap
+                        // per `EAGAIN` turns the pipe into a metronome: the
+                        // 64 KB buffer drains in microseconds and then the
+                        // parent does nothing for the rest of the tick, so the
+                        // push tops out near 3 MB/s no matter how fast the
+                        // link is. Measured on a 64 MB payload into
+                        // `cat > /dev/null`: 4138 MB/s blocking, 2.8 MB/s with
+                        // the sleep — an hour and a half added to a 16 GB
+                        // Hermes home. `poll` wakes on the byte, so the
+                        // non-blocking pump costs what the blocking one did
+                        // while keeping the property it exists for: the wait
+                        // is CAPPED, at the shorter of what is left of the
+                        // stall budget and ``pumpPollSlice``, so
+                        // `Task.checkCancellation()` still gets a turn several
+                        // times a second (round-4 P43c).
+                        Self.waitWritable(
+                            writeFD, upTo: min(stallTimeout - stalledFor, Self.pumpPollSlice))
+                        continue
+                    }
+                    throw RestoreError.localIO(
+                        "writing to the remote failed: \(String(cString: strerror(errno)))")
+                }
             }
         } catch is CancellationError {
             try? writer.close()
-            proc.terminate()
+            _ = await abandon()
+            // `.cancelled` carries no message: the user asked for this one, so
+            // there is nothing for the child's stderr to explain.
             throw RestoreError.cancelled
         } catch {
             try? writer.close()
-            proc.terminate()
-            throw RestoreError.localIO("Couldn't pump tarball into remote: \(error.localizedDescription)")
+            // The EPIPE arm lands HERE — a remote `tar` that refuses the
+            // archive closes stdin, and the next write is "Broken pipe". Its
+            // reason is on the stderr the drain has been collecting since the
+            // spawn.
+            let tail = await abandon()
+            throw RestoreError.localIO(Self.appendingTail(
+                "Couldn't pump tarball into remote: \(error.localizedDescription)", tail))
+        }
+        if stalled {
+            try? writer.close()
+            let tail = await abandon()
+            throw RestoreError.remoteCommandFailed(Self.appendingTail(
+                "the remote stopped reading the tarball for \(Int(stallTimeout))s, so the transfer was stopped",
+                tail))
         }
         try? writer.close() // signals EOF to the remote tar
 
-        proc.waitUntilExit()
+        // C10: bounded. The drain has been running since the spawn, so what is
+        // collected here is everything the child said — including whatever it
+        // said DURING the pump.
+        let (exited, drained) = await proc.waitDrainingAsync(
+            timeout: extractTimeout, drain: drain, drainGrace: Self.drainCollectGrace)
+        // The write ends stay ours; the drain owns the read ends.
+        closeWriteEnds()
+        guard exited else {
+            throw RestoreError.remoteCommandFailed(Self.appendingTail(
+                "remote tar -x did not finish within \(Int(extractTimeout))s and was stopped",
+                Self.outputTail(drained)))
+        }
         if proc.terminationStatus != 0 {
-            let tail = (try? errPipe.fileHandleForReading.readToEnd())
-                .flatMap { $0.flatMap { String(data: $0, encoding: .utf8) } } ?? ""
+            let tail = String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
             throw RestoreError.remoteCommandFailed("tar -x exited \(proc.terminationStatus): \(tail)")
         }
-        #endif
     }
+
+    /// How long to wait for the drained pipes to reach EOF once the child has
+    /// gone, at the push.
+    ///
+    /// Longer than ``Process/drainGrace`` (1 s) on purpose. EOF lands at the
+    /// child's exit, so on every ordinary path this wait returns at once and
+    /// the size costs nothing; what the extra seconds buy is that the whole
+    /// POINT of the drain — the child's own explanation of why it gave up —
+    /// does not evaporate on a machine too busy to schedule a reader inside a
+    /// second. It was a one-second grace that first lost `tar`'s message under
+    /// load, before `ProcessPipeDrain` moved its readers onto threads of their
+    /// own; the belt stays alongside the braces (round-4 P43c).
+    static let drainCollectGrace: TimeInterval = 5
+
+    /// The longest a single `poll(2)` inside the pump may park before the loop
+    /// takes its `Task.checkCancellation()` again. Short enough that a user
+    /// who cancels a wedged push sees it stop; long enough that a healthy push
+    /// never notices the cap at all, because `poll` returns on the byte.
+    ///
+    /// **This IS a block on a cooperative thread, deliberately.** It is not the
+    /// hazard ``Process/waitDrainingAsync(timeout:drain:drainGrace:)`` exists
+    /// to remove, because that one is a five-minute reap and this one is a
+    /// fifth of a second with a hard cap — bounded tightly enough that holding
+    /// the thread is cheaper than the hop that would avoid it, and short
+    /// enough that the pool cannot be starved by it.
+    static let pumpPollSlice: TimeInterval = 0.2
+
+    /// How many bytes the tarball pump may push between cooperative
+    /// suspensions. 8 MB is ~128 of the 64 KB chunks — a few milliseconds on
+    /// a fast link, and far below any rate the yield itself could bound.
+    static let pumpYieldBytes: Int64 = 8 * 1024 * 1024
+
+    /// Whether the pump owes a `Task.yield()`. Factored out so the rule is
+    /// testable without a remote host on the other end of the pipe.
+    static func shouldYield(written: Int64, lastYield: Int64) -> Bool {
+        written - lastYield >= pumpYieldBytes
+    }
+
+    /// Block until `fd` accepts a write again, for at most `budget` seconds.
+    ///
+    /// The one bounded block in the pump, and it is bounded by construction:
+    /// `poll` takes its timeout in milliseconds and the caller never passes
+    /// more than ``pumpPollSlice``.
+    static func waitWritable(_ fd: Int32, upTo budget: TimeInterval) {
+        var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        // At least one tick: a zero timeout is a spin, and a negative one is
+        // `poll`'s spelling of "forever".
+        let milliseconds = Int32(max(1, min(10_000, (budget * 1000).rounded(.up))))
+        _ = poll(&descriptor, 1, milliseconds)
+    }
+
+    /// The last `lines` non-blank lines of a drained child's output, for an
+    /// error message. Empty when the child said nothing.
+    ///
+    /// Leading whitespace is trimmed for the same reason `HermesCLIVerdict`
+    /// trims it: `tar` indents continuation lines, and an error tail that
+    /// carries the indentation reads as a wall.
+    static func outputTail(_ drained: [Data], lines: Int = 4) -> String {
+        let significant = drained
+            .compactMap { String(data: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !significant.isEmpty else { return "" }
+        return significant.suffix(lines).joined(separator: " / ")
+    }
+
+    /// Attach `tail` to `message`, or hand back `message` unchanged when the
+    /// child said nothing worth quoting.
+    static func appendingTail(_ message: String, _ tail: String) -> String {
+        tail.isEmpty ? message : "\(message) — the remote said: \(tail)"
+    }
+
+    /// How long a give-up arm waits for the child it just abandoned. Short: the
+    /// caller is already on its way out with an error, and the wait escalates
+    /// SIGTERM → SIGKILL rather than hoping.
+    static let abandonReapTimeout: TimeInterval = 5
+    #endif
 
     // MARK: - Path re-anchor
 
@@ -526,7 +838,11 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// `Process` is unavailable in the iOS SDK. Restore is initiated from
     /// the Mac app; the iOS stub throws so any accidental call surfaces a
     /// clear message instead of a link-time failure.
-    private static func unzipArchive(at archive: URL, into dest: URL) throws {
+    static func unzipArchive(
+        at archive: URL,
+        into dest: URL,
+        timeout: TimeInterval = RemoteRestoreService.unzipTimeout
+    ) async throws {
         #if os(iOS)
         throw RestoreError.archiveUnreadable("Restore unzip is not supported on iOS — run the restore from the Mac app.")
         #else
@@ -534,17 +850,33 @@ public final class RemoteRestoreService: @unchecked Sendable {
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         proc.arguments = ["-q", archive.path, "-d", dest.path]
         let errPipe = Pipe()
+        let outPipe = Pipe()
         proc.standardError = errPipe
-        proc.standardOutput = Pipe()
+        proc.standardOutput = outPipe
         do {
             try proc.run()
         } catch {
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
+            try? outPipe.fileHandleForReading.close()
+            try? outPipe.fileHandleForWriting.close()
             throw RestoreError.archiveUnreadable("Couldn't launch unzip: \(error.localizedDescription)")
         }
-        proc.waitUntilExit()
+        // C10: bounded, and drained CONCURRENTLY with the wait — `unzip`
+        // prints a line per problem entry, so a corrupt or adversarial
+        // backup fills the 64 KB pipe buffer and deadlocks a parent that
+        // reads only after the wait. The archive here is the USER'S file,
+        // chosen in an open panel: the one input Scarf trusts least.
+        let (exited, drained) = await proc.waitDrainingAsync(
+            timeout: timeout, pipes: [errPipe, outPipe])
+        try? errPipe.fileHandleForWriting.close()
+        try? outPipe.fileHandleForWriting.close()
+        guard exited else {
+            throw RestoreError.archiveUnreadable(
+                "unzip did not finish within \(Int(timeout))s and was stopped")
+        }
         if proc.terminationStatus != 0 {
-            let tail = (try? errPipe.fileHandleForReading.readToEnd())
-                .flatMap { $0.flatMap { String(data: $0, encoding: .utf8) } } ?? ""
+            let tail = String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
             throw RestoreError.archiveUnreadable("unzip exited \(proc.terminationStatus): \(tail)")
         }
         #endif

@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/scarf-go-i-os-companion-app
 tags: [ios, scarfgo, ssh]
 source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfDesign, scarf/Packages/ScarfIOS]
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-05-29
 updated: 2026-06-25
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

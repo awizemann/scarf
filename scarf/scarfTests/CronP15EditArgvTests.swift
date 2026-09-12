@@ -64,12 +64,12 @@ import ScarfCore
             existing: ["research", "browse"], newSkills: ["research", "summarize"],
             clearSkills: false
         )
-        #expect(args == ["--remove-skill", "browse", "--add-skill", "summarize"])
+        #expect(args == ["--remove-skill=browse", "--add-skill=summarize"])
         // Never a replacement `--skill`: that would be computed against the
         // form's snapshot and would wipe a skill added between load and save,
         // where the diff is applied to `existing_skills` as Hermes reads them
         // at edit time (`hermes_cli/cron.py:606`).
-        #expect(!args.contains("--skill"))
+        #expect(!HermesCLIOption.contains("--skill", in: args))
     }
 
     @Test func anUnchangedSetSendsNoSkillFlagsAtAll() {

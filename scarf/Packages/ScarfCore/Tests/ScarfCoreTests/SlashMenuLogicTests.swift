@@ -134,7 +134,11 @@ import Foundation
 
     // MARK: - disabledSlashCommandNames
 
-    @Test func disabledSlashGreysSteerOnPreV013Idle() {
+    /// P44 / round-4 decision 14 + the `/queue`-on-idle LOW. A pre-v0.13
+    /// host has no `/queue` row to grey (the roster hides it), and the
+    /// retired `hasACPSteerOnIdle` arm no longer greys `steer` either — so
+    /// an idle sub-floor session disables nothing.
+    @Test func disabledSlashGreysNothingOnPreV013Idle() {
         let caps = HermesCapabilities(
             versionLine: "0.12.0",
             semver: HermesCapabilities.SemVer(major: 0, minor: 12, patch: 0),
@@ -145,10 +149,13 @@ import Foundation
             hasActiveSession: true,
             capabilities: caps
         )
-        #expect(disabled == ["steer"])
+        #expect(disabled.isEmpty)
     }
 
-    @Test func disabledSlashEmptyOnV013HostEvenIdle() {
+    /// The arm that replaced it: on a host that HAS `/queue`, an idle
+    /// session greys the row — `_cmd_queue` would append to a queue whose
+    /// only drain is the tail of a running turn.
+    @Test func disabledSlashGreysQueueOnV013IdleSession() {
         let caps = HermesCapabilities(
             versionLine: "0.13.0",
             semver: HermesCapabilities.SemVer(major: 0, minor: 13, patch: 0),
@@ -159,11 +166,11 @@ import Foundation
             hasActiveSession: true,
             capabilities: caps
         )
-        #expect(disabled.isEmpty)
+        #expect(disabled == ["queue"])
     }
 
     @Test func disabledSlashEmptyWhileAgentIsWorking() {
-        let caps = HermesCapabilities.empty
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         let disabled = RichChatViewModel.disabledSlashCommandNames(
             isAgentWorking: true,
             hasActiveSession: true,
@@ -173,14 +180,14 @@ import Foundation
     }
 
     @Test func disabledSlashReasonAccompaniesGreying() {
-        let caps = HermesCapabilities.empty
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         let reason = RichChatViewModel.disabledSlashCommandReason(
             isAgentWorking: false,
             hasActiveSession: true,
             capabilities: caps
         )
         #expect(reason != nil)
-        #expect(reason?.contains("/steer") == true)
+        #expect(reason?.contains("/queue") == true)
     }
 
     @Test func disabledSlashReasonNilWhenNothingDisabled() {
@@ -190,7 +197,7 @@ import Foundation
             dateVersion: nil
         )
         let reason = RichChatViewModel.disabledSlashCommandReason(
-            isAgentWorking: false,
+            isAgentWorking: true,
             hasActiveSession: true,
             capabilities: caps
         )

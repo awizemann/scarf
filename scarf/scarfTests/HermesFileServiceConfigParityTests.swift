@@ -673,18 +673,49 @@ struct AllConfigWritersParityTests {
             // build (and judge) it the same way. The KEYS are unchanged — they
             // are still this file's own `unsetSetting("…")` literals, which
             // the scan sees.
+            //
+            // P39 made that ninth site VISIBLE again rather than adding one:
+            // `setSetting`'s inline argv moved onto `HermesConfigSet.argv`, and
+            // the scan learned the builder shape — so the `HermesConfigUnset`
+            // call P35 had hidden from it is now counted too. Same keys, same
+            // gate; one more declared site.
             Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
-                   nonLiteralKeySites: 8,
+                   nonLiteralKeySites: 9,
                    computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()
                     + directYAMLKeys),
-            // The shared `hermes config unset <key>` argv builder. One
+            // The shared `hermes config set` / `config unset` argv builders. One
             // non-literal site by construction — the key is its PARAMETER —
-            // and no keys of its own: every caller (`SettingsViewModel`'s
+            // and no keys of its own. P39 added the `config set` twin
+            // (``HermesConfigSet``), so it is two. Every caller (`SettingsViewModel`'s
             // `unsetSetting` literals and iOS's `SettingEditorSheet`, whose
             // key is a `SettingSpec.key` already in the manifest below) is
             // itself registered, so the readability gate still sees them.
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift",
-                   nonLiteralKeySites: 1, computedKeys: []),
+                   nonLiteralKeySites: 2, computedKeys: []),
+            // iOS Settings. It was INVISIBLE to this gate until P39, because
+            // it built its argv into a shell script string
+            // (`"… \(hermes) config set \(shellEscape(key)) …"`) that no marker
+            // could see; routing it through the shared builders put it in the
+            // discovered set, where it belongs. Two non-literal sites — `set`
+            // and `unset`, both taking `key` as a parameter — and no keys of
+            // its own: every key it can write is a `SettingSpec.key`, and
+            // `SettingsEditorSpecParityTests` already pins those.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/ViewModels/IOSSettingsViewModel.swift",
+                   nonLiteralKeySites: 2, computedKeys: []),
+            // iOS chat's model preflight. Newly VISIBLE rather than newly
+            // written (P46 finding 12): it has always written these two keys,
+            // but through a hand-rolled shell string
+            // (`"\(hermes) config set 'model.provider' '…'"`) that no marker
+            // could see — and, being hand-rolled, without the `--` and judged
+            // by exit code. Routing it through `HermesConfigSet.argv`/`.judge`
+            // put it in the discovered set, where it belongs. One non-literal
+            // site (the shared `runConfigSet(_:hermes:key:value:)` helper,
+            // whose `key` is a parameter); its two concrete keys are declared
+            // here because the callers pass them as arguments, not as argv
+            // literals the scan can read.
+            Writer(path: "Scarf iOS/Chat/ChatView.swift",
+                   nonLiteralKeySites: 1,
+                   computedKeys: ["model.provider", "model.default"]),
             Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Core/Services/HermesFileService.swift",
@@ -782,6 +813,8 @@ struct AllConfigWritersParityTests {
     private static let writerMarkers = [
         #"(?:un)?setSetting\("#,
         #""config",\s*"(?:set|unset)""#,
+        // P39: the shared `config set`/`config unset` argv builders.
+        #"Hermes(?:ConfigSet|ConfigUnset)\.argv\(\s*key:"#,
         #"configKV\s*\[\s*""#,
         #"configKV:\s*\[String:\s*String\]\s*=\s*\[\s*\n"#,
         // Direct-YAML writers. `hermes config set` stringifies arrays and
@@ -860,7 +893,11 @@ struct AllConfigWritersParityTests {
     static func literalKeys(in source: String) -> (staticKeys: [String], interpolated: [String]) {
         var found: [String] = []
         found += matches(#"(?:un)?setSetting\("([^"]*)""#, in: source)
-        found += matches(#""config",\s*"(?:set|unset)",\s*"([^"]*)""#, in: source)
+        found += matches(#""config",\s*"(?:set|unset)",\s*"(?!--")([^"]*)""#, in: source)
+        // P39: the shared argv builders. A call site that spells its key
+        // literally here is exactly as checkable as the inline array it
+        // replaced, and must stay in the readability gate.
+        found += matches(#"Hermes(?:ConfigSet|ConfigUnset)\.argv\(\s*key:\s*"([^"]*)""#, in: source)
         found += matches(#"configKV\["([^"]*)"\]"#, in: source)
         found += matches(#"\.(?:set|clear)\(key:\s*"([^"]*)""#, in: source)
         found += configKVDictionaryKeys(in: source)
@@ -1026,6 +1063,7 @@ struct AllConfigWritersParityTests {
             let source = Self.stripComments(try Self.read(writer.path))
             // Every config-write call site in the file…
             let argvSites = Self.count(#""config",\s*"(?:set|unset)","#, in: source)
+                + Self.count(#"Hermes(?:ConfigSet|ConfigUnset)\.argv\(\s*key:"#, in: source)
             let setSettingSites = Self.count(#"(?:un)?setSetting\("#, in: source)
                 - Self.count(#"func\s+(?:un)?setSetting\("#, in: source)
             let configKVSites = Self.count(#"configKV\["#, in: source)
@@ -1047,7 +1085,8 @@ struct AllConfigWritersParityTests {
             // literal. An interpolated literal (`"quick_commands.\(name).type"`)
             // is a matched literal but NOT a checkable key, so it counts as
             // non-literal and must be declared with its expansion.
-            let literalArgv = Self.matches(#""config",\s*"(?:set|unset)",\s*"([^"]*)""#, in: source)
+            let literalArgv = Self.matches(#""config",\s*"(?:set|unset)",\s*"(?!--")([^"]*)""#, in: source)
+                + Self.matches(#"Hermes(?:ConfigSet|ConfigUnset)\.argv\(\s*key:\s*"([^"]*)""#, in: source)
             let literalSetSetting = Self.matches(#"(?:un)?setSetting\("([^"]*)""#, in: source)
             let literalConfigKV = Self.matches(#"configKV\["([^"]*)"\]"#, in: source)
             let staticLiterals = (literalArgv + literalSetSetting + literalConfigKV)

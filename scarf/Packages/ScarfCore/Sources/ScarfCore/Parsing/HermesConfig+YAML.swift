@@ -90,21 +90,14 @@ public extension HermesConfig {
                 // keeps as a map rather than dotted keys.
                 values["\(section).\(key)"] ?? maps[section]?[key]
             }
-            func isBlock(_ section: String) -> Bool {
-                if maps[section]?.isEmpty == false { return true }
-                let dot = section + "."
-                return values.keys.contains { $0.hasPrefix(dot) }
-                    || lists.keys.contains { $0.hasPrefix(dot) }
-                    || maps.keys.contains { $0.hasPrefix(dot) }
-            }
-            let bridgeSource: String
-            if isBlock(plat) {
-                bridgeSource = plat
-            } else if isBlock("gateway.platforms.\(plat)") {
-                bridgeSource = "gateway.platforms.\(plat)"
-            } else {
-                bridgeSource = "platforms.\(plat)"
-            }
+            // Step 1 lives in `HermesPlatformSharedKeys` since P44, because
+            // the WRITE side needs the same answer (`t-6fa3fc84`) and a
+            // second copy of `platform_section` is how the two halves got
+            // out of phase in the first place.
+            let bridgeSource = HermesPlatformSharedKeys.bridgeSourcePrefix(
+                platform: plat,
+                in: parsed
+            )
             return raw(bridgeSource)
                 ?? raw("platforms.\(plat).extra")
                 ?? raw("gateway.platforms.\(plat).extra")
@@ -699,7 +692,39 @@ public extension HermesConfig {
             // Upstream default is TRUE (`gateway/config.py` PlatformConfig),
             // so an absent key — and any non-`true` spelling of a truthy
             // value — must NOT read as off. See `boolTrueDefault`.
-            let restartNotice   = boolTrueDefault(prefix + "gateway_restart_notification")
+            // P46b: `gateway_restart_notification` is a `_SHARED_KEYS`
+            // member, and reading it from the bare top-level spelling alone
+            // is what made `GatewayBehaviorViewModel`'s toggle CREATE a
+            // top-level `<platform>:` block on a nested-only host —
+            // `platform_section` then bridges from that block
+            // (`gateway/config_loader.py:171-180` @ `v2026.9.7`) and every
+            // nested shared key beside it (`platforms.slack.require_mention`
+            // …) stops reaching `extra`. Read through the bridge and the
+            // write lands wherever the bridge source already is, creating
+            // nothing.
+            //
+            // Only `slack` and `telegram` are moved, because those are the
+            // platforms whose OTHER shared keys Scarf reads through the
+            // bridge (`HermesPlatformSharedKeys.bridgeResolvedKeys`) and so
+            // the only ones a created block can un-bridge anything on. The
+            // remaining six keep the flat spelling; the general hazard —
+            // ANY bare `<platform>.<unshared>` key creating a block — is
+            // filed, not closed here.
+            let restartRaw: String?
+            switch platform {
+            case "slack":
+                restartRaw = sharedPlatformScalar("slack", "gateway_restart_notification")
+            case "telegram":
+                restartRaw = sharedPlatformScalar("telegram", "gateway_restart_notification")
+            default:
+                restartRaw = values[prefix + "gateway_restart_notification"]
+            }
+            // `boolTrueDefault`'s rule, over a scalar this reader resolved
+            // itself: absent means the host IS notifying, and only an
+            // explicit falsy spelling turns it off.
+            let restartNotice = restartRaw
+                .map(HermesYAML.normalizedScalar)
+                .map { !["false", "0", "no", "off"].contains($0.lowercased()) } ?? true
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
@@ -708,7 +733,7 @@ public extension HermesConfig {
                 && allowedChats.isEmpty
                 && allowedRooms.isEmpty
                 && values[prefix + "busy_ack_enabled"] == nil
-                && values[prefix + "gateway_restart_notification"] == nil
+                && restartRaw == nil
             if !isEmpty {
                 gatewayPlatforms[platform] = GatewayPlatformSettings(
                     allowedChannels: allowedChannels,
@@ -809,7 +834,7 @@ public extension HermesConfig {
             // mirror; `hermes_constants.py:876-889` `parse_reasoning_effort`
             // returns `None` for an empty/unrecognised value and its callers
             // then "use the default", which is the model provider's own. The
-            // picker renders this as a distinct "Provider default" row rather
+            // picker renders this as a distinct "Hermes default" row rather
             // than asserting a level Hermes never chose.
             reasoningEffort: strEnum("agent.reasoning_effort"),
             showCost: boolish("display.show_cost", default: false),
@@ -824,6 +849,11 @@ public extension HermesConfig {
             // guardian model was actually deciding — the dangerous direction.
             // Resolved by `HermesConfig.displayApprovalMode(capabilities:)`.
             approvalMode: strEnum("approvals.mode"),
+            // The RAW scalar, quotes intact — `HermesApprovalMode.normalize`
+            // needs to tell a quoted `"no"` (a `str`, i.e. `manual` to
+            // Hermes) from a bare `no` (a bool, i.e. `off`). Every other
+            // reader wants the normalised form above.
+            approvalModeRawScalar: values["approvals.mode"] ?? "",
             browserCloudProvider: strEnum("browser.cloud_provider"),
             memoryProvider: strEnum("memory.provider"),
             dockerEnv: dockerEnv,

@@ -5,11 +5,11 @@ permalink: scarf/decisions/post-v2-24-backfill-decisions
 tags: [i18n, settings, chat, config-parity, backfill]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/scarfTests/HermesFileServiceConfigParityTests.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift, tools/merge-translations.py]
 source_paths_inferred: false
-source_sha: 012316d0d66c732c238b25f4990bc173867747cf
+source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-09-01
 updated: 2026-09-01
-reviewed: 2026-09-09
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-10
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

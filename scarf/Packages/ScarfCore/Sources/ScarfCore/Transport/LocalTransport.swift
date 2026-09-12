@@ -46,6 +46,36 @@ public struct LocalTransport: ServerTransport {
     /// doesn't run subprocesses there.
     nonisolated(unsafe) public static var environmentEnricher: (@Sendable () -> [String: String])?
 
+    /// The `COLUMNS` handed to the Hermes subprocesses Scarf JUDGES BY OUTPUT,
+    /// so `rich` does not wrap a line Scarf matches on. Wide enough that no
+    /// marker line Hermes prints comes close, narrow enough to stay a
+    /// plausible terminal.
+    ///
+    /// ## Exactly which spawns carry it
+    ///
+    /// - ``runProcess(executable:args:stdin:timeout:cwd:)`` locally, via
+    ///   ``subprocessEnvironment(forExecutable:)`` — that is the one-shot CLI
+    ///   path every ``HermesCLIVerdict`` call site runs through.
+    /// - every remote command, via the prefix
+    ///   ``SSHTransport/composedRemoteCommand(executable:args:cwd:)`` builds —
+    ///   an ssh client's own environment does not cross to the remote shell.
+    ///   That prefix is on the shared composer, so the remote ACP spawn gets
+    ///   it too; harmless, and not something ACP reads.
+    ///
+    /// It is deliberately NOT on the LOCAL streaming spawns —
+    /// ``streamLines(executable:args:)``, ``streamRawBytes(executable:args:)``
+    /// and ``makeProcess(executable:args:cwd:)`` (the ACP spawn). Those
+    /// inherit the app's environment rather than building one, and routing
+    /// them through ``subprocessEnvironment(forExecutable:)`` for `COLUMNS`
+    /// alone would also move PATH (which the enricher always overrides) and
+    /// every other key the shell-harvested enricher supplies onto the ACP
+    /// session — a real behaviour change for one setting nothing on those
+    /// paths reads. Nothing streamed is judged by a `rich`-printed marker:
+    /// `streamLines` tails log files (`HermesLogService`), `streamRawBytes`
+    /// moves raw bytes (`cat`, `RemoteBackupService`), and ACP is
+    /// newline-framed JSON-RPC.
+    public static let wideColumns = "400"
+
     /// Build the environment dict for a single subprocess. Process
     /// env wins for keys it has; the enricher fills gaps + always
     /// owns PATH (which is the whole point of running it). The
@@ -72,6 +102,18 @@ public struct LocalTransport: ServerTransport {
                 }
             }
         }
+        // `rich` wraps `console.print` at 80 columns when stdout is not a TTY
+        // (`Console.width` falls back to `COLUMNS`, then to 80), and a pipe is
+        // never a TTY. Scarf judges Hermes runs by matching whole printed
+        // lines, so an 80-column wrap can split a marker in half: the live
+        // case is `✓ Plugin <name> updated.` (`hermes_cli/plugins_cmd.py:828`
+        // @ v2026.9.7), matched as a column-0 `Plugin ` prefix AND an
+        // `updated.` tail, which a long plugin name pushes onto two lines.
+        // A wide `COLUMNS` keeps Hermes's own lines intact. An explicit
+        // value in the environment is left alone — the user (or a test) meant
+        // it.
+        if (env["COLUMNS"] ?? "").isEmpty { env["COLUMNS"] = Self.wideColumns }
+
         // Always make sure the executable's own directory is on PATH —
         // covers the case where the enricher hasn't been wired (tests,
         // pre-launch helpers) but a child process still tries to spawn

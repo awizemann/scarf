@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ScarfCore
 import ScarfDesign
 
 /// Shared form-row components used across the Settings tabs. Tokens come
@@ -376,5 +377,39 @@ struct PathRow: View {
             .help("Reveal in Finder")
         }
         .settingsRowChrome()
+    }
+}
+
+/// The affordance that accompanies a WIDENED reasoning-effort picker
+/// (round-4 decision 13).
+///
+/// The three effort pickers — `AgentTab`'s global row, `AuxiliaryTab`'s
+/// per-task rows, and `ReasoningOverridesSection`'s per-model rows — all
+/// offer `HermesReasoningEffort.levels(capabilities:selected:)`, which keeps
+/// a stored value selectable even when it is above this host's floor (a
+/// `Picker` with no matching tag renders blank). Widening alone would then
+/// show the level as if it worked, so every widened row renders this
+/// underneath it. Renders nothing when the level is in the host's
+/// vocabulary, and nothing for the empty "Hermes default" sentinel — so
+/// call sites need no `if`.
+struct UnsupportedEffortNote: View {
+    let selected: String
+    let capabilities: HermesCapabilities
+
+    var body: some View {
+        if let notice = HermesReasoningEffort.unsupportedLevelNotice(
+            for: selected,
+            capabilities: capabilities
+        ) {
+            Text(verbatim: notice)
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.warning)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+                // `notice` is already a full sentence naming the host and
+                // what it does with the value; prefixing it doubled it.
+                .accessibilityLabel(Text(verbatim: notice))
+        }
     }
 }

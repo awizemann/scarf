@@ -62,18 +62,31 @@ import ScarfCore
 
     // MARK: - Terminal-job activation (Hermes v0.20.6+, W7)
 
-    /// `update_job` raises "Cannot activate terminal cron job …"
-    /// (cron/jobs.py:2593/2694) and `trigger_job` raises "Cannot run:
-    /// … (terminal)" (:2760). Both must land as one plain sentence, not
-    /// a Python traceback tail.
+    /// `update_job` raises "Cannot activate terminal cron job …" through
+    /// `_reject_terminal_activation` (`cron/jobs.py:1865-1878`, armed at
+    /// `:1941` and `:1965`) and `trigger_job` raises "Cannot run: …
+    /// (terminal)" (`:2012-2016`), both at `v2026.9.7`. Both must land as one
+    /// plain sentence, not a Python traceback tail.
+    ///
+    /// P42: neither call here passes an offer, and with no offer the sentence
+    /// may no longer name "Resume & Run Now" — for a recurring job that
+    /// button is a guaranteed exit 1 (`_REARM_RECURRING_ERROR`, `:2065-2066`)
+    /// and "we can't tell" is not a licence to guess. The remedy it CAN
+    /// always assert is duplicating, which no terminal guard touches.
+    /// `CronRecoveryP42Tests` owns the offer-bearing arms.
     @Test func terminalRefusalsGetAFriendlyMessage() {
         let updateErr = "ValueError: Cannot activate terminal cron job 'Nightly' "
             + "through update_job; use cron resume --run-now or --at."
-        #expect(CronViewModel.friendlyCronFailure(updateErr)?.contains("Resume & Run Now") == true)
-
         let triggerErr = "ValueError: Cannot run: job 'Nightly' is completed (terminal). "
             + "Create a new occurrence with 'hermes cron resume Nightly --run-now'."
-        #expect(CronViewModel.friendlyCronFailure(triggerErr)?.contains("Resume & Run Now") == true)
+        for output in [updateErr, triggerErr] {
+            let message = CronViewModel.friendlyCronFailure(output)
+            #expect(message != nil)
+            // Not a traceback tail.
+            #expect(message?.contains("ValueError") == false)
+            #expect(message?.contains("Resume & Run Now") == false)
+            #expect(message?.lowercased().contains("duplicate") == true)
+        }
 
         // Everything else keeps the raw-output path.
         #expect(CronViewModel.friendlyCronFailure("error: no such job 'x'") == nil)
@@ -173,15 +186,15 @@ import ScarfCore
     /// `ValueError` and returns it as a JSON `error` payload. The remedy is
     /// the LAST clause of the sentence, so the generic `prefix(200)`
     /// truncation would have cut off exactly the actionable half.
-    @Test func cloudPlaceholderRefusalIsSurfacedVerbatim() {
+    @Test func cloudPlaceholderRefusalIsSurfacedVerbatim() throws {
         let output = """
             Failed to create job: Blocked: the cron script lives on a cloud-synced path (iCloud Drive / ~/Library/CloudStorage). Opening an evicted FileProvider placeholder can hang the guard's preflight scan indefinitely, so it is refused without being read. Move the script to a local, non-cloud path (e.g. ~/.hermes/scripts/) and recreate the job.
             """
-        let message = try? #require(CronViewModel.friendlyCronFailure(output))
-        #expect(message?.hasPrefix("Blocked: the cron script lives on a cloud-synced path") == true)
+        let message = try #require(CronViewModel.friendlyCronFailure(output))
+        #expect(message.hasPrefix("Blocked: the cron script lives on a cloud-synced path"))
         // The whole sentence, remedy included — not a 200-char stub.
-        #expect(message?.hasSuffix("and recreate the job.") == true)
-        #expect((message?.count ?? 0) > 200)
+        #expect(message.hasSuffix("and recreate the job."))
+        #expect(message.count > 200)
     }
 
     @Test func gatewayLifecycleRefusalAlsoComesThroughVerbatim() {
@@ -222,22 +235,22 @@ import ScarfCore
     /// C3: `--failure-deliver` composition. The VIEW strips the value on a
     /// host without `hasCronFailureDeliver`, so the builder's contract is
     /// simply "empty means omit".
-    @Test func failureDeliverArgvComposition() {
+    @Test func failureDeliverArgvComposition() throws {
         let withOverride = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "p", name: "n", deliver: "telegram:1", skills: [],
             script: "", repeatCount: "", failureDeliver: "local"
         )
-        #expect(withOverride.contains("--failure-deliver"))
-        #expect(withOverride.firstIndex(of: "local") == withOverride.firstIndex(of: "--failure-deliver").map { $0 + 1 })
+        #expect(HermesCLIOption.contains("--failure-deliver", in: withOverride))
+        #expect(HermesCLIOption.value(of: "--failure-deliver", in: withOverride) == "local")
         // Every flag still precedes the `--` end-of-options marker.
-        let marker = try? #require(withOverride.firstIndex(of: "--"))
-        #expect((withOverride.firstIndex(of: "--failure-deliver") ?? .max) < (marker ?? 0))
+        let marker = try #require(withOverride.firstIndex(of: "--"))
+        #expect((HermesCLIOption.index(of: "--failure-deliver", in: withOverride) ?? .max) < marker)
 
         let without = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "p", name: "n", deliver: "", skills: [],
             script: "", repeatCount: ""
         )
-        #expect(without.contains("--failure-deliver") == false)
+        #expect(HermesCLIOption.contains("--failure-deliver", in: without) == false)
     }
 
     // MARK: - Fixtures

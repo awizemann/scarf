@@ -202,20 +202,18 @@ import Foundation
             skills: ["translation", "github-code-review"]
         )
         let argv = req.argv()
-        #expect(argv.contains("--body"))
-        #expect(argv.contains("--assignee"))
-        #expect(argv.contains("--parent"))
-        #expect(argv.contains("--workspace"))
-        #expect(argv.contains("dir:/tmp/proj"))
-        #expect(argv.contains("--tenant"))
-        #expect(argv.contains("scarf:demo"))
-        #expect(argv.contains("--priority"))
-        #expect(argv.contains("75"))
+        #expect(HermesCLIOption.contains("--body", in: argv))
+        #expect(HermesCLIOption.contains("--assignee", in: argv))
+        #expect(HermesCLIOption.contains("--parent", in: argv))
+        #expect(HermesCLIOption.contains("--workspace", in: argv))
+        #expect(HermesCLIOption.value(of: "--workspace", in: argv) == "dir:/tmp/proj")
+        #expect(HermesCLIOption.value(of: "--tenant", in: argv) == "scarf:demo")
+        #expect(HermesCLIOption.value(of: "--priority", in: argv) == "75")
         #expect(argv.contains("--triage"))
-        #expect(argv.contains("--idempotency-key"))
-        #expect(argv.contains("--max-runtime"))
-        #expect(argv.contains("--created-by"))
-        #expect(argv.contains("--skill"))
+        #expect(HermesCLIOption.contains("--idempotency-key", in: argv))
+        #expect(HermesCLIOption.contains("--max-runtime", in: argv))
+        #expect(HermesCLIOption.contains("--created-by", in: argv))
+        #expect(HermesCLIOption.contains("--skill", in: argv))
         #expect(argv.last == "Translate doc") // positional title is last
         #expect(argv.contains("--json"))
     }
@@ -225,11 +223,11 @@ import Foundation
         let argv = req.argv()
         #expect(argv.contains("--json"))
         #expect(argv.last == "minimal")
-        #expect(!argv.contains("--body"))
-        #expect(!argv.contains("--assignee"))
+        #expect(!HermesCLIOption.contains("--body", in: argv))
+        #expect(!HermesCLIOption.contains("--assignee", in: argv))
         #expect(!argv.contains("--triage"))
         // v0.15 `--branch` is absent by default.
-        #expect(!argv.contains("--branch"))
+        #expect(!HermesCLIOption.contains("--branch", in: argv))
     }
 
     @Test func createRequestArgvIncludesBranch() {
@@ -240,32 +238,24 @@ import Foundation
             branch: "feat/x"
         )
         let argv = req.argv()
-        #expect(argv.contains("--branch"))
-        if let i = argv.firstIndex(of: "--branch") {
-            #expect(argv[argv.index(after: i)] == "feat/x")
-        } else {
-            Issue.record("expected --branch in argv: \(argv)")
-        }
+        #expect(HermesCLIOption.contains("--branch", in: argv))
+        #expect(HermesCLIOption.value(of: "--branch", in: argv) == "feat/x")
         // `worktree:<path>` workspace spec round-trips.
-        #expect(argv.contains("worktree:/tmp/wt"))
+        #expect(HermesCLIOption.value(of: "--workspace", in: argv) == "worktree:/tmp/wt")
     }
 
     @Test func createRequestArgvIncludesCompletionContract() {
         // v0.21.1 `--completion-contract` (hermes_cli/kanban_parser.py:189).
         let req = KanbanCreateRequest(title: "gated", completionContract: "nousresearch/hermes")
         let argv = req.argv()
-        guard let i = argv.firstIndex(of: "--completion-contract") else {
-            Issue.record("expected --completion-contract in argv: \(argv)")
-            return
-        }
-        #expect(argv[argv.index(after: i)] == "nousresearch/hermes")
+        #expect(HermesCLIOption.value(of: "--completion-contract", in: argv) == "nousresearch/hermes")
         // Still behind `--` so the title stays a positional.
         #expect(argv.last == "gated")
         // Absent (and empty) means "send no flag" — Hermes keeps its own
         // local-only default rather than Scarf asserting it.
-        #expect(!KanbanCreateRequest(title: "x").argv().contains("--completion-contract"))
-        #expect(!KanbanCreateRequest(title: "x", completionContract: "").argv()
-                    .contains("--completion-contract"))
+        #expect(!HermesCLIOption.contains("--completion-contract", in: KanbanCreateRequest(title: "x").argv()))
+        #expect(!HermesCLIOption.contains("--completion-contract",
+                                          in: KanbanCreateRequest(title: "x", completionContract: "").argv()))
     }
 
     @Test func taskDecodesV0211FieldsAndToleratesTheirAbsence() {
@@ -305,14 +295,12 @@ import Foundation
 
     @Test func listFilterStatusFlag() {
         let argv = KanbanListFilter(status: .running).argv()
-        #expect(argv.contains("--status"))
-        #expect(argv.contains("running"))
+        #expect(HermesCLIOption.value(of: "--status", in: argv) == "running")
     }
 
     @Test func listFilterTenantPasses() {
         let argv = KanbanListFilter(tenant: "scarf:demo").argv()
-        #expect(argv.contains("--tenant"))
-        #expect(argv.contains("scarf:demo"))
+        #expect(HermesCLIOption.value(of: "--tenant", in: argv) == "scarf:demo")
     }
 
     @Test func listFilterArchivedAndMine() {
@@ -323,40 +311,30 @@ import Foundation
 
     @Test func listFilterSessionPasses() {
         let argv = KanbanListFilter(session: "acp-sess-123").argv()
-        #expect(argv.contains("--session"))
-        #expect(argv.contains("acp-sess-123"))
+        #expect(HermesCLIOption.value(of: "--session", in: argv) == "acp-sess-123")
         // The empty default filter never emits `--session`.
-        #expect(!KanbanListFilter.all.argv().contains("--session"))
+        #expect(!HermesCLIOption.contains("--session", in: KanbanListFilter.all.argv()))
     }
 
     @Test func listFilterEmptySessionDropped() {
         // Empty string is treated as "no session" (mirrors the
         // non-empty guard on `--session`), so it isn't emitted.
         let argv = KanbanListFilter(session: "").argv()
-        #expect(!argv.contains("--session"))
+        #expect(!HermesCLIOption.contains("--session", in: argv))
     }
 
     @Test func listFilterSessionAndsWithTenant() {
         let argv = KanbanListFilter(tenant: "scarf:demo", session: "acp-x").argv()
-        #expect(argv.contains("--tenant"))
-        #expect(argv.contains("scarf:demo"))
-        #expect(argv.contains("--session"))
-        #expect(argv.contains("acp-x"))
+        #expect(HermesCLIOption.value(of: "--tenant", in: argv) == "scarf:demo")
+        #expect(HermesCLIOption.value(of: "--session", in: argv) == "acp-x")
     }
 
     @Test func listFilterSortPasses() {
         // v0.15 `--sort` is passed through verbatim (not enforced).
         let argv = KanbanListFilter(sort: "priority-desc").argv()
-        #expect(argv.contains("--sort"))
-        #expect(argv.contains("priority-desc"))
-        // The two appear adjacently in flag/value order.
-        if let i = argv.firstIndex(of: "--sort") {
-            #expect(argv[argv.index(after: i)] == "priority-desc")
-        } else {
-            Issue.record("expected --sort in argv: \(argv)")
-        }
+        #expect(HermesCLIOption.value(of: "--sort", in: argv) == "priority-desc")
         // The empty default filter never emits `--sort`.
-        #expect(!KanbanListFilter.all.argv().contains("--sort"))
+        #expect(!HermesCLIOption.contains("--sort", in: KanbanListFilter.all.argv()))
     }
 
     // MARK: - Transition planning
@@ -544,14 +522,13 @@ import Foundation
     @Test func createRequestArgvIncludesMaxRetries() {
         let req = KanbanCreateRequest(title: "t", maxRetries: 5)
         let argv = req.argv()
-        #expect(argv.contains("--max-retries"))
-        #expect(argv.contains("5"))
+        #expect(HermesCLIOption.value(of: "--max-retries", in: argv) == "5")
     }
 
     @Test func createRequestArgvOmitsMaxRetriesWhenAbsent() {
         let req = KanbanCreateRequest(title: "t")
         let argv = req.argv()
-        #expect(!argv.contains("--max-retries"))
+        #expect(!HermesCLIOption.contains("--max-retries", in: argv))
     }
 
     @Test func runRowsCarryNoDiagnostics() throws {
@@ -696,10 +673,13 @@ import Foundation
         // takes `--json`, an optional `--task <id>`, and `--severity`.
         // `--board` stays a GLOBAL flag right after `kanban`.
         #expect(KanbanService.diagnosticsArgv() == ["kanban", "diagnostics", "--json"])
+        // P42: every option value Scarf composes is the single-token
+        // `--flag=value` form, so a task id or board slug beginning with a
+        // dash cannot be read as an option string (argparse exit 2).
         #expect(KanbanService.diagnosticsArgv(taskId: "t_1")
-                == ["kanban", "diagnostics", "--json", "--task", "t_1"])
+                == ["kanban", "diagnostics", "--json", "--task=t_1"])
         #expect(KanbanService.diagnosticsArgv(board: "ops", taskId: "t_1")
-                == ["kanban", "--board", "ops", "diagnostics", "--json", "--task", "t_1"])
+                == ["kanban", "--board=ops", "diagnostics", "--json", "--task=t_1"])
         // Empty task id must not emit a bare `--task`.
         #expect(KanbanService.diagnosticsArgv(taskId: "") == ["kanban", "diagnostics", "--json"])
     }

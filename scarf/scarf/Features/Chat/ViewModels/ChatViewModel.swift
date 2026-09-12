@@ -1203,6 +1203,17 @@ final class ChatViewModel {
     ) {
         ScarfMon.event(.chatStream, "mac.sendViaACP", count: 1, bytes: text.utf8.count)
 
+        // Whether a turn was ALREADY in flight when this send started —
+        // captured before the local echo below, because `addUserMessage`
+        // sets `isAgentWorking = true` itself, so reading the flag after it
+        // always answers "working" and the `/queue`-on-idle arm could never
+        // fire. The `localEchoAlreadyAdded` callers echoed a moment earlier
+        // for the same reason; both of them (autostart's queued prompt and
+        // the project-wizard kickoff) are fresh sessions with nothing
+        // running, so they read as idle rather than inheriting their own
+        // echo.
+        let wasAgentWorking = richChatViewModel.isAgentWorking && !localEchoAlreadyAdded
+
         // Client-side slash intercept. Hermes ACP doesn't intercept
         // `/new` server-side — sending it as a prompt routes to the
         // LLM, which responds in-character ("/new is a TUI slash
@@ -1254,7 +1265,35 @@ final class ChatViewModel {
         // prompt template. The literal slash is meaningless to Hermes
         // for project-scoped commands; this is what makes them portable
         // and Hermes-version-independent. v2.5.
-        let wireText = richChatViewModel.expandIfProjectScoped(text, context: context)
+        let parsedForWire = RichChatViewModel.parseSlashName(text)
+        // A typed `/queue <text>` with NOTHING running is not a queue: the
+        // adapter appends it to `queued_prompts` and returns `end_turn`
+        // before the only drain (`acp_adapter/server.py:793-799` vs
+        // `:908-915` @ `v2026.9.7`), so it would run two turns from now.
+        // Send the argument as an ordinary prompt instead — leaving the
+        // `/queue` prefix on the wire would hand it straight back to
+        // `_cmd_queue` and make the notice a lie.
+        let idleQueueText = RichChatViewModel.idleQueueFallbackText(
+            name: parsedForWire.name,
+            args: parsedForWire.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: richChatViewModel.capabilitiesGate
+        )
+        // A typed `/steer <text>` with NOTHING running is an ordinary turn on
+        // Hermes's side too — `_rewrite_prompt_for_interrupt` strips the
+        // prefix before the slash dispatch ever sees it
+        // (`acp_adapter/server.py:667-689` at `:789`, dispatch at `:792`).
+        // Unlike `/queue` the WIRE needs no change (Hermes does the
+        // stripping); what changes is the indicator, the hint, and — the part
+        // that mattered — whether Stop can cancel it.
+        let idleSteer = RichChatViewModel.idleSteerIsOrdinaryPrompt(
+            name: parsedForWire.name,
+            args: parsedForWire.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: richChatViewModel.capabilitiesGate
+        )
+        let wireText = idleQueueText
+            ?? richChatViewModel.expandIfProjectScoped(text, context: context)
 
         // Non-interruptive slash commands keep the "Agent working…"
         // indicator off and surface a transient toast confirming the
@@ -1264,8 +1303,24 @@ final class ChatViewModel {
         // Each gets its own optimistic side-effect on RichChatViewModel
         // so the chat header pill / queue chip update synchronously
         // without waiting for a server round-trip.
-        let isNonInterruptive = richChatViewModel.isNonInterruptiveSlash(text)
-        let parsed = RichChatViewModel.parseSlashName(text)
+        //
+        // CAPABILITY-AWARE (round-4 decision 12). The menu has hidden
+        // `/steer` and `/queue` below their v0.13 floor since P37, but the
+        // user can still TYPE either one, and below the floor the adapter
+        // does not dispatch it: `_handle_slash_command` returns `None` for a
+        // name outside `_COMMANDS` and the raw text goes to the LLM as an
+        // ordinary prompt (`acp_adapter/commands.py:88-95` @ `v2026.9.7`;
+        // both names enter the dict together at `acp_adapter/server.py:170`
+        // /`:171` @ `v2026.5.7`, and `acp_adapter/` at `v2026.4.30` has
+        // neither). So that turn is a REAL turn: no queue chip, no
+        // "runs after current turn" hint, the normal working indicator, and
+        // a one-line notice saying what Scarf actually sent.
+        // An idle `/queue` is an ordinary turn now (see `idleQueueText`), so
+        // it must NOT suppress the working indicator either.
+        let isNonInterruptive = richChatViewModel.isDispatchedNonInterruptiveSlash(text)
+            && idleQueueText == nil
+            && !idleSteer
+        let parsed = parsedForWire
         switch parsed.name {
         case "goal":
             // TODO(WS-2-Q7): once a v0.13 host confirms the
@@ -1290,7 +1345,10 @@ final class ChatViewModel {
                 richChatViewModel.transientHint = "Sent /goal — see the agent reply for current goal."
             }
             scheduleHintClear()
-        case "queue":
+        // `wasAgentWorking` is the second gate: the queue chip and the
+        // "runs after current turn" hint are only true of a session with a
+        // turn in flight.
+        case "queue" where isNonInterruptive && wasAgentWorking:
             let queuedText = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
             if !queuedText.isEmpty {
                 richChatViewModel.recordQueuedPrompt(text: queuedText)
@@ -1319,7 +1377,11 @@ final class ChatViewModel {
                 richChatViewModel.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
             }
             scheduleHintClear()
-        case "steer" where isNonInterruptive:
+        // `wasAgentWorking` is the second gate, exactly as `/queue` has it:
+        // the "applies after the next tool call" promise is only true of a
+        // turn that is running. `isNonInterruptive` already excludes the idle
+        // case via `idleSteer`; naming it here keeps the two rows symmetric.
+        case "steer" where isNonInterruptive && wasAgentWorking:
             richChatViewModel.transientHint = "Guidance queued — applies after the next tool call."
             scheduleHintClear()
         default:
@@ -1327,6 +1389,23 @@ final class ChatViewModel {
             // Don't flip "Agent working…" for any other
             // non-interruptive command (defensive; matches the
             // legacy contract).
+            //
+            // A sub-floor `/steer` / `/queue` lands here too, which is the
+            // point: it takes the ordinary-prompt path, indicator included,
+            // and says so once.
+            if let notice = RichChatViewModel.subFloorSlashNotice(
+                name: parsed.name,
+                capabilities: richChatViewModel.capabilitiesGate
+            ) {
+                richChatViewModel.transientHint = notice
+                scheduleHintClear()
+            } else if idleQueueText != nil {
+                richChatViewModel.transientHint = RichChatViewModel.idleQueueNotice
+                scheduleHintClear()
+            } else if idleSteer {
+                richChatViewModel.transientHint = RichChatViewModel.idleSteerNotice
+                scheduleHintClear()
+            }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
         // Record the in-flight interruptive turn (ChatViewModel-owned;

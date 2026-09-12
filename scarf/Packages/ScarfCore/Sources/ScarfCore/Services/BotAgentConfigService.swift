@@ -20,7 +20,8 @@ import Foundation
 /// .readDisabledSkillNames`, `ToolsViewModel.loadPlatforms`,
 /// `HermesConfigReader.readRawConfig`). There is also a correctness reason
 /// beyond consistency: `hermes config get` prints the **effective** value
-/// (`get_config_value` → `load_config()`, `hermes_cli/config.py:6000-6012`),
+/// (`get_config_value` → `load_config()`, `hermes_cli/config.py:3530-3546` @
+/// v2026.9.7 — P39 re-anchored this from `:6000-6012`),
 /// which folds in `DEFAULT_CONFIG` and the managed overlay and gives the
 /// caller no way to tell a user pin from a built-in default. Scarf's whole UI
 /// story here is "pinned vs default", so the raw file is the only honest
@@ -286,10 +287,19 @@ public struct BotAgentConfigService: Sendable {
     /// Hermes' built-in default — **not** to the root profile's model, which
     /// the bot never inherited (see ``BotConfigOrigin``).
     ///
-    /// `hermes config unset` exits non-zero with "Config key not set" for a key
-    /// that was never pinned (`config.py:6058-6060`), which is a success from
-    /// the caller's point of view, so those results are returned rather than
-    /// thrown. Callers that need to distinguish should re-read.
+    /// `hermes config unset` exits non-zero with `Config key not set: <key>`
+    /// for a key that was never pinned — `_exit_invalid` at
+    /// `hermes_cli/config.py:3561` (the `.env` arm) and `:3579` (the
+    /// config.yaml arm), both `sys.exit(1)` via `:3422-3424` @ v2026.9.7 —
+    /// which is a success from the caller's point of view, so those results
+    /// are returned rather than thrown. Callers that need to distinguish
+    /// should re-read.
+    ///
+    /// P39 re-anchored this citation: it read `config.py:6058-6060`, and the
+    /// file is 3891 lines at v2026.9.7.
+    ///
+    /// Throws `BotsError.unsupported` on a host below the `hasConfigUnset`
+    /// floor — see ``unsetValue(forProfile:key:timeout:)``.
     @discardableResult
     public func clearModelPin(forProfile name: String, timeout: TimeInterval = 60) throws -> [ProcessResult] {
         [
@@ -478,8 +488,11 @@ public struct BotAgentConfigService: Sendable {
     }
 
     /// A whole dotted key: every segment safe, no empty segment. Mirrors
-    /// `hermes_cli/config.py:5751-5757`, which rejects leading/trailing/doubled
-    /// dots outright.
+    /// `set_config_value`'s own two key guards at
+    /// `hermes_cli/config.py:3453-3458` @ v2026.9.7, which reject surrounding
+    /// whitespace and any empty path segment (leading, trailing or doubled
+    /// dot) outright. P39 re-anchored this citation from `:5751-5757`, which
+    /// is past the end of a 3891-line file.
     static func isSafeDottedKey(_ key: String) -> Bool {
         guard key == key.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else { return false }
         let segments = key.split(separator: ".", omittingEmptySubsequences: false)
@@ -491,7 +504,9 @@ public struct BotAgentConfigService: Sendable {
     ///
     /// Note that Hermes routes credential-shaped keys away from `config.yaml`
     /// entirely: `_is_env_config_key` sends them to the profile's `.env` via
-    /// `save_provider_env_credential` (`config.py:5774-5781`). Still the bot's
+    /// `save_provider_env_credential` (`_is_env_config_key` at `config.py:934`,
+    /// the routing at `:3461-3468` @ v2026.9.7 — P39 re-anchored this from
+    /// `:5774-5781`). Still the bot's
     /// own file — profiles get their own `.env` at creation — but a key written
     /// that way will not read back through ``readAgentConfig(forProfile:)`,
     /// which parses `config.yaml` only. Nothing this service writes today is
@@ -506,20 +521,44 @@ public struct BotAgentConfigService: Sendable {
         guard Self.isSafeDottedKey(key) else {
             throw BotsError.invalidValue(key: key)
         }
-        return try run(forProfile: name, args: ["config", "set", key, value], timeout: timeout)
+        return try run(forProfile: name, args: HermesConfigSet.argv(key: key, value: value), timeout: timeout)
     }
 
-    /// `hermes -p <bot> config unset <key>`.
+    /// `hermes -p <bot> config unset -- <key>`.
+    ///
+    /// P39 (round-4 decision 11): argv comes from ``HermesConfigUnset`` — the
+    /// same builder both Settings surfaces use — and the `hasConfigUnset`
+    /// floor is checked HERE, not at the caller. This was the seventh
+    /// `config unset` door: it hand-built its own argv, carried no floor gate
+    /// at all, and left the outcome to the exit code, which
+    /// `unset_config_value`'s managed-install arm never sets
+    /// (`hermes_cli/config.py:3549-3551` @ v2026.9.7 — print to stderr and
+    /// bare `return`, i.e. exit 0).
+    ///
+    /// The verdict is deliberately NOT applied here: the result is a
+    /// `ProcessResult` and the caller — ``clearModelPin(forProfile:timeout:)``
+    /// and `BotAgentViewModel.isBenignUnset` above it — is what decides which
+    /// refusals are benign. `HermesConfigUnset.judge` is the one judge both
+    /// use.
     @discardableResult
     public func unsetValue(
         forProfile name: String,
         key: String,
         timeout: TimeInterval = 60
     ) throws -> ProcessResult {
+        // The floor is MOOT under Bot Mode — `hasBotMode` is v0.20.3 and
+        // `hasConfigUnset` is v0.19.0, so no host can reach here without the
+        // verb — and it is here anyway for the P37 reason: a floor that lives
+        // only in a comment is re-broken by the next caller, and the one place
+        // to state it is the helper every door goes through. Pinned by
+        // `BotAgentUnsetP39Tests.theConfigUnsetFloorIsMootUnderBotModeButStillStructural`
+        // (in `HermesConfigSetP39Tests.swift`, not a file of its own — the
+        // suite name is not the file name here).
+        guard capabilities.hasConfigUnset else { throw BotsError.unsupported }
         guard Self.isSafeDottedKey(key) else {
             throw BotsError.invalidValue(key: key)
         }
-        return try run(forProfile: name, args: ["config", "unset", key], timeout: timeout)
+        return try run(forProfile: name, args: HermesConfigUnset.argv(key: key), timeout: timeout)
     }
 
     /// Compose the full argv for a bot-scoped invocation. Exposed for tests,

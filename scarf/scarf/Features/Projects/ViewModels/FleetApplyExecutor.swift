@@ -271,6 +271,7 @@ struct FleetApplyExecutor: Sendable {
         let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
 
         var created = 0, skipped = 0, failed = 0, deliverAllDowngrades = 0, scriptOnlySkipped = 0
+        var monitorSkipped = 0, continuityDowngrades = 0, crossJobContextDowngrades = 0
         var cancelledRemaining = 0
         var createdNames: [String] = []
         // First failing `cron create`'s combined stdout+stderr — the only
@@ -303,6 +304,19 @@ struct FleetApplyExecutor: Sendable {
                 scriptOnlySkipped += 1
                 continue
             }
+            // Round-4 decision 8: a MONITOR job is skipped and surfaced for
+            // the same reason. Its behaviour is "run the agent only when this
+            // source's output CHANGED" — `--monitor-script` is a path on the
+            // SOURCE host that fleet-apply does not replicate, `--monitor-url`
+            // carries hash state (`monitor_state`) that does not travel
+            // (`hermes_cli/subcommands/cron.py:51-62` @ `v2026.9.7`).
+            // `cronCreateArgs` forwards neither, so a copy used to become an
+            // ordinary agent job that ran, and billed, on every single tick
+            // under a green "created". Decline it and say so instead.
+            if FleetApplyPlan.shouldSkipMonitorJob(job) {
+                monitorSkipped += 1
+                continue
+            }
             // `sourceJobs` is already the partitioned copy set, so a nil here
             // can only mean the caller handed us an unpartitioned list — count
             // it as a failure WITH a reason rather than a bare tally.
@@ -327,6 +341,28 @@ struct FleetApplyExecutor: Sendable {
                 created += 1
                 createdNames.append(job.name)
                 if droppedDeliverAll { deliverAllDowngrades += 1 }
+                // `--continuity` is a downgrade, not a refusal: it is stored
+                // as `"self"` in `context_from`
+                // (`tools/cronjob_job_args.py:313-321` @ `v2026.9.7`), so the
+                // copy just starts its own run history — which is what the
+                // FIRST run of a continuity job does anyway
+                // (`subcommands/cron.py:76-84`). Counted on the SUCCESS arm
+                // with the deliver downgrade: a job that never landed was not
+                // degraded, it failed, and reporting both would double-count
+                // the same job in two different notes.
+                if job.hasRunToRunContinuity { continuityDowngrades += 1 }
+                // A `context_from` ref naming ANOTHER job is the second half
+                // of the same field and gets the same treatment for a harder
+                // reason: there is no `--context-from` option on `cron
+                // create`/`edit` at all (`hermes_cli/subcommands/cron.py`
+                // exposes only `--continuity`/`--no-continuity`, `:76-84`,
+                // `:115-120` @ `v2026.9.7`), so nothing CAN forward it — and
+                // `_validate_context_from_refs`
+                // (`tools/cronjob_job_args.py:326-337`) would reject the ids
+                // anyway, because they name jobs on the SOURCE host. Surface,
+                // never forward. Counted on the success arm: the copy landed,
+                // it just wakes without the other job's output.
+                if !job.crossJobContextRefs.isEmpty { crossJobContextDowngrades += 1 }
             } else {
                 failed += 1
                 if firstFailureDetail == nil {
@@ -369,6 +405,7 @@ struct FleetApplyExecutor: Sendable {
         }
         if skipped > 0 { parts.append(String(localized: "\(skipped) already present")) }
         if scriptOnlySkipped > 0 { parts.append(String(localized: "\(scriptOnlySkipped) script-only skipped")) }
+        if monitorSkipped > 0 { parts.append(String(localized: "\(monitorSkipped) monitor skipped — source doesn't travel")) }
         if failed > 0 { parts.append(String(localized: "\(failed) failed")) }
         if cancelledRemaining > 0 { parts.append(String(localized: "\(cancelledRemaining) cancelled")) }
         // A deliver=all downgrade is a created-but-degraded job (runs with
@@ -377,8 +414,17 @@ struct FleetApplyExecutor: Sendable {
         if deliverAllDowngrades > 0 {
             parts.append(String(localized: "\(deliverAllDowngrades) w/o deliver=all (host < v0.14)"))
         }
+        // A copied continuity job DID land; it just starts its own run
+        // history. Same created-but-degraded rule as the deliver note.
+        if continuityDowngrades > 0 {
+            parts.append(String(localized: "\(continuityDowngrades) w/o run-to-run continuity"))
+        }
+        if crossJobContextDowngrades > 0 {
+            parts.append(String(localized: "\(crossJobContextDowngrades) w/o cross-job context (no CLI flag to copy it)"))
+        }
         let status = Self.cronFieldStatus(
-            created: created, failed: failed, scriptOnlySkipped: scriptOnlySkipped,
+            created: created, failed: failed,
+            scriptOnlySkipped: scriptOnlySkipped + monitorSkipped,
             cancelledRemaining: cancelledRemaining)
         return FieldResult(
             field: .cron,
@@ -398,7 +444,10 @@ struct FleetApplyExecutor: Sendable {
     ///   used to tell. A created-but-unpaused job is a different matter — it
     ///   DID land, and its live state is surfaced in the message.
     /// - `.skipped` when nothing was created, nothing failed, and the pass
-    ///   either skipped jobs for being script-only (`no_agent`) or was
+    ///   either skipped jobs Scarf declines to copy — script-only
+    ///   (`no_agent`) or monitor (`monitor_script`/`monitor_url`), which the
+    ///   caller sums into `scriptOnlySkipped` because the verdict is the same
+    ///   for both — or was
     ///   CANCELLED before it wrote anything. Both are real outcomes where not
     ///   one job was written; cancellation already reports `.skipped`
     ///   "cancelled before apply" when it lands between targets, and a cancel

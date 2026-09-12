@@ -229,16 +229,33 @@ public enum HermesMCPAdd {
     ///
     /// **And no `--` before the `name` positional either.** The F2/F3 rule
     /// ("guard a user-supplied positional with `--`") does NOT generalise to
-    /// this subparser, and F9 checked rather than assumed. `mcp add`'s only
-    /// positional is `name`, and it is declared *after* `--command` /
-    /// `--url` / `--env` / `--args` on the command line in every form we
-    /// emit. Python's argparse treats everything following the first `--`
-    /// as positional, so `mcp add -- srv --command npx` fails with
-    /// `unrecognized arguments: --command npx` — verified by execution
-    /// against the real subparser shape at v2026.8.31, for the stdio, url,
-    /// `--env` and leading-dash-name forms alike. There is therefore no
-    /// safe `--` placement here; a leading-dash server name is instead
-    /// rejected upstream by the name validator before it reaches argv.
+    /// this subparser, and F9 checked rather than assumed. Scarf always emits
+    /// `name` BEFORE the options it carries (see ``stdioPlan(name:command:args:env:connectTimeout:state:)``
+    /// and ``urlPlan(name:url:auth:connectTimeout:state:)``), and argparse
+    /// treats everything after the first `--` as positional, so
+    /// `mcp add -- srv --command npx` fails with
+    /// `unrecognized arguments: --command npx`.
+    ///
+    /// **The claim is narrowed to the stdio shape (P40b).** What makes it a
+    /// structural fact rather than an observation is `--args`:
+    /// `nargs=argparse.REMAINDER` (`hermes_cli/subcommands/mcp.py:34-36` @
+    /// v2026.9.7) swallows every remaining token verbatim, `--` included, so
+    /// no `--` can be placed after it and none can be placed before `name`.
+    /// The url / `--env` forms were checked by execution at v2026.8.31 rather
+    /// than read off the parser, and they behave the same way, but the
+    /// REMAINDER argument is the one that cannot change under us silently.
+    ///
+    /// **There is no `--`-shaped hole for a leading-dash name.** Nothing
+    /// upstream validates the NAME's shape: `cmd_mcp_add`
+    /// (`hermes_cli/mcp_config.py:429`) passes it to `_validate_or_warn`
+    /// (`:479`, defined `:88-96`) → `validate_mcp_server_entry`
+    /// (`hermes_cli/mcp_security.py:89-145`), which inspects `command`,
+    /// `args` and `env` for IOCs and shell interpreters and never looks at
+    /// `name`. argparse itself is the gate: a `-`-leading token in the
+    /// positional slot is parsed as an unknown option and the parser exits 2
+    /// before any handler runs. Scarf's own MCP editor is where such a name
+    /// should be refused with a readable message, and it is not one today —
+    /// tracked, not fixed here.
     ///
     /// (`--` before an ordinary positional in a *flagless tail* —
     /// `profile delete -y -- name` — is unaffected and still correct; both

@@ -144,13 +144,18 @@ final class MCPServersViewModel {
         }
     }
 
+    /// P40: judged by what `hermes mcp remove` PRINTED. `cmd_mcp_remove`
+    /// returns after `_lookup_server`'s `✗ Server '<name>' not found in
+    /// config.` (`hermes_cli/mcp_config.py:104`, `:518-519` @ v2026.9.7) at
+    /// exit 0, so the row flashed "Removed", vanished from the list, and came
+    /// back on the reload — the shape P31 fixed for `pairing revoke`.
     func deleteServer(name: String) {
         let fileService = self.fileService
         Task.detached { [weak self] in
-            let result = fileService.removeMCPServer(name: name)
+            let outcome = fileService.removeMCPServer(name: name)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
+                if outcome.succeeded {
                     self.flashStatus("Removed \(name)")
                     if self.selectedServerName == name {
                         self.selectedServerName = nil
@@ -159,7 +164,8 @@ final class MCPServersViewModel {
                     self.load(force: true)
                     self.showRestartBanner = true
                 } else {
-                    self.activeError = "Remove failed: \(result.output)"
+                    self.activeError = outcome.detail
+                        .map { "Remove failed: \($0)" } ?? "Remove failed"
                 }
             }
         }
@@ -501,17 +507,40 @@ final class MCPServersViewModel {
         }
     }
 
+    /// What a `gateway restart` verdict does to this pane. Three arms (P40c):
+    /// a `.unconfirmed` verdict is not an error — it goes to the neutral
+    /// status line rather than `activeError` — and it does NOT clear the
+    /// restart banner, because Scarf could not confirm the restart and the
+    /// "restart needed" prompt has therefore not earned its dismissal.
+    /// Pure and `static` so the arms can be tested without a live `hermes`.
+    enum RestartBanner: Equatable {
+        case confirmed(String)
+        case unconfirmed(String)
+        case failed(String)
+    }
+
+    static func restartBanner(_ outcome: HermesCLIOutcome) -> RestartBanner {
+        if outcome.confidence == .unconfirmed {
+            return .unconfirmed(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
+        }
+        if outcome.succeeded { return .confirmed("Gateway restarted") }
+        return .failed(outcome.detail.map { "Restart failed: \($0)" } ?? "Restart failed")
+    }
+
     func restartGateway() {
         let fileService = self.fileService
         Task.detached { [weak self] in
-            let result = fileService.restartGateway()
+            let outcome = fileService.restartGateway()
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
-                    self.flashStatus("Gateway restarted")
+                switch Self.restartBanner(outcome) {
+                case .confirmed(let status):
+                    self.flashStatus(status)
                     self.showRestartBanner = false
-                } else {
-                    self.activeError = "Restart failed: \(result.output)"
+                case .unconfirmed(let status):
+                    self.flashStatus(status)
+                case .failed(let error):
+                    self.activeError = error
                 }
             }
         }

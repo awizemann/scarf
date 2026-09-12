@@ -40,6 +40,48 @@ public struct ParsedYAML: Sendable {
 /// Entry points for Hermes-flavored YAML parsing. Stateless, pure
 /// functions — no Foundation types that differ cross-platform.
 public enum HermesYAML {
+    /// The dotted paths whose scalars SCARF ITSELF writes, and which are
+    /// therefore decoded with ``YAMLScalar/unquote(_:)`` — the writers'
+    /// own inverse — rather than with ``stripYAMLQuotes(_:)``.
+    ///
+    /// **Round-4 decision 10.** `YAMLScalar.unquote`'s doc called itself
+    /// "the single decoder every Scarf-written scalar is read back
+    /// through", and for these blocks it was not true: they are emitted by
+    /// `PowerSettingsWriter` through `YAMLScalar.quoteIfNeeded` (which
+    /// escapes `\\`, `\n`, `\xNN`, `\uNNNN` inside double quotes) and read
+    /// back through `stripYAMLQuotes`, which hands a double-quoted BODY
+    /// back verbatim — so a pattern containing a backslash came back
+    /// doubled and grew one `\` per save, exactly the defect P32 found in
+    /// `ProfileRoutesWriter`.
+    ///
+    /// **Per-KEY, not global.** `stripYAMLQuotes` stays the rule everywhere
+    /// else on purpose: it reads arbitrary HERMES-written config.yaml
+    /// values, where widening the escape table would change the meaning of
+    /// every unrelated `\` in the file. Opt a path in only when Scarf is
+    /// the writer.
+    ///
+    /// Writers, cited:
+    /// * `agent.reasoning_overrides` — `PowerSettingsWriter
+    ///   .setReasoningOverrides(in:pairs:capabilities:)` →
+    ///   `GatewayConfigWriter.setMapChecked`, which puts BOTH the key and
+    ///   the value through `YAMLScalar.quoteIfNeeded`. Hence the map arm
+    ///   below decodes both halves.
+    /// * `model_catalog.excluded_providers` — `PowerSettingsWriter
+    ///   .setExcludedProviders(in:providers:capabilities:)` →
+    ///   `GatewayConfigWriter.setListChecked`.
+    ///
+    /// **`gateway.multiplex_profile_allowlist` is deliberately NOT here.**
+    /// The round-4 finding listed it as a third Scarf-written block; it is
+    /// not one. Scarf READS it (`HermesConfig+YAML.multiplexProfileAllowlist`,
+    /// and `SettingsViewModel.multiplexProfileAllowlistWarning` on top of
+    /// that) and writes only the sibling BOOL `multiplex_profiles`, through
+    /// `hermes config set` — a repo-wide grep for the key finds no writer at
+    /// either spelling. Opting a Hermes-written-only list into the wider
+    /// escape table is the exact widening the paragraph above refuses. If a
+    /// writer ever lands, add both spellings here in the same commit.
+    static let scarfWrittenMapPaths: Set<String> = ["agent.reasoning_overrides"]
+    static let scarfWrittenListPaths: Set<String> = ["model_catalog.excluded_providers"]
+
     /// Parse a YAML string into a `ParsedYAML` bundle.
     public static func parseNestedYAML(_ rawYAML: String) -> ParsedYAML {
         // A leading U+FEFF is in NEITHER `.whitespaces` nor
@@ -135,8 +177,13 @@ public enum HermesYAML {
                     if let parent = lastScalarParent {
                         // Re-strip quotes on the FULL value: a quoted scalar
                         // folded across lines only closes its quote on the
-                        // last continuation line.
-                        maps[parent.path, default: [:]][parent.key] = stripYAMLQuotes(joined)
+                        // last continuation line. Decision 10's opt-in
+                        // applies here too — the same key must not decode
+                        // one way folded and another way on one line.
+                        maps[parent.path, default: [:]][parent.key] =
+                            scarfWrittenMapPaths.contains(parent.path)
+                            ? YAMLScalar.unquote(joined)
+                            : stripYAMLQuotes(joined)
                     }
                 }
                 continue
@@ -158,9 +205,13 @@ public enum HermesYAML {
 
             if isListItem {
                 let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                let stripped = stripYAMLQuotes(item)
                 let path = currentPath()
                 guard !path.isEmpty else { continue }
+                // Decision 10: a list Scarf itself writes is decoded with
+                // the writers' own inverse — see `scarfWrittenListPaths`.
+                let stripped = scarfWrittenListPaths.contains(path)
+                    ? YAMLScalar.unquote(item)
+                    : stripYAMLQuotes(item)
                 lists[path, default: []].append(stripped)
                 lastScalarIndent = nil
                 lastScalarPath = nil
@@ -175,17 +226,28 @@ public enum HermesYAML {
             // take the original path.
             let key: String
             let afterColon: String
-            if let quote = trimmed.first, quote == "'" || quote == "\"" {
-                let body = trimmed.dropFirst()
-                guard let close = closingQuoteIndex(in: body, quote: quote) else { continue }
-                var raw = String(body[body.startIndex..<close])
+            guard let span = blockKeySpan(in: trimmed) else { continue }
+            let rawKeySpan = String(span.key)
+            if let quote = rawKeySpan.first, quote == "'" || quote == "\"" {
+                var raw = String(rawKeySpan.dropFirst().dropLast())
                 if quote == "'" {
                     raw = raw.replacingOccurrences(of: "''", with: "'")
                 }
-                let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
-                guard rest.hasPrefix(":") else { continue }
-                key = raw
-                afterColon = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
+                // Decision 10, the KEY half. A single-quoted key is already
+                // fully decoded above (`''` is that style's ONE escape); a
+                // DOUBLE-quoted one was taken verbatim, so a key Scarf wrote
+                // through `YAMLScalar.quoteIfNeeded` — which escapes `\\`,
+                // `\n` and `\xNN`/`\uNNNN` — came back with its escapes
+                // intact and grew one `\` per save. Re-decode it with the
+                // writers' own inverse, but ONLY under a path Scarf writes
+                // (`scarfWrittenMapPaths`), because the same token under a
+                // Hermes-written block must keep reading as it always has.
+                if quote == "\"", scarfWrittenMapPaths.contains(currentPath()) {
+                    key = YAMLScalar.unquote("\"" + raw + "\"")
+                } else {
+                    key = raw
+                }
+                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
             } else {
                 // Plain (unquoted) key. YAML's `key: value` separator is a
                 // colon followed by whitespace (or end-of-line); a colon NOT
@@ -193,9 +255,8 @@ public enum HermesYAML {
                 // emits Ollama-style ids like `llama3:8b: high` unquoted.
                 // Splitting at the first bare colon used to shear that into
                 // key "llama3" + value "8b: high".
-                guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { continue }
-                key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                key = rawKeySpan.trimmingCharacters(in: .whitespaces)
+                afterColon = String(span.afterColon).trimmingCharacters(in: .whitespaces)
             }
 
             let path = currentPath(joinedWith: key)
@@ -289,7 +350,7 @@ public enum HermesYAML {
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                maps[path] = parseFlatFlowMap(inner) ?? [:]
+                maps[path] = parseFlatFlowMap(inner, unquoting: scarfWrittenMapPaths.contains(path)) ?? [:]
                 writtenPaths.insert(path)
                 continue
             }
@@ -310,7 +371,7 @@ public enum HermesYAML {
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                lists[path] = parseFlatFlowList(inner)
+                lists[path] = parseFlatFlowList(inner, unquoting: scarfWrittenListPaths.contains(path))
                 writtenPaths.insert(path)
                 continue
             }
@@ -324,7 +385,10 @@ public enum HermesYAML {
             // without a separate scan.
             if !stack.isEmpty {
                 let parentPath = currentPath()
-                maps[parentPath, default: [:]][key] = stripYAMLQuotes(afterColon)
+                // Decision 10, the VALUE half — see `scarfWrittenMapPaths`.
+                maps[parentPath, default: [:]][key] = scarfWrittenMapPaths.contains(parentPath)
+                    ? YAMLScalar.unquote(afterColon)
+                    : stripYAMLQuotes(afterColon)
                 lastScalarParent = (path: parentPath, key: key)
             }
         }
@@ -359,8 +423,14 @@ public enum HermesYAML {
     }
 
     /// Index of the `key: value` separator colon in a trimmed plain-key
-    /// line: the first colon followed by whitespace or end-of-line. Colons
-    /// with a non-space successor are part of the key (`llama3:8b: high`).
+    /// line: the first colon followed by a SPACE or end-of-line. Colons
+    /// with any other successor are part of the key (`llama3:8b: high`).
+    ///
+    /// A space, not "whitespace": PyYAML's scanner refuses a TAB after the
+    /// value indicator (`k:\tv`, and `k:\t` alone, are both ScannerError;
+    /// 6.0.3), so a tab-separated line is not a row Hermes can load — it is
+    /// a document Hermes discards whole (`gateway/config.py:775-791` @
+    /// `v2026.9.7`). Reading it as a row was P42c's finding.
     ///
     /// Public so every reader that has to decide "is this line a `key:`
     /// row, and where does the key end?" uses ONE rule — the parser here,
@@ -373,7 +443,11 @@ public enum HermesYAML {
         while i < trimmed.endIndex {
             if trimmed[i] == ":" {
                 let next = trimmed.index(after: i)
-                if next == trimmed.endIndex || trimmed[next] == " " || trimmed[next] == "\t" {
+                // Space or end of line only — a TAB after the value
+                // indicator is a PyYAML ScannerError even for a plain key
+                // (`k:\tv`, and `k:\t` alone; PyYAML 6.0.3), so `k:\tv` is
+                // not a row, it is a document Hermes cannot load.
+                if next == trimmed.endIndex || trimmed[next] == " " {
                     return i
                 }
             }
@@ -386,15 +460,22 @@ public enum HermesYAML {
     /// into a flat scalar map. Returns `[:]` for empty content and `nil`
     /// when the content is nested/exotic (embedded `{`/`[`, or an entry
     /// that doesn't split into `key: value`) — callers treat nil as empty.
-    private static func parseFlatFlowMap(_ inner: String) -> [String: String]? {
+    ///
+    /// `unquoting` is decision 10's per-key opt-in, threaded down from the
+    /// PATH. P46 finding 7: the flow arms decoded with `stripYAMLQuotes`
+    /// unconditionally, so `excluded_providers: ["c\x41d"]` came back as the
+    /// literal `c\x41d` while the block form of the same key came back as
+    /// `cAd` — one key, two answers, decided by which shape the host's
+    /// config.yaml happened to use.
+    private static func parseFlatFlowMap(_ inner: String, unquoting: Bool = false) -> [String: String]? {
         let body = inner.trimmingCharacters(in: .whitespaces)
         if body.isEmpty { return [:] }
         if body.contains("{") || body.contains("[") { return nil }
         var result: [String: String] = [:]
-        for part in body.split(separator: ",") {
+        for part in splitFlowEntries(body) {
             let entry = part.trimmingCharacters(in: .whitespaces)
             if entry.isEmpty { continue }
-            guard let (k, v) = splitFlowEntry(entry), !k.isEmpty, !v.isEmpty else { return nil }
+            guard let (k, v) = splitFlowEntry(entry, unquoting: unquoting), !k.isEmpty, !v.isEmpty else { return nil }
             result[k] = v
         }
         return result
@@ -405,38 +486,138 @@ public enum HermesYAML {
     /// entries and arbitrary internal spacing; empty entries (from `[]` or a
     /// stray trailing comma) are dropped. Shared by `parseNestedYAML`'s
     /// inline-array handling and `ProjectSkillsScanner.parseTrustedProjectDirs`.
-    public static func parseFlatFlowList(_ inner: String) -> [String] {
-        inner.split(separator: ",").compactMap { part in
-            let value = stripYAMLQuotes(part.trimmingCharacters(in: .whitespaces))
+    /// `unquoting` is decision 10's per-key opt-in — see ``parseFlatFlowMap``.
+    /// It defaults to false so the one external caller
+    /// (`ProjectSkillsScanner.parseTrustedProjectDirs`, a key Scarf does not
+    /// write through ``YAMLScalar``) keeps the rule that applies everywhere else.
+    ///
+    /// P46b: the split is QUOTE-AWARE. A bare `inner.split(separator: ",")`
+    /// cut inside a quoted scalar, so PyYAML's one-item `["a,b"]` came back
+    /// as the two items `"a` and `b"` — and, once ``stripYAMLQuotes`` had
+    /// eaten the stray quotes, as the plausible-looking `["a", "b"]` that
+    /// nothing downstream could tell from a real pair. Verified against
+    /// PyYAML 6.0.3. P46 made the flow path authoritative for decision 10's
+    /// `unquote` opt-in, which is what makes a comma inside a quoted entry
+    /// reachable in practice.
+    public static func parseFlatFlowList(_ inner: String, unquoting: Bool = false) -> [String] {
+        splitFlowEntries(inner).compactMap { part in
+            let raw = part.trimmingCharacters(in: .whitespaces)
+            let value = unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
             return value.isEmpty ? nil : value
         }
     }
 
+    /// Split flow content on the commas that are actually SEPARATORS — i.e.
+    /// not the ones inside a quoted scalar.
+    ///
+    /// The quote scan is ``closingQuoteIndex``, the same one
+    /// ``splitFlowEntry`` uses for a quoted KEY, so `'a,b'` (single-quoted,
+    /// `''` doubling) and `"a\",b"` (double-quoted, backslash escapes) are
+    /// both one entry here and one entry to PyYAML. An UNCLOSED quote is not
+    /// an error this function may invent: the scan falls through to the end
+    /// of the content and the remainder is one entry, which leaves the
+    /// caller's own validation (`parseFlatFlowMap` returning nil, or
+    /// `stripYAMLQuotes` keeping the stray quote) to decide, exactly as
+    /// before.
+    ///
+    /// A quote only OPENS a scalar where a scalar can BEGIN — at the start
+    /// of the content, after a `,` (a new entry) or after a `:` (a map
+    /// entry's value). Everywhere else it is an ordinary character in a
+    /// plain scalar, the way YAML reads it: PyYAML 6.0.3 loads `[a'b, c]` as
+    /// two PLAIN scalars, `["a'b", "c"]`, so an apostrophe inside a bare word
+    /// must not swallow the separator after it — and `{a: "x,y"}` must still
+    /// have its value quoted, which is why "start of an entry" alone is the
+    /// wrong test.
+    ///
+    /// Empty entries survive as empty substrings; both callers drop them.
+    static func splitFlowEntries(_ inner: String) -> [Substring] {
+        var out: [Substring] = []
+        var start = inner.startIndex
+        var i = inner.startIndex
+        var previousSignificant: Character?
+        while i < inner.endIndex {
+            let c = inner[i]
+            let opensScalar = previousSignificant == nil
+                || previousSignificant == ","
+                || previousSignificant == ":"
+            if opensScalar, c == "'" || c == "\"" {
+                let body = inner[inner.index(after: i)...]
+                guard let close = closingQuoteIndex(in: body, quote: c) else { break }
+                i = inner.index(after: close)
+                previousSignificant = c
+                continue
+            }
+            if c == "," {
+                out.append(inner[start..<i])
+                i = inner.index(after: i)
+                start = i
+                previousSignificant = ","
+                continue
+            }
+            if c != " ", c != "\t" { previousSignificant = c }
+            i = inner.index(after: i)
+        }
+        out.append(inner[start...])
+        return out
+    }
+
     /// Split one `key: value` flow entry, honoring a quoted key that may
     /// contain colons (`'llama3:8b': high`).
-    private static func splitFlowEntry(_ entry: String) -> (String, String)? {
+    /// `unquoting` is decision 10's per-key opt-in — see ``parseFlatFlowMap``.
+    /// A DOUBLE-quoted key under an opted-in path is decoded the way the
+    /// block-form key path decodes it (`YAMLScalar.unquote` over the
+    /// re-quoted body), which is what makes `{"a\tb": high}` and its block
+    /// spelling agree.
+    private static func splitFlowEntry(_ entry: String, unquoting: Bool = false) -> (String, String)? {
+        func decode(_ raw: String) -> String {
+            unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
+        }
         if let quote = entry.first, quote == "'" || quote == "\"" {
             let body = entry.dropFirst()
             guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
             var key = String(body[body.startIndex..<close])
-            if quote == "'" { key = key.replacingOccurrences(of: "''", with: "'") }
+            if quote == "'" {
+                key = key.replacingOccurrences(of: "''", with: "'")
+            } else if unquoting {
+                key = YAMLScalar.unquote("\"" + key + "\"")
+            }
             let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
             guard rest.hasPrefix(":") else { return nil }
             let value = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
-            return (key, stripYAMLQuotes(value))
+            return (key, decode(value))
         }
         guard let colon = entry.firstIndex(of: ":") else { return nil }
         let key = String(entry[entry.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
         let value = String(entry[entry.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-        return (key, stripYAMLQuotes(value))
+        return (key, decode(value))
     }
 
     /// Index of the closing quote in `body` (which starts just AFTER the
     /// opening quote). Single-quoted YAML escapes an embedded quote by
-    /// doubling (`''`), so skip doubled pairs.
+    /// doubling (`''`), so skip doubled pairs; DOUBLE-quoted YAML escapes
+    /// with a backslash (`\\"`, and `\\\\` for the backslash itself), so skip
+    /// the character after any backslash.
+    ///
+    /// P41b: the double-quoted half was missing, and it is the style
+    /// ``YAMLScalar/doubleQuoted(_:)`` emits for a key carrying a control
+    /// character — a key that also contains a `"` came back with its span
+    /// cut at the escaped quote, the `rest.hasPrefix(":")` guard then failed,
+    /// and `parseNestedYAML` DROPPED the row. Under
+    /// `agent.reasoning_overrides` that row then vanished from the editor
+    /// and the next `setReasoningOverrides` save deleted it from the file.
     private static func closingQuoteIndex(in body: Substring, quote: Character) -> Substring.Index? {
         var i = body.startIndex
         while i < body.endIndex {
+            if quote == "\"", body[i] == "\\" {
+                // `\X` is one escape token: skip the backslash AND whatever
+                // follows it, so an escaped quote does not close the span.
+                // A trailing lone backslash falls off the end and the scan
+                // returns nil, which callers read as "not a quoted key".
+                let next = body.index(after: i)
+                if next == body.endIndex { return nil }
+                i = body.index(after: next)
+                continue
+            }
             if body[i] == quote {
                 let next = body.index(after: i)
                 if quote == "'", next < body.endIndex, body[next] == quote {
@@ -448,6 +629,64 @@ public enum HermesYAML {
             i = body.index(after: i)
         }
         return nil
+    }
+
+    /// Split a block-style `key: value` line (already trimmed of indentation)
+    /// into the key's RAW span — quotes included, exactly as written — and
+    /// everything after the separator colon. Returns nil when the line is not
+    /// a `key: value` row at all.
+    ///
+    /// The one block-style key scanner in the repo. `parseNestedYAML` uses it
+    /// and so does `HermesFileService`'s MCP-entry reader, which used to split
+    /// on `trimmed.firstIndex(of: ":")` with no quote awareness: an env or
+    /// header name containing a colon was WRITTEN correctly (`'A: B': v`, via
+    /// ``YAMLScalar/quoteIfNeeded(_:)``) and read back as the key `'A` with the
+    /// value `B': v`, which the next save then persisted.
+    ///
+    /// A quoted key ends at its closing quote, and the colon after it must be
+    /// followed by a SPACE or end the line: PyYAML's parser demands a
+    /// space after the value indicator whenever the key is not plain, so
+    /// `'a':b` raises `ParserError` while `'a': b` and `'a':` both load
+    /// (verified against PyYAML 6.0.3). Accepting `'a':b` here meant reading
+    /// a row Hermes cannot load at all. A TAB is NOT a space, on either side
+    /// of the colon — P41b accepted one "for symmetry with the plain arm",
+    /// but the plain arm was wrong too: `'q':\tv`, `"q":\tv`, `plain:\tv`,
+    /// a bare `'q':\t` and `'q'\t: v` are every one of them ScannerError
+    /// (6.0.3), while `'q' : v` loads. Spaces only, both arms. A PLAIN key
+    /// ends at the first colon followed by a space or end-of-line, per
+    /// ``plainKeySeparatorIndex(in:)`` — there a colon with a non-space
+    /// successor belongs to the key (`llama3:8b: high`).
+    public static func blockKeySpan(
+        in trimmed: String
+    ) -> (key: Substring, afterColon: Substring)? {
+        if let quote = trimmed.first, quote == "'" || quote == "\"" {
+            let body = trimmed.dropFirst()
+            guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
+            let afterQuote = body.index(after: close)
+            let rest = body[afterQuote...].drop(while: { $0 == " " })
+            guard rest.first == ":" else { return nil }
+            let afterColon = rest.dropFirst()
+            // PyYAML: after a non-plain key the `:` needs a SPACE or the end
+            // of the line. `'a':b` is a ParserError, not a row.
+            //
+            // A TAB is not a space here. PyYAML's scanner refuses a tab in
+            // this position outright — `'q':\tv`, `"q":\tv` and even a bare
+            // `'q':\t` are all ScannerError ("found character '\t' that
+            // cannot start any token"), verified against PyYAML 6.0.3 — so a
+            // tab-separated row is one Hermes cannot load at all, and
+            // accepting it meant Scarf displayed a row that makes Hermes
+            // discard the whole config.yaml layer
+            // (`gateway/config.py:775-791` @ `v2026.9.7`). Same for a tab
+            // BEFORE the colon: `'q'\t: v` is a ScannerError too, while
+            // `'q' : v` loads — hence spaces only on both sides.
+            if let next = afterColon.first, next != " " { return nil }
+            return (trimmed[trimmed.startIndex..<afterQuote], afterColon)
+        }
+        guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { return nil }
+        return (
+            trimmed[trimmed.startIndex..<colonIdx],
+            trimmed[trimmed.index(after: colonIdx)...]
+        )
     }
 
     /// Strip a single layer of surrounding single or double quotes from a YAML scalar.

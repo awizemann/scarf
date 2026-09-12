@@ -22,7 +22,7 @@ struct ProjectTemplateService: Sendable {
     /// handful of megabytes and this runs off the main actor, so the cap is a
     /// bound on a WEDGED child (a stuck mount, a full pipe), not a
     /// performance knob.
-    static let unzipTimeout: TimeInterval = 120
+    nonisolated static let unzipTimeout: TimeInterval = 120
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateService")
 
     let context: ServerContext
@@ -330,64 +330,154 @@ struct ProjectTemplateService: Sendable {
     /// total, which is what a decompression bomb has to LIE about to be
     /// effective — a lie that makes the archive fail its `verifyClaims`
     /// pass anyway. The compressed-size cap catches the honest-header case.
-    /// Failure to read the listing is not a refusal: an `unzip` that can't
-    /// list will fail the extraction below with its own error.
-    private nonisolated func enforceArchiveBounds(zipPath: String) throws {
+    ///
+    /// **A listing Scarf cannot read is a REFUSAL** (round-4 decision 16).
+    /// This used to reason that "an `unzip` that can't list will fail the
+    /// extraction below with its own error" — which is exactly backwards for
+    /// the input this guard exists for. The listing fails for a corrupt
+    /// central directory, for a `-Zt` too chatty to finish inside its budget,
+    /// and for an archive crafted to make it fail; in every one of those
+    /// cases the extraction that follows is the thing the caps were supposed
+    /// to gate, and `try?` handed it a free pass. An unopenable template is a
+    /// small loss; a Mac that fills its disk is not.
+    /// Internal rather than private so `ProjectTemplateBoundsP43Tests` can
+    /// drive the ceilings directly, on real archives, without going through
+    /// an `inspect()` that would unpack them.
+    nonisolated func enforceArchiveBounds(
+        zipPath: String,
+        listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout
+    ) throws {
         let attrs = try? FileManager.default.attributesOfItem(atPath: zipPath)
         if let size = attrs?[.size] as? Int64, size > Self.maxTemplateArchiveBytes {
             throw ProjectTemplateError.unzipFailed(
-                "This template file is \(size / 1_048_576) MB. Templates are a few kilobytes; "
-                    + "refusing to open it."
+                String(
+                    localized: "This template file is \(size / 1_048_576) MB. Templates are a few kilobytes; refusing to open it.",
+                    comment: "Refusal shown when a .scarftemplate file is far larger than any real template. The argument is the file's size in megabytes."
+                )
             )
         }
-        guard let listing = try? Self.runToolCapturingOutput(
-            "/usr/bin/unzip", ["-Zt", zipPath], timeout: 20
-        ) else { return }
-        // `unzip -Zt` prints e.g. "12 files, 40960 bytes uncompressed, 8192 bytes compressed: 80.0%"
+        let listing: String
+        do {
+            listing = try Self.runToolCapturingOutput(
+                "/usr/bin/unzip", ["-Zt", zipPath], timeout: listingTimeout
+            )
+        } catch {
+            throw ProjectTemplateError.unzipFailed(Self.unreadableListingRefusal)
+        }
+        // Same refusal for a listing that came back in a shape this parser
+        // does not recognise: an unparsed listing gates nothing, and "the
+        // numbers were not there" is not evidence that they were small.
+        guard let claims = Self.parseArchiveListing(listing) else {
+            throw ProjectTemplateError.unzipFailed(Self.unreadableListingRefusal)
+        }
+        if claims.entries > Self.maxTemplateEntries {
+            throw ProjectTemplateError.unzipFailed(
+                String(
+                    localized: "This template declares \(claims.entries) files. Templates hold a handful; refusing to open it.",
+                    comment: "Refusal shown when a .scarftemplate archive declares far more entries than any real template. The argument is the declared entry count."
+                )
+            )
+        }
+        if claims.uncompressedBytes > Self.maxTemplateUnpackedBytes {
+            throw ProjectTemplateError.unzipFailed(
+                String(
+                    localized: "This template would expand to \(claims.uncompressedBytes / 1_048_576) MB. Templates are a few kilobytes; refusing to open it.",
+                    comment: "Refusal shown when a .scarftemplate archive's declared uncompressed size is far larger than any real template. The argument is that size in megabytes."
+                )
+            )
+        }
+    }
+
+    /// Parse `unzip -Zt`'s one-line summary into the two numbers the caps
+    /// read. Returns nil when either is missing — which, now that a listing
+    /// Scarf cannot read is a refusal, is the difference between opening a
+    /// template and rejecting it.
+    ///
+    /// `unzip -Zt` prints
+    /// `12 files, 40960 bytes uncompressed, 8192 bytes compressed:  80.0%` —
+    /// **and `1 file, 3 bytes uncompressed, …` for a single-entry archive.**
+    /// The old field walk looked only for `files,`, so a one-file archive
+    /// silently matched neither cap; under the fail-open it merely skipped
+    /// them, but as a refusal it would have rejected a legitimate template.
+    /// Both spellings are accepted here, and `ProjectTemplateBoundsP43Tests`
+    /// runs the real `unzip` on a real one-entry zip to keep it honest.
+    nonisolated static func parseArchiveListing(
+        _ listing: String
+    ) -> (entries: Int, uncompressedBytes: Int64)? {
         let fields = listing.split(separator: " ").map(String.init)
-        if let idx = fields.firstIndex(of: "files,"), idx > 0,
-           let entries = Int(fields[idx - 1]), entries > Self.maxTemplateEntries {
-            throw ProjectTemplateError.unzipFailed(
-                "This template declares \(entries) files. Templates hold a handful; refusing to open it."
-            )
-        }
-        if let idx = fields.firstIndex(of: "bytes"), idx > 0,
-           let uncompressed = Int64(fields[idx - 1]),
-           uncompressed > Self.maxTemplateUnpackedBytes {
-            throw ProjectTemplateError.unzipFailed(
-                "This template would expand to \(uncompressed / 1_048_576) MB. "
-                    + "Templates are a few kilobytes; refusing to open it."
-            )
-        }
+        guard let countIdx = fields.firstIndex(where: { $0 == "files," || $0 == "file," }),
+              countIdx > 0, let entries = Int(fields[countIdx - 1]),
+              let bytesIdx = fields.firstIndex(of: "bytes"), bytesIdx > 0,
+              let uncompressed = Int64(fields[bytesIdx - 1])
+        else { return nil }
+        return (entries, uncompressed)
+    }
+
+    /// The one sentence every "the ceilings could not be checked" arm shows.
+    /// Named because three arms share it — the listing spawn failed, it
+    /// outstayed its budget, or it came back unparseable — and because the
+    /// tests assert on the refusal rather than on a message literal.
+    nonisolated static var unreadableListingRefusal: String {
+        String(
+            localized: "Scarf couldn't read this template's table of contents, so it can't check the file for a decompression bomb. Refusing to open it.",
+            comment: "Refusal shown when listing a .scarftemplate archive fails, times out, or comes back unparseable, so the size and entry-count ceilings could not be checked."
+        )
     }
 
     /// Run a tool and return stdout, with a hard timeout. Charter C10: no
     /// subprocess Scarf spawns is allowed to hang a caller forever, and both
     /// of this file's `unzip` invocations are on a user-facing path.
-    private nonisolated static func runToolCapturingOutput(
+    /// The listing spawn's own budget. `unzip -Zt` reads only the central
+    /// directory, so a healthy run is milliseconds; this is a ceiling on a
+    /// wedged one.
+    nonisolated static let listingTimeout: TimeInterval = 20
+
+    nonisolated static func runToolCapturingOutput(
         _ executable: String, _ args: [String], timeout: TimeInterval
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let outPipe = Pipe()
+        let errPipe = Pipe()
         process.standardOutput = outPipe
-        process.standardError = Pipe()
-        defer {
-            try? outPipe.fileHandleForReading.close()
+        process.standardError = errPipe
+        // The READ ends belong to `waitDraining` once the process has
+        // launched; only the launch-failure path below closes them here.
+        func closeWriteEnds() {
             try? outPipe.fileHandleForWriting.close()
+            try? errPipe.fileHandleForWriting.close()
         }
-        try process.run()
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
+        do {
+            try process.run()
+        } catch {
+            try? outPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForReading.close()
+            closeWriteEnds()
+            throw ProjectTemplateError.unzipFailed(error.localizedDescription)
         }
-        if process.isRunning {
-            process.terminate()
+        // C10, and the half the old bounded poll was missing: the drain must
+        // run CONCURRENTLY with the wait. This read stdout only after the
+        // poll, so an archive chatty enough to fill the 64 KB buffer stalled
+        // the child in `write()`, ran the budget out, and — through the
+        // caller's `try?` — turned the bomb check into a no-op. Which is
+        // precisely what an archive would want. See
+        // ``Process.waitDraining(timeout:pipes:)``.
+        let (exited, drained) = process.waitDraining(timeout: timeout, pipes: [outPipe, errPipe])
+        closeWriteEnds()
+        guard exited else {
             throw ProjectTemplateError.unzipFailed("timed out reading the template archive")
         }
-        let data = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
-        return String(data: data, encoding: .utf8) ?? ""
+        // A non-zero exit is "could not read", not "read nothing". The old
+        // code returned the empty stdout of a failed `unzip -Zt`, which parsed
+        // into no fields and so skipped both caps — the same fail-open the
+        // caller's `try?` had, one frame down.
+        guard process.terminationStatus == 0 else {
+            let err = String(data: drained.last ?? Data(), encoding: .utf8) ?? ""
+            throw ProjectTemplateError.unzipFailed(
+                err.isEmpty ? "exit \(process.terminationStatus)" : err)
+        }
+        return String(data: drained.first ?? Data(), encoding: .utf8) ?? ""
     }
 
     private nonisolated func unzip(zipPath: String, intoDir: String) throws {
@@ -401,12 +491,18 @@ struct ProjectTemplateService: Sendable {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        // Foundation dup()s these handles into the child on `run()`, but the
-        // parent copies stay open until explicitly released. Both ends must
-        // be closed or each Process spawn leaks 4 fds.
-        // The READ ends belong to `waitDraining` once the process has
-        // launched — see that method. On the launch-failure path below
-        // nothing is draining them, so they are closed there explicitly.
+        // The READ ends are the ones that leak: a spawn whose `Pipe` outlives
+        // it and whose read ends are never closed costs 2 fds (measured at 50
+        // spawns, round-4 P43b). They belong to `waitDraining` once the
+        // process has launched — see that method — so this closes them only on
+        // the launch-failure path below, where nothing is draining them.
+        //
+        // The WRITE ends do not leak after a successful `run()`: Foundation
+        // closes the parent's copy as part of the spawn, and the 50-spawn
+        // /dev/fd count was identical with and without these closes. They are
+        // kept anyway because on the launch-failure path `run()` never spawned
+        // and they are then the real release; a `try?` close of an
+        // already-closed handle is a harmless `EBADF`.
         func closePipes(includingReadEnds: Bool = false) {
             if includingReadEnds {
                 try? outPipe.fileHandleForReading.close()

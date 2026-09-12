@@ -40,10 +40,9 @@ struct HermesP37RemediationTests {
         // lines in the same dict at the same first tag.
         #expect(v012.hasACPSteer == v012.hasACPQueue)
         #expect(v013.hasACPSteer == v013.hasACPQueue)
-        // `hasACPSteerOnIdle` is the same floor expressed once, not a
-        // second claim about it.
-        #expect(v012.hasACPSteerOnIdle == v012.hasACPSteer)
-        #expect(v013.hasACPSteerOnIdle == v013.hasACPSteer)
+        // P44 (round-4 decision 14) retired `hasACPSteerOnIdle`: it was
+        // `hasACPSteer` expressed a second time and its only reader was an
+        // unreachable arm. The single floor is what these two lines pin.
     }
 
     /// C1's degradation arm: `.empty` (no version known) offers neither.

@@ -155,11 +155,11 @@ import Foundation
         for caps in [HermesCapabilities.parse("Hermes Agent v0.13.0 (2026.5.7)"), .empty] {
             let (args, dropped) = FleetApplyPlan.cronCreateArgs(
                 copying: job, schedule: .cronExpression("0 9 * * *"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
-            #expect(!args.contains("--deliver"))
+            #expect(!HermesCLIOption.contains("--deliver", in: args))
             #expect(!args.contains("all"))
             #expect(dropped)
             // The job is still created — name, schedule, prompt all present.
-            #expect(args.contains("--name"))
+            #expect(HermesCLIOption.contains("--name", in: args))
             #expect(args.contains("0 9 * * *"))
             #expect(args.last == "run")
         }
@@ -170,9 +170,7 @@ import Foundation
         let caps = HermesCapabilities.parse("Hermes Agent v0.14.0 (2026.5.16)")
         let (args, dropped) = FleetApplyPlan.cronCreateArgs(
             copying: job, schedule: .cronExpression("0 9 * * *"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
-        #expect(args.contains("--deliver"))
-        let i = args.firstIndex(of: "--deliver")!
-        #expect(args[args.index(after: i)] == "all")
+        #expect(HermesCLIOption.value(of: "--deliver", in: args) == "all")
         #expect(!dropped)
     }
 
@@ -184,9 +182,7 @@ import Foundation
             for caps in [HermesCapabilities.parse("Hermes Agent v0.14.0"), .empty] {
                 let (args, dropped) = FleetApplyPlan.cronCreateArgs(
                     copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
-                #expect(args.contains("--deliver"))
-                let i = args.firstIndex(of: "--deliver")!
-                #expect(args[args.index(after: i)] == value)
+                #expect(HermesCLIOption.value(of: "--deliver", in: args) == value)
                 #expect(!dropped)
             }
         }
@@ -199,14 +195,13 @@ import Foundation
         let sub = FleetApplyPlan.cronCreateArgs(
             copying: Self.cronJob(workdir: "/src/proj/sub"), schedule: .cronExpression("@daily"),
             caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj").args
-        #expect(sub.contains("--workdir"))
-        #expect(sub[sub.index(after: sub.firstIndex(of: "--workdir")!)] == "/tgt/proj/sub")
+        #expect(HermesCLIOption.value(of: "--workdir", in: sub) == "/tgt/proj/sub")
         // The most common case: workdir == the project root itself (end-of-
         // string boundary in the rewriter).
         let root = FleetApplyPlan.cronCreateArgs(
             copying: Self.cronJob(workdir: "/src/proj"), schedule: .cronExpression("@daily"),
             caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj").args
-        #expect(root[root.index(after: root.firstIndex(of: "--workdir")!)] == "/tgt/proj")
+        #expect(HermesCLIOption.value(of: "--workdir", in: root) == "/tgt/proj")
     }
 
     @Test func cronArgsDropsWorkdirOnPreV012() {
@@ -214,7 +209,7 @@ import Foundation
         for caps in [HermesCapabilities.parse("Hermes Agent v0.11.0"), .empty] {
             let (args, _) = FleetApplyPlan.cronCreateArgs(
                 copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
-            #expect(!args.contains("--workdir"))
+            #expect(!HermesCLIOption.contains("--workdir", in: args))
         }
     }
 
@@ -223,9 +218,7 @@ import Foundation
         let caps = HermesCapabilities.parse("Hermes Agent v0.14.0")
         let (args, _) = FleetApplyPlan.cronCreateArgs(
             copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
-        #expect(args.filter { $0 == "--skill" }.count == 2)
-        #expect(args.contains("research"))
-        #expect(args.contains("writing"))
+        #expect(HermesCLIOption.values(of: "--skill", in: args) == ["research", "writing"])
         // prompt is the trailing positional, path-rewritten; schedule precedes it.
         #expect(args.last == "summarize /tgt/proj/notes.md")
         #expect(args[args.count - 2] == "@daily")

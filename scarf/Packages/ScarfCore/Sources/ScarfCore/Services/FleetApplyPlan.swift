@@ -248,13 +248,32 @@ public struct FleetApplyPlan: Sendable, Equatable {
         /// Script-only (`no_agent`) jobs — their behavior is a `script` FILE
         /// on the source host that fleet-apply doesn't replicate.
         public var scriptOnly: [HermesCronJob]
+        /// Monitor jobs (`monitor_script` / `monitor_url`) — round-4
+        /// decision 8. Their behaviour is "run the agent only when this
+        /// source's output CHANGED", and the source is a script path on the
+        /// source host that fleet-apply does not replicate, or a URL whose
+        /// hash state (`monitor_state`) does not travel. Recreating one
+        /// without its source yields an agent job that runs on every tick, so
+        /// it is declined and surfaced exactly as `scriptOnly` is, rather
+        /// than copied degraded under a green "created".
+        public var monitor: [HermesCronJob]
         /// Jobs whose schedule carries no field we can rebuild a `cron
         /// create` argument from.
         public var unsupportedSchedule: [HermesCronJob]
 
-        public init(copyable: [HermesCronJob] = [], scriptOnly: [HermesCronJob] = [], unsupportedSchedule: [HermesCronJob] = []) {
+        /// Every job the pass will NOT create, with the two reasons kept
+        /// separate for copy but summed where the verdict is the same.
+        public var declined: [HermesCronJob] { scriptOnly + monitor }
+
+        public init(
+            copyable: [HermesCronJob] = [],
+            scriptOnly: [HermesCronJob] = [],
+            monitor: [HermesCronJob] = [],
+            unsupportedSchedule: [HermesCronJob] = []
+        ) {
             self.copyable = copyable
             self.scriptOnly = scriptOnly
+            self.monitor = monitor
             self.unsupportedSchedule = unsupportedSchedule
         }
     }
@@ -267,6 +286,8 @@ public struct FleetApplyPlan: Sendable, Equatable {
         for job in jobs where job.name.hasPrefix(tag) {
             if job.noAgent == true {
                 set.scriptOnly.append(job)
+            } else if shouldSkipMonitorJob(job) {
+                set.monitor.append(job)
             } else if CronScheduleArgument.resolve(job.schedule) == nil {
                 set.unsupportedSchedule.append(job)
             } else {
@@ -357,9 +378,35 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// - `model` — the source's model reference may not be configured on the
     ///   target (would error at create or first run).
     /// - `silent` — JSON-only field; `cron create` has no flag for it.
+    /// - `monitor_script` / `monitor_url` / `--continuity` — NOT dropped
+    ///   silently any more. A monitor job's whole behaviour is "run the agent
+    ///   only when this source's output changed" (`hermes cron create
+    ///   --monitor-script`, `hermes_cli/subcommands/cron.py:51-62` @
+    ///   `v2026.9.7`); the source is a script path on the SOURCE host that
+    ///   fleet-apply does not replicate, or a URL whose hash state
+    ///   (`monitor_state`) does not travel. Re-creating one without its
+    ///   source produces an ordinary agent job that runs — and bills — on
+    ///   every tick. Round-4 decision 8: the caller SKIPS these and surfaces
+    ///   them exactly as it surfaces `no_agent` jobs, so the pass never
+    ///   reports a silently-degraded job as "created". `shouldSkipMonitorJob`
+    ///   is the predicate; the counting lives in `FleetApplyExecutor`.
     /// `schedule` is a STRUCTURED `CronScheduleArgument` (cron expression /
     /// interval minutes / one-shot timestamp), not a free-text string — see
     /// that type for why the job's human `display` is never round-tripped.
+    /// Whether a fleet copy must decline this record rather than degrade it.
+    ///
+    /// A monitor job (`monitor_script` / `monitor_url`) is the shape: its
+    /// source does not travel, and the copy would run the agent every tick
+    /// instead of only on a change. `--continuity` is NOT on its own a reason
+    /// to skip — it is stored as `"self"` in `context_from`
+    /// (`tools/cronjob_job_args.py:313-321` @ `v2026.9.7`), the copy simply
+    /// starts its own history, and the first run of a continuity job is
+    /// unchanged by design (`hermes_cli/subcommands/cron.py:76-84`). It is
+    /// reported as a downgrade note, not a refusal.
+    public static func shouldSkipMonitorJob(_ job: HermesCronJob) -> Bool {
+        job.isMonitorJob
+    }
+
     public static func cronCreateArgs(
         copying job: HermesCronJob,
         schedule: CronScheduleArgument,
@@ -405,12 +452,12 @@ public struct FleetApplyPlan: Sendable, Equatable {
         caps: HermesCapabilities,
         paused: Bool = false
     ) -> (args: [String], droppedDeliverAll: Bool) {
-        var args = ["cron", "create", "--name", name]
+        var args = ["cron", "create", HermesCLIOption.joined("--name", name)]
         var droppedDeliverAll = false
 
         if let deliver, !deliver.isEmpty {
             if caps.supportsCronDeliver(deliver) {
-                args += ["--deliver", deliver]
+                args.append(HermesCLIOption.joined("--deliver", deliver))
             } else {
                 droppedDeliverAll = true
             }
@@ -425,16 +472,16 @@ public struct FleetApplyPlan: Sendable, Equatable {
         if caps.hasCronFailureDeliver,
            let failureDeliver, !failureDeliver.isEmpty,
            caps.supportsCronDeliver(failureDeliver) {
-            args += ["--failure-deliver", failureDeliver]
+            args.append(HermesCLIOption.joined("--failure-deliver", failureDeliver))
         }
-        if let repeatCount { args += ["--repeat", String(repeatCount)] }
+        if let repeatCount { args.append(HermesCLIOption.joined("--repeat", String(repeatCount))) }
         // v0.21.1 `--paused`: create disabled in ONE write. Callers that pass
         // `true` keep a create-then-`cron pause` fallback for older hosts —
         // the flag itself is fatal to argparse there.
         if paused, caps.hasCronCreatePaused { args.append("--paused") }
-        for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
+        for skill in skills where !skill.isEmpty { args.append(HermesCLIOption.joined("--skill", skill)) }
         if let workdir, !workdir.isEmpty, caps.hasCronWorkdir {
-            args += ["--workdir", workdir]
+            args.append(HermesCLIOption.joined("--workdir", workdir))
         }
         // `--` ends the options: the positionals below are user text, and a
         // prompt or schedule beginning with `-` would otherwise be read as

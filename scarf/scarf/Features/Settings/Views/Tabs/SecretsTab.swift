@@ -31,6 +31,13 @@ struct SecretsTab: View {
             StepperRow(label: "Cache TTL (s)", value: bitwarden.cacheTTLSeconds, range: 0...86400, step: 30) { viewModel.setBitwardenCacheTTLSeconds($0) }
             ToggleRow(label: "Auto Install SDK", isOn: bitwarden.autoInstall) { viewModel.setBitwardenAutoInstall($0) }
         }
+        // P39c: the lock is per-section here, not tab-wide. Every row above
+        // is a `config set secrets.bitwarden.*` write, and on a managed host
+        // `set_config_value`'s `is_managed()` arm prints
+        // `Cannot set configuration values: …` to stderr and returns at exit 0
+        // (`hermes_cli/config.py:3450-3452` @ v2026.9.7). The Status section
+        // below is a READ and stays live — see `locksWholeTabWhenManaged`.
+        .disabled(viewModel.isManagedHost)
 
         Text("The bootstrap access token itself goes in `~/.hermes/.env` as the env var named above (default `BWS_ACCESS_TOKEN`) — never in config.yaml. Leave Server URL empty for US Cloud, use `https://vault.bitwarden.eu` for EU, or a self-hosted vault URL.")
             .scarfStyle(.caption)
@@ -38,13 +45,25 @@ struct SecretsTab: View {
             .padding(.horizontal, ScarfSpace.s4)
 
         if capabilitiesStore?.capabilities.hasBitwardenEncryptedCache ?? false {
+            // `config set secrets.bitwarden.encrypted_cache.*` — same
+            // `set_config_value` door as above (`config.py:3450-3452`).
             encryptedCacheSection
+                .disabled(viewModel.isManagedHost)
         }
 
         if capabilitiesStore?.capabilities.hasCommandSecretSource ?? false {
+            // `config set secrets.command.*` — same door.
             commandSecretsSection
+                .disabled(viewModel.isManagedHost)
         }
 
+        // NOT locked on a managed host: `bitwardenStatus()` shells
+        // `hermes secrets bitwarden status`, whose `cmd_status`
+        // (`hermes_cli/secrets_cli.py:248-282` @ v2026.9.7) only calls
+        // `load_config()` and `find_bws(install_if_missing=False)` — no
+        // `save_config`, no `save_env_value`, nothing to refuse. `.disabled`
+        // would also kill the `.textSelection` on its output panel, which is
+        // the only way to get the report off the screen.
         SettingsSection(title: "Status", icon: "stethoscope") {
             HStack {
                 Text("Actions")

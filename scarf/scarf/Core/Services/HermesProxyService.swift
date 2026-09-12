@@ -83,7 +83,12 @@ final class HermesProxyService {
 
         let pipe = Pipe()
         proc.standardError = pipe
-        proc.standardOutput = Pipe()    // discard; proxied bodies on stdout aren't surfaced
+        // Discard: proxied bodies on stdout aren't surfaced. `FileHandle.nullDevice`,
+        // never a `Pipe()` — a pipe nobody reads is not a discard, it is a 64 KB
+        // buffer that the proxy blocks in `write()` on as soon as it fills, and
+        // this child is meant to run for hours. `/dev/null` swallows any volume
+        // and costs no fd of ours to close (C10, round-4 P43).
+        proc.standardOutput = FileHandle.nullDevice
 
         // Hook readability so log lines arrive without polling. The
         // closure captures `[weak self]` and hops to MainActor for

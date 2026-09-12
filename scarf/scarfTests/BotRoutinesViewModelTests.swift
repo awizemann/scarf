@@ -18,7 +18,7 @@ struct BotRoutinesViewModelTests {
     private static let otherProfile = "work"
 
     @Test("a routine for bot 'research' lands PREFIXED and never bleeds to another profile")
-    func routineNameIsPrefixedForTheRightBot() {
+    func routineNameIsPrefixedForTheRightBot() throws {
         let args = BotRoutinesViewModel.createRoutineArguments(
             botName: "research",
             storeProfile: Self.sameProfile,
@@ -28,17 +28,20 @@ struct BotRoutinesViewModelTests {
             hasCronBotChatDelivery: true
         )
         #expect(args == [
-            "cron", "create", "--name", "[bot:research] Morning digest",
-            "--deliver", "bot-chat:research",
+            "cron", "create", "--name=[bot:research] Morning digest",
+            "--deliver=bot-chat:research",
             // `--` end-of-options, so a prompt opening with a dash is text
             // rather than a flag (F2 / t-e96cc0ad).
             "--", "0 9 * * *", "Summarize overnight news"
         ])
+        // P42: the name rides in one `--name=<value>` token now, so read it
+        // back through the argv inspector rather than by index.
+        let routineName = try #require(HermesCLIOption.value(of: "--name", in: args))
         // The name is unambiguously scoped to THIS bot — the adversarial
         // case B4 was asked to hunt: a routine created for bot A landing
         // unprefixed, or prefixed for bot B.
-        #expect(BotRoutinePrefix.matches(jobName: args[3], bot: "research"))
-        #expect(!BotRoutinePrefix.matches(jobName: args[3], bot: "ops"))
+        #expect(BotRoutinePrefix.matches(jobName: routineName, bot: "research"))
+        #expect(!BotRoutinePrefix.matches(jobName: routineName, bot: "ops"))
     }
 
     @Test("delivery is gated on hasCronBotChatDelivery — pre-0.20.6 hosts get no --deliver flag")
@@ -51,9 +54,9 @@ struct BotRoutinesViewModelTests {
             prompt: "Summarize overnight news",
             hasCronBotChatDelivery: false
         )
-        #expect(!args.contains("--deliver"))
+        #expect(!HermesCLIOption.contains("--deliver", in: args))
         #expect(args == [
-            "cron", "create", "--name", "[bot:research] Morning digest",
+            "cron", "create", "--name=[bot:research] Morning digest",
             "--", "0 9 * * *", "Summarize overnight news"
         ])
     }
@@ -79,10 +82,8 @@ struct BotRoutinesViewModelTests {
         let argsB = BotRoutinesViewModel.createRoutineArguments(
             botName: "beta", storeProfile: "beta", title: "x", schedule: "30m", prompt: "", hasCronBotChatDelivery: true
         )
-        #expect(argsA.contains("bot-chat:alpha"))
-        #expect(!argsA.contains("bot-chat:beta"))
-        #expect(argsB.contains("bot-chat:beta"))
-        #expect(!argsB.contains("bot-chat:alpha"))
+        #expect(HermesCLIOption.value(of: "--deliver", in: argsA) == "bot-chat:alpha")
+        #expect(HermesCLIOption.value(of: "--deliver", in: argsB) == "bot-chat:beta")
     }
 
     // MARK: - Cross-profile delegation (the audit's headline B4 finding)
@@ -118,7 +119,7 @@ struct BotRoutinesViewModelTests {
         If the command fails, report the error instead.
         """)
         // The name is still the bot's, so both clients' Routines panes list it.
-        #expect(args[3] == "[bot:research] Morning digest")
+        #expect(HermesCLIOption.value(of: "--name", in: args) == "[bot:research] Morning digest")
     }
 
     @Test("the marker is byte-identical to SAFE_ROUTINE_MARKER, trailing space included")

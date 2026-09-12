@@ -94,6 +94,25 @@ enum PlatformSetupHelpers {
             if !envService.unset(key) { envOK = false }
         }
 
+        // `t-6fa3fc84`. A `_SHARED_KEYS` member does NOT reach the adapter
+        // from whichever section the form happens to spell: `platform_section`
+        // (`gateway/config_loader.py:171-180` @ v2026.9.7) picks ONE section
+        // to bridge from, and a top-level `<platform>:` block REPLACES the
+        // nested one as that source rather than out-ranking it key by key. So
+        // `platforms.slack.require_mention` written onto a config that also
+        // carries a top-level `slack:` block is bridged from nowhere and read
+        // by nobody (`_slack_require_mention` reads `config.extra`,
+        // `plugins/platforms/slack/adapter.py:5917-5926`) — while the save bar
+        // said "Saved".
+        //
+        // Resolved HERE, at the single `config set` site, rather than in each
+        // of the fifteen forms: the forms keep their literal keys (which is
+        // what keeps them visible to the write/read parity gate) and this
+        // rewrites the shared ones against the config.yaml actually on the
+        // host. One extra read per save, off the main actor, and only when
+        // the batch contains a shared key at all.
+        let configKV = resolveSharedKeys(configKV, context: context)
+
         var configFailures: [String] = []
         for (key, value) in configKV {
             // `hermes config set` takes exactly ONE key/value pair at
@@ -101,8 +120,15 @@ enum PlatformSetupHelpers {
             // from `_CONFIG_SUBCOMMANDS`) — there is no batch form, so the
             // loop stays one spawn per key. It is the whole reason this
             // function must not run on the main actor.
-            let result = run(["config", "set", key, value], configSetTimeout)
-            if result.exitCode != 0 {
+            //
+            // P39: judged by OUTPUT, not the exit code. `set_config_value`'s
+            // managed-install arm prints to stderr and `return`s
+            // (`hermes_cli/config.py:3450-3452` @ v2026.9.7), which Python
+            // exits 0 — so all fifteen platform-setup forms banner'd
+            // "Saved — restart gateway to apply" over a config.yaml the host
+            // never wrote. Same `HermesConfigSet` judge Settings uses.
+            let result = run(HermesConfigSet.argv(key: key, value: value), configSetTimeout)
+            if !HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded {
                 configFailures.append(key)
                 logger.warning("hermes config set \(key) failed: \(result.output)")
             }
@@ -116,6 +142,27 @@ enum PlatformSetupHelpers {
             return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
         }
         return .success(String(localized: "Saved — restart gateway to apply"))
+    }
+
+    /// Resolve every `_SHARED_KEYS` member in a save batch onto the section
+    /// Hermes bridges it from. See the call site in ``saveForm`` for why.
+    ///
+    /// Reads config.yaml only when the batch actually contains a shared key,
+    /// so the fourteen saves that carry none pay nothing. An UNREADABLE
+    /// config.yaml leaves the batch untouched: that is the pre-P44 behaviour,
+    /// and guessing a spelling off a file we could not read would be a worse
+    /// answer than the literal the form chose. (A form whose load could not
+    /// prove config.yaml never reaches here anyway — `commitSave` bounces it
+    /// off the latched `loadRefusal`.)
+    nonisolated static func resolveSharedKeys(
+        _ configKV: [String: String],
+        context: ServerContext
+    ) -> [String: String] {
+        guard configKV.keys.contains(where: { HermesPlatformSharedKeys.split(key: $0) != nil })
+        else { return configKV }
+        guard let proven = try? HermesFileService(context: context).loadConfigProven()
+        else { return configKV }
+        return HermesPlatformSharedKeys.resolved(configKV, configText: proven.rawText)
     }
 
     /// Ask the user's default browser to open a URL (typically a hermes doc page
