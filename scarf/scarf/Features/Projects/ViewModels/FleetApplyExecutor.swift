@@ -272,6 +272,7 @@ struct FleetApplyExecutor: Sendable {
 
         var created = 0, skipped = 0, failed = 0, deliverAllDowngrades = 0, scriptOnlySkipped = 0
         var monitorSkipped = 0, continuityDowngrades = 0, crossJobContextDowngrades = 0
+        var preRunScriptDowngrades = 0
         var cancelledRemaining = 0
         var createdNames: [String] = []
         // First failing `cron create`'s combined stdout+stderr — the only
@@ -363,6 +364,21 @@ struct FleetApplyExecutor: Sendable {
                 // never forward. Counted on the success arm: the copy landed,
                 // it just wakes without the other job's output.
                 if !job.crossJobContextRefs.isEmpty { crossJobContextDowngrades += 1 }
+                // Round-5 decision 12. A pre-run script on an AGENT job is a
+                // downgrade, not a refusal — unlike a `no_agent` job, where
+                // the script IS the job and the copy would be an empty no-op
+                // (`scriptOnly`, declined above). Here the copy keeps its
+                // prompt and runs; it just wakes without the script's stdout
+                // injected. `cron create` would ACCEPT `--script` (it takes
+                // that flag and validates nothing at create time —
+                // `hermes_cli/subcommands/cron.py:41-46`, `hermes_cli/cron.py:540`,
+                // `:453-465` @ `v2026.9.7`), which is exactly why forwarding
+                // it is the wrong answer: the path names a file under the
+                // SOURCE host's `~/.hermes/scripts/` and the green "created"
+                // would hide a job that injects nothing. Replicating the
+                // script file is `t-848d3adc`. Counted on the success arm,
+                // same rule as the two notes above.
+                if job.hasPreRunScript { preRunScriptDowngrades += 1 }
             } else {
                 failed += 1
                 if firstFailureDetail == nil {
@@ -421,6 +437,9 @@ struct FleetApplyExecutor: Sendable {
         }
         if crossJobContextDowngrades > 0 {
             parts.append(String(localized: "\(crossJobContextDowngrades) w/o cross-job context (no CLI flag to copy it)"))
+        }
+        if preRunScriptDowngrades > 0 {
+            parts.append(String(localized: "\(preRunScriptDowngrades) w/o their pre-run script (the file stays on this host)"))
         }
         let status = Self.cronFieldStatus(
             created: created, failed: failed,

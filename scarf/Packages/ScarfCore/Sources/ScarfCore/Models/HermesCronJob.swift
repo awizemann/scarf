@@ -954,6 +954,34 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             .filter { !$0.isEmpty && !mine.contains($0) }
     }
 
+    /// Whether this job carries a pre-run script — the `script` field
+    /// (`HermesCronJob.preRunScript`) on an AGENT job, i.e. one that is not
+    /// `no_agent`.
+    ///
+    /// **Why the fleet copier surfaces it instead of forwarding it.** The
+    /// script's whole behaviour is "run this file each tick and inject its
+    /// stdout into the agent's prompt" (`hermes cron create --script`,
+    /// `hermes_cli/subcommands/cron.py:41-46` @ `v2026.9.7`). `cron create`
+    /// DOES take `--script` — there is no `--pre-run-script` spelling; the
+    /// flag is `--script` and `_JOB_ARG_FIELDS` maps it straight onto the
+    /// record's `script` key (`hermes_cli/cron.py:540`) — and it validates
+    /// NOTHING at create time: the only existence check is `cron doctor`'s
+    /// `_script_health_issue` (`:453-465`), run on demand, long after the
+    /// fact. So forwarding `--script` across a fleet apply would create a
+    /// green "created" job pointing at a path under the SOURCE host's
+    /// `~/.hermes/scripts/` that the target does not have, and the failure
+    /// would surface as a broken run days later rather than at the apply.
+    /// Replicating the script FILE across transports is a real feature
+    /// (`t-848d3adc`), not a flag; until it exists the honest answer is a
+    /// downgrade note on a job that still copies and still runs its prompt.
+    ///
+    /// A `no_agent` job is NOT this case: there the script IS the job, so the
+    /// copy would be an empty no-op and the copier DECLINES it outright
+    /// (`FleetApplyPlan.CronCopySet.scriptOnly`).
+    public nonisolated var hasPreRunScript: Bool {
+        noAgent != true && !(preRunScript?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+    }
+
     /// `extra[key]` as a trimmed non-empty string, or `nil`. Hermes writes
     /// these optional text fields as `None` OR `""` depending on the path
     /// (`_normalize_job_optional_text`, `cron/jobs.py:1583-1584`), and an
