@@ -21,6 +21,23 @@ import ScarfCore
 @MainActor
 struct HermesFileWatcherAtomicReplaceTests {
 
+    /// Poll `condition` until it holds, or give up after `timeout`.
+    ///
+    /// A ceiling, not a measurement: FSEvents latency is not a constant, so a
+    /// fixed nap here is a bet that is also wall time on every serial run.
+    /// The caller re-asserts the condition afterwards, so a timeout surfaces
+    /// as that assertion failing with its own message (round-5 P48).
+    static func waitUntil(
+        timeout: TimeInterval = 5,
+        _ condition: @MainActor () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     /// Waits for `lastChangeDate` to move past `baseline`. The watcher
     /// coalesces (0.5s window), so this polls rather than sleeping a
     /// fixed amount.
@@ -111,7 +128,11 @@ struct HermesFileWatcherAtomicReplaceTests {
         // Deleted with a GAP — nothing takes its place, so the re-arm has
         // no inode to open and the source is dropped.
         try FileManager.default.removeItem(atPath: registry)
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        // Poll the observable rather than napping 600 ms and asserting. The
+        // nap was both a bet (FSEvents latency is not a constant) and 600 ms
+        // of every serial run; this returns as soon as the watcher notices
+        // and is bounded at five seconds (round-5 P48).
+        await Self.waitUntil { watcher.unarmedCorePathCount == unarmedAtStart + 1 }
         #expect(
             watcher.unarmedCorePathCount == unarmedAtStart + 1,
             "the deleted core path was forgotten rather than remembered"
@@ -178,7 +199,15 @@ struct HermesFileWatcherAtomicReplaceTests {
         watcher.startWatching()
         defer { watcher.stopWatching() }
         await churn.value
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        // Let the churn's events settle before taking a baseline. There is no
+        // observable for "the backlog has drained", so this polls for the one
+        // thing that follows from it: `lastChangeDate` stops moving.
+        var settled = watcher.lastChangeDate
+        await Self.waitUntil {
+            let now = watcher.lastChangeDate
+            defer { settled = now }
+            return now == settled
+        }
 
         // Whatever happened during arming, the watch must be live now.
         let baseline = watcher.lastChangeDate

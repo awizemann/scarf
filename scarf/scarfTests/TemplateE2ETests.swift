@@ -103,7 +103,7 @@ import ScarfCore
         // Three sections: Today's Digest (3 stat widgets), Top Stories
         // (1 list widget), How to Use (1 text widget). No webview —
         // this template intentionally doesn't expose a Site tab.
-        #expect(dashboard.sections.count == 3)
+        try #require(dashboard.sections.count == 3)
 
         let statsSection = dashboard.sections[0]
         #expect(statsSection.title == "Today's Digest")

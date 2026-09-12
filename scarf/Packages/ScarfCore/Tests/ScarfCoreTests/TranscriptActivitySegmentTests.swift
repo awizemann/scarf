@@ -204,7 +204,7 @@ import Foundation
         )
     }
 
-    @Test func historyToolLoopAggregatesAcrossRowsIntoOneCollapsedCard() {
+    @Test func historyToolLoopAggregatesAcrossRowsIntoOneCollapsedCard() throws {
         // The ShabuBox shape: DB-loaded rows (positive ids, no id-0
         // streaming row) — user prompt, then a long run of identical
         // `find` calls each persisted as its own assistant row with a
@@ -225,7 +225,7 @@ import Foundation
 
         let groups = RichChatViewModel.buildGroups(from: rows)
         // One user-rooted group holds the entire turn.
-        #expect(groups.count == 1)
+        try #require(groups.count == 1)
 
         let items = groups[0].transcriptItems(coalesceText: true)
         // ONE aggregated activity segment, then the closing text bubble.
@@ -241,7 +241,7 @@ import Foundation
         #expect(Self.bubble(items.last)?.content == "All done.")
     }
 
-    @Test func userlessActivityRowsShareOneGroup() {
+    @Test func userlessActivityRowsShareOneGroup() throws {
         // A history window that starts mid-turn (no user message):
         // activity-only assistant rows must accumulate into ONE group
         // instead of one single-call group per row.
@@ -254,7 +254,7 @@ import Foundation
             Self.message(id: 4, role: "assistant", content: "(empty)")
         ]
         let groups = RichChatViewModel.buildGroups(from: rows)
-        #expect(groups.count == 1)
+        try #require(groups.count == 1)
         #expect(groups[0].transcriptItems(coalesceText: true).count == 1)
     }
 

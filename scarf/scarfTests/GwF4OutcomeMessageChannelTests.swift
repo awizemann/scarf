@@ -70,7 +70,15 @@ struct GwF4OutcomeMessageChannelTests {
     func successAutoClears() async throws {
         let host = Host()
         host.showSuccess("Saved display.skin")
-        try await Task.sleep(for: .seconds(OutcomeMessage.successTTL + 0.5))
+        // The clear IS observable, so poll for it instead of sleeping out the
+        // TTL and asserting once: this returns the moment the timer fires and
+        // is bounded a second past it (round-5 P48). The two neighbours below
+        // assert a NON-event and have nothing to poll — see
+        // `allowedFixedSleeps` in `HermesP38SourceSweepTests`.
+        let deadline = Date().addingTimeInterval(OutcomeMessage.successTTL + 1)
+        while Date() < deadline, host.message != nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
         #expect(host.message == nil)
     }
 

@@ -239,7 +239,7 @@ import Foundation
             // …but the bytes are preserved in a quarantine copy.
             let copies = try FileManager.default.contentsOfDirectory(atPath: scarfDir)
                 .filter { $0.hasPrefix("project.json.corrupt-") }
-            #expect(copies.count == 1)
+            try #require(copies.count == 1)
             #expect(
                 try Data(contentsOf: URL(fileURLWithPath: scarfDir + "/" + copies[0])) == corrupt
             )

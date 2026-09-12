@@ -79,7 +79,7 @@ import Foundation
 
             let doctor = ProjectDoctorService(context: ctx)
             let found = doctor.diagnose().findings.filter { $0.kind == .missingRegistryUUID }
-            #expect(found.count == 1)
+            try #require(found.count == 1)
             #expect(found.first?.repair == .reindexRegistryFromRecord(path: dir))
 
             try doctor.repair(found[0])
@@ -126,7 +126,7 @@ import Foundation
 
             let doctor = ProjectDoctorService(context: ctx)
             let found = doctor.diagnose().findings.filter { $0.kind == .missingRecord }
-            #expect(found.count == 1)
+            try #require(found.count == 1)
 
             try doctor.repair(found[0])
             let record = ProjectStore(context: ctx).load(projectPath: dir)
@@ -157,7 +157,7 @@ import Foundation
 
             let doctor = ProjectDoctorService(context: ctx)
             let found = doctor.diagnose().findings.filter { $0.kind == .recordIdMismatch }
-            #expect(found.count == 1)
+            try #require(found.count == 1)
 
             try doctor.repair(found[0])
             // The RECORD wins: it travels with the project.

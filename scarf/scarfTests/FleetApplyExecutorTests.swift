@@ -74,7 +74,7 @@ import ScarfCore
             let plan = FleetApplyPlan.make(source: src, targets: [tgt], fields: [.modelPreset, .board])
             let results = await FleetApplyExecutor(contexts: [ctx]).execute(plan, source: src.project)
 
-            #expect(results.count == 1)
+            try #require(results.count == 1)
             #expect(results[0].hadFailure == false)
             #expect(results[0].appliedCount == 2)
 
@@ -125,7 +125,7 @@ import ScarfCore
         let plan = FleetApplyPlan.make(source: src, targets: [ghost], fields: [.modelPreset])
         let results = await FleetApplyExecutor(contexts: []).execute(plan, source: src.project)
 
-        #expect(results.count == 1)
+        try #require(results.count == 1)
         #expect(results[0].hadFailure == true)
     }
 }

@@ -130,13 +130,13 @@ struct SkillsHubParserTests {
 
     /// A status word Scarf does not know must be DROPPED, never badged as an
     /// available update — the C5 rule applied to a table cell.
-    @Test func unknownStatusWordIsDropped() {
+    @Test func unknownStatusWordIsDropped() throws {
         let table = """
         │ future-skill │ official │ needs_migration │
         │ 1password    │ official │ update_available │
         """
         let result = HermesSkillsHubParser.parseUpdateList(table)
-        #expect(result.count == 1)
+        try #require(result.count == 1)
         #expect(result[0].identifier == "1password")
     }
 
@@ -186,9 +186,9 @@ struct SkillsHubParserTests {
     ]
     """
 
-    @Test func parsesSearchJSONWithFullIdentifiers() {
+    @Test func parsesSearchJSONWithFullIdentifiers() throws {
         let result = HermesSkillsHubParser.parseSearchJSON(Self.searchJSONFixture)
-        #expect(result?.count == 3)
+        try #require(result?.count == 3)
         // The identifier is the whole point: the table path used the Name
         // cell, which installs the wrong thing for a tap or a browse-sh slug.
         #expect(result?[0].identifier == "openai/skills/skill-creator")

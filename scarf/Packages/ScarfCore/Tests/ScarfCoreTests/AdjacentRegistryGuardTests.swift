@@ -95,7 +95,7 @@ import Foundation
 
             #expect(store.grantedPermissions(projectId: "p", miniAppId: "a") == [.store])
             let copies = Self.siblings(of: path, prefix: "miniapp_grants.json.corrupt-")
-            #expect(copies.count == 1)
+            try #require(copies.count == 1)
             let dir = (path as NSString).deletingLastPathComponent
             let saved = try Data(contentsOf: URL(fileURLWithPath: dir + "/" + copies[0]))
             #expect(String(data: saved, encoding: .utf8) == "{ this is not json")
@@ -209,7 +209,7 @@ import Foundation
 
             let service = ProjectDashboardService(context: ctx)
             var registry = service.loadRegistry()
-            #expect(registry.projects.count == 1)
+            try #require(registry.projects.count == 1)
             // A perfectly ordinary edit an older build would make.
             registry.projects[0].folder = "Work"
             try service.saveRegistry(registry)

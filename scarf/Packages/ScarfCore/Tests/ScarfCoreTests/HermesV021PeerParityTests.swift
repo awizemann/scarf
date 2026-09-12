@@ -14,7 +14,7 @@ import Foundation
 
     // MARK: - bot_peers registry (config.yaml)
 
-    @Test func parsesBlockStyleBotPeersRegistry() {
+    @Test func parsesBlockStyleBotPeersRegistry() throws {
         // The shape PyYAML dumps from `_save_peers`: `note` present only
         // when `--note` was given.
         let yaml = """
@@ -28,7 +28,7 @@ import Foundation
             url: https://hermes.example.com
         """
         let peers = HermesBotPeersYAML.parse(yaml: yaml)
-        #expect(peers.count == 2)
+        try #require(peers.count == 2)
         // Sorted by name, matching `peer list`'s `sorted(peers)`.
         #expect(peers[0].name == "cloud")
         #expect(peers[0].url == "https://hermes.example.com")
@@ -59,7 +59,7 @@ import Foundation
         #expect(peers.map(\.name) == ["good"])
     }
 
-    @Test func registryNeverExposesAKeyEvenIfOneIsHandWrittenIntoConfig() {
+    @Test func registryNeverExposesAKeyEvenIfOneIsHandWrittenIntoConfig() throws {
         // Hermes stores peer keys in ~/.hermes/.env, never config.yaml —
         // but a user could paste one in by hand. The model has nowhere to
         // put it, which is the point: it can't leak through Scarf.
@@ -70,7 +70,7 @@ import Foundation
             key: sk-should-never-be-read
         """
         let peers = HermesBotPeersYAML.parse(yaml: yaml)
-        #expect(peers.count == 1)
+        try #require(peers.count == 1)
         #expect(peers[0].url == "http://spark.lan:8377")
         #expect(peers[0].note.isEmpty)
         // Only the env-var NAME is derivable, per `_peer_key_env`.
@@ -123,7 +123,7 @@ import Foundation
     /// a note quoting `url: …` used to parse as one, and because PyYAML
     /// dumps keys sorted (`note` before `url`) it overwrote the peer's real
     /// URL in the UI with text the note author chose.
-    @Test func aFoldedNoteCannotForgeASiblingKey() {
+    @Test func aFoldedNoteCannotForgeASiblingKey() throws {
         let yaml = """
         bot_peers:
           spark:
@@ -133,7 +133,7 @@ import Foundation
             url: http://spark.lan:8377
         """
         let peers = HermesBotPeersYAML.parse(yaml: yaml)
-        #expect(peers.count == 1)
+        try #require(peers.count == 1)
         #expect(peers[0].url == "http://spark.lan:8377")
         // The continuation is now JOINED into the note (and the reunited
         // quote pair stripped) — previously only the first physical line

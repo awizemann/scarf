@@ -46,7 +46,7 @@ struct SectionAuditF3CLIContractTests {
     @Test("plugins list --json decodes all three activation states")
     func pluginsListJSONDecodes() throws {
         let entries = try #require(HermesPluginList.parseJSON(Self.pluginsListJSON))
-        #expect(entries.count == 3)
+        try #require(entries.count == 3)
         #expect(entries[0].name == "chrome-profiles")
         #expect(entries[0].status == .enabled)
         #expect(entries[0].version == "1.2.0")

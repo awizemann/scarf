@@ -146,7 +146,7 @@ import ScarfCore
         let base = (home.context.paths.configYAML as NSString).lastPathComponent
         let backups = try FileManager.default.contentsOfDirectory(atPath: dir)
             .filter { $0.hasPrefix(base + ".scarf-backup-") }
-        #expect(backups.count == 1, "expected exactly one backup per launch, got \(backups)")
+        try #require(backups.count == 1, "expected exactly one backup per launch, got \(backups)")
         let kept = try String(contentsOfFile: dir + "/" + backups[0], encoding: .utf8)
         #expect(kept == original, "the backup must hold what the user had BEFORE the patch")
     }

@@ -50,14 +50,14 @@ import Foundation
     }
 
     /// Summary aggregates per (category, name) and computes percentiles.
-    @Test func summaryAggregatesByCategoryAndName() {
+    @Test func summaryAggregatesByCategoryAndName() throws {
         let ring = ScarfMonRingBuffer(capacity: 16)
         // Three "fast" intervals + two "slow" intervals on the same key.
         for nanos: UInt64 in [1_000_000, 2_000_000, 3_000_000, 50_000_000, 100_000_000] {
             ring.record(.fixture(name: "render", durationNanos: nanos))
         }
         let stats = ring.summary()
-        #expect(stats.count == 1)
+        try #require(stats.count == 1)
         let s = stats[0]
         #expect(s.count == 5)
         #expect(s.totalNanos == 156_000_000)
@@ -70,7 +70,7 @@ import Foundation
 
     /// Events accumulate count + bytes without contributing to interval
     /// percentiles.
-    @Test func eventsAccumulateBytesNotDuration() {
+    @Test func eventsAccumulateBytesNotDuration() throws {
         let ring = ScarfMonRingBuffer(capacity: 16)
         ring.record(ScarfMon.Sample(
             category: .chatStream, name: "token", kind: .event,
@@ -81,7 +81,7 @@ import Foundation
             timestamp: Date(), durationNanos: 0, count: 1, bytes: 128
         ))
         let stats = ring.summary()
-        #expect(stats.count == 1)
+        try #require(stats.count == 1)
         #expect(stats[0].count == 2)
         #expect(stats[0].totalBytes == 384)
         #expect(stats[0].p95Nanos == 0)
@@ -111,7 +111,7 @@ import Foundation
         // so concurrent suites' samples can also land in `ring` under the
         // parallel test runner. (t-aud22)
         let unit = ring.samples().filter { $0.name.description == "unit" }
-        #expect(unit.count == 1)
+        try #require(unit.count == 1)
         #expect(unit[0].kind == .interval)
     }
 
@@ -135,7 +135,7 @@ import Foundation
     }
 
     /// `event(...)` records a count entry without taking a clock reading.
-    @Test func eventRecordsCountSample() {
+    @Test func eventRecordsCountSample() throws {
         let ring = ScarfMonRingBuffer(capacity: 8)
         ScarfMon.install([ring])
         defer { ScarfMon.install([]) }
@@ -143,7 +143,7 @@ import Foundation
         ScarfMon.event(.chatStream, "token", count: 1, bytes: 32)
         // Filter by name — backend is process-global. (t-aud22)
         let tokens = ring.samples().filter { $0.name.description == "token" }
-        #expect(tokens.count == 1)
+        try #require(tokens.count == 1)
         #expect(tokens[0].kind == .event)
         #expect(tokens[0].count == 1)
         #expect(tokens[0].bytes == 32)

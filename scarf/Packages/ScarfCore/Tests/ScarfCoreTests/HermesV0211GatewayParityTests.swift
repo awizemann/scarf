@@ -20,7 +20,7 @@ import Foundation
     /// traffic the default profile's multiplexer carries, prints the clause
     /// where a self-hosted profile prints `PID <n>`
     /// (`hermes_cli/gateway.py:1520-1522` at tag `v2026.9.7`).
-    @Test func parsesMultiplexedProfileFromTaggedOutputShape() {
+    @Test func parsesMultiplexedProfileFromTaggedOutputShape() throws {
         let text = """
         Gateways:
           ✓ default (current)        — PID 44417
@@ -28,7 +28,7 @@ import Foundation
           ✗ scarfbox-smoke           — not running
         """
         let snap = HermesGatewayListService.parse(text)
-        #expect(snap?.profiles.count == 3)
+        try #require(snap?.profiles.count == 3)
 
         // Self-hosted: unchanged by the new branch.
         #expect(snap?.profiles[0].profile == "default")

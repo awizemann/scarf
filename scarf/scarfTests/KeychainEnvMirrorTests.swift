@@ -142,10 +142,12 @@ struct KeychainEnvMirrorTests {
             envPath: env.path
         )
         let mtimeBefore = try env.modificationDate()
-        // Sleep one second so a real write would advance mtime to a
-        // distinct value (APFS mtime resolution is nanosecond on
-        // modern macOS but we want to be unambiguous).
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // A gap so a real write would advance mtime to a DISTINCT value.
+        // 100 ms, not the second this used to be: APFS timestamps resolve to
+        // the nanosecond, so the gap only has to be larger than the clock's
+        // granularity, and a second of wall time bought nothing but a second
+        // of wall time (round-5 P48).
+        try await Task.sleep(nanoseconds: 100_000_000)
         try mirror.mirror(
             slug: "x",
             entries: [("KEY", "value")],

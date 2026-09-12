@@ -281,7 +281,7 @@ import Foundation
         #expect(options == ["default"])
     }
 
-    @Test func preV0204UserEntryKeepsItsOwnPromptAndIsNotMarkedBuiltin() {
+    @Test func preV0204UserEntryKeepsItsOwnPromptAndIsNotMarkedBuiltin() throws {
         let yaml = """
         agent:
           personalities:
@@ -289,7 +289,7 @@ import Foundation
               tone: gruff
         """
         let entries = HermesPersonalities.resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: false)
-        #expect(entries.count == 1)
+        try #require(entries.count == 1)
         #expect(entries[0].isBuiltin == false)
         #expect(entries[0].prompt == "Tone: gruff")
     }

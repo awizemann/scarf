@@ -205,7 +205,7 @@ import Foundation
     /// Rows verified against live `hermes curator list-unmanaged` output
     /// on v0.20.0 — header line, indented rows with both marker
     /// variants, multi-word names, and the trailing adopt hint.
-    @Test func listUnmanagedParsesRealShape() {
+    @Test func listUnmanagedParsesRealShape() throws {
         let out = """
         unmanaged skills (4):
           CDO Contact Research Automation              activity=   0  last_activity=never           (no marker)
@@ -216,7 +216,7 @@ import Foundation
         adopt one with `hermes curator adopt <name>`, or all with `hermes curator adopt --all-unmanaged`
         """
         let rows = CuratorService.parseListUnmanaged(out)
-        #expect(rows.count == 4)
+        try #require(rows.count == 4)
         #expect(rows[0].name == "CDO Contact Research Automation")
         #expect(rows[0].activityCount == 0)
         #expect(rows[0].lastActivityLabel == "never")
@@ -361,7 +361,7 @@ import Foundation
         ]
         """
         let result = try CuratorService.parseListArchived(stdout: json)
-        #expect(result.count == 3)
+        try #require(result.count == 3)
         #expect(result[0].name == "legacy-helper")
         #expect(result[0].category == "templates")
         #expect(result[0].reason == "stale: 91d unused")
@@ -385,20 +385,20 @@ import Foundation
         ]}
         """
         let result = try CuratorService.parseListArchived(stdout: json)
-        #expect(result.count == 1)
+        try #require(result.count == 1)
         #expect(result[0].name == "envelope-skill")
     }
 
     /// Text fallback when `--json` isn't supported. Each row carries
     /// the name in column 1 plus k=v chips for the optional fields.
-    @Test func listArchivedTextFallback() {
+    @Test func listArchivedTextFallback() throws {
         let text = """
           legacy-helper      archived=2026-04-22 size=4521 reason=stale
           old-translator     archived=2026-04-23 size=8192
           minimal-row
         """
         let result = CuratorService.parseListArchivedText(text)
-        #expect(result.count == 3)
+        try #require(result.count == 3)
         #expect(result[0].name == "legacy-helper")
         #expect(result[0].archivedAt == "2026-04-22")
         #expect(result[0].sizeBytes == 4521)
@@ -520,7 +520,7 @@ import Foundation
     /// into` row + one `rollback of` row, plus the trailing hint line —
     /// all reproduced from Python's `f"{...:<14} {...:<12} {...:<8}
     /// {...:<12} {...}"` format so column offsets match exactly.
-    @Test func ledgerParsesPopulatedTableWithSuffixArrows() {
+    @Test func ledgerParsesPopulatedTableWithSuffixArrows() throws {
         let out = """
         id             when         actor    action       skill
         ab12cd34ef56   2026-08-18   curator  archive      old-helper
@@ -530,7 +530,7 @@ import Foundation
         Roll back a single mutation with `hermes curator rollback <id>`; whole-tree snapshots remain available via `hermes curator rollback --list`.
         """
         let rows = CuratorService.parseLedger(out)
-        #expect(rows.count == 3)
+        try #require(rows.count == 3)
 
         #expect(rows[0].entryID == "ab12cd34ef56")
         #expect(rows[0].whenLabel == "2026-08-18")

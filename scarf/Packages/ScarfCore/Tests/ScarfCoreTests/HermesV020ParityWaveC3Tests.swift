@@ -65,7 +65,7 @@ import Testing
 
     @Test func suggestParserPopulatedPayload() throws {
         let proposals = try #require(HermesApprovalsSuggestParser.parse(json: Self.populatedSuggestJSON))
-        #expect(proposals.count == 2)
+        try #require(proposals.count == 2)
 
         let first = proposals[0]
         #expect(first.n == 1)
@@ -135,9 +135,9 @@ import Testing
     77aa0c3d5e6f47b2a1908877dd41e0cd  running    job=job-zz99  source=webhook  2026-08-03T10:15:00-04:00
     """
 
-    @Test func cronRunsParserPopulatedListing() {
+    @Test func cronRunsParserPopulatedListing() throws {
         let runs = HermesCronRunsParser.parse(text: Self.cronRunsText)
-        #expect(runs.count == 3)
+        try #require(runs.count == 3)
 
         #expect(runs[0].id == "9f2c1e77aa004d0f8e21bb6f01c5d9ab")
         #expect(runs[0].status == "completed")
@@ -154,7 +154,7 @@ import Testing
         #expect(runs[2].jobID == "job-zz99")
     }
 
-    @Test func cronRunsParserMultiLineErrorAndGarbageRows() {
+    @Test func cronRunsParserMultiLineErrorAndGarbageRows() throws {
         let text = """
         abc123  failed     job=j1  source=scheduler  2026-08-01T00:00:00
             line one
@@ -162,7 +162,7 @@ import Testing
         this row is not parseable
         """
         let runs = HermesCronRunsParser.parse(text: text)
-        #expect(runs.count == 1)
+        try #require(runs.count == 1)
         #expect(runs[0].error == "line one\nline two")
     }
 

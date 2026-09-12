@@ -84,145 +84,26 @@ struct HermesP38SourceSweepTests {
     /// failure and execution continues into an out-of-bounds index. Either
     /// `guard xs.count == 1 else { Issue.record(…); return }` or
     /// `try #require(xs.first)`.
-    /// **Scoped to the phase suites**, not the whole tree: every file whose
-    /// name carries a phase number (`…P39Tests.swift`, `HermesP44bTests.swift`,
-    /// `…P0Tests.swift`) under any of ``phaseSuiteRoots`` — the app target,
-    /// the iOS target, and the ScarfCore package.
-    /// A repo-wide run reports ~100 pre-existing sites in non-phase files,
-    /// and fixing those is a separate mechanical pass (filed as `t-f43f0af5`)
-    /// — a sweep that fails on day one is a sweep somebody disables. What it
-    /// does buy: every suite the audit branches wrote is held to the rule,
-    /// and a new phase suite that reintroduces the shape fails here.
+    /// **Repo-wide since round-5 P48 (decision 7).** Every `.swift` file
+    /// under ``phaseSuiteRoots`` — the app target, the iOS target and the
+    /// ScarfCore package — is swept, with no scope predicate at all.
     ///
-    /// Round 4 replaced a hand-kept allowlist with this pattern. The
-    /// allowlist had stopped at P39 — P40–P44 and every ScarfCore package
-    /// test file were silently unscanned — and its only self-check caught
-    /// deletions, never omissions. `legacySuiteFiles` keeps the old names as
-    /// a floor (each must still be found), and `phaseSuiteFloor` keeps the
-    /// population from collapsing if the matcher ever stops matching.
-    static func isPhaseSuite(_ name: String) -> Bool {
-        guard name.hasSuffix("Tests.swift") else { return false }
-        return name.range(of: "P[0-9]+[a-z]?", options: .regularExpression) != nil
-    }
+    /// The scoping is worth remembering as a sequence of honest compromises
+    /// rather than as a mistake. P38 hand-listed 17 phase suites; P45
+    /// replaced the list with a phase-NAME pattern, which finds new phase
+    /// suites by construction but reads nothing a phase writes in an
+    /// ordinarily-named file; P46 added the branch's own touched files by
+    /// PATH, which closed that and found seven more sites. Each step was
+    /// bounded by the same fact: a repo-wide run reported ~90 pre-existing
+    /// sites, and a sweep that fails on day one is a sweep somebody disables.
+    /// P48 is the day the 90 were fixed, so the scope is gone and future
+    /// phases append nothing. `t-f43f0af5` closed with it.
 
-    /// The round-3/round-4 names the pattern replaced. Every one must still
-    /// be scanned; a rename that drops the phase number fails here.
-    static let legacySuiteFiles: Set<String> = [
-        "HermesCLIVerdictP31Tests.swift", "HermesConfigUnsetP35Tests.swift",
-        "HermesCronRecoveryP30Tests.swift", "HermesCronRecoveryP38Tests.swift",
-        "HermesP32YAMLUnificationTests.swift", "HermesP37RemediationTests.swift",
-        "HermesP38YAMLPurgeTests.swift", "SettingsEditorClearP35Tests.swift",
-        "BotDraftControlCharacterP32Tests.swift", "ConfigReadProofP33Tests.swift",
-        "CronRecoveryOfferP30Tests.swift", "CronRecoveryP38Tests.swift",
-        "GatewayPairingVerdictP31Tests.swift", "HermesP35MCPTokenProbeTests.swift",
-        "HermesP35SelectionAndFloorsTests.swift", "HermesP38SettingsResidueTests.swift",
-        "MainActorSpawnDisciplineP22Tests.swift",
-        "HermesManagedRefusalP39Tests.swift", "HermesConfigSetP39Tests.swift",
-        "HermesManagedInstallP39Tests.swift",
-    ]
-
-    /// Scope (ii), P46 finding 3: **every test file this branch touched**,
-    /// whether or not its name carries a phase number.
-    ///
-    /// The name pattern alone is not a scope. P45 replaced a hand-kept
-    /// allowlist with `isPhaseSuite`, which finds new PHASE suites by
-    /// construction — but a phase that fixes sites in an existing,
-    /// ordinarily-named suite (`M5FeatureVMTests.swift`, which P45 itself
-    /// edited) writes code no sweep reads. Scoping by PATH — what the branch
-    /// changed — closes that.
-    ///
-    /// P46b: the list is CHECKED IN and read unconditionally. It was pinned
-    /// against `git diff --name-only 5be08f2e..HEAD` by a test, which made a
-    /// unit test depend on repository topology: it fails on a shallow clone
-    /// or any checkout without that commit, and once the branch merges it
-    /// goes red on `main` the first time anyone edits a test file, for a
-    /// reason that has nothing to do with the rule being swept. The list
-    /// below was generated from exactly that diff at `b44dfefd` and frozen.
-    /// A later phase that touches an ordinarily-named test file APPENDS its
-    /// basename here — that is the maintenance the git call was buying, and
-    /// it is one line.
-    ///
-    /// A phase-numbered suite needs no entry: ``isPhaseSuite`` already finds
-    /// it by construction.
-    ///
-    /// Basenames, because the same suite name appears under two targets and
-    /// both are in scope either way.
-    static let branchTouchedTestFiles: Set<String> = [
-        "AuditF2ArgvAndSecretSurfacingTests.swift",
-        "BotAgentViewModelTests.swift",
-        "BotModePhaseBP0Tests.swift",
-        "BotRoutinesViewModelTests.swift",
-        "ConfigReadProofP33Tests.swift",
-        "CronArgvP42Tests.swift",
-        "CronP15EditArgvTests.swift",
-        "CronP18ClearGestureTests.swift",
-        "CronRecoveryP38Tests.swift",
-        "CronRecoveryP42Tests.swift",
-        "CronRecoveryP42bTests.swift",
-        "CronScheduleDisplayP42cTests.swift",
-        "CronViewModelErrorClassificationTests.swift",
-        "FleetApplyPlanTests.swift",
-        "GatewayAndPluginsVerdictP40Tests.swift",
-        "GatewayAndPluginsVerdictP40bTests.swift",
-        "GatewayAndPluginsVerdictP40cTests.swift",
-        "HermesCLIOptionP42Tests.swift",
-        "HermesCLIVerdictP40Tests.swift",
-        "HermesCapabilitiesTests.swift",
-        "HermesConfigSetP39Tests.swift",
-        "HermesConfigUnsetP35Tests.swift",
-        "HermesCronKanbanP42bTests.swift",
-        "HermesFileServiceConfigParityTests.swift",
-        "HermesGatewayVerdictP40bTests.swift",
-        "HermesGatewayVerdictP40cTests.swift",
-        "HermesManagedInstallP39Tests.swift",
-        "HermesManagedLockP39cTests.swift",
-        "HermesManagedRefusalP39Tests.swift",
-        "HermesManagedRefusalP39bTests.swift",
-        "HermesManagedRefusalP39cTests.swift",
-        "HermesP17RemediationTests.swift",
-        "HermesP26CitationSweepTests.swift",
-        "HermesP28CrossPhaseRemediationTests.swift",
-        "HermesP35SelectionAndFloorsTests.swift",
-        "HermesP37RemediationTests.swift",
-        "HermesP38SettingsResidueTests.swift",
-        "HermesP38SourceSweepTests.swift",
-        "HermesP41ControlCharacterRefusalTests.swift",
-        "HermesP41MCPScalarTests.swift",
-        "HermesP41YAMLDecoderTests.swift",
-        "HermesP41bRefusalTests.swift",
-        "HermesP41bYAMLTests.swift",
-        "HermesP44Tests.swift",
-        "HermesP44bTests.swift",
-        "HermesP45Tests.swift",
-        "HermesP46Tests.swift",
-        "HermesV0204SkillsParityTests.swift",
-        "HermesV0211CronParityTests.swift",
-        "KanbanModelsTests.swift",
-        "LocalModelConfigPlanTests.swift",
-        "LocalizationCatalogTests.swift",
-        "M0bTransportTests.swift",
-        "M5FeatureVMTests.swift",
-        "MCPYAMLMapKeyP19Tests.swift",
-        "MainActorBlockingWritesP11Tests.swift",
-        "MainActorSpawnDisciplineP22Tests.swift",
-        "OAuthFlowDrainP40Tests.swift",
-        "ProcessAsyncWaitP43cTests.swift",
-        "ProcessDrainP43Tests.swift",
-        "ProjectTemplateBoundsP43Tests.swift",
-        "SectionAuditF5KanbanTests.swift",
-        "SectionAuditF5ManageAppTests.swift",
-        "SettingsP20ConfigDefaultsTests.swift",
-        "SlashMenuLogicTests.swift",
-        "SpawnDisciplineP43Tests.swift",
-    ]
-
-    /// Scope = the phase-name pattern OR the branch's own touched files.
-    static func isInSweepScope(_ name: String) -> Bool {
-        isPhaseSuite(name) || branchTouchedTestFiles.contains(name)
-    }
-
-    /// Premise floor: 78 phase suites matched when round 4 widened the sweep.
-    static let phaseSuiteFloor = 70
+    /// Premise floor. A sweep that reads nothing "passes": 484 test files
+    /// matched when P48 made this repo-wide, and the floor is well under that
+    /// so ordinary deletion cannot make the floor the thing that fails, and
+    /// well over zero so a broken enumeration cannot hide.
+    static let testFileFloor = 300
 
     /// The roots the phase sweep walks — the same three the `try! #require`
     /// sweep above uses, spelled separately because ScarfCore's root is the
@@ -239,8 +120,7 @@ struct HermesP38SourceSweepTests {
         var scanned: Set<String> = []
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard url.lastPathComponent != Self.ownFileName else { continue }
                 scanned.insert(url.lastPathComponent)
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let lines = src.components(separatedBy: "\n")
@@ -267,6 +147,15 @@ struct HermesP38SourceSweepTests {
                         // A string-keyed lookup (`findings["File"]`) is a
                         // dictionary read: it returns nil, it does not trap.
                         if next[open.upperBound...].hasPrefix("\"") { break }
+                        // So is an OPTIONAL-CHAINED one (`map[1]?.first`):
+                        // `Dictionary.subscript` returns an Optional, and the
+                        // `?` right after the closing bracket is the proof —
+                        // an Array subscript is non-optional and cannot be
+                        // chained that way. P46's note listed this shape as a
+                        // known false positive; round-5 P48 tightens the
+                        // matcher rather than exempting the file it lives in.
+                        if let close = next.range(of: "]", range: open.upperBound..<next.endIndex),
+                           next[close.upperBound...].hasPrefix("?") { break }
                         offenders.append("\(url.lastPathComponent):\(j + 1) — "
                                          + next.trimmingCharacters(in: .whitespaces))
                         break
@@ -274,34 +163,15 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
-        #expect(scanned.count >= Self.phaseSuiteFloor, Comment(rawValue:
-            "the phase-suite matcher found only \(scanned.count) files "
-            + "(floor \(Self.phaseSuiteFloor)) — it has stopped matching"))
-        #expect(Self.legacySuiteFiles.subtracting(scanned).isEmpty, Comment(rawValue:
-            "legacy phase suites are no longer being scanned: "
-            + Self.legacySuiteFiles.subtracting(scanned).sorted().joined(separator: ", ")))
+        #expect(scanned.count >= Self.testFileFloor, Comment(rawValue:
+            "the sweep read only \(scanned.count) test files "
+            + "(floor \(Self.testFileFloor)) — it cannot have covered the roots"))
         #expect(offenders.isEmpty, Comment(rawValue: """
             A subscript follows a count `#expect` with no guard between them. \
             `#expect` records and CONTINUES, so a wrong count runs straight \
             into an out-of-bounds trap and kills the test host: \
             \(offenders.joined(separator: "; "))
             """))
-    }
-
-    /// Deletion floor for scope (ii): every branch-touched file must still be
-    /// found, or a rename has silently dropped it out of the sweep.
-    @Test func theBranchScopeIsFullyScanned() {
-        var scanned: Set<String> = []
-        for root in Self.phaseSuiteRoots {
-            for url in Self.swiftFiles(under: root)
-            where Self.isInSweepScope(url.lastPathComponent) {
-                scanned.insert(url.lastPathComponent)
-            }
-        }
-        let missing = Self.branchTouchedTestFiles.subtracting(scanned)
-        #expect(missing.isEmpty, Comment(rawValue:
-            "branch-touched test files are no longer being scanned: "
-            + missing.sorted().joined(separator: ", ")))
     }
 
     // MARK: - 22b: `try? #require` swallows the requirement
@@ -315,8 +185,7 @@ struct HermesP38SourceSweepTests {
         var offenders: [String] = []
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard url.lastPathComponent != Self.ownFileName else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try? #require") && !Self.isComment(line) {
@@ -339,11 +208,19 @@ struct HermesP38SourceSweepTests {
     /// waiting to be lost on a loaded machine or half a second of wall clock
     /// added to every serial run — usually both. Poll an observable instead.
     ///
-    /// Two sites are allowed, with reasons, because their sleep is not a wait
-    /// for an observable but the FIXTURE itself or a deliberate "nothing
-    /// happened" window, which by construction has nothing to observe.
+    /// Allowed sites, each with a written reason, because each sleep is not a
+    /// wait for an observable: it is the FIXTURE, a deliberate "nothing
+    /// happened" window (which by construction has nothing to poll for), or a
+    /// watchdog that a healthy run cancels before it ever elapses.
+    ///
+    /// Round-5 P48 widened this rule from the branch-scoped files to the whole
+    /// test tree, so the list below is now the repo-wide answer. Everything
+    /// that COULD be polled was converted rather than allowed — the FSEvents
+    /// naps in `HermesFileWatcherAtomicReplaceTests`, the mtime gap in
+    /// `KeychainEnvMirrorTests`, and `GwF4OutcomeMessageChannelTests`'s one
+    /// auto-clear that actually fires.
     static let allowedFixedSleeps: [String: String] = [
-        "ProcessAsyncWaitP43cTests.swift:339":
+        "ProcessAsyncWaitP43cTests.swift:603":
             "the 3 s is the FIXTURE — EOF deliberately lands between the two "
             + "graces (1 s and 6 s) so the latch race is decided by construction, "
             + "not by luck; it runs on a background queue, not in the test body",
@@ -351,6 +228,23 @@ struct HermesP38SourceSweepTests {
             "the assertion is that the cancelled load did NOT reach its third "
             + "probe, so there is no observable to poll for; the window is one "
             + "probe delay (0.3 s) times three",
+        "PreReleaseFixupTests.swift:28":
+            "the assertion is that a FAILURE did not auto-clear after the "
+            + "success path's 3 s TTL — a non-event, so there is nothing to "
+            + "poll; the wait must outlast the real timer to mean anything",
+        "GwF4OutcomeMessageChannelTests.swift:64":
+            "same non-event: a failure must still be on screen after the "
+            + "success TTL has elapsed. The sibling that asserts a success DOES "
+            + "clear polls for it instead",
+        "GwF4OutcomeMessageChannelTests.swift:94":
+            "same non-event, with the extra condition that an EARLIER success's "
+            + "pending timer must not wipe the refusal that landed after it",
+        "ProcessACPChannelTests.swift:80":
+            "a WATCHDOG, not a wait: the sleep runs in a task the test cancels "
+            + "as soon as the echo arrives, so a healthy run never spends any "
+            + "of it — it exists to turn a hang into a failure",
+        "ProcessACPChannelTests.swift:136":
+            "the same watchdog on the stdout/stderr interleaving test",
     ]
 
     /// The seconds a sleep on this line lasts, or `nil` if the line is not a
@@ -387,8 +281,7 @@ struct HermesP38SourceSweepTests {
         var allowancesSeen: Set<String> = []
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName,
-                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard url.lastPathComponent != Self.ownFileName else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated() {
                     guard !Self.isComment(line) else { continue }

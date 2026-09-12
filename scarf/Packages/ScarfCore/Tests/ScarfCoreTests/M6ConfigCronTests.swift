@@ -925,7 +925,7 @@ import Foundation
         #expect(!text.contains("\"expression\""))
     }
 
-    @Test func cronJobsFileMemberwise() {
+    @Test func cronJobsFileMemberwise() throws {
         let jobs = [
             HermesCronJob(
                 id: "a", name: "A", prompt: "p",
@@ -939,7 +939,7 @@ import Foundation
         // Codable round-trip should survive.
         let data = try! JSONEncoder().encode(file)
         let decoded = try! JSONDecoder().decode(CronJobsFile.self, from: data)
-        #expect(decoded.jobs.count == 1)
+        try #require(decoded.jobs.count == 1)
         #expect(decoded.jobs[0].name == "A")
         #expect(decoded.updatedAt == file.updatedAt)
     }

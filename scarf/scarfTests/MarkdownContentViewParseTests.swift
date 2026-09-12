@@ -34,7 +34,7 @@ import Testing
         #expect(blocks == [.paragraph("| just | pipes |")])
     }
 
-    @Test func tableBetweenParagraphsKeepsItsNeighbors() {
+    @Test func tableBetweenParagraphsKeepsItsNeighbors() throws {
         let blocks = MarkdownContentView.parseBlocks(from: """
         Before.
 
@@ -44,7 +44,7 @@ import Testing
 
         After.
         """)
-        #expect(blocks.count == 5)
+        try #require(blocks.count == 5)
         #expect(blocks[0] == .paragraph("Before."))
         #expect(blocks[1] == .blank)
         guard case .table(let table) = blocks[2] else {
