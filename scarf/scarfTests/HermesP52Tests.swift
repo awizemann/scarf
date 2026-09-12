@@ -158,24 +158,81 @@ struct OffPoolDisciplineP52Tests {
 
     /// The needles a closure body actually parks on the pool.
     ///
-    /// A needle on a line that ALSO spells `OffPool.run` is not a hit: the
-    /// blocking call is already on its own thread and the enclosing
-    /// `Task.detached` is a pure orchestrator (`HealthViewModel`'s seven-way
-    /// `async let` batch is exactly this, and the round-6 report named it as
-    /// a live site on the strength of the brace match alone). The exemption
-    /// is per LINE rather than per body precisely so a body that wraps ONE of
-    /// two blocking calls still reports the other.
+    /// Code inside an `OffPool.run { … }` is not a hit: the blocking call is
+    /// already on its own thread and the enclosing `Task.detached` is a pure
+    /// orchestrator (`HealthViewModel`'s seven-way `async let` batch is
+    /// exactly this, and the round-6 report named it as a live site on the
+    /// strength of the brace match alone). The exemption is REGIONAL rather
+    /// than per body, so a body that wraps one of two blocking calls still
+    /// reports the other.
+    ///
+    /// Round-6 P53b: the exemption used to be per LINE, which failed the
+    /// same way the sweep it guards used to — the real form is
+    /// `await OffPool.run {` on one line and the blocking call on the next,
+    /// and that line was reported. It brace-matches the region now. A
+    /// trailing `// OffPool.run` comment used to exempt a line outright;
+    /// comments are stripped first.
     static func pooledBlockingNeedles(in body: String) -> [String] {
+        let lines = body.components(separatedBy: "\n")
+        let exempt = offPoolLineRanges(in: lines)
         var hits: [String] = []
-        for raw in body.components(separatedBy: "\n") {
-            let bare = raw.trimmingCharacters(in: .whitespaces)
-            guard !bare.hasPrefix("//"), !bare.hasPrefix("*"), !bare.hasPrefix("///") else { continue }
-            guard !bare.contains("OffPool.run") else { continue }
+        for (i, raw) in lines.enumerated() {
+            guard !exempt.contains(i) else { continue }
+            let bare = stripComment(raw).trimmingCharacters(in: .whitespaces)
+            guard !bare.isEmpty, !bare.hasPrefix("*") else { continue }
             for needle in blockingNeedles where bare.contains(needle) {
                 hits.append(needle)
             }
         }
         return hits
+    }
+
+    /// A line with its trailing `//` comment removed. `://` is left alone so
+    /// a URL literal does not swallow the rest of the line.
+    static func stripComment(_ line: String) -> String {
+        var out = ""
+        var prev: Character?
+        var i = line.startIndex
+        while i < line.endIndex {
+            let c = line[i]
+            let next = line.index(after: i)
+            if c == "/", next < line.endIndex, line[next] == "/", prev != ":" { break }
+            out.append(c)
+            prev = c
+            i = next
+        }
+        return out
+    }
+
+    /// The 0-based line indices covered by an `OffPool.run { … }` region,
+    /// brace-matched from the `{` that follows each occurrence.
+    static func offPoolLineRanges(in lines: [String]) -> Set<Int> {
+        var exempt: Set<Int> = []
+        var depth = 0
+        for (i, raw) in lines.enumerated() {
+            let code = stripComment(raw)
+            var scan = code[code.startIndex...]
+            if depth == 0, let hit = code.range(of: "OffPool.run") {
+                // The call's own line is exempt from the `{` onwards; the
+                // simplest honest rule is to exempt the whole line, since a
+                // blocking call before `OffPool.run` on the SAME line is
+                // already inside some other expression.
+                exempt.insert(i)
+                scan = code[hit.upperBound...]
+            } else if depth > 0 {
+                exempt.insert(i)
+            } else {
+                continue
+            }
+            for c in scan {
+                if c == "{" { depth += 1 }
+                if c == "}" {
+                    depth -= 1
+                    if depth <= 0 { depth = 0; break }
+                }
+            }
+        }
+        return exempt
     }
 
     @Test("the matcher sees a needle several lines inside the closure")
@@ -205,6 +262,43 @@ struct OffPoolDisciplineP52Tests {
         let second = try #require(closures.dropFirst().first)
         #expect(Self.pooledBlockingNeedles(in: second.body).isEmpty,
                 "a needle already inside `OffPool.run` is not a pool hit")
+    }
+
+    /// The exemption's own two failure modes, planted (round-6 P53b).
+    @Test("the pool exemption is a brace-matched region, and not a comment")
+    func theExemptionIsCalibrated() throws {
+        // 1. The real shape: `OffPool.run {` opens, the blocking call is on
+        //    the NEXT line. A per-line exemption reported this.
+        let wrapped = """
+                let state = try await OffPool.run {
+                    svc.loadState()
+                }
+                let after = HermesFileService.enrichedEnvironment()
+            """
+        #expect(!Self.pooledBlockingNeedles(in: wrapped).contains("loadState()"), """
+            A blocking call wrapped across the `OffPool.run` line break is \
+            reported as if it rode the pool — the exemption is per line again.
+            """)
+        // The call AFTER the region closes is still a hit, or the exemption
+        // has swallowed the rest of the body.
+        #expect(Self.pooledBlockingNeedles(in: wrapped).contains("enrichedEnvironment()"),
+                "the region never closed — everything after `OffPool.run` is exempt")
+
+        // 2. A trailing comment is not an exemption.
+        let commented = """
+                let state = svc.loadState() // OffPool.run
+            """
+        #expect(Self.pooledBlockingNeedles(in: commented) == ["loadState()"], """
+            A trailing `// OffPool.run` comment exempts the line — the sweep \
+            is defeated by a comment.
+            """)
+
+        // 3. Two calls, one wrapped: the other is still reported.
+        let mixed = """
+                async let a = OffPool.run { svc.loadState() }
+                let env = HermesFileService.enrichedEnvironment()
+            """
+        #expect(Self.pooledBlockingNeedles(in: mixed) == ["enrichedEnvironment()"])
     }
 
     @Test("no blocking call is parked on the cooperative pool by `Task.detached`")
