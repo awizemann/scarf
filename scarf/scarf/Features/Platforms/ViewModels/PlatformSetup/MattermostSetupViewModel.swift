@@ -69,8 +69,20 @@ final class MattermostSetupViewModel: PlatformSetupForm {
             // Nothing is migrated silently: the `.env` half is READ as the
             // fallback, and only a Save writes the config key (which is also
             // where the value starts winning).
+            //
+            // `mattermostRequireMention(envValue:)`, NOT `parseEnvBool`. The
+            // adapter's rule is `str(...).lower() not in {"false","0","no"}`
+            // (`adapter.py:504-505` @ `v2026.9.7`) — a three-word DENYlist
+            // with no `off` in it, unlike slack/discord/telegram — while
+            // `parseEnvBool` is a four-word truthy ALLOWlist. It read `off`,
+            // `y` and every other spelling as FALSE where Hermes reads them
+            // as true, so the toggle showed the opposite of the gateway's
+            // behaviour (round-6 P53). Absent → the adapter's `"true"`
+            // default; empty → the empty string, which is not one of the
+            // three words and so is true.
             requireMention = snapshot.config?.mattermost.requireMentionIsSet
-                ?? PlatformSetupHelpers.parseEnvBool(env["MATTERMOST_REQUIRE_MENTION"] ?? "true")
+                ?? HermesYAML.mattermostRequireMention(
+                    envValue: env["MATTERMOST_REQUIRE_MENTION"])
         }
     }
 

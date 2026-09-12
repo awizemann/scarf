@@ -104,11 +104,26 @@ public extension HermesConfig {
         }
         /// A `_SHARED_KEYS` boolean with a TRUE host default, read through
         /// `sharedPlatformScalar`'s precedence and Hermes's boolish sets.
+        ///
+        /// NOT for `mattermost.require_mention` — that key's reader has its
+        /// own three-word falsy set (see `mattermostRequireMention` below).
         func sharedPlatformBool(_ plat: String, _ key: String, default def: Bool) -> Bool {
             HermesYAML.boolishValue(sharedPlatformScalar(plat, key)) ?? def
         }
-        // `display.busy_ack_enabled` is the ONE boolean key in config.yaml whose
-        // effective vocabulary is NOT the universal boolish set, because it
+        /// `mattermost.require_mention`, which reaches its comparison as a
+        /// `str()` of whatever PyYAML loaded rather than as a boolish scalar
+        /// — so `"OFF"` (quoted) is TRUE and bare `off` is false, and
+        /// `boolishValue` is wrong on both. The rule and its citation live in
+        /// ``HermesYAML/mattermostRequireMention(configScalar:)``; the
+        /// precedence (the bridged section, not the flat spelling) is
+        /// `sharedPlatformScalar`'s, unchanged.
+        func mattermostRequireMention(default def: Bool) -> Bool {
+            HermesYAML.mattermostRequireMention(
+                configScalar: sharedPlatformScalar("mattermost", "require_mention")) ?? def
+        }
+        // `display.busy_ack_enabled` and `mattermost.require_mention` are the
+        // TWO boolean keys in config.yaml whose effective vocabulary is NOT
+        // the universal boolish set, each for its own reason. This one
         // reaches its reader through an env bridge that stringifies:
         //
         //   gateway/run.py:1813  `_DISPLAY_ENV_BRIDGE` maps it to
@@ -624,7 +639,7 @@ public extension HermesConfig {
             // write move together — the pair is on
             // `HermesPlatformSharedKeys.bridgeResolvedKeys` now, so the write
             // lands wherever the bridge source already is.
-            requireMention: sharedPlatformBool("mattermost", "require_mention", default: true),
+            requireMention: mattermostRequireMention(default: true),
             // `platforms.mattermost.extra.reply_mode`, NOT the top-level
             // `mattermost.reply_mode` Scarf used to read. The adapter reads
             // `config.extra` only —
@@ -647,8 +662,11 @@ public extension HermesConfig {
             // Presence is asked at the SAME precedence as the value, or the
             // fallback would fire for a key that is there (nested) and not
             // fire for one that is not.
+            // Same coercion as `requireMention` above — the mattermost one,
+            // not the universal boolish set — or the form's fallback arm
+            // would show a value the gateway does not hold (round-6 P53).
             requireMentionIsSet: sharedPlatformScalar("mattermost", "require_mention") != nil
-                ? sharedPlatformBool("mattermost", "require_mention", default: true)
+                ? mattermostRequireMention(default: true)
                 : nil
         )
 

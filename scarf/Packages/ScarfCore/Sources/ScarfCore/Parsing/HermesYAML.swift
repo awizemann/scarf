@@ -830,6 +830,89 @@ public enum HermesYAML {
         return nil
     }
 
+    // MARK: - Mattermost's own boolean vocabulary
+
+    /// Hermes's mattermost falsy set. **Three words, not four** — `off` is
+    /// NOT in it (`plugins/platforms/mattermost/adapter.py:504-505` @
+    /// `v2026.9.7`:
+    /// `str(self._extra_or_env("require_mention", …, "true")).lower() not in
+    /// {"false", "0", "no"}`), while slack, discord and telegram all spell
+    /// theirs `{"false", "0", "no", "off"}`. It is the ONE platform whose
+    /// vocabulary differs, and the difference is load-bearing on the `.env`
+    /// side, where no YAML resolver stands between the user's text and that
+    /// comparison.
+    static let mattermostFalsy: Set<String> = ["false", "0", "no"]
+
+    /// The YAML 1.1 spellings PyYAML's bool resolver actually matches. Case
+    /// is significant: `yes`/`Yes`/`YES` resolve, `yEs` does not and stays a
+    /// string. Bare `y` / `n` are NOT in the resolver's regex either, whatever
+    /// the YAML 1.1 spec says.
+    private static let pyYAMLTrue: Set<String> = ["yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
+    private static let pyYAMLFalse: Set<String> = ["no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
+
+    /// `mattermost.require_mention` as read from a config.yaml scalar.
+    ///
+    /// This is ``boolishValue(_:)``'s job for every other key and it is the
+    /// WRONG function here, twice over: its falsy set contains `off`, and it
+    /// answers `nil` for anything outside its two lists, where Hermes answers
+    /// TRUE for anything outside three words.
+    ///
+    /// The chain the value actually travels, which is what this mirrors:
+    /// PyYAML loads the scalar into a Python object, `_extra_or_env` hands
+    /// that object back untouched (`adapter.py:491-494`), and `str(...)` then
+    /// stringifies it before the comparison at `:504-505`. So:
+    ///
+    ///   - a QUOTED scalar is a Python `str` and never a bool — `"OFF"` is
+    ///     the string `OFF`, which is not one of the three words, so it is
+    ///     **true**; bare `off` resolves to `False`, stringifies to `"false"`
+    ///     and is **false**. The quotes are the whole difference;
+    ///   - a bare bool spelling becomes `True`/`False` → `"true"`/`"false"`;
+    ///   - an integer becomes `str(int)`, so `0` is false and `1`, `2`, `-1`
+    ///     are true;
+    ///   - anything else is its own text, true unless it IS one of the three.
+    ///
+    /// This is the same species of exception ``HermesConfig`` documents for
+    /// `display.busy_ack_enabled` — a key whose effective vocabulary is not
+    /// the universal boolish set because of what happens between the YAML and
+    /// the comparison. Round-6 P53.
+    ///
+    /// - Returns: `nil` when the key is absent, so the caller can fall back
+    ///   to `.env` (config.yaml wins where it is set — `adapter.py:491-494`).
+    public static func mattermostRequireMention(configScalar raw: String?) -> Bool? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let quoted = (trimmed.first == "'" || trimmed.first == "\"")
+        if !quoted {
+            if pyYAMLTrue.contains(trimmed) { return true }
+            if pyYAMLFalse.contains(trimmed) { return false }
+            // `str()` of a Python int drops a leading `+` and any `_`
+            // separators; only the value `0` stringifies to a falsy word.
+            if let asInt = Int(trimmed) { return asInt != 0 }
+        }
+        // A quoted scalar, or a plain one PyYAML leaves as text: compare the
+        // STRING, which is what `str()` returns unchanged.
+        return !mattermostFalsy.contains(normalizedScalar(trimmed).lowercased())
+    }
+
+    /// `MATTERMOST_REQUIRE_MENTION` as read from `.env`.
+    ///
+    /// No YAML resolver stands here — `get_scoped_secret`
+    /// (`gateway/platforms/_shared.py:17-30`) returns the raw string, and
+    /// `str()` leaves it alone — so the rule is the bare three-word set. An
+    /// ABSENT key is the adapter's `"true"` default; an EMPTY one is the
+    /// empty string, which is not one of the three words and is therefore
+    /// **true** (`get_scoped_secret` returns `val if val is not None else
+    /// default`, so `""` is a value, not a miss).
+    ///
+    /// `PlatformSetupHelpers.parseEnvBool` is a truthy ALLOWLIST and was the
+    /// wrong shape for this key in both directions: it read `off`, `y` and
+    /// `maybe` as false where Hermes reads all three as true.
+    public static func mattermostRequireMention(envValue raw: String?) -> Bool {
+        guard let raw else { return true }
+        return !mattermostFalsy.contains(raw.lowercased())
+    }
+
     /// Strip one layer of surrounding quotes, reversing the writers' escape.
     ///
     /// The single-quoted un-doubling is load-bearing: the writers escape an
