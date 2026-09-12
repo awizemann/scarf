@@ -67560,6 +67560,47 @@
         }
       }
     },
+    "Pairing needs a terminal on %@, where Hermes runs — run this step there over SSH." : {
+      "comment" : "Shown under a disabled Signal/WhatsApp pairing button when the window is bound to a remote Hermes. The embedded terminal spawns on the user's own Mac, so pairing there would link the wrong machine. %@ is the server's display name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kopplung braucht ein Terminal auf %@, wo Hermes läuft — führe diesen Schritt dort über SSH aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El emparejamiento necesita un terminal en %@, donde se ejecuta Hermes: realiza este paso allí por SSH."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’association nécessite un terminal sur %@, là où Hermes s’exécute — effectuez cette étape là-bas via SSH."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペアリングには Hermes が動作している %@ 上のターミナルが必要です。この手順は SSH でそちらから実行してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O pareamento precisa de um terminal em %@, onde o Hermes é executado — faça esta etapa lá por SSH."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对需要在运行 Hermes 的 %@ 上使用终端——请通过 SSH 在那里执行此步骤。"
+          }
+        }
+      }
+    },
     "Parent directory" : {
       "localizations" : {
         "de" : {
@@ -113919,6 +113960,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "验证错误：%@ 包含制表符或控制字符。请删除后再保存。"
+          }
+        }
+      }
+    },
+    "“%@” contains a control character. Hermes would store it as an invisible escape that never matches — remove it and save again." : {
+      "comment" : "Shown on a platform setup form's save bar when a config.yaml value carries a C0/C1 control character. Hermes writes it losslessly as an escape, so the file stays valid but the value is invisible and never matches. %@ is the config key, e.g. whatsapp.reply_prefix.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält ein Steuerzeichen. Hermes würde es als unsichtbare Escape-Sequenz speichern, die nie zutrifft — entferne es und speichere erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» contiene un carácter de control. Hermes lo guardaría como un escape invisible que nunca coincide: elimínalo y vuelve a guardar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » contient un caractère de contrôle. Hermes l’enregistrerait comme une séquence d’échappement invisible qui ne correspondra jamais — supprimez-le et enregistrez à nouveau."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」に制御文字が含まれています。Hermes はこれを不可視のエスケープとして保存するため、決して一致しません。削除してから保存し直してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” contém um caractere de controle. O Hermes o armazenaria como um escape invisível que nunca corresponde — remova-o e salve novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”包含控制字符。Hermes 会将其存储为永远无法匹配的不可见转义序列——请删除后重新保存。"
           }
         }
       }

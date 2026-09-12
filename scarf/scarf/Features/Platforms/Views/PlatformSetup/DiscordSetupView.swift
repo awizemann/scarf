@@ -37,7 +37,14 @@ struct DiscordSetupView: View {
                 if capabilitiesStore?.capabilities.hasDiscordHistoryBackfill == true {
                     ToggleRow(label: "Backfill channel history on join", isOn: viewModel.historyBackfill) { viewModel.historyBackfill = $0 }
                 }
-                ToggleRow(label: "Allow any attachment type", isOn: viewModel.allowAnyAttachment) { viewModel.allowAnyAttachment = $0 }
+                // A WINDOW, not a floor: the Discord adapter stopped calling
+                // its own `_discord_allow_any_attachment` getter at v2026.7.1
+                // (0.18.0) and the key is a documented no-op at v2026.9.7, so
+                // the row hides on a v0.18+ host — and keeps rendering, byte
+                // for byte, on the v0.15–v0.17 hosts that honour it (C1).
+                if capabilitiesStore?.capabilities.hasDiscordAllowAnyAttachment == true {
+                    ToggleRow(label: "Allow any attachment type", isOn: viewModel.allowAnyAttachment) { viewModel.allowAnyAttachment = $0 }
+                }
             }
 
             saveBar
@@ -53,7 +60,7 @@ struct DiscordSetupView: View {
                 context: context
             )
         }
-        .onAppear { viewModel.load() }
+        .onAppear { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
     }
 
     private var instructions: some View {
@@ -78,7 +85,7 @@ struct DiscordSetupView: View {
                 onDismiss: { viewModel.dismissMessage() }
             )
             Spacer()
-            Button("Reload") { viewModel.load() }.controlSize(.small)
+            Button("Reload") { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }.controlSize(.small)
                     .disabled(viewModel.isBusy)
             Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
                 // Disabled until the (now off-main, C10) load has landed:

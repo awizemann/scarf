@@ -49,16 +49,29 @@ final class NtfySetupViewModel: PlatformSetupForm {
         loadSnapshot { [weak self] snapshot in
             guard let self else { return }
             let env = snapshot.env
-            guard let cfg = snapshot.config?.ntfy else { return }
+            // NOT a `guard … else { return }`. `loadSnapshot` already bounced
+            // an unproven `.env` before calling this, so reaching here means
+            // the `.env` half IS proven — and dropping it because the OTHER
+            // file could not be read is P37 finding 5 through the other door:
+            // the user is shown blanks for values Scarf has in hand. The
+            // latched `loadRefusal` still refuses the Save, so nothing the
+            // half-populated form holds can reach disk.
+            let cfg = snapshot.config?.ntfy
 
             // env wins over config.yaml for topic + server.
-            topic = env["NTFY_TOPIC"] ?? cfg.topic
-            server = env["NTFY_SERVER_URL"] ?? (cfg.server.isEmpty ? "https://ntfy.sh" : cfg.server)
-            publishTopic = cfg.publishTopic
+            topic = env["NTFY_TOPIC"] ?? cfg?.topic ?? ""
+            let configServer = cfg?.server ?? ""
+            server = env["NTFY_SERVER_URL"] ?? (configServer.isEmpty ? "https://ntfy.sh" : configServer)
             // config.yaml wins in Hermes (`extra.get("token") or NTFY_TOKEN`),
             // so read it first — a token left there by an older Scarf or by hand
             // is what the adapter will actually use. Save migrates it to .env.
-            token = cfg.token.isEmpty ? (env["NTFY_TOKEN"] ?? "") : cfg.token
+            let configToken = cfg?.token ?? ""
+            token = configToken.isEmpty ? (env["NTFY_TOKEN"] ?? "") : configToken
+            // These two have no `.env` spelling at all, so an unreadable
+            // config.yaml leaves them at whatever the form already holds
+            // rather than at a fabricated default.
+            guard let cfg else { return }
+            publishTopic = cfg.publishTopic
             markdown = cfg.markdown
         }
     }

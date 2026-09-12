@@ -734,6 +734,13 @@ struct AllConfigWritersParityTests {
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/MatrixSetupViewModel.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
+            // P51: became a config writer when `mattermost.require_mention`
+            // moved off `.env` onto the side the adapter actually prefers
+            // (`plugins/platforms/mattermost/adapter.py:491-494`, `:504` @
+            // `v2026.9.7`). The gate caught it on the first run, which is
+            // what it is for.
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/MattermostSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/SignalSetupViewModel.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/WhatsAppSetupViewModel.swift",

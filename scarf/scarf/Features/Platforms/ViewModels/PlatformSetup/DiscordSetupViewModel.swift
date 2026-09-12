@@ -40,9 +40,17 @@ final class DiscordSetupViewModel: PlatformSetupForm {
     /// Default is `true` to match Hermes's v0.14 server-side default.
     /// Capability-gated by the host UI on `hasDiscordHistoryBackfill`.
     var historyBackfill: Bool = true
-    /// Hermes v0.15 — `platforms.discord.extra.allow_any_attachment`.
-    /// When true, forward any attachment type (not just images) to the agent.
+    /// `platforms.discord.extra.allow_any_attachment` — live only on a
+    /// v0.15–v0.17 host. Capability-gated by the view AND by `save` on
+    /// `hasDiscordAllowAnyAttachment`, which is a WINDOW: the adapter stopped
+    /// calling its own getter at v2026.7.1 (0.18.0) and the tag's docs call
+    /// the key a no-op. See the flag for the tag-by-tag walk.
     var allowAnyAttachment: Bool = false
+
+    /// The host's capability set, captured at `load` and read by `save` —
+    /// Telegram's shape (`TelegramSetupViewModel.swift:57`). The form writes
+    /// only the version-windowed keys whose ROW it renders.
+    private(set) var capabilities: HermesCapabilities = .empty
 
     var message: String?
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
@@ -56,7 +64,12 @@ final class DiscordSetupViewModel: PlatformSetupForm {
     /// distinguishes absent (empty form — nothing is set yet) from unreadable
     /// (GW-F6 / DI L10: the form used to render blanks over live values and a
     /// Save then commented those keys out).
-    func load() {
+    /// `capabilities` is REQUIRED, not defaulted — the addendum's "a
+    /// parameter that IS the fix gets no default". The Reload button calls
+    /// this too, and a defaulted overload would silently reset the stored
+    /// value to `.empty` and change which keys the next Save writes.
+    func load(capabilities: HermesCapabilities) {
+        self.capabilities = capabilities
         loadSnapshot { [weak self] snapshot in
             guard let self else { return }
             let env = snapshot.env
@@ -86,14 +99,25 @@ final class DiscordSetupViewModel: PlatformSetupForm {
             "DISCORD_ALLOW_BOTS": allowBots == "none" ? "" : allowBots, // default is "none", don't persist
             "DISCORD_REPLY_TO_MODE": replyToMode == "first" ? "" : replyToMode
         ]
-        let configKV: [String: String] = [
+        var configKV: [String: String] = [
             "discord.require_mention": PlatformSetupHelpers.envBool(requireMention),
             "discord.free_response_channels": freeResponseChannels,
             "discord.auto_thread": PlatformSetupHelpers.envBool(autoThread),
-            "discord.reactions": PlatformSetupHelpers.envBool(reactions),
-            "discord.history_backfill": PlatformSetupHelpers.envBool(historyBackfill),
-            "platforms.discord.extra.allow_any_attachment": PlatformSetupHelpers.envBool(allowAnyAttachment)
+            "discord.reactions": PlatformSetupHelpers.envBool(reactions)
         ]
+        // Only the keys whose row this host actually renders, Telegram's rule
+        // (`TelegramSetupViewModel.swift:108-118`). Both of these were written
+        // unconditionally while the VIEW gated their rows, so a pre-v0.14 host
+        // got a `history_backfill` it never showed the user, and every
+        // v0.18+ host got an `allow_any_attachment` nothing reads — stamped
+        // over whatever the file already held, from a toggle that was never
+        // on screen.
+        if capabilities.hasDiscordHistoryBackfill {
+            configKV["discord.history_backfill"] = PlatformSetupHelpers.envBool(historyBackfill)
+        }
+        if capabilities.hasDiscordAllowAnyAttachment {
+            configKV["platforms.discord.extra.allow_any_attachment"] = PlatformSetupHelpers.envBool(allowAnyAttachment)
+        }
         commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

@@ -624,7 +624,17 @@ public extension HermesConfig {
             // (`MATTERMOST_REPLY_MODE`, which is what `MattermostSetupView`
             // actually edits) lives in `.env`, outside this parse; an absent
             // YAML key reads as the same `off` it always did.
-            replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off")
+            replyMode: strEnum("platforms.mattermost.extra.reply_mode", default: "off"),
+            // Presence, not value. `boolTrueDefault` above resolves the key
+            // the way the adapter does; this says whether the key is THERE,
+            // which is what lets `MattermostSetupViewModel` fall back to
+            // `MATTERMOST_REQUIRE_MENTION` exactly when Hermes would
+            // (`plugins/platforms/mattermost/adapter.py:491-494`, `:504` @
+            // `v2026.9.7`) instead of showing config's resolved default over
+            // a live `.env` value.
+            requireMentionIsSet: values["mattermost.require_mention"] != nil
+                ? boolTrueDefault("mattermost.require_mention")
+                : nil
         )
 
         let whatsapp = WhatsAppSettings(

@@ -965,15 +965,30 @@ public struct MatrixSettings: Sendable, Equatable {
 /// reserve this struct for future expansion so the form has a stable type.
 public struct MattermostSettings: Sendable, Equatable {
     public var requireMention: Bool
+    /// `nil` when `mattermost.require_mention` is ABSENT from config.yaml,
+    /// distinct from an explicit `false`. Round-5, P51.
+    ///
+    /// The adapter reads `_extra_or_env("require_mention",
+    /// "MATTERMOST_REQUIRE_MENTION", "true")`
+    /// (`plugins/platforms/mattermost/adapter.py:504`, the helper at
+    /// `:491-494` @ `v2026.9.7`): config.yaml's value WINS and the env var is
+    /// only the fallback for an absent one. So the setup form cannot decide
+    /// which side to show without knowing whether the config key is there —
+    /// ``requireMention`` collapses absence into the resolved `true`, which
+    /// is right for a display and wrong for a fallback. The raw-beside-the-
+    /// normalised shape `HermesConfig.approvalModeRawScalar` established.
+    public var requireMentionIsSet: Bool?
     public var replyMode: String           // "thread" | "off"
 
 
     public init(
         requireMention: Bool,
-        replyMode: String
+        replyMode: String,
+        requireMentionIsSet: Bool? = nil
     ) {
         self.requireMention = requireMention
         self.replyMode = replyMode
+        self.requireMentionIsSet = requireMentionIsSet
     }
     public nonisolated static let empty = MattermostSettings(requireMention: true, replyMode: "off")
 }

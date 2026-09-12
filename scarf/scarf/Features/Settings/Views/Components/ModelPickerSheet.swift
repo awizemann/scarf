@@ -202,7 +202,13 @@ struct ModelPickerSheet: View {
                 // Refresh subscription immediately so the right-column
                 // status row flips to "active" without waiting for the
                 // picker to be re-opened.
-                subscription = subscriptionService.loadState()
+                //
+                // P51: the idle twin of the `.task` read 20 lines above,
+                // which has been detached since P43 — this one was still a
+                // synchronous SSH `readFile` on the main actor (C10), and a
+                // sign-in is exactly when that round trip is slowest.
+                let svc = subscriptionService
+                Task { subscription = await Task.detached { svc.loadState() }.value }
                 // Sign-in unlocked the bearer token — kick a fresh
                 // model-list fetch so the picker populates without the
                 // user needing to hit Refresh manually.

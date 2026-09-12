@@ -666,6 +666,37 @@ public struct HermesCapabilities: Sendable, Equatable {
     public static let ntfyPlatformFloor = SemVer(major: 0, minor: 15, patch: 0)
 
 
+    /// `discord.allow_any_attachment` is read by the adapter — a WINDOW, not
+    /// a floor. Round-5, P51.
+    ///
+    /// This is the first flag in the file whose upper bound is load-bearing,
+    /// so the walk is written out. `_discord_allow_any_attachment` is defined
+    /// AND CALLED (`plugins/platforms/discord/adapter.py:3622`, called at
+    /// `:4608` and `:4717`, gating at `:4719`) from **v2026.5.28 (0.15.0)**;
+    /// it is absent at v2026.5.16 and before. At **v2026.7.1 (0.18.0)** the
+    /// two call sites are GONE while the getter itself lingers, so the key
+    /// stops deciding anything — and at `v2026.9.7` the getter is deleted
+    /// too: the key survives only as a schema default
+    /// (`hermes_cli/config_defaults.py:1448`), and the tag's own docs say so
+    /// in as many words (`website/docs/user-guide/messaging/discord.md:703`:
+    /// the flag "is now a no-op — any file type is always accepted").
+    ///
+    /// Counted by CALL SITE, not by definition: a getter nothing calls is
+    /// exactly the dead row C1 exists to keep off screen, and grepping the
+    /// symbol would have put the window's end three releases late. Tags
+    /// walked one by one, `self._discord_allow_any_attachment()` call count:
+    /// v2026.5.16 → absent, v2026.5.28 → 2, v2026.5.29 → 2, v2026.6.5 → 2,
+    /// v2026.6.19 → 2, v2026.7.1 → 0, and 0 at every tag through v2026.9.7.
+    ///
+    /// Retiring the row outright was the alternative and it is the wrong one:
+    /// a v0.15–v0.17 host honours the toggle, and C1's "a pre-target host
+    /// must render byte-identical to the prior Scarf release" is exactly
+    /// about those users. The row hides where it does nothing, and the
+    /// writer follows the row (`DiscordSetupViewModel.save`).
+    public var hasDiscordAllowAnyAttachment: Bool {
+        atLeastSemver(0, 15, 0) && !atLeastSemver(0, 18, 0)
+    }
+
     /// Opt-in `tts.xai.auto_speech_tags` — inserts light `[pause]` tags
     /// between sentences/paragraphs for more natural xAI TTS. Default OFF.
     public var hasXAITTSAutoSpeechTags: Bool { atLeastSemver(0, 15, 0) }
