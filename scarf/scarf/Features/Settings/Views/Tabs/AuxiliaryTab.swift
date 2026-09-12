@@ -284,12 +284,20 @@ struct AuxiliaryTab: View {
                 capabilities: capabilities,
                 selected: value
             ),
-            // The sentinel row here is NOT the same claim as AgentTab's.
-            // An empty `auxiliary.<task>.reasoning_effort` falls through to
-            // the GLOBAL `agent.reasoning_effort` row on this same window —
-            // which may itself be set — so "Hermes default" would be wrong
-            // whenever the global row carries a level. "Default" is the
-            // deliberate word for "whatever the row above resolves to".
+            // The sentinel row here is NOT the same claim as AgentTab's, and
+            // the difference is walked. An empty `agent.reasoning_effort`
+            // RESOLVES to Hermes's own `medium`
+            // (`agent/transports/chat_completions.py:420-422` @ `v2026.9.7`),
+            // which is why that row reads "Hermes default". An empty
+            // `auxiliary.<task>.reasoning_effort` resolves to NOTHING:
+            // `_get_task_extra_body` returns early on `effort is None or
+            // effort == ""` (`agent/auxiliary_client.py:5700-5702`), so no
+            // `reasoning` key is put in the aux call's `extra_body` at all
+            // and the provider's own default stands. It does not inherit the
+            // global row either — `_get_auxiliary_task_config` (`:5583-5605`)
+            // reads `auxiliary.<task>` plus a plugin's declared defaults, and
+            // never `agent.*`. "Default" is the honest word for a row whose
+            // fallback Scarf cannot name.
             optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )
