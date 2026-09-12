@@ -75,46 +75,6 @@ public struct KanbanListFilter: Sendable, Equatable {
     }
 }
 
-/// Filter options for `hermes kanban watch --json` (live event stream).
-public struct KanbanWatchFilter: Sendable, Equatable {
-    public var assignee: String?
-    public var tenant: String?
-    public var kinds: [KanbanEventKind]
-    public var intervalSeconds: Double
-
-    public init(
-        assignee: String? = nil,
-        tenant: String? = nil,
-        kinds: [KanbanEventKind] = [],
-        intervalSeconds: Double = 0.5
-    ) {
-        self.assignee = assignee
-        self.tenant = tenant
-        self.kinds = kinds
-        self.intervalSeconds = intervalSeconds
-    }
-
-    public static let all = KanbanWatchFilter()
-
-    public func argv() -> [String] {
-        var args: [String] = []
-        if let assignee, !assignee.isEmpty {
-            args.append(HermesCLIOption.joined("--assignee", assignee))
-        }
-        if let tenant, !tenant.isEmpty {
-            args.append(HermesCLIOption.joined("--tenant", tenant))
-        }
-        if !kinds.isEmpty {
-            let joined = kinds.map(\.rawValue).joined(separator: ",")
-            args.append(HermesCLIOption.joined("--kinds", joined))
-        }
-        if intervalSeconds > 0 && intervalSeconds != 0.5 {
-            args.append(HermesCLIOption.joined("--interval", String(format: "%.2f", intervalSeconds)))
-        }
-        return args
-    }
-}
-
 /// Summary of one `hermes kanban dispatch` pass. Used by the optional
 /// "Dispatch now" button to show what happened.
 public struct KanbanDispatchSummary: Sendable, Equatable, Codable {

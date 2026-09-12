@@ -113553,43 +113553,43 @@
         }
       }
     },
-    "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, edit the schedule to re-arm it." : {
-      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0.",
+    "This job failed to schedule. Hermes v0.21.0 or newer can resume it — until then, duplicate it to schedule a new one." : {
+      "comment" : "Shown in place of the cron recovery buttons for a recurring job stuck in the error state on a Hermes older than v0.21.0. Names Duplicate, the only gesture those hosts accept for the record.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dieser Auftrag konnte nicht geplant werden. Hermes v0.21.0 oder neuer kann ihn fortsetzen — bis dahin bearbeite den Zeitplan, um ihn neu zu aktivieren."
+            "value" : "Dieser Auftrag konnte nicht geplant werden. Hermes v0.21.0 oder neuer kann ihn fortsetzen — bis dahin dupliziere ihn, um eine neue Ausführung zu planen."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No se pudo programar esta tarea. Hermes v0.21.0 o posterior puede reanudarla; hasta entonces, edita la programación para reactivarla."
+            "value" : "No se pudo programar esta tarea. Hermes v0.21.0 o posterior puede reanudarla; hasta entonces, duplícala para programar una nueva."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cette tâche n'a pas pu être planifiée. Hermes v0.21.0 ou plus récent peut la reprendre — en attendant, modifiez la planification pour la réarmer."
+            "value" : "Cette tâche n'a pas pu être planifiée. Hermes v0.21.0 ou plus récent peut la reprendre — en attendant, dupliquez-la pour en planifier une nouvelle."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このジョブのスケジュール設定に失敗しました。Hermes v0.21.0 以降なら再開できます。それまではスケジュールを編集して再設定してください。"
+            "value" : "このジョブのスケジュール設定に失敗しました。Hermes v0.21.0 以降なら再開できます。それまでは複製して新しい実行を予約してください。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Não foi possível agendar esta tarefa. O Hermes v0.21.0 ou mais recente pode retomá-la — até então, edite o agendamento para reativá-la."
+            "value" : "Não foi possível agendar esta tarefa. O Hermes v0.21.0 ou mais recente pode retomá-la — até então, duplique-a para agendar uma nova."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请编辑排程以重新启用。"
+            "value" : "此任务排程失败。Hermes v0.21.0 或更高版本可以恢复它 — 在此之前，请复制它以安排新的运行。"
           }
         }
       }

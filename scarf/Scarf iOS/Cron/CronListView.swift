@@ -384,14 +384,47 @@ struct CronEditorView: View {
     /// host's. An EMPTY time is unusable for the same reason (a `once` with no
     /// `run_at` has no `next_run_at` to compute) and that string-level helper
     /// answers `false` for one, so it is checked here.
-    /// Applies to `.edit` as well as the duplicate that motivated it: the
-    /// write is the same `jobs.json` rewrite either way, and re-saving a
-    /// `once` record whose time is spent re-writes the same ghost. Switching
-    /// the kind, or supplying a future time, is what unblocks Save.
+    /// **Scoped to a create or a duplicate — round-5 decision 13.** It used
+    /// to fire on an edit too, which blocked a user from fixing the PROMPT of
+    /// a record whose one-shot time had already passed: the schedule field
+    /// was never touched, yet Save stayed grey with nothing on screen naming
+    /// the reason. The axis is the SCHEDULE, not the sheet: a spent time is
+    /// refused unless it is the record's OWN already-stored value, unedited.
+    /// That admits the prompt-only edit and still refuses every write that
+    /// puts a spent time somewhere it was not — a create (no `existing`), a
+    /// duplicate (whose seed is blanked by `duplicateSeedSchedule`, so a
+    /// spent value there is one the user just typed), a kind switch, and a
+    /// re-typed dead timestamp.
+    ///
+    /// Hermes agrees for the case this admits. `cron edit <id> --prompt …` on
+    /// a one-shot that actually RAN is accepted at `v2026.9.7`: the record is
+    /// `enabled=False, state="completed", next_run_at=None`
+    /// (`_complete_job_record`, `cron/jobs.py:1463-1465`), so
+    /// `_reject_terminal_activation` (`:1865-1878`) sees `state` in the
+    /// terminal set, `enabled` not `True` and `next_run_at` nil and does not
+    /// raise, `_apply_schedule_update` never runs without `--schedule`, and
+    /// `_fill_missing_next_run` (`:1912-1927`) returns on the first line
+    /// because the record is disabled. The one shape Hermes would still
+    /// refuse is a never-run GHOST (`state="scheduled", enabled=True`, no
+    /// `next_run_at`), where `_fill_missing_next_run` raises "Requested
+    /// one-shot time … is in the past" — but that record can only exist
+    /// because an older Scarf wrote it, this gate is what stops a new one,
+    /// and re-saving its prompt writes back the ghost that is already there
+    /// rather than creating a second. iOS never shells `cron edit` anyway
+    /// (`IOSCronViewModel.saveJobs` rewrites `cron/jobs.json`), so this form
+    /// is the only validation either way.
     private var oneShotTimeIsUnusable: Bool {
         guard scheduleKind == "once" else { return false }
         let raw = scheduleRunAt.trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.isEmpty { return true }
+        // The record's own stored time, unchanged: this write re-states what
+        // `jobs.json` already holds, so it cannot create a ghost that is not
+        // already there.
+        if existing?.schedule.kind == "once",
+           let stored = existing?.schedule.runAt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           stored == raw {
+            return false
+        }
         return HermesCronJob.oneShotScheduleIsPastGrace(raw)
     }
 
