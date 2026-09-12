@@ -340,9 +340,12 @@ struct CronEditorView: View {
                     Text("Job")
                 } footer: {
                     if enabledIsLocked, let existing {
-                        // The SAME sentence the row toggle shows when it
-                        // refuses the same gesture on the same record.
-                        Text(IOSCronViewModel.resumeRefusalMessage(
+                        // The same REASON the row toggle gives, worded for a
+                        // modal: `resumeRefusalMessage`'s two remedies name
+                        // "Resume & Run Now" and "duplicate it", and neither
+                        // is reachable from inside this sheet — both live on
+                        // the list row the sheet is covering (round-6 P53).
+                        Text(IOSCronViewModel.editorEnabledLockNote(
                             existing, offer: recoveryOffer))
                     }
                 }

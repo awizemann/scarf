@@ -320,6 +320,44 @@ public final class IOSCronViewModel {
             : oneShotRefusalMessage(job, offer: offer)
     }
 
+    /// The same refusal, worded for the MODAL EDITOR's locked `Enabled`
+    /// toggle.
+    ///
+    /// ``resumeRefusalMessage(_:offer:)`` is written for the list's top
+    /// banner, where both of its remedies are one gesture away: "Resume &
+    /// Run Now" is in the row's context menu and "duplicate it" is the row's
+    /// trailing swipe action (P50b put it there for exactly this reason —
+    /// round-5 lesson 4, "a hint that names a remedy is walked like a
+    /// button"). Inside the editor sheet NEITHER is reachable: the sheet
+    /// covers the list, and its only controls are Cancel and Save. P50b's
+    /// footer rendered the banner's sentence there anyway, so the copy named
+    /// two gestures the user could not perform without first dismissing the
+    /// thing they were reading.
+    ///
+    /// The cheaper honest answer of the two on offer: keep the REASON, which
+    /// is what the footer is for, and point at where the remedy lives rather
+    /// than duplicating the row's actions into a sheet toolbar. The reason
+    /// clause is taken verbatim from the banner's sentence — one rule, two
+    /// framings — by trimming at the em dash or full stop the remedy clause
+    /// begins after.
+    public static func editorEnabledLockNote(
+        _ job: HermesCronJob, offer: CronRecoveryOffer
+    ) -> String {
+        let full = resumeRefusalMessage(job, offer: offer)
+        // Both arms put the remedy after " — " or after the first ". ".
+        var reason = full
+        if let dash = reason.range(of: " — ") {
+            reason = String(reason[reason.startIndex..<dash.lowerBound])
+        } else if let stop = reason.range(of: ". ") {
+            reason = String(reason[reason.startIndex..<stop.lowerBound])
+        }
+        reason = reason.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        if offer.canRearm {
+            return reason + ". Close this editor, then press and hold the job to Resume & Run Now."
+        }
+        return reason + ". Close this editor, then swipe the job to Duplicate it."
+    }
+
     static func oneShotRefusalMessage(
         _ job: HermesCronJob,
         offer: CronRecoveryOffer = .none

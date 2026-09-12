@@ -163,3 +163,109 @@ struct MattermostRequireMentionP53Tests {
         #expect(settings("platforms:\n  mattermost: {}\n").requireMentionIsSet == nil)
     }
 }
+
+/// Round-6 P53 — the modal editor's locked-`Enabled` footer named two
+/// gestures that do not exist inside the modal.
+///
+/// P50b gated the iOS `CronEditorView`'s `Enabled` toggle and gave the
+/// section footer `IOSCronViewModel.resumeRefusalMessage` — the LIST
+/// banner's sentence, whose two arms end in "use Resume & Run Now to re-arm
+/// it." and "Duplicate it to schedule a new run.". Both remedies live on the
+/// list ROW (the context menu and, since P50b, the trailing swipe), and the
+/// sheet is covering that list: from inside the editor neither is reachable.
+/// Round-5 lesson 4 — a hint that names a remedy is walked like a button —
+/// applied to a sheet instead of a row.
+@Suite("The cron editor's lock note names a reachable remedy (P53)")
+@MainActor
+struct CronEditorLockNoteP53Tests {
+
+    private func job(
+        name: String = "nightly",
+        kind: String = "once",
+        runAt: String? = "2020-01-01T00:00:00Z",
+        state: String = "completed",
+        enabled: Bool = false
+    ) -> HermesCronJob {
+        HermesCronJob(
+            id: "job_1", name: name, prompt: "hi",
+            schedule: CronSchedule(kind: kind, runAt: runAt),
+            enabled: enabled, state: state)
+    }
+
+    @Test("the note never names a gesture the sheet cannot perform unaided")
+    func theNoteNamesNoUnreachableGesture() {
+        for offer in [CronRecoveryOffer.none,
+                      CronRecoveryOffer(canResume: false, canRearm: true)] {
+            let note = IOSCronViewModel.editorEnabledLockNote(job(), offer: offer)
+            // Every gesture the note names must be prefixed by the dismissal
+            // it requires, so the copy is walkable as written.
+            if note.contains("Duplicate") || note.contains("Resume & Run Now") {
+                #expect(note.contains("Close this editor"), """
+                    The note names a list-row gesture without saying the \
+                    editor has to be dismissed first: \(note)
+                    """)
+            }
+        }
+    }
+
+    @Test("the note keeps the banner's reason verbatim")
+    func theNoteKeepsTheReason() {
+        let spent = job()
+        let banner = IOSCronViewModel.resumeRefusalMessage(spent, offer: .none)
+        let note = IOSCronViewModel.editorEnabledLockNote(spent, offer: .none)
+        #expect(note.contains("\"nightly\""), "the note stopped naming the job: \(note)")
+        // The reason clause — everything before the banner's remedy — must
+        // survive, so the two surfaces state one rule.
+        let reason = banner.components(separatedBy: " — ").first?
+            .components(separatedBy: ". ").first ?? banner
+        let trimmed = reason.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        #expect(note.hasPrefix(trimmed), """
+            The note no longer opens with the banner's own reason — the two \
+            surfaces have drifted into two rules. banner: \(banner) note: \(note)
+            """)
+    }
+
+    @Test("the re-arm arm points at the gesture that actually re-arms")
+    func theRearmArmPointsAtTheContextMenu() {
+        let note = IOSCronViewModel.editorEnabledLockNote(
+            job(), offer: CronRecoveryOffer(canResume: false, canRearm: true))
+        #expect(note.contains("Resume & Run Now"), "got: \(note)")
+        #expect(note.contains("press and hold"), """
+            "Resume & Run Now" is in the row's CONTEXT MENU, not its swipe \
+            actions — the note must name the gesture that reaches it: \(note)
+            """)
+    }
+
+    @Test("the no-rearm arm points at Duplicate, which is a swipe since P50b")
+    func theDuplicateArmPointsAtTheSwipe() {
+        let note = IOSCronViewModel.editorEnabledLockNote(job(), offer: .none)
+        #expect(note.contains("Duplicate"), "got: \(note)")
+        #expect(note.contains("swipe"), """
+            P50b moved Duplicate off the long press and onto the row's \
+            trailing swipe; the note must name where it is now: \(note)
+            """)
+    }
+
+    /// A recurring job in `error` is terminal too, and its note must read as
+    /// a sentence rather than a fragment — the reason clause is trimmed by
+    /// punctuation, so every arm has to be checked, not just the one shape.
+    @Test("the error-recurring arm reads as a sentence")
+    func theErrorRecurringArmIsWellFormed() {
+        let note = IOSCronViewModel.editorEnabledLockNote(
+            job(kind: "cron", runAt: nil, state: "error", enabled: true), offer: .none)
+        #expect(note.hasSuffix("."), "got: \(note)")
+        #expect(!note.contains(" ."), "a stray space before a full stop: \(note)")
+        #expect(!note.contains(".."), "a doubled full stop: \(note)")
+    }
+
+    /// The list banner is unchanged — it is the surface where both remedies
+    /// ARE one gesture away, and P50b's swipe action exists because of it.
+    @Test("the list banner keeps naming its remedies")
+    func theBannerIsUnchanged() {
+        let banner = IOSCronViewModel.resumeRefusalMessage(job(), offer: .none)
+        #expect(banner.contains("duplicate it"), "got: \(banner)")
+        let rearm = IOSCronViewModel.resumeRefusalMessage(
+            job(), offer: CronRecoveryOffer(canResume: false, canRearm: true))
+        #expect(rearm.contains("use Resume & Run Now to re-arm it."), "got: \(rearm)")
+    }
+}
