@@ -330,8 +330,14 @@ struct SlashCitationAndLocalizationP44bTests {
             ),
             encoding: .utf8
         )
-        #expect(components.contains("Text(String(localized: \"Not supported on this host:"),
-                "UnsupportedEffortNote's accessibility label is still unlocalized")
+        // P46 finding 2: the label used to PREFIX the notice with a second
+        // sentence saying the same thing. `notice` is already localized and
+        // already names the host and what it does with the value, so the
+        // accessibility label is the notice, verbatim and nothing more.
+        #expect(components.contains("accessibilityLabel(Text(verbatim: notice))"),
+                "UnsupportedEffortNote's accessibility label is not the plain notice")
+        #expect(!components.contains("Not supported on this host:"),
+                "the doubled sentence is still there")
     }
 
     /// Finding 7. The plan doc is hand-authored history, so it carries a

@@ -237,7 +237,7 @@ struct SettingsView: View {
             LabeledContent(
                 "Reasoning effort",
                 value: vm.config.reasoningEffort.isEmpty
-                    ? "Hermes default" : vm.config.reasoningEffort
+                    ? String(localized: "Hermes default") : vm.config.reasoningEffort
             )
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)

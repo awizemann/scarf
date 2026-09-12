@@ -116,16 +116,23 @@ public enum HermesPlatformSharedKeys {
     /// `platforms.<p>.<key>`, `platforms.<p>.extra.<key>` and
     /// `gateway.platforms.<p>.<key>`. `nil` for everything else.
     ///
-    /// The platform segment is matched against ``bridgeResolvedPlatforms``
+    /// The `(platform, key)` PAIR is matched against ``bridgeResolvedKeys``
     /// rather than accepted as "whatever came before the leaf", so an
     /// unrelated key that happens to end in a shared-key name is never
-    /// rewritten — and neither is a platform whose reader still expects one
-    /// hard-coded spelling.
+    /// rewritten — and neither is a key whose reader still expects one
+    /// hard-coded spelling on a platform some OTHER key of which does
+    /// resolve the bridge. P44 scoped this to the PLATFORM, and that is
+    /// exactly what broke `<p>.gateway_restart_notification`, whose reader
+    /// (`HermesConfig+YAML.swift:695`, `boolTrueDefault("\(p).…")`) is
+    /// hard-coded top-level: the rewrite sent it to `platforms.<p>.…` on
+    /// every nested-only config and the toggle became write-only.
     public static func split(key: String) -> (platform: String, sharedKey: String)? {
         var parts = key.split(separator: ".").map(String.init)
         guard let leaf = parts.popLast(), names.contains(leaf) else { return nil }
         if parts.last == "extra" { parts.removeLast() }
-        guard let platform = parts.popLast(), bridgeResolvedPlatforms.contains(platform) else { return nil }
+        guard let platform = parts.popLast(),
+              bridgeResolvedKeys.contains(SharedKeyRef(platform: platform, key: leaf))
+        else { return nil }
         // What is left must be one of the recognised prefixes — nothing,
         // `platforms`, or `gateway.platforms`.
         switch parts {
@@ -150,11 +157,44 @@ public enum HermesPlatformSharedKeys {
     /// A rewrite that would collide with a key the batch already spells
     /// correctly is dropped rather than overwriting it — two entries setting
     /// one key would be two `config set` spawns racing on one line.
+    ///
+    /// ## The prefix is resolved against the file AS THE BATCH WILL LEAVE IT
+    ///
+    /// A batch is not one write: `hermes config set` runs once per pair, and
+    /// the pairs a form sends are not all shared keys. `TelegramSetupViewModel`
+    /// sends bare `telegram.require_mention` (shared) beside bare
+    /// `telegram.reactions` and `telegram.disable_topic_auto_rename` (not
+    /// shared, so untouched). Resolved against the PRE-save file — which has
+    /// no top-level `telegram:` — `require_mention` moves to
+    /// `platforms.telegram.require_mention`, while `reactions` CREATES the
+    /// top-level block. On the next load `platform_section` bridges from
+    /// `telegram:` and `require_mention` is not in it: the batch invalidated
+    /// its own resolution. So a bare `<platform>.<anything>` anywhere in the
+    /// batch pins the prefix to `<platform>` for that platform, because the
+    /// file will carry that top-level block once the batch lands.
+    ///
+    /// ## This MOVES, it does not MIGRATE
+    ///
+    /// The value is written at the resolved spelling and whatever sits at the
+    /// source spelling is left behind as a stale shadow. Hermes ignores it —
+    /// only the bridge source reaches `extra` — but it is visible in
+    /// config.yaml and will re-emerge if the bridge source later changes.
+    /// Clearing it is not available: `hermes config` has no delete for an
+    /// arbitrary key (`config unset` is the host-default-picker verb, not a
+    /// general remove), so Scarf would have to hand-edit config.yaml to do
+    /// it. Filed as a task rather than done here.
     public static func resolved(
         _ configKV: [String: String],
         configText: String
     ) -> [String: String] {
         let parsed = HermesYAML.parseNestedYAML(configText)
+        // Platforms the batch itself gives a top-level block to.
+        var batchTopLevel: Set<String> = []
+        for key in configKV.keys {
+            let parts = key.split(separator: ".")
+            guard parts.count == 2 else { continue }
+            batchTopLevel.insert(String(parts[0]))
+        }
         var prefixes: [String: String] = [:]
         var out: [String: String] = [:]
         for (key, value) in configKV {
@@ -164,7 +204,9 @@ public enum HermesPlatformSharedKeys {
             }
             var prefix = prefixes[platform]
             if prefix == nil {
-                prefix = bridgeSourcePrefix(platform: platform, in: parsed)
+                prefix = batchTopLevel.contains(platform)
+                    ? platform
+                    : bridgeSourcePrefix(platform: platform, in: parsed)
                 prefixes[platform] = prefix
             }
             let target = (prefix ?? "platforms.\(platform)") + "." + sharedKey
@@ -177,13 +219,34 @@ public enum HermesPlatformSharedKeys {
         return out
     }
 
-    /// The platforms whose READER resolves the bridge source, and therefore
-    /// the only ones whose WRITER may be moved onto it.
+    /// One `(platform, key)` whose reader resolves the bridge source.
+    public struct SharedKeyRef: Hashable, Sendable, Comparable {
+        public let platform: String
+        public let key: String
+        public init(platform: String, key: String) {
+            self.platform = platform
+            self.key = key
+        }
+        public static func < (a: Self, b: Self) -> Bool {
+            (a.platform, a.key) < (b.platform, b.key)
+        }
+    }
+
+    /// The `(platform, key)` PAIRS whose READER resolves the bridge source,
+    /// and therefore the only writes that may be moved onto it.
+    ///
+    /// Scoping this by PLATFORM was P44's bug. `slack` has a reader that
+    /// resolves the bridge for `require_mention` and one that does NOT for
+    /// `gateway_restart_notification` (`HermesConfig+YAML.swift:695`, a flat
+    /// `boolTrueDefault("slack.gateway_restart_notification")`), so a
+    /// platform-scoped allowlist moved a key whose reader could not follow
+    /// and `GatewayBehaviorViewModel`'s toggle became write-only on every
+    /// nested-only config.
     ///
     /// This list is short on purpose, and the shortness is the finding, not
     /// the fix. `HermesConfig+YAML` reads slack's `require_mention` /
     /// `reply_in_thread` and telegram's `require_mention` through
-    /// `sharedPlatformScalar` (P20); every other platform's shared keys are
+    /// `sharedPlatformScalar` (P20); every other shared key is
     /// read from ONE hard-coded spelling —
     /// `platforms.signal.extra.require_mention`,
     /// `platforms.whatsapp_cloud.extra.dm_policy` / `.allow_from`,
@@ -198,7 +261,12 @@ public enum HermesPlatformSharedKeys {
     /// moved in the same commit — filed, not smuggled in here.
     ///
     /// `HermesPlatformSharedKeyWriteP44Tests` pins this set against
-    /// `HermesConfig+YAML.swift`'s actual `sharedPlatform*` call sites, so a
-    /// reader that adopts the bridge fails the test until it is added here.
-    public static let bridgeResolvedPlatforms: Set<String> = ["slack", "telegram"]
+    /// `HermesConfig+YAML.swift`'s actual `sharedPlatform*` call sites —
+    /// both arguments of each — so a reader that adopts the bridge fails the
+    /// test until it is added here.
+    public static let bridgeResolvedKeys: Set<SharedKeyRef> = [
+        SharedKeyRef(platform: "slack", key: "require_mention"),
+        SharedKeyRef(platform: "slack", key: "reply_in_thread"),
+        SharedKeyRef(platform: "telegram", key: "require_mention"),
+    ]
 }

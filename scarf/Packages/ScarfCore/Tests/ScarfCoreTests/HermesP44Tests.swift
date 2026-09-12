@@ -260,7 +260,7 @@ struct ReasoningEffortWideningP44Tests {
                 let notified = HermesReasoningEffort.unsupportedLevelNotice(
                     for: level, capabilities: caps
                 ) != nil
-                #expect(widened == notified, "\(level) on \(caps.versionLine ?? "unknown")")
+                #expect(widened == notified, "\(level) on \(caps.versionLine)")
             }
         }
     }
@@ -430,10 +430,12 @@ struct HermesPlatformSharedKeyWriteP44Tests {
 
     /// The allowlist is the honest half of this fix. Rewriting a write whose
     /// READER still expects one hard-coded spelling would trade half the bug
-    /// for the other half, so `bridgeResolvedPlatforms` must contain exactly
-    /// the platforms `HermesConfig+YAML` reads through `sharedPlatformScalar`
-    /// / `sharedPlatformBool`. A reader that adopts the bridge fails here
-    /// until its writer is let in too.
+    /// for the other half, so `bridgeResolvedKeys` must contain exactly the
+    /// `(platform, key)` PAIRS `HermesConfig+YAML` reads through
+    /// `sharedPlatformScalar` / `sharedPlatformBool`. A reader that adopts
+    /// the bridge fails here until its writer is let in too. Scoping this by
+    /// platform alone was P46 finding 1(a): `slack` resolves the bridge for
+    /// `require_mention` and does NOT for `gateway_restart_notification`.
     @Test func theAllowlistMatchesTheReadersThatResolveTheBridge() throws {
         let source = try String(
             contentsOf: P44Repo.root.appendingPathComponent(
@@ -446,18 +448,19 @@ struct HermesPlatformSharedKeyWriteP44Tests {
             .split(separator: "\n", omittingEmptySubsequences: false)
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")
-        let pattern = #"sharedPlatform(?:Scalar|Bool)\(\"([a-z_]+)\""#
+        let pattern = #"sharedPlatform(?:Scalar|Bool)\(\"([a-z_]+)\", *\"([a-z_]+)\""#
         let regex = try NSRegularExpression(pattern: pattern)
         let ns = body as NSString
-        var platforms: Set<String> = []
-        for m in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges > 1 {
-            platforms.insert(ns.substring(with: m.range(at: 1)))
+        var pairs: Set<HermesPlatformSharedKeys.SharedKeyRef> = []
+        for m in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges > 2 {
+            pairs.insert(.init(platform: ns.substring(with: m.range(at: 1)),
+                               key: ns.substring(with: m.range(at: 2))))
         }
-        #expect(!platforms.isEmpty, "the scan found no sharedPlatform* call sites — it has broken")
-        #expect(platforms == HermesPlatformSharedKeys.bridgeResolvedPlatforms, """
-            HermesConfig+YAML resolves the bridge for \(platforms.sorted()), but \
-            HermesPlatformSharedKeys.bridgeResolvedPlatforms says \
-            \(HermesPlatformSharedKeys.bridgeResolvedPlatforms.sorted()). Move the \
+        #expect(!pairs.isEmpty, "the scan found no sharedPlatform* call sites — it has broken")
+        #expect(pairs == HermesPlatformSharedKeys.bridgeResolvedKeys, """
+            HermesConfig+YAML resolves the bridge for \(pairs.sorted()), but \
+            HermesPlatformSharedKeys.bridgeResolvedKeys says \
+            \(HermesPlatformSharedKeys.bridgeResolvedKeys.sorted()). Move the \
             reader and the writer in the same commit.
             """)
     }

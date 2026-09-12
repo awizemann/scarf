@@ -63,11 +63,21 @@ public enum HermesReasoningEffort {
     /// top-level pickers prepend themselves) widens nothing.
     public static func levels(capabilities: HermesCapabilities, selected: String) -> [String] {
         let base = levels(capabilities: capabilities)
-        // Emptiness is asked of the RAW string and membership of the
-        // normalised one: a whitespace-only value is pathological but it IS
-        // what a `Picker` has to find a tag for, while `Max` must not earn a
-        // second row beside `max`.
-        guard !selected.isEmpty, !base.contains(normalizedLevel(selected)) else { return base }
+        // Two questions, two comparisons. The ROW is a `Picker` tag, and the
+        // Picker's tags and its selection are the RAW stored string
+        // (`AgentTab.swift:50-58`, `AuxiliaryTab.swift:280-289`,
+        // `SettingsComponents.swift:212-218`) — so membership here must be
+        // asked RAW too, or `Max` finds no tag and the control renders BLANK,
+        // which is the exact failure this overload exists to prevent. The
+        // NOTICE is a question about the HOST, so it compares normalised
+        // (`unsupportedLevelNotice`) and `Max` draws no warning. P45 asked
+        // both questions of the normalised form and blanked the picker.
+        //
+        // Emptiness is asked of the NORMALISED string: a whitespace-only
+        // value is Hermes's own absent-key case (`str(effort).strip()` is
+        // empty, `hermes_constants.py:884` @ `v2026.9.7`), so it is the
+        // "Hermes default" sentinel — no extra row, and no notice either.
+        guard !normalizedLevel(selected).isEmpty, !base.contains(selected) else { return base }
         return [selected] + base
     }
 
@@ -101,8 +111,8 @@ public enum HermesReasoningEffort {
     /// tier. It is also NOT "the model provider's own default", which is
     /// what this notice claimed until P44b — the consumers were walked:
     /// `resolve_reasoning_config` logs `Unknown reasoning_effort '%s', using
-    /// default (medium)` and returns `None` (`hermes_constants.py:957-979`,
-    /// the warning at `:975-976`); `agent_runtime_helpers.py:2145-2147`
+    /// default (medium)` and returns `None` (`hermes_constants.py:957-980`,
+    /// the warning at `:978-979`); `agent_runtime_helpers.py:2145-2147`
     /// stores that `None` on `agent.reasoning_config`; and the
     /// chat-completions transport then substitutes `medium` EXPLICITLY —
     /// `_effort = (reasoning_config.get("effort", "medium") or "medium") if

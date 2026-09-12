@@ -350,7 +350,7 @@ public enum HermesYAML {
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                maps[path] = parseFlatFlowMap(inner) ?? [:]
+                maps[path] = parseFlatFlowMap(inner, unquoting: scarfWrittenMapPaths.contains(path)) ?? [:]
                 writtenPaths.insert(path)
                 continue
             }
@@ -371,7 +371,7 @@ public enum HermesYAML {
                        .hasPrefix("#") {
                 let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                lists[path] = parseFlatFlowList(inner)
+                lists[path] = parseFlatFlowList(inner, unquoting: scarfWrittenListPaths.contains(path))
                 writtenPaths.insert(path)
                 continue
             }
@@ -460,7 +460,14 @@ public enum HermesYAML {
     /// into a flat scalar map. Returns `[:]` for empty content and `nil`
     /// when the content is nested/exotic (embedded `{`/`[`, or an entry
     /// that doesn't split into `key: value`) — callers treat nil as empty.
-    private static func parseFlatFlowMap(_ inner: String) -> [String: String]? {
+    ///
+    /// `unquoting` is decision 10's per-key opt-in, threaded down from the
+    /// PATH. P46 finding 7: the flow arms decoded with `stripYAMLQuotes`
+    /// unconditionally, so `excluded_providers: ["c\x41d"]` came back as the
+    /// literal `c\x41d` while the block form of the same key came back as
+    /// `cAd` — one key, two answers, decided by which shape the host's
+    /// config.yaml happened to use.
+    private static func parseFlatFlowMap(_ inner: String, unquoting: Bool = false) -> [String: String]? {
         let body = inner.trimmingCharacters(in: .whitespaces)
         if body.isEmpty { return [:] }
         if body.contains("{") || body.contains("[") { return nil }
@@ -468,7 +475,7 @@ public enum HermesYAML {
         for part in body.split(separator: ",") {
             let entry = part.trimmingCharacters(in: .whitespaces)
             if entry.isEmpty { continue }
-            guard let (k, v) = splitFlowEntry(entry), !k.isEmpty, !v.isEmpty else { return nil }
+            guard let (k, v) = splitFlowEntry(entry, unquoting: unquoting), !k.isEmpty, !v.isEmpty else { return nil }
             result[k] = v
         }
         return result
@@ -479,30 +486,47 @@ public enum HermesYAML {
     /// entries and arbitrary internal spacing; empty entries (from `[]` or a
     /// stray trailing comma) are dropped. Shared by `parseNestedYAML`'s
     /// inline-array handling and `ProjectSkillsScanner.parseTrustedProjectDirs`.
-    public static func parseFlatFlowList(_ inner: String) -> [String] {
+    /// `unquoting` is decision 10's per-key opt-in — see ``parseFlatFlowMap``.
+    /// It defaults to false so the one external caller
+    /// (`ProjectSkillsScanner.parseTrustedProjectDirs`, a key Scarf does not
+    /// write through ``YAMLScalar``) keeps the rule that applies everywhere else.
+    public static func parseFlatFlowList(_ inner: String, unquoting: Bool = false) -> [String] {
         inner.split(separator: ",").compactMap { part in
-            let value = stripYAMLQuotes(part.trimmingCharacters(in: .whitespaces))
+            let raw = part.trimmingCharacters(in: .whitespaces)
+            let value = unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
             return value.isEmpty ? nil : value
         }
     }
 
     /// Split one `key: value` flow entry, honoring a quoted key that may
     /// contain colons (`'llama3:8b': high`).
-    private static func splitFlowEntry(_ entry: String) -> (String, String)? {
+    /// `unquoting` is decision 10's per-key opt-in — see ``parseFlatFlowMap``.
+    /// A DOUBLE-quoted key under an opted-in path is decoded the way the
+    /// block-form key path decodes it (`YAMLScalar.unquote` over the
+    /// re-quoted body), which is what makes `{"a\tb": high}` and its block
+    /// spelling agree.
+    private static func splitFlowEntry(_ entry: String, unquoting: Bool = false) -> (String, String)? {
+        func decode(_ raw: String) -> String {
+            unquoting ? YAMLScalar.unquote(raw) : stripYAMLQuotes(raw)
+        }
         if let quote = entry.first, quote == "'" || quote == "\"" {
             let body = entry.dropFirst()
             guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
             var key = String(body[body.startIndex..<close])
-            if quote == "'" { key = key.replacingOccurrences(of: "''", with: "'") }
+            if quote == "'" {
+                key = key.replacingOccurrences(of: "''", with: "'")
+            } else if unquoting {
+                key = YAMLScalar.unquote("\"" + key + "\"")
+            }
             let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
             guard rest.hasPrefix(":") else { return nil }
             let value = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
-            return (key, stripYAMLQuotes(value))
+            return (key, decode(value))
         }
         guard let colon = entry.firstIndex(of: ":") else { return nil }
         let key = String(entry[entry.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
         let value = String(entry[entry.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-        return (key, stripYAMLQuotes(value))
+        return (key, decode(value))
     }
 
     /// Index of the closing quote in `body` (which starts just AFTER the

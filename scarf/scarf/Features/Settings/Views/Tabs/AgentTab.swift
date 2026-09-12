@@ -41,12 +41,17 @@ struct AgentTab: View {
             // showed an empty control. Widening is not an endorsement, so the
             // row carries `unsupportedLevelNotice` beneath it.
             //
-            // The leading empty row is the ABSENT key, and absent is not
-            // `medium`: `agent.reasoning_effort` is in no schema layer at any
-            // supported tag, so nothing decides the level but the model
-            // provider itself. Asserting `medium` in the picker claimed a
-            // level Hermes never chose — and the first unrelated save on that
-            // tab wrote it.
+            // The leading empty row is the ABSENT key. It is not a level
+            // the picker may assert — `agent.reasoning_effort` is in no
+            // schema layer at any supported tag, so stamping `medium` into
+            // the control would claim a value Hermes never wrote, and the
+            // first unrelated save on that tab would write it. What the
+            // absent key RESOLVES to is Hermes's own `medium`, not the model
+            // provider's default: the chat-completions transport substitutes
+            // it EXPLICITLY (`agent/transports/chat_completions.py:420-422` @
+            // `v2026.9.7`), and only the Anthropic adapter leaves the choice
+            // to the model (`agent/anthropic_adapter.py:570`). Hence the row
+            // reads "Hermes default", P45's wording on all four surfaces.
             PickerRow(
                 label: "Reasoning Effort",
                 selection: viewModel.config.reasoningEffort,

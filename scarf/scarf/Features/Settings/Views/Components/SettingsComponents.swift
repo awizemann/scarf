@@ -407,7 +407,9 @@ struct UnsupportedEffortNote: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
-                .accessibilityLabel(Text(String(localized: "Not supported on this host: \(notice)")))
+                // `notice` is already a full sentence naming the host and
+                // what it does with the value; prefixing it doubled it.
+                .accessibilityLabel(Text(verbatim: notice))
         }
     }
 }

@@ -284,6 +284,12 @@ struct AuxiliaryTab: View {
                 capabilities: capabilities,
                 selected: value
             ),
+            // The sentinel row here is NOT the same claim as AgentTab's.
+            // An empty `auxiliary.<task>.reasoning_effort` falls through to
+            // the GLOBAL `agent.reasoning_effort` row on this same window —
+            // which may itself be set — so "Hermes default" would be wrong
+            // whenever the global row carries a level. "Default" is the
+            // deliberate word for "whatever the row above resolves to".
             optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )

@@ -84,16 +84,29 @@ struct ReasoningEffortNormalisationP45Tests {
 
     private static let target = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
 
-    @Test func aCasedLevelDoesNotWidenThePicker() {
+    /// P45 asked the ROW question of the normalised form and blanked the
+    /// picker: the `Picker`'s tags and selection are the RAW stored string,
+    /// so `Max` with only a `max` tag renders an EMPTY control — the very
+    /// failure the widening overload exists to prevent. The row is widened
+    /// on RAW membership; what `Max` must not earn is the NOTICE.
+    @Test func aCasedLevelKeepsATagOfItsOwn() {
         let widened = HermesReasoningEffort.levels(capabilities: Self.target, selected: "Max")
-        #expect(widened == HermesReasoningEffort.levels(capabilities: Self.target),
-                "`Max` added a duplicate row beside `max`: \(widened)")
+        #expect(widened.first == "Max", "`Max` has no tag and the picker renders blank: \(widened)")
+        #expect(widened.dropFirst() == HermesReasoningEffort.levels(capabilities: Self.target)[...])
     }
 
-    @Test func aPaddedLevelDoesNotWidenThePicker() {
+    @Test func aPaddedLevelKeepsATagOfItsOwn() {
         let widened = HermesReasoningEffort.levels(capabilities: Self.target, selected: " high ")
-        #expect(widened == HermesReasoningEffort.levels(capabilities: Self.target),
-                "` high ` added a duplicate row beside `high`: \(widened)")
+        #expect(widened.first == " high ", "` high ` has no tag and the picker renders blank: \(widened)")
+    }
+
+    /// A whitespace-only value is `str(effort).strip()` == "" to Hermes
+    /// (`hermes_constants.py:884` @ `v2026.9.7`) — the absent-key case. It is
+    /// the "Hermes default" sentinel: no extra row, no notice.
+    @Test func aWhitespaceOnlyValueIsTheSentinel() {
+        #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "   ")
+                == HermesReasoningEffort.levels(capabilities: Self.target))
+        #expect(HermesReasoningEffort.unsupportedLevelNotice(for: "   ", capabilities: Self.target) == nil)
     }
 
     @Test func aCasedOrPaddedLevelDrawsNoUnsupportedNotice() {
@@ -114,13 +127,11 @@ struct ReasoningEffortNormalisationP45Tests {
         #expect(notice.contains("Turbo"), "the notice must quote what is on disk")
     }
 
-    /// Emptiness is still asked of the raw string: a whitespace-only value
-    /// is what a `Picker` has to find a tag for, or it renders blank — the
-    /// failure decision 13 exists to prevent.
-    @Test func aWhitespaceOnlyValueStillGetsARow() {
-        #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "  ")
-            .first == "  ")
-        // …and the empty sentinel still widens nothing.
+    /// The empty sentinel widens nothing. (The whitespace-only case is
+    /// `aWhitespaceOnlyValueIsTheSentinel` above: P45 gave it a row on the
+    /// theory that a `Picker` needs a tag, but `str(effort).strip()` makes
+    /// it Hermes's absent-key case, so the sentinel row is the honest one.)
+    @Test func theEmptyStringWidensNothing() {
         #expect(HermesReasoningEffort.levels(capabilities: Self.target, selected: "")
             == HermesReasoningEffort.levels(capabilities: Self.target))
     }
