@@ -112,30 +112,56 @@ struct ProjectTemplateBoundsP43Tests {
                 "refused for the wrong reason — the listing was readable: \(error)")
     }
 
-    /// The unpacked-size ceiling: one member of zeros that expands to 300 MB
-    /// and compresses to a few hundred KB. This is the bomb the guard exists
-    /// for, and `unzip -Zt` says `1 file,` — singular — for it, which is the
-    /// spelling the old parser did not know.
+    /// The unpacked-size ceiling, and the `1 file,` spelling `unzip -Zt`
+    /// prints for a single-entry archive — which is the spelling the old
+    /// parser did not know.
+    ///
+    /// **6 MB against a 4 MB ceiling, not 300 MB against the shipped 256 MB**
+    /// (round-5 decision 8). The guard reads a DECLARED size out of the
+    /// listing and compares it to a number; the size of that number is not
+    /// the mechanism. The old fixture allocated, wrote and compressed 300 MB
+    /// of zeros on every run to clear a constant, which was several seconds
+    /// of the serial suite for no extra proof. The ceiling is a parameter
+    /// now — the same test seam `listingTimeout` already had — and the
+    /// shipped value is pinned separately below, so both halves are still
+    /// covered and neither costs 300 MB.
     @Test("a one-member decompression bomb is refused on size")
     func unpackedSizeCeilingRefuses() async throws {
         let dir = try Self.scratchDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let bomb = 300 * 1024 * 1024
-        #expect(Int64(bomb) > ProjectTemplateService.maxTemplateUnpackedBytes)
+        let ceiling: Int64 = 4 * 1024 * 1024
+        let bomb = 6 * 1024 * 1024
+        #expect(Int64(bomb) > ceiling)
         let archive = try Self.makeZip(
             in: dir, named: "bomb.scarftemplate", contents: [("payload.bin", bomb)])
         // The premise: it got PAST the archive-size cap, so the refusal below
-        // can only come from the declared unpacked size.
+        // can only come from the declared unpacked size. Zeros compress to
+        // almost nothing, so this holds by a wide margin.
         let onDisk = (try FileManager.default.attributesOfItem(atPath: archive.path)[.size]
                       as? Int64) ?? 0
         #expect(onDisk < ProjectTemplateService.maxTemplateArchiveBytes,
                 "the zip is \(onDisk) bytes — it would be refused on file size instead")
 
         var thrown: Error?
-        do { try await ProjectTemplateService().enforceArchiveBounds(zipPath: archive.path) }
-        catch { thrown = error }
-        let error = try #require(thrown, "300 MB unpacked is past the ceiling")
+        do {
+            try await ProjectTemplateService().enforceArchiveBounds(
+                zipPath: archive.path, unpackedCeiling: ceiling)
+        } catch { thrown = error }
+        let error = try #require(thrown, "6 MB unpacked is past a 4 MB ceiling")
         #expect("\(error)".contains("expand to"), "\(error)")
+
+        // And the same archive passes when the ceiling is above it — so the
+        // refusal is the SIZE comparison and not the one-member listing.
+        try await ProjectTemplateService().enforceArchiveBounds(
+            zipPath: archive.path, unpackedCeiling: Int64(bomb) * 2)
+    }
+
+    /// The parameter above is a test seam; the value Scarf actually ships is
+    /// what protects a user, so it is pinned on its own.
+    @Test("the shipped unpacked ceiling is unchanged")
+    func shippedUnpackedCeilingIsPinned() {
+        #expect(ProjectTemplateService.maxTemplateUnpackedBytes == 256 * 1024 * 1024)
+        #expect(ProjectTemplateService.maxTemplateArchiveBytes == 64 * 1024 * 1024)
     }
 
     /// `openRemoteURL` downloads to its own temp file and hands it to

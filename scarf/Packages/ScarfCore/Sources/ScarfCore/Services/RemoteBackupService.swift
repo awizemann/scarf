@@ -518,6 +518,15 @@ public final class RemoteBackupService: @unchecked Sendable {
         #if os(iOS)
         throw BackupError.zipFailed("Backup zip is not supported on iOS — run the backup from the Mac app.")
         #else
+        // **The clock starts BEFORE `run()`.** `timeout` is the caller's
+        // wall-clock ceiling on the whole operation, and a fork+exec is part
+        // of that operation — starting the budget after the spawn quietly
+        // grants the child however long the machine took to start it, which
+        // under load is the difference between a bounded wait and a generous
+        // one. It also lets the overrun tests use a fixture sized to the
+        // BOUND rather than one large enough to outrun a free head start
+        // (round-5 decision 8).
+        let started = Date()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
         proc.currentDirectoryURL = workDir
@@ -541,7 +550,8 @@ public final class RemoteBackupService: @unchecked Sendable {
         // 64 KB pipe buffer — which deadlocks a parent that reads only after
         // the wait. See ``Process.waitDrainingAsync(timeout:pipes:drainGrace:)``.
         let (exited, drained) = await proc.waitDrainingAsync(
-            timeout: timeout, pipes: [errPipe, outPipe])
+            timeout: max(0, timeout - Date().timeIntervalSince(started)),
+            pipes: [errPipe, outPipe])
         // The write ends stay ours; the drain owns the read ends.
         try? errPipe.fileHandleForWriting.close()
         try? outPipe.fileHandleForWriting.close()

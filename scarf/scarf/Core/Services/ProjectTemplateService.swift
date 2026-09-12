@@ -345,7 +345,8 @@ struct ProjectTemplateService: Sendable {
     /// an `inspect()` that would unpack them.
     nonisolated func enforceArchiveBounds(
         zipPath: String,
-        listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout
+        listingTimeout: TimeInterval = ProjectTemplateService.listingTimeout,
+        unpackedCeiling: Int64 = ProjectTemplateService.maxTemplateUnpackedBytes
     ) async throws {
         let attrs = try? FileManager.default.attributesOfItem(atPath: zipPath)
         if let size = attrs?[.size] as? Int64, size > Self.maxTemplateArchiveBytes {
@@ -378,7 +379,7 @@ struct ProjectTemplateService: Sendable {
                 )
             )
         }
-        if claims.uncompressedBytes > Self.maxTemplateUnpackedBytes {
+        if claims.uncompressedBytes > unpackedCeiling {
             throw ProjectTemplateError.unzipFailed(
                 String(
                     localized: "This template would expand to \(claims.uncompressedBytes / 1_048_576) MB. Templates are a few kilobytes; refusing to open it.",

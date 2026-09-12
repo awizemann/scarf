@@ -25,76 +25,10 @@ extension AnalyticsConnectionEventsTests {
 @Suite("Analytics feature usage events", .serialized)
 struct AnalyticsFeatureUsageEventsTests {
 
-    // MARK: - section_viewed dedupe
-
     /// The `section` tokens of every `section_viewed` event emitted so far,
     /// in order.
     private static func sections(_ tracker: CapturingUsageTracker) -> [String] {
         tracker.captured.filter { $0.name == "section_viewed" }.compactMap { $0.props["section"] }
-    }
-
-    @Test("visiting the same section twice only records once")
-    @MainActor
-    func sameSectionDedupes() {
-        let tracker = CapturingUsageTracker()
-        Analytics.install(tracker)
-        defer { Analytics.install(nil) }
-
-        let coordinator = AppCoordinator()
-        // The initializer itself counts as the first visit (every window
-        // starts on .dashboard, and a property initializer's default value
-        // never runs `didSet`).
-        #expect(Self.sections(tracker) == ["dashboard"])
-
-        coordinator.selectedSection = .chat
-        #expect(Self.sections(tracker) == ["dashboard", "chat"])
-
-        // Revisit .chat, then re-select .dashboard: neither is a NEW
-        // section, so nothing more is emitted.
-        coordinator.selectedSection = .settings
-        coordinator.selectedSection = .chat
-        coordinator.selectedSection = .dashboard
-        #expect(Self.sections(tracker) == ["dashboard", "chat", "settings"])
-    }
-
-    @Test("visiting two different sections records both")
-    @MainActor
-    func differentSectionsBothRecord() {
-        let tracker = CapturingUsageTracker()
-        Analytics.install(tracker)
-        defer { Analytics.install(nil) }
-
-        let coordinator = AppCoordinator()
-        coordinator.selectedSection = .insights
-        coordinator.selectedSection = .kanban
-        #expect(Self.sections(tracker) == ["dashboard", "insights", "kanban"])
-    }
-
-    /// The regression the audit caught: the dedupe used to be an instance
-    /// property, but `AppCoordinator` is per-window and is rebuilt on every
-    /// server/profile switch, and each new one re-reports `.dashboard` from
-    /// `init`. A second coordinator must emit nothing it has already seen.
-    @Test("a second coordinator (new window or server switch) re-reports nothing")
-    @MainActor
-    func dedupeIsProcessWideAcrossCoordinators() {
-        let tracker = CapturingUsageTracker()
-        Analytics.install(tracker)
-        defer { Analytics.install(nil) }
-
-        let first = AppCoordinator()
-        first.selectedSection = .logs
-        #expect(Self.sections(tracker) == ["dashboard", "logs"])
-
-        // A brand-new window / post-switch coordinator: its `init` re-selects
-        // .dashboard and the user walks back to Logs. Both are already-seen
-        // facts, so nothing new is emitted.
-        let second = AppCoordinator()
-        second.selectedSection = .logs
-        #expect(Self.sections(tracker) == ["dashboard", "logs"])
-
-        // A genuinely new section still records, from either coordinator.
-        second.selectedSection = .cron
-        #expect(Self.sections(tracker) == ["dashboard", "logs", "cron"])
     }
 
     @Test("recordOnce reports the first call for a key and nothing after")
@@ -367,5 +301,88 @@ struct AnalyticsFeatureUsageEventsTests {
         #expect(Analytics.serverCountBucket(999) == "gt_5")
     }
 }
+
+}
+
+/// The `section_viewed` half of Phase 5, lifted OUT of
+/// `AnalyticsConnectionEventsTests` in round-5 P48 and deliberately NOT
+/// `.serialized`.
+///
+/// These tests used to install a `CapturingUsageTracker` into
+/// `Analytics.install(_:)` — a process-global slot — which made them
+/// serial-only twice over: two suites installing at once clobber each other,
+/// and any other test that builds an `AppCoordinator`
+/// (`CronViewAccessibilityTreeTests:92`, `SidebarRestructureTests:119`/`:137`)
+/// emits `section_viewed` into whatever happens to be installed. The
+/// coordinator takes its tracker as a parameter now, so each test here owns
+/// its own and nothing else in the process can reach it.
+///
+/// The three tests still in the serialized suite are the ones whose SUBJECT
+/// is the process seam itself (`Analytics.install` / `Analytics.recordOnce`);
+/// those are serial for a real reason and stay there.
+@Suite("Analytics section_viewed")
+struct AnalyticsSectionViewedTests {
+
+    /// The `section` tokens of every `section_viewed` event emitted so far,
+    /// in order.
+    private static func sections(_ tracker: CapturingUsageTracker) -> [String] {
+        tracker.captured.filter { $0.name == "section_viewed" }.compactMap { $0.props["section"] }
+    }
+
+
+    @Test("visiting the same section twice only records once")
+    @MainActor
+    func sameSectionDedupes() {
+        let tracker = CapturingUsageTracker()
+        let coordinator = AppCoordinator(usageTracker: tracker)
+        // The initializer itself counts as the first visit (every window
+        // starts on .dashboard, and a property initializer's default value
+        // never runs `didSet`).
+        #expect(Self.sections(tracker) == ["dashboard"])
+
+        coordinator.selectedSection = .chat
+        #expect(Self.sections(tracker) == ["dashboard", "chat"])
+
+        // Revisit .chat, then re-select .dashboard: neither is a NEW
+        // section, so nothing more is emitted.
+        coordinator.selectedSection = .settings
+        coordinator.selectedSection = .chat
+        coordinator.selectedSection = .dashboard
+        #expect(Self.sections(tracker) == ["dashboard", "chat", "settings"])
+    }
+
+    @Test("visiting two different sections records both")
+    @MainActor
+    func differentSectionsBothRecord() {
+        let tracker = CapturingUsageTracker()
+        let coordinator = AppCoordinator(usageTracker: tracker)
+        coordinator.selectedSection = .insights
+        coordinator.selectedSection = .kanban
+        #expect(Self.sections(tracker) == ["dashboard", "insights", "kanban"])
+    }
+
+    /// The regression the audit caught: the dedupe used to be an instance
+    /// property, but `AppCoordinator` is per-window and is rebuilt on every
+    /// server/profile switch, and each new one re-reports `.dashboard` from
+    /// `init`. A second coordinator must emit nothing it has already seen.
+    @Test("a second coordinator (new window or server switch) re-reports nothing")
+    @MainActor
+    func dedupeIsProcessWideAcrossCoordinators() {
+        let tracker = CapturingUsageTracker()
+        let first = AppCoordinator(usageTracker: tracker)
+        first.selectedSection = .logs
+        #expect(Self.sections(tracker) == ["dashboard", "logs"])
+
+        // A brand-new window / post-switch coordinator: its `init` re-selects
+        // .dashboard and the user walks back to Logs. Both are already-seen
+        // facts, so nothing new is emitted.
+        let second = AppCoordinator(usageTracker: tracker)
+        second.selectedSection = .logs
+        #expect(Self.sections(tracker) == ["dashboard", "logs"])
+
+        // A genuinely new section still records, from either coordinator.
+        second.selectedSection = .cron
+        #expect(Self.sections(tracker) == ["dashboard", "logs", "cron"])
+    }
 
 }
