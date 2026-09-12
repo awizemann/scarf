@@ -560,11 +560,11 @@ final class CronViewModel {
             // duplicating is an ordinary `cron create`, which no terminal
             // guard touches — and stay silent about a door we cannot prove.
             guard let offer else {
-                return "That job already finished — duplicate it to schedule a new one."
+                return String(localized: "That job already finished — duplicate it to schedule a new one.")
             }
             return offer.canRearm
-                ? "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
-                : "That job already finished and can't be re-armed — duplicate it to schedule a new one."
+                ? String(localized: "That job already finished — use Resume & Run Now to re-arm it, or duplicate it.")
+                : String(localized: "That job already finished and can't be re-armed — duplicate it to schedule a new one.")
         }
         // `rearm_oneshot`'s own two refusal families, both of which used to
         // fall through to the generic `prefix(200)` truncation of raw CLI text.

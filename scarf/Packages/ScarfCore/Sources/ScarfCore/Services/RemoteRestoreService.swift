@@ -479,10 +479,23 @@ public final class RemoteRestoreService: @unchecked Sendable {
         var written: Int64 = 0
         var lastProgress = Date()
         var stalled = false
+        var lastYield: Int64 = 0
         let chunkSize = 64 * 1024
         do {
             pump: while true {
                 try Task.checkCancellation()
+                // SUSPEND. The happy path — a remote reading as fast as we
+                // write — never hits the `EAGAIN` arm below, so the whole
+                // multi-gigabyte pump ran without a single suspension point:
+                // `Task.checkCancellation()` is synchronous, and `write(2)`
+                // on a drained pipe returns immediately. One cooperative
+                // thread was held for the length of the push.
+                // `Task.yield()` every ``pumpYieldBytes`` gives the pool its
+                // thread back without measurably slowing the copy.
+                if Self.shouldYield(written: written, lastYield: lastYield) {
+                    lastYield = written
+                    await Task.yield()
+                }
                 let chunk = reader.readData(ofLength: chunkSize)
                 if chunk.isEmpty { break }
                 var offset = 0
@@ -500,7 +513,13 @@ public final class RemoteRestoreService: @unchecked Sendable {
                         continue
                     }
                     if sent < 0, errno == EINTR { continue }
-                    if sent < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                    // `write(2)` returning 0 for a NON-zero count accepted
+                    // nothing and set no errno, so the throw below would
+                    // report whatever `errno` happened to hold from an
+                    // earlier call. It is the same condition `EAGAIN` names —
+                    // no progress — so it gets the same treatment, under the
+                    // same stall budget, which is what stops it spinning.
+                    if sent == 0 || (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                         // The remote has stopped reading. Give it room, but
                         // not forever: see ``pumpStallTimeout``.
                         let stalledFor = Date().timeIntervalSince(lastProgress)
@@ -599,6 +618,17 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// the thread is cheaper than the hop that would avoid it, and short
     /// enough that the pool cannot be starved by it.
     static let pumpPollSlice: TimeInterval = 0.2
+
+    /// How many bytes the tarball pump may push between cooperative
+    /// suspensions. 8 MB is ~128 of the 64 KB chunks — a few milliseconds on
+    /// a fast link, and far below any rate the yield itself could bound.
+    static let pumpYieldBytes: Int64 = 8 * 1024 * 1024
+
+    /// Whether the pump owes a `Task.yield()`. Factored out so the rule is
+    /// testable without a remote host on the other end of the pipe.
+    static func shouldYield(written: Int64, lastYield: Int64) -> Bool {
+        written - lastYield >= pumpYieldBytes
+    }
 
     /// Block until `fd` accepts a write again, for at most `budget` seconds.
     ///

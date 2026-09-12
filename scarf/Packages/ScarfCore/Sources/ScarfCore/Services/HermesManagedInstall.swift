@@ -130,7 +130,26 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
 
     private let probe: Probe
     private let lock = NSLock()
-    private var cached: [String: HermesManagedInstall] = [:]
+    /// What the cache holds: the RAW marker bytes, plus the last verdict
+    /// derived from them.
+    ///
+    /// P46 finding 6. The cache used to hold the VERDICT, and the verdict is
+    /// a function of the marker AND of ``HermesCapabilities/hasManagedMarkerContents``
+    /// — which is `false` for an UNDETECTED host as much as for a genuinely
+    /// pre-v0.20.5 one. So one missed `hermes --version` at connect time
+    /// (a slow first spawn, a transport blip) made the below-floor reading
+    /// authoritative for the life of the process: ANY marker ⇒ `"NixOS"`
+    /// (`hermes_cli/config.py:327-330` @ v2026.6.19), and a Homebrew host
+    /// whose `.managed` says `brew` rendered its panes read-only until Scarf
+    /// was relaunched. Caching the marker instead costs nothing — the marker
+    /// is what the round trip bought — and lets the verdict follow the
+    /// capabilities as soon as they land.
+    struct MarkerCacheEntry {
+        var marker: String?
+        var lastDerived: HermesManagedInstall
+    }
+
+    private var cached: [String: MarkerCacheEntry] = [:]
 
     /// - Parameter timeout: the ceiling on one probe. Injectable only so a
     ///   test can prove the fall-open path in milliseconds instead of
@@ -154,14 +173,24 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
     ) -> HermesManagedInstall {
         let key = Self.key(for: context)
         lock.lock()
-        if let hit = cached[key] { lock.unlock(); return hit }
+        let hit = cached[key]
         lock.unlock()
 
-        guard let marker = probeWithinTimeout(context) else {
-            // The probe did not answer inside ``probeTimeout``. NOT cached:
-            // the next surface that asks gets a fresh attempt rather than a
-            // process-lifetime "not managed" won by a slow SSH round-trip.
-            return .notManaged
+        let marker: String?
+        if let hit {
+            // The MARKER is memoized; the verdict is re-derived every call,
+            // because it also depends on the capabilities — see
+            // ``MarkerCacheEntry``.
+            marker = hit.marker
+        } else {
+            guard let probed = probeWithinTimeout(context) else {
+                // The probe did not answer inside ``probeTimeout``. NOT
+                // cached: the next surface that asks gets a fresh attempt
+                // rather than a process-lifetime "not managed" won by a slow
+                // SSH round-trip.
+                return .notManaged
+            }
+            marker = probed
         }
 
         let result = HermesManagedInstall(system: HermesManagedInstall.system(
@@ -170,7 +199,7 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
         ))
 
         lock.lock()
-        cached[key] = result
+        cached[key] = MarkerCacheEntry(marker: marker, lastDerived: result)
         lock.unlock()
         return result
     }
@@ -222,7 +251,7 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
         let key = Self.key(for: context)
         lock.lock()
         defer { lock.unlock() }
-        return cached[key] ?? .notManaged
+        return cached[key]?.lastDerived ?? .notManaged
     }
 
     public func invalidate(for context: ServerContext) {

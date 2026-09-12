@@ -69,6 +69,11 @@ final class BotRoutinesViewModel {
     /// This bot's routines, filtered from the FULL job list by the verified
     /// `[bot:<name>] ` prefix — never a separate fetch, so a job Hermes
     /// Desktop would show under this bot is exactly the set Scarf shows.
+    /// Every cron job name on the host — the collision space
+    /// ``HermesCronDuplicateName`` must avoid, which is wider than
+    /// ``routines``.
+    var allJobNames: [String] { cron.jobs.map(\.name) }
+
     var routines: [HermesCronJob] {
         cron.jobs.filter { BotRoutinePrefix.matches(jobName: $0.name, bot: botName) }
     }

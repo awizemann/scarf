@@ -226,9 +226,17 @@ public final class HermesVersionCache: @unchecked Sendable {
     /// Drop any memoized result and re-probe. Used by the "Re-detect" button
     /// and after `hermes update`, where the whole point is to observe a
     /// version that just changed.
+    ///
+    /// The managed-install cache is dropped with it. That cache re-derives
+    /// its verdict from the memoized marker on every call (P46 finding 6),
+    /// but "Re-detect" and `hermes update` are exactly the two gestures where
+    /// the MARKER itself may also have changed — a re-provision, or an
+    /// install that moved between package managers — so the marker's round
+    /// trip is worth paying again here.
     @discardableResult
     public func refresh(for context: ServerContext) async -> HermesCapabilities {
         invalidate(for: context)
+        HermesManagedInstallCache.shared.invalidate(for: context)
         return await capabilities(for: context)
     }
 

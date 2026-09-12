@@ -167,7 +167,9 @@ struct CronListView: View {
             // carry every field, including the ones the Mac's create FORM has
             // no widget for.
             CronEditorView(
-                initial: job.duplicatedAsNewJob(id: "job_\(UUID().uuidString.prefix(8))"),
+                initial: job.duplicatedAsNewJob(
+                        id: "job_\(UUID().uuidString.prefix(8))",
+                        existingNames: vm.jobs.map(\.name)),
                 title: "Duplicate cron job"
             ) { created in
                 Task { await vm.upsert(created) }

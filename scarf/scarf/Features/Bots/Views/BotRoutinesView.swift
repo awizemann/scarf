@@ -104,6 +104,11 @@ struct BotRoutinesView: View {
             CronJobEditor(
                 mode: .duplicate(job),
                 availableSkills: [],
+                // ALL the host's jobs, not just this bot's routines: the
+                // collision `resolve_job_ref` raises on is over every job in
+                // `jobs.json`, and the `[bot:…] ` prefix is part of the name
+                // it folds (`cron/jobs.py:1840-1845` @ `v2026.9.7`).
+                existingNames: viewModel.allJobNames,
                 supportsWorkdir: hasCronWorkdir,
                 supportsNoAgent: hasCronNoAgent,
                 supportsDeliverAll: hasCronDeliverAll,

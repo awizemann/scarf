@@ -142,3 +142,48 @@ public enum BotRoutineDelegation {
             + "If the command fails, report the error instead."
     }
 }
+
+/// Naming a DUPLICATE so `hermes cron run <name>` still resolves.
+///
+/// `resolve_job_ref` (`cron/jobs.py:1831-1846` @ `v2026.9.7`) falls back from
+/// an exact id to a **case-folded name** match, and raises
+/// `AmbiguousJobReference` — *"Job name '<ref>' is ambiguous — matches N
+/// jobs: … Use the job ID instead."* (`:1825-1828`) — the moment two jobs
+/// share one folded name. Seeding a duplicate's editor with the SOURCE's name
+/// therefore breaks `cron run` for **both** jobs the instant the copy is
+/// saved unedited, which is the path of least resistance in every one of the
+/// three duplicate seeds Scarf has.
+public enum HermesCronDuplicateName {
+    /// `"<name> (copy)"`, or `(copy 2)`, `(copy 3)` … when that is taken too.
+    ///
+    /// A bot routine's `[bot:<slug>] ` prefix is preserved and the suffix
+    /// goes on the TITLE inside it, so `BotRoutinePrefix.matches` still
+    /// claims the copy for the same bot.
+    ///
+    /// Comparison is case-folded because that is what `resolve_job_ref`
+    /// compares (`(j.get("name") or "").lower() == ref_lower`, `:1841`): a
+    /// copy named `Nightly (copy)` beside an existing `NIGHTLY (COPY)` is
+    /// just as ambiguous.
+    public nonisolated static func next(for name: String, existing: [String]) -> String {
+        let taken = Set(existing.map { $0.lowercased() })
+        // A tagged name is recomposed through `routineName(forBot:title:)`
+        // — the same compose every other Scarf surface uses — so the copy is
+        // claimed by `matches(jobName:bot:)` whatever spacing the source had.
+        let bot = BotRoutinePrefix.taggedBot(inJobName: name)
+        let title: String
+        if bot != nil, let close = name.firstIndex(of: "]") {
+            title = String(name[name.index(after: close)...])
+                .trimmingCharacters(in: .whitespaces)
+        } else {
+            title = name
+        }
+        func candidate(_ n: Int) -> String {
+            let suffixed = title + (n == 1 ? " (copy)" : " (copy \(n))")
+            guard let bot else { return suffixed }
+            return BotRoutinePrefix.routineName(forBot: bot, title: suffixed)
+        }
+        var n = 1
+        while taken.contains(candidate(n).lowercased()), n < 1000 { n += 1 }
+        return candidate(n)
+    }
+}

@@ -535,7 +535,14 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// top-level `schedule_display` goes unconditionally: it is the label of
     /// whatever time the SOURCE was on, and the duplicate is about to be
     /// given a different one (`droppingDerivedScheduleDisplay`).
-    public nonisolated func duplicatedAsNewJob(id newID: String, now: Date = Date()) -> HermesCronJob {
+    ///
+    /// The NAME gets a `(copy)` suffix (``HermesCronDuplicateName``). Seeding
+    /// the source's name verbatim made `hermes cron run <name>` raise
+    /// `AmbiguousJobReference` for BOTH jobs the moment the copy was saved
+    /// unedited (`cron/jobs.py:1840-1845` @ `v2026.9.7`).
+    public nonisolated func duplicatedAsNewJob(
+        id newID: String, existingNames: [String] = [], now: Date = Date()
+    ) -> HermesCronJob {
         var carried = extra
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
                            "last_status", "last_dispatch", "last_delivery_unverified",
@@ -563,7 +570,9 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
                            extra: schedule.extra)
             : schedule
         return HermesCronJob(
-            id: newID, name: name, prompt: prompt, skills: skills, model: model,
+            id: newID,
+            name: HermesCronDuplicateName.next(for: name, existing: existingNames),
+            prompt: prompt, skills: skills, model: model,
             schedule: seedSchedule, enabled: true, state: "scheduled", deliver: deliver,
             nextRunAt: nil, lastRunAt: nil, lastError: nil,
             preRunScript: preRunScript, deliveryFailures: nil,

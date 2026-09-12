@@ -246,7 +246,7 @@ struct CronView: View {
         // `rearm_oneshot` refuses anything but `once` (`:2065-2066`), but
         // nothing guards a create.
         .sheet(item: $viewModel.duplicatingJob) { job in
-            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
+            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
                 viewModel.createJob(
                     schedule: form.schedule,
                     prompt: form.prompt,
@@ -1430,6 +1430,10 @@ struct CronJobEditor: View {
 
     let mode: Mode
     let availableSkills: [String]
+    /// Every job name currently on the host, used ONLY to seed a
+    /// `.duplicate`'s name uniquely (``HermesCronDuplicateName``). Default
+    /// empty so `.create` / `.edit` call sites need not pass it.
+    var existingNames: [String] = []
     /// Pass `false` on pre-v0.12 hosts; the `--workdir` field is hidden and
     /// the form's value is dropped when the parent calls `createJob`/`updateJob`.
     let supportsWorkdir: Bool
@@ -1645,7 +1649,16 @@ struct CronJobEditor: View {
             // on save" toggle) stays false.
             if let job = mode.seed {
                 if case .edit = mode { isEditMode = true }
-                form.name = job.name
+                // A duplicate may NOT reuse the name: `resolve_job_ref`
+                // matches on a case-folded name and raises
+                // `AmbiguousJobReference` for both jobs as soon as two share
+                // one (`cron/jobs.py:1840-1845` @ `v2026.9.7`), which breaks
+                // `hermes cron run <name>` for the ORIGINAL too.
+                if case .duplicate = mode {
+                    form.name = HermesCronDuplicateName.next(for: job.name, existing: existingNames)
+                } else {
+                    form.name = job.name
+                }
                 // `editValue`, never `display`: a one-shot's display label
                 // ("once at 2026-02-03 14:00") is not a schedule Hermes can
                 // parse back, so seeding the field from it made every
