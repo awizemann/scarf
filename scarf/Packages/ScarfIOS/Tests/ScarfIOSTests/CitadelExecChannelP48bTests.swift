@@ -51,15 +51,33 @@ struct CitadelExecChannelP48bTests {
     func theTimeoutThrowsFromInsideWithExec() throws {
         let code = Self.codeOnly(try Self.transportSource())
         #expect(code.contains("client.withExec(cmd)"))
+        // BRACE-MATCHED, not line-sliced. This read the literal
+        // `throw TransportError.timeout(seconds: timeout` and the end of the
+        // closure as a newline plus exactly eight spaces — so wrapping the
+        // throw across two lines (round-6 P53 gave it a partial-stdout
+        // argument) made the `#require` find the DRAIN's throw instead, far
+        // past the closure, and the test failed on a formatting change rather
+        // than on the property it names.
         let opened = try #require(code.range(of: "client.withExec(cmd)"))
-        let tail = String(code[opened.upperBound...])
-        let thrown = try #require(
-            tail.range(of: "throw TransportError.timeout(seconds: timeout"),
-            "the timeout no longer throws out of the withExec closure")
-        let closureEnd = try #require(tail.range(of: "\n        }"),
-                                      "could not find the end of the withExec closure")
-        #expect(thrown.lowerBound < closureEnd.lowerBound,
-                "the timeout throw escaped the withExec closure — the channel is abandoned again")
+        let chars = Array(code[opened.upperBound...])
+        let open = try #require(chars.firstIndex(of: "{"), "the withExec closure is gone")
+        var depth = 0
+        var body = ""
+        var i = open
+        while i < chars.count {
+            if chars[i] == "{" { depth += 1 }
+            if chars[i] == "}" {
+                depth -= 1
+                if depth == 0 { break }
+            }
+            body.append(chars[i])
+            i += 1
+        }
+        #expect(depth == 0, "the withExec closure never closes — the slice is wrong")
+        #expect(body.contains("throw TransportError.timeout(") , """
+            The timeout no longer throws from INSIDE the withExec closure. \
+            Returning, or throwing outside it, abandons the channel again.
+            """)
     }
 
     /// Both execs share the one drain now: a fix applied to one arm of a
