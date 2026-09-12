@@ -539,8 +539,10 @@ import Foundation
             #expect(!names.contains("yolo"), "\(line)")
             #expect(!names.contains("sessions"), "\(line)")
             #expect(!names.contains("codex-runtime"), "\(line)")
-            // The flags themselves keep their verified v0.14 floor.
-            #expect(caps.hasYOLOSlashCommand == caps.isV014OrLater)
+            // `hasYOLOSlashCommand` was deleted in P49 (round-5 decision 10):
+            // no consumer, and `/yolo` is absent from `acp_adapter/` at every
+            // tag. The sibling flags keep their verified v0.14 floor.
+            #expect(caps.hasSessionsSlashCommand == caps.isV014OrLater)
         }
     }
 

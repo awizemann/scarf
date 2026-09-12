@@ -66,15 +66,12 @@ struct SidebarView: View {
         }
         manage += [.cron, .health, .logs, .settings]
 
-        // Models entry sits in Configure when the host supports the
-        // session/set_model RPC (v0.13+). Pre-v0.13 the binding can be
-        // stored but never applied at runtime, so the surface stays
-        // hidden — same posture every other capability-gated entry
-        // takes.
-        var configure: [SidebarSection] = [.platforms, .personalities, .quickCommands, .credentialPools, .plugins, .webhooks, .profiles]
-        if caps?.hasACPSetSessionModel ?? false {
-            configure.append(.models)
-        }
+        // Models entry is UNGATED (P49): the session/set_model RPC is
+        // defined in `acp_adapter/server.py` at every supported tag
+        // (`:482` @ v2026.3.30 = 0.6.0; `:929` @ v2026.9.7), so there is
+        // no host in the supported window where the binding would be
+        // stored but never applied.
+        var configure: [SidebarSection] = [.platforms, .personalities, .quickCommands, .credentialPools, .plugins, .webhooks, .profiles, .models]
         // v0.14 — Hermes Proxy is the user-facing surface for the
         // `hermes proxy` CLI. Gated on hasHermesProxy so pre-v0.14
         // hosts don't see an entry that wouldn't launch.

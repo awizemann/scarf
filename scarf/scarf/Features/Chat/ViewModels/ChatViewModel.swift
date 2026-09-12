@@ -1620,13 +1620,10 @@ final class ChatViewModel {
             return
         }
 
-        let caps = capabilitiesStore?.capabilities ?? .empty
-        guard caps.hasACPSetSessionModel else {
-            logger.info("host doesn't support session/set_model (pre-v0.13) — preset '\(preset.name)' bound but not applied")
-            currentModelPreset = nil
-            return
-        }
-
+        // No capability gate: ACP `session/set_model` is defined in the
+        // adapter at every tag Scarf supports (`acp_adapter/server.py:482` @
+        // v2026.3.30 = 0.6.0, the supported floor; `:466` @ v2026.3.17, the
+        // earliest adapter tag; `:929` @ v2026.9.7). P49 / round-5 decision 9.
         do {
             // Pass providerID so the RPC uses Hermes's
             // `<provider>:<model>` colon-encoded wire format. Without

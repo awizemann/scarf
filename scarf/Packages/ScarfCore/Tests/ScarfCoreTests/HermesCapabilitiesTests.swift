@@ -120,7 +120,6 @@ import Foundation
         #expect(caps.hasXAIVoiceCloning)
         #expect(caps.hasVideoAnalyze)
         #expect(caps.hasTransformLLMOutputHook)
-        #expect(caps.hasACPSetSessionModel)
     }
 
     @Test func v012FlagsAllOn() {
@@ -159,7 +158,6 @@ import Foundation
         #expect(!caps.hasImageGenModel)
         #expect(!caps.hasDisplayLanguage)
         #expect(!caps.hasXAIVoiceCloning)
-        #expect(!caps.hasACPSetSessionModel)
     }
 
     @Test func v011FlagsAllOff() {
@@ -199,11 +197,9 @@ import Foundation
         #expect(caps.hasGoals)
         #expect(caps.hasKanbanDiagnostics)
         #expect(caps.hasCuratorArchive)
-        #expect(caps.hasACPSetSessionModel)
         #expect(!caps.hasFlushMemoriesAux)
         // v0.14 slash commands.
         #expect(caps.hasSubgoal)
-        #expect(caps.hasYOLOSlashCommand)
         #expect(caps.hasSessionsSlashCommand)
         #expect(caps.hasCodexRuntimeSlashCommand)
         // v0.14 providers.
@@ -240,7 +236,6 @@ import Foundation
         // UI degrades silently.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)")
         #expect(!caps.hasSubgoal)
-        #expect(!caps.hasYOLOSlashCommand)
         #expect(!caps.hasSessionsSlashCommand)
         #expect(!caps.hasCodexRuntimeSlashCommand)
         #expect(!caps.hasGrokOAuthProvider)
@@ -317,9 +312,7 @@ import Foundation
         #expect(caps.hasACPImagePrompts)
         #expect(caps.hasGoals)
         #expect(caps.hasKanbanDiagnostics)
-        #expect(caps.hasACPSetSessionModel)
         #expect(caps.hasSubgoal)
-        #expect(caps.hasYOLOSlashCommand)
         #expect(caps.hasGrokOAuthProvider)
         #expect(caps.hasHermesProxy)
         #expect(caps.hasCrossSessionClaudeCache)
@@ -448,7 +441,6 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.16.0 (2026.6.5)")
         #expect(caps.hasSessionsOptimize)
         #expect(caps.hasKanbanGoalMode)
-        #expect(caps.hasInsightsCommand)
         #expect(caps.hasDashboardCommand)
         #expect(caps.isV016OrLater)
     }
@@ -458,8 +450,6 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.15.2 (2026.5.29)")
         #expect(!caps.hasSessionsOptimize)
         #expect(!caps.hasKanbanGoalMode)
-        #expect(!caps.hasInsightsCommand)
-        #expect(!caps.hasDashboardCommand)
         #expect(!caps.isV016OrLater)
         // v0.15 surfaces stay alive on a v0.15 host.
         #expect(caps.hasBitwarden)
