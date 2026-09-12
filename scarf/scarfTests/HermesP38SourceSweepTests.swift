@@ -21,11 +21,12 @@ struct HermesP38SourceSweepTests {
             .deletingLastPathComponent()   // repo root
     }
 
-    private static let testRoots = [
-        "scarf/scarfTests",
-        "scarf/Scarf iOSTests",
-        "scarf/Packages/ScarfCore/Tests/ScarfCoreTests",
-    ]
+    /// The `try! #require` sweep walks the SAME roots as its two siblings.
+    /// It used to carry its own list, which named ScarfCore's inner
+    /// `ScarfCoreTests` directory (missing the package's second test target)
+    /// and omitted `scarf/Packages/ScarfIOS/Tests` entirely, and it asserted
+    /// nothing about how much it had read (round-6 P53b).
+    private static var testRoots: [String] { phaseSuiteRoots }
 
     private static func swiftFiles(under relative: String) -> [URL] {
         let root = repoRoot.appendingPathComponent(relative)
@@ -65,9 +66,11 @@ struct HermesP38SourceSweepTests {
     /// `try! #require` traps on exactly the condition under test.
     @Test func noTestForceTriesARequire() {
         var offenders: [String] = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.testRoots {
             for url in Self.swiftFiles(under: root) {
                 guard url.standardizedFileURL.path != Self.ownPath else { continue }
+                scannedByRoot[root, default: 0] += 1
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try! #require") && !Self.isComment(line) {
@@ -76,6 +79,7 @@ struct HermesP38SourceSweepTests {
                 }
             }
         }
+        Self.assertTheSweepRead(scannedByRoot)
         #expect(offenders.isEmpty, Comment(rawValue: """
             `try! #require` traps on failure and a trap takes the whole test \
             host down. Make the test `throws` and use `try #require`: \
@@ -119,6 +123,21 @@ struct HermesP38SourceSweepTests {
     /// cannot hide.
     static let testFileFloor = 250
 
+    /// Per-root floors. A shared `> 0` is not a floor — `scarf/Scarf
+    /// iOSTests` is four files and `scarf/Packages/ScarfIOS/Tests` eleven,
+    /// so a root that half-stopped enumerating would still clear a total of
+    /// 250 on the strength of the two big roots alone (round-6 P53b). Each
+    /// floor is set well under the root's real population so ordinary
+    /// deletion cannot make the floor the thing that fails.
+    ///
+    /// Populations at P53b: 136 / 4 / 199 / 11.
+    static let perRootFloor: [String: Int] = [
+        "scarf/scarfTests": 100,
+        "scarf/Scarf iOSTests": 3,
+        "scarf/Packages/ScarfCore/Tests": 150,
+        "scarf/Packages/ScarfIOS/Tests": 8,
+    ]
+
     /// The premise floor, shared by all three sweeps over these roots.
     ///
     /// It was inline in `noSubscriptFollowsACountExpectation` and NOWHERE in
@@ -139,8 +158,10 @@ struct HermesP38SourceSweepTests {
         let location = SourceLocation(
             fileID: fileID, filePath: filePath, line: line, column: column)
         for root in phaseSuiteRoots {
-            #expect((scannedByRoot[root] ?? 0) > 0, Comment(rawValue:
-                "the sweep read no test files under \(root) — the walk is broken"),
+            let floor = perRootFloor[root] ?? 1
+            #expect((scannedByRoot[root] ?? 0) >= floor, Comment(rawValue:
+                "the sweep read \(scannedByRoot[root] ?? 0) test files under "
+                + "\(root) (floor \(floor)) — the walk is broken"),
                 sourceLocation: location)
         }
         let scanned = scannedByRoot.values.reduce(0, +)
@@ -150,14 +171,22 @@ struct HermesP38SourceSweepTests {
             sourceLocation: location)
     }
 
-    /// The roots the phase sweep walks — the same three the `try! #require`
+    /// The roots the phase sweep walks — the same ones the `try! #require`
     /// sweep above uses, spelled separately because ScarfCore's root is the
     /// whole `Tests` directory (it holds two test targets), not just
     /// `ScarfCoreTests`.
-    private static let phaseSuiteRoots = [
+    ///
+    /// `scarf/Packages/ScarfIOS/Tests` was missing until round-6 P53b. P53
+    /// had just taught the three C10 sweeps that omitting
+    /// `Packages/ScarfIOS/Sources` blessed the iOS SSH runtime by omission;
+    /// its TEST tree was blessed the same way by this one, which is why the
+    /// roots carry per-root floors now — the lesson is that a root's absence
+    /// is invisible, so each root has to say how much it expects to read.
+    static let phaseSuiteRoots = [
         "scarf/scarfTests",
         "scarf/Scarf iOSTests",
         "scarf/Packages/ScarfCore/Tests",
+        "scarf/Packages/ScarfIOS/Tests",
     ]
 
     /// The matcher, hoisted out of the sweep so it can be CALIBRATED.
@@ -212,6 +241,24 @@ struct HermesP38SourceSweepTests {
             }
         }
         return offenders
+    }
+
+    /// Deleting a root deletes its floor with it, so the roster is pinned
+    /// the way `MainActorSpawnDisciplineP22Tests` pins the C10 sweeps'
+    /// roots: by MEMBERSHIP (round-6 P53b).
+    @Test("every test root is walked, and every walked root has a floor")
+    func theRootRosterIsComplete() {
+        for root in ["scarf/scarfTests",
+                     "scarf/Scarf iOSTests",
+                     "scarf/Packages/ScarfCore/Tests",
+                     "scarf/Packages/ScarfIOS/Tests"] {
+            #expect(Self.phaseSuiteRoots.contains(root), Comment(rawValue:
+                "\(root) dropped out of the sweep's roots — it is blessed by "
+                + "omission the way ScarfIOS was for five rounds"))
+            #expect(Self.perRootFloor[root] != nil, Comment(rawValue:
+                "\(root) has no per-root floor, so a half-broken walk there "
+                + "passes on the big roots' counts"))
+        }
     }
 
     @Test func noSubscriptFollowsACountExpectation() {
