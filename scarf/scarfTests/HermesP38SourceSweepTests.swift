@@ -39,7 +39,13 @@ struct HermesP38SourceSweepTests {
     }
 
     /// These sweeps match on source text, so they would match themselves.
-    private static let ownFileName = URL(fileURLWithPath: #filePath).lastPathComponent
+    ///
+    /// Exempted by PATH, not by basename: a basename exemption covers every
+    /// file that happens to share the name, anywhere under the three roots,
+    /// and would quietly stop sweeping a future same-named file. The ScarfCore
+    /// P49b sweep already does it this way (round-5 P52).
+    private static let ownPath = URL(fileURLWithPath: #filePath)
+        .standardizedFileURL.path
 
     private static func isComment(_ line: String) -> Bool {
         let bare = line.trimmingCharacters(in: .whitespaces)
@@ -61,7 +67,7 @@ struct HermesP38SourceSweepTests {
         var offenders: [String] = []
         for root in Self.testRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try! #require") && !Self.isComment(line) {
@@ -99,11 +105,19 @@ struct HermesP38SourceSweepTests {
     /// P48 is the day the 90 were fixed, so the scope is gone and future
     /// phases append nothing. `t-f43f0af5` closed with it.
 
-    /// Premise floor. A sweep that reads nothing "passes": 484 test files
-    /// matched when P48 made this repo-wide, and the floor is well under that
-    /// so ordinary deletion cannot make the floor the thing that fails, and
-    /// well over zero so a broken enumeration cannot hide.
-    static let testFileFloor = 300
+    /// Premise floor. A sweep that reads nothing "passes".
+    ///
+    /// The real population, counted at round-5 P52: **335 `.swift` files**
+    /// across the three roots (134 + 4 + 197). The "484" this said before was
+    /// wrong, and so was the thing it was compared against — the sweep
+    /// counted a `Set` of BASENAMES, which collapses 335 files to 322 and
+    /// would have kept passing while a whole root stopped enumerating. It
+    /// counts URLs now, and each root is asserted non-empty separately.
+    ///
+    /// The floor is well under 335 so ordinary deletion cannot make the floor
+    /// the thing that fails, and well over zero so a broken enumeration
+    /// cannot hide.
+    static let testFileFloor = 250
 
     /// The roots the phase sweep walks — the same three the `try! #require`
     /// sweep above uses, spelled separately because ScarfCore's root is the
@@ -171,19 +185,25 @@ struct HermesP38SourceSweepTests {
 
     @Test func noSubscriptFollowsACountExpectation() {
         var offenders: [String] = []
-        var scanned: Set<String> = []
+        var scannedByRoot: [String: Int] = [:]
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName else { continue }
-                scanned.insert(url.lastPathComponent)
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
+                scannedByRoot[root, default: 0] += 1
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for hit in Self.subscriptAfterCountOffenses(in: src) {
                     offenders.append("\(url.lastPathComponent):\(hit.line) — \(hit.text)")
                 }
             }
         }
-        #expect(scanned.count >= Self.testFileFloor, Comment(rawValue:
-            "the sweep read only \(scanned.count) test files "
+        // Per root, because a total can hide a root that enumerated nothing.
+        for root in Self.phaseSuiteRoots {
+            #expect((scannedByRoot[root] ?? 0) > 0, Comment(rawValue:
+                "the sweep read no test files under \(root) — the walk is broken"))
+        }
+        let scanned = scannedByRoot.values.reduce(0, +)
+        #expect(scanned >= Self.testFileFloor, Comment(rawValue:
+            "the sweep read only \(scanned) test files "
             + "(floor \(Self.testFileFloor)) — it cannot have covered the roots"))
         #expect(offenders.isEmpty, Comment(rawValue: """
             A subscript follows a count `#expect` with no guard between them. \
@@ -204,7 +224,7 @@ struct HermesP38SourceSweepTests {
         var offenders: [String] = []
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated()
                 where line.contains("try? #require") && !Self.isComment(line) {
@@ -300,7 +320,7 @@ struct HermesP38SourceSweepTests {
         var allowancesSeen: Set<String> = []
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard url.lastPathComponent != Self.ownFileName else { continue }
+                guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 for (i, line) in src.components(separatedBy: "\n").enumerated() {
                     guard !Self.isComment(line) else { continue }
@@ -390,7 +410,7 @@ struct HermesP38SourceSweepTests {
 /// test is a matcher that can stop matching in silence.
 /// This suite lives in the sweep's own file ON PURPOSE: its calibration
 /// cases are sleep spellings written as string literals, and any other file
-/// in scope would have the sweep read them as real sleeps. `ownFileName` is
+/// in scope would have the sweep read them as real sleeps. `ownPath` is
 /// already excluded, so the cases sit where they cannot trip the rule they
 /// calibrate.
 @Suite("P46b · the fixed-sleep matcher is calibrated")
