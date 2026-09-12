@@ -23,14 +23,26 @@ struct HermesP38ClearRowNoOpTests {
         return SettingsViewModel(context: .local(home: home), cliRunner: log.runner())
     }
 
-    private static func settle(_ log: CLILog, expectingACall: Bool = true) async {
-        if expectingACall {
-            let deadline = Date().addingTimeInterval(10)
-            while Date() < deadline, log.calls.isEmpty {
-                try? await Task.sleep(for: .milliseconds(20))
+    /// Wait on the OBSERVABLE, not the clock. `SettingsViewModel.writeChain`
+    /// is the `Task` every settings write is serialised through, and its
+    /// last act is `commitConfigWrite` — the banner these tests assert on —
+    /// so awaiting it is precisely "the write finished and said so". This
+    /// used to poll for a call and then nap a flat 300 ms (P45 finding 12).
+    ///
+    /// `expectingACall: false` is the "nothing must run" shape: there is no
+    /// observable to wait FOR, so it polls to a short deadline, breaking out
+    /// early if a call does appear — the caller's `#expect(log.calls.isEmpty)`
+    /// is what then fails.
+    private static func settle(
+        _ vm: SettingsViewModel, _ log: CLILog, expectingACall: Bool = true
+    ) async {
+        if !expectingACall {
+            let deadline = Date().addingTimeInterval(0.3)
+            while Date() < deadline, log.calls.isEmpty, vm.writeChain == nil {
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        await vm.writeChain?.value
     }
 
     private var v0211: HermesCapabilities {
@@ -47,7 +59,7 @@ struct HermesP38ClearRowNoOpTests {
             // NOTE: no `stored(vm)` — the key is absent.
             if key == "auxiliary.compression.max_concurrency" { continue }
             act(vm, v0211)
-            await Self.settle(log, expectingACall: false)
+            await Self.settle(vm, log, expectingACall: false)
             #expect(log.calls.isEmpty, "\(key): cleared a key that was never set")
             #expect(vm.message == nil, "\(key): a no-op posted a banner")
         }
@@ -61,7 +73,7 @@ struct HermesP38ClearRowNoOpTests {
         let vmAbsent = Self.viewModel(absent)
         vmAbsent.setAuxiliaryMaxConcurrency("compression", value: nil, stored: nil,
                                            capabilities: v0211)
-        await Self.settle(absent, expectingACall: false)
+        await Self.settle(vmAbsent, absent, expectingACall: false)
         #expect(absent.calls.isEmpty)
         #expect(vmAbsent.message == nil)
 
@@ -69,7 +81,7 @@ struct HermesP38ClearRowNoOpTests {
         let vmPresent = Self.viewModel(present)
         vmPresent.setAuxiliaryMaxConcurrency("compression", value: nil, stored: 4,
                                             capabilities: v0211)
-        await Self.settle(present)
+        await Self.settle(vmPresent, present)
         #expect(present.calls == [["config", "unset", "--", "auxiliary.compression.max_concurrency"]])
     }
 
@@ -81,7 +93,7 @@ struct HermesP38ClearRowNoOpTests {
             let vm = Self.viewModel(log)
             stored(vm)
             act(vm, v0211)
-            await Self.settle(log)
+            await Self.settle(vm, log)
             #expect(log.calls == [["config", "unset", "--", key]], "\(key): the real clear was swallowed")
         }
     }

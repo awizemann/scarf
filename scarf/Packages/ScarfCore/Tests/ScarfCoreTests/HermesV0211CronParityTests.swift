@@ -288,14 +288,14 @@ import Foundation
     /// `hermes_cli/cron.py::cron_runs` used at v0.21.0 — byte-identical at
     /// v2026.9.7, so `HermesCronRunsParser` needs no edit. Sibling of
     /// `cronRunsFormatUnchangedAtV021`.
-    @Test func cronRunsFormatUnchangedAtV0211() {
+    @Test func cronRunsFormatUnchangedAtV0211() throws {
         let output = """
             e1  completed  job=job-1  source=scheduler  2026-09-07T09:00:00
             e2  failed     job=job-1  source=manual  2026-09-06T09:00:00
                 boom: provider 500
             """
         let runs = HermesCronRunsParser.parse(text: output)
-        #expect(runs.count == 2)
+        try #require(runs.count == 2)
         #expect(runs[0].id == "e1")
         #expect(runs[0].status == "completed")
         #expect(runs[1].error == "boom: provider 500")
@@ -369,7 +369,8 @@ import Foundation
         let end = try #require(args.firstIndex(of: "--"))
         #expect(Array(args[end...]) == ["--", "@daily", "--summarize the inbox"])
         // …and nothing option-shaped follows the marker.
-        #expect(HermesCLIOption.index(of: "--name", in: args)! < end)
+        let nameIndex = try #require(HermesCLIOption.index(of: "--name", in: args))
+        #expect(nameIndex < end)
     }
 
     /// The template installer used to hand-roll this argv; both callers now

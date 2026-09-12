@@ -88,7 +88,7 @@ struct OAuthFlowDrainP40Tests {
     /// invariant `MCPLoginController` carries; `stop()` bumps the generation
     /// BEFORE terminating, and the spawn continuation closes the window where
     /// `stop()` saw a nil `stdoutPipe`.
-    @Test func aRetiredRunsReaderIsUnhookedWhenItsSpawnResumes() async {
+    @Test func aRetiredRunsReaderIsUnhookedWhenItsSpawnResumes() async throws {
         let runA = Self.sh("exec sleep 30")
         let runB = Self.sh("sleep 0.6; printf 'Saved credential b\\n'; exit 0")
         final class Handout { var count = 0 }
@@ -102,12 +102,12 @@ struct OAuthFlowDrainP40Tests {
         // can have resumed, which IS the window.
         controller.start(provider: "b", label: "")
 
-        let pipeA = try? #require(runA.standardOutput as? Pipe)
+        let pipeA = try #require(runA.standardOutput as? Pipe)
         let deadline = Date().addingTimeInterval(60)
-        while pipeA?.fileHandleForReading.readabilityHandler != nil, Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
+        while pipeA.fileHandleForReading.readabilityHandler != nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(pipeA?.fileHandleForReading.readabilityHandler == nil,
+        #expect(pipeA.fileHandleForReading.readabilityHandler == nil,
                 "the retired run's reader is still installed and feeding the live run")
         #expect(runA.isRunning == false, "the retired run was not terminated")
 

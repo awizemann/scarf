@@ -23,18 +23,22 @@ import Foundation
         // Every flag stays AHEAD of the marker — argparse reads each token
         // after it as a positional, so a flag behind it would be rejected
         // as an unrecognized extra argument.
-        #expect(HermesCLIOption.index(of: "--name", in: argv)! < marker)
-        #expect(HermesCLIOption.index(of: "--deliver", in: argv)! < marker)
+        let nameIndex = try #require(HermesCLIOption.index(of: "--name", in: argv))
+        let deliverIndex = try #require(HermesCLIOption.index(of: "--deliver", in: argv))
+        #expect(nameIndex < marker)
+        #expect(deliverIndex < marker)
     }
 
     @Test("the no-agent form still sends its empty prompt positional")
-    func noAgentKeepsTheEmptyPrompt() {
+    func noAgentKeepsTheEmptyPrompt() throws {
         let argv = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "", name: "", deliver: "",
             skills: [], script: "run.sh", repeatCount: "", workdir: "", noAgent: true
         )
         #expect(argv.suffix(3) == ["--", "30m", ""])
-        #expect(argv.firstIndex(of: "--no-agent")! < argv.firstIndex(of: "--")!)
+        let noAgentIndex = try #require(argv.firstIndex(of: "--no-agent"))
+        let markerIndex = try #require(argv.firstIndex(of: "--"))
+        #expect(noAgentIndex < markerIndex)
     }
 
     @Test("the marker appears exactly once even with every flag populated")

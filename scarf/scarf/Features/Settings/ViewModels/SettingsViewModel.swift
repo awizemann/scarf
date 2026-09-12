@@ -339,7 +339,12 @@ final class SettingsViewModel {
     /// second change under the first toggle's banner, or (worse, when the
     /// second write is slower) a snapshot missing it entirely and a control
     /// that visibly snaps back.
-    @ObservationIgnored private var writeChain: Task<Void, Never>?
+    ///
+    /// The setter stays private; the GETTER is internal so a test can await
+    /// the chain instead of napping a fixed beat and hoping. Awaiting it is
+    /// exactly "the write ran and `commitConfigWrite` posted its banner",
+    /// which is what those tests were sleeping for (P45 finding 12).
+    @ObservationIgnored private(set) var writeChain: Task<Void, Never>?
 
     /// How a queued write's outcome is decided — REQUIRED since P39, for the
     /// same reason `capabilities` (P37) and `isStored` (P38) became required
@@ -688,7 +693,7 @@ final class SettingsViewModel {
     // MARK: - Agent
 
     func setMaxTurns(_ value: Int) { setSetting("agent.max_turns", value: String(value)) }
-    /// Empty is the picker's "Provider default" row and IS writable here,
+    /// Empty is the picker's "Hermes default" row and IS writable here,
     /// unlike `setApprovalMode`'s host-default row: `parse_reasoning_effort`
     /// (`hermes_constants.py:876-889` @ v2026.9.7) returns `None` for an empty
     /// string exactly as it does for an absent key, and its callers then use

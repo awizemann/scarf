@@ -32,12 +32,26 @@ struct HermesManagedRefusalP39Tests {
         SettingsViewModel(context: scratchContext(), cliRunner: log.runner())
     }
 
-    private static func settle(_ log: CLILog) async {
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline, log.calls.isEmpty {
-            try? await Task.sleep(nanoseconds: 20_000_000)
+    /// Wait on the OBSERVABLE, not the clock. `SettingsViewModel.writeChain`
+    /// is the `Task` every settings write is serialised through, and its
+    /// last act is `commitConfigWrite` — the banner these tests assert on —
+    /// so awaiting it is precisely "the write finished and said so". This
+    /// used to poll for a call and then nap a flat 300 ms (P45 finding 12).
+    ///
+    /// `expectingACall: false` is the "nothing must run" shape: there is no
+    /// observable to wait FOR, so it polls to a short deadline, breaking out
+    /// early if a call does appear — the caller's `#expect(log.calls.isEmpty)`
+    /// is what then fails.
+    private static func settle(
+        _ vm: SettingsViewModel, _ log: CLILog, expectingACall: Bool = true
+    ) async {
+        if !expectingACall {
+            let deadline = Date().addingTimeInterval(0.3)
+            while Date() < deadline, log.calls.isEmpty, vm.writeChain == nil {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
         }
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        await vm.writeChain?.value
     }
 
     // MARK: - Settings
@@ -50,7 +64,7 @@ struct HermesManagedRefusalP39Tests {
         let vm = Self.viewModel(log)
 
         vm.setSetting("display.streaming", value: "true")
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
         #expect(vm.saveMessageIsFailure, "a refused write reported success")
         #expect(vm.message?.contains("managed by nixos") == true,
@@ -65,7 +79,7 @@ struct HermesManagedRefusalP39Tests {
         let vm = Self.viewModel(log)
 
         vm.setSetting("model.context_length", value: "-1")
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
         let call = try #require(log.calls.first)
         #expect(call == ["config", "set", "--", "model.context_length", "-1"])
@@ -78,7 +92,7 @@ struct HermesManagedRefusalP39Tests {
         let vm = Self.viewModel(log)
 
         vm.setSetting("display.streaming", value: "true")
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
         #expect(vm.saveMessageIsFailure == false)
         #expect(vm.message?.contains("Saved display.streaming") == true)
@@ -99,7 +113,7 @@ struct HermesManagedRefusalP39Tests {
         let vm = Self.viewModel(log)
 
         vm.setMemoryProvider("")
-        await Self.settle(log)
+        await Self.settle(vm, log)
 
         let call = try #require(log.calls.first)
         #expect(call == ["memory", "off"])

@@ -28,16 +28,26 @@ struct HermesP37ConfigUnsetFloorTests {
         SettingsViewModel(context: scratchContext(), cliRunner: log.runner())
     }
 
-    /// Let the serialised write chain run. With `expectingACall: false` the
-    /// assertion is that nothing ran, so it settles for a fixed beat.
-    private static func settle(_ log: CLILog, expectingACall: Bool = true) async {
-        if expectingACall {
-            let deadline = Date().addingTimeInterval(10)
-            while Date() < deadline, log.calls.isEmpty {
-                try? await Task.sleep(for: .milliseconds(20))
+    /// Wait on the OBSERVABLE, not the clock. `SettingsViewModel.writeChain`
+    /// is the `Task` every settings write is serialised through, and its
+    /// last act is `commitConfigWrite` — the banner these tests assert on —
+    /// so awaiting it is precisely "the write finished and said so". This
+    /// used to poll for a call and then nap a flat 300 ms (P45 finding 12).
+    ///
+    /// `expectingACall: false` is the "nothing must run" shape: there is no
+    /// observable to wait FOR, so it polls to a short deadline, breaking out
+    /// early if a call does appear — the caller's `#expect(log.calls.isEmpty)`
+    /// is what then fails.
+    private static func settle(
+        _ vm: SettingsViewModel, _ log: CLILog, expectingACall: Bool = true
+    ) async {
+        if !expectingACall {
+            let deadline = Date().addingTimeInterval(0.3)
+            while Date() < deadline, log.calls.isEmpty, vm.writeChain == nil {
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        await vm.writeChain?.value
     }
 
     private var v0211: HermesCapabilities {
@@ -88,7 +98,7 @@ struct HermesP37ConfigUnsetFloorTests {
             let vmBelow = Self.viewModel(belowFloor)
             stored(vmBelow)
             act(vmBelow, v018)
-            await Self.settle(belowFloor, expectingACall: false)
+            await Self.settle(vmBelow, belowFloor, expectingACall: false)
             #expect(belowFloor.calls.isEmpty,
                     "\(key): a v0.18 host was asked to run `config unset`")
             #expect(vmBelow.messageIsFailure, "\(key): the inert row said nothing")
@@ -100,7 +110,7 @@ struct HermesP37ConfigUnsetFloorTests {
             let vmAt = Self.viewModel(atFloor)
             stored(vmAt)
             act(vmAt, v0211)
-            await Self.settle(atFloor)
+            await Self.settle(vmAt, atFloor)
             #expect(atFloor.calls == [["config", "unset", "--", key]], "\(key): did not clear")
         }
     }
@@ -111,13 +121,13 @@ struct HermesP37ConfigUnsetFloorTests {
         let log = CLILog(output: "")
         let vm = Self.viewModel(log)
         vm.setDatabaseWalAutocheckpoint(500, capabilities: v018)
-        await Self.settle(log)
+        await Self.settle(vm, log)
         #expect(log.calls == [["config", "set", "--", "database.wal_autocheckpoint", "500"]])
 
         let log2 = CLILog(output: "")
         let vm2 = Self.viewModel(log2)
         vm2.setBrowserCloudProvider("browserbase", capabilities: v018)
-        await Self.settle(log2)
+        await Self.settle(vm2, log2)
         #expect(log2.calls == [["config", "set", "--", "browser.cloud_provider", "browserbase"]])
     }
 
@@ -126,7 +136,7 @@ struct HermesP37ConfigUnsetFloorTests {
         let log = CLILog()
         let vm = Self.viewModel(log)
         vm.unsetSetting("anything.at.all", capabilities: v018, isStored: true)
-        await Self.settle(log, expectingACall: false)
+        await Self.settle(vm, log, expectingACall: false)
         #expect(log.calls.isEmpty)
         #expect(vm.messageIsFailure)
     }

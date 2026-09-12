@@ -294,13 +294,14 @@ import Foundation
 
             let vm = SkillsViewModel(context: ctx)
             await vm.load()
-            #expect(vm.categories.count == 2)
+            try #require(vm.categories.count == 2)
             #expect(vm.categories[0].name == "dev")
             #expect(vm.categories[1].name == "personal")
-            #expect(vm.categories[0].skills.count == 1)
+            try #require(vm.categories[0].skills.count == 1)
             #expect(vm.categories[0].skills[0].name == "git")
             #expect(vm.categories[0].skills[0].files.sorted() == ["SKILL.md", "helpers.sh"])
             // Dotfile filtered out
+            try #require(vm.categories[1].skills.count == 1)
             #expect(vm.categories[1].skills[0].files == ["SKILL.md"])
         }
     }
@@ -491,18 +492,22 @@ import Foundation
         await service.openLog(path: "/fake/agent.log")
         defer { Task { await service.closeLog() } }
 
-        // Give the pump task a moment to drain the scripted stream.
-        try await Task.sleep(nanoseconds: 50_000_000)
-
-        let entries = await service.readNewLines()
-        #expect(entries.count == 3)
+        // Poll the pump rather than napping a fixed 50 ms: drain until the
+        // three scripted lines have arrived, or a bounded deadline expires.
+        var entries: [LogEntry] = []
+        let deadline = Date().addingTimeInterval(5)
+        while entries.count < 3, Date() < deadline {
+            entries += await service.readNewLines()
+            if entries.count < 3 { try await Task.sleep(nanoseconds: 5_000_000) }
+        }
+        try #require(entries.count == 3)
         #expect(entries[0].level == .info)
         #expect(entries[1].level == .warning)
         #expect(entries[2].level == .error)
         #expect(entries[2].message == "boom")
     }
 
-    @Test @MainActor func hermesLogServiceReadLastLinesUsesOneShotTail() async {
+    @Test @MainActor func hermesLogServiceReadLastLinesUsesOneShotTail() async throws {
         let scripted = ScriptedTransport(lines: ["x", "y", "z"])
         let previous = ServerContext.sshTransportFactory
         defer { ServerContext.sshTransportFactory = previous }
@@ -520,7 +525,7 @@ import Foundation
         defer { Task { await service.closeLog() } }
 
         let entries = await service.readLastLines(count: 100)
-        #expect(entries.count == 3)
+        try #require(entries.count == 3)
         #expect(entries[0].message == "x")
         #expect(entries[2].message == "z")
     }

@@ -520,10 +520,11 @@ struct HermesToolsListTests {
     }
 
     @Test("a row with no description falls back to its own name")
-    func bareRow() {
+    func bareRow() throws {
         let tools = HermesToolsList.parse("✓ enabled  memory")
         #expect(tools.count == 1)
-        #expect(tools[0].name == "memory")
-        #expect(tools[0].icon == "🔧")
+        let tool = try #require(tools.first)
+        #expect(tool.name == "memory")
+        #expect(tool.icon == "🔧")
     }
 }

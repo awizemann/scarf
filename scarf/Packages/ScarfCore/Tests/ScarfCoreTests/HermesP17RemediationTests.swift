@@ -147,7 +147,8 @@ struct HermesP17RemediationTests {
         #expect(backup.jobName == "Nightly backup")
         // The whole traceback stays attached to the issue it belongs to.
         #expect(backup.issues.count == 1)
-        #expect(backup.issues[0].contains("RuntimeError: nightly-backup exploded"))
+        #expect(try #require(backup.issues.first)
+            .contains("RuntimeError: nightly-backup exploded"))
         #expect(try #require(findings["4f2a9c1b7e03"]).jobName == "Digest")
     }
 

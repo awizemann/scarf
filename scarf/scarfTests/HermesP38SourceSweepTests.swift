@@ -84,13 +84,30 @@ struct HermesP38SourceSweepTests {
     /// failure and execution continues into an out-of-bounds index. Either
     /// `guard xs.count == 1 else { Issue.record(…); return }` or
     /// `try #require(xs.first)`.
-    /// **Scoped to the round-3/round-4 phase suites**, not the whole tree.
-    /// A repo-wide run reports ~100 pre-existing sites, and fixing those is a
-    /// separate mechanical pass (filed as `t-f43f0af5`) — a sweep that fails
-    /// on day one is a sweep somebody disables. What it does buy: every suite
-    /// this branch wrote is held to the rule, and a new phase suite that
-    /// reintroduces the shape fails here.
-    static let phaseSuiteFiles: Set<String> = [
+    /// **Scoped to the phase suites**, not the whole tree: every file whose
+    /// name carries a phase number (`…P39Tests.swift`, `HermesP44bTests.swift`,
+    /// `…P0Tests.swift`) under any of ``phaseSuiteRoots`` — the app target,
+    /// the iOS target, and the ScarfCore package.
+    /// A repo-wide run reports ~100 pre-existing sites in non-phase files,
+    /// and fixing those is a separate mechanical pass (filed as `t-f43f0af5`)
+    /// — a sweep that fails on day one is a sweep somebody disables. What it
+    /// does buy: every suite the audit branches wrote is held to the rule,
+    /// and a new phase suite that reintroduces the shape fails here.
+    ///
+    /// Round 4 replaced a hand-kept allowlist with this pattern. The
+    /// allowlist had stopped at P39 — P40–P44 and every ScarfCore package
+    /// test file were silently unscanned — and its only self-check caught
+    /// deletions, never omissions. `legacySuiteFiles` keeps the old names as
+    /// a floor (each must still be found), and `phaseSuiteFloor` keeps the
+    /// population from collapsing if the matcher ever stops matching.
+    static func isPhaseSuite(_ name: String) -> Bool {
+        guard name.hasSuffix("Tests.swift") else { return false }
+        return name.range(of: "P[0-9]+[a-z]?", options: .regularExpression) != nil
+    }
+
+    /// The round-3/round-4 names the pattern replaced. Every one must still
+    /// be scanned; a rename that drops the phase number fails here.
+    static let legacySuiteFiles: Set<String> = [
         "HermesCLIVerdictP31Tests.swift", "HermesConfigUnsetP35Tests.swift",
         "HermesCronRecoveryP30Tests.swift", "HermesCronRecoveryP38Tests.swift",
         "HermesP32YAMLUnificationTests.swift", "HermesP37RemediationTests.swift",
@@ -100,17 +117,30 @@ struct HermesP38SourceSweepTests {
         "GatewayPairingVerdictP31Tests.swift", "HermesP35MCPTokenProbeTests.swift",
         "HermesP35SelectionAndFloorsTests.swift", "HermesP38SettingsResidueTests.swift",
         "MainActorSpawnDisciplineP22Tests.swift",
-        // P39.
         "HermesManagedRefusalP39Tests.swift", "HermesConfigSetP39Tests.swift",
         "HermesManagedInstallP39Tests.swift",
+    ]
+
+    /// Premise floor: 78 phase suites matched when round 4 widened the sweep.
+    static let phaseSuiteFloor = 70
+
+    /// The roots the phase sweep walks — the same three the `try! #require`
+    /// sweep above uses, spelled separately because ScarfCore's root is the
+    /// whole `Tests` directory (it holds two test targets), not just
+    /// `ScarfCoreTests`.
+    private static let phaseSuiteRoots = [
+        "scarf/scarfTests",
+        "scarf/Scarf iOSTests",
+        "scarf/Packages/ScarfCore/Tests",
     ]
 
     @Test func noSubscriptFollowsACountExpectation() {
         var offenders: [String] = []
         var scanned: Set<String> = []
-        for root in Self.testRoots {
+        for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
-                guard Self.phaseSuiteFiles.contains(url.lastPathComponent) else { continue }
+                guard url.lastPathComponent != Self.ownFileName,
+                      Self.isPhaseSuite(url.lastPathComponent) else { continue }
                 scanned.insert(url.lastPathComponent)
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let lines = src.components(separatedBy: "\n")
@@ -133,18 +163,23 @@ struct HermesP38SourceSweepTests {
                         // A `guard`/`#require` in between is the correct fix
                         // and ends the window.
                         if next.contains("guard ") || next.contains("#require(") { break }
-                        if next.contains(receiver + "[") {
-                            offenders.append("\(url.lastPathComponent):\(j + 1) — "
-                                             + next.trimmingCharacters(in: .whitespaces))
-                            break
-                        }
+                        guard let open = next.range(of: receiver + "[") else { continue }
+                        // A string-keyed lookup (`findings["File"]`) is a
+                        // dictionary read: it returns nil, it does not trap.
+                        if next[open.upperBound...].hasPrefix("\"") { break }
+                        offenders.append("\(url.lastPathComponent):\(j + 1) — "
+                                         + next.trimmingCharacters(in: .whitespaces))
+                        break
                     }
                 }
             }
         }
-        #expect(scanned == Self.phaseSuiteFiles, Comment(rawValue:
-            "the scoped list names files that no longer exist: "
-            + Self.phaseSuiteFiles.subtracting(scanned).sorted().joined(separator: ", ")))
+        #expect(scanned.count >= Self.phaseSuiteFloor, Comment(rawValue:
+            "the phase-suite matcher found only \(scanned.count) files "
+            + "(floor \(Self.phaseSuiteFloor)) — it has stopped matching"))
+        #expect(Self.legacySuiteFiles.subtracting(scanned).isEmpty, Comment(rawValue:
+            "legacy phase suites are no longer being scanned: "
+            + Self.legacySuiteFiles.subtracting(scanned).sorted().joined(separator: ", ")))
         #expect(offenders.isEmpty, Comment(rawValue: """
             A subscript follows a count `#expect` with no guard between them. \
             `#expect` records and CONTINUES, so a wrong count runs straight \

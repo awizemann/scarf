@@ -381,12 +381,23 @@ struct ProcessDrainP43Tests {
             return (pipe, fd)
         }
 
-        // 1. Nobody reads: the wait is capped by its budget and returns.
+        // 1. Nobody reads: the pipe is genuinely NOT writable — asserted
+        //    through the mechanism `waitWritable` blocks on, a `poll` for
+        //    `POLLOUT` with a zero timeout, which reports no ready
+        //    descriptor — and the wait is nonetheless capped by its budget
+        //    and returns.
+        //
+        //    This used to assert `idleElapsed >= 0.15` against a 0.2 budget:
+        //    a duration floor with a 50 ms margin over a `poll` timeout the
+        //    kernel rounds to its own tick and may return early from. The
+        //    stopwatch was never the property under test; not-writable is.
         let (idle, idleFD) = fullPipe()
+        var idleProbe = pollfd(fd: idleFD, events: Int16(POLLOUT), revents: 0)
+        #expect(poll(&idleProbe, 1, 0) == 0,
+                "a pipe filled to the brim with no reader reported writable")
         let idleStarted = Date()
         RemoteRestoreService.waitWritable(idleFD, upTo: 0.2)
         let idleElapsed = Date().timeIntervalSince(idleStarted)
-        #expect(idleElapsed >= 0.15, "a full pipe with no reader must actually wait")
         #expect(idleElapsed < 5, "the wait is capped, so cancellation gets a turn")
         try? idle.fileHandleForReading.close()
         try? idle.fileHandleForWriting.close()
