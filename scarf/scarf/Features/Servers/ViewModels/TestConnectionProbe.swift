@@ -169,6 +169,20 @@ struct TestConnectionProbe {
         // paste into Terminal to compare.
         let displayCommand = "/usr/bin/ssh " + sshArgs.map { Self.shellDisplayQuote($0) }.joined(separator: " ")
 
+        // The login-shell env probe, hoisted OUT of the detached closure.
+        // Everything else in that closure suspends rather than blocks (the
+        // `Task.sleep` poll and `waitDrainingAsync` below, both deliberate),
+        // but `enrichedEnvironment()` reads a `static let` whose `swift_once`
+        // initialiser is two `zsh` probes at 5 s + 3 s
+        // (`HermesFileService.swift`, `runShellProbe(script:`) — it BLOCKS,
+        // and a detached task is off the MAIN actor but still on the
+        // cooperative pool, one thread per core and unable to grow. So the
+        // one blocking call gets a thread of its own and the closure stays
+        // the suspending thing it was written to be (charter C10, round-5
+        // P53). One read, before the spawn, so it is also one probe instead
+        // of one per attempt.
+        let shellEnv = await OffPool.run { HermesFileService.enrichedEnvironment() }
+
         let probe = await Task.detached { () -> (Int32, String, String) in
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
@@ -177,7 +191,6 @@ struct TestConnectionProbe {
             // Without this, GUI-launched Scarf can't see the user's
             // ssh-add'd keys (terminal works because shell sets the var).
             var env = ProcessInfo.processInfo.environment
-            let shellEnv = HermesFileService.enrichedEnvironment()
             for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
                 if env[key] == nil, let value = shellEnv[key], !value.isEmpty {
                     env[key] = value

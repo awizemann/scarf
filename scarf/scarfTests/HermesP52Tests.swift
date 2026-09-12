@@ -62,28 +62,166 @@ struct OffPoolDisciplineP52Tests {
     /// at `:2575` and `:2580`) behind a `swift_once`; `loadState()` is a
     /// `readFile` of `auth.json` through the context's transport, i.e. an SSH
     /// round trip on a remote server.
-    private static let blockingNeedles = [
+    static let blockingNeedles = [
         "enrichedEnvironment()",
         "loadState()",
     ]
+
+    /// A `Task.detached` closure the sweep may keep, keyed
+    /// `basename: needle`, each with a written reason.
+    ///
+    /// Calibrated like every other allowance in this tree: an entry that
+    /// stops matching is a stale allowance hiding the next violation, and
+    /// ``blockingCallsDoNotRideTaskDetached`` fails on one.
+    static let allowances: [String: String] = [
+        "scarfApp.swift:enrichedEnvironment()": """
+            The launch warm-up, and the ONE site whose whole purpose is to \
+            park a thread until the `swift_once` is populated. It runs once, \
+            at `.utility`, before any window exists, and every later caller \
+            reads the memoised value — so the pool thread it holds is the \
+            price of never holding a UI one. Converting it would be correct \
+            and pointless; saying why is the honest answer.
+            """,
+    ]
+
+    // MARK: - The matcher
+
+    /// Every `Task.detached { … }` closure body in `source`, brace-matched.
+    ///
+    /// The round-6 review's finding: the sweep matched per LINE, so it only
+    /// ever caught `Task.detached { svc.loadState() }` written on ONE line.
+    /// All four real sites in the tree spell the needle several lines below
+    /// the `Task.detached`, and every one of them passed. This is the walker
+    /// ``ProcessAsyncWaitP43cTests/detachedClosureHits(in:)`` already uses,
+    /// reimplemented here because the two suites live in different targets.
+    ///
+    /// - Returns: `(startLine, body)` per closure, 1-based.
+    static func detachedClosures(in source: String) -> [(line: Int, body: String)] {
+        let chars = Array(source)
+        // Line number for any index, computed once.
+        var lineAt = [Int](repeating: 1, count: chars.count + 1)
+        var line = 1
+        for (i, c) in chars.enumerated() {
+            lineAt[i] = line
+            if c == "\n" { line += 1 }
+        }
+        lineAt[chars.count] = line
+
+        var out: [(line: Int, body: String)] = []
+        var i = 0
+        while i + 13 < chars.count {
+            guard chars[i] == "T",
+                  String(chars[i..<(i + 13)]) == "Task.detached",
+                  (i == 0 || !(chars[i - 1].isLetter || chars[i - 1].isNumber || chars[i - 1] == "_"))
+            else { i += 1; continue }
+            // Read forward to the `{` that opens the closure, allowing a
+            // `(priority:)` argument list and whitespace.
+            var j = i + 13
+            var parens = 0
+            var bodyStart: Int?
+            var ok = true
+            while j < chars.count {
+                let c = chars[j]
+                if c == "(" { parens += 1; j += 1; continue }
+                if c == ")" { parens -= 1; j += 1; continue }
+                if c == "{", parens == 0 { bodyStart = j; break }
+                if parens == 0, !(c.isWhitespace || c == "." || c.isLetter
+                                  || c.isNumber || c == "_" || c == ":") {
+                    ok = false
+                    break
+                }
+                j += 1
+            }
+            guard ok, let start = bodyStart else { i += 13; continue }
+            var depth = 0
+            var k = start
+            var body = ""
+            while k < chars.count {
+                if chars[k] == "{" { depth += 1 }
+                if chars[k] == "}" {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+                body.append(chars[k])
+                k += 1
+            }
+            out.append((line: lineAt[i], body: body))
+            i = start + 1
+        }
+        return out
+    }
+
+    /// The needles a closure body actually parks on the pool.
+    ///
+    /// A needle on a line that ALSO spells `OffPool.run` is not a hit: the
+    /// blocking call is already on its own thread and the enclosing
+    /// `Task.detached` is a pure orchestrator (`HealthViewModel`'s seven-way
+    /// `async let` batch is exactly this, and the round-6 report named it as
+    /// a live site on the strength of the brace match alone). The exemption
+    /// is per LINE rather than per body precisely so a body that wraps ONE of
+    /// two blocking calls still reports the other.
+    static func pooledBlockingNeedles(in body: String) -> [String] {
+        var hits: [String] = []
+        for raw in body.components(separatedBy: "\n") {
+            let bare = raw.trimmingCharacters(in: .whitespaces)
+            guard !bare.hasPrefix("//"), !bare.hasPrefix("*"), !bare.hasPrefix("///") else { continue }
+            guard !bare.contains("OffPool.run") else { continue }
+            for needle in blockingNeedles where bare.contains(needle) {
+                hits.append(needle)
+            }
+        }
+        return hits
+    }
+
+    @Test("the matcher sees a needle several lines inside the closure")
+    func matcherIsCalibrated() throws {
+        let planted = """
+            func probe() {
+                Task.detached(priority: .utility) {
+                    let proc = Process()
+                    if true {
+                        let env = HermesFileService.enrichedEnvironment()
+                        _ = env
+                    }
+                }
+                Task.detached {
+                    async let a = OffPool.run { svc.loadState() }
+                    _ = await a
+                }
+                Task { let x = svc.loadState(); _ = x }
+            }
+            """
+        let closures = Self.detachedClosures(in: planted)
+        #expect(closures.count == 2, "the walker found \(closures.count) detached closures, expected 2")
+        let first = try #require(closures.first)
+        #expect(first.body.contains("enrichedEnvironment()"),
+                "the brace match stopped before the needle — this is the per-line bug the walk replaces")
+        #expect(Self.pooledBlockingNeedles(in: first.body) == ["enrichedEnvironment()"])
+        let second = try #require(closures.dropFirst().first)
+        #expect(Self.pooledBlockingNeedles(in: second.body).isEmpty,
+                "a needle already inside `OffPool.run` is not a pool hit")
+    }
 
     @Test("no blocking call is parked on the cooperative pool by `Task.detached`")
     func blockingCallsDoNotRideTaskDetached() {
         var offenders: [String] = []
         var scannedByRoot: [String: Int] = [:]
+        var allowancesSeen: Set<String> = []
 
         for root in Self.roots {
             for url in Self.swiftFiles(under: root) {
                 guard url.standardizedFileURL.path != Self.ownPath else { continue }
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 scannedByRoot[root, default: 0] += 1
-                for (i, line) in src.components(separatedBy: "\n").enumerated() {
-                    let bare = line.trimmingCharacters(in: .whitespaces)
-                    guard !bare.hasPrefix("//"), !bare.hasPrefix("*") else { continue }
-                    guard bare.contains("Task.detached") else { continue }
-                    guard Self.blockingNeedles.contains(where: { bare.contains($0) })
-                    else { continue }
-                    offenders.append("\(url.lastPathComponent):\(i + 1) — \(bare)")
+                for closure in Self.detachedClosures(in: src) {
+                    for needle in Self.pooledBlockingNeedles(in: closure.body) {
+                        let key = "\(url.lastPathComponent):\(needle)"
+                        if Self.allowances[key] != nil {
+                            allowancesSeen.insert(key)
+                            continue
+                        }
+                        offenders.append("\(url.lastPathComponent):\(closure.line) — \(needle)")
+                    }
                 }
             }
         }
@@ -102,6 +240,11 @@ struct OffPoolDisciplineP52Tests {
             `OffPool.run { … }`, which gives the blocking work a thread of \
             its own: \(offenders.joined(separator: "; "))
             """))
+
+        let stale = Set(Self.allowances.keys).subtracting(allowancesSeen)
+        #expect(stale.isEmpty, Comment(rawValue:
+            "allowed detached site(s) no longer match anything — they have moved: "
+            + stale.sorted().joined(separator: ", ")))
     }
 
     /// The helper itself, pinned: if `OffPool.run` ever becomes a

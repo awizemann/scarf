@@ -171,9 +171,15 @@ struct CredentialPoolsView: View {
     private func probeKeepalive() {
         let svc = keepalive
         let nous = nousService
-        Task.detached {
-            let enabled = svc.isEnabled()
-            let state = nous.loadState()
+        // ``OffPool/run(_:)``, not `Task.detached`: `loadState()` is a
+        // `readFile` of `auth.json` through the context's transport — an SSH
+        // round trip on a remote server — and `isEnabled()` probes the cron
+        // table the same way. A detached task is off the MAIN actor but still
+        // on the cooperative pool (one thread per core, unable to grow), so
+        // this parked a pool thread for the whole round trip (charter C10,
+        // round-5 P53).
+        Task {
+            let (enabled, state) = await OffPool.run { (svc.isEnabled(), nous.loadState()) }
             await MainActor.run {
                 keepaliveEnabled = enabled
                 nousSubscription = state
