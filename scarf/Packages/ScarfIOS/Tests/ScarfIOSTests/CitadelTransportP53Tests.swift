@@ -1,5 +1,7 @@
 import Testing
 import Foundation
+import Citadel
+import NIOCore
 @testable import ScarfIOS
 
 /// Round-6 P53 — the two C10 holes the sweeps could not see, because
@@ -102,12 +104,66 @@ struct CitadelTransportP53Tests {
             output — `SSHTransport.runLocal`'s timeout arm reports \
             `drain.collect()`.
             """)
-        #expect(code.contains("partial.append(bytes)"),
-                "the drain no longer mirrors stdout into the shared accumulator as it arrives")
         // The drain's own cancellation arm keeps its full local copy: it is
         // the arm that wins when the stream ends, and it is strictly richer.
         #expect(code.contains("throw TransportError.timeout(seconds: timeout, partialStdout: stdout)"),
                 "the drain's own cancellation arm stopped carrying its bytes")
+    }
+
+    /// The mirror, RUN rather than grepped.
+    ///
+    /// P53 proved this wiring with `code.contains("partial.append(bytes)")`,
+    /// which says nothing about which arm the call sits in: moved into the
+    /// `.stderr` arm, or below the loop, the grep still passes and every
+    /// timeout still reports empty output. The loop is `absorb`, over any
+    /// sequence of chunks, so the real race can be staged: a drain that has
+    /// read a chunk and is still waiting, against a budget that wins
+    /// (round-6 P53b).
+    /// One stdout chunk, then a stream that never finishes — the wedged
+    /// remote command the timeout arm exists for.
+    private struct OneChunkThenHang: AsyncSequence, Sendable {
+        typealias Element = ExecCommandOutput
+        static let chunk = "half a JSON payl"
+        struct Iterator: AsyncIteratorProtocol {
+            var sent = false
+            mutating func next() async throws -> ExecCommandOutput? {
+                guard sent else {
+                    sent = true
+                    return .stdout(ByteBuffer(string: OneChunkThenHang.chunk))
+                }
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+                return nil
+            }
+        }
+        func makeAsyncIterator() -> Iterator { Iterator() }
+    }
+
+    @Test("when the budget wins, the timeout arm sees what the drain read")
+    func theBudgetArmSeesThePartialStdout() async {
+        let partial = PartialStdout()
+        let sawBudget: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                _ = try? await CitadelServerTransport.absorb(
+                    OneChunkThenHang(), timeout: 0.2,
+                    midStream: .typedError, partial: partial)
+                return false
+            }
+            group.addTask {
+                // The budget arm, as `runProcess` spells it.
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                return true
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+
+        #expect(sawBudget, "the drain finished first — the race did not stage")
+        #expect(String(data: partial.bytes(), encoding: .utf8) == OneChunkThenHang.chunk, """
+            The budget arm cannot see the bytes the drain already read, so \
+            `TransportError.timeout(partialStdout:)` would carry `Data()` — \
+            the exact defect P53 fixed, back again.
+            """)
     }
 
     @Test("the accumulator survives concurrent appends and reads")

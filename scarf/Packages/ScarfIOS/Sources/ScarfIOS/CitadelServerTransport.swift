@@ -245,7 +245,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     // MARK: - The one remote-exec drain
 
     /// What a mid-stream transport failure means to the caller.
-    private enum MidStreamFailure {
+    enum MidStreamFailure {
         /// Keep the partial output and report exit `-1`, so the caller can
         /// tell a broken channel from a clean non-zero remote exit
         /// (`asyncRunProcess`).
@@ -348,11 +348,28 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         midStream: MidStreamFailure,
         partial: PartialStdout
     ) async throws -> ProcessResult {
+        try await absorb(boxed.value, timeout: timeout, midStream: midStream, partial: partial)
+    }
+
+    /// The loop itself, over ANY sequence of exec chunks.
+    ///
+    /// Split out from ``drain(_:timeout:midStream:partial:)`` — whose only
+    /// job is now unwrapping the non-`Sendable` `TTYOutput` — so the mirror
+    /// into `partial` can be proved by RUNNING it. P53's test asserted the
+    /// mirror by grepping this file for `partial.append(bytes)`, which says
+    /// nothing about which arm the call sits in or whether the timeout arm
+    /// can see the bytes (round-6 P53b).
+    static func absorb<S: AsyncSequence>(
+        _ chunks: S,
+        timeout: TimeInterval,
+        midStream: MidStreamFailure,
+        partial: PartialStdout
+    ) async throws -> ProcessResult where S.Element == ExecCommandOutput {
         var stdout = Data()
         var stderr = Data()
         var exitCode: Int32 = 0
         do {
-            for try await chunk in boxed.value {
+            for try await chunk in chunks {
                 try Task.checkCancellation()
                 switch chunk {
                 case .stdout(var buf):
