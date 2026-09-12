@@ -54,7 +54,7 @@ struct AgentTab: View {
                     capabilities: capabilities,
                     selected: viewModel.config.reasoningEffort
                 ),
-                optionLabel: { $0.isEmpty ? String(localized: "Provider default") : $0 }
+                optionLabel: { $0.isEmpty ? String(localized: "Hermes default") : $0 }
             ) { viewModel.setReasoningEffort($0) }
             UnsupportedEffortNote(
                 selected: viewModel.config.reasoningEffort,

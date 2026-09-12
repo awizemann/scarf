@@ -1108,12 +1108,18 @@ public enum HermesCLIMarkers {
 
     // MARK: plugins update — the security-disable third state
 
-    /// `[red]Plugin '<name>' has been disabled.[/red]` (`plugins_cmd.py:848-851`,
-    /// inside `_rescan_after_update`'s `dangerous` arm `:845-851`). Printed
-    /// BEFORE `cmd_update`'s `✓ Plugin <name> updated.` (`:828`), both at
-    /// exit 0. Matched as a SUBSTRING, not anchored: `rich` wraps at its
-    /// 80-column non-TTY default, so this clause can start mid-line after a
-    /// wrap of the sentence it opens.
+    /// The clause of `[red]Plugin '<name>' has been disabled.[/red] Review the
+    /// findings, then re-enable with …` (`plugins_cmd.py:848-851`, inside
+    /// `_rescan_after_update`'s `dangerous` arm `:845-851`). Printed BEFORE
+    /// `cmd_update`'s `✓ Plugin <name> updated.` (`:828`), both at exit 0.
+    ///
+    /// Never match this clause on its own: `cmd_update` echoes the raw
+    /// `git pull` body (`:829`) and `_rescan_after_update` prints the scan
+    /// report (`:844`), and neither is text Hermes authors — a pulled commit
+    /// message or a scan finding reading "… has been disabled." was a false
+    /// third state. `HermesPluginsUpdateVerdict.isSecurityDisableLine` pairs
+    /// it with the column-0 `Plugin ` prefix, the same shape as
+    /// `isSuccessLine`.
     public static let pluginsUpdateSecurityDisabled = "has been disabled."
 
     /// `[yellow]⚠ Security scan flagged the updated plugin:[/yellow] {reason}`
@@ -1809,6 +1815,20 @@ public enum HermesMCPTestVerdict {
 /// was a false success. The real line is `✓ Plugin <name> updated.`, so this
 /// requires the column-0 `Plugin ` prefix AND one of the two tails, which no
 /// pull body or scan finding satisfies by accident.
+///
+/// **Why this stays bespoke rather than calling `HermesCLIVerdict.judge`.**
+/// `judge`'s third outcome is `.unconfirmed` — the shape where a verb can
+/// finish printing NOTHING the client recognises, and silence must not read
+/// as success. `cmd_update` (`:794-830`) has no such arm: every path through
+/// it ends in either a refusal (`_require_installed_plugin` `:797`, `_fail`
+/// on a `PluginOperationError` `:809-810`, the capability-consent abort
+/// `:826`) or one of the two `✓ Plugin <name> …` lines (`:825-829`),
+/// so `!succeeded` is already a failure and there is nothing for
+/// `.unconfirmed` to carry. What this verb has instead is a third SUCCESS
+/// state — updated-but-flagged / updated-then-disabled (`:842-851`) — which
+/// `judge` has no vocabulary for: it produces an `HermesCLIOutcome` with a
+/// `warning` on the success side. Fold this into `judge` only if that warning
+/// shape becomes general.
 public enum HermesPluginsUpdateVerdict {
     public static func argv(name: String) -> [String] { ["plugins", "update", "--", name] }
 
@@ -1819,6 +1839,24 @@ public enum HermesPluginsUpdateVerdict {
         let head = HermesCLIVerdict.unglyphed(line)
         guard head.hasPrefix("Plugin ") else { return false }
         return HermesCLIMarkers.pluginsUpdateSuccess.contains { head.hasSuffix($0) }
+    }
+
+    /// `Plugin '<name>' has been disabled.` (`:848-851`). Anchored on the
+    /// column-0 `Plugin ` prefix so the `git pull` echo (`:829`) and the scan
+    /// report (`:844`) — text Hermes does not author — cannot supply it.
+    ///
+    /// `contains`, not `hasSuffix`: the emitter continues the same print with
+    /// " Review the findings, then re-enable with `hermes plugins enable
+    /// <name>` if you trust them.", so the clause is never at end of line.
+    /// `rich` wraps at its 80-column non-TTY default; the clause survives the
+    /// first wrap for any plugin name under ~45 characters, and a longer name
+    /// that splits it only costs the wording (the `⚠ Security scan flagged`
+    /// line at `:843` prints for EVERY not-allowed verdict, so the warning
+    /// itself still fires).
+    static func isSecurityDisableLine(_ line: String) -> Bool {
+        let head = HermesCLIVerdict.unglyphed(line)
+        return head.hasPrefix("Plugin ")
+            && head.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled)
     }
 
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
@@ -1844,7 +1882,7 @@ public enum HermesPluginsUpdateVerdict {
         // reported a flagged-but-still-enabled update as a plain "Updated" —
         // the user never learned the scan had found anything.
         let flagged = lines.first { $0.contains(HermesCLIMarkers.pluginsUpdateScanFlagged) }
-        let disabled = lines.first { $0.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled) }
+        let disabled = lines.first(where: isSecurityDisableLine)
         guard let reason = flagged ?? disabled else {
             return HermesCLIOutcome(succeeded: true, detail: nil)
         }

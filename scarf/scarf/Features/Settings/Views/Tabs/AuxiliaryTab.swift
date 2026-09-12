@@ -354,14 +354,14 @@ struct AuxiliaryTab: View {
             get: { value },
             set: { viewModel.setImageGenModel($0) }
         )) {
-            Text("Provider default").tag("")
+            Text("Hermes default").tag("")
             Divider()
             ForEach(ModelCatalogService.imageGenModels) { model in
                 Text(model.display).tag(model.modelID)
             }
             // User has set a custom value not in the curated list;
             // preserve it as a tagged option so the picker renders the
-            // actual selection rather than collapsing to "Provider
+            // actual selection rather than collapsing to "Hermes
             // default".
             if !value.isEmpty
                 && !ModelCatalogService.imageGenModels.contains(where: { $0.modelID == value }) {
@@ -373,7 +373,7 @@ struct AuxiliaryTab: View {
         EditableTextField(label: "Custom model ID", value: value) { newValue in
             viewModel.setImageGenModel(newValue.trimmingCharacters(in: .whitespaces))
         }
-        Text("Used for image generation calls. Leave as Provider default unless your provider documents a specific model ID for image-gen.")
+        Text("Used for image generation calls. Leave as Hermes default unless your provider documents a specific model ID for image-gen.")
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 12)

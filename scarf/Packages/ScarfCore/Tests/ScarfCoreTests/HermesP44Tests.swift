@@ -205,7 +205,7 @@ struct ReasoningEffortWideningP44Tests {
         #expect(!HermesReasoningEffort.levels(capabilities: Self.v0180).contains("max"))
     }
 
-    /// The "Provider default" sentinel widens nothing — the two top-level
+    /// The "Hermes default" sentinel widens nothing — the two top-level
     /// pickers prepend `""` themselves and a duplicate row would be a second
     /// blank option.
     @Test func theEmptySentinelWidensNothing() {

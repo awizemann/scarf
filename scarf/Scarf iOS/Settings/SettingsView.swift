@@ -229,11 +229,15 @@ struct SettingsView: View {
             if !vm.config.provider.isEmpty, vm.config.provider != "unknown" {
                 LabeledContent("Provider", value: vm.config.provider)
             }
-            // Absent key = the model provider's own default, not `medium`.
+            // Absent key = HERMES's own default, not the model provider's
+            // and not `medium` (P44b walked the consumers: the
+            // chat-completions transport substitutes `medium` explicitly,
+            // `agent/transports/chat_completions.py:420-422` @ `v2026.9.7`;
+            // only the Anthropic adapter leaves it to the model).
             LabeledContent(
                 "Reasoning effort",
                 value: vm.config.reasoningEffort.isEmpty
-                    ? "Provider default" : vm.config.reasoningEffort
+                    ? "Hermes default" : vm.config.reasoningEffort
             )
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)

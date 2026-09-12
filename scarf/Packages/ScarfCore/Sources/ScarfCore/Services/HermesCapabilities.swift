@@ -972,6 +972,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// file at v2026.7.7.2 (0.18.2).
     public var hasCronRuns: Bool { isV019OrLater }
 
+    // MARK: v0.18.1 (v2026.7.7) flags — re-floored out of the v0.20 cluster
+    //
+    // Three flags the v0.20 audit filed under v0.20 whose per-flag tag walks
+    // (below) put them at v2026.7.7 = 0.18.1. They stay in this file position
+    // rather than moving up to the `v0.18` MARK: the v0.18 section is the
+    // 0.18.0 tag (v2026.7.1) and these are one release later, and forty
+    // commits of audit docs cite them here. P45 added this header because
+    // `hasReasoningDisableAliases` was landing under a MARK reading "v0.20"
+    // while its own doc floors it at v0.18.1.
+
     /// `hermes sessions export --format md|html|qmd|trace` — additional
     /// session export formats beyond the default.
     ///
@@ -1015,6 +1025,8 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// ``HermesReasoningEffort/unsupportedLevelNotice(for:capabilities:)``
     /// renders.
     public var hasReasoningDisableAliases: Bool { isV0181OrLater }
+
+    // MARK: v0.19.0 (v2026.7.20) flags — re-floored out of the v0.20 cluster
 
     /// `ultra` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
     ///

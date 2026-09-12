@@ -54,6 +54,26 @@ struct ReasoningDisableAliasP44bTests {
         #expect(Self.target.hasReasoningDisableAliases)
     }
 
+    /// C1's own case, and the one P44b left out: `.empty` — no version line
+    /// at all, which is what a failed `hermes --version` probe and every
+    /// host below the oldest tag Scarf parses look like. It must render as
+    /// the OLDEST supported Hermes, never as the target: the aliases do not
+    /// disable there, so the notice is owed.
+    @Test func anUnknownHostSitsBelowTheAliasFloor() throws {
+        #expect(!HermesCapabilities.empty.hasReasoningDisableAliases)
+        #expect(HermesReasoningEffort.disablingSpellings(capabilities: .empty) == ["none"])
+        for alias in HermesReasoningEffort.disableAliases {
+            let notice = try #require(
+                HermesReasoningEffort.unsupportedLevelNotice(for: alias, capabilities: .empty),
+                "\(alias) is not known to disable reasoning on an unknown host"
+            )
+            #expect(notice.contains(alias))
+        }
+        // …and `none`, which every tag accepts, still draws none.
+        #expect(HermesReasoningEffort.unsupportedLevelNotice(
+            for: "none", capabilities: .empty) == nil)
+    }
+
     /// Case and whitespace come from a hand-edited config.yaml, which is the
     /// only way these values reach a picker at all.
     @Test func theAliasTestIsNormalised() {

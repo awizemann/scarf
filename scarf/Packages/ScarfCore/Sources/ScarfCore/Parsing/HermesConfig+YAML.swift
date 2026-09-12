@@ -802,7 +802,7 @@ public extension HermesConfig {
             // mirror; `hermes_constants.py:876-889` `parse_reasoning_effort`
             // returns `None` for an empty/unrecognised value and its callers
             // then "use the default", which is the model provider's own. The
-            // picker renders this as a distinct "Provider default" row rather
+            // picker renders this as a distinct "Hermes default" row rather
             // than asserting a level Hermes never chose.
             reasoningEffort: strEnum("agent.reasoning_effort"),
             showCost: boolish("display.show_cost", default: false),

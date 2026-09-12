@@ -59,12 +59,28 @@ public enum HermesReasoningEffort {
     ///
     /// The out-of-range value is PREPENDED rather than appended, matching
     /// `AgentTab`'s `effortOptions(current:)` — the shape this unifies.
-    /// An empty `selected` (the "provider default" sentinel, which the two
+    /// An empty `selected` (the "Hermes default" sentinel, which the two
     /// top-level pickers prepend themselves) widens nothing.
     public static func levels(capabilities: HermesCapabilities, selected: String) -> [String] {
         let base = levels(capabilities: capabilities)
-        guard !selected.isEmpty, !base.contains(selected) else { return base }
+        let normalized = normalizedLevel(selected)
+        guard !normalized.isEmpty, !base.contains(normalized) else { return base }
         return [selected] + base
+    }
+
+    /// What Hermes itself does to the stored value before it compares:
+    /// `effort = str(effort).strip().lower()` — `hermes_constants.py:884` @
+    /// `v2026.9.7`, and the same line at `:807` @ `v2026.7.1`, i.e. on both
+    /// sides of the `max`/`ultra` floors this file gates on.
+    ///
+    /// So `Max` and `" high "` are ACCEPTED values, and comparing the raw
+    /// string against the vocabulary made the picker widen for one (a second,
+    /// duplicate row beside the canonical level) and
+    /// ``unsupportedLevelNotice`` claim the other was ignored. Normalise once
+    /// and compare normalised; the RAW string is still what the widened row
+    /// and the notice display, because that is what is on disk.
+    public static func normalizedLevel(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     /// The affordance beside a widened picker: what Hermes on THIS host
@@ -94,7 +110,9 @@ public enum HermesReasoningEffort {
     /// omits the parameter, leaving the model's own default
     /// (`agent/anthropic_adapter.py:570` — `_thinking_kwargs` runs only for a
     /// truthy dict). Hermes's OWN default is therefore the honest word, and
-    /// it is NOT what the empty "Provider default" row means.
+    /// it is NOT what the empty "Hermes default" row means — that row is the
+    /// ABSENT key, which the same walk shows also resolves to Hermes's
+    /// `medium`, so P45 relabelled it "Hermes default".
     ///
     /// `nil` when the level IS in the host's vocabulary, when the value
     /// DISABLES reasoning on this host (see ``disablingSpellings``), and for
@@ -103,11 +121,10 @@ public enum HermesReasoningEffort {
         for selected: String,
         capabilities: HermesCapabilities
     ) -> String? {
-        guard !selected.isEmpty,
-              !levels(capabilities: capabilities).contains(selected),
-              !disablingSpellings(capabilities: capabilities).contains(
-                  selected.trimmingCharacters(in: .whitespaces).lowercased()
-              )
+        let normalized = normalizedLevel(selected)
+        guard !normalized.isEmpty,
+              !levels(capabilities: capabilities).contains(normalized),
+              !disablingSpellings(capabilities: capabilities).contains(normalized)
         else { return nil }
         return String(localized: "“\(selected)” isn’t supported on this Hermes — it ignores it and uses its own default effort (medium).")
     }

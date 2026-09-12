@@ -390,7 +390,7 @@ struct PathRow: View {
 /// `Picker` with no matching tag renders blank). Widening alone would then
 /// show the level as if it worked, so every widened row renders this
 /// underneath it. Renders nothing when the level is in the host's
-/// vocabulary, and nothing for the empty "provider default" sentinel — so
+/// vocabulary, and nothing for the empty "Hermes default" sentinel — so
 /// call sites need no `if`.
 struct UnsupportedEffortNote: View {
     let selected: String
