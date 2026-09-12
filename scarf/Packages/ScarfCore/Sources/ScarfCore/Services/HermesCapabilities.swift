@@ -693,6 +693,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// must render byte-identical to the prior Scarf release" is exactly
     /// about those users. The row hides where it does nothing, and the
     /// writer follows the row (`DiscordSetupViewModel.save`).
+    ///
+    /// **What this REMOVES, owned plainly (round-5 P52).** The row was
+    /// previously ungated, so it rendered on every host — and this window
+    /// takes it away at BOTH ends, not just above v0.18. On a v0.18+ host and
+    /// on a ≤v0.14 host alike, a control the previous Scarf release showed is
+    /// now gone. That is intended, and it is not a C1 violation, because C1
+    /// protects a host that HONOURS a setting: at ≤v0.14 the getter does not
+    /// exist to read the key, and at v0.18+ nothing calls it — Hermes ships
+    /// the key as a schema default whose own comment says
+    /// `# DEPRECATED no-op (uploads are always cached; messaging auth is the
+    /// gate). Kept so existing configs don't error.`
+    /// (`hermes_cli/config_defaults.py:1446-1448` @ v2026.9.7). A toggle that
+    /// writes a key nobody reads is the dead row, not the preserved one.
     public var hasDiscordAllowAnyAttachment: Bool {
         atLeastSemver(0, 15, 0) && !atLeastSemver(0, 18, 0)
     }

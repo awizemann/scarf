@@ -324,6 +324,12 @@ import Foundation
         #expect(caps.hasXAITTSAutoSpeechTags)
         // v0.15 platform + auth + secrets.
         #expect(caps.hasNtfyPlatform)
+        // A WINDOW, not a floor: v0.15 is where `discord.allow_any_attachment`
+        // starts being READ, and v0.18 is where it stops. Do NOT copy this
+        // line into the v0.18+ all-on tests — `v018HostHidesTheDiscordAttachmentWindow`
+        // below owns the upper end, and the full walk is in
+        // `DiscordAllowAnyAttachmentWindowP51Tests` (round-5 P52).
+        #expect(caps.hasDiscordAllowAnyAttachment)
         #expect(caps.hasAzureEntraAuth)
         #expect(caps.hasBitwarden)
         // v0.15 verbs.
@@ -350,6 +356,9 @@ import Foundation
         #expect(!caps.hasXAIWebSearchBackend)
         #expect(!caps.hasNtfyPlatform)
         #expect(!caps.hasXAITTSAutoSpeechTags)
+        // The window's LOWER end: no getter exists to read the key at v0.14,
+        // so the row is correctly gone there too (round-5 P52).
+        #expect(!caps.hasDiscordAllowAnyAttachment)
         #expect(!caps.hasAzureEntraAuth)
         #expect(!caps.hasBitwarden)
         #expect(!caps.hasHermesAudit)
@@ -364,6 +373,24 @@ import Foundation
         #expect(caps.hasSubgoal)
         #expect(caps.hasHermesProxy)
         #expect(caps.isV014OrLater)
+    }
+
+    /// The upper end of the one window flag in this file, kept beside the
+    /// v0.15 pair so a reader of `v015FlagsAllOn` cannot miss that the flag
+    /// goes OFF again. `hasDiscordAllowAnyAttachment` is off on a v0.18 host
+    /// and on the v0.21.1 target: the Discord adapter stopped calling
+    /// `_discord_allow_any_attachment` at v2026.7.1 (0.18.0) and the key is a
+    /// documented schema no-op at v2026.9.7
+    /// (`hermes_cli/config_defaults.py:1446-1448`). Round-5 P52; the tag walk
+    /// is in `DiscordAllowAnyAttachmentWindowP51Tests`.
+    @Test func v018HostHidesTheDiscordAttachmentWindow() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+            .hasDiscordAllowAnyAttachment)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+            .hasDiscordAllowAnyAttachment)
+        // …while v0.17 still honours it.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.17.0")
+            .hasDiscordAllowAnyAttachment)
     }
 
     @Test func v0_15_patchReleaseStillEnablesAllFlags() {
