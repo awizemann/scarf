@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import scarf
+import ScarfCore
 
 /// Round-5 P48 — the Mac target's share of the C10 residue.
 ///
@@ -57,14 +58,61 @@ struct HermesProxyLifecycleP48Tests {
     /// `hermes proxy` that ignores SIGTERM or is wedged left the Stop button
     /// looking like it had worked while the child kept port 8645 against the
     /// next Start.
-    @Test("stop escalates through the bounded primitive, off the main actor")
+    ///
+    /// **And the ask comes FIRST.** P48's first attempt handed the ceiling to
+    /// `waitUntilExit(timeout:)` and nothing else — but that primitive signals
+    /// only once its budget is SPENT, so Stop polled a child nobody had asked
+    /// to leave for the whole three seconds and only then sent SIGTERM. This
+    /// pins the order inside `stop()` itself: a `terminate()` above the
+    /// detached wait. The old shape had no `terminate()` in the function at
+    /// all, so it fails this outright (round-5 P48b).
+    @Test("stop asks first, then escalates through the bounded primitive off the main actor")
     func stopEscalatesOffTheMainActor() throws {
         let code = Self.codeOnly(try Self.source(Self.proxyPath))
-        #expect(code.contains("waitUntilExit(timeout: ceiling)"))
+        let body = try #require(
+            code.range(of: "func stop() {").map { String(code[$0.upperBound...]) },
+            "stop() is gone from the proxy service")
+        let terminate = try #require(
+            body.range(of: "proc.terminate()"),
+            "stop() never sends SIGTERM — the ceiling is grace AFTER the ask")
+        let wait = try #require(
+            body.range(of: "waitUntilExit(timeout: ceiling)"),
+            "stop() no longer escalates through the bounded primitive")
+        #expect(terminate.lowerBound < wait.lowerBound,
+                "stop() waits out its whole ceiling before asking the child to leave")
         // A THREAD, not `Task.detached`: the primitive is a `Thread.sleep`
         // poll loop and `Task.detached` is the same cooperative pool (P43c).
         #expect(code.contains("Thread.detachNewThread"))
         #expect(!code.contains("Task.detached {\n            _ = proc.waitUntilExit"))
+    }
+
+    /// Why the order is worth a test: the primitive's budget is a POLL, not a
+    /// grace period. Same child, same ceiling — the only difference is whether
+    /// it was asked to leave first, and that difference is the whole ceiling.
+    @Test("the primitive's budget is time spent waiting, not time spent dying")
+    func theCeilingIsGraceOnlyAfterTheAsk() throws {
+        func spawnSleeper() throws -> Process {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+            proc.arguments = ["-c", "sleep 30"]
+            try proc.run()
+            return proc
+        }
+
+        let unasked = try spawnSleeper()
+        defer { if unasked.isRunning { unasked.terminate() } }
+        var clock = Date()
+        _ = unasked.waitUntilExit(timeout: 1)
+        let polled = Date().timeIntervalSince(clock)
+
+        let asked = try spawnSleeper()
+        asked.terminate()
+        clock = Date()
+        _ = asked.waitUntilExit(timeout: 1)
+        let signalled = Date().timeIntervalSince(clock)
+
+        #expect(polled >= 0.9, "a child that was never asked should burn the budget, took \(polled)s")
+        #expect(signalled < 0.5, "a child already sent SIGTERM should go at once, took \(signalled)s")
     }
 
     /// The P22 main-actor sweep learned `Thread.detachNewThread` as an
@@ -149,3 +197,4 @@ struct ConnectionProbeDrainP48Tests {
         #expect(!code.contains("\"Timed out after 20s"))
     }
 }
+

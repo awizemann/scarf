@@ -161,9 +161,20 @@ final class HermesProxyService {
     /// this service is `@MainActor` (C10 — never block the main actor on a
     /// process). The `terminationHandler` still flips `isRunning` and clears
     /// state on its own MainActor hop, so nothing here needs to.
+    ///
+    /// **SIGTERM goes first, here, before the wait.** `waitUntilExit(timeout:)`
+    /// signals only once its budget is SPENT, so handing it `stopCeiling` and
+    /// nothing else polled a child nobody had asked to leave for three full
+    /// seconds — strictly worse than the bare `terminate()` this replaced, and
+    /// the opposite of what `stopCeiling` is documented to be. The ask is
+    /// free and immediate; the ceiling is the grace AFTER it, which is why
+    /// every other escalation in the app passes `timeout: 0` to a child it has
+    /// already signalled or already given its budget (`StreamingChild.reap`,
+    /// `SSHTransport.runLocal`, `TestConnectionProbe`) — round-5 P48b.
     func stop() {
         guard let proc = child, proc.isRunning else { return }
         let ceiling = Self.stopCeiling
+        proc.terminate()
         // A THREAD, not `Task.detached`: the primitive is a `Thread.sleep`
         // poll loop, and `Task.detached` runs on the same cooperative pool
         // the caller is on — one thread per core, unable to grow. Same
