@@ -135,22 +135,46 @@ final class HermesProxyService {
         } catch {
             lastError = "Could not launch hermes proxy: \(error.localizedDescription)"
             logger.error("hermes proxy launch failed: \(error.localizedDescription, privacy: .public)")
-            // Tear down the half-initialized pipe to avoid fd leak.
-            (proc.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+            // Tear down the half-initialized pipe. `run()` threw, so there
+            // was no fork and Foundation never closed the parent's copy of
+            // EITHER end — nilling the handler alone left both fds open for
+            // the life of the process, once per failed Start (round-5 P48).
+            pipe.fileHandleForReading.readabilityHandler = nil
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
         }
     }
 
-    /// Send SIGTERM to the child and clear state. Idempotent.
+    /// Ask the child to stop, insisting if it does not. Idempotent.
+    ///
+    /// SIGTERM alone was the whole of this: no escalation and no ceiling, so
+    /// a `hermes proxy` that installs SIGTERM to ignore, or that is wedged in
+    /// an uninterruptible wait, left the Stop button looking like it had
+    /// worked while the child ran on — holding port 8645 against the next
+    /// Start (round-5 P48). `waitUntilExit(timeout:)` is SIGTERM → bounded
+    /// poll → pid-guarded SIGKILL → bounded poll and returns either way.
+    ///
+    /// The escalation runs OFF the main actor: it can block for up to
+    /// `Self.stopCeiling` plus the primitive's own two signal graces, and
+    /// this service is `@MainActor` (C10 — never block the main actor on a
+    /// process). The `terminationHandler` still flips `isRunning` and clears
+    /// state on its own MainActor hop, so nothing here needs to.
     func stop() {
-        guard let proc = child else { return }
-        if proc.isRunning {
-            proc.terminate()
+        guard let proc = child, proc.isRunning else { return }
+        let ceiling = Self.stopCeiling
+        // A THREAD, not `Task.detached`: the primitive is a `Thread.sleep`
+        // poll loop, and `Task.detached` runs on the same cooperative pool
+        // the caller is on — one thread per core, unable to grow. Same
+        // reasoning as `Process.waitDrainingAsync` (round-4 P43c).
+        Thread.detachNewThread {
+            _ = proc.waitUntilExit(timeout: ceiling)
         }
-        // The terminationHandler will flip isRunning + clear state on
-        // the MainActor hop. We don't preemptively clear here to keep
-        // the UI consistent with reality (the child may take a moment
-        // to actually exit on the OS side).
     }
+
+    /// How long to let `hermes proxy` shut down cleanly before SIGKILL.
+    /// Short: the proxy has no work to flush — the panel's log tail is the
+    /// only thing reading it, and a clean exit is immediate.
+    nonisolated static let stopCeiling: TimeInterval = 3
 
     /// Clear the log buffer. Useful when the user wants to start
     /// fresh after a failed launch.

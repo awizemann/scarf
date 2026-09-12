@@ -443,7 +443,7 @@ import Foundation
         func listDirectory(_ path: String) throws -> [String] { [] }
         func createDirectory(_ path: String) throws {}
         func removeFile(_ path: String) throws {}
-        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
             // For readLastLines' one-shot tail — return all scripted lines joined.
             let content = lines.joined(separator: "\n") + "\n"
             return ProcessResult(exitCode: 0, stdout: Data(content.utf8), stderr: Data())

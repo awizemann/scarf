@@ -915,7 +915,7 @@ private final class RecordingTransport: ServerTransport, @unchecked Sendable {
         self.init(results: [.failure(error)], isRemote: isRemote, contextID: contextID)
     }
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         calls.append(Call(executable: executable, args: args, timeout: timeout))
         return try script[min(calls.count - 1, script.count - 1)].get()
     }

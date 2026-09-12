@@ -35,7 +35,7 @@ struct GatewayAndPluginsVerdictP40bTests {
         func createDirectory(_ path: String) throws {}
         func removeFile(_ path: String) throws {}
         func runProcess(
-            executable: String, args: [String], stdin: Data?, timeout: TimeInterval?
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
         ) throws -> ProcessResult {
             lock.lock(); _calls.append((executable, args)); lock.unlock()
             return answer(executable, args)

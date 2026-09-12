@@ -343,7 +343,7 @@ public struct SSHTransport: ServerTransport {
     /// single-quoted via `shellQuote` so ssh's argv-join-by-space doesn't
     /// split it across multiple shell tokens on the remote side.
     @discardableResult
-    nonisolated private func runRemoteShell(_ command: String, timeout: TimeInterval? = 60) throws -> ProcessResult {
+    nonisolated private func runRemoteShell(_ command: String, timeout: TimeInterval = 60) throws -> ProcessResult {
         var args = sshArgs()
         // `-T` disables pty allocation, exactly as `makeProcess` /
         // `streamLines` / `streamRawBytes` already do. Without it a user's
@@ -680,7 +680,7 @@ public struct SSHTransport: ServerTransport {
         return cmd
     }
 
-    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         // Wrap in `sh -c '<exe> <arg> <arg>'`.
         let cmd = composedRemoteCommand(executable: executable, args: args)
         var sshArgv = sshArgs()
@@ -1044,7 +1044,7 @@ public struct SSHTransport: ServerTransport {
         case none
     }
 
-    nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?, gate: GatePolicy = .full) throws -> ProcessResult {
+    nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval, gate: GatePolicy = .full) throws -> ProcessResult {
         #if os(iOS)
         // iOS uses `CitadelServerTransport` instead of spawning ssh/scp
         // binaries. Reaching here from iOS is a wiring bug.
@@ -1067,75 +1067,76 @@ public struct SSHTransport: ServerTransport {
         proc.environment = Self.sshSubprocessEnvironment()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        let stdinPipe = Pipe()
+        // Created only when there is something to send — see the twin comment
+        // in `LocalTransport.runProcess`. A stdin-less spawn used to leak the
+        // read end for the life of the process, and a failed launch both ends
+        // (round-5 P48).
+        let stdinPipe: Pipe? = stdin != nil ? Pipe() : nil
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
-        if stdin != nil { proc.standardInput = stdinPipe }
-        let pipeCapture = ProcessPipeDrainer.start(
-            stdout: stdoutPipe.fileHandleForReading,
-            stderr: stderrPipe.fileHandleForReading
-        )
+        if let stdinPipe { proc.standardInput = stdinPipe }
+        // One drain primitive in the app, `ProcessPipeDrain` (round-5
+        // decision 4); `ProcessPipeDrainer` is retired. Its `Capture.wait()`
+        // was unbounded and its readers shared the fixed-width `.utility`
+        // global queue — see `LocalTransport.runProcess` for the full note.
+        let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
         do {
             try proc.run()
         } catch {
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
-            if stdin != nil {
-                try? stdinPipe.fileHandleForReading.close()
-            }
-            _ = pipeCapture.wait()
+            try? stdinPipe?.fileHandleForReading.close()
+            try? stdinPipe?.fileHandleForWriting.close()
+            _ = drain.collect()
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
         }
         // Parent's copy of the inherited ends — close so EOF lands when
-        // the child exits and we don't leak fds.
+        // the child exits and we don't leak fds. The stdout/stderr READ ends
+        // belong to the drain, which closes each in the reader that drained it.
         try? stdoutPipe.fileHandleForWriting.close()
         try? stderrPipe.fileHandleForWriting.close()
-        if stdin != nil {
-            try? stdinPipe.fileHandleForReading.close()
-        }
-        if let stdin {
+        try? stdinPipe?.fileHandleForReading.close()
+        if let stdin, let stdinPipe {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
             try? stdinPipe.fileHandleForWriting.close()
         }
-        if let timeout {
-            // Kernel-wait via DispatchGroup + terminationHandler instead
-            // of a 100ms Thread.sleep spin loop. The old loop burned a
-            // cooperative-pool thread for the full timeout duration AND
-            // had 100ms granularity on the deadline; this version blocks
-            // once on a semaphore that the OS wakes when the process
-            // terminates (or when the timeout fires). Net effect: under
-            // concurrent SSH load (sidebar reload + chat finalize +
-            // watcher poll all firing together) we don't accumulate
-            // multiple spin-blocked threads, which was the mechanism
-            // behind the 7-second `loadRecentSessions` outliers
-            // observed in remote-context perf captures.
-            let waitGroup = DispatchGroup()
-            waitGroup.enter()
-            proc.terminationHandler = { _ in waitGroup.leave() }
-            let outcome = waitGroup.wait(timeout: .now() + timeout)
-            proc.terminationHandler = nil
-            if outcome == .timedOut {
-                proc.terminate()
-                // Brief block until the kill actually lands so we can
-                // collect partial stdout. terminate() is async; without
-                // this wait the readToEnd below could race the close.
-                proc.waitUntilExit()
-                let captured = pipeCapture.wait()
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForReading.close()
-                // A timeout is connection-level for gate purposes: the
-                // reported cloudflared scenario is precisely ssh blocking
-                // on its ProxyCommand's OAuth dance until our timer fires.
-                if gate == .full { SSHConnectionGate.shared.recordFailure(gateKey) }
-                throw TransportError.timeout(seconds: timeout, partialStdout: captured.stdout)
-            }
-        } else {
-            proc.waitUntilExit()
+        // Kernel-wait via DispatchGroup + terminationHandler instead
+        // of a 100ms Thread.sleep spin loop. The old loop burned a
+        // cooperative-pool thread for the full timeout duration AND
+        // had 100ms granularity on the deadline; this version blocks
+        // once on a semaphore that the OS wakes when the process
+        // terminates (or when the timeout fires). Net effect: under
+        // concurrent SSH load (sidebar reload + chat finalize +
+        // watcher poll all firing together) we don't accumulate
+        // multiple spin-blocked threads, which was the mechanism
+        // behind the 7-second `loadRecentSessions` outliers
+        // observed in remote-context perf captures.
+        let waitGroup = DispatchGroup()
+        waitGroup.enter()
+        proc.terminationHandler = { _ in waitGroup.leave() }
+        let outcome = waitGroup.wait(timeout: .now() + timeout)
+        proc.terminationHandler = nil
+        if outcome == .timedOut {
+            // `terminate()` then a BARE `waitUntilExit()` was the shape here,
+            // and it is the one `Process.waitDraining`'s doc calls out: an ssh
+            // wedged in its ProxyCommand, or one holding an inherited
+            // ControlMaster fd, never reaps — so the "timeout" path blocked
+            // forever with its budget already spent. `waitUntilExit(timeout:)`
+            // escalates SIGTERM → bounded poll → pid-guarded SIGKILL →
+            // bounded poll and returns either way; a budget of 0 means "the
+            // deadline is already gone, escalate now" (round-5 P48).
+            _ = proc.waitUntilExit(timeout: 0)
+            let captured = drain.collect()
+            // A timeout is connection-level for gate purposes: the
+            // reported cloudflared scenario is precisely ssh blocking
+            // on its ProxyCommand's OAuth dance until our timer fires.
+            if gate == .full { SSHConnectionGate.shared.recordFailure(gateKey) }
+            throw TransportError.timeout(
+                seconds: timeout, partialStdout: captured.first ?? Data())
         }
-        let captured = pipeCapture.wait()
-        try? stdoutPipe.fileHandleForReading.close()
-        try? stderrPipe.fileHandleForReading.close()
-        try? stdinPipe.fileHandleForWriting.close()
+        let captured = drain.collect()
+        let capturedStdout = captured.first ?? Data()
+        let capturedStderr = captured.count > 1 ? captured[1] : Data()
         if gate == .full {
             // Exit 255 is ssh's own failure code (dial/auth/proxy); any
             // other exit means the remote actually ran our command, which
@@ -1146,7 +1147,7 @@ public struct SSHTransport: ServerTransport {
                 SSHConnectionGate.shared.recordSuccess(gateKey)
             }
         }
-        return ProcessResult(exitCode: proc.terminationStatus, stdout: captured.stdout, stderr: captured.stderr)
+        return ProcessResult(exitCode: proc.terminationStatus, stdout: capturedStdout, stderr: capturedStderr)
         #endif
     }
 }

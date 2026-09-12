@@ -40,7 +40,7 @@ struct HermesP35MCPTokenProbeTests {
         func createDirectory(_ path: String) throws { try inner.createDirectory(path) }
         func removeFile(_ path: String) throws { try inner.removeFile(path) }
         func runProcess(
-            executable: String, args: [String], stdin: Data?, timeout: TimeInterval?
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
         ) throws -> ProcessResult {
             try inner.runProcess(executable: executable, args: args, stdin: stdin, timeout: timeout)
         }

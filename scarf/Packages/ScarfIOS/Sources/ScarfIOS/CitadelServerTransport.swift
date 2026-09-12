@@ -141,7 +141,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         executable: String,
         args: [String],
         stdin: Data?,
-        timeout: TimeInterval?
+        timeout: TimeInterval
     ) throws -> ProcessResult {
         if stdin != nil {
             // Citadel's `executeCommand` doesn't accept stdin. None of
@@ -528,7 +528,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     private func asyncRunProcess(
         executable: String,
         args: [String],
-        timeout: TimeInterval?
+        timeout: TimeInterval
     ) async throws -> ProcessResult {
         let client = try await connectionHolder.ssh()
         // Citadel's raw exec channel doesn't source the user's shell rc
@@ -572,32 +572,57 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
                 stderr: Data(error.localizedDescription.utf8)
             )
         }
-        var stdout = Data()
-        var stderr = Data()
-        var exitCode: Int32 = 0
-        do {
-            for try await chunk in stream {
-                switch chunk {
-                case .stdout(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        stdout.append(Data(s.utf8))
+        // Race the drain against the caller's budget. `timeout` was accepted
+        // and then IGNORED here — the parameter was `TimeInterval?` and every
+        // arm of this function simply drained the stream to its end, so a
+        // remote that stopped producing (a wedged `hermes`, a half-open
+        // channel NIO has not yet failed) hung the iOS caller with no ceiling
+        // at all. C10 says every subprocess has a timeout and a remote exec
+        // is one. Same shape as `runScript` below (round-5 P48, decision 5).
+        return try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
+            group.addTask {
+                var stdout = Data()
+                var stderr = Data()
+                var exitCode: Int32 = 0
+                do {
+                    for try await chunk in stream {
+                        try Task.checkCancellation()
+                        switch chunk {
+                        case .stdout(var buf):
+                            if let s = buf.readString(length: buf.readableBytes) {
+                                stdout.append(Data(s.utf8))
+                            }
+                        case .stderr(var buf):
+                            if let s = buf.readString(length: buf.readableBytes) {
+                                stderr.append(Data(s.utf8))
+                            }
+                        }
                     }
-                case .stderr(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        stderr.append(Data(s.utf8))
-                    }
+                } catch let failed as SSHClient.CommandFailed {
+                    exitCode = Int32(failed.exitCode)
+                } catch is CancellationError {
+                    throw TransportError.timeout(seconds: timeout, partialStdout: stdout)
+                } catch {
+                    // Network / channel-level failure mid-stream — preserve any
+                    // partial output and report -1 so callers can distinguish
+                    // from a clean non-zero remote exit.
+                    stderr.append(Data(error.localizedDescription.utf8))
+                    exitCode = -1
                 }
+                return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
             }
-        } catch let failed as SSHClient.CommandFailed {
-            exitCode = Int32(failed.exitCode)
-        } catch {
-            // Network / channel-level failure mid-stream — preserve any
-            // partial output and report -1 so callers can distinguish
-            // from a clean non-zero remote exit.
-            stderr.append(Data(error.localizedDescription.utf8))
-            exitCode = -1
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            guard let first = try await group.next() else {
+                group.cancelAll()
+                throw TransportError.other(message: "SSH exec produced no result")
+            }
+            group.cancelAll()
+            if let result = first { return result }
+            throw TransportError.timeout(seconds: timeout, partialStdout: Data())
         }
-        return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
     // MARK: - Shell helpers

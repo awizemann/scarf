@@ -212,7 +212,7 @@ import Foundation
         func createDirectory(_ path: String) throws { try inner.createDirectory(path) }
         func removeFile(_ path: String) throws { try inner.removeFile(path) }
         func runProcess(
-            executable: String, args: [String], stdin: Data?, timeout: TimeInterval?
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
         ) throws -> ProcessResult {
             throw TransportError.other(message: "unused")
         }

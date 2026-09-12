@@ -53,7 +53,7 @@ private struct LocalSQLite3Transport: ServerTransport {
         try FileManager.default.removeItem(atPath: path)
     }
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         throw TransportError.other(message: "LocalSQLite3Transport.runProcess unused in tests")
     }
 
@@ -743,7 +743,7 @@ private struct RecordingTransport: ServerTransport {
     func listDirectory(_ path: String) throws -> [String] { [] }
     func createDirectory(_ path: String) throws {}
     func removeFile(_ path: String) throws {}
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         throw TransportError.other(message: "unused")
     }
     #if !os(iOS)

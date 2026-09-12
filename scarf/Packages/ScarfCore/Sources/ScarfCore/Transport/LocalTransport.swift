@@ -257,7 +257,7 @@ public struct LocalTransport: ServerTransport {
 
     // MARK: - Processes
 
-    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         #if os(iOS)
         // iOS can't spawn processes. Callers on iOS use `CitadelServerTransport`
         // (from the ScarfIOS package) instead; reaching here is a wiring bug.
@@ -279,23 +279,33 @@ public struct LocalTransport: ServerTransport {
         proc.environment = Self.subprocessEnvironment(forExecutable: executable)
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        let stdinPipe = Pipe()
+        // Created only when there is something to send. A `Pipe()` made for a
+        // caller that passes no stdin is two fds nobody ever closes: the read
+        // end was released on the `stdin != nil` arms only, so every
+        // stdin-less spawn leaked one for the life of the process, and a
+        // spawn that failed to LAUNCH leaked both (round-5 P48).
+        let stdinPipe: Pipe? = stdin != nil ? Pipe() : nil
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
-        if stdin != nil { proc.standardInput = stdinPipe }
-        let pipeCapture = ProcessPipeDrainer.start(
-            stdout: stdoutPipe.fileHandleForReading,
-            stderr: stderrPipe.fileHandleForReading
-        )
+        if let stdinPipe { proc.standardInput = stdinPipe }
+        // One drain primitive in the app, `ProcessPipeDrain` (round-5
+        // decision 4). The `ProcessPipeDrainer` that used to live here was a
+        // second implementation carrying both defects P43c had already fixed
+        // in this one: its `Capture.wait()` was an UNBOUNDED `group.wait()`,
+        // so an inherited write end (an ssh ControlMaster, a hermes worker)
+        // hung the timeout path forever after its budget was spent; and its
+        // readers sat on the fixed-width `.utility` global queue, where
+        // several piped spawns in flight park every thread and leave the next
+        // spawn's drain unscheduled.
+        let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
         do {
             try proc.run()
         } catch {
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
-            if stdin != nil {
-                try? stdinPipe.fileHandleForReading.close()
-            }
-            _ = pipeCapture.wait()
+            try? stdinPipe?.fileHandleForReading.close()
+            try? stdinPipe?.fileHandleForWriting.close()
+            _ = drain.collect()
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
         }
         // Parent has its own copy of every pipe end after fork. The child
@@ -303,38 +313,28 @@ public struct LocalTransport: ServerTransport {
         // reading end of stdin; the parent must close its own copies of
         // those so EOF reaches the parent's reader once the child exits
         // (otherwise the kernel keeps each fd open as long as any process
-        // holds a reference, and we leak fds).
+        // holds a reference, and we leak fds). The READ ends of stdout and
+        // stderr belong to the drain, which closes each one in the reader
+        // that drained it — closing them here would raise while a reader is
+        // still blocked on them.
         try? stdoutPipe.fileHandleForWriting.close()
         try? stderrPipe.fileHandleForWriting.close()
-        if stdin != nil {
-            try? stdinPipe.fileHandleForReading.close()
-        }
-        if let stdin {
+        try? stdinPipe?.fileHandleForReading.close()
+        if let stdin, let stdinPipe {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
             try? stdinPipe.fileHandleForWriting.close()
         }
-        // Timeout handling: poll every 100ms up to timeout, kill on overrun.
-        if let timeout {
-            let deadline = Date().addingTimeInterval(timeout)
-            while proc.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.1)
-            }
-            if proc.isRunning {
-                proc.terminate()
-                proc.waitUntilExit()
-                let captured = pipeCapture.wait()
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForReading.close()
-                throw TransportError.timeout(seconds: timeout, partialStdout: captured.stdout)
-            }
-        } else {
-            proc.waitUntilExit()
+        // Bounded, and bounded on the overrun arm too: `waitDraining` is
+        // `waitUntilExit(timeout:)`, i.e. poll → SIGTERM → bounded poll →
+        // pid-guarded SIGKILL → bounded poll, never a bare `waitUntilExit()`
+        // after `terminate()`.
+        let (exited, captured) = proc.waitDraining(timeout: timeout, drain: drain)
+        let capturedStdout = captured.first ?? Data()
+        let capturedStderr = captured.count > 1 ? captured[1] : Data()
+        if !exited {
+            throw TransportError.timeout(seconds: timeout, partialStdout: capturedStdout)
         }
-        let captured = pipeCapture.wait()
-        try? stdoutPipe.fileHandleForReading.close()
-        try? stderrPipe.fileHandleForReading.close()
-        try? stdinPipe.fileHandleForWriting.close()
-        return ProcessResult(exitCode: proc.terminationStatus, stdout: captured.stdout, stderr: captured.stderr)
+        return ProcessResult(exitCode: proc.terminationStatus, stdout: capturedStdout, stderr: capturedStderr)
         #endif
     }
 

@@ -64,11 +64,17 @@ public protocol ServerTransport: Sendable {
     /// Run a process to completion and capture its stdout/stderr. For remote
     /// transports this actually invokes `ssh host -- executable args…` under
     /// the hood; for local it spawns `executable` directly.
+    ///
+    /// `timeout` is REQUIRED. It was `TimeInterval?` and the `nil` arm of both
+    /// Mac conformers was a bare, unbounded `waitUntilExit()` — a latent C10
+    /// hole that no call site had to think about, because forgetting the
+    /// budget and asking for no budget looked the same at the seam. Making it
+    /// non-optional turns that into a compile error (round-5 decision 5).
     nonisolated func runProcess(
         executable: String,
         args: [String],
         stdin: Data?,
-        timeout: TimeInterval?
+        timeout: TimeInterval
     ) throws -> ProcessResult
 
     /// Return a `Process` configured for the target — already pointed at the
