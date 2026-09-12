@@ -100,6 +100,44 @@ struct TransportDrainP48Tests {
         (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
     }
 
+    /// The SMALLEST `/dev/fd` delta `body` produced across `trials` runs.
+    ///
+    /// `/dev/fd` is a PROCESS-global measure and `swift test` runs suites in
+    /// parallel, so a single before/after pair also counts whatever a
+    /// neighbouring suite's spawn happened to be holding across the window —
+    /// which is how the first version of these two tests failed twice in five
+    /// full runs with a delta of 16 against a threshold of 10 (round-5 P48b).
+    ///
+    /// The minimum of several trials separates the two signals rather than
+    /// widening the threshold until both fit. The leak under test is
+    /// DETERMINISTIC — one descriptor per spawn, so every trial pays +30 —
+    /// while a neighbour's descriptors are transient and will not be open
+    /// across all three windows. A widened threshold would have had to clear
+    /// the noise, which is the same size as the leak.
+    static func minimumFDDelta(trials: Int = 3, _ body: () -> Void) -> Int {
+        var smallest = Int.max
+        for _ in 0..<trials {
+            let before = openFDCount()
+            body()
+            smallest = min(smallest, openFDCount() - before)
+        }
+        return smallest
+    }
+
+    /// The `async` twin of ``minimumFDDelta(trials:_:)``, for the streaming
+    /// arms whose attempts are `await`ed.
+    static func minimumFDDelta(
+        trials: Int = 3, _ body: () async -> Void
+    ) async -> Int {
+        var smallest = Int.max
+        for _ in 0..<trials {
+            let before = openFDCount()
+            await body()
+            smallest = min(smallest, openFDCount() - before)
+        }
+        return smallest
+    }
+
     /// **The audit's fd-leak finding was wrong, and this test says so rather
     /// than pretending otherwise.**
     ///
@@ -123,15 +161,15 @@ struct TransportDrainP48Tests {
         // Warm up: the first spawn allocates one-time machinery.
         _ = try transport.runProcess(
             executable: "/bin/echo", args: ["warm"], stdin: nil, timeout: 10)
-        let before = Self.openFDCount()
-        for _ in 0..<30 {
-            _ = try transport.runProcess(
-                executable: "/bin/echo", args: ["hi"], stdin: nil, timeout: 10)
+        let delta = Self.minimumFDDelta {
+            for _ in 0..<30 {
+                _ = try? transport.runProcess(
+                    executable: "/bin/echo", args: ["hi"], stdin: nil, timeout: 10)
+            }
         }
-        let after = Self.openFDCount()
-        // 30 spawns × 1 leaked read end = +30 against the old code; a couple
-        // of descriptors of slack for unrelated machinery.
-        #expect(after - before < 10, "fd count went \(before) → \(after)")
+        // 30 spawns × 1 leaked read end = +30 per trial against the old code;
+        // a couple of descriptors of slack for unrelated machinery.
+        #expect(delta < 10, "smallest fd delta over three trials was \(delta)")
     }
 
     /// The launch-failure arm. See the note above: this passes against the
@@ -142,17 +180,17 @@ struct TransportDrainP48Tests {
         let transport = LocalTransport()
         _ = try? transport.runProcess(
             executable: "/nonexistent/warm", args: [], stdin: Data("x".utf8), timeout: 10)
-        let before = Self.openFDCount()
-        for _ in 0..<30 {
-            _ = try? transport.runProcess(
-                executable: "/nonexistent/binary",
-                args: [],
-                stdin: Data("payload".utf8),
-                timeout: 10
-            )
+        let delta = Self.minimumFDDelta {
+            for _ in 0..<30 {
+                _ = try? transport.runProcess(
+                    executable: "/nonexistent/binary",
+                    args: [],
+                    stdin: Data("payload".utf8),
+                    timeout: 10
+                )
+            }
         }
-        let after = Self.openFDCount()
-        #expect(after - before < 10, "fd count went \(before) → \(after)")
+        #expect(delta < 10, "smallest fd delta over three trials was \(delta)")
     }
 
     /// Stdin still reaches the child — the pipe became conditional, and a
@@ -420,11 +458,16 @@ struct LaunchFailureLeakP48Tests {
             } catch {}
         }
         await attempt()
-        let before = TransportDrainP48Tests.openFDCount()
-        for _ in 0..<20 { await attempt() }
-        let after = TransportDrainP48Tests.openFDCount()
-        // 20 attempts × 2 streams × 4 ends = 160 against the old code.
-        #expect(after - before < 10, "fd count went \(before) → \(after)")
+        // Three trials, smallest delta: `/dev/fd` is process-global and the
+        // suites run in parallel, so one before/after pair also counts a
+        // neighbour's in-flight spawn — see `minimumFDDelta` (round-5 P48b).
+        let delta = await TransportDrainP48Tests.minimumFDDelta {
+            for _ in 0..<20 { await attempt() }
+        }
+        // 20 attempts × 2 streams × 4 ends = 160 per trial against the old
+        // code.
+        #expect(delta < 10, "smallest fd delta over three trials was \(delta)")
     }
 }
 #endif
+
