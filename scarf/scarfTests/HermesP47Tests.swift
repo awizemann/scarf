@@ -6,11 +6,14 @@ import ScarfCore
 // MARK: - P47 / round-5 decision 1: the Plugins pane under the managed lock
 
 /// Decision 1 folds this pane's half of `t-8f55df7d`. Activation is a config
-/// write — `cmd_enable` / `cmd_disable` reach `_set_plugin_enabled` →
-/// `_write_config_value` → `save_config` (`hermes_cli/plugins_cmd.py:944`,
-/// `:115-120`), whose managed arm refuses at exit 0 and lets the caller print
-/// its success line anyway (`hermes_cli/config.py:2315-2318` @ `v2026.9.7`) —
-/// so on a managed host every Enable/Disable click ended in the same refusal.
+/// write — `cmd_enable` (`hermes_cli/plugins_cmd.py:987`) and `cmd_disable`
+/// (`:1182`) call `_save_plugin_sets` (`:1022`, `:1196`) → `_save_enabled_set`
+/// / `_save_disabled_set` (`:910`, `:906`) → `_write_config_value`
+/// (`:115-120`) → `save_config`, whose managed arm refuses at exit 0 and lets
+/// the caller print its success line anyway (`hermes_cli/config.py:2315-2318`
+/// @ `v2026.9.7`) — so on a managed host every Enable/Disable click ended in
+/// the same refusal. (`_set_plugin_enabled`, `:944`, is a sibling caller of
+/// the same door, not a link in this chain — P47b review, finding 2.)
 @Suite("P47 · the Plugins managed lock")
 struct PluginsManagedLockP47Tests {
 
@@ -282,6 +285,8 @@ struct CatalogueCoverageP47Tests {
         "There was no stored auth state for this provider.",
         "There were no memory files to reset.",
         "Optimize failed. %@",
+        // P47b finding 1.
+        "hermes sessions optimize printed no result. Check the host.",
     ])
     func theNewStringsAreInTheCatalogueInAllSixLocales(_ key: String) throws {
         let url = PluginsManagedLockP47Tests.repoRoot
@@ -294,5 +299,121 @@ struct CatalogueCoverageP47Tests {
         for locale in ["de", "es", "fr", "ja", "pt-BR", "zh-Hans"] {
             #expect(locs[locale] != nil, "\(key) is missing \(locale)")
         }
+    }
+}
+
+// MARK: - P47b: the review of P47's two commits
+
+/// Finding 1. `HermesSessionsOptimizeVerdict` has three states, and the strip
+/// had two branches for them: a `.unconfirmed` run (exit 0, neither
+/// `Optimized {n} FTS index(es).` at `hermes_cli/sessions_cmd.py:817` nor
+/// `Error: optimization failed:` at `:815`) fell into the failure arm, which
+/// rendered `"Optimize failed. "` with an empty tail when the run printed
+/// nothing at all. The memory-reset sites already say Hermes printed no
+/// result; this one does now too.
+@Suite("P47b · the sessions optimize strip")
+struct SessionsOptimizeStripP47bTests {
+
+    @MainActor @Test func aSilentExitZeroRunSaysHermesPrintedNoResult() {
+        let outcome = HermesSessionsOptimizeVerdict.judge(output: "", exitCode: 0)
+        #expect(outcome.confidence == .unconfirmed)
+        let message = HealthViewModel.sessionsOptimizeSummary(
+            outcome: outcome, exitCode: 0, trimmed: ""
+        )
+        #expect(message == "hermes sessions optimize printed no result. Check the host.")
+        #expect(message.contains("Optimize failed") == false)
+    }
+
+    /// The unrecognised-output shape: exit 0 with a line the verdict does not
+    /// know. Still `.unconfirmed`, so still not a failure.
+    @MainActor @Test func anUnrecognisedExitZeroRunIsNotCalledAFailure() {
+        let output = "Nothing to do.\n"
+        let outcome = HermesSessionsOptimizeVerdict.judge(output: output, exitCode: 0)
+        #expect(outcome.confidence == .unconfirmed)
+        let message = HealthViewModel.sessionsOptimizeSummary(
+            outcome: outcome, exitCode: 0,
+            trimmed: output.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        #expect(message.contains("Optimize failed") == false)
+    }
+
+    /// The real exit-0 failure — `Error: optimization failed: {e}` (`:815`) —
+    /// still quotes Hermes's own reason line. That is the P47 fix and it
+    /// stays.
+    @MainActor @Test func theExitZeroRefusalStillQuotesItsReasonLine() {
+        let output = """
+        Optimizing session store (FTS merge + VACUUM)…
+        Error: optimization failed: database is locked
+        """
+        let outcome = HermesSessionsOptimizeVerdict.judge(output: output, exitCode: 0)
+        #expect(outcome.confidence == .failed)
+        let message = HealthViewModel.sessionsOptimizeSummary(
+            outcome: outcome, exitCode: 0,
+            trimmed: output.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        #expect(message.contains("Optimize failed."))
+        #expect(message.contains("database is locked"))
+    }
+
+    /// C1: the success and non-zero-exit arms are untouched.
+    @MainActor @Test func theSuccessAndNonZeroArmsAreUnchanged() {
+        let ok = "Optimized 3 FTS index(es)."
+        let okOutcome = HermesSessionsOptimizeVerdict.judge(output: ok, exitCode: 0)
+        #expect(HealthViewModel.sessionsOptimizeSummary(
+            outcome: okOutcome, exitCode: 0, trimmed: ok
+        ) == ok)
+        let bad = "Traceback…"
+        let badOutcome = HermesSessionsOptimizeVerdict.judge(output: bad, exitCode: 2)
+        #expect(HealthViewModel.sessionsOptimizeSummary(
+            outcome: badOutcome, exitCode: 2, trimmed: bad
+        ).contains("exit 2"))
+    }
+}
+
+/// Finding 5. Two sibling `.alert`s on one view is a SwiftUI coin-toss when
+/// both fire; the reset's failure and its decision-3 neutral note are
+/// mutually exclusive, so they are one enum-driven alert.
+@Suite("P47b · the memory reset alert")
+struct MemoryResetAlertP47bTests {
+
+    @Test func theMemoryPaneRaisesExactlyOneResetAlert() throws {
+        let source = try PluginsManagedLockP47Tests
+            .source("scarf/Features/Memory/Views/MemoryView.swift")
+        #expect(source.components(separatedBy: ".alert(").count - 1 == 1)
+        #expect(source.contains("resetAlert: ResetAlert?"))
+        // The two @State strings the stacked alerts were driven by are gone.
+        #expect(source.contains("resetError") == false)
+        #expect(source.contains("resetNote") == false)
+    }
+}
+
+/// Findings 2, 3 and 4 — the citations P47 wrote that the tagged source does
+/// not support. Each was re-opened at `v2026.9.7`.
+@Suite("P47b · the corrected citations")
+struct CorrectedCitationsP47bTests {
+
+    /// Finding 2: `cmd_enable` (`plugins_cmd.py:987`) and `cmd_disable`
+    /// (`:1182`) call `_save_plugin_sets` directly (`:1022`, `:1196`);
+    /// `_set_plugin_enabled` (`:944`) is a sibling caller, not a link.
+    @Test(arguments: [
+        "scarf/Features/Plugins/ViewModels/PluginsViewModel.swift",
+    ])
+    func theActivationChainNamesSavePluginSets(_ relative: String) throws {
+        let source = try PluginsManagedLockP47Tests.source(relative)
+        #expect(source.contains("_save_plugin_sets"))
+        #expect(source.contains("`cmd_enable` / `cmd_disable` reach\n    /// `_set_plugin_enabled`") == false)
+    }
+
+    /// Finding 3: `cmd_update` DOES reach `save_config`, through
+    /// `_rescan_after_update` (`:810`) → `_set_plugin_enabled(name,
+    /// enable=False)` (`:847`) on a dangerous verdict — the rationale that
+    /// only `_set_plugin_enabled` reaches it (and by implication that Update
+    /// is config-write-free) was false. The verdict, not the lock, catches it.
+    @Test func theUpdateRationaleNoLongerClaimsNoConfigWrite() throws {
+        let source = try PluginsManagedLockP47Tests
+            .source("scarf/Features/Plugins/ViewModels/PluginsViewModel.swift")
+        #expect(source.contains("only\n    /// `_set_plugin_enabled` reaches `save_config`") == false)
+        #expect(source.contains("_rescan_after_update"))
+        #expect(source.contains("HermesPluginsUpdateVerdict/judge"))
     }
 }

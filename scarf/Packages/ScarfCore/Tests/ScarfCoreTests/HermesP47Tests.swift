@@ -58,10 +58,14 @@ struct PluginInstallRefusalP47Tests {
         #expect(outcome.configWriteRefusal == nil)
     }
 
-    /// The P39b/P39c rule: the marker is ANCHORED. `cmd_install` echoes the
-    /// plugin's own `after-install.md` through `_display_after_install`
-    /// (`plugins_cmd.py:749`), so a plugin whose README says "Cannot set the
-    /// key yourself" mid-sentence must not read as a refusal.
+    /// The P39b/P39c rule: the marker is ANCHORED. `cmd_install` prints text
+    /// Hermes does not author at column 0 — the `[dim]` community-index lines
+    /// echo the entry's own `ref` and `install_identifier`
+    /// (`plugins_cmd.py:694-697` @ `v2026.9.7`) — so a line that says "Cannot
+    /// set the key yourself" mid-sentence must not read as a refusal. (The
+    /// plugin's `after-install.md` reaches stdout inside a rich `Panel`,
+    /// `_display_after_install` `:391-404`, so it is already behind a `│`;
+    /// P47b review, finding 4.)
     @Test func aMidSentenceCannotIsNotARefusal() {
         let outcome = HermesPluginInstallOutcome.parse("""
         ✓ Installed widget
@@ -72,15 +76,24 @@ struct PluginInstallRefusalP47Tests {
         #expect(outcome.configWriteRefusal == nil)
     }
 
-    /// Every anchored spelling `format_managed_message` can produce reaches
-    /// this door, and the leading `✗`/`⚠` glyph must not hide it
-    /// (`HermesCLIVerdict.unglyphed`).
+    /// Breadth by CHOICE, not a reachability claim. The only managed line
+    /// `cmd_install` can actually print is `Cannot save configuration: …` —
+    /// `save_config`'s arm (`hermes_cli/config.py:2317`) calling
+    /// `managed_error("save configuration")` (`:453-455`) →
+    /// `format_managed_message` (`:445-450`). The `set`/`unset` spellings come
+    /// from other verbs' calls to the same formatter and are pinned here
+    /// because ``HermesCLIMarkers/managedRefusalAnchored`` is one SHARED
+    /// marker list: a door added to it later must land on this path too. What
+    /// this test guarantees is the shared list's behaviour and that the
+    /// leading `✗`/`⚠` glyph never hides a marker
+    /// (`HermesCLIVerdict.unglyphed`) — not that Hermes emits all three here
+    /// (P47b review, finding 4).
     @Test(arguments: [
         "Cannot save configuration: managed by home-manager.",
         "✗ Cannot set plugins.enabled: it is managed by your administrator.",
         "⚠ Cannot unset plugins.disabled: managed install.",
     ])
-    func everyAnchoredRefusalSpellingLands(_ line: String) {
+    func everySharedRefusalMarkerLandsOnThisDoor(_ line: String) {
         let outcome = HermesPluginInstallOutcome.parse("""
         ✓ Installed widget
         \(line)

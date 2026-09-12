@@ -54,11 +54,17 @@ final class PluginsViewModel: OutcomeMessageHosting {
     ///
     /// P47 / round-5 decision 1 — the Plugins pane is the second surface
     /// under the read-only lock (`t-8f55df7d`, this pane's half). Activation
-    /// is a config write: `cmd_enable` / `cmd_disable` reach
-    /// `_set_plugin_enabled` → `_write_config_value` → `save_config`
-    /// (`hermes_cli/plugins_cmd.py:944`, `:115-120`), whose managed arm
-    /// refuses at exit 0 and lets the caller print its success line anyway
-    /// (`hermes_cli/config.py:2315-2318` @ `v2026.9.7`).
+    /// is a config write: `cmd_enable` (`hermes_cli/plugins_cmd.py:987`) and
+    /// `cmd_disable` (`:1182`) call `_save_plugin_sets` directly (`:1022`,
+    /// `:1196`) → `_save_enabled_set` / `_save_disabled_set` (`:910`, `:906`)
+    /// → `_write_config_value` (`:115-120`) → `save_config`, whose managed
+    /// arm refuses at exit 0 and lets the caller print its success line
+    /// anyway (`hermes_cli/config.py:2315-2318` @ `v2026.9.7`).
+    /// `_set_plugin_enabled` (`:944`) is a SIBLING caller of the same door,
+    /// reached from `cmd_install` (`:754`), `_rescan_after_update` (`:847`)
+    /// and the dashboard APIs (`:1711`, `:1786`) — the door is
+    /// `_save_plugin_sets` (`:914-916`), not any one of its callers
+    /// (P47b review, finding 2).
     ///
     /// `.notManaged` until the probe lands, so the pane renders writable and
     /// then locks — never the reverse flash. A host WITHOUT the marker file
@@ -94,8 +100,17 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// Update and Remove write the plugin DIRECTORY
     /// (`_install_plugin_core`, `_remove_plugin_core`, the `git pull` in
     /// `cmd_update` — `hermes_cli/plugins_cmd.py:740`, `:893`, `:794-830` @
-    /// `v2026.9.7`), which `is_managed()` never guards; only
-    /// `_set_plugin_enabled` reaches `save_config`. Locking a control Hermes
+    /// `v2026.9.7`), which `is_managed()` never guards, and those directory
+    /// writes are the whole of what the three verbs do on their own account.
+    /// They are not `save_config`-free: `cmd_update` (`:794`) →
+    /// `_rescan_after_update` (`:810`) → `_set_plugin_enabled(name,
+    /// enable=False)` (`:847`) on a `dangerous` scan verdict, and it prints
+    /// `Plugin '<name>' has been disabled.` (`:848-851`) whether or not the
+    /// write landed. That refusal is caught by the VERDICT
+    /// (``HermesPluginsUpdateVerdict/judge``, whose `managedRefusalAnchored`
+    /// match wins over the success line), not by the lock — P47's rationale
+    /// that "only `_set_plugin_enabled` reaches `save_config`" was false
+    /// (P47b review, finding 3). Locking a control Hermes
     /// would honour is the round-4-review mistake in reverse, and a managed
     /// host has more reason to manage its plugin directory, not less. What
     /// the lock covers: the Enable/Disable buttons and the install sheet's

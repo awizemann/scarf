@@ -42022,6 +42022,46 @@
         }
       }
     },
+    "hermes sessions optimize printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes sessions optimize` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "Hermes stopped" : {
       "comment" : "A description of the Hermes service status.",
       "extractionState" : "stale",

@@ -903,24 +903,47 @@ final class HealthViewModel {
                 let outcome = HermesSessionsOptimizeVerdict.judge(
                     output: result.output, exitCode: result.exitCode
                 )
-                if outcome.succeeded {
-                    // Prefer a concise tail of the output (the summary line)
-                    // over the full report — the panel-less inline strip is short.
-                    let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
-                } else if result.exitCode != 0 {
-                    let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = String(localized: "Optimize failed (exit \(result.exitCode)). \(tail)")
-                } else {
-                    // Exit 0 and no success line: quoting "(exit 0)" here
-                    // would be the old bug in a new voice. Hermes's own
-                    // reason line is the whole message.
-                    self.sessionsOptimizeMessage = String(
-                        localized: "Optimize failed. \(outcome.detail ?? trimmed)"
-                    )
-                }
+                self.sessionsOptimizeMessage = Self.sessionsOptimizeSummary(
+                    outcome: outcome, exitCode: result.exitCode, trimmed: trimmed
+                )
             }
         }
+    }
+
+    /// The one place the `sessions optimize` strip's text is decided, lifted
+    /// out of the detached hop so it can be exercised without a live host.
+    ///
+    /// Three answers, not two — the verdict has three states (P47b review,
+    /// finding 1). A `.unconfirmed` run is exit 0 with neither
+    /// `Optimized {n} FTS index(es).` (`hermes_cli/sessions_cmd.py:817` @
+    /// `v2026.9.7`) nor `Error: optimization failed:` (`:815`): the verdict
+    /// has just declared the status meaningless, so naming it would be the
+    /// original bug in a new voice, and where the run printed nothing at all
+    /// `"Optimize failed. "` with an empty tail said less than nothing. It
+    /// says Hermes printed no result instead — the same sentence both
+    /// memory-reset sites give (`MemoryView`, iOS `MemoryListView`).
+    static func sessionsOptimizeSummary(
+        outcome: HermesCLIOutcome, exitCode: Int32, trimmed: String
+    ) -> String {
+        if outcome.succeeded {
+            // Prefer a concise tail of the output (the summary line)
+            // over the full report — the panel-less inline strip is short.
+            let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
+            return tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
+        }
+        if exitCode != 0 {
+            let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
+            return String(localized: "Optimize failed (exit \(exitCode)). \(tail)")
+        }
+        // Exit 0 and no success line: quoting "(exit 0)" here would be the
+        // old bug in a new voice. A `.failed` verdict at exit 0 matched
+        // `Error: optimization failed:` — Hermes's own reason line is the
+        // whole message. `.unconfirmed` matched neither marker, so there is
+        // no failure to report and nothing recognisable to quote.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty else {
+            return String(localized: "hermes sessions optimize printed no result. Check the host.")
+        }
+        return String(localized: "Optimize failed. \(detail)")
     }
 
     /// Run `hermes migrate xai --apply` (v0.15) off MainActor to move a retired

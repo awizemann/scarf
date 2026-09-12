@@ -10,12 +10,16 @@ import ScarfDesign
 struct MemoryView: View {
     @State private var viewModel: MemoryViewModel
     @State private var showResetConfirm: Bool = false
-    @State private var resetError: String?
-    /// P47 / round-5 decision 3: the neutral note a reset with nothing to
-    /// reset carries. A success, so it does NOT go through `resetError`'s
-    /// "Couldn't reset memory" alert — the user asked for the memory to be
-    /// empty and it is. Nil on a reset that actually erased files.
-    @State private var resetNote: String?
+    /// The ONE alert the reset raises, in whichever of its two voices.
+    ///
+    /// P47 / round-5 decision 3 gave the reset a neutral note (a success, so
+    /// it must not wear the failure alert's "Couldn't reset memory" title),
+    /// and P47 stacked a second sibling `.alert` on this view to carry it.
+    /// The two are mutually exclusive by construction — one branch of one
+    /// `if` sets each — and stacked alerts on a single view are a SwiftUI
+    /// coin-toss when both fire, so they are one enum-driven alert here
+    /// (P47b review, finding 5). Nil when the reset has nothing to say.
+    @State private var resetAlert: ResetAlert?
     /// True while `hermes memory reset` is running; the destructive button
     /// disables on it so the state transition renders.
     @State private var isResetting = false
@@ -101,21 +105,46 @@ struct MemoryView: View {
         } message: {
             Text("Wipes MEMORY.md and USER.md to empty via `hermes memory reset --yes`. The agent's accumulated knowledge for this server is gone immediately. Use this when a session went off the rails — there's no undo.")
         }
-        .alert("Couldn't reset memory", isPresented: Binding(
-            get: { resetError != nil },
-            set: { if !$0 { resetError = nil } }
-        )) {
-            Button("OK") { resetError = nil }
-        } message: {
-            Text(resetError ?? "")
+        .alert(
+            resetAlert?.title ?? Text(verbatim: ""),
+            isPresented: Binding(
+                get: { resetAlert != nil },
+                set: { if !$0 { resetAlert = nil } }
+            ),
+            presenting: resetAlert
+        ) { _ in
+            Button("OK") { resetAlert = nil }
+        } message: { alert in
+            Text(alert.detail)
         }
-        .alert("Memory reset", isPresented: Binding(
-            get: { resetNote != nil },
-            set: { if !$0 { resetNote = nil } }
-        )) {
-            Button("OK") { resetNote = nil }
-        } message: {
-            Text(resetNote ?? "")
+    }
+
+    /// The two voices of the reset's one alert: a failure (or a run whose
+    /// result Scarf does not recognise) and decision 3's neutral
+    /// nothing-to-reset note, which is a SUCCESS and must not be titled as a
+    /// failure.
+    private enum ResetAlert: Identifiable {
+        case failure(String)
+        case note(String)
+
+        var id: String {
+            switch self {
+            case .failure(let detail): "failure:\(detail)"
+            case .note(let detail): "note:\(detail)"
+            }
+        }
+
+        var title: Text {
+            switch self {
+            case .failure: Text("Couldn't reset memory")
+            case .note: Text("Memory reset")
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .failure(let detail), .note(let detail): detail
+            }
         }
     }
 
@@ -571,7 +600,7 @@ struct MemoryView: View {
                 output: result.output, exitCode: result.exitCode
             )
             if outcome.succeeded {
-                resetNote = outcome.warning
+                resetAlert = outcome.warning.map { .note($0) }
                 // Only AFTER the reset has actually happened — a load issued
                 // before it returned would have re-published the pre-reset
                 // text and made a successful wipe look like a no-op.
@@ -581,9 +610,9 @@ struct MemoryView: View {
                 // printed neither marker is `.unconfirmed`, and "status 0"
                 // would be the old bug in a new voice — say that Hermes
                 // printed nothing this side recognises instead.
-                resetError = outcome.detail ?? (result.exitCode != 0
+                resetAlert = .failure(outcome.detail ?? (result.exitCode != 0
                     ? "hermes memory reset exited with status \(result.exitCode)."
-                    : "hermes memory reset printed no result. Check the host.")
+                    : "hermes memory reset printed no result. Check the host."))
             }
         }
     }

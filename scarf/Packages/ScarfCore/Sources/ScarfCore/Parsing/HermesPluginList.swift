@@ -268,9 +268,12 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     ///
     /// Matched with ``HermesCLIMarkers/managedRefusalAnchored`` — anchored at
     /// column 0 after glyph-stripping, never as a bare substring, because
-    /// `cmd_install` echoes text Hermes does not author (the resolved install
-    /// identifier, `:694-697`, and the plugin's own `after-install.md`
-    /// through `_display_after_install`, `:749`).
+    /// `cmd_install` echoes text Hermes does not author at column 0: the
+    /// `[dim]` community-index lines carry the entry's own `ref` and
+    /// `install_identifier` straight through (`:694-697`). The plugin's
+    /// `after-install.md` is NOT that hazard — `_display_after_install`
+    /// (`:391-404`) renders it inside a rich `Panel`, so every line of it
+    /// arrives behind a `│` and could never anchor (P47b review, finding 4).
     public let configWriteRefusal: String?
 
     public init(
