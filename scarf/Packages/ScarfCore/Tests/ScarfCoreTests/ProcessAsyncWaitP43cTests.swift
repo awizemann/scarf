@@ -8,13 +8,23 @@ import Testing
 /// reachable from an `async` function, and `ProcessPipeDrain.collect` must be
 /// a latch rather than a check-then-set.
 ///
-/// **Scope** (narrowed in P46). This suite proves a syntactic property about
+/// **Scope** (narrowed in P46, widened in P48). This suite matches
 /// ``blockingSpellings`` — `waitUntilExit(timeout:`, `.waitDraining(`,
-/// `waitUntilExit()` — called directly from an `async` function body. It does
-/// NOT prove that nothing in ScarfCore blocks a cooperative thread: a
-/// synchronous helper that itself blocks, called from `async` code, is
-/// invisible to it. `LocalTransport.runProcess` and `SSHTransport.runLocal`
-/// are exactly that shape and are on this branch today.
+/// `waitUntilExit()` — reached from `async` code three ways: called directly
+/// in an `async` function body; called inside a `Task.detached { … }` or
+/// `Task { … }` closure, which is the same cooperative pool and so the same
+/// hazard under a different label; and called by a SYNCHRONOUS helper
+/// declared in the same file that an `async` function in that file calls —
+/// one level of indirection, which is where `LocalTransport.runProcess` and
+/// `SSHTransport.runLocal` hid until round-5 P48 retired their unbounded
+/// arms.
+///
+/// It still does not follow a call ACROSS files, and it is still syntactic.
+/// What it buys is that the three shapes a phase has actually shipped are
+/// each red on sight.
+///
+/// **Two roots** since P48: `Sources/ScarfCore` and the Mac app target
+/// `scarf/scarf`, whose five sites were `t-12d04477`.
 ///
 /// `Process.waitUntilExit(timeout:)` is a `Thread.sleep` poll loop. On a
 /// cooperative-pool thread that is not slow, it is *stolen*: the pool has one
@@ -107,6 +117,159 @@ struct ProcessAsyncWaitP43cTests {
     /// inside an `async` function is still flagged, via its parent's body,
     /// which is right: it runs on the same stolen thread.
     static func blockingCallsInAsyncFunctions(in source: String) -> [String] {
+        var findings = declarationHits(in: source)
+        findings.append(contentsOf: detachedClosureHits(in: source))
+        findings.append(contentsOf: indirectHits(in: source))
+        return findings
+    }
+
+    /// A blocking spelling inside a `Task.detached { … }` or `Task { … }`
+    /// closure.
+    ///
+    /// `Task.detached` does not move a block off the cooperative pool — it IS
+    /// the cooperative pool (round-4 P43c). The declaration walk cannot see
+    /// this at all when the enclosing `func` is synchronous, which is exactly
+    /// how all five app-target sites in `t-12d04477` stayed invisible: each
+    /// sat in a `Task.detached` closure inside an ordinary `func`.
+    static func detachedClosureHits(in source: String) -> [String] {
+        let text = Array(stripped(source))
+        var findings: [String] = []
+        var i = 0
+        while i + 4 < text.count {
+            guard text[i] == "T",
+                  String(text[i..<min(i + 4, text.count)]) == "Task",
+                  (i == 0 || !(text[i - 1].isLetter || text[i - 1].isNumber || text[i - 1] == "_"))
+            else { i += 1; continue }
+            // Read forward to the `{` that opens the closure, allowing
+            // `.detached`, a `(priority:)` argument list, and whitespace.
+            var j = i + 4
+            var parens = 0
+            var bodyStart: Int?
+            var sawOnlyAllowed = true
+            while j < text.count {
+                let c = text[j]
+                if c == "(" { parens += 1; j += 1; continue }
+                if c == ")" { parens -= 1; j += 1; continue }
+                if c == "{", parens == 0 { bodyStart = j; break }
+                if parens == 0, !(c.isWhitespace || c == "." || c.isLetter || c.isNumber || c == "_" || c == ":") {
+                    sawOnlyAllowed = false
+                    break
+                }
+                j += 1
+            }
+            guard sawOnlyAllowed, let start = bodyStart else { i += 4; continue }
+            var depth = 0
+            var k = start
+            var body = ""
+            while k < text.count {
+                if text[k] == "{" { depth += 1 }
+                if text[k] == "}" {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+                body.append(text[k])
+                k += 1
+            }
+            for spelling in blockingSpellings where body.contains(spelling) {
+                findings.append("Task closure: \(spelling)")
+            }
+            i = start + 1
+        }
+        return findings
+    }
+
+    /// One level of indirection: an `async` function in this file calls a
+    /// SYNCHRONOUS function declared in the same file whose body blocks.
+    ///
+    /// This is the shape P46 narrowed the suite's claim over and filed as
+    /// `t-10eb7c17` item 0 — `LocalTransport.runProcess` and
+    /// `SSHTransport.runLocal`, both synchronous, both blocking, both called
+    /// from `async` code. One level, same file: following further would need
+    /// a real call graph, and the two shapes that actually shipped are both
+    /// reachable at this depth.
+    static func indirectHits(in source: String) -> [String] {
+        let decls = declarations(in: source)
+        // Synchronous declarations whose own body blocks.
+        var blockingSync: [String: String] = [:]
+        for decl in decls where !decl.isAsync {
+            for spelling in blockingSpellings where decl.body.contains(spelling) {
+                blockingSync[decl.name] = spelling
+            }
+        }
+        guard !blockingSync.isEmpty else { return [] }
+        var findings: [String] = []
+        for decl in decls where decl.isAsync {
+            for (callee, spelling) in blockingSync where decl.body.contains(callee + "(") {
+                findings.append("\(decl.name) -> \(callee): \(spelling)")
+            }
+        }
+        return findings
+    }
+
+    /// One parsed function declaration.
+    struct Declaration {
+        let name: String
+        let isAsync: Bool
+        let body: String
+    }
+
+    /// Every `func` declaration in `source`, with its body.
+    static func declarations(in source: String) -> [Declaration] {
+        let text = Array(stripped(source))
+        var out: [Declaration] = []
+        var i = 0
+        while i < text.count {
+            guard text[i] == "f",
+                  i + 4 < text.count,
+                  String(text[i..<(i + 4)]) == "func",
+                  (i == 0 || !(text[i - 1].isLetter || text[i - 1].isNumber || text[i - 1] == "_")),
+                  !(text[i + 4].isLetter || text[i + 4].isNumber || text[i + 4] == "_")
+            else { i += 1; continue }
+
+            var j = i + 4
+            var parens = 0
+            var angle = 0
+            var signature = ""
+            var bodyStart: Int?
+            while j < text.count {
+                let c = text[j]
+                if c == "(" { parens += 1 }
+                if c == ")" { parens -= 1 }
+                if c == "<" { angle += 1 }
+                if c == ">" { angle = max(0, angle - 1) }
+                if c == "{", parens == 0, angle == 0 { bodyStart = j; break }
+                if c == ";" { break }
+                signature.append(c)
+                j += 1
+            }
+            guard let start = bodyStart else { i += 4; continue }
+
+            var depth = 0
+            var k = start
+            var body = ""
+            while k < text.count {
+                if text[k] == "{" { depth += 1 }
+                if text[k] == "}" {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+                body.append(text[k])
+                k += 1
+            }
+            let name = String(signature
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(while: { $0 != "(" && $0 != "<" }))
+            let isAsync = signature.contains(" async ") || signature.contains(" async\n")
+                || signature.contains(" async-> ") || signature.contains("async ->")
+            out.append(Declaration(name: name, isAsync: isAsync, body: body))
+            i = start + 1
+        }
+        return out
+    }
+
+    /// The original P43c walk: a blocking spelling directly in an `async`
+    /// function's body.
+    static func declarationHits(in source: String) -> [String] {
         let text = Array(stripped(source))
         var findings: [String] = []
         var i = 0
@@ -212,6 +375,55 @@ struct ProcessAsyncWaitP43cTests {
             }
             """#).isEmpty, "a string literal quoting the helper is not a call")
 
+        // P48's two added shapes — hits.
+        #expect(!Self.blockingCallsInAsyncFunctions(in: """
+            func ordinary() {
+                Task.detached {
+                    _ = proc.waitUntilExit(timeout: 20)
+                }
+            }
+            """).isEmpty, "a Task.detached closure is the same cooperative pool")
+        #expect(!Self.blockingCallsInAsyncFunctions(in: """
+            func ordinary() {
+                Task {
+                    _ = proc.waitDraining(timeout: 5, pipes: [a])
+                }
+            }
+            """).isEmpty, "a Task closure is the same cooperative pool")
+        #expect(!Self.blockingCallsInAsyncFunctions(in: """
+            func helper() throws -> Int {
+                _ = proc.waitUntilExit(timeout: 5)
+                return 1
+            }
+            func caller() async throws -> Int {
+                return try helper()
+            }
+            """).isEmpty, "one level of synchronous indirection is still the caller's thread")
+
+        // P48's two added shapes — near-misses.
+        #expect(Self.blockingCallsInAsyncFunctions(in: """
+            func ordinary() {
+                Task.detached {
+                    _ = await proc.waitDrainingAsync(timeout: 5, pipes: [a])
+                }
+            }
+            """).isEmpty, "the async form inside a Task closure is correct")
+        #expect(Self.blockingCallsInAsyncFunctions(in: """
+            func helper() throws -> Int { return 1 }
+            func caller() async throws -> Int { return try helper() }
+            """).isEmpty, "a synchronous helper that does not block is not a hit")
+        #expect(Self.blockingCallsInAsyncFunctions(in: """
+            func helper() throws -> Int {
+                _ = proc.waitUntilExit(timeout: 5)
+                return 1
+            }
+            func other() throws -> Int { return try helper() }
+            """).isEmpty, "a blocking helper called only from synchronous code is fine")
+        #expect(Self.blockingCallsInAsyncFunctions(in: """
+            let task = Task.detached { await work() }
+            func unrelated() { _ = proc.waitUntilExit(timeout: 5) }
+            """).isEmpty, "a blocking call OUTSIDE the closure is not a closure hit")
+
         // The stripper does not eat code.
         let kept = Self.stripped("let u = \"https://x/y\" // note\nlet n = 1\n")
         #expect(kept.contains("let n = 1"))
@@ -220,49 +432,101 @@ struct ProcessAsyncWaitP43cTests {
 
     // MARK: - The sweep
 
-    static var scarfCoreSources: URL {
+    static var repoRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // ScarfCoreTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // ScarfCore
-            .appendingPathComponent("Sources/ScarfCore")
+            .deletingLastPathComponent()   // Packages
+            .deletingLastPathComponent()   // scarf
+            .deletingLastPathComponent()   // repo root
     }
 
-    /// The title says what the sweep PROVES, which is narrower than "no
-    /// async function in ScarfCore blocks a cooperative thread" (P46 finding
-    /// 11). It matches three named spellings of the synchronous child reap;
-    /// it does not and cannot see a blocking wait reached INDIRECTLY through
-    /// a synchronous helper. Two such shapes are live in this package —
-    /// `LocalTransport.runProcess` and `SSHTransport.runLocal`, both
-    /// synchronous, both a 100 ms `Thread.sleep` poll plus an unbounded
-    /// `group.wait()`, both called from `async` code — and the calibration
-    /// below blesses them by construction, because the floor is a count of
-    /// what this matcher finds. Filed under `t-10eb7c17`.
-    @Test("no async function in ScarfCore reaps a child with the synchronous spellings")
-    func noSynchronousReapInAsyncCode() throws {
-        let root = Self.scarfCoreSources
-        #expect(FileManager.default.fileExists(atPath: root.path), "the sweep root moved")
-        let walker = try #require(
-            FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil),
-            "could not enumerate \(root.path)")
+    static var scarfCoreSources: URL {
+        repoRoot.appendingPathComponent("scarf/Packages/ScarfCore/Sources/ScarfCore")
+    }
 
-        var scanned = 0
-        var offenders: [String] = []
-        for case let url as URL in walker where url.pathExtension == "swift" {
-            // The file that IMPLEMENTS the helpers is where the synchronous
-            // form is called on purpose: `waitDrainingAsync` is a wrapper
-            // around it, from inside a detached task.
-            if url.lastPathComponent == "ProcessTimeout.swift" { continue }
-            let text = try String(contentsOf: url, encoding: .utf8)
-            scanned += 1
-            for hit in Self.blockingCallsInAsyncFunctions(in: text) {
-                offenders.append("\(url.lastPathComponent) — \(hit)")
-            }
+    /// Two roots since P48. The app target is the second, because
+    /// `t-12d04477`'s five sites lived there and P43c had scoped itself to
+    /// the package — a sweep that stops at its own module's edge blesses the
+    /// other half of the same codebase by omission.
+    static var sweepRoots: [URL] {
+        [scarfCoreSources, repoRoot.appendingPathComponent("scarf/scarf")]
+    }
+
+    /// The one file where the synchronous form is called on purpose: it
+    /// IMPLEMENTS the helpers, and `waitDrainingAsync` is a wrapper around
+    /// exactly this.
+    static let implementationFile = "ProcessTimeout.swift"
+
+    /// EMPTY, and the P37 rule says an empty allowlist has to be replaced by
+    /// a calibration test rather than trusted — which is what
+    /// ``matcherIsCalibrated`` is, over all six shapes.
+    ///
+    /// The one app-target reap that stays synchronous on purpose,
+    /// `HermesFileService.runShellProbe`, needs no entry: its only caller is
+    /// an `enrichedShellEnv` `static let` initializer, not a `func`, so no
+    /// rule here matches it. That is the honest answer rather than a comfortable
+    /// one — the sweep does not read property initializers, and saying so is
+    /// better than an allowance implying it does (round-5 P48, t-12d04477).
+    static let allowances: [String: String] = [:]
+
+    @Test("both sweep roots exist")
+    func sweepRootsExist() {
+        for root in Self.sweepRoots {
+            #expect(
+                FileManager.default.fileExists(atPath: root.path),
+                "sweep root moved: \(root.path)")
         }
-        // The premise floor, P43b's lesson: a sweep that scanned nothing
-        // "passes".
-        #expect(scanned > 100, "only \(scanned) ScarfCore sources scanned")
+    }
+
+    /// The title says what the sweep PROVES. Since P48 that is three shapes,
+    /// over two roots: a blocking spelling called directly in an `async`
+    /// body, one inside a `Task { … }` / `Task.detached { … }` closure, and
+    /// one reached through a synchronous helper declared in the same file.
+    /// It still does not follow a call across files.
+    @Test("no async code in ScarfCore or the Mac app reaps a child synchronously")
+    func noSynchronousReapInAsyncCode() throws {
+        var scannedPerRoot: [String: Int] = [:]
+        var offenders: [String] = []
+        var allowanceHits: Set<String> = []
+
+        for root in Self.sweepRoots {
+            #expect(FileManager.default.fileExists(atPath: root.path), "the sweep root moved")
+            let walker = try #require(
+                FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil),
+                "could not enumerate \(root.path)")
+            var scanned = 0
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                let name = url.lastPathComponent
+                if name == Self.implementationFile { continue }
+                let text = try String(contentsOf: url, encoding: .utf8)
+                scanned += 1
+                let hits = Self.blockingCallsInAsyncFunctions(in: text)
+                guard !hits.isEmpty else { continue }
+                if Self.allowances[name] != nil {
+                    allowanceHits.insert(name)
+                    continue
+                }
+                for hit in hits { offenders.append("\(name) — \(hit)") }
+            }
+            scannedPerRoot[root.lastPathComponent] = scanned
+        }
+
+        // The premise floor, P43b's lesson, per root: a sweep that scanned
+        // nothing "passes". Recalibrated honestly in P48 — these are the
+        // real counts at the time of writing, halved so ordinary deletion
+        // cannot make the floor the thing that fails.
+        let core = scannedPerRoot["ScarfCore"] ?? 0
+        let app = scannedPerRoot["scarf"] ?? 0
+        #expect(core > 100, "only \(core) ScarfCore sources scanned")
+        #expect(app > 200, "only \(app) app-target sources scanned")
         #expect(offenders.isEmpty, "\(offenders)")
+        // Every allowance must still be a live debt, or it is a stale entry
+        // hiding the next violation (the P37 rule).
+        #expect(
+            allowanceHits == Set(Self.allowances.keys),
+            "stale allowance(s): \(Set(Self.allowances.keys).subtracting(allowanceHits))")
     }
 
     // MARK: - The async form behaves like the synchronous one

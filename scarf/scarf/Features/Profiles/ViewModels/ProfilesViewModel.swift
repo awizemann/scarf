@@ -104,7 +104,7 @@ final class ProfilesViewModel {
             // to LaunchServices, and a wedged `lsd` used to freeze the window
             // for the full budget. Only the verdict hops back.
             do {
-                try AppRelauncher.relaunch()
+                try await AppRelauncher.relaunch()
                 await MainActor.run {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         NSApp.terminate(nil)

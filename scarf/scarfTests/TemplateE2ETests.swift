@@ -27,11 +27,11 @@ import ScarfCore
 
     /// Parse + plan the shipped HN Digest bundle, assert its shape, and
     /// confirm the cron prompt + dashboard contract are intact.
-    @Test func hackernewsDigestParsesAndPlans() throws {
+    @Test func hackernewsDigestParsesAndPlans() async throws {
         let bundle = try Self.locateExample(author: "awizemann", name: "hackernews-digest")
 
         let service = ProjectTemplateService(context: .local)
-        let inspection = try service.inspect(zipPath: bundle)
+        let inspection = try await service.inspect(zipPath: bundle)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         // Manifest shape — mirror the install-time invariants the catalog

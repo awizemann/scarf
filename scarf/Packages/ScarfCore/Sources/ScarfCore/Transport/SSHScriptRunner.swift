@@ -243,19 +243,21 @@ public enum SSHScriptRunner {
                     // Bounded escalation, and the drain owns the read ends —
                     // closing them here would raise while a reader is still
                     // blocked on one.
-                    _ = proc.waitUntilExit(timeout: 0)
-                    _ = drain.collect()
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                     return .connectFailure("Script cancelled")
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                _ = proc.waitUntilExit(timeout: 0)
-                _ = drain.collect()
+                _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                 return .connectFailure("Script timed out after \(Int(timeout))s")
             }
             // Wait for the LAST EOF, not merely for the process to go.
-            let collected = drain.collect()
+            // `waitDrainingAsync` with a spent budget: the child has already
+            // gone, so this is the drain collection alone — but on a dedicated
+            // thread, because `collect(grace:)` still blocks for up to its
+            // grace and this closure runs on the cooperative pool.
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
             let out = collected.first ?? Data()
             let err = collected.count > 1 ? collected[1] : Data()
             return .completed(
@@ -311,18 +313,20 @@ public enum SSHScriptRunner {
                     // Bounded escalation, and the drain owns the read ends —
                     // closing them here would raise while a reader is still
                     // blocked on one.
-                    _ = proc.waitUntilExit(timeout: 0)
-                    _ = drain.collect()
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                     return .connectFailure("Script cancelled")
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
-                _ = proc.waitUntilExit(timeout: 0)
-                _ = drain.collect()
+                _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
                 return .connectFailure("Script timed out after \(Int(timeout))s")
             }
-            let collected = drain.collect()
+            // `waitDrainingAsync` with a spent budget: the child has already
+            // gone, so this is the drain collection alone — but on a dedicated
+            // thread, because `collect(grace:)` still blocks for up to its
+            // grace and this closure runs on the cooperative pool.
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
             let out = collected.first ?? Data()
             let err = collected.count > 1 ? collected[1] : Data()
             return .completed(

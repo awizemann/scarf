@@ -214,13 +214,12 @@ struct TestConnectionProbe {
                 // Bounded escalation, not a bare `terminate()`: a wedged
                 // ProxyCommand ignores it, and the trace collected so far is
                 // the whole value of this arm.
-                _ = proc.waitUntilExit(timeout: 0)
-                let partial = drain.collect()
+                let partial = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
                 let trace = String(
                     data: partial.count > 1 ? partial[1] : Data(), encoding: .utf8) ?? ""
                 return (-1, "", "Timed out after \(Int(Self.probeTimeout))s.\n\nssh trace so far:\n" + trace)
             }
-            let collected = drain.collect()
+            let collected = await proc.waitDrainingAsync(timeout: 0, drain: drain).data
             return (
                 proc.terminationStatus,
                 String(data: collected.first ?? Data(), encoding: .utf8) ?? "",

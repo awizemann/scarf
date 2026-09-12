@@ -581,6 +581,17 @@ struct MainActorSpawnDisciplineP22Tests {
                         }
                         minIndent = indent
                         if trimmed.contains("nonisolated") { optedOut = true; break }
+                        // A `Thread.detachNewThread { … }` body is not the
+                        // main actor, whatever the enclosing declaration says
+                        // — a fresh thread has no actor at all. It is the
+                        // primitive `Process.waitDrainingAsync` and
+                        // `SpotifyAuthFlow.reapDetached` both use, precisely
+                        // because `Task.detached` (which the walk correctly
+                        // does NOT treat as an opt-out, since it stays on the
+                        // cooperative pool) would not do. Added in round-5
+                        // P48, when `HermesProxyService.stop()` gained a
+                        // bounded escalation on one.
+                        if trimmed.contains("Thread.detachNewThread") { optedOut = true; break }
                         needDeclarationStart = !declarationStarts.contains { trimmed.contains($0) }
                             && !trimmed.hasPrefix("//")
                         // Column 0 with a body brace: we have left the type.

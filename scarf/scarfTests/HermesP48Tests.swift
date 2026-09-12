@@ -63,6 +63,26 @@ struct HermesProxyLifecycleP48Tests {
         #expect(!code.contains("Task.detached {\n            _ = proc.waitUntilExit"))
     }
 
+    /// The P22 main-actor sweep learned `Thread.detachNewThread` as an
+    /// opt-out in P48, because `stop()` is main-actor-isolated by default and
+    /// the escalation inside it is not. The opt-out must stay NARROW: a
+    /// thread has no actor, but `Task.detached` is the same cooperative pool
+    /// the caller was on and must keep counting as a hit.
+    @Test("the main-actor sweep excuses a thread, never a detached task")
+    func theP22OptOutIsNarrow() throws {
+        let sweep = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("MainActorSpawnDisciplineP22Tests.swift"),
+            encoding: .utf8)
+        #expect(sweep.contains("""
+            if trimmed.contains("Thread.detachNewThread") { optedOut = true; break }
+            """.trimmingCharacters(in: .whitespaces)))
+        #expect(!sweep.contains("""
+            if trimmed.contains("Task.detached") { optedOut = true; break }
+            """.trimmingCharacters(in: .whitespaces)))
+    }
+
     /// The ceiling is a named constant with a stated reason, not a literal
     /// buried in the call — the house rule for every C10 budget since P43.
     @Test("the stop ceiling is a named budget")
@@ -107,8 +127,10 @@ struct ConnectionProbeDrainP48Tests {
         let code = Self.codeOnly(Self.probeSource)
         #expect(code.contains("Process.startDraining(pipes: [stdoutPipe, stderrPipe])"))
         #expect(!code.contains("readToEnd()"))
-        // Bounded escalation on the overrun arm, not a bare `terminate()`.
-        #expect(code.contains("proc.waitUntilExit(timeout: 0)"))
+        // Bounded escalation on the overrun arm, not a bare `terminate()` —
+        // and through the ASYNC twin, because this closure is `async` and the
+        // synchronous form would park a cooperative-pool thread.
+        #expect(code.contains("waitDrainingAsync(timeout: 0, drain: drain)"))
         #expect(!code.contains("proc.terminate()"))
     }
 

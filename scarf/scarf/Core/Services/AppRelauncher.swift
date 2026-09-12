@@ -60,7 +60,11 @@ enum AppRelauncher {
     /// froze the window for the whole 20 s with no way out. The body touches
     /// only `Bundle.main`, `Process` and the logger, none of which need the
     /// main actor; the caller hops back for `NSApp.terminate`.
-    nonisolated static func relaunch() throws {
+    /// `async` since round-5 P48 (t-12d04477): the reap is
+    /// `waitDrainingAsync`, so the 20 s budget parks a DEDICATED thread
+    /// rather than one of the cooperative pool's. The caller's
+    /// `Task.detached` never moved the block — `Task.detached` IS that pool.
+    nonisolated static func relaunch() async throws {
         let bundleURL = Bundle.main.bundleURL
         let path = bundleURL.path
         if path.contains("/DerivedData/")
@@ -102,7 +106,7 @@ enum AppRelauncher {
         // is normally instant, but it talks to LaunchServices — which can
         // block on a wedged `lsd`/`launchservicesd`, and an unbounded wait
         // here freezes the relaunch gesture with no way out.
-        let (exited, drained) = proc.waitDraining(
+        let (exited, drained) = await proc.waitDrainingAsync(
             timeout: Self.openTimeout, pipes: [stderrPipe, stdoutPipe])
         let errData = drained.first ?? Data()
         // `waitDraining` closes the READ ends (each reader closes the handle

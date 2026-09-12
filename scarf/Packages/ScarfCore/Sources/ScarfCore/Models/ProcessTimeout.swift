@@ -79,6 +79,30 @@ extension Process {
     /// giving up). Small on purpose — the caller's own budget is already gone.
     private static let signalGrace: TimeInterval = 2
 
+    /// The `async` twin of ``waitUntilExit(timeout:pollInterval:)``.
+    ///
+    /// Same rule as ``waitDrainingAsync(timeout:drain:drainGrace:)``: the
+    /// synchronous form is a `Thread.sleep` poll loop, so an `async` caller
+    /// parks a COOPERATIVE-POOL thread — one per core, unable to grow — for
+    /// the whole budget. That is true of the ESCALATION arm too, which is
+    /// where this twin earns its keep: `waitUntilExit(timeout: 0)` is the
+    /// house spelling for "the deadline is gone, stop this child now", and
+    /// even that can sleep through two `signalGrace` windows before it
+    /// returns. Round-5 P48 added it after the widened `ProcessAsyncWait`
+    /// sweep found eleven such calls sitting directly in `Task` closures.
+    public func waitUntilExitAsync(
+        timeout: TimeInterval,
+        pollInterval: TimeInterval = 0.05
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            Thread.detachNewThread {
+                continuation.resume(
+                    returning: self.waitUntilExit(
+                        timeout: timeout, pollInterval: pollInterval))
+            }
+        }
+    }
+
     /// Wait for a piped child within `timeout`, draining its pipes
     /// CONCURRENTLY with the wait, and hand back what they held.
     ///

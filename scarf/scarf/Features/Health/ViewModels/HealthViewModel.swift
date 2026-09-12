@@ -1254,7 +1254,7 @@ final class HealthViewModel {
             await Task.detached {
                 if terminateOwned {
                     owned?.terminate()
-                } else if let pid = Self.dashboardListenerPID(port: port) {
+                } else if let pid = await Self.dashboardListenerPID(port: port) {
                     // External instance — signal only the process actually
                     // bound to our dashboard port, not anything that happens
                     // to mention "hermes dashboard" in its argv.
@@ -1288,7 +1288,7 @@ final class HealthViewModel {
     /// `nonisolated`: the only caller is inside `Task.detached` (see
     /// `stopDashboard`), so this must not be main-actor work — and now that the
     /// body is four lines there is nothing left to justify an isolation hop.
-    private nonisolated static func dashboardListenerPID(port: Int) -> pid_t? {
+    private nonisolated static func dashboardListenerPID(port: Int) async -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN"]
@@ -1304,7 +1304,8 @@ final class HealthViewModel {
             // bounded drain grace — plus the read-end close this version never
             // did. An overrun is reported as "no listener", the same answer a
             // failed lsof has always given.
-            let (exited, data) = lsof.waitDraining(timeout: Self.lsofTimeout, pipes: [output])
+            let (exited, data) = await lsof.waitDrainingAsync(
+                timeout: Self.lsofTimeout, pipes: [output])
             guard exited else {
                 Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
                 return nil

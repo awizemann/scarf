@@ -2603,6 +2603,15 @@ struct HermesFileService: Sendable {
     /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
     /// When `interactive` is true, injects env vars that suppress common
     /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
+    /// **Synchronous on purpose, and the one app-target reap that stays so**
+    /// (round-5 P48, t-12d04477). Its only caller is the `enrichedShellEnv`
+    /// `static let` initializer above — a lazy global, which Swift runs
+    /// synchronously on whichever thread first touches it and which cannot be
+    /// `async`. Making this `async` would mean giving the enrichment an
+    /// asynchronous entry point and auditing every one of its many
+    /// synchronous readers, which is a larger change than the hazard: the
+    /// budgets here are 5 s and 3 s, not the 300 s the async rule was written
+    /// for, and the value is computed exactly once per process.
     nonisolated static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
         let pipe = Pipe()
         let errPipe = Pipe()

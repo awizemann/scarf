@@ -795,10 +795,11 @@ public struct SSHTransport: ServerTransport {
                 // Bounded, and the child is reaped rather than orphaned:
                 // stdout has reached EOF, so a healthy child is milliseconds
                 // from exiting and this ceiling is for the one that is not.
-                _ = proc.waitUntilExit(timeout: StreamingChild.reapCeiling)
+                let reaped = await proc.waitDrainingAsync(
+                    timeout: StreamingChild.reapCeiling, drain: errDrain)
                 child.finish()
                 let stderrText = String(
-                    data: errDrain.collect().first ?? Data(), encoding: .utf8) ?? ""
+                    data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
                 // The stdout read end is ours; the stderr read end belongs to
                 // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()
@@ -880,10 +881,11 @@ public struct SSHTransport: ServerTransport {
                 // Bounded, and the child is reaped rather than orphaned:
                 // stdout has reached EOF, so a healthy child is milliseconds
                 // from exiting and this ceiling is for the one that is not.
-                _ = proc.waitUntilExit(timeout: StreamingChild.reapCeiling)
+                let reaped = await proc.waitDrainingAsync(
+                    timeout: StreamingChild.reapCeiling, drain: errDrain)
                 child.finish()
                 let stderrText = String(
-                    data: errDrain.collect().first ?? Data(), encoding: .utf8) ?? ""
+                    data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
                 // The stdout read end is ours; the stderr read end belongs to
                 // the drain, which closes it in the reader that drained it.
                 try? outPipe.fileHandleForReading.close()

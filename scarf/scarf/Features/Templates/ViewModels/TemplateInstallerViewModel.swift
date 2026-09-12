@@ -114,7 +114,7 @@ final class TemplateInstallerViewModel {
                 }
             }
             do {
-                let inspection = try service.inspect(zipPath: zipPath)
+                let inspection = try await service.inspect(zipPath: zipPath)
                 let readme = Self.readReadme(unpackedDir: inspection.unpackedDir)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
