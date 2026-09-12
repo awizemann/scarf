@@ -266,7 +266,7 @@ struct HermesCLIVerdictP40Tests {
     /// The third state. `_rescan_after_update` disables the plugin
     /// (`hermes_cli/plugins_cmd.py:845-851` @ v2026.9.7) and `cmd_update`
     /// prints its success line anyway (`:828`); both at exit 0.
-    @Test func aSecurityDisabledUpdateIsASuccessCarryingTheReason() {
+    @Test func aSecurityDisabledUpdateIsASuccessCarryingTheReason() throws {
         let output = """
         Updating weather...
 
@@ -277,9 +277,9 @@ struct HermesCLIVerdictP40Tests {
         """
         let outcome = HermesPluginsUpdateVerdict.judge(output: output, exitCode: 0)
         #expect(outcome.succeeded)
-        let warning = try? #require(outcome.warning)
-        #expect(warning?.contains("disabled by the security scan") == true)
-        #expect(warning?.contains("subprocess with shell=True") == true)
+        let warning = try #require(outcome.warning)
+        #expect(warning.contains("disabled by the security scan"))
+        #expect(warning.contains("subprocess with shell=True"))
     }
 
     /// The unanchored-success bug: `"updated."` matched a `git pull` body

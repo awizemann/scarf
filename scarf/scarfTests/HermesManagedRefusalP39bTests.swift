@@ -66,7 +66,7 @@ struct HermesManagedLockP39bTests {
     /// A refused `.env` mirror is a SUCCESS carrying a warning, and the
     /// warning is what the banner says — not the bare "Saved <key>" that
     /// would hide it.
-    @Test func aPartialWriteBannersTheWarningRatherThanABareSaved() {
+    @Test func aPartialWriteBannersTheWarningRatherThanABareSaved() throws {
         let outcome = HermesConfigSet.judge(
             output: """
             Cannot set TERMINAL_ENV: it is managed by your administrator (/etc/hermes/.env) and cannot be changed.
@@ -75,11 +75,11 @@ struct HermesManagedLockP39bTests {
             exitCode: 0
         )
         #expect(outcome.succeeded)
-        let warning = try? #require(outcome.warning)
-        #expect(warning?.contains("Cannot set TERMINAL_ENV") == true)
+        let warning = try #require(outcome.warning)
+        #expect(warning.contains("Cannot set TERMINAL_ENV"))
 
-        let source = try? Self.source("scarf/Features/Settings/ViewModels/SettingsViewModel.swift")
-        #expect(source?.contains("outcome.warning") == true)
+        let source = try Self.source("scarf/Features/Settings/ViewModels/SettingsViewModel.swift")
+        #expect(source.contains("outcome.warning"))
     }
 
     /// A plain write still gets the plain sentence.

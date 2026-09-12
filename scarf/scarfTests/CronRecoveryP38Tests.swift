@@ -98,13 +98,13 @@ import ScarfCore
     /// `update_job` is reached, so Scarf must refuse locally rather than
     /// shelling out and surfacing the ValueError tail.
     @Test("a past-deadline one-shot is refused before the CLI round-trip")
-    func pastDeadlineOneShotIsRefusedLocally() {
+    func pastDeadlineOneShotIsRefusedLocally() throws {
         let vm = Self.viewModel()
         vm.resumeJob(Self.job(state: "paused", kind: "once",
                               runAt: "2020-01-01T09:00:00+00:00"))
-        let message = try? #require(vm.message)
-        #expect(message?.contains("is in the past") == true, Comment(rawValue: message ?? "nil"))
-        #expect(message?.contains("Resume & Run Now") == true, Comment(rawValue: message ?? "nil"))
+        let message = try #require(vm.message)
+        #expect(message.contains("is in the past"), Comment(rawValue: message))
+        #expect(message.contains("Resume & Run Now"), Comment(rawValue: message))
     }
 
     /// C1: below v0.18.1 the host has no such raise, so the click must reach

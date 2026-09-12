@@ -165,7 +165,7 @@ import Foundation
     /// no edit — this fixture is the drift alarm, and it pins the new issue
     /// into its own severity so a Slack-delivering job is never headlined
     /// as broken.
-    @Test func parsesTheV0211DoctorIssueSet() {
+    @Test func parsesTheV0211DoctorIssueSet() throws {
         let output = """
             Cron doctor found 3 issue(s) across 2 job(s):
 
@@ -181,16 +181,16 @@ import Foundation
         let findings = HermesCronDoctorParser.parse(text: output)
         #expect(findings.count == 2)
 
-        let digest = try? #require(findings["4f2a9c1b7e03"])
-        #expect(digest?.issues.count == 2)
-        #expect(digest?.problemIssues == ["last delivery failed: telegram 429 Too Many Requests"])
-        #expect(digest?.unverifiedIssues.count == 1)
+        let digest = try #require(findings["4f2a9c1b7e03"])
+        #expect(digest.issues.count == 2)
+        #expect(digest.problemIssues == ["last delivery failed: telegram 429 Too Many Requests"])
+        #expect(digest.unverifiedIssues.count == 1)
 
         // A job whose ONLY finding is an unverified delivery has zero
         // problems — the banner must not claim "1 issue".
-        let ping = try? #require(findings["b71c02da9f10"])
-        #expect(ping?.problemIssues.isEmpty == true)
-        #expect(ping?.unverifiedIssues.count == 1)
+        let ping = try #require(findings["b71c02da9f10"])
+        #expect(ping.problemIssues.isEmpty)
+        #expect(ping.unverifiedIssues.count == 1)
     }
 
     @Test func classifiesDoctorIssueSeverity() {

@@ -111,7 +111,7 @@ struct HermesConfigMirrorP39bTests {
     /// (`hermes_cli/config.py:3511`, `:2574-2578`, `:2560-2565`) refuses the
     /// mirror and returns; `:3521` prints the success line anyway. The
     /// config.yaml write DID land, so this is a partial write, not a failure.
-    @Test func aRefusedEnvMirrorIsAPartialWriteNotAFailure() {
+    @Test func aRefusedEnvMirrorIsAPartialWriteNotAFailure() throws {
         let out = HermesConfigSet.judge(
             output: """
             \(Self.refusal)
@@ -121,9 +121,9 @@ struct HermesConfigMirrorP39bTests {
         )
         #expect(out.succeeded)
         #expect(out.detail == nil)
-        let warning = try? #require(out.warning)
-        #expect(warning?.contains("the .env mirror was refused") == true)
-        #expect(warning?.contains(Self.refusal) == true)
+        let warning = try #require(out.warning)
+        #expect(warning.contains("the .env mirror was refused"))
+        #expect(warning.contains(Self.refusal))
     }
 
     /// `unset_config_value`'s twin, through `remove_env_value`
@@ -388,13 +388,13 @@ struct IOSManagedHostP39bTests {
 
     /// The same sentence the Mac shows, naming the package manager — "use
     /// your package manager" is useless without it.
-    @Test func aManagedHostGetsOneBannerNamingTheSystem() {
+    @Test func aManagedHostGetsOneBannerNamingTheSystem() throws {
         let model = Self.vm()
         model.managedInstall = HermesManagedInstall(system: "home-manager")
         #expect(model.isManagedHost)
-        let text = try? #require(model.managedBannerText)
-        #expect(text?.contains("home-manager") == true)
-        #expect(text?.contains("read-only") == true)
+        let text = try #require(model.managedBannerText)
+        #expect(text.contains("home-manager"))
+        #expect(text.contains("read-only"))
     }
 
     /// Reaching the write at all means something got past the locked editor.

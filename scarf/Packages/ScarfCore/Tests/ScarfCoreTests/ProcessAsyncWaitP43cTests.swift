@@ -4,9 +4,17 @@ import os
 import Testing
 @testable import ScarfCore
 
-/// Round-4 P43c: the synchronous reap must not be reachable from an `async`
-/// function, and `ProcessPipeDrain.collect` must be a latch rather than a
-/// check-then-set.
+/// Round-4 P43c: the three NAMED synchronous reap spellings must not be
+/// reachable from an `async` function, and `ProcessPipeDrain.collect` must be
+/// a latch rather than a check-then-set.
+///
+/// **Scope** (narrowed in P46). This suite proves a syntactic property about
+/// ``blockingSpellings`` — `waitUntilExit(timeout:`, `.waitDraining(`,
+/// `waitUntilExit()` — called directly from an `async` function body. It does
+/// NOT prove that nothing in ScarfCore blocks a cooperative thread: a
+/// synchronous helper that itself blocks, called from `async` code, is
+/// invisible to it. `LocalTransport.runProcess` and `SSHTransport.runLocal`
+/// are exactly that shape and are on this branch today.
 ///
 /// `Process.waitUntilExit(timeout:)` is a `Thread.sleep` poll loop. On a
 /// cooperative-pool thread that is not slow, it is *stolen*: the pool has one
@@ -220,7 +228,17 @@ struct ProcessAsyncWaitP43cTests {
             .appendingPathComponent("Sources/ScarfCore")
     }
 
-    @Test("no async function in ScarfCore blocks a cooperative thread on a child")
+    /// The title says what the sweep PROVES, which is narrower than "no
+    /// async function in ScarfCore blocks a cooperative thread" (P46 finding
+    /// 11). It matches three named spellings of the synchronous child reap;
+    /// it does not and cannot see a blocking wait reached INDIRECTLY through
+    /// a synchronous helper. Two such shapes are live in this package —
+    /// `LocalTransport.runProcess` and `SSHTransport.runLocal`, both
+    /// synchronous, both a 100 ms `Thread.sleep` poll plus an unbounded
+    /// `group.wait()`, both called from `async` code — and the calibration
+    /// below blesses them by construction, because the floor is a count of
+    /// what this matcher finds. Filed under `t-10eb7c17`.
+    @Test("no async function in ScarfCore reaps a child with the synchronous spellings")
     func noSynchronousReapInAsyncCode() throws {
         let root = Self.scarfCoreSources
         #expect(FileManager.default.fileExists(atPath: root.path), "the sweep root moved")

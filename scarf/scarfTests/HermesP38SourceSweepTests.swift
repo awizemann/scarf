@@ -121,6 +121,97 @@ struct HermesP38SourceSweepTests {
         "HermesManagedInstallP39Tests.swift",
     ]
 
+    /// The base of `fix/whole-surface-audit-r4`. The branch scope below is
+    /// `git diff --name-only <this>..HEAD -- '*Tests.swift'`.
+    static let branchBase = "5be08f2e"
+
+    /// Scope (ii), P46 finding 3: **every test file this branch touched**,
+    /// whether or not its name carries a phase number.
+    ///
+    /// The name pattern alone is not a scope. P45 replaced a hand-kept
+    /// allowlist with `isPhaseSuite`, which finds new PHASE suites by
+    /// construction — but a phase that fixes sites in an existing,
+    /// ordinarily-named suite (`M5FeatureVMTests.swift`, which P45 itself
+    /// edited) writes code no sweep reads. Scoping by PATH — what the branch
+    /// changed — closes that, and ``theBranchScopeMatchesGit`` keeps the list
+    /// honest against `git` rather than against itself.
+    ///
+    /// Basenames, because the same suite name appears under two targets and
+    /// both are in scope either way.
+    static let branchTouchedTestFiles: Set<String> = [
+        "AuditF2ArgvAndSecretSurfacingTests.swift",
+        "BotAgentViewModelTests.swift",
+        "BotModePhaseBP0Tests.swift",
+        "BotRoutinesViewModelTests.swift",
+        "ConfigReadProofP33Tests.swift",
+        "CronArgvP42Tests.swift",
+        "CronP15EditArgvTests.swift",
+        "CronP18ClearGestureTests.swift",
+        "CronRecoveryP38Tests.swift",
+        "CronRecoveryP42Tests.swift",
+        "CronRecoveryP42bTests.swift",
+        "CronScheduleDisplayP42cTests.swift",
+        "CronViewModelErrorClassificationTests.swift",
+        "FleetApplyPlanTests.swift",
+        "GatewayAndPluginsVerdictP40Tests.swift",
+        "GatewayAndPluginsVerdictP40bTests.swift",
+        "GatewayAndPluginsVerdictP40cTests.swift",
+        "HermesCLIOptionP42Tests.swift",
+        "HermesCLIVerdictP40Tests.swift",
+        "HermesCapabilitiesTests.swift",
+        "HermesConfigSetP39Tests.swift",
+        "HermesConfigUnsetP35Tests.swift",
+        "HermesCronKanbanP42bTests.swift",
+        "HermesFileServiceConfigParityTests.swift",
+        "HermesGatewayVerdictP40bTests.swift",
+        "HermesGatewayVerdictP40cTests.swift",
+        "HermesManagedInstallP39Tests.swift",
+        "HermesManagedLockP39cTests.swift",
+        "HermesManagedRefusalP39Tests.swift",
+        "HermesManagedRefusalP39bTests.swift",
+        "HermesManagedRefusalP39cTests.swift",
+        "HermesP17RemediationTests.swift",
+        "HermesP26CitationSweepTests.swift",
+        "HermesP28CrossPhaseRemediationTests.swift",
+        "HermesP35SelectionAndFloorsTests.swift",
+        "HermesP37RemediationTests.swift",
+        "HermesP38SettingsResidueTests.swift",
+        "HermesP38SourceSweepTests.swift",
+        "HermesP41ControlCharacterRefusalTests.swift",
+        "HermesP41MCPScalarTests.swift",
+        "HermesP41YAMLDecoderTests.swift",
+        "HermesP41bRefusalTests.swift",
+        "HermesP41bYAMLTests.swift",
+        "HermesP44Tests.swift",
+        "HermesP44bTests.swift",
+        "HermesP45Tests.swift",
+        "HermesP46Tests.swift",
+        "HermesV0204SkillsParityTests.swift",
+        "HermesV0211CronParityTests.swift",
+        "KanbanModelsTests.swift",
+        "LocalModelConfigPlanTests.swift",
+        "LocalizationCatalogTests.swift",
+        "M0bTransportTests.swift",
+        "M5FeatureVMTests.swift",
+        "MCPYAMLMapKeyP19Tests.swift",
+        "MainActorBlockingWritesP11Tests.swift",
+        "MainActorSpawnDisciplineP22Tests.swift",
+        "OAuthFlowDrainP40Tests.swift",
+        "ProcessAsyncWaitP43cTests.swift",
+        "ProcessDrainP43Tests.swift",
+        "ProjectTemplateBoundsP43Tests.swift",
+        "SectionAuditF5KanbanTests.swift",
+        "SectionAuditF5ManageAppTests.swift",
+        "SettingsP20ConfigDefaultsTests.swift",
+        "SlashMenuLogicTests.swift",
+        "SpawnDisciplineP43Tests.swift",
+    ]
+
+    /// Scope = the phase-name pattern OR the branch's own touched files.
+    static func isInSweepScope(_ name: String) -> Bool {
+        isPhaseSuite(name) || branchTouchedTestFiles.contains(name)
+    }
+
     /// Premise floor: 78 phase suites matched when round 4 widened the sweep.
     static let phaseSuiteFloor = 70
 
@@ -140,7 +231,7 @@ struct HermesP38SourceSweepTests {
         for root in Self.phaseSuiteRoots {
             for url in Self.swiftFiles(under: root) {
                 guard url.lastPathComponent != Self.ownFileName,
-                      Self.isPhaseSuite(url.lastPathComponent) else { continue }
+                      Self.isInSweepScope(url.lastPathComponent) else { continue }
                 scanned.insert(url.lastPathComponent)
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let lines = src.components(separatedBy: "\n")
@@ -186,6 +277,155 @@ struct HermesP38SourceSweepTests {
             into an out-of-bounds trap and kills the test host: \
             \(offenders.joined(separator: "; "))
             """))
+    }
+
+    /// Deletion floor for scope (ii): every branch-touched file must still be
+    /// found, or a rename has silently dropped it out of the sweep.
+    @Test func theBranchScopeIsFullyScanned() {
+        var scanned: Set<String> = []
+        for root in Self.phaseSuiteRoots {
+            for url in Self.swiftFiles(under: root)
+            where Self.isInSweepScope(url.lastPathComponent) {
+                scanned.insert(url.lastPathComponent)
+            }
+        }
+        let missing = Self.branchTouchedTestFiles.subtracting(scanned)
+        #expect(missing.isEmpty, Comment(rawValue:
+            "branch-touched test files are no longer being scanned: "
+            + missing.sorted().joined(separator: ", ")))
+    }
+
+    /// And the list is checked against `git`, not against itself — the exact
+    /// self-check P45's `phaseSuiteFiles` was missing. A test file this
+    /// branch touches without being added here fails right here.
+    ///
+    /// `git` unavailable (a sandbox with no binary, or a checkout without the
+    /// base commit) records an issue rather than passing quietly: a scope pin
+    /// that can silently no-op is the failure mode this test exists for.
+    @Test func theBranchScopeMatchesGit() throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = ["git", "-C", Self.repoRoot.path, "diff", "--name-only",
+                          "\(Self.branchBase)..HEAD", "--", "*Tests.swift"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try proc.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else {
+            Issue.record("git could not diff \(Self.branchBase)..HEAD — the branch scope is unpinned")
+            return
+        }
+        let reported = Set(
+            String(decoding: data, as: UTF8.self)
+                .split(separator: "\n")
+                .map { URL(fileURLWithPath: String($0)).lastPathComponent }
+        )
+        #expect(!reported.isEmpty, "the git diff reported nothing — the pin has broken")
+        let unlisted = reported.subtracting(Self.branchTouchedTestFiles)
+        #expect(unlisted.isEmpty, Comment(rawValue:
+            "this branch touched test files that are not in `branchTouchedTestFiles`, "
+            + "so the stability sweeps do not read them: "
+            + unlisted.sorted().joined(separator: ", ")))
+    }
+
+    // MARK: - 22b: `try? #require` swallows the requirement
+
+    /// `try? #require(x)` is `try! #require(x)`'s quiet twin: the `#require`
+    /// failure is DISCARDED and the test continues with `nil`, so what the
+    /// reader sees is an optional-chained `== true` failing somewhere below
+    /// with no statement of what was actually missing — or, worse, an
+    /// assertion that vacuously holds. The point of `#require` is to stop.
+    @Test func noTestOptionalTriesARequire() {
+        var offenders: [String] = []
+        for root in Self.phaseSuiteRoots {
+            for url in Self.swiftFiles(under: root) {
+                guard url.lastPathComponent != Self.ownFileName,
+                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                for (i, line) in src.components(separatedBy: "\n").enumerated()
+                where line.contains("try? #require") && !Self.isComment(line) {
+                    offenders.append("\(url.lastPathComponent):\(i + 1) — "
+                                     + line.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: """
+            `try? #require` discards the requirement and continues with nil. \
+            Make the test `throws` and use `try #require`: \
+            \(offenders.joined(separator: "; "))
+            """))
+    }
+
+    // MARK: - 22c: no long fixed sleep in a test
+
+    /// P45's lesson: "a test that naps and then asserts is asserting about
+    /// the clock". A fixed sleep of half a second or more is either a race
+    /// waiting to be lost on a loaded machine or half a second of wall clock
+    /// added to every serial run — usually both. Poll an observable instead.
+    ///
+    /// Two sites are allowed, with reasons, because their sleep is not a wait
+    /// for an observable but the FIXTURE itself or a deliberate "nothing
+    /// happened" window, which by construction has nothing to observe.
+    static let allowedFixedSleeps: [String: String] = [
+        "ProcessAsyncWaitP43cTests.swift:339":
+            "the 3 s is the FIXTURE — EOF deliberately lands between the two "
+            + "graces (1 s and 6 s) so the latch race is decided by construction, "
+            + "not by luck; it runs on a background queue, not in the test body",
+        "MainActorSpawnDisciplineP22Tests.swift:251":
+            "the assertion is that the cancelled load did NOT reach its third "
+            + "probe, so there is no observable to poll for; the window is one "
+            + "probe delay (0.3 s) times three",
+    ]
+
+    @Test func noTestSleepsAFixedHalfSecondOrMore() {
+        let pattern = #"(?:Task|Thread)\.sleep\([^)]*?([0-9][0-9_]*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            Issue.record("the sleep sweep's pattern does not compile")
+            return
+        }
+        var offenders: [String] = []
+        var allowancesSeen: Set<String> = []
+        for root in Self.phaseSuiteRoots {
+            for url in Self.swiftFiles(under: root) {
+                guard url.lastPathComponent != Self.ownFileName,
+                      Self.isInSweepScope(url.lastPathComponent) else { continue }
+                guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                for (i, line) in src.components(separatedBy: "\n").enumerated() {
+                    guard !Self.isComment(line) else { continue }
+                    let ns = line as NSString
+                    for m in regex.matches(in: line, range: NSRange(location: 0, length: ns.length))
+                    where m.numberOfRanges > 1 {
+                        let digits = ns.substring(with: m.range(at: 1)).replacingOccurrences(of: "_", with: "")
+                        guard let raw = Double(digits) else { continue }
+                        let seconds: Double
+                        if line.contains("nanoseconds") { seconds = raw / 1_000_000_000 }
+                        else if line.contains("microseconds") { seconds = raw / 1_000_000 }
+                        else if line.contains("milliseconds") { seconds = raw / 1_000 }
+                        else { seconds = raw }
+                        guard seconds >= 0.5 else { continue }
+                        let site = "\(url.lastPathComponent):\(i + 1)"
+                        if Self.allowedFixedSleeps[site] != nil {
+                            allowancesSeen.insert(site)
+                            continue
+                        }
+                        offenders.append("\(site) — " + line.trimmingCharacters(in: .whitespaces))
+                    }
+                }
+            }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: """
+            A test sleeps a fixed half second or more. Poll the observable the \
+            work produces instead, or add the site to `allowedFixedSleeps` with \
+            a reason: \(offenders.joined(separator: "; "))
+            """))
+        // The allowances are calibrated, not decorative: a stale one means the
+        // site moved and the sweep is no longer reading it.
+        let stale = Set(Self.allowedFixedSleeps.keys).subtracting(allowancesSeen)
+        #expect(stale.isEmpty, Comment(rawValue:
+            "allowed sleep sites no longer match anything — they have moved: "
+            + stale.sorted().joined(separator: ", ")))
     }
 
     // MARK: - 25: every platform form reads `.env` under the shared guard

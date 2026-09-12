@@ -231,7 +231,7 @@ import Foundation
             let vm = IOSCronViewModel(context: ctx)
             await vm.load()
             #expect(vm.lastError == nil)
-            #expect(vm.jobs.count == 3)
+            try #require(vm.jobs.count == 3)
             // Enabled + next_run_at earlier → first
             #expect(vm.jobs[0].name == "Early bird")
             #expect(vm.jobs[1].name == "Late riser")
@@ -323,7 +323,7 @@ import Foundation
     // MARK: - RichChatViewModel PendingPermission public init
 
     #if canImport(SQLite3)
-    @Test func pendingPermissionMemberwise() {
+    @Test func pendingPermissionMemberwise() throws {
         let p = RichChatViewModel.PendingPermission(
             requestId: 99,
             title: "write_file: /etc/hosts",
@@ -333,7 +333,7 @@ import Foundation
         #expect(p.requestId == 99)
         #expect(p.title == "write_file: /etc/hosts")
         #expect(p.kind == "edit")
-        #expect(p.options.count == 2)
+        try #require(p.options.count == 2)
         #expect(p.options[0].optionId == "allow")
     }
     #endif
@@ -557,12 +557,12 @@ import Foundation
             )
             let ok = await vm.upsert(job)
             #expect(ok)
-            #expect(vm.jobs.count == 1)
+            try #require(vm.jobs.count == 1)
             #expect(vm.jobs[0].name == "Morning brief")
 
             let vm2 = IOSCronViewModel(context: ctx)
             await vm2.load()
-            #expect(vm2.jobs.count == 1)
+            try #require(vm2.jobs.count == 1)
             #expect(vm2.jobs[0].id == "job_abc")
             #expect(vm2.jobs[0].prompt == "summarize my calendar")
             #expect(vm2.jobs[0].skills == ["calendar"])
@@ -599,12 +599,12 @@ import Foundation
 
             let ok = await vm.delete(id: "a")
             #expect(ok)
-            #expect(vm.jobs.count == 1)
+            try #require(vm.jobs.count == 1)
             #expect(vm.jobs[0].id == "b")
 
             let vm2 = IOSCronViewModel(context: ctx)
             await vm2.load()
-            #expect(vm2.jobs.count == 1)
+            try #require(vm2.jobs.count == 1)
             #expect(vm2.jobs[0].id == "b")
         }
     }
@@ -623,7 +623,7 @@ import Foundation
                 schedule: CronSchedule(kind: "interval"),
                 enabled: false, state: "scheduled"
             ))
-            #expect(vm.jobs.count == 1)
+            try #require(vm.jobs.count == 1)
             #expect(vm.jobs[0].name == "Renamed")
             #expect(vm.jobs[0].prompt == "p2")
             #expect(vm.jobs[0].enabled == false)

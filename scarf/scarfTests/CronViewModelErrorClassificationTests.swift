@@ -186,15 +186,15 @@ import ScarfCore
     /// `ValueError` and returns it as a JSON `error` payload. The remedy is
     /// the LAST clause of the sentence, so the generic `prefix(200)`
     /// truncation would have cut off exactly the actionable half.
-    @Test func cloudPlaceholderRefusalIsSurfacedVerbatim() {
+    @Test func cloudPlaceholderRefusalIsSurfacedVerbatim() throws {
         let output = """
             Failed to create job: Blocked: the cron script lives on a cloud-synced path (iCloud Drive / ~/Library/CloudStorage). Opening an evicted FileProvider placeholder can hang the guard's preflight scan indefinitely, so it is refused without being read. Move the script to a local, non-cloud path (e.g. ~/.hermes/scripts/) and recreate the job.
             """
-        let message = try? #require(CronViewModel.friendlyCronFailure(output))
-        #expect(message?.hasPrefix("Blocked: the cron script lives on a cloud-synced path") == true)
+        let message = try #require(CronViewModel.friendlyCronFailure(output))
+        #expect(message.hasPrefix("Blocked: the cron script lives on a cloud-synced path"))
         // The whole sentence, remedy included — not a 200-char stub.
-        #expect(message?.hasSuffix("and recreate the job.") == true)
-        #expect((message?.count ?? 0) > 200)
+        #expect(message.hasSuffix("and recreate the job."))
+        #expect(message.count > 200)
     }
 
     @Test func gatewayLifecycleRefusalAlsoComesThroughVerbatim() {
@@ -235,7 +235,7 @@ import ScarfCore
     /// C3: `--failure-deliver` composition. The VIEW strips the value on a
     /// host without `hasCronFailureDeliver`, so the builder's contract is
     /// simply "empty means omit".
-    @Test func failureDeliverArgvComposition() {
+    @Test func failureDeliverArgvComposition() throws {
         let withOverride = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "p", name: "n", deliver: "telegram:1", skills: [],
             script: "", repeatCount: "", failureDeliver: "local"
@@ -243,8 +243,8 @@ import ScarfCore
         #expect(HermesCLIOption.contains("--failure-deliver", in: withOverride))
         #expect(HermesCLIOption.value(of: "--failure-deliver", in: withOverride) == "local")
         // Every flag still precedes the `--` end-of-options marker.
-        let marker = try? #require(withOverride.firstIndex(of: "--"))
-        #expect((HermesCLIOption.index(of: "--failure-deliver", in: withOverride) ?? .max) < (marker ?? 0))
+        let marker = try #require(withOverride.firstIndex(of: "--"))
+        #expect((HermesCLIOption.index(of: "--failure-deliver", in: withOverride) ?? .max) < marker)
 
         let without = CronViewModel.createJobArguments(
             schedule: "30m", prompt: "p", name: "n", deliver: "", skills: [],
