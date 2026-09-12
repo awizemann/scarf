@@ -69,13 +69,15 @@ final class NousAuthFlow {
         // C10. The LOCAL branch below needs `HermesFileService
         // .enrichedEnvironment()`, whose backing `enrichedShellEnv` is a
         // `static let` initialised by two `zsh` probes at 5 s + 3 s
-        // (`HermesFileService.swift:2468-2484`). `scarfApp.swift:89-91` warms
-        // it on a detached task at launch, but a `static let` initialiser is
-        // a `swift_once`: a main-actor reader arriving while the warm-up is
-        // still running BLOCKS on it — up to eight seconds of frozen window,
-        // on the click that opens the sign-in sheet. Resolved on a detached
-        // hop first, exactly as `SignalSetupViewModel.load` does it, and the
-        // spawn then happens back on the main actor with the value in hand.
+        // (`HermesFileService.swift:2566-2583`, probes at `:2575` and
+        // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
+        // launch, but a `static let` initialiser is a `swift_once`: a
+        // main-actor reader arriving while the warm-up is still running
+        // BLOCKS on it — up to eight seconds of frozen window, on the click
+        // that opens the sign-in sheet. Resolved on an `OffPool.run` hop
+        // first — blocking for eight seconds is precisely what must not
+        // happen on a cooperative-pool thread (round-5 P52) — and the spawn
+        // then happens back on the main actor with the value in hand.
         //
         // The REMOTE branch needs none of it (it wraps the command in `env
         // PYTHONUNBUFFERED=1 …` because ssh forwards no environment), so it
@@ -85,7 +87,7 @@ final class NousAuthFlow {
             return
         }
         startTask = Task { [weak self] in
-            let env = await Task.detached { HermesFileService.enrichedEnvironment() }.value
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
             guard let self, !Task.isCancelled else { return }
             self.launch(localEnvironment: env)
         }
@@ -223,7 +225,7 @@ final class NousAuthFlow {
             // a remote server this is a full SSH round trip — landing on the
             // main actor at the moment the sheet reports its result.
             let svc = subscriptionService
-            let sub = await Task.detached { svc.loadState() }.value
+            let sub = await OffPool.run { svc.loadState() }
             if sub.subscribed {
                 state = .success
             } else if sub.present {

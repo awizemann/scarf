@@ -179,24 +179,26 @@ final class HealthViewModel {
             // output — so they run CONCURRENTLY rather than as five serial
             // remote round-trips. On a remote host this is the difference
             // between ~5×RTT and ~1×RTT on every Health visit (C10).
-            // Each rides its own `Task.detached` because the underlying calls
-            // block (process spawn / SSH exec); running them as bare
-            // `async let` would park five cooperative-pool threads.
-            async let pidProbe        = Task.detached { svc.hermesPID() }.value
-            async let versionProbe    = Task.detached { Self.probeVersion(ctx) }.value
+            // Each rides its own ``OffPool/run(_:)`` because the underlying
+            // calls BLOCK (process spawn / SSH exec); running them as bare
+            // `async let` would park seven cooperative-pool threads — and so
+            // did the `Task.detached` this said before round-5 P52, since a
+            // detached task is off the main actor but still ON that pool.
+            async let pidProbe        = OffPool.run { svc.hermesPID() }
+            async let versionProbe    = OffPool.run { Self.probeVersion(ctx) }
             // Every `runHermes` NAMES its timeout (P22's rule): the 60 s
             // default in `ServerContext+Mac.swift:21` is silent, so a site
             // that omits it cannot be read as having chosen anything. These
             // two are read-only probes behind a spinner.
-            async let statusProbe     = Task.detached { ctx.runHermes(["status"], timeout: 60).output }.value
-            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"], timeout: 60).output }.value
-            async let subscriptionRead = Task.detached { subSvc.loadState() }.value
-            async let configRead      = Task.detached { svc.loadConfig() }.value
+            async let statusProbe     = OffPool.run { ctx.runHermes(["status"], timeout: 60).output }
+            async let doctorProbe     = OffPool.run { ctx.runHermes(["doctor"], timeout: 60).output }
+            async let subscriptionRead = OffPool.run { subSvc.loadState() }
+            async let configRead      = OffPool.run { svc.loadConfig() }
             // v0.18+ — `computer-use permissions status --json` exits 1
             // when not ready, which is a STATE, not a failure, so the
             // stdout is parsed regardless of exit code. Skipped entirely
             // on hosts without the flag so no extra round-trip is spent.
-            async let computerUseProbe = Task.detached { () -> HermesComputerUseStatus? in
+            async let computerUseProbe = OffPool.run { () -> HermesComputerUseStatus? in
                 guard caps.hasComputerUsePermissionsJSON else { return nil }
                 // cua-driver's own probes cap at ~12s + ~10s + 5s inside
                 // Hermes, so 45 bounds the whole thing without truncating a
@@ -205,7 +207,7 @@ final class HealthViewModel {
                 // line carrying a `}` would truncate a brace-sliced payload.
                 return HermesComputerUseStatus.parse(
                     ctx.runHermesSplit(["computer-use", "permissions", "status", "--json"], timeout: 45).stdout)
-            }.value
+            }
 
             let pid = await pidProbe
             let versionOutput = await versionProbe

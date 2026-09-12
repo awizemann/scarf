@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import SwiftTerm
 import os
+import ScarfCore
 
 /// Inline SwiftTerm terminal for platform pairing wizards that genuinely require
 /// a TTY (WhatsApp QR, Signal `signal-cli link`). This is a lightweight sibling
@@ -61,17 +62,20 @@ final class EmbeddedSetupTerminalController {
         }
         // C10. `HermesFileService.enrichedEnvironment()` reads a `static let`
         // backed by two `zsh` probes at 5 s + 3 s
-        // (`HermesFileService.swift:2468-2484`). `scarfApp.swift:89-91` warms
-        // it on a detached task at launch, but a `static let` initialiser is
-        // a `swift_once`, so a main-actor reader that arrives while the
-        // warm-up is still running BLOCKS on it — and this one sat on the
-        // click that starts a pairing. Resolve it off-main, then attach on
-        // the main actor with the value in hand. `launch` re-checks
+        // (`HermesFileService.swift:2566-2583`, probes at `:2575` and
+        // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
+        // launch, but a `static let` initialiser is a `swift_once`, so a
+        // main-actor reader that arrives while the warm-up is still running
+        // BLOCKS on it — and this one sat on the click that starts a pairing.
+        // Resolve it on an `OffPool.run` hop — off the main actor AND off the
+        // cooperative pool, since eight seconds of blocking is what a
+        // fixed-width pool must never be handed (round-5 P52) — then attach
+        // on the main actor with the value in hand. `launch` re-checks
         // `container`: this hop yields, and the view can be gone by the time
         // it lands.
         startTask?.cancel()
         startTask = Task { [weak self] in
-            let env = await Task.detached { HermesFileService.enrichedEnvironment() }.value
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
             guard let self, !Task.isCancelled else { return }
             self.launch(executable: executable, arguments: arguments, environment: environment, shellEnv: env)
         }

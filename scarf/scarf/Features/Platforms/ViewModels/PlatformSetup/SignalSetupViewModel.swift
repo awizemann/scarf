@@ -66,7 +66,8 @@ final class SignalSetupViewModel: PlatformSetupForm {
         // NOT inside the apply closure above: that closure runs on the main
         // actor, and `detectSignalCLI` reads `HermesFileService.enrichedEnvironment()`,
         // whose backing `enrichedShellEnv` is a `static let` initialised by two
-        // `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2468-2484`).
+        // `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2566-2583`,
+        // probes at `:2575` and `:2580`).
         // `scarfApp.swift:89-91` warms it on a detached task at launch, but a
         // `static let` initialiser is a `swift_once`: a main-actor reader that
         // arrives while the warm-up is still running BLOCKS on it, for up to

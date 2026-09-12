@@ -285,15 +285,19 @@ enum PlatformSetupHelpers {
     /// read, and its save is an `.env` write plus one `hermes config set`
     /// spawn per key — on an ssh context every one of those is a network
     /// round-trip. Running them inline froze the window for the whole batch.
-    /// `Task.detached` (not `Task { }`) is required: these view models are
-    /// `@MainActor`, so a plain child task would inherit that isolation and
-    /// run the I/O right back on the main actor.
+    /// Getting off the main actor is only half of it, and `Task.detached` is
+    /// only that half: these view models are `@MainActor`, so a plain child
+    /// task would inherit that isolation and run the I/O right back on the
+    /// main actor — but a DETACHED task still runs on the cooperative pool,
+    /// one thread per core, and every one of these reads blocks its thread.
+    /// ``OffPool/run(_:)`` gives the blocking work a thread of its own
+    /// (round-5 P52).
     static func detached<T: Sendable>(
         _ work: @escaping @Sendable () -> T,
         then commit: @escaping @MainActor (T) -> Void
     ) {
         Task { @MainActor in
-            let value = await Task.detached { work() }.value
+            let value = await OffPool.run(work)
             commit(value)
         }
     }

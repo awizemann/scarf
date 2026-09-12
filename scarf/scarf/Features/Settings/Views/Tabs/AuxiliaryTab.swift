@@ -31,14 +31,17 @@ struct AuxiliaryTab: View {
     /// sheet's completion — go through this one function so neither can drift
     /// back onto a main-actor `readFile`.
     ///
-    /// `Task.detached`, not `Task { }`: this view is main-actor isolated, so
-    /// an unstructured `Task` would inherit that isolation and run the SSH
-    /// read on it anyway — the trap `PlatformSetupHelpers.detached` documents.
+    /// ``OffPool/run(_:)``, not `Task { }` and not `Task.detached`: this view
+    /// is main-actor isolated, so an unstructured `Task` would inherit that
+    /// isolation and run the SSH read on it anyway — the trap
+    /// `PlatformSetupHelpers.detached` documents. `Task.detached` clears the
+    /// isolation but not the COOPERATIVE POOL, and `loadState()` blocks its
+    /// thread on an SSH `readFile` (round-5 P52).
     private static func loadSubscription(
         _ context: ServerContext
     ) async -> NousSubscriptionState {
         let service = NousSubscriptionService(context: context)
-        return await Task.detached { service.loadState() }.value
+        return await OffPool.run { service.loadState() }
     }
 
     // Keyed by the config path name — matches `auxiliary.<task>.*` in config.yaml.
@@ -236,7 +239,7 @@ struct AuxiliaryTab: View {
             // `auth.json` through the CONTEXT's transport — a local read on a
             // local server, a full SSH round trip on a remote one, and it was
             // running synchronously on the main actor from `onAppear`. The
-            // shape is `ModelPickerSheet`'s (`:193-195`): a detached hop whose
+            // shape is `ModelPickerSheet`'s: an `OffPool.run` hop whose
             // result is a small `Sendable` value assigned back on the main
             // actor. `.task` rather than `.onAppear` for the reason the
             // "Prefer .task over .onAppear" note gives — it fires once per
