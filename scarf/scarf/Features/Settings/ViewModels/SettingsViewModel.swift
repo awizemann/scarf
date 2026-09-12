@@ -1234,6 +1234,18 @@ final class SettingsViewModel {
     private func saveDirectYAML(
         label: String, transform: @escaping @Sendable (String) -> String?
     ) async {
+        // MANAGED-HOST BOUNCE, the same one ``enqueueConfigWrite`` does —
+        // and here it is the ONLY guard there is. A `config set` on a managed
+        // host at least gets refused by Hermes (at exit 0, which is why the
+        // verdicts exist); this writer edits config.yaml DIRECTLY through
+        // `GuardedTextFile`, so Hermes never sees it and there is nothing
+        // downstream to refuse it. The pane is already read-only when
+        // `isManagedHost` is true, so reaching here means a programmatic or
+        // keyboard-driven save got past a disabled control.
+        if let refusal = managedBannerText {
+            showSaveFailure(refusal)
+            return
+        }
         // SERIALISED on the same chain as every `hermes config set`
         // (round-3 P33). These writers are a read-modify-write of the WHOLE
         // config.yaml, so they are the most damaging thing that can

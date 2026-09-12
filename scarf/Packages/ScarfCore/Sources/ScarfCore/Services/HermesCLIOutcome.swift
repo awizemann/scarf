@@ -45,7 +45,7 @@ public struct HermesCLIOutcome: Sendable, Equatable {
     /// the two files it mirrors a key into and refused the other.
     ///
     /// The live shape is `config set terminal.*` — `set_config_value` writes
-    /// config.yaml (`hermes_cli/config.py:3508`), then mirrors the key into
+    /// config.yaml (`hermes_cli/config.py:3506`), then mirrors the key into
     /// `.env` through `save_env_value` (`:3511`), whose
     /// `_env_write_blocked` managed-**scope** arm prints `Cannot set <KEY>: it
     /// is managed by your administrator (…)` and returns (`:2560-2565`) —
@@ -260,6 +260,26 @@ public enum HermesCLIVerdict {
 public enum HermesCLIMarkers {
     // MARK: skills install / uninstall — hermes_cli/skills_hub.py
 
+    // MARK: tools enable / disable — hermes_cli/tools_config_mcp.py
+
+    /// `_print_success(f"{verb}: {', '.join(successful)}")` where `verb` is
+    /// `"Disabled"` or `"Enabled"` — `hermes_cli/tools_config_mcp.py:284-285`
+    /// @ v2026.9.7. `print_success` prefixes `✓ `
+    /// (`hermes_cli/cli_output.py:13-14`), which `unglyphed` strips, so these
+    /// anchor at column 0.
+    public static let toolsToggleSuccess = ["Enabled:", "Disabled:"]
+
+    /// Every refusal `tools_disable_enable_command` can print, in source
+    /// order, plus ``managedRefusalAnchored`` for the `save_config` arm
+    /// (`hermes_cli/config.py:2316-2318`). All are `_print_error`
+    /// (`✗ ` prefix, `cli_output.py:21-22`) and NONE of them exits non-zero.
+    public static let toolsToggleFailure = managedRefusalAnchored + [
+        "Unknown platform '",        // tools_config_mcp.py:247
+        "Unknown toolset '",         // :262
+        "Toolset '",                 // :268 — "…' is not available on platform '…'"
+        "MCP server '",              // :278 — "…' not found in config"
+    ]
+
     /// `c.print(f"[bold green]Installed:[/] {…}")` — hermes_cli/skills_hub.py:720.
     /// (Same line, same prefix, at v2026.6.19:691 through v2026.8.31:799.)
     public static let skillsInstallSuccess = ["Installed:"]
@@ -415,7 +435,7 @@ public enum HermesCLIMarkers {
     ///    (`:3598-3604`) — exit 1, caught by the exit code.
     /// 9. `_usage_exit` for a missing key/value (`:3585-3593`) — exit 1.
     /// 10. the **terminal `.env` mirror** (round-4 review). After the
-    ///    config.yaml write lands (`_write_user_config`, `:3508`),
+    ///    config.yaml write lands (`_write_user_config`, `:3506`),
     ///    `terminal_config_env_var_for_key(key)` finds an env twin for every
     ///    `terminal.*` key except `terminal.cwd` and calls `save_env_value`
     ///    (`:3509-3511`) → `_env_write_blocked` (`:2574-2578`), whose
@@ -482,7 +502,7 @@ public enum HermesCLIMarkers {
     /// `Cannot unset` already quotes the `unset_config_value` managed arm, but
     /// the `.env` branch reaches `_env_write_blocked` through
     /// `remove_env_value` (`:2552-2566`) and `unset_config_value` prints
-    /// `✓ Unset …` (`:3583`) after it regardless — a success line and a
+    /// `✓ Unset …` (`:3582`) after it regardless — a success line and a
     /// refusal line in the same run, which only `failureWins` resolves the
     /// right way.
     ///
@@ -1304,7 +1324,7 @@ public enum HermesMemoryOff {
 /// config.yaml and then REFUSED the `.env` mirror of the same key.
 ///
 /// `set_config_value` writes config.yaml (`_write_user_config`,
-/// `hermes_cli/config.py:3508` @ v2026.9.7), then mirrors every `terminal.*`
+/// `hermes_cli/config.py:3506` @ v2026.9.7), then mirrors every `terminal.*`
 /// key except `terminal.cwd` into `.env` through `save_env_value`
 /// (`:3509-3511`); `_env_write_blocked`'s managed-**scope** arm prints
 /// `Cannot set <KEY>: it is managed by your administrator (…)` and returns
@@ -1418,6 +1438,57 @@ public enum HermesConfigSet {
         return HermesConfigMirror.resolve(
             verdict, output: output, exitCode: exitCode,
             successMarkers: HermesCLIMarkers.configSetSuccess
+        )
+    }
+}
+
+/// `hermes tools enable|disable <name> --platform <p>` — the FOURTH door onto
+/// `save_config`'s exit-0 managed refusal (P46 finding 4).
+///
+/// Walked at v2026.9.7. `cmd_tools` dispatches `enable`/`disable` to
+/// `tools_disable_enable_command` (`hermes_cli/main_agent_cmds.py:93-95` →
+/// `hermes_cli/tools_config_mcp.py:237`). Every refusal that command can
+/// print is a `_print_error` followed by a bare `return` or a `continue`, so
+/// **every one of them exits 0**:
+///
+/// - `Unknown platform '<p>'. Valid: …` — `:247`, then `return` at `:248`:
+///   nothing is saved and nothing else is printed.
+/// - `Unknown toolset '<name>'` — `:262`. The name is dropped from
+///   `toolset_targets` (`:269-270`) and the command CONTINUES.
+/// - `Toolset '<name>' is not available on platform '<p>' (only: …)` —
+///   `:268`, same treatment.
+/// - `MCP server '<srv>' not found in config` — `:278`.
+///
+/// and the write itself is `save_config(config)` (`:279`), whose managed arm
+/// is `if is_managed(): managed_error("save configuration"); return`
+/// (`hermes_cli/config.py:2316-2318`) — the same `print(…, file=sys.stderr)`
+/// + bare `return` shape `HermesSkillsTrust` documents, covered by
+/// ``HermesCLIMarkers/managedRefusalAnchored``.
+///
+/// The success line is `_print_success(f"{verb}: {', '.join(successful)}")`
+/// (`:284-285`) — `✓ Enabled: web` / `✓ Disabled: web` — and it is printed
+/// from the `successful` list, which is computed BEFORE `save_config` can
+/// refuse and is not conditioned on it. So a managed host prints the refusal
+/// on stderr and `✓ Enabled: web` on stdout in the same run, which is exactly
+/// why this verdict must run `failureWins: true`.
+///
+/// Anchored on both sides. The success line interpolates the toolset NAMES
+/// the caller passed, so an unanchored `Enabled:` would match a name that
+/// contained it; and the refusals interpolate a name or a platform, which is
+/// the echo `anchoredFailureMarkers` exists for.
+public enum HermesToolsToggle {
+    public static func argv(toolset: String, platform: String, enabled: Bool) -> [String] {
+        ["tools", enabled ? "enable" : "disable", toolset, "--platform", platform]
+    }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.toolsToggleSuccess,
+            anchoredFailureMarkers: HermesCLIMarkers.toolsToggleFailure,
+            failureWins: true,
+            successAnchored: true
         )
     }
 }

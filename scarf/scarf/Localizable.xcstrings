@@ -50,6 +50,211 @@
         }
       }
     },
+    "Completion contract set at create time: local-only, OWNER/REPO for publication, or a PR URL whose CI gates completion. Read-only — Hermes has no update verb." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Erstellen festgelegter Abschlussvertrag: nur lokal, OWNER/REPO zur Veröffentlichung oder eine PR-URL, deren CI den Abschluss freigibt. Schreibgeschützt — Hermes hat kein Aktualisierungsverb."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contrato de finalización definido al crear: solo local, OWNER/REPO para publicación o una URL de PR cuya CI controla la finalización. Solo lectura: Hermes no tiene un verbo de actualización."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contrat d’achèvement défini à la création : local uniquement, OWNER/REPO pour la publication, ou une URL de PR dont la CI conditionne l’achèvement. Lecture seule — Hermes n’a pas de verbe de mise à jour."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作成時に設定された完了コントラクト: ローカルのみ、公開用の OWNER/REPO、または CI が完了を判定する PR の URL。読み取り専用です — Hermes に更新用のコマンドはありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contrato de conclusão definido na criação: apenas local, OWNER/REPO para publicação ou uma URL de PR cuja CI controla a conclusão. Somente leitura — o Hermes não tem um verbo de atualização."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建时设置的完成约定：仅本地、用于发布的 OWNER/REPO，或由 CI 把关完成状态的 PR 链接。只读——Hermes 没有更新命令。"
+          }
+        }
+      }
+    },
+    "Nothing is running — Hermes runs this as a normal prompt instead of steering." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es läuft nichts — Hermes führt dies als normalen Prompt aus, statt zu steuern."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay nada en ejecución: Hermes lo ejecuta como un mensaje normal en lugar de dirigir."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rien n’est en cours — Hermes l’exécute comme une invite normale au lieu de l’orienter."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行中の処理がないため、Hermes はこれをステアリングではなく通常のプロンプトとして実行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada está em execução — o Hermes executa isto como um prompt normal em vez de direcionar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前没有正在运行的任务——Hermes 会将其作为普通提示运行，而不是进行引导。"
+          }
+        }
+      }
+    },
+    "That job already finished and can't be re-armed — duplicate it to schedule a new one." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Auftrag ist bereits abgeschlossen und kann nicht neu aktiviert werden — duplizieren Sie ihn, um einen neuen zu planen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esa tarea ya terminó y no puede rearmarse: duplícala para programar una nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche est déjà terminée et ne peut pas être réarmée — dupliquez-la pour en planifier une nouvelle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブはすでに完了しており、再設定できません。複製して新しいジョブをスケジュールしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Essa tarefa já terminou e não pode ser rearmada — duplique-a para agendar uma nova."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该任务已完成且无法重新启用——复制它以安排新的任务。"
+          }
+        }
+      }
+    },
+    "That job already finished — duplicate it to schedule a new one." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Auftrag ist bereits abgeschlossen — duplizieren Sie ihn, um einen neuen zu planen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esa tarea ya terminó: duplícala para programar una nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche est déjà terminée — dupliquez-la pour en planifier une nouvelle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブはすでに完了しています。複製して新しいジョブをスケジュールしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Essa tarefa já terminou — duplique-a para agendar uma nova."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该任务已完成——复制它以安排新的任务。"
+          }
+        }
+      }
+    },
+    "That job already finished — use Resume & Run Now to re-arm it, or duplicate it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Auftrag ist bereits abgeschlossen — verwenden Sie „Fortsetzen & jetzt ausführen“, um ihn neu zu aktivieren, oder duplizieren Sie ihn."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esa tarea ya terminó: usa Reanudar y ejecutar ahora para rearmarla, o duplícala."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche est déjà terminée — utilisez « Reprendre et exécuter maintenant » pour la réarmer, ou dupliquez-la."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブはすでに完了しています。「再開して今すぐ実行」で再設定するか、複製してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Essa tarefa já terminou — use Retomar e executar agora para rearmá-la, ou duplique-a."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该任务已完成——使用“恢复并立即运行”重新启用它，或复制它。"
+          }
+        }
+      }
+    },
     "—" : {
       "comment" : "A placeholder for a project name.",
       "isCommentAutoGenerated" : true

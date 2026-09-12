@@ -1279,6 +1279,19 @@ final class ChatViewModel {
             isAgentWorking: wasAgentWorking,
             capabilities: richChatViewModel.capabilitiesGate
         )
+        // A typed `/steer <text>` with NOTHING running is an ordinary turn on
+        // Hermes's side too — `_rewrite_prompt_for_interrupt` strips the
+        // prefix before the slash dispatch ever sees it
+        // (`acp_adapter/server.py:667-689` at `:789`, dispatch at `:792`).
+        // Unlike `/queue` the WIRE needs no change (Hermes does the
+        // stripping); what changes is the indicator, the hint, and — the part
+        // that mattered — whether Stop can cancel it.
+        let idleSteer = RichChatViewModel.idleSteerIsOrdinaryPrompt(
+            name: parsedForWire.name,
+            args: parsedForWire.args,
+            isAgentWorking: wasAgentWorking,
+            capabilities: richChatViewModel.capabilitiesGate
+        )
         let wireText = idleQueueText
             ?? richChatViewModel.expandIfProjectScoped(text, context: context)
 
@@ -1306,6 +1319,7 @@ final class ChatViewModel {
         // it must NOT suppress the working indicator either.
         let isNonInterruptive = richChatViewModel.isDispatchedNonInterruptiveSlash(text)
             && idleQueueText == nil
+            && !idleSteer
         let parsed = parsedForWire
         switch parsed.name {
         case "goal":
@@ -1363,7 +1377,11 @@ final class ChatViewModel {
                 richChatViewModel.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
             }
             scheduleHintClear()
-        case "steer" where isNonInterruptive:
+        // `wasAgentWorking` is the second gate, exactly as `/queue` has it:
+        // the "applies after the next tool call" promise is only true of a
+        // turn that is running. `isNonInterruptive` already excludes the idle
+        // case via `idleSteer`; naming it here keeps the two rows symmetric.
+        case "steer" where isNonInterruptive && wasAgentWorking:
             richChatViewModel.transientHint = "Guidance queued — applies after the next tool call."
             scheduleHintClear()
         default:
@@ -1383,6 +1401,9 @@ final class ChatViewModel {
                 scheduleHintClear()
             } else if idleQueueText != nil {
                 richChatViewModel.transientHint = RichChatViewModel.idleQueueNotice
+                scheduleHintClear()
+            } else if idleSteer {
+                richChatViewModel.transientHint = RichChatViewModel.idleSteerNotice
                 scheduleHintClear()
             }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }

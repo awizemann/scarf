@@ -367,7 +367,7 @@ final class BotAgentViewModel {
         // overlay letting Hermes choose). Pass nil rather than "" — P0 refuses
         // empty values because `config set k ""` pins an empty string, which
         // is not the same as leaving the key unset.
-        perform(pin: true) { backend, name in
+        perform(pin: true, verdict: Self.configSetVerdict) { backend, name in
             try backend.setModelPin(
                 forProfile: name,
                 provider: provider.isEmpty ? nil : provider,
@@ -380,7 +380,7 @@ final class BotAgentViewModel {
     /// root profile's model, which this bot never inherited.
     func clearModelPin() {
         guard canClearModelPin else { return }
-        perform(pin: true) { backend, name in
+        perform(pin: true, verdict: Self.configUnsetVerdict) { backend, name in
             // `config unset` exits non-zero with "Config key not set" for a
             // key that was never pinned, which is a success here — P0 returns
             // those rather than throwing, and the reload below is the truth.
@@ -416,6 +416,26 @@ final class BotAgentViewModel {
     /// also appears in unrelated display placeholders like `(not set)` used
     /// for masked/empty values elsewhere in the same file; a broad match there
     /// could swallow a real failure whose text happened to echo one of those.
+    /// `hermes config set`'s verdict, over a `ProcessResult`.
+    nonisolated static let configSetVerdict: @Sendable (ProcessResult) -> HermesCLIOutcome = { result in
+        HermesConfigSet.judge(output: result.stdoutString + "\n" + result.stderrString,
+                              exitCode: result.exitCode)
+    }
+
+    /// `hermes config unset`'s verdict, over a `ProcessResult`. `clearModelPin`
+    /// has already dropped the benign `Config key not set` results through
+    /// ``isBenignUnset``, so anything reaching here is a real refusal.
+    nonisolated static let configUnsetVerdict: @Sendable (ProcessResult) -> HermesCLIOutcome = { result in
+        HermesConfigUnset.judge(output: result.stdoutString + "\n" + result.stderrString,
+                                exitCode: result.exitCode)
+    }
+
+    /// `hermes tools enable|disable`'s verdict, over a `ProcessResult`.
+    nonisolated static let toolsToggleVerdict: @Sendable (ProcessResult) -> HermesCLIOutcome = { result in
+        HermesToolsToggle.judge(output: result.stdoutString + "\n" + result.stderrString,
+                                exitCode: result.exitCode)
+    }
+
     nonisolated static func isBenignUnset(_ result: ProcessResult) -> Bool {
         let combined = result.stdoutString + "\n" + result.stderrString
         let outcome = HermesConfigUnset.judge(output: combined, exitCode: result.exitCode)
@@ -423,8 +443,20 @@ final class BotAgentViewModel {
         return combined.lowercased().contains("config key not set")
     }
 
+    /// Run a pin write off the main actor and report its verdict.
+    ///
+    /// `verdict` is not optional decoration: `setModelPin` spawns
+    /// `hermes config set`, whose managed-host arm prints to stderr and
+    /// `return`s — **exit 0** (`hermes_cli/config.py:3549-3551` for the unset
+    /// twin; `HermesConfigSet` documents the nine `config set` arms). P39
+    /// closed that hole for `clearModelPin` by filtering through
+    /// ``isBenignUnset``, which judges by OUTPUT — and then this function
+    /// threw the result away again with `exitCode != 0`, so a managed refusal
+    /// that `isBenignUnset` had correctly surfaced reported "saved". The
+    /// verdict is now asked HERE, the way `enqueueConfigWrite` asks it.
     private func perform(
         pin: Bool,
+        verdict: @escaping @Sendable (ProcessResult) -> HermesCLIOutcome,
         _ work: @escaping @Sendable (any BotAgentBackend, String) throws -> [ProcessResult]
     ) {
         guard canEditConfig, !isPinBusy else { return }
@@ -438,8 +470,10 @@ final class BotAgentViewModel {
             let message: String? = await Task.detached {
                 do {
                     let results = try work(backend, name)
-                    if let bad = results.first(where: { $0.exitCode != 0 }) {
-                        return Self.failureText(bad)
+                    for result in results {
+                        let outcome = verdict(result)
+                        guard !outcome.succeeded else { continue }
+                        return outcome.detail ?? Self.failureText(result)
                     }
                     return nil
                 } catch {
@@ -480,7 +514,13 @@ final class BotAgentViewModel {
                         platform: Self.toolsetPlatform,
                         enabled: enabled
                     )
-                    return result.exitCode == 0 ? nil : Self.failureText(result)
+                    // `tools enable|disable` reaches `save_config`, whose
+                    // managed arm prints and `return`s — exit 0 — while the
+                    // success line is printed unconditionally from a list
+                    // computed before the save (`tools_config_mcp.py:279-285`
+                    // @ v2026.9.7). Exit code is not the signal.
+                    let outcome = Self.toolsToggleVerdict(result)
+                    return outcome.succeeded ? nil : (outcome.detail ?? Self.failureText(result))
                 } catch {
                     return Self.describe(error)
                 }
@@ -512,7 +552,10 @@ final class BotAgentViewModel {
             let message: String? = await Task.detached {
                 do {
                     let result = try backend.setMCPServerEnabled(forProfile: profile, server: name, enabled: enabled)
-                    return result.exitCode == 0 ? nil : Self.failureText(result)
+                    // `config set mcp_servers.<n>.enabled` — an exit-0
+                    // refusal family, see ``configSetVerdict``.
+                    let outcome = Self.configSetVerdict(result)
+                    return outcome.succeeded ? nil : (outcome.detail ?? Self.failureText(result))
                 } catch {
                     return Self.describe(error)
                 }

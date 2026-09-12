@@ -655,9 +655,12 @@ public final class RichChatViewModel {
     /// and `/queue` (run a prompt after the current turn finishes).
     ///
     /// **Floor v0.13 (`v2026.5.7`), not v2026.4.23.** Both names enter
-    /// `SlashCommandsMixin._SLASH_COMMANDS` together at
-    /// `acp_adapter/server.py:170-171` @ `v2026.5.7`, and `acp_adapter/` at
-    /// `v2026.4.30` has neither. The gates are ``HermesCapabilities
+    /// `HermesACPAgent._SLASH_COMMANDS` together — the dict is
+    /// `acp_adapter/server.py:163-173` @ `v2026.5.7`, `steer` at `:170` and
+    /// `queue` at `:171` — and `acp_adapter/` at `v2026.4.30` has neither.
+    /// (At `v2026.9.7` the roster has moved to `acp_adapter/commands.py`,
+    /// `steer` at `:55` and `queue` at `:60`; the FLOOR is what this line
+    /// is about, so it cites the tag the names arrived at.) The gates are ``HermesCapabilities
     /// .hasACPSteer`` and ``HermesCapabilities.hasACPQueue``, applied in
     /// `availableCommands` — this list is unfiltered.
     ///
@@ -1533,6 +1536,55 @@ public final class RichChatViewModel {
     /// ``idleQueueFallbackText(name:args:isAgentWorking:capabilities:)``.
     public static var idleQueueNotice: String {
         String(localized: "Nothing is running — sent as a normal prompt instead of queueing it.")
+    }
+
+    /// A typed `/steer <text>` on an IDLE session is an ORDINARY TURN, and
+    /// Scarf must paint it as one.
+    ///
+    /// Walked at `v2026.9.7`. `_rewrite_prompt_for_interrupt`
+    /// (`acp_adapter/server.py:667-689`) runs at `:789` — BEFORE the slash
+    /// dispatch at `:792-793`. For a text-only `/steer` with a non-empty
+    /// argument it takes `_take_interrupted_prompt(state)` and, when the
+    /// session is idle, returns `(steer_text, steer_text)` (`:686`): the
+    /// leading `/steer` is GONE, so `:792`'s `startswith("/")` is false,
+    /// `_handle_slash_command` is never reached, and the text runs as a real
+    /// turn through `_run_agent_turn` (`:812-824`). (After a cancel the same
+    /// arm replays the interrupted prompt with the steer text attached,
+    /// `:684-685` — also a real turn.) The fallback shipped with `/steer`
+    /// itself: `server.py:812-824` @ `v2026.5.7`.
+    ///
+    /// So the pre-P46 idle `/steer` painted "Guidance queued — applies after
+    /// the next tool call." over a turn that was starting right then, with
+    /// the working indicator suppressed and no `turnGeneration` recorded —
+    /// which meant **Stop could not cancel it**. This is the `/queue` shape
+    /// P44b fixed, one row up.
+    ///
+    /// The difference from `/queue` is the WIRE: Hermes strips the prefix
+    /// itself, so the text goes out unchanged as `/steer <args>` and there is
+    /// no fallback text to substitute — only a notice and an ordinary-turn
+    /// treatment. An EMPTY argument is left alone: `:681-682` returns the
+    /// text untouched and the dispatched `_cmd_steer` answers for it.
+    ///
+    /// Only for a host that WOULD dispatch it; below the v0.13 floor the text
+    /// already goes to the LLM verbatim and
+    /// ``subFloorSlashNotice(name:capabilities:)`` owns that case.
+    public static func idleSteerIsOrdinaryPrompt(
+        name: String?,
+        args: String,
+        isAgentWorking: Bool,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        guard name == "steer",
+              !isAgentWorking,
+              nonInterruptiveSlashIsDispatched(name, capabilities: capabilities)
+        else { return false }
+        return !args.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The one-line notice that accompanies
+    /// ``idleSteerIsOrdinaryPrompt(name:args:isAgentWorking:capabilities:)``.
+    public static var idleSteerNotice: String {
+        String(localized: "Nothing is running — Hermes runs this as a normal prompt instead of steering.")
     }
 
     /// Expand `/<name> args` when `<name>` matches a loaded project-

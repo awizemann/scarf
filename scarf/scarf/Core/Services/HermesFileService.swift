@@ -2792,7 +2792,9 @@ struct HermesFileService: Sendable {
     /// Wraps two `hermes config set` invocations because Hermes doesn't
     /// expose a combined "set model" command.
     ///
-    /// LEGACY — iOS `ChatView`'s preflight is the only remaining caller
+    /// LEGACY. It has no callers left: iOS `ChatView`'s preflight — the
+    /// last one this doc named — spawns its own `HermesConfigSet.argv` over
+    /// the transport (P46 finding 12) and never came through here.
     /// (t-9657430b). Every Mac writer routes through
     /// `LocalModelConfigPlan` + `applyModelConfigPlan(_:)` instead: this
     /// method never clears the local-managed keys, so switching away
@@ -2885,7 +2887,16 @@ struct HermesFileService: Sendable {
             // String so callers that grep through output don't need to
             // change. Stderr after stdout mirrors what the old Process impl
             // produced since both pipes were drained in that order.
-            let combined = result.stdoutString + result.stderrString
+            // A SEPARATOR when stdout does not already end in one. Without
+            // it a stdout with no trailing newline welds its last line to
+            // stderr's first — and every anchored refusal marker
+            // (``HermesCLIMarkers/managedRefusalAnchored`` and friends) asks
+            // whether a line STARTS with the marker, which a welded line
+            // never does. The exit-0 refusal families are exactly the ones
+            // that print to stderr while stdout carries a success line.
+            let stdout = result.stdoutString
+            let separator = (stdout.isEmpty || stdout.hasSuffix("\n")) ? "" : "\n"
+            let combined = stdout + separator + result.stderrString
             return (result.exitCode, combined)
         } catch let error as TransportError {
             let message = error.diagnosticStderr.isEmpty

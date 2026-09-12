@@ -64,9 +64,21 @@ final class ToolsViewModel {
         let newEnabled = toolsets[idx].enabled
 
         let action = newEnabled ? "enable" : "disable"
-        let result = await runHermes(["tools", action, tool.name, "--platform", selectedPlatform.name])
+        let result = await runHermes(
+            HermesToolsToggle.argv(toolset: tool.name,
+                                   platform: selectedPlatform.name,
+                                   enabled: newEnabled))
 
-        if result.exitCode != 0 {
+        // NOT the exit code. `tools enable|disable` prints every refusal it
+        // has — unknown platform, unknown toolset, a platform-restricted
+        // toolset, an unknown MCP server, and `save_config`'s managed arm —
+        // and exits 0 for all of them, then prints `✓ Enabled: <name>` from a
+        // list computed before the save could refuse
+        // (`hermes_cli/tools_config_mcp.py:237-285`, `config.py:2316-2318` @
+        // v2026.9.7). See ``HermesToolsToggle``. The per-bot twin
+        // (`BotAgentViewModel.setToolset`) judges the same way.
+        let outcome = HermesToolsToggle.judge(output: result.output, exitCode: result.exitCode)
+        if !outcome.succeeded {
             if let idx = toolsets.firstIndex(where: { $0.name == tool.name }) {
                 toolsets[idx].enabled = !newEnabled
             }
@@ -74,10 +86,10 @@ final class ToolsViewModel {
             // user has no idea whether they mis-clicked or the CLI refused.
             // Reuse the Settings extraction so the CLI's own sentence (or a
             // Python traceback tail) becomes one readable line.
-            toggleFailureMessage = SettingsViewModel.failureReason(from: result.output)
+            toggleFailureMessage = (outcome.detail ?? SettingsViewModel.failureReason(from: result.output))
                 .map { String(localized: "Couldn’t \(action) \(tool.name): \($0)") }
                 ?? String(localized: "Couldn’t \(action) \(tool.name)")
-            logger.warning("tools \(action, privacy: .public) failed (exit \(result.exitCode))")
+            logger.warning("tools \(action, privacy: .public) refused (exit \(result.exitCode))")
         } else {
             toggleFailureMessage = nil
         }
