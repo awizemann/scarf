@@ -181,15 +181,31 @@ struct ProcessDrainP43Tests {
         let bytes = urandom.readData(ofLength: 8 * 1024 * 1024)
         try bytes.write(to: work.appendingPathComponent("noise.bin"))
 
+        // **What this proves, exactly.** The budget now starts BEFORE
+        // `Process.run()` (decision 8), so on a loaded machine the 25 ms can
+        // be spent on the fork+exec rather than on `zip`'s compression — the
+        // refusal is then of a child that had barely started. That is still
+        // the property under test: the call REFUSES within a bounded time
+        // instead of running to completion or hanging, wherever the budget
+        // went. It is not a measurement of `zip`'s throughput, and the
+        // comment above about 8 MB taking ~200 ms is why the fixture is
+        // sized as it is, not a claim about which side of the budget won
+        // (round-5 P48b).
         var thrown: Error?
+        let started = Date()
         do {
             try await RemoteBackupService.zipDirectory(
                 workDir: work, into: dir.appendingPathComponent("o.zip"), timeout: 0.025)
         } catch {
             thrown = error
         }
+        let elapsed = Date().timeIntervalSince(started)
         let error = try #require(thrown, "zipping 8 MB of noise cannot finish inside 25 ms")
         #expect("\(error)".contains("did not finish"))
+        // The bound is the point: a refusal that took as long as the work
+        // would have is not a bound. Generous against the primitive's two
+        // signal graces plus the drain grace.
+        #expect(elapsed < 8, "the refusal took \(elapsed)s — that is not a bounded budget")
     }
 
     @Test("the archive budgets are named and ordered")

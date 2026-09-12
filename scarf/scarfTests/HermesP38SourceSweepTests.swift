@@ -115,6 +115,60 @@ struct HermesP38SourceSweepTests {
         "scarf/Packages/ScarfCore/Tests",
     ]
 
+    /// The matcher, hoisted out of the sweep so it can be CALIBRATED.
+    ///
+    /// It was inline, and the optional-chain exemption P48 added to it went in
+    /// with nothing exercising either arm: a matcher that silently stopped
+    /// matching would have left the sweep green and empty. Hoisted, its three
+    /// interesting cases are pinned next door in
+    /// `SubscriptAfterCountMatcherP48bTests` — the way
+    /// `FixedSleepMatcherP46bTests` pins the sleep matcher (round-5 P48b).
+    ///
+    /// - Returns: the 1-based line numbers of offending subscripts, each with
+    ///   the offending text.
+    static func subscriptAfterCountOffenses(in source: String) -> [(line: Int, text: String)] {
+        var offenders: [(line: Int, text: String)] = []
+        let lines = source.components(separatedBy: "\n")
+        for (i, line) in lines.enumerated() {
+            guard !Self.isComment(line),
+                  line.contains("#expect("), line.contains(".count")
+            else { continue }
+            // The receiver whose count was asserted: the token right before
+            // `.count`.
+            guard let dot = line.range(of: ".count") else { continue }
+            let receiver = String(line[line.startIndex..<dot.lowerBound])
+                .split(whereSeparator: { " (!=<>&|,".contains($0) })
+                .last.map(String.init) ?? ""
+            guard !receiver.isEmpty else { continue }
+            // Look at the next few statements for a bare subscript on that
+            // same receiver.
+            for j in (i + 1)..<min(i + 5, lines.count) {
+                let next = lines[j]
+                guard !Self.isComment(next) else { continue }
+                // A `guard`/`#require` in between is the correct fix and ends
+                // the window.
+                if next.contains("guard ") || next.contains("#require(") { break }
+                guard let open = next.range(of: receiver + "[") else { continue }
+                // A string-keyed lookup (`findings["File"]`) is a dictionary
+                // read: it returns nil, it does not trap.
+                if next[open.upperBound...].hasPrefix("\"") { break }
+                // So is an OPTIONAL-CHAINED one (`map[1]?.first`):
+                // `Dictionary.subscript` returns an Optional, and the `?`
+                // right after the closing bracket is the proof — an Array
+                // subscript is non-optional and cannot be chained that way.
+                // P46's note listed this shape as a known false positive;
+                // round-5 P48 tightens the matcher rather than exempting the
+                // file it lives in.
+                if let close = next.range(of: "]", range: open.upperBound..<next.endIndex),
+                   next[close.upperBound...].hasPrefix("?") { break }
+                offenders.append(
+                    (line: j + 1, text: next.trimmingCharacters(in: .whitespaces)))
+                break
+            }
+        }
+        return offenders
+    }
+
     @Test func noSubscriptFollowsACountExpectation() {
         var offenders: [String] = []
         var scanned: Set<String> = []
@@ -123,43 +177,8 @@ struct HermesP38SourceSweepTests {
                 guard url.lastPathComponent != Self.ownFileName else { continue }
                 scanned.insert(url.lastPathComponent)
                 guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                let lines = src.components(separatedBy: "\n")
-                for (i, line) in lines.enumerated() {
-                    guard !Self.isComment(line),
-                          line.contains("#expect("), line.contains(".count")
-                    else { continue }
-                    // The receiver whose count was asserted: the token right
-                    // before `.count`.
-                    guard let dot = line.range(of: ".count") else { continue }
-                    let receiver = String(line[line.startIndex..<dot.lowerBound])
-                        .split(whereSeparator: { " (!=<>&|,".contains($0) })
-                        .last.map(String.init) ?? ""
-                    guard !receiver.isEmpty else { continue }
-                    // Look at the next few statements for a bare subscript on
-                    // that same receiver.
-                    for j in (i + 1)..<min(i + 5, lines.count) {
-                        let next = lines[j]
-                        guard !Self.isComment(next) else { continue }
-                        // A `guard`/`#require` in between is the correct fix
-                        // and ends the window.
-                        if next.contains("guard ") || next.contains("#require(") { break }
-                        guard let open = next.range(of: receiver + "[") else { continue }
-                        // A string-keyed lookup (`findings["File"]`) is a
-                        // dictionary read: it returns nil, it does not trap.
-                        if next[open.upperBound...].hasPrefix("\"") { break }
-                        // So is an OPTIONAL-CHAINED one (`map[1]?.first`):
-                        // `Dictionary.subscript` returns an Optional, and the
-                        // `?` right after the closing bracket is the proof —
-                        // an Array subscript is non-optional and cannot be
-                        // chained that way. P46's note listed this shape as a
-                        // known false positive; round-5 P48 tightens the
-                        // matcher rather than exempting the file it lives in.
-                        if let close = next.range(of: "]", range: open.upperBound..<next.endIndex),
-                           next[close.upperBound...].hasPrefix("?") { break }
-                        offenders.append("\(url.lastPathComponent):\(j + 1) — "
-                                         + next.trimmingCharacters(in: .whitespaces))
-                        break
-                    }
+                for hit in Self.subscriptAfterCountOffenses(in: src) {
+                    offenders.append("\(url.lastPathComponent):\(hit.line) — \(hit.text)")
                 }
             }
         }
@@ -413,5 +432,61 @@ struct FixedSleepMatcherP46bTests {
         #expect(HermesP38SourceSweepTests.fixedSleepSeconds(
             in: "try await Task.sleep(nanoseconds: 10_000_000)").first == 0.01)
         #expect(HermesP38SourceSweepTests.fixedSleepSeconds(in: "await settle()").isEmpty)
+    }
+}
+
+/// Round-5 P48b — calibration for the subscript-after-count matcher.
+///
+/// The sweep's other matcher got this treatment in P46b and this one did not,
+/// even as P48 added an exemption arm to it. A source sweep that stops
+/// matching reports nothing and looks exactly like a clean tree, so the arms
+/// are exercised here against hand-written snippets rather than against
+/// whatever the repo happens to contain today.
+@Suite("The subscript-after-count matcher is calibrated (P48b)")
+struct SubscriptAfterCountMatcherP48bTests {
+
+    /// The shape the sweep exists for: `#expect` RECORDS and continues, so a
+    /// wrong count runs into the subscript and traps the host.
+    @Test func anArraySubscriptAfterACountIsAHit() {
+        let source = """
+            #expect(items.count == 2)
+            let first = items[0]
+            """
+        let hits = HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source)
+        #expect(hits.count == 1, "expected one hit, got \(hits)")
+        #expect(hits.first?.line == 2)
+    }
+
+    /// A string-keyed lookup is a `Dictionary` read: it returns `nil`, it does
+    /// not trap.
+    @Test func aStringKeyedDictionaryReadIsNotAHit() {
+        let source = """
+            #expect(findings.count == 2)
+            let one = findings["Transport.swift"]
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+    }
+
+    /// So is an optional-chained one — the `?` right after the bracket is the
+    /// proof, since an Array subscript is non-optional and cannot be chained
+    /// that way. This is the arm P48 added; without it the sweep fires on a
+    /// safe line, with it inverted the sweep misses a real trap.
+    @Test func anOptionalChainedSubscriptIsNotAHit() {
+        let source = """
+            #expect(byLine.count == 2)
+            #expect(byLine[1]?.first == "a")
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+    }
+
+    /// …and the `#require` the sweep asks for really does end the window,
+    /// or every correctly-fixed site in the tree would be reported.
+    @Test func aRequireBetweenThemEndsTheWindow() {
+        let source = """
+            #expect(items.count == 2)
+            let first = try #require(items.first)
+            let second = items[1]
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
     }
 }

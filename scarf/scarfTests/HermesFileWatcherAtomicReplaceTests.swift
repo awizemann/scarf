@@ -27,6 +27,11 @@ struct HermesFileWatcherAtomicReplaceTests {
     /// fixed nap here is a bet that is also wall time on every serial run.
     /// The caller re-asserts the condition afterwards, so a timeout surfaces
     /// as that assertion failing with its own message (round-5 P48).
+    /// How long `lastChangeDate` must hold still before the churn counts as
+    /// drained. The watcher coalesces on a 0.5 s window, so anything shorter
+    /// than that cannot tell "drained" from "between coalesced ticks".
+    static let settleWindow: TimeInterval = 0.7
+
     static func waitUntil(
         timeout: TimeInterval = 5,
         _ condition: @MainActor () -> Bool
@@ -202,11 +207,23 @@ struct HermesFileWatcherAtomicReplaceTests {
         // Let the churn's events settle before taking a baseline. There is no
         // observable for "the backlog has drained", so this polls for the one
         // thing that follows from it: `lastChangeDate` stops moving.
-        var settled = watcher.lastChangeDate
-        await Self.waitUntil {
+        //
+        // **A quiet WINDOW, seeded from outside the domain.** The first
+        // version seeded `settled` from `lastChangeDate` itself and returned
+        // as soon as one sample equalled it — which the very first sample
+        // always does, so the settle was vacuous and the 700 ms became ~0
+        // (round-5 P48b). The value now has to hold still across consecutive
+        // samples spanning the whole window before the baseline is taken.
+        var settled = Date.distantPast
+        var quietSince = Date.distantFuture
+        await Self.waitUntil(timeout: 10) {
             let now = watcher.lastChangeDate
-            defer { settled = now }
-            return now == settled
+            if now != settled {
+                settled = now
+                quietSince = Date()
+                return false
+            }
+            return Date().timeIntervalSince(quietSince) >= Self.settleWindow
         }
 
         // Whatever happened during arming, the watch must be live now.
