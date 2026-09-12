@@ -11,6 +11,11 @@ struct MemoryView: View {
     @State private var viewModel: MemoryViewModel
     @State private var showResetConfirm: Bool = false
     @State private var resetError: String?
+    /// P47 / round-5 decision 3: the neutral note a reset with nothing to
+    /// reset carries. A success, so it does NOT go through `resetError`'s
+    /// "Couldn't reset memory" alert — the user asked for the memory to be
+    /// empty and it is. Nil on a reset that actually erased files.
+    @State private var resetNote: String?
     /// True while `hermes memory reset` is running; the destructive button
     /// disables on it so the state transition renders.
     @State private var isResetting = false
@@ -103,6 +108,14 @@ struct MemoryView: View {
             Button("OK") { resetError = nil }
         } message: {
             Text(resetError ?? "")
+        }
+        .alert("Memory reset", isPresented: Binding(
+            get: { resetNote != nil },
+            set: { if !$0 { resetNote = nil } }
+        )) {
+            Button("OK") { resetNote = nil }
+        } message: {
+            Text(resetNote ?? "")
         }
     }
 
@@ -544,19 +557,33 @@ struct MemoryView: View {
         let ctx = viewModel.context
         Task {
             let result = await Task.detached {
-                ctx.runHermes(["memory", "reset", "--yes"])
+                ctx.runHermes(HermesMemoryResetVerdict.argv)
             }.value
             isResetting = false
-            if result.exitCode == 0 {
+            // P47 / round-5 decision 3: judged by OUTPUT.
+            // `_cmd_memory_reset`'s nothing-to-do arm prints
+            // `Nothing to reset — no memory files found in …` and RETURNS at
+            // exit 0 (`hermes_cli/main_agent_cmds.py:32-33` @ `v2026.9.7`),
+            // so an exit-code verdict reloaded as though the wipe had
+            // happened. Decision 3 keeps it a success — there was nothing to
+            // erase — and carries the neutral note instead.
+            let outcome = HermesMemoryResetVerdict.judge(
+                output: result.output, exitCode: result.exitCode
+            )
+            if outcome.succeeded {
+                resetNote = outcome.warning
                 // Only AFTER the reset has actually happened — a load issued
                 // before it returned would have re-published the pre-reset
                 // text and made a successful wipe look like a no-op.
                 viewModel.load()
             } else {
-                let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                resetError = trimmed.isEmpty
+                // A non-zero exit names the status; an exit-0 run that
+                // printed neither marker is `.unconfirmed`, and "status 0"
+                // would be the old bug in a new voice — say that Hermes
+                // printed nothing this side recognises instead.
+                resetError = outcome.detail ?? (result.exitCode != 0
                     ? "hermes memory reset exited with status \(result.exitCode)."
-                    : trimmed
+                    : "hermes memory reset printed no result. Check the host.")
             }
         }
     }

@@ -522,7 +522,7 @@ final class ChatViewModel {
     /// CLI process.
     @ObservationIgnored
     var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
-        ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
+        ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
     }
 
     private static let maxReconnectAttempts = 5
@@ -2527,7 +2527,15 @@ final class ChatViewModel {
         // would read as a fresh failure.
         renameError = nil
         guard !trimmed.isEmpty else { return false }
-        let result = context.runHermes(["sessions", "rename", sessionId, trimmed])
+        // P47: `--` before the positionals, through the ONE argv builder the
+        // Sessions pane already uses. `sessions rename` takes `session_id`
+        // then `title` with `nargs="+"`
+        // (`hermes_cli/subcommands/sessions.py:210-213` @ `v2026.9.7`), so a
+        // title beginning with a dash exited 2 here while the identical
+        // rename from the Sessions pane worked.
+        let result = context.runHermes(
+            SessionsViewModel.renameArgv(sessionId: sessionId, title: trimmed)
+        )
         guard result.exitCode == 0 else {
             // Hermes refuses some renames server-side — most notably the
             // canonical Bot Chat, whose title IS its identity. Surface the

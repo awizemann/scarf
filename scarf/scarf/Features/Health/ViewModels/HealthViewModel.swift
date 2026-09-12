@@ -888,18 +888,36 @@ final class HealthViewModel {
         isRunningSessionsOptimize = true
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["sessions", "optimize"], timeout: 120)
+            let result = fileService.runHermesCLI(
+                args: HermesSessionsOptimizeVerdict.argv, timeout: 120
+            )
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if result.exitCode == 0 {
+                // P47: judged by OUTPUT. `_cmd_optimize` catches every
+                // exception from `db.vacuum()`, prints
+                // `Error: optimization failed: {e}` and RETURNS — exit 0
+                // (`hermes_cli/sessions_cmd.py:809-819` @ `v2026.9.7`) — so
+                // the pane rendered a failed VACUUM as its summary. The
+                // success line is `Optimized {n} FTS index(es).` (`:817`).
+                let outcome = HermesSessionsOptimizeVerdict.judge(
+                    output: result.output, exitCode: result.exitCode
+                )
+                if outcome.succeeded {
                     // Prefer a concise tail of the output (the summary line)
                     // over the full report — the panel-less inline strip is short.
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
                     self.sessionsOptimizeMessage = tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
-                } else {
+                } else if result.exitCode != 0 {
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
                     self.sessionsOptimizeMessage = String(localized: "Optimize failed (exit \(result.exitCode)). \(tail)")
+                } else {
+                    // Exit 0 and no success line: quoting "(exit 0)" here
+                    // would be the old bug in a new voice. Hermes's own
+                    // reason line is the whole message.
+                    self.sessionsOptimizeMessage = String(
+                        localized: "Optimize failed. \(outcome.detail ?? trimmed)"
+                    )
                 }
             }
         }

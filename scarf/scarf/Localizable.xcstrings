@@ -91,6 +91,46 @@
         }
       }
     },
+    "Installed, but it could not be enabled: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installiert, konnte aber nicht aktiviert werden: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalado, pero no se pudo activar: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installé, mais n'a pas pu être activé : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストールされましたが、有効化できませんでした: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instalado, mas não foi possível ativá-lo: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装，但无法启用：%@"
+          }
+        }
+      }
+    },
     "Nothing is running — Hermes runs this as a normal prompt instead of steering." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -128,6 +168,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前没有正在运行的任务——Hermes 会将其作为普通提示运行，而不是进行引导。"
+          }
+        }
+      }
+    },
+    "Optimize failed. %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimierung fehlgeschlagen. %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error al optimizar. %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de l'optimisation. %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最適化に失敗しました。%@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha ao otimizar. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "优化失败。%@"
           }
         }
       }
@@ -251,6 +331,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "该任务已完成——使用“恢复并立即运行”重新启用它，或复制它。"
+          }
+        }
+      }
+    },
+    "There was no stored auth state for this provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für diesen Anbieter war kein Authentifizierungsstatus gespeichert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No había estado de autenticación almacenado para este proveedor."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun état d'authentification n'était enregistré pour ce fournisseur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーに保存された認証情報はありませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não havia estado de autenticação armazenado para este provedor."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该提供方没有已存储的认证状态。"
+          }
+        }
+      }
+    },
+    "There were no memory files to reset." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es gab keine Memory-Dateien zum Zurücksetzen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No había archivos de memoria que restablecer."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Il n'y avait aucun fichier de mémoire à réinitialiser."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リセットするメモリファイルはありませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não havia arquivos de memória para redefinir."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可重置的记忆文件。"
+          }
+        }
+      }
+    },
+    "This Hermes installation is managed; plugin activation is read-only" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird verwaltet; die Plugin-Aktivierung ist schreibgeschützt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalación de Hermes está gestionada; la activación de complementos es de solo lectura"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette installation Hermes est gérée ; l'activation des plugins est en lecture seule"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes インストールは管理されています。プラグインの有効化は読み取り専用です"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalação do Hermes é gerenciada; a ativação de plugins é somente leitura"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 安装受管理；插件启用为只读"
+          }
+        }
+      }
+    },
+    "This Hermes is managed by %@. Enabling and disabling plugins is read-only here — change it in your package manager's configuration and re-deploy." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird von %@ verwaltet. Das Aktivieren und Deaktivieren von Plugins ist hier schreibgeschützt — ändere es in der Konfiguration deines Paketmanagers und deploye erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes está gestionado por %@. Activar y desactivar complementos es de solo lectura aquí: cámbialo en la configuración de tu gestor de paquetes y vuelve a desplegar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet Hermes est géré par %@. L'activation et la désactivation des plugins sont en lecture seule ici — modifiez-les dans la configuration de votre gestionnaire de paquets, puis redéployez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes は %@ によって管理されています。プラグインの有効化と無効化はここでは読み取り専用です。パッケージマネージャーの設定で変更して再デプロイしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Hermes é gerenciado por %@. Ativar e desativar plugins é somente leitura aqui — altere na configuração do seu gerenciador de pacotes e reimplante."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 由 %@ 管理。此处无法启用或停用插件，请在软件包管理器的配置中修改并重新部署。"
           }
         }
       }

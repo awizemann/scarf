@@ -437,29 +437,39 @@ final class CredentialPoolsViewModel {
     /// `providers.<name>` while leaving the upstream account intact.
     /// User-initiated; the credential pool view's trash button on
     /// each OAuth row routes here after a confirmation dialog.
+    ///
+    /// **P47 / round-5 decision 2: judged by OUTPUT, not by the exit code.**
+    /// `logout_command` (`hermes_cli/auth.py:2173-2196` @ `v2026.9.7`) has two
+    /// arms that clear nothing and still exit 0 — `No provider is currently
+    /// logged in.` (`:2180`) and `No auth state found for {name}.` (`:2185`).
+    /// This pane reported `Removed OAuth provider <p>` over both. Decision 2
+    /// makes them a success with a neutral note (the provider IS logged out),
+    /// which is what ``HermesAuthLogoutVerdict`` returns as its `warning`.
+    /// `--` before the positional: `provider` is the subparser's only
+    /// positional (`hermes_cli/subcommands/auth.py:59-61`).
     func removeOAuthProvider(_ provider: String) {
-        runMutation(["auth", "logout", provider], clearAfter: 3) { [weak self] output, exitCode in
+        runMutation(HermesAuthLogoutVerdict.argv(provider: provider), clearAfter: 3) { [weak self] output, exitCode in
             guard let self else { return }
-            if exitCode == 0 {
-                self.message = "Removed OAuth provider \(provider)"
+            let outcome = HermesAuthLogoutVerdict.judge(output: output, exitCode: exitCode)
+            if outcome.succeeded {
+                self.message = outcome.warning ?? "Removed OAuth provider \(provider)"
                 self.load()
             } else {
-            // Surface the first output line in the toast so the user
-            // can tell whether the verb is missing on this Hermes
-            // version (older builds may not have `auth logout`) vs.
-            // an actual failure. `runHermes` returns combined output
-            // (stdout + stderr) in `output`; first non-empty line is
-            // the most useful tail.
-                let detail = output
-                    .split(separator: "\n", omittingEmptySubsequences: true)
-                    .first.map(String.init) ?? "exit \(exitCode)"
-                self.message = "Remove failed: \(detail)"
+                // Surface the CLI's own reason so the user can tell a refusal
+                // from a missing verb (older builds may not have
+                // `auth logout`). `judge` quotes the last significant line
+                // when nothing more specific matched.
+                self.message = "Remove failed: \(outcome.detail ?? "exit \(exitCode)")"
             }
         }
     }
 
     func resetProvider(_ provider: String) {
-        runMutation(["auth", "reset", provider]) { [weak self] output, exitCode in
+        // `--` before the positional: `provider` is the subparser's first
+        // positional and `target` its optional second
+        // (`hermes_cli/subcommands/auth.py:40-45` @ `v2026.9.7`), so nothing
+        // after `--` can be read as an option.
+        runMutation(["auth", "reset", "--", provider]) { [weak self] output, exitCode in
             guard let self else { return }
             if exitCode == 0 {
                 self.message = "Cooldowns cleared for \(provider)"

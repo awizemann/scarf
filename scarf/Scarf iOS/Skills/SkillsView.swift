@@ -13,7 +13,12 @@ import ScarfDesign
 /// - **Browse Hub**: search + source picker. Tap to install. Calls
 ///   remote `hermes skills search/browse` over SSH.
 /// - **Updates**: check + update-all buttons. Calls remote
-///   `hermes skills check / update --yes`.
+///   `hermes skills check / update`. There is no `--yes` on either verb:
+///   `skills update` takes an optional `name` and `--force` only
+///   (`hermes_cli/subcommands/skills.py:79-83` @ `v2026.9.7`), and passing an
+///   unknown flag would fail the whole command at argparse time. What the
+///   code shells is `SkillsViewModel.updateAllArgs` /
+///   `["skills", "update", "--force", "--", name]`.
 struct SkillsView: View {
     let config: IOSServerConfig
 

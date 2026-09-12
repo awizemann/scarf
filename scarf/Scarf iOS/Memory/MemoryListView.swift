@@ -13,6 +13,10 @@ struct MemoryListView: View {
     @State private var showResetConfirm = false
     @State private var resetError: String?
     @State private var resetSucceeded = false
+    /// P47 / round-5 decision 3: the neutral note a reset with nothing to
+    /// reset carries, in place of the "were cleared" sentence. Nil on a reset
+    /// that actually erased files. The Mac twin is `MemoryView.resetNote`.
+    @State private var resetNote: String?
 
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
@@ -77,9 +81,9 @@ struct MemoryListView: View {
             Text(resetError ?? "")
         }
         .alert("Memory reset", isPresented: $resetSucceeded) {
-            Button("OK") {}
+            Button("OK") { resetNote = nil }
         } message: {
-            Text("MEMORY.md and USER.md were cleared on the host.")
+            Text(resetNote ?? String(localized: "MEMORY.md and USER.md were cleared on the host."))
         }
     }
 
@@ -89,7 +93,7 @@ struct MemoryListView: View {
     /// find hermes even when it's in `~/.local/bin` or `/opt/homebrew/bin`.
     private func resetMemory(context: ServerContext) async {
         let hermes = context.paths.hermesBinary
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) memory reset --yes"
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
         let ctx = context
         do {
             let result = try await Task.detached {
@@ -100,15 +104,30 @@ struct MemoryListView: View {
                     timeout: 15
                 )
             }.value
-            if result.exitCode == 0 {
+            let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+            // P47 / round-5 decision 3: judged by OUTPUT, exactly as the Mac
+            // twin. `_cmd_memory_reset`'s nothing-to-do arm prints
+            // `Nothing to reset — no memory files found in …` and RETURNS at
+            // exit 0 (`hermes_cli/main_agent_cmds.py:32-33` @ `v2026.9.7`),
+            // so this alert claimed the two files "were cleared" over a run
+            // that found none. A success either way — the memory IS empty —
+            // with the note saying which of the two happened.
+            let outcome = HermesMemoryResetVerdict.judge(
+                output: combined, exitCode: result.exitCode
+            )
+            if outcome.succeeded {
+                resetNote = outcome.warning
                 resetSucceeded = true
             } else {
-                let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
-                let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-                let combined = [stderr, stdout].filter { !$0.isEmpty }.joined(separator: "\n")
-                resetError = combined.isEmpty
+                // A non-zero exit names the status; an exit-0 run that
+                // printed neither marker is `.unconfirmed`, and "status 0"
+                // would be the old bug in a new voice — say that Hermes
+                // printed nothing this side recognises instead.
+                resetError = outcome.detail ?? (result.exitCode != 0
                     ? "hermes memory reset exited with status \(result.exitCode)."
-                    : combined
+                    : "hermes memory reset printed no result. Check the host.")
             }
         } catch {
             resetError = "Couldn't reach Hermes: \(error.localizedDescription)"

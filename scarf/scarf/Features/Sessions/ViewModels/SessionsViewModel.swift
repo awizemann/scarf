@@ -130,7 +130,7 @@ final class SessionsViewModel {
     /// seam shape as `ChatViewModel.sessionDeleteRunner` (t-01bd55ec).
     @ObservationIgnored
     var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
-        ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
+        ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
     }
 
     /// Runs `hermes sessions export …` and hands back stdout bytes, stderr,
@@ -501,6 +501,16 @@ final class SessionsViewModel {
     /// splitting here would collapse the user's internal spacing.
     static func renameArgv(sessionId: String, title: String) -> [String] {
         ["sessions", "rename", "--", sessionId, title]
+    }
+
+    /// `sessions delete --yes -- <id>`. P47: the flag comes FIRST and the
+    /// separator after it — argparse reads everything past the first `--` as
+    /// a positional, so `--yes` appended afterwards would exit 2.
+    /// `session_id` is the subparser's only positional and `--yes` its only
+    /// flag (`hermes_cli/subcommands/sessions.py:100-102` @ `v2026.9.7`),
+    /// which is what makes `--` safe here.
+    static func deleteArgv(sessionId: String) -> [String] {
+        ["sessions", "delete", "--yes", "--", sessionId]
     }
 
     private func performRename() {
