@@ -58,6 +58,41 @@ final class KanbanBoardViewModel {
     /// exist before v0.13 and Hermes routes an unknown kanban verb to the
     /// agent (charter C5).
     private(set) var diagnosticsByTask: [String: [HermesKanbanDiagnostic]] = [:]
+    /// The connected host's capabilities, mirrored by the view from
+    /// `HermesCapabilitiesStore`. Handed to `KanbanService.plan(for:caps:)`,
+    /// which needs `hasKanbanReviewExits` (v0.20.1) to decide whether the
+    /// Review column has its two exits — `review -> done` via
+    /// `kanban complete` and `review -> upNext` via `kanban reopen-review`.
+    ///
+    /// The whole struct rather than another `supports…` Bool: the planner
+    /// takes `HermesCapabilities`, a second gated arm would need a second
+    /// mirror, and a mirror that can disagree with the store is the bug this
+    /// avoids. `.empty` — every flag off — is the safe default, so a Preview
+    /// or a host whose version probe has not landed keeps the pre-P56
+    /// refusal rather than offering a drag the host declines.
+    var capabilities: HermesCapabilities = .empty
+
+    /// A drag onto **Running** the user has not confirmed yet — round-6
+    /// decision 9.
+    ///
+    /// `hermes kanban dispatch` has NO per-task selector: the whole argv is
+    /// `--dry-run` / `--max` / `--failure-limit` / `--json`
+    /// (`hermes_cli/kanban_parser.py:346-353` @ `v2026.9.7`), so dropping
+    /// ONE card on Running runs a BOARD-WIDE dispatcher pass that spawns
+    /// workers for every assigned `ready` task in priority order — and may
+    /// well start a different one first. The card moving under the cursor
+    /// said "this task"; the verb means "all of them". Nothing runs until
+    /// `confirmPendingDispatch()`.
+    private(set) var pendingDispatch: PendingDispatch?
+
+    /// The card a `.running` drop is waiting on, plus the inputs
+    /// `attemptMove` will need when it is finally allowed to proceed.
+    struct PendingDispatch: Equatable, Sendable {
+        let taskId: String
+        let taskTitle: String
+        let source: KanbanBoardColumn
+    }
+
     /// Set by the view from `HermesCapabilities.hasKanbanDiagnostics`.
     /// Defaults to `false` so a Preview / harness context never spawns the
     /// extra call. Turning it off drops any signals already on screen.
@@ -260,20 +295,37 @@ final class KanbanBoardViewModel {
     /// Inputs the drag layer must collect upstream:
     /// - `blockReason` when the destination is `.blocked`
     /// - `completeResult` when the destination is `.done`
+    /// - `confirmed`: the caller has already shown the board-wide dispatch
+    ///   confirmation for this drop. Only `confirmPendingDispatch()` passes
+    ///   `true`; every UI entry point leaves it at `false` so a drop onto
+    ///   Running always asks.
     func attemptMove(
         taskId: String,
         to destination: KanbanBoardColumn,
         blockReason: String? = nil,
-        completeResult: String? = nil
+        completeResult: String? = nil,
+        confirmed: Bool = false
     ) {
         guard let task = tasks.first(where: { $0.id == taskId }) else { return }
         let source = effectiveColumn(task)
         if source == destination { return }
 
+        // Round-6 decision 9. Every route into Running ends in `.dispatch`,
+        // which is board-wide (see `PendingDispatch`). Park the move and ask
+        // first — including the optimistic mutation, so a cancelled drop
+        // leaves the card exactly where the user picked it up rather than
+        // sitting in Running until the next poll disagrees.
+        if destination == .running, !confirmed {
+            pendingDispatch = PendingDispatch(
+                taskId: taskId, taskTitle: task.title, source: source)
+            return
+        }
+
         let plan: KanbanTransitionPlan
         do {
             plan = try KanbanService.plan(
-                for: KanbanTransition(from: source, to: destination)
+                for: KanbanTransition(from: source, to: destination),
+                caps: capabilities
             )
         } catch let err as KanbanError {
             // AX M3: a refused transition is a FAILURE, so it belongs in
@@ -310,6 +362,20 @@ final class KanbanBoardViewModel {
                 lastError = error.localizedDescription
             }
         }
+    }
+
+    /// Run the parked drop (round-6 decision 9). The ONLY caller that passes
+    /// `confirmed: true`.
+    func confirmPendingDispatch() {
+        guard let pending = pendingDispatch else { return }
+        pendingDispatch = nil
+        attemptMove(taskId: pending.taskId, to: .running, confirmed: true)
+    }
+
+    /// Drop the parked move. Nothing was mutated, optimistically or
+    /// otherwise, so there is nothing to roll back.
+    func cancelPendingDispatch() {
+        pendingDispatch = nil
     }
 
     /// Archive via context menu (not drag).
@@ -581,6 +647,15 @@ final class KanbanBoardViewModel {
             _ = try await service.dispatch(maxTasks: nil, dryRun: false)
         case .unblock:
             try await service.unblock(taskIds: [taskId])
+        case .reopenReview:
+            // `review -> ready|todo` (`reopen_review_task`,
+            // `hermes_cli/kanban_db.py:3295-3328` @ `v2026.9.7`). No reason
+            // is sent from a drag: `--reason` is recorded as a CHANGES
+            // REQUESTED comment on the task (`_cmd_reopen_review`,
+            // `hermes_cli/kanban.py:1000-1003`), and inventing one on the
+            // user's behalf would put words in a review they did not write.
+            // The inspector's Comment action is where a reason belongs.
+            try await service.reopenReview(taskIds: [taskId], reason: nil)
         case .block(let reasonRequired):
             let reason = (blockReason?.isEmpty ?? true) ? nil : blockReason
             if reasonRequired && reason == nil {

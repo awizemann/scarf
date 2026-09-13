@@ -70,6 +70,14 @@ struct KanbanBoardView: View {
         capabilitiesStore?.capabilities.hasKanbanCompletionContract ?? false
     }
 
+    /// The whole capability struct, for `KanbanBoardViewModel.capabilities`
+    /// (which hands it to `KanbanService.plan(for:caps:)`). A missing store
+    /// is `.empty` — every flag off — for the same Preview reason the Bool
+    /// gates above default to `false`.
+    private var hostCapabilities: HermesCapabilities {
+        capabilitiesStore?.capabilities ?? .empty
+    }
+
     @State private var inspectorTaskId: String?
     @State private var showingCreateSheet = false
     /// Pending permanent-delete (archived-card context action). Drives
@@ -127,6 +135,11 @@ struct KanbanBoardView: View {
             // Must be set BEFORE the first poll: the VM only spawns
             // `kanban diagnostics --json` when the connected host is v0.13+.
             viewModel.supportsDiagnostics = supportsKanbanDiagnostics
+            // The planner reads `hasKanbanReviewExits` off this (round-6
+            // decision 6); an unresolved store leaves `.empty`, which keeps
+            // the Review column's pre-P56 refusal rather than offering a
+            // drag the host declines.
+            viewModel.capabilities = hostCapabilities
             viewModel.startPolling()
             Task { await viewModel.refreshAssignees() }
             Task { await refreshToolsetState() }
@@ -136,6 +149,9 @@ struct KanbanBoardView: View {
         // after first paint must still enable (or disable) the fetch.
         .onChange(of: supportsKanbanDiagnostics) { _, isOn in
             viewModel.supportsDiagnostics = isOn
+        }
+        .onChange(of: hostCapabilities) { _, caps in
+            viewModel.capabilities = caps
         }
         // Pause every poll loop while the window is not the active scene.
         // A backgrounded Scarf window kept spawning `hermes kanban list`
@@ -197,6 +213,24 @@ struct KanbanBoardView: View {
             Button("Cancel", role: .cancel) { pendingPurge = nil }
         } message: {
             Text("This removes the task from `~/.hermes/kanban.db` for good. This cannot be undone.")
+        }
+        // Round-6 decision 9. `hermes kanban dispatch` has no per-task
+        // selector (`hermes_cli/kanban_parser.py:346-353` @ `v2026.9.7`), so
+        // the card the user dropped buys a pass over the WHOLE board. Say so
+        // before running it; nothing has moved yet.
+        .confirmationDialog(
+            viewModel.pendingDispatch.map {
+                String(localized: "Start work on '\($0.taskTitle)'?")
+            } ?? "",
+            isPresented: Binding(
+                get: { viewModel.pendingDispatch != nil },
+                set: { if !$0 { viewModel.cancelPendingDispatch() } }
+            )
+        ) {
+            Button("Run dispatcher") { viewModel.confirmPendingDispatch() }
+            Button("Cancel", role: .cancel) { viewModel.cancelPendingDispatch() }
+        } message: {
+            Text("Hermes has no per-task start. This runs one dispatcher pass over the whole board, which spawns workers for every assigned task that is ready — in priority order, so it may start a different task first.")
         }
     }
 
