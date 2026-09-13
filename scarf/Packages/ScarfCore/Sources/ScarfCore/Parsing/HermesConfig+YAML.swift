@@ -55,9 +55,17 @@ public extension HermesConfig {
         // (`agent/agent_init.py`: `_streaming in {"false", "0", "no", "off"}`);
         // for the YAML-boolean keys it is a superset of what PyYAML would
         // have turned into `False` anyway.
+        //
+        // P57: the falsy test runs on the scalar STRIPPED inside its quotes
+        // and on PyYAML's int resolver, because that is what Hermes compares
+        // — `_bool_token` is `str(value).strip().lower()`
+        // (`gateway/config.py:29-32` @ `v2026.9.7`). A verbatim body compare
+        // read `" false"`, `"\tno\t"`, `00`, `-0`, `0x0` and `0b0` as
+        // unrecognised and therefore ON, for keys whose host had them OFF —
+        // the unsafe direction for a true-by-default key.
         func boolTrueDefault(_ key: String) -> Bool {
-            guard let v = scalar(key) else { return true }
-            return !["false", "0", "no", "off"].contains(v.lowercased())
+            guard let raw = values[key] else { return true }
+            return HermesYAML.boolishValue(raw) != false
         }
         // Raw scalar for a `_SHARED_KEYS` member of a gateway platform,
         // resolved with Hermes's OWN precedence rather than a key list ordered
@@ -143,10 +151,17 @@ public extension HermesConfig {
         // Absent key → the bridge never runs → `os.environ.get(…, "true")` →
         // enabled, which is why this is still a true-by-default key.
         func busyAckEnabled() -> Bool {
-            guard let v = scalar("display.busy_ack_enabled") else { return true }
+            guard let raw = values["display.busy_ack_enabled"] else { return true }
             // The YAML 1.1 spellings PyYAML's bool resolver loads as `True`;
             // `str(True).lower()` is the only thing that equals "true".
-            return ["true", "yes", "on"].contains(v.lowercased())
+            //
+            // P57: on the scalar STRIPPED inside its quotes, because the
+            // comparison downstream is `os.environ.get(…).lower() == "true"`
+            // over a value Hermes itself `str()`-ed — `" true"` in quotes is
+            // the string `true`. Deliberately still NOT `boolishValue`: `1`
+            // is `str(1)` == `"1"` here, which is not `"true"`, so the int
+            // resolver must NOT be consulted for this key.
+            return ["true", "yes", "on"].contains(HermesYAML.strippedScalar(raw).lowercased())
         }
         func int(_ key: String, default def: Int) -> Int {
             Int(scalar(key) ?? "") ?? def
@@ -765,9 +780,10 @@ public extension HermesConfig {
             // `boolTrueDefault`'s rule, over a scalar this reader resolved
             // itself: absent means the host IS notifying, and only an
             // explicit falsy spelling turns it off.
-            let restartNotice = restartRaw
-                .map(HermesYAML.normalizedScalar)
-                .map { !["false", "0", "no", "off"].contains($0.lowercased()) } ?? true
+            // P57: `boolTrueDefault`'s rule is now a call, not a copy — the
+            // copy compared the quoted body verbatim and knew no int
+            // resolver, so `" false"` and `0x0` read as ON.
+            let restartNotice = HermesYAML.boolishValue(restartRaw) != false
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
