@@ -101517,6 +101517,47 @@
         }
       }
     },
+    "Hermes chat has no /%@ — sent as an ordinary prompt." : {
+      "comment" : "Transient chat notice after the user typed /goal or /subgoal. Both are real Hermes TUI/gateway commands, but the ACP adapter Scarf chats through has never had either, so the text went to the model as an ordinary prompt. %@ is the command name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hermes-Chat kennt kein /%@ — als normaler Prompt gesendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El chat de Hermes no tiene /%@: se envió como un prompt normal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le chat Hermes n’a pas de /%@ — envoyé comme une invite ordinaire."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes のチャットには /%@ がありません。通常のプロンプトとして送信しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O chat do Hermes não tem /%@ — enviado como um prompt comum."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 聊天没有 /%@ — 已作为普通提示发送。"
+          }
+        }
+      }
+    },
     "This Hermes has no /%@ — sent as an ordinary prompt." : {
       "comment" : "Transient chat notice after the user typed /steer or /queue on a Hermes whose ACP adapter has neither command, so the text went to the model as an ordinary prompt. %@ is the command name.",
       "localizations" : {

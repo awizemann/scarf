@@ -132,3 +132,42 @@ struct HermesP55GoalArmTests {
         #expect(mac.contains("RichChatViewModel.acpUnhandledSlashNotice(name: parsed.name)"))
     }
 }
+
+/// P54b's lesson applied to P55's one new localized key: `String(localized:)`
+/// is the extraction hook, not the translation. A wrapped key with no
+/// `Localizable.xcstrings` row ships English on every locale, silently, and
+/// the call-site test passes the whole time.
+@Suite("Hermes P55 — the notice key has a catalogue row")
+struct HermesP55CatalogueTests {
+
+    static let locales = ["de", "es", "fr", "ja", "pt-BR", "zh-Hans"]
+
+    /// The CATALOGUE spelling: `\(name)` resolves to `%@` at lookup time.
+    static let key = "Hermes chat has no /%@ — sent as an ordinary prompt."
+
+    @Test("the /goal notice is in the catalogue, translated in all six locales")
+    func noticeKeyIsTranslated() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(
+            contentsOf: repoRoot.appendingPathComponent("scarf/scarf/Localizable.xcstrings")
+        )
+        let root = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let strings = try #require(root["strings"] as? [String: Any])
+        // A planted needle would pass a `!= nil` test against any dictionary;
+        // the floor proves the catalogue actually decoded.
+        #expect(strings.count > 1000, "catalogue decoded only \(strings.count) keys")
+        let row = try #require(strings[Self.key] as? [String: Any], "no catalogue row")
+        let localizations = try #require(row["localizations"] as? [String: Any])
+        for locale in Self.locales {
+            let unit = (localizations[locale] as? [String: Any])?["stringUnit"] as? [String: Any]
+            let value = unit?["value"] as? String
+            #expect(value?.isEmpty == false, "\(Self.key) is untranslated in \(locale)")
+        }
+        // P44's sibling notice is a different key and must still be there.
+        #expect(strings["This Hermes has no /%@ — sent as an ordinary prompt."] != nil)
+    }
+}
