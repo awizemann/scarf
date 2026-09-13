@@ -92,7 +92,56 @@ struct OffPoolDisciplineP52Tests {
         // call looks like; `OffPool.run { … }` takes a closure and never
         // spells the empty parens, so the cure is not a hit.
         "run()",
+        // Round-6 P59. The cross-phase review's finding: the sweep asked
+        // about `runHermesCLI(` and `readFile(`'s caller but not about the
+        // two seams the ViewModels actually use.
+        // `ServerContext.runHermes` / `runHermesSplit`
+        // (`ServerContext+Mac.swift:21-24`, `:33-36`) are one-line wrappers
+        // around `runHermesCLI` / `runHermesCLISplit`, so a site that spells
+        // the wrapper blocks exactly as long as one that spells the wrapped
+        // call and the sweep could not see 20 of them. `readText(` /
+        // `readFile(` are the transport reads — an SFTP round trip on a
+        // remote server — and `KanbanToolsetDetector` rode one on the pool
+        // for four rounds.
+        "runHermes(",
+        "runHermesSplit(",
+        "readText(",
+        "readFile(",
     ]
+
+    /// Needles whose ASYNC twin shares their spelling, so an occurrence that
+    /// is directly `await`ed is the cure and not the defect.
+    ///
+    /// `SkillsViewModel` has its OWN `static func runHermes(executable:…)
+    /// async`, which is `transport.asyncRunProcess` underneath (round-6
+    /// decision 11's seam, `SkillsViewModel.swift:1132-1155`) — ten call
+    /// sites of it sit inside `Task.detached` bodies and NONE of them parks
+    /// a thread. `ServerContext.runHermes` is `nonisolated` and synchronous,
+    /// so `await` can never precede it. That asymmetry is the whole rule:
+    /// awaited ⇒ the async seam, bare ⇒ the blocking one. It is narrower
+    /// than dropping the needle and narrower than exempting the file, and it
+    /// keeps a future blocking `ctx.runHermes(` in `SkillsViewModel` visible.
+    static let awaitedIsTheCure: Set<String> = ["runHermes(", "runHermesSplit("]
+
+    /// Is the occurrence of `needle` in `line` directly preceded by `await`?
+    static func isAwaitedCall(_ needle: String, in line: String) -> Bool {
+        var search = line[line.startIndex...]
+        var sawBare = false
+        while let range = search.range(of: needle) {
+            // Walk back over the receiver chain (`Self.`, `ctx.`, …) to the
+            // token in front of the call expression.
+            var idx = range.lowerBound
+            while idx > line.startIndex {
+                let before = line.index(before: idx)
+                let c = line[before]
+                guard c.isLetter || c.isNumber || c == "_" || c == "." else { break }
+                idx = before
+            }
+            let prefix = line[line.startIndex..<idx].trimmingCharacters(in: .whitespaces)
+            if prefix.hasSuffix("await") { search = line[range.upperBound...] } else { sawBare = true; break }
+        }
+        return !sawBare
+    }
 
     /// Does `line` contain `needle` as its own identifier?
     ///
@@ -127,6 +176,15 @@ struct OffPoolDisciplineP52Tests {
     /// and wrote the rest down here rather than either leaving the needles
     /// narrow or dumping 22 fresh failures on the next phase.
     ///
+    /// Round-6 P59 widened them again, from seven to eleven
+    /// (`runHermes(`, `runHermesSplit(`, `readText(`, `readFile(`), fixed
+    /// the ten sites its finding named — nine `ctx.runHermes` ViewModel
+    /// bodies and `KanbanToolsetDetector` — and re-baselined the rest. The
+    /// baseline is 38 hits across 26 keys; it was 29 before, and it grew
+    /// because the sweep can now SEE more, not because the tree got worse:
+    /// converting `BotConversationViewModel` took three `runProcess(` hits
+    /// off it in the same pass.
+    ///
     /// It is COUNTED so it cannot rot into a licence: one more
     /// `runHermesCLI(` in `CronViewModel` is a new offender even though the
     /// file is listed, and fixing one is a FAILURE until the number comes
@@ -144,7 +202,6 @@ struct OffPoolDisciplineP52Tests {
         "HermesFileService.swift:runHermesCLI(": 1,
         "HermesProxyService.swift:runHermesCLI(": 1,
         "OAuthKeepaliveCronService.swift:runHermesCLI(": 2,
-        "BotConversationViewModel.swift:runProcess(": 3,
         "CronViewModel.swift:runHermesCLI(": 4,
         "HealthView.swift:runHermesCLI(": 1,
         "MCPLoginController.swift:runProcess(": 2,
@@ -166,6 +223,25 @@ struct OffPoolDisciplineP52Tests {
         "SSHScriptRunner.swift:run()": 2,
         "LocalTransport.swift:run()": 2,
         "TestConnectionProbe.swift:run()": 1,
+        // Round-6 P59's `readText(` / `readFile(` needles. P59 converted the
+        // one site its finding named — `KanbanToolsetDetector`, whose whole
+        // detached body WAS the `readText` — and the nine `ctx.runHermes`
+        // ViewModel sites; these eleven are the rest and belong to
+        // `t-406d56d6`. None is the one-line shape: every one is a
+        // multi-statement detached body that reads a file ALONGSIDE other
+        // work, and three of them (`CuratorViewModel`, `LogTailWidgetView`,
+        // `ProjectCockpitViewModel`) `await` inside that body, which
+        // `OffPool.run`'s synchronous closure cannot take. Splitting them is
+        // a refactor of the load, not a wrap, so it is a follow-up and not a
+        // line this phase could honestly claim to have tested.
+        "CredentialPoolsViewModel.swift:readText(": 1,
+        "CuratorViewModel.swift:readText(": 1,
+        "KanbanSummaryWidgetView.swift:readFile(": 1,
+        "LogTailWidgetView.swift:readFile(": 1,
+        "PersonalitiesViewModel.swift:readText(": 2,
+        "ProjectCockpitViewModel.swift:readText(": 2,
+        "SettingsViewModel.swift:readText(": 3,
+        "SkillsViewModel.swift:readText(": 1,
     ]
 
     /// A `Task.detached` closure the sweep may keep, keyed
@@ -299,6 +375,7 @@ struct OffPoolDisciplineP52Tests {
             let bare = stripComment(raw).trimmingCharacters(in: .whitespaces)
             guard !bare.isEmpty, !bare.hasPrefix("*") else { continue }
             for needle in blockingNeedles where containsNeedle(needle, in: bare) {
+                if awaitedIsTheCure.contains(needle), isAwaitedCall(needle, in: bare) { continue }
                 hits.append(needle)
             }
         }
@@ -426,6 +503,73 @@ struct OffPoolDisciplineP52Tests {
         #expect(!Self.containsNeedle("runProcess(", in: "try await t.asyncRunProcess(x)"))
         #expect(Self.containsNeedle("run()", in: "try proc.run()"))
         #expect(!Self.containsNeedle("run()", in: "await OffPool.run { work() }"))
+    }
+
+    /// The four needles P59 added, planted, plus the near-miss that makes
+    /// the `await` rule load-bearing.
+    ///
+    /// `ctx.runHermes(…)` is `ServerContext+Mac.swift:21-24` — one line
+    /// around `HermesFileService.runHermesCLI`, i.e. a process spawn or an
+    /// SSH exec channel — and twenty of them rode `Task.detached` while the
+    /// sweep asked only about the wrapped call. `SkillsViewModel`'s
+    /// same-named `static func runHermes(executable:…) async` is
+    /// `asyncRunProcess` underneath and must NOT be reported, or the sweep
+    /// tells the next phase to undo round-6 decision 11.
+    @Test("the P59 needles match the blocking seams and not their async twins")
+    func contextSeamNeedlesAreCalibrated() throws {
+        let planted = """
+            func probe() {
+                Task.detached {
+                    _ = ctx.runHermes(["status"], timeout: 60)
+                    _ = ctx.runHermesSplit(["doctor"], timeout: 60)
+                    let yaml = ctx.readText(ctx.paths.configYAML)
+                    let data = transport.readFile(path)
+                    _ = (yaml, data)
+                }
+            }
+            """
+        let closure = try #require(Self.detachedClosures(in: planted).first)
+        let hits = Set(Self.pooledBlockingNeedles(in: closure.body))
+        #expect(hits == Set(["runHermes(", "runHermesSplit(", "readText(", "readFile("]),
+                "the P59 needle set missed \(Set(["runHermes(", "runHermesSplit(", "readText(", "readFile("]).subtracting(hits))")
+
+        // The near-misses. `Self.runHermes(` awaited is `SkillsViewModel`'s
+        // async seam; `runHermesCLI(` must stay its own needle rather than
+        // being swallowed by the shorter one.
+        let cures = """
+                let result = await Self.runHermes(
+                    executable: bin, args: args, transport: xport, timeout: 30)
+                let split = await Self.runHermesSplit(
+                    executable: bin, args: args, transport: xport, timeout: 30)
+                _ = (result, split)
+            """
+        #expect(Self.pooledBlockingNeedles(in: cures).isEmpty, Comment(rawValue: """
+            The sweep reports `SkillsViewModel`'s ASYNC `runHermes` seam as \
+            blocking: \(Self.pooledBlockingNeedles(in: cures)). Ten call \
+            sites of it sit in `Task.detached` bodies and none parks a \
+            thread — reporting them tells the next phase to undo decision 11.
+            """))
+        #expect(Self.isAwaitedCall("runHermes(", in: "let r = await Self.runHermes("))
+        #expect(!Self.isAwaitedCall("runHermes(", in: "let r = ctx.runHermes([\"status\"])"))
+        // A body with BOTH shapes still reports the bare one.
+        #expect(Self.pooledBlockingNeedles(in: """
+                let a = await Self.runHermes(executable: bin, args: [], transport: x, timeout: 5)
+                let b = ctx.runHermes(["status"], timeout: 60)
+                _ = (a, b)
+            """) == ["runHermes("])
+        // And `runHermesCLI(` is not a `runHermes(` hit, or the baseline
+        // keys would double-count every CLI site.
+        #expect(!Self.containsNeedle("runHermes(", in: "svc.runHermesCLI(args: [])"))
+    }
+
+    /// The baseline's own size, pinned (lesson 6: a number in a comment is a
+    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 38
+    /// hits across 26 keys; this is what re-measures it, so a phase that
+    /// adds or clears an entry must restate the prose.
+    @Test("the pending-site baseline is the size its documentation claims")
+    func baselineSizeIsPinned() {
+        #expect(Self.pendingOffPoolSites.count == 26)
+        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 38)
     }
 
     /// The walker must not read PROSE. `PipeReader.swift`'s doc comment

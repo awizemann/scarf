@@ -175,6 +175,6 @@ final class ToolsViewModel {
 
     private nonisolated func runHermes(_ arguments: [String]) async -> (output: String, exitCode: Int32) {
         let ctx = context
-        return await Task.detached { ctx.runHermes(arguments) }.value
+        return await OffPool.run { ctx.runHermes(arguments) }
     }
 }

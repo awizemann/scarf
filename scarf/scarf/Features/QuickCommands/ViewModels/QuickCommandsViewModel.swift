@@ -82,14 +82,14 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             // Detached, matching `load()` above. They stay SEQUENTIAL inside
             // the detached body: both write config.yaml, and Hermes's writer
             // is read-modify-write, so overlapping them would lose one key.
-            let (typeResult, cmdResult) = await Task.detached {
+            let (typeResult, cmdResult) = await OffPool.run {
                 (
                     ctx.runHermes(HermesConfigSet.argv(
                         key: "quick_commands.\(sanitizedName).type", value: "exec")),
                     ctx.runHermes(HermesConfigSet.argv(
                         key: "quick_commands.\(sanitizedName).command", value: command))
                 )
-            }.value
+            }
             guard let self else { return }
             self.isSaving = false
             self.applyAddOrUpdateResult(

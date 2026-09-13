@@ -729,7 +729,7 @@ final class HealthViewModel {
             // Longer than the 60 s default on purpose: `hermes dump` walks
             // state.db and the config tree, and on a remote host that is an
             // SSH round trip over the whole thing.
-            let result = await Task.detached { ctx.runHermes(["dump"], timeout: 120) }.value
+            let result = await OffPool.run { ctx.runHermes(["dump"], timeout: 120) }
             guard let self else { return }
             self.isRunningDump = false
             self.diagnosticsOutput = result.output

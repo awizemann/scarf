@@ -1140,7 +1140,7 @@ final class SettingsViewModel {
     /// hanging Settings for the round-trip. The read itself is unchanged.
     func bitwardenStatus() async -> String {
         let ctx = context
-        return await Task.detached { ctx.runHermes(["secrets", "bitwarden", "status"]).output }.value
+        return await OffPool.run { ctx.runHermes(["secrets", "bitwarden", "status"]).output }
     }
 
     // MARK: - Performance / Advanced

@@ -585,9 +585,9 @@ struct MemoryView: View {
         isResetting = true
         let ctx = viewModel.context
         Task {
-            let result = await Task.detached {
+            let result = await OffPool.run {
                 ctx.runHermes(HermesMemoryResetVerdict.argv)
-            }.value
+            }
             isResetting = false
             // P47 / round-5 decision 3: judged by OUTPUT.
             // `_cmd_memory_reset`'s nothing-to-do arm prints

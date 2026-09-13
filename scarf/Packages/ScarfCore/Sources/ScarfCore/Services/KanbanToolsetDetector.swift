@@ -76,9 +76,9 @@ public actor KanbanToolsetDetector {
     public func detect(platform: String = "cli") async -> KanbanToolsetState {
         let context = self.context
         let path = context.paths.configYAML
-        let yaml: String? = await Task.detached(priority: .utility) {
+        let yaml: String? = await OffPool.run {
             context.readText(path)
-        }.value
+        }
 
         guard let yaml, !yaml.isEmpty else {
             return .unknown(reason: "config.yaml is empty or unreadable")

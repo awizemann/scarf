@@ -274,7 +274,7 @@ final class CredentialPoolsViewModel {
         isMutating = true
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(args) }.value
+            let result = await OffPool.run { ctx.runHermes(args) }
             guard let self else { return }
             self.isMutating = false
             apply(result.output, result.exitCode)

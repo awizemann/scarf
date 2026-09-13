@@ -114,9 +114,9 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
         Task { [weak self] in
             // `hermes config set` is a process spawn — an SSH exec channel on
             // a remote host. Detached, matching `load()` right above.
-            let result = await Task.detached {
+            let result = await OffPool.run {
                 ctx.runHermes(HermesConfigSet.argv(key: "display.personality", value: name))
-            }.value
+            }
             guard let self else { return }
             self.isSaving = false
             // P39: output-judged — `set_config_value`'s managed-install arm
