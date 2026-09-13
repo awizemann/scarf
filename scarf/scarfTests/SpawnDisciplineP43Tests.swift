@@ -239,6 +239,24 @@ struct SpawnDisciplineP43Tests {
     /// the write ends are closed" — was false, and a false rationale is how a
     /// close gets moved somewhere it raises. Measured here rather than
     /// asserted: it is the READ ends that leak.
+    ///
+    /// P60: the measurement is the SMALLEST delta over three trials, not one
+    /// before/after pair. `/dev/fd` is a PROCESS-global measure and the Mac
+    /// suite is run serially only by convention — under parallel load a
+    /// single pair also counts whatever a neighbouring suite's spawn happened
+    /// to be holding across the window, which is how this test failed on this
+    /// branch with the flat arm reading well above its threshold of 10. The
+    /// leak under test is DETERMINISTIC (2 descriptors per spawn, so every
+    /// trial pays the same +100) while a neighbour's are transient and will
+    /// not be open across all three windows, so the minimum separates the two
+    /// signals; widening the threshold cannot, because the noise is the same
+    /// size as the leak. This is `HermesP48Tests.minimumFDDelta`
+    /// (`ScarfCore/Tests/…/HermesP48Tests.swift:117`), reimplemented here
+    /// because the two suites live in different targets.
+    ///
+    /// The minimum is the conservative direction for BOTH assertions: noise
+    /// can only ADD descriptors, so it can only inflate the `>= 90` arm and
+    /// only inflate the `< 10` one.
     @Test("Foundation closes the parent's write end at spawn; the read end is ours")
     func onlyReadEndsLeak() throws {
         func openFDs() -> Int {
@@ -277,14 +295,23 @@ struct SpawnDisciplineP43Tests {
             return after - before
         }
 
+        /// The smallest delta `body` produced over `trials` runs.
+        func minimumFDDelta(trials: Int = 3, _ body: () -> Int) -> Int {
+            var smallest = Int.max
+            for _ in 0..<trials { smallest = min(smallest, body()) }
+            return smallest
+        }
+
         // Read ends left open: 2 per spawn.
-        #expect(spawn50(closeReadEnds: false, closeWriteEnds: true) >= 90)
+        let leaked = minimumFDDelta { spawn50(closeReadEnds: false, closeWriteEnds: true) }
+        #expect(leaked >= 90, "smallest fd delta over three trials was \(leaked)")
         // Read ends closed, write ends NOT: flat. Foundation closed the
         // parent's copy of the write end as part of `run()`, so the closes in
         // `AppRelauncher` / `ProjectTemplateService` are no-ops after a
         // successful spawn — kept only because they are the real release on
         // the launch-failure path, where `run()` never spawned.
-        #expect(spawn50(closeReadEnds: true, closeWriteEnds: false) < 10)
+        let flat = minimumFDDelta { spawn50(closeReadEnds: true, closeWriteEnds: false) }
+        #expect(flat < 10, "smallest fd delta over three trials was \(flat)")
     }
 
     // MARK: - AppRelauncher
