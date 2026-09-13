@@ -79,9 +79,19 @@ public actor HermesLogService {
         closeLog()
         currentPath = path
         if context.isRemote {
-            // Streaming tail via the transport's `streamLines`. This works
-            // on every platform: Mac/Linux drive it through a local `ssh`
-            // subprocess; iOS drives it through a Citadel exec channel.
+            // Streaming tail via the transport's `streamLines`. Mac/Linux
+            // drive it through a local `ssh` subprocess
+            // (``SSHTransport/streamLines(executable:args:)``), which since
+            // round-6 P58 reads the child with a `DispatchSourceRead` rather
+            // than parking a cooperative-pool thread on a `tail -F` that
+            // never ends.
+            //
+            // **iOS does NOT stream.** This comment used to say it drove the
+            // same path through a Citadel exec channel; it does not —
+            // ``ScarfIOS/CitadelServerTransport/streamLines(executable:args:)``
+            // is an M3 stub that finishes the stream immediately, so the iOS
+            // Logs pane gets nothing from this branch and falls back to
+            // whatever the snapshot read gave it. Wiring it is `t-78ced4d2`.
             // We don't hold a FileHandle anymore — the AsyncThrowingStream
             // owns the lifecycle and our pump Task pulls lines off it.
             let stream = transport.streamLines(

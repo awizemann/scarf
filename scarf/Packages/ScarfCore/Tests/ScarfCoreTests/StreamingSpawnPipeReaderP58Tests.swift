@@ -336,4 +336,71 @@ enum PipeReaderTestSupport {
         return true
     }
 }
+/// Round-6 P58 — the iOS streaming claim, pinned to the code that would have
+/// to be true for it.
+///
+/// `HermesLogService.openLog(path:)`'s remote branch said iOS drove the same
+/// `tail -F` "through a Citadel exec channel". It does not:
+/// `CitadelServerTransport.streamLines` is an M3 stub that finishes the
+/// stream immediately, so on iOS that branch yields nothing at all. P58 fixed
+/// the SENTENCE and filed the wiring as `t-78ced4d2` — round-6 lesson 6, "a
+/// number or citation in a comment is a claim nobody executes", applied to a
+/// claim about a sibling's behaviour.
+///
+/// This is the executable half: while the stub is a stub, the comment must
+/// not say otherwise; and when someone wires it, this test is what tells them
+/// the comment is now wrong in the other direction.
+@Suite("The iOS streaming claim matches the iOS code (P58)")
+struct IOSStreamingClaimP58Tests {
+
+    /// `…/scarf/Packages` — the two sibling package roots live under it.
+    private static var packagesRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // …/ScarfCoreTests
+            .deletingLastPathComponent()   // …/Tests
+            .deletingLastPathComponent()   // …/ScarfCore
+            .deletingLastPathComponent()   // …/Packages
+    }
+
+    @Test("the log service does not claim an iOS stream the iOS transport cannot give")
+    func theClaimTracksTheStub() throws {
+        let citadel = try String(
+            contentsOf: Self.packagesRoot.appendingPathComponent(
+                "ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift"),
+            encoding: .utf8)
+        let logService = try String(
+            contentsOf: Self.packagesRoot.appendingPathComponent(
+                "ScarfCore/Sources/ScarfCore/Services/HermesLogService.swift"),
+            encoding: .utf8)
+
+        // The stub, located by its declaration rather than by a line number:
+        // `streamLines` whose body is the immediate `finish()`.
+        let lines = citadel.components(separatedBy: "\n")
+        let start = try #require(
+            lines.firstIndex { $0.contains("public func streamLines(") },
+            "`CitadelServerTransport.streamLines` is gone — re-point this test")
+        let body = lines[start..<min(start + 14, lines.count)].joined(separator: "\n")
+        let isStub = body.contains("AsyncThrowingStream { $0.finish() }")
+
+        if isStub {
+            #expect(!logService.contains("iOS drives it through a Citadel exec channel"), """
+                `HermesLogService` still tells the reader that iOS streams \
+                through a Citadel exec channel while \
+                `CitadelServerTransport.streamLines` is an immediate-finish \
+                stub. The comment describes a feature that does not exist.
+                """)
+            #expect(logService.contains("t-78ced4d2"), """
+                The comment says iOS does not stream but names no task, so the \
+                gap is documented and unowned.
+                """)
+        } else {
+            #expect(!logService.contains("**iOS does NOT stream.**"), """
+                `CitadelServerTransport.streamLines` is no longer a stub, so \
+                `HermesLogService`'s "iOS does NOT stream" paragraph is now the \
+                wrong claim — update it and close `t-78ced4d2`.
+                """)
+        }
+    }
+}
+
 #endif
