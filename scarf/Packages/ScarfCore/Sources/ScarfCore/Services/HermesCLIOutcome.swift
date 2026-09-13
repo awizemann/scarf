@@ -39,6 +39,22 @@ public struct HermesCLIOutcome: Sendable, Equatable {
     public let succeeded: Bool
     /// The emitter's own one-line explanation of a refusal, when it printed
     /// one. `nil` on success, and on a failure with nothing quotable.
+    ///
+    /// **Two documented exceptions, both added by P54**, where the emitter's
+    /// line is information the pane needs on a SUCCESS and lives nowhere
+    /// else:
+    ///
+    /// - ``HermesWebhookTestVerdict`` carries `Response ({status}): {body}`
+    ///   (`hermes_cli/webhook.py:216` @ `v2026.9.7`) — the gateway's own
+    ///   answer to the POST, which is the entire result the button exists to
+    ///   show. A test that fired and a test whose route answered are the
+    ///   same event to the exit code and different events to the user.
+    /// - ``HermesBackupVerdict`` carries `Backup incomplete: {path}`
+    ///   (`backup.py:666`), naming WHICH archive is the partial one.
+    ///
+    /// Every other verdict in this file leaves it `nil` on success, and a
+    /// consumer that renders `detail` unconditionally should check which
+    /// verdict it is reading.
     public let detail: String?
     /// A refusal the run printed **alongside** a real success line, where the
     /// two are not a contradiction but a PARTIAL write: Hermes wrote one of
@@ -2140,5 +2156,514 @@ public enum HermesSessionsOptimizeVerdict {
         return HermesCLIOutcome(
             succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
         )
+    }
+}
+
+// MARK: - backup — hermes_cli/backup.py
+
+/// `hermes backup`, judged by output.
+///
+/// P54, round-6. `_run_backup_locked` (`hermes_cli/backup.py:622-681`
+/// @ `v2026.9.7`) is a `-> None` with **two exit-0 arms Scarf reported as a
+/// saved backup**:
+///
+/// - `No files to back up.` (`:633`) — the scan found nothing, and the
+///   function `return`s before an archive is ever created. There is no zip.
+/// - `Backup incomplete: {path}` (`:666`, the `'incomplete' if errors else
+///   'complete'` interpolation) followed by
+///   `Warnings ({n} files skipped):` (`:679`) — the archive exists but is
+///   missing files, typically an unreadable `state.db` or a permission
+///   error. `errors` is appended by `_write_zip_entries`'s `on_db_failure`
+///   / `on_error` callbacks (`:652-653`) and by the external-entry loop
+///   (`:660-661`); nothing in either path raises, so the run exits 0.
+///
+/// `import` is the only verb whose SUCCESS line the old code could have
+/// distinguished, and it did not look at either: `runBackup` keyed on
+/// `result.exitCode == 0` and then on whether a `.zip` path could be
+/// regexed out of the output — which `Backup incomplete: /…/x.zip` satisfies
+/// exactly as well as the complete form, so a partial archive was revealed
+/// in Finder under "Backup saved".
+///
+/// The incomplete arm is a **partial success**, not a failure, and takes the
+/// ``HermesCLIOutcome/warning`` channel `config set`'s mirror refusal uses:
+/// the zip is real and restorable, it just is not everything. The
+/// nothing-to-back-up arm is the house "nothing to do" answer — a success
+/// with a neutral note (P47's third convention, after `auth logout` and
+/// `memory reset`).
+///
+/// **The tag walk, and what C1 turns on.** Opened at `v2026.6.19`,
+/// `v2026.7.30`, `v2026.8.19` and `v2026.9.7`:
+///
+/// - `Backup complete: {out_path}` is present at all four (`:314`, `:647`,
+///   `:816`, `:666`). The v0.21.1 spelling is the interpolation
+///   `Backup {'incomplete' if errors else 'complete'}: {out_path}`; the
+///   earlier tags print the two as separate `print` calls. Same bytes on the
+///   wire either way.
+/// - `Backup incomplete: {out_path}` exists from `v2026.7.30` (`:645`)
+///   onward. **`v2026.6.19` has no incomplete arm at all** — it prints the
+///   complete line unconditionally — so on such a host this verdict's
+///   incomplete branch can never fire and the pane renders exactly as it did
+///   before P54. That is the C1 answer for the one range outside the window:
+///   nothing is hidden there, because Hermes emits nothing to hide.
+/// - `No files to back up.` (`:266`, `:585`, `:734`, `:633`) and
+///   `Warnings ({n} files skipped):` (`:326`, `:673`, `:842`, `:679`) are
+///   byte-identical at all four.
+public enum HermesBackupVerdict {
+    /// `backup`. No positional, no flag Scarf passes — nothing to separate.
+    public static let argv = ["backup"]
+
+    /// `Backup complete: {out_path}` (`backup.py:666`). The trailing space
+    /// and colon are load-bearing: `Backup incomplete: ` is NOT a superset
+    /// of this string, so the two prefixes cannot both match one line.
+    static let successPrefix = "Backup complete: "
+
+    /// `Backup incomplete: {out_path}` (`:666`) — the archive was written,
+    /// but `errors` is non-empty.
+    static let incompletePrefix = "Backup incomplete: "
+
+    /// `Warnings ({len(errors)} files skipped):` (`:679`), printed by
+    /// `_print_capped` right after the incomplete line.
+    static let warningsPrefix = "Warnings ("
+
+    /// `No files to back up.` (`:633`) — the scan arm that writes no zip.
+    static let nothingToBackUpPrefix = "No files to back up."
+
+    /// The neutral note for the nothing-to-back-up arm.
+    public static let nothingToBackUpNote = String(
+        localized: "Hermes found no files to back up, so no archive was written."
+    )
+
+    /// The warning a partial archive carries.
+    public static let incompleteNote = String(
+        localized: "Some files were skipped — the archive is incomplete."
+    )
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        // The incomplete arm is checked FIRST: it is a distinct prefix, but
+        // reading it before the success prefix makes the precedence explicit
+        // rather than incidental.
+        if let incomplete = lines.first(where: { head($0).hasPrefix(incompletePrefix) }) {
+            let skipped = lines.first { head($0).hasPrefix(warningsPrefix) }
+            // The archive IS written, so this succeeds — with Hermes's own
+            // "Warnings (N files skipped):" line when it printed one, which
+            // is the only place the count lives.
+            return HermesCLIOutcome(
+                succeeded: true,
+                detail: incomplete,
+                warning: skipped.map { "\(incompleteNote) \($0)" } ?? incompleteNote
+            )
+        }
+        if lines.contains(where: { head($0).hasPrefix(successPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        if lines.contains(where: { head($0).hasPrefix(nothingToBackUpPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil, warning: nothingToBackUpNote)
+        }
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}
+
+// MARK: - import — hermes_cli/backup.py
+
+/// `hermes import --force <zip>`, judged by output.
+///
+/// P54, round-6 **decision 1** — and the HIGH finding of the round: before
+/// this, `hermes import <path>` could not restore into a live Hermes home AT
+/// ALL from Scarf.
+///
+/// `run_import` (`hermes_cli/backup.py:919-…` @ `v2026.9.7`) gates on
+/// `if not args.force and not _confirm_import_overwrite(hermes_root)`
+/// (`:942`). `_confirm_import_overwrite` (`:829-843`) returns `True` only
+/// when the target has neither `config.yaml` nor `.env` — i.e. only into an
+/// EMPTY home. On any real home it prints the overwrite warning and calls
+/// bare `input("Continue? [y/N] ")` (`:836`). Scarf's CLI child inherits a
+/// closed/`/dev/null` stdin, so `input()` raises `EOFError`, which the
+/// handler catches to print `Aborted.` and `sys.exit(1)` (`:837-839`).
+/// Every restore therefore exited 1 and the Settings pane showed a bare
+/// "Restore failed" with no hint that a prompt nobody could answer was the
+/// cause.
+///
+/// **Decision 1: pass `--force`; Scarf's restore sheet is the consent.**
+/// The flag is `--force`/`-f` on the `import` subparser
+/// (`hermes_cli/subcommands/import_cmd.py:16-17` @ `v2026.9.7`) and exists
+/// precisely to say the confirmation was collected elsewhere. Scarf already
+/// collects it: the user picks the archive and confirms the restore in the
+/// sheet before this runs. **No stdin pipe** — writing `y\n` into the child
+/// would be Scarf answering a question on the user's behalf, which is the
+/// opposite of consent.
+///
+/// The verb is `_forward_command`ed without `forward_return`
+/// (`hermes_cli/main.py:1755-1772`), so beyond the three `sys.exit(1)`
+/// guards (`:924`, `:927`, `:935`) every arm exits 0 — including the two
+/// partial-restore arms, which is why this is a verdict and not an exit-code
+/// check even with `--force` in place.
+///
+/// **The tag walk, and what C1 turns on.** Opened at `v2026.6.19`,
+/// `v2026.7.30`, `v2026.8.19` and `v2026.9.7`:
+///
+/// - `--force`/`-f` is on the `import` subparser at ALL four
+///   (`hermes_cli/subcommands/import_cmd.py:25-30` @ `v2026.6.19`, `:16-17`
+///   @ `v2026.9.7`), and the gate reads it at all four (`backup.py:425`,
+///   `:773`, `:1066`, `:942`). So the flag is safe on every host Scarf
+///   supports at these tags — argparse never sees an unknown option — and on
+///   every one of them it turns a guaranteed `EOFError` exit 1 into a real
+///   restore. There is no range where adding it makes a host worse.
+/// - `Import complete: {restored} files restored in {elapsed}s` is present
+///   at all four (`:494`, `:876`, `:1170`, `:950`); only `v2026.9.7` appends
+///   the `  Target: …` second line, which is downstream of the prefix.
+/// - `Warnings ({n} files skipped):` is present at all four (`:498`, `:886`,
+///   `:1180`, `:955`).
+/// - `⚠ Session data replaced by older backup contents:` is **new at
+///   `v2026.9.7`** (`:959`; absent at the other three). An older host never
+///   prints it, so the shrink note simply never fires there — additive, and
+///   the only arm of this verdict that is.
+public enum HermesImportVerdict {
+    /// `import --force -- <path>`.
+    ///
+    /// The flag comes FIRST and the separator after it: `zipfile` is the
+    /// subparser's only positional and nothing follows it
+    /// (`hermes_cli/subcommands/import_cmd.py:15-17` @ `v2026.9.7`), so
+    /// everything past `--` is read as that positional and a backup path
+    /// beginning with a dash stops exiting 2. An appended flag after `--`
+    /// would be the error P47 documented on `sessions delete`.
+    ///
+    /// `--force` is a **parameter that IS the fix**, so it is not optional
+    /// and there is no non-forced spelling to reach for by accident.
+    public static func argv(path: String) -> [String] {
+        ["import", "--force", "--", path]
+    }
+
+    /// `Import complete: {restored} files restored in {elapsed}s`
+    /// (`backup.py:950`).
+    static let successPrefix = "Import complete: "
+
+    /// `Warnings ({len(errors)} files skipped):` (`:955`) — path-traversal
+    /// blocks and per-file `PermissionError`/`OSError`, collected by
+    /// `_import_members` (`:889`, `:911`) and printed at exit 0.
+    static let warningsPrefix = "Warnings ("
+
+    /// `⚠ Session data replaced by older backup contents:` (`:959`) — the
+    /// restore overwrote a session database with one holding FEWER rows
+    /// (`db_shrunk`, `:899`). Hermes's own `⚠` is stripped by
+    /// ``HermesCLIVerdict/unglyphed(_:)`` before this is matched.
+    static let sessionsShrankPrefix = "Session data replaced by older backup contents:"
+
+    /// The warning a restore that skipped files carries.
+    public static let skippedNote = String(
+        localized: "Some files were skipped — the restore is incomplete."
+    )
+
+    /// The warning a restore that shrank a session database carries. This
+    /// is data loss the user cannot see from the Settings pane, so it names
+    /// the remedy Hermes names (`:963-964`).
+    public static let sessionsShrankNote = String(
+        localized: """
+            The backup is older than this host's session data — anything \
+            recorded after it was taken is gone. Recover from a newer \
+            backup or snapshot.
+            """
+    )
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        guard lines.contains(where: { head($0).hasPrefix(successPrefix) }) else {
+            return HermesCLIOutcome(
+                succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+            )
+        }
+        // Both partial arms can fire on ONE run, and the shrink is the more
+        // serious of the two — it is silent data loss, where a skipped file
+        // is merely absent. Both are reported when both are present.
+        var notes: [String] = []
+        if lines.contains(where: { head($0).hasPrefix(sessionsShrankPrefix) }) {
+            notes.append(sessionsShrankNote)
+        }
+        if lines.contains(where: { head($0).hasPrefix(warningsPrefix) }) {
+            notes.append(skippedNote)
+        }
+        return HermesCLIOutcome(
+            succeeded: true,
+            detail: nil,
+            warning: notes.isEmpty ? nil : notes.joined(separator: " ")
+        )
+    }
+}
+
+// MARK: - webhook remove / test — hermes_cli/webhook.py
+
+/// The refusal `hermes webhook` prints before ANY subcommand runs.
+///
+/// `webhook_command` (`hermes_cli/webhook.py:92-103` @ `v2026.9.7`) checks
+/// `_is_webhook_enabled()` and, when the platform is off in config, prints
+/// `_setup_hint()` (`:100`) and `return`s — the handler never dispatches.
+/// `webhook` is `_forward_command`ed WITHOUT `forward_return`
+/// (`hermes_cli/main.py:1755-1772`), so this exits 0 and every webhook
+/// mutation Scarf ran on a webhook-disabled host reported success.
+///
+/// The hint's first line is `  Webhook platform is not enabled. To set it
+/// up:` (`:70`, inside the `_setup_hint()` f-string at `:67-88`);
+/// ``HermesCLIVerdict/significantLines(_:)`` trims the indent, so it anchors.
+///
+/// **The tag walk.** Every marker in this enum and in the two webhook
+/// verdicts below was opened at `v2026.6.19`, `v2026.7.30`, `v2026.8.19` and
+/// `v2026.9.7` and is byte-identical at all four — only the line numbers
+/// moved (`Webhook platform is not enabled.` `:108`/`:110`/`:110`/`:70`;
+/// `No subscription named '{name}'.` `:249`,`:264` / `:258`,`:273` /
+/// `:258`,`:273` / `:188`,`:201`; `Removed webhook subscription: {name}`
+/// `:255`/`:264`/`:264`/`:193`; `Response ({status}): {body}`
+/// `:295`/`:304`/`:304`/`:216`; `Error: {e}` `:297`/`:306`/`:306`/`:218`;
+/// `Is the gateway running? (hermes gateway run)`
+/// `:298`/`:307`/`:307`/`:219`). So the verdicts change no pane's rendering
+/// on any host in that range except where it was already wrong (C1).
+enum HermesWebhookGate {
+    static let disabledPrefix = "Webhook platform is not enabled."
+
+    /// `  No subscription named '{name}'.` — printed by `_cmd_remove`
+    /// (`:188`) and by `_cmd_test` (`:201`), both followed by a bare
+    /// `return` at exit 0.
+    static let notFoundPrefix = "No subscription named "
+
+    /// The sentence a disabled-platform refusal shows. Names the cause the
+    /// hint names, which the anchored marker DOES prove here: unlike
+    /// `"Cannot "`, this line has exactly one emitter.
+    static let disabledNote = String(
+        localized: "The webhook platform is not enabled on this host. Run the gateway setup wizard first."
+    )
+}
+
+/// `hermes webhook remove <name>`, judged by output.
+///
+/// P54, round-6. Three exit-0 arms, all previously reported as "Removed":
+/// the disabled-platform gate (``HermesWebhookGate/disabledPrefix``),
+/// `No subscription named '{name}'.` (`webhook.py:188`, which also notes
+/// that static config.yaml routes cannot be removed here), and the real
+/// removal `  Removed webhook subscription: {name}` (`:193`).
+public enum HermesWebhookRemoveVerdict {
+    /// `webhook remove -- <name>`. `name` is the subparser's only positional
+    /// and carries no flags (`hermes_cli/subcommands/webhook.py:42-43` @
+    /// `v2026.9.7`).
+    public static func argv(name: String) -> [String] {
+        ["webhook", "remove", "--", name]
+    }
+
+    /// `  Removed webhook subscription: {name}` (`webhook.py:193`).
+    static let successPrefix = "Removed webhook subscription: "
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        // A refusal outranks a success line the way `failureWins` does: the
+        // gate returns BEFORE the handler, so the two cannot co-occur, but a
+        // positive refusal signal must never lose to a stray prefix match.
+        if lines.contains(where: { head($0).hasPrefix(HermesWebhookGate.disabledPrefix) }) {
+            return HermesCLIOutcome(succeeded: false, detail: HermesWebhookGate.disabledNote)
+        }
+        if let notFound = lines.first(where: { head($0).hasPrefix(HermesWebhookGate.notFoundPrefix) }) {
+            return HermesCLIOutcome(succeeded: false, detail: notFound)
+        }
+        if lines.contains(where: { head($0).hasPrefix(successPrefix) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil)
+        }
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}
+
+/// `hermes webhook test <name>`, judged by output.
+///
+/// P54, round-6. `_cmd_test` (`webhook.py:196-219` @ `v2026.9.7`) wraps the
+/// POST in a bare `except Exception` that prints `  Error: {e}` (`:218`) and
+/// `  Is the gateway running? (hermes gateway run)` (`:219`) — then falls off
+/// the end of the function at exit 0. A connection refused because the
+/// gateway is down looked exactly like a delivered test.
+///
+/// Success is `  Response ({resp.status}): {body}` (`:216`), printed only
+/// inside the `with urllib.request.urlopen(...)` block — and **only for a
+/// 2xx**. `urllib.request`'s default opener installs `HTTPErrorProcessor`,
+/// which raises `HTTPError` for any code outside `200..<300`, so a gateway
+/// that answers 401 or 500 takes the `except Exception` arm below and prints
+/// `  Error: HTTP Error 500: Internal Server Error` — NOT a
+/// `Response (500)` line, which Hermes can never emit.
+///
+/// That has a consequence worth knowing: on a non-2xx answer Hermes also
+/// prints its `Is the gateway running?` hint, and the gateway plainly IS
+/// running. Scarf quotes Hermes's own two lines rather than second-guessing
+/// them (the `Error:` text names the real status), but the misleading half
+/// of that sentence is Hermes's, not ours — `t-<filed>` tracks proposing a
+/// narrower hint upstream. Either way a non-2xx is a FAILURE here, which is
+/// the part the exit code got wrong.
+///
+/// The success `detail` carries the response line because the gateway's own
+/// 2xx body is the result the button exists to show.
+public enum HermesWebhookTestVerdict {
+    /// `webhook test -- <name>`. `name` is the first positional and Scarf
+    /// passes no `--payload` (`hermes_cli/subcommands/webhook.py:45-48` @
+    /// `v2026.9.7`), so the separator is the last token before it.
+    public static func argv(name: String) -> [String] {
+        ["webhook", "test", "--", name]
+    }
+
+    /// `  Response ({status}): {body}` (`webhook.py:216`).
+    static let successPrefix = "Response ("
+
+    /// `  Error: {e}` (`:218`), the `except Exception` arm.
+    static let failurePrefix = "Error: "
+
+    /// `  Is the gateway running? (hermes gateway run)` (`:219`) — always
+    /// printed with the `Error:` line, and the more useful of the two when
+    /// the exception's `str()` is something like `<urlopen error [Errno 61]
+    /// Connection refused>`.
+    static let gatewayHintPrefix = "Is the gateway running?"
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        if lines.contains(where: { head($0).hasPrefix(HermesWebhookGate.disabledPrefix) }) {
+            return HermesCLIOutcome(succeeded: false, detail: HermesWebhookGate.disabledNote)
+        }
+        if let notFound = lines.first(where: { head($0).hasPrefix(HermesWebhookGate.notFoundPrefix) }) {
+            return HermesCLIOutcome(succeeded: false, detail: notFound)
+        }
+        if let error = lines.first(where: { head($0).hasPrefix(failurePrefix) }) {
+            let hint = lines.first { head($0).hasPrefix(gatewayHintPrefix) }
+            return HermesCLIOutcome(
+                succeeded: false,
+                detail: hint.map { "\(error) \($0)" } ?? error
+            )
+        }
+        if let response = lines.first(where: { head($0).hasPrefix(successPrefix) }) {
+            // The detail rides along on SUCCESS here, unlike every other
+            // verdict in this file: the gateway's own 2xx answer (status and
+            // body) is the result the button exists to show, and it lives
+            // nowhere else once the run is judged.
+            return HermesCLIOutcome(succeeded: true, detail: response, warning: nil, confidence: .confirmed)
+        }
+        return HermesCLIOutcome(
+            succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+        )
+    }
+}
+
+// MARK: - debug share — hermes_cli/debug.py
+
+/// `hermes debug share`, judged by output.
+///
+/// P54, round-6. `run_debug_share` (`hermes_cli/debug.py:460-497` @
+/// `v2026.9.7`) uploads the report to several paste targets and prints
+/// `Debug report uploaded:` (`:490`) followed by one `  {label}  {url}` line
+/// per target. When SOME targets failed it then prints
+/// `  (failed to upload: {', '.join(result.failures)})` (`:494`) — **at exit
+/// 0, after the success block**. Only a total failure raises `RuntimeError`,
+/// which prints `Upload failed: …` to stderr and `sys.exit(1)` (`:485-488`).
+///
+/// The Health pane keyed on `exitCode == 0` and said "Upload complete", so a
+/// run that got two of three pastes up read identically to a clean one. The
+/// URLs are in `diagnosticsOutput` either way; what was missing was any
+/// signal that the list is short.
+///
+/// **The tag walk.** Both lines opened at `v2026.6.19` (`debug.py:779`,
+/// `:784`), `v2026.7.30` (`:866`, `:871`), `v2026.8.19` (`:899`, `:904`) and
+/// `v2026.9.7` (`:490`, `:494`) — byte-identical at all four, only the line
+/// numbers moved, so C1 holds.
+public enum HermesDebugShareVerdict {
+    /// `Debug report uploaded:` (`debug.py:490`). Column 0 after the
+    /// leading `\n`.
+    static let successPrefix = "Debug report uploaded:"
+
+    /// `  (failed to upload: {…})` (`:494`).
+    static let partialPrefix = "(failed to upload:"
+
+    /// The warning a partial upload carries.
+    public static let partialNote = String(
+        localized: "Some upload targets failed — not every link below was created."
+    )
+
+    /// `--local` never uploads: `run_debug_share`'s first branch prints the
+    /// report and returns, so there is no `Debug report uploaded:` line to
+    /// find. The local run is judged by its exit code alone, which is why
+    /// this takes the flag rather than guessing from the output.
+    public static func judge(output: String, exitCode: Int32, local: Bool) -> HermesCLIOutcome {
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard exitCode == 0 else {
+            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+        }
+        guard !local else { return HermesCLIOutcome(succeeded: true, detail: nil) }
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        guard lines.contains(where: { head($0).hasPrefix(successPrefix) }) else {
+            return HermesCLIOutcome(
+                succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
+            )
+        }
+        if let partial = lines.first(where: { head($0).hasPrefix(partialPrefix) }) {
+            // Hermes's own line names WHICH targets failed; the note alone
+            // would lose that.
+            return HermesCLIOutcome(
+                succeeded: true, detail: nil, warning: "\(partialNote) \(partial)"
+            )
+        }
+        return HermesCLIOutcome(succeeded: true, detail: nil)
+    }
+}
+
+// MARK: - curator run — hermes_cli/curator.py
+
+/// The prune-only note `hermes curator run` prints when the LLM
+/// consolidation pass is off.
+///
+/// P54, round-6 **decision 2**. `_cmd_run` (`hermes_cli/curator.py:145-186`
+/// @ `v2026.9.7`) reads `curator.consolidate` from config when `--consolidate`
+/// is absent, and when it is false prints
+/// `curator: consolidation is off — running prune-only (deterministic
+/// stale/archive). Pass --consolidate or set \`curator.consolidate: true\` to
+/// enable the LLM merge pass.` (`:159-163`) before running. The pass still
+/// happens and still `return 0`s (`:186`) — it simply does half of what
+/// "Run Now" implies.
+///
+/// **Decision 2: a neutral note beside the success, and NO `--consolidate`
+/// on Run Now.** Forcing the LLM pass from a button would spend the user's
+/// tokens on a setting they turned off (or never turned on — it defaults to
+/// false); the honest answer is to say what ran and let them change the
+/// config. This is the `pin`/`unpin` unmanaged-nudge shape
+/// (``CuratorService/pin(_:)``): Hermes's own sentence, surfaced instead of
+/// discarded, in place of the terse success message.
+///
+/// **The tag walk.** `curator: consolidation is off — running prune-only …`
+/// opened at `v2026.6.19` (`:191`), `v2026.7.30` (`:232`), `v2026.8.19`
+/// (`:232`) and `v2026.9.7` (`:161`) — byte-identical at all four.
+public enum HermesCuratorRunNote {
+    /// `curator: consolidation is off — running prune-only …`
+    /// (`curator.py:161`). Matched on the ASCII head alone: the em dash and
+    /// the backticked remedy are downstream of it, and the head is unique in
+    /// the file.
+    static let pruneOnlyPrefix = "curator: consolidation is off"
+
+    /// The note, when the run printed one. `nil` for a full run.
+    ///
+    /// Detected by CONTENT rather than version-gated, exactly as
+    /// `unmanagedNudge` is: a host too old to print this line simply never
+    /// matches, so the check is a no-op there and no capability flag is
+    /// needed (C1).
+    public static func pruneOnlyNote(in output: String) -> String? {
+        HermesCLIVerdict.significantLines(output).first {
+            HermesCLIVerdict.unglyphed($0).hasPrefix(pruneOnlyPrefix)
+        }
     }
 }

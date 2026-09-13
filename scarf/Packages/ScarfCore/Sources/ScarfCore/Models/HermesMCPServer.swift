@@ -194,17 +194,35 @@ public struct MCPTestResult: Sendable, Equatable {
     public let tools: [String]
     public let elapsed: TimeInterval
 
+    /// What the verdict actually KNOWS, carried alongside ``succeeded``
+    /// rather than collapsed into it (P54, round-6).
+    ///
+    /// ``HermesMCPTestVerdict/judge(output:exitCode:)`` returns three states
+    /// and `HermesFileService.testMCPServer` used to keep only `.succeeded`,
+    /// so `.unconfirmed` — exit 0 with neither a success nor a failure
+    /// marker, which is what an unknown-verb fallthrough or a wedged probe
+    /// looks like — arrived at the two views as a hard red "Test failed".
+    /// That is the mirror of the bug the verdict exists to prevent: a claim
+    /// the run PROVED something when it proved nothing. Both consumers had a
+    /// two-way `if` on `succeeded` (round-6 lesson 12).
+    ///
+    /// Defaults to the two-state reading so every existing constructor and
+    /// test fixture still means exactly what it did.
+    public let confidence: HermesCLIOutcome.Confidence
+
     public init(
         serverName: String,
         succeeded: Bool,
         output: String,
         tools: [String],
-        elapsed: TimeInterval
+        elapsed: TimeInterval,
+        confidence: HermesCLIOutcome.Confidence? = nil
     ) {
         self.serverName = serverName
         self.succeeded = succeeded
         self.output = output
         self.tools = tools
         self.elapsed = elapsed
+        self.confidence = confidence ?? (succeeded ? .confirmed : .failed)
     }
 }
