@@ -795,20 +795,43 @@ struct ThreeStateSealP54bTests {
         #expect(host.messageKind == .success)
     }
 
-    /// …and the two shipped sites actually spell it. A source scan because
-    /// both are inside `Task.detached` bodies with no injectable seam.
-    @Test func bothInProgressSitesClearAllThreeFlags() throws {
-        for (path, marker) in [
+    /// …and the shipped sites actually spell it. A source scan because they
+    /// are inside `Task.detached` / `MainActor.run` bodies with no
+    /// injectable seam.
+    ///
+    /// Round-6 P59 added `WebhooksViewModel`'s three. That pane keeps its own
+    /// `messageIsError`/`messageIsUnconfirmed` pair (it is not an
+    /// `OutcomeMessageHosting` conformer) and routes its CLI verdicts through
+    /// `applyConfidence`, which sets both — but three banners written by hand
+    /// set only `messageIsError`, so an `.unconfirmed` seal from a previous
+    /// webhook action, which by design never auto-clears, survived onto the
+    /// next line. The flag name differs per pane, which is why the scan takes
+    /// it as a parameter instead of assuming one spelling.
+    @Test func everyHandWrittenBannerClearsAllThreeFlags() throws {
+        for (path, failureFlag, markers) in [
             ("scarf/Features/Platforms/ViewModels/PlatformsViewModel.swift",
-             "message = String(localized: \"Restarting gateway…\")"),
+             "messageIsFailure",
+             ["message = String(localized: \"Restarting gateway…\")"]),
             ("scarf/Features/Plugins/ViewModels/PluginsViewModel.swift",
-             "message = String(localized: \"Installing \\(identifier)…\")")
+             "messageIsFailure",
+             ["message = String(localized: \"Installing \\(identifier)…\")"]),
+            ("scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift",
+             "messageIsError",
+             ["self.message = Self.subscribeFailureMessage(result.output)",
+              "self.message = \"Subscribed /\\(storedName)\"",
+              "Check `hermes webhook list` on the host.\","])
         ] {
             let code = P54Source.codeOnly(try P54Source.read(path))
-            let at = try #require(code.range(of: marker), "in-progress line moved in \(path)")
-            let window = code[at.upperBound...].prefix(260)
-            #expect(window.contains("messageIsFailure = false"), "\(path)")
-            #expect(window.contains("messageIsUnconfirmed = false"), "\(path)")
+            for marker in markers {
+                let at = try #require(code.range(of: marker),
+                                      Comment(rawValue: "banner line moved in \(path): \(marker)"))
+                let window = code[at.upperBound...].prefix(400)
+                #expect(window.contains("\(failureFlag) = "), Comment(rawValue:
+                    "\(path): \(marker) no longer sets \(failureFlag) — the scan is stale"))
+                #expect(window.contains("messageIsUnconfirmed = false"), Comment(rawValue:
+                    "\(path): \(marker) leaves `messageIsUnconfirmed` set, so an earlier"
+                    + " amber question mark survives onto this banner"))
+            }
         }
     }
 

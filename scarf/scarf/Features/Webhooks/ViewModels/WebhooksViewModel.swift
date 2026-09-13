@@ -102,6 +102,11 @@ final class WebhooksViewModel {
                             comment: "Webhook subscribe claimed success but the reload disagrees"
                         )
                         self.messageIsError = true
+                        // All THREE, not two (P55b's rule, P59's site): an
+                        // `.unconfirmed` seal from an earlier action never
+                        // auto-clears, so a hand-written banner that sets only
+                        // `messageIsError` inherits the amber question mark.
+                        self.messageIsUnconfirmed = false
                         self.createdSecret = nil
                     }
                 }
@@ -180,6 +185,7 @@ final class WebhooksViewModel {
                 if let created {
                     self.message = "Subscribed /\(storedName)"
                     self.messageIsError = false
+                    self.messageIsUnconfirmed = false
                     self.createdSecret = created
                     self.pendingSubscribeConfirmation = storedName
                 } else {
@@ -189,6 +195,7 @@ final class WebhooksViewModel {
                     self.createdSecret = nil
                     self.message = Self.subscribeFailureMessage(result.output)
                     self.messageIsError = true
+                    self.messageIsUnconfirmed = false
                 }
                 self.load(force: true)
                 let delay: TimeInterval = created == nil ? 6 : 2
