@@ -1215,7 +1215,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// not what the record holds. There is no minutes field on the sheet, so
     /// a new `interval` job, or one switched to `interval` from another kind,
     /// has nowhere to get one; naming that beats writing a job that can never
-    /// fire. Growing the form a minutes field is `t-f0a5b2ce`.
+    /// fire. Growing the form a minutes field is `t-b74c65a4`.
     ///
     /// No parameter takes a default: each one IS the fix (addendum lesson 10).
     public nonisolated static func scheduleFormRefusal(
