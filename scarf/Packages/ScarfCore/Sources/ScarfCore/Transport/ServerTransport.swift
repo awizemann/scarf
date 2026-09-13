@@ -77,6 +77,29 @@ public protocol ServerTransport: Sendable {
         timeout: TimeInterval
     ) throws -> ProcessResult
 
+    /// The `async` seam for the same run — round-6 decision 11.
+    ///
+    /// ``runProcess(executable:args:stdin:timeout:)`` BLOCKS its caller's
+    /// thread, and its callers are `async`: on iOS every call sat inside a
+    /// `Task.detached`, so the wait ran on the cooperative pool (one thread
+    /// per core, unable to grow) while the work it waited for ran on that
+    /// same pool — the caller competing with the thing it is waiting for.
+    /// Charter C10.
+    ///
+    /// ``ScarfIOS/CitadelServerTransport`` OVERRIDES this with its own
+    /// `async` exec, so the iOS path has no blocking bridge at all. The
+    /// default implementation below hands the synchronous call a thread of
+    /// its own via ``OffPool``, which is a strictly smaller claim: the wait
+    /// no longer holds a pool thread, but the transport's internals are
+    /// still synchronous. Converting the two Mac transports end-to-end is
+    /// `t-02f830f4`.
+    nonisolated func asyncRunProcess(
+        executable: String,
+        args: [String],
+        stdin: Data?,
+        timeout: TimeInterval
+    ) async throws -> ProcessResult
+
     /// Return a `Process` configured for the target — already pointed at the
     /// right executable with the right arguments, but **not yet started**.
     /// Callers attach their own `Pipe`s and call `run()`. Used by the Mac
@@ -269,6 +292,27 @@ public final class WatchBaselineStore: @unchecked Sendable {
 }
 
 public extension ServerTransport {
+    /// Default `async` seam: the synchronous run on a thread of its own.
+    ///
+    /// `OffPool.run`, never `Task.detached` — a detached task is still the
+    /// cooperative pool, which is the defect this seam exists to remove
+    /// (round-6 decision 11, lesson 15). `Result` because `OffPool.run` is
+    /// non-throwing by design: the work always runs to completion and it is
+    /// the AWAIT a cancelled caller abandons.
+    nonisolated func asyncRunProcess(
+        executable: String,
+        args: [String],
+        stdin: Data?,
+        timeout: TimeInterval
+    ) async throws -> ProcessResult {
+        try await OffPool.run {
+            Result {
+                try self.runProcess(
+                    executable: executable, args: args, stdin: stdin, timeout: timeout)
+            }
+        }.get()
+    }
+
     /// Default: one `stat` per path. Correct everywhere and cheap on a
     /// local filesystem; `SSHTransport` overrides it with a single shell
     /// command so the remote case is one round-trip instead of N.

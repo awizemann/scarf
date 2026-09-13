@@ -53,7 +53,8 @@ public final class ProjectSkillsViewModel {
         Task.detached { [weak self] in
             let outcome: HermesCLIOutcome
             do {
-                let result = try xport.runProcess(
+                // Round-6 decision 11: the `async` seam (charter C10).
+                let result = try await xport.asyncRunProcess(
                     executable: bin,
                     args: args,
                     stdin: nil,

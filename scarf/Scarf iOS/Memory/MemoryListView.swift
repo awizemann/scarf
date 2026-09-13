@@ -114,14 +114,15 @@ struct MemoryListView: View {
             + "\(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
         let ctx = context
         do {
-            let result = try await Task.detached {
-                try ctx.makeTransport().runProcess(
-                    executable: "/bin/sh",
-                    args: ["-c", script],
-                    stdin: nil,
-                    timeout: 15
-                )
-            }.value
+            // Round-6 decision 11: the `async` seam, so the wait is a
+            // SUSPENSION rather than a cooperative-pool thread blocked on a
+            // semaphore while the exec it waits for runs on that same pool.
+            let result = try await ctx.makeTransport().asyncRunProcess(
+                executable: "/bin/sh",
+                args: ["-c", script],
+                stdin: nil,
+                timeout: 15
+            )
             let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
             let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
             let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")

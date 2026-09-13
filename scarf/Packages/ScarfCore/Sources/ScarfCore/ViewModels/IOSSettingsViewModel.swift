@@ -169,14 +169,15 @@ public final class IOSSettingsViewModel {
         let argv = HermesConfigSet.argv(key: key, value: value).map(shellEscape).joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
 
-        let result: ProcessResult = try await Task.detached {
-            try ctx.makeTransport().runProcess(
-                executable: "/bin/sh",
-                args: ["-c", script],
-                stdin: nil,
-                timeout: 15
-            )
-        }.value
+        // Round-6 decision 11: the `async` seam, so the wait is a suspension
+        // rather than a cooperative-pool thread blocked on the exec that runs
+        // on that same pool (charter C10).
+        let result: ProcessResult = try await ctx.makeTransport().asyncRunProcess(
+            executable: "/bin/sh",
+            args: ["-c", script],
+            stdin: nil,
+            timeout: 15
+        )
 
         // P39: judged by OUTPUT, exactly like `unsetValue` below and for the
         // same reason — `set_config_value`'s managed-install arm prints to
@@ -228,14 +229,15 @@ public final class IOSSettingsViewModel {
         let argv = HermesConfigUnset.argv(key: key).map(shellEscape).joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
 
-        let result: ProcessResult = try await Task.detached {
-            try ctx.makeTransport().runProcess(
-                executable: "/bin/sh",
-                args: ["-c", script],
-                stdin: nil,
-                timeout: 15
-            )
-        }.value
+        // Round-6 decision 11: the `async` seam, so the wait is a suspension
+        // rather than a cooperative-pool thread blocked on the exec that runs
+        // on that same pool (charter C10).
+        let result: ProcessResult = try await ctx.makeTransport().asyncRunProcess(
+            executable: "/bin/sh",
+            args: ["-c", script],
+            stdin: nil,
+            timeout: 15
+        )
 
         let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
         let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)

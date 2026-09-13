@@ -417,7 +417,7 @@ public final class SkillsViewModel {
         Task.detached { [weak self] in
             var args = ["skills", "browse", "--size", "40"]
             if source != "all" { args += ["--source", source] }
-            let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
+            let result = await Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
             let parsed = HermesSkillsHubParser.parseHubList(result.output)
             await self?.finishBrowse(
                 results: parsed,
@@ -481,7 +481,7 @@ public final class SkillsViewModel {
                 var args = ["skills", "search", "--limit", "40", "--source", source]
                 if useJSON { args.append("--json") }
                 args += ["--", query]
-                let result = Self.runHermesSplit(
+                let result = await Self.runHermesSplit(
                     executable: bin, args: args, transport: xport, timeout: 30)
                 // The JSON array is read from STDOUT alone — a stderr
                 // warning carrying a `]` would otherwise truncate the sliced
@@ -521,7 +521,7 @@ public final class SkillsViewModel {
         let xport = transport
         Task.detached { [weak self] in
             let args = ["skills", "browse", "--size", "40"]
-            let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
+            let result = await Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
             let parsed = HermesSkillsHubParser.parseHubList(result.output)
             await self?.finishBrowseThenFilter(
                 browseResults: parsed,
@@ -579,7 +579,7 @@ public final class SkillsViewModel {
         let xport = transport
         let identifier = skill.identifier
         Task.detached { [weak self] in
-            let result = Self.runHermes(
+            let result = await Self.runHermes(
                 executable: bin,
                 args: Self.installArgs(identifier),
                 transport: xport,
@@ -614,7 +614,7 @@ public final class SkillsViewModel {
         Task.detached { [weak self] in
             let args = Self.installArgs(
                 url, category: categoryOverride, name: nameOverride)
-            let result = Self.runHermes(
+            let result = await Self.runHermes(
                 executable: bin,
                 args: args,
                 transport: xport,
@@ -640,7 +640,7 @@ public final class SkillsViewModel {
         let bin = context.paths.hermesBinary
         let xport = transport
         let result = await Task.detached {
-            Self.runHermes(
+            await Self.runHermes(
                 executable: bin,
                 args: ["skills", "audit"],
                 transport: xport,
@@ -724,7 +724,7 @@ public final class SkillsViewModel {
         Task { [weak self] in
             guard let caps = await self?.resolvedCapabilities() else { return }
             await Task.detached { [weak self] in
-                let result = Self.runHermes(
+                let result = await Self.runHermes(
                     executable: bin,
                     args: Self.uninstallArgs(identifier, capabilities: caps),
                     transport: xport,
@@ -770,7 +770,7 @@ public final class SkillsViewModel {
         let bin = context.paths.hermesBinary
         let xport = transport
         Task.detached { [weak self] in
-            let result = Self.runHermes(
+            let result = await Self.runHermes(
                 executable: bin,
                 args: ["skills", "check"],
                 transport: xport,
@@ -806,7 +806,7 @@ public final class SkillsViewModel {
         let bin = context.paths.hermesBinary
         let xport = transport
         Task.detached { [weak self] in
-            let result = Self.runHermes(
+            let result = await Self.runHermes(
                 executable: bin,
                 args: Self.updateAllArgs,
                 transport: xport,
@@ -824,7 +824,7 @@ public final class SkillsViewModel {
         let xport = transport
         isHubLoading = true
         Task.detached { [weak self] in
-            let result = Self.runHermes(
+            let result = await Self.runHermes(
                 executable: bin,
                 args: Self.forceUpdateArgs(name),
                 transport: xport,
@@ -1107,9 +1107,10 @@ public final class SkillsViewModel {
         transport: any ServerTransport,
         timeout: TimeInterval,
         stdin: String? = nil
-    ) -> (exitCode: Int32, stdout: String, stderr: String) {
+    ) async -> (exitCode: Int32, stdout: String, stderr: String) {
         do {
-            let result = try transport.runProcess(
+            // Round-6 decision 11: the `async` seam (charter C10).
+            let result = try await transport.asyncRunProcess(
                 executable: executable,
                 args: args,
                 stdin: stdin.flatMap { $0.data(using: .utf8) },
@@ -1134,9 +1135,10 @@ public final class SkillsViewModel {
         transport: any ServerTransport,
         timeout: TimeInterval,
         stdin: String? = nil
-    ) -> (exitCode: Int32, output: String) {
+    ) async -> (exitCode: Int32, output: String) {
         do {
-            let result = try transport.runProcess(
+            // Round-6 decision 11: the `async` seam (charter C10).
+            let result = try await transport.asyncRunProcess(
                 executable: executable,
                 args: args,
                 stdin: stdin.flatMap { $0.data(using: .utf8) },

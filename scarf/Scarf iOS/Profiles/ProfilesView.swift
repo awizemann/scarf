@@ -153,18 +153,21 @@ struct ProfilesView: View {
         let rootHome = HermesProfileScope.rootHome(
             forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome
         )
-        let result = await Task.detached { () -> (output: String?, active: String?) in
+        let result = await { () async -> (output: String?, active: String?) in
             // `profile list` enumerates ALL profiles regardless of the
             // HERMES_HOME scope the transport injects — Hermes resolves it
             // against the root via get_default_hermes_root() (verified
             // v0.16; see memory note "Hermes profile / HERMES_HOME
             // resolution"). So running it through the profile-scoped
             // transport still returns the full list.
-            let listOut = Self.runHermes(context: ctx, args: ["profile", "list"])
-            let activeRaw = ctx.readText(rootHome + "/active_profile")
+            let listOut = await Self.runHermes(context: ctx, args: ["profile", "list"])
+            // `readText` is still the SYNCHRONOUS transport seam (the file
+            // verbs have no `async` twin — `t-02f830f4`), so it keeps its own
+            // thread rather than riding the pool.
+            let activeRaw = await OffPool.run { ctx.readText(rootHome + "/active_profile") }
             let active = activeRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (listOut, active)
-        }.value
+        }()
         self.hostActiveProfile = result.active.flatMap {
             ($0.isEmpty || $0 == "default") ? nil : $0
         }
@@ -184,10 +187,10 @@ struct ProfilesView: View {
     /// Run a hermes command, returning combined stdout+stderr, or `nil`
     /// when the transport itself failed (so callers can tell "couldn't
     /// reach the host" apart from "ran fine, printed nothing").
-    nonisolated private static func runHermes(context: ServerContext, args: [String]) -> String? {
+    nonisolated private static func runHermes(context: ServerContext, args: [String]) async -> String? {
         let transport = context.makeTransport()
         do {
-            let r = try transport.runProcess(
+            let r = try await transport.asyncRunProcess(
                 executable: context.paths.hermesBinary,
                 args: args,
                 stdin: nil,

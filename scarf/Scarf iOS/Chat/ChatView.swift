@@ -1338,16 +1338,16 @@ final class ChatController {
             // (`hermes_cli/config.py:3450-3452` @ v2026.9.7). Both halves now
             // come from ``HermesConfigSet``, exactly as
             // `IOSSettingsViewModel.saveValue` does.
-            let provider = Self.runConfigSet(ctx, hermes: hermes,
-                                             key: "model.provider", value: trimmedProvider)
+            let provider = await Self.runConfigSet(ctx, hermes: hermes,
+                                                   key: "model.provider", value: trimmedProvider)
             let providerOK = provider.outcome?.succeeded == true
             var modelResult: ProcessResult? = nil
             var modelError: String? = nil
             var modelOutcome: HermesCLIOutcome? = nil
             var modelOK = true
             if providerOK, !trimmedModel.isEmpty {
-                let model = Self.runConfigSet(ctx, hermes: hermes,
-                                              key: "model.default", value: trimmedModel)
+                let model = await Self.runConfigSet(ctx, hermes: hermes,
+                                                    key: "model.default", value: trimmedModel)
                 modelResult = model.result
                 modelError = model.error
                 modelOutcome = model.outcome
@@ -1412,14 +1412,14 @@ final class ChatController {
         hermes: String,
         key: String,
         value: String
-    ) -> (result: ProcessResult?, error: String?, outcome: HermesCLIOutcome?) {
+    ) async -> (result: ProcessResult?, error: String?, outcome: HermesCLIOutcome?) {
         let argv = HermesConfigSet.argv(key: key, value: value)
             .map(escapeShellArg)
             .map { "'\($0)'" }
             .joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
         do {
-            let result = try ctx.makeTransport().runProcess(
+            let result = try await ctx.makeTransport().asyncRunProcess(
                 executable: "/bin/sh",
                 args: ["-c", script],
                 stdin: nil,

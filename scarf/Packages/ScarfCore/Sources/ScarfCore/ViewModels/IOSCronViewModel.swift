@@ -455,10 +455,11 @@ public final class IOSCronViewModel {
         extraArgs: [String] = []
     ) async -> CLIOutcome {
         let ctx = context
-        return await Task.detached {
+        return await { () async -> CLIOutcome in
             let result: ProcessResult
             do {
-                result = try ctx.makeTransport().runProcess(
+                // Round-6 decision 11: the `async` seam (charter C10).
+                result = try await ctx.makeTransport().asyncRunProcess(
                     executable: ctx.paths.hermesBinary,
                     args: ["cron", verb, jobID] + extraArgs,
                     stdin: nil,
@@ -473,7 +474,7 @@ public final class IOSCronViewModel {
                 return .unavailable
             }
             return .refused(Self.refusalMessage(verb: verb, output: combined, exitCode: result.exitCode))
-        }.value
+        }()
     }
 
     /// A shell that can't find `hermes` is "CLI unavailable", not a

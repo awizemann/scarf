@@ -104,7 +104,7 @@ public final class CuratorViewModel {
         // how often the report file is missing or oversized.
         let parsed = await ScarfMon.measureAsync(.diskIO, "curator.load") {
             await Task.detached(priority: .userInitiated) { () -> (HermesCuratorStatus, String?) in
-                let textResult = Self.runCuratorStatus(context: context)
+                let textResult = await Self.runCuratorStatus(context: context)
                 let stateData = context.readData(context.paths.curatorStateFile)
                 let parsed = HermesCuratorStatusParser.parse(text: textResult, stateFileJSON: stateData)
                 // Best-effort markdown report: the state file points at the
@@ -451,10 +451,11 @@ public final class CuratorViewModel {
     nonisolated private static func runHermes(
         context: ServerContext,
         args: [String]
-    ) -> (exitCode: Int32, output: String) {
+    ) async -> (exitCode: Int32, output: String) {
         let transport = context.makeTransport()
         do {
-            let result = try transport.runProcess(
+            // Round-6 decision 11: the `async` seam (charter C10).
+            let result = try await transport.asyncRunProcess(
                 executable: context.paths.hermesBinary,
                 args: args,
                 stdin: nil,
@@ -470,7 +471,7 @@ public final class CuratorViewModel {
         }
     }
 
-    nonisolated private static func runCuratorStatus(context: ServerContext) -> String {
-        runHermes(context: context, args: ["curator", "status"]).output
+    nonisolated private static func runCuratorStatus(context: ServerContext) async -> String {
+        await runHermes(context: context, args: ["curator", "status"]).output
     }
 }

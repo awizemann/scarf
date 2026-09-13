@@ -173,6 +173,34 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         }
     }
 
+    /// The `async` seam (round-6 decision 11) — no bridge at all.
+    ///
+    /// ``ServerTransport``'s default implementation wraps the SYNCHRONOUS
+    /// `runProcess` in an `OffPool.run`, which for this transport would be
+    /// two hops around work that is already `async`: `runSync` blocks a
+    /// thread on a semaphore while `asyncRunProcess` runs on the cooperative
+    /// pool, so a caller on a pool thread competes with the work it waits
+    /// for. Overriding here deletes both. `runSync` stays for the SFTP file
+    /// verbs, whose `ServerTransport` signatures are synchronous.
+    ///
+    /// The partial-stdout-on-timeout contract is unchanged and is now the
+    /// only one in play: `asyncRunProcess`'s drain and budget arms share one
+    /// ``PartialStdout`` accumulator (round-6 P53), where the bridge could
+    /// only ever report `Data()`.
+    public func asyncRunProcess(
+        executable: String,
+        args: [String],
+        stdin: Data?,
+        timeout: TimeInterval
+    ) async throws -> ProcessResult {
+        if stdin != nil {
+            throw TransportError.other(
+                message: "CitadelServerTransport.runProcess does not support stdin yet")
+        }
+        return try await asyncRunProcess(
+            executable: executable, args: args, timeout: timeout)
+    }
+
     public func streamLines(
         executable: String,
         args: [String]
