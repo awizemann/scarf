@@ -38,6 +38,8 @@ final class EmailSetupViewModel: PlatformSetupForm {
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     /// Common provider presets so users don't have to look up IMAP/SMTP servers.
     struct Preset {

@@ -43,24 +43,6 @@ import Foundation
         #expect(r.args == "")
     }
 
-    // MARK: - truncatedToastGoal
-
-    @Test func truncatedToastGoalPassesShortStringsThrough() {
-        let goal = "short goal"
-        #expect(RichChatViewModel.truncatedToastGoal(goal) == goal)
-    }
-
-    @Test func truncatedToastGoalCapsLongStrings() {
-        let goal = String(repeating: "a", count: 200)
-        let result = RichChatViewModel.truncatedToastGoal(goal)
-        #expect(result.count == 58)
-        #expect(result.hasSuffix("…"))
-    }
-
-    @Test func truncatedToastGoalLeavesBoundaryUntouched() {
-        let goal = String(repeating: "a", count: 60)
-        #expect(RichChatViewModel.truncatedToastGoal(goal) == goal)
-    }
 
     // MARK: - shouldShowSlashMenu
 

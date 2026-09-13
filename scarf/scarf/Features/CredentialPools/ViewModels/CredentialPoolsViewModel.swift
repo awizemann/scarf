@@ -274,7 +274,7 @@ final class CredentialPoolsViewModel {
         isMutating = true
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(args) }.value
+            let result = await OffPool.run { ctx.runHermes(args) }
             guard let self else { return }
             self.isMutating = false
             apply(result.output, result.exitCode)
@@ -482,7 +482,16 @@ final class CredentialPoolsViewModel {
         // Exit 0 and nothing recognisable in the output: there is no failure
         // to report and nothing to quote. Same sentence shape the other
         // unconfirmed verdicts give.
-        if outcome.confidence == .unconfirmed, (outcome.detail ?? "").isEmpty {
+        //
+        // Round-6 P59: gated on the CONFIDENCE ALONE. The extra
+        // `detail.isEmpty` condition made this arm reachable only for a run
+        // that printed NOTHING, and `judge` fills `detail` with `lines.last`
+        // on the unconfirmed arm too — so a run that printed an unrelated
+        // progress line fell through to "Remove failed: <that line>", which
+        // presents a sentence Hermes never said as its reason for a refusal
+        // it never made. Same invariant as `backupFailureSummary` and
+        // `HermesMemoryResetVerdict.failureSummary`.
+        if outcome.confidence == .unconfirmed {
             return String(localized: "hermes auth logout printed no result. Check the host.")
         }
         // Surface the CLI's own reason so the user can tell a refusal from a

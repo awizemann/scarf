@@ -337,7 +337,19 @@ public struct BotsService: Sendable {
         public var argv: [String] {
             switch self {
             case .create(let name, let cloneFrom, let cloneAll, let noSkills, let description):
-                var args = ["profile", "create", name]
+                // P60. `profile_name` is a PLAIN positional
+                // (`hermes_cli/subcommands/profile.py:19` @ `v2026.9.7`) —
+                // no `nargs`, no default — so a bot name the user typed
+                // beginning with `-` is read as an unknown flag and argparse
+                // exits 2 with a usage block. `--` ends option parsing, and
+                // it is safe here by P47's rule because no option on this
+                // parser is list-valued: every flag is `store_true` or takes
+                // exactly one value, so `--` cannot terminate one of them.
+                //
+                // Everything optional goes BEFORE the separator; the
+                // positional is last. Mirrors `ProfilesViewModel.rename`
+                // (`:155`) and `.delete` (`:172`), which learned this at P47.
+                var args = ["profile", "create"]
                 if cloneAll {
                     args.append("--clone-all")
                 }
@@ -350,11 +362,18 @@ public struct BotsService: Sendable {
                 if let description, !description.trimmingCharacters(in: .whitespaces).isEmpty {
                     args += ["--description", description]
                 }
+                args += ["--", name]
                 return args
             case .delete(let name):
-                return ["profile", "delete", name, "--yes"]
+                // `--yes` moves BEFORE the separator: an option after `--`
+                // is a positional, and `profile delete` has exactly one, so
+                // the old spelling would have handed argparse two.
+                // (`profile.py:42-43` @ `v2026.9.7`.)
+                return ["profile", "delete", "--yes", "--", name]
             case .rename(let from, let to):
-                return ["profile", "rename", from, to]
+                // Two plain positionals, `old_name` / `new_name`
+                // (`profile.py:77`, `:79` @ `v2026.9.7`).
+                return ["profile", "rename", "--", from, to]
             }
         }
 

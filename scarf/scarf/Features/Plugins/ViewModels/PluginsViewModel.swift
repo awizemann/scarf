@@ -85,6 +85,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4). This channel carried "Install failed"
     /// and "Installed and enabled" alike, and the header painted both green.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     private var pluginsDir: String { context.paths.pluginsDir }
 
@@ -350,6 +352,9 @@ final class PluginsViewModel: OutcomeMessageHosting {
         // In-progress, not an outcome — nothing has failed yet.
         message = String(localized: "Installing \(identifier)…")
         messageIsFailure = false
+        // And the unconfirmed flag (P55b): it never auto-clears, so a prior
+        // neutral verdict would otherwise seal this in-progress line amber.
+        messageIsUnconfirmed = false
         // P47: through `cliRunner`, the same injectable seam `enable` /
         // `disable` / `update` use. The verdict rule that matters here — a
         // refusal outranks the `✓ Plugin <name> enabled.` line printed on top

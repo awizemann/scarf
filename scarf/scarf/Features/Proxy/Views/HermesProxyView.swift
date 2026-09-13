@@ -86,7 +86,7 @@ struct HermesProxyView: View {
                             .disabled(viewModel.service.isRunning)
                     }
                     Spacer()
-                    Button("Start") { viewModel.start() }
+                    Button("Start") { Task { await viewModel.start() } }
                         .buttonStyle(ScarfPrimaryButton())
                         .disabled(!viewModel.canStart)
                     Button("Stop") { viewModel.stop() }

@@ -56,6 +56,12 @@ final class SpotifyAuthFlow {
     private var stderrPipe: Pipe?
     private var pollTask: Task<Void, Never>?
     private var deadlineTask: Task<Void, Never>?
+    /// The hop that resolves the login-shell environment before the local
+    /// spawn (C10, round-6 P58 — the literal twin of the `NousAuthFlow.start`
+    /// fix in `c93c2287`). Held so ``cancel()`` can stop a start that has not
+    /// reached `proc.run()` yet, which would otherwise leave a process nobody
+    /// owns.
+    private var startTask: Task<Void, Never>?
 
     /// The two readers' hand-off buffers, one per pipe, plus the exit status.
     /// The verdict needs BOTH EOFs and the status — see ``pump()``.
@@ -107,19 +113,54 @@ final class SpotifyAuthFlow {
     // MARK: - Lifecycle
 
     /// Start the sign-in flow. Cancels any in-flight subprocess first.
+    ///
+    /// **C10 (round-6 P58).** The local branch needs
+    /// `HermesFileService.enrichedEnvironment()`, whose backing
+    /// `enrichedShellEnv` is a `static let` initialised by two `zsh` probes at
+    /// 5 s + 3 s. A `static let` initialiser is a `swift_once`, so a
+    /// main-actor reader arriving while the launch warm-up is still running
+    /// BLOCKS on it — up to eight seconds of frozen window, on the click that
+    /// opens the Spotify sheet. It is resolved off the pool first and the
+    /// spawn happens back on the main actor with the value in hand. This is
+    /// the same split `NousAuthFlow` got in `c93c2287`; this flow was its
+    /// literal twin and was missed.
+    ///
+    /// A remote context pays nothing: it wraps the command in
+    /// `env PYTHONUNBUFFERED=1 …` because ssh forwards no environment, and an
+    /// injected `makeAuthProcess` (the tests') brings its own.
     func start() {
         cancel()
         output = ""
         state = .starting
 
         generation &+= 1
-        let generation = self.generation
         let stdoutInbox = ProcessOutputInbox()
         let stderrInbox = ProcessOutputInbox()
         self.stdoutInbox = stdoutInbox
         self.stderrInbox = stderrInbox
         pendingExit = nil
         didFinish = false
+
+        guard makeAuthProcess == nil, !context.isRemote else {
+            launch(localEnvironment: nil, stdoutInbox: stdoutInbox, stderrInbox: stderrInbox)
+            return
+        }
+        startTask = Task { [weak self] in
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+            guard let self, !Task.isCancelled else { return }
+            self.launch(localEnvironment: env, stdoutInbox: stdoutInbox, stderrInbox: stderrInbox)
+        }
+    }
+
+    /// Spawn `hermes auth spotify`. `localEnvironment` is the pre-resolved
+    /// login-shell environment for a local, non-injected run and `nil`
+    /// otherwise — see ``start()``.
+    private func launch(
+        localEnvironment: [String: String]?,
+        stdoutInbox: ProcessOutputInbox,
+        stderrInbox: ProcessOutputInbox
+    ) {
+        let generation = self.generation
 
         let proc: Process
         if let makeAuthProcess {
@@ -130,7 +171,7 @@ final class SpotifyAuthFlow {
                 args: ["auth", "spotify"]
             )
             if !context.isRemote {
-                var env = HermesFileService.enrichedEnvironment()
+                var env = localEnvironment ?? [:]
                 // Force unbuffered Python stdout so the auth URL flushes
                 // immediately. Same reasoning as NousAuthFlow.
                 env["PYTHONUNBUFFERED"] = "1"
@@ -259,6 +300,8 @@ final class SpotifyAuthFlow {
     /// the last reference here is dropped is closed by the `Pipe`'s own
     /// deinit. Only the write ends — which nobody else touches — are closed.
     func cancel() {
+        startTask?.cancel()
+        startTask = nil
         pollTask?.cancel()
         pollTask = nil
         deadlineTask?.cancel()

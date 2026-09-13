@@ -33,11 +33,15 @@ struct OutcomeMessageBar: View {
     /// The message to show. `nil` renders nothing, so call sites drop
     /// their own `if let`.
     let text: String?
-    /// Whether `text` describes a FAILURE. Supplied by the view model as a
-    /// stored outcome, never inferred here.
-    let isFailure: Bool
-    /// Optional dismiss action. Rendered only for a failure — a success
-    /// message clears itself.
+    /// What `text` describes — proven success, proven failure, or an exit-0
+    /// run that proved nothing (P54b). Supplied by the view model as a
+    /// stored outcome, never inferred here. **No default**: the parameter IS
+    /// the fix, and a default would let the next pane slide back onto two
+    /// states without anyone writing that down.
+    let kind: OutcomeMessage.Kind
+    /// Optional dismiss action. Rendered for anything that is not a proven
+    /// success — a success message clears itself; a failure and an
+    /// unconfirmed run both stay until the user acts.
     var onDismiss: (() -> Void)?
 
     /// Guards against re-announcing an unchanged message when the owning
@@ -49,9 +53,7 @@ struct OutcomeMessageBar: View {
         if let text, !text.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s2) {
                 HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s2) {
-                    Image(systemName: isFailure
-                          ? "exclamationmark.triangle.fill"
-                          : "checkmark.circle.fill")
+                    Image(systemName: Self.glyph(for: kind))
                         // Redundant with the outcome word in the label below.
                         .accessibilityHidden(true)
                     Text(text)
@@ -59,10 +61,10 @@ struct OutcomeMessageBar: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-                .foregroundStyle(isFailure ? ScarfColor.danger : ScarfColor.success)
+                .foregroundStyle(Self.tint(for: kind))
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(spoken(text))
-                if isFailure, let onDismiss {
+                if kind != .success, let onDismiss {
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
                     }
@@ -85,9 +87,32 @@ struct OutcomeMessageBar: View {
     /// `.accessibilityLabel` binds the `StringProtocol` overload, which is
     /// never extracted for translation.
     private func spoken(_ text: String) -> String {
-        isFailure
-            ? String(localized: "Failed: \(text)")
-            : String(localized: "Succeeded: \(text)")
+        switch kind {
+        case .failure: String(localized: "Failed: \(text)")
+        case .unconfirmed: String(localized: "No result: \(text)")
+        case .success: String(localized: "Succeeded: \(text)")
+        }
+    }
+
+    /// The three seals, the glyph half. Amber question mark for the
+    /// unconfirmed arm — ``MCPServerTestResultView/glyph(for:)``'s spelling
+    /// for the same verdict.
+    static func glyph(for kind: OutcomeMessage.Kind) -> String {
+        switch kind {
+        case .success: "checkmark.circle.fill"
+        case .unconfirmed: "questionmark.circle.fill"
+        case .failure: "exclamationmark.triangle.fill"
+        }
+    }
+
+    /// The colour half. Neutral amber, **not** red: red asserts a refusal
+    /// that an exit-0 silent run never made.
+    static func tint(for kind: OutcomeMessage.Kind) -> Color {
+        switch kind {
+        case .success: ScarfColor.success
+        case .unconfirmed: ScarfColor.warning
+        case .failure: ScarfColor.danger
+        }
     }
 
     private func announce(_ text: String) {

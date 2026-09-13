@@ -79,8 +79,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasFallbackCommand: Bool { atLeastSemver(0, 12, 0) }
 
-    /// `hermes kanban` task board CLI (v0.12+).
-    public var hasKanban: Bool { atLeastSemver(0, 12, 0) }
+    // `hasKanban` used to live here on an `atLeastSemver(0, 12, 0)` floor.
+    // The P55 re-walk moved it into the v0.13 group below: `kanban` appears
+    // ZERO times in `hermes_cli/commands.py` and `hermes_cli/main.py` at
+    // `v2026.4.30` (0.12.0), and `hermes_cli/kanban.py` does not exist there.
 
     /// `hermes -z <prompt>` non-interactive one-shot mode (v0.12+).
     ///
@@ -183,14 +185,56 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `/goal` slash command + Persistent Goals + Checkpoints v2 single-store
     /// (v0.13+).
     ///
-    /// **CLI/gateway only.** This doc used to say `RichChatViewModel` adds
-    /// `/goal` to the non-interruptive command list; it does not, and has not
-    /// since the ACP roster was reconciled — `/goal` is not an
-    /// `acp_adapter/` name at any tag, so a row for it would no-op against an
-    /// ACP host. The consumers are the optimistic goal PILL
-    /// (`ChatViewModel.swift:1269`, iOS `ChatView.swift:56`) and the
-    /// typed-command path that feeds it.
+    /// **CLI/gateway only, and CONSUMER-FREE since P55.** `/goal` is a real
+    /// Hermes command in the TUI and gateway (`hermes_cli/commands.py:103` @
+    /// `v2026.5.7`) but has never been an `acp_adapter/` name at any tag
+    /// (`_COMMANDS`, `acp_adapter/commands.py:44-66` @ `v2026.9.7`), and
+    /// Scarf's chat speaks ACP. Its last two readers were the optimistic goal
+    /// PILL and the typed-command path that fed it; round-6 decision 3
+    /// dropped both, because a pill for state no Hermes was asked to hold is
+    /// Scarf inventing state (charter identity). Kept, unretired, because the
+    /// floor is source-verified and because a future tag could add the name
+    /// to the ACP table — the follow-on P55 filed is `t-e9c464a9`.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
+
+    /// `hermes kanban` task board CLI.
+    ///
+    /// **Floor v0.13.0, not v0.12.0** (P55 re-walk; charter C2 — the old doc
+    /// cited a RELEASE, and the 0.12 release notes are exactly where the
+    /// board's short life is recorded). Walked by OPENING both blobs:
+    ///
+    /// - **`v2026.4.30`** (`pyproject.toml` = **0.12.0**):
+    ///   `hermes_cli/kanban.py` DOES NOT EXIST (`git ls-tree v2026.4.30
+    ///   hermes_cli/kanban.py` lists nothing), and the string `kanban`
+    ///   appears **zero** times in `hermes_cli/commands.py` and zero times
+    ///   in `hermes_cli/main.py` — no `CommandDef`, no subparser, no
+    ///   `cmd_kanban`.
+    /// - **`v2026.5.7`** (**0.13.0**): `hermes_cli/kanban.py` exists,
+    ///   `CommandDef("kanban", "Multi-profile collaboration board …")` is
+    ///   `hermes_cli/commands.py:163`, `cmd_kanban` is `main.py:5278` and
+    ///   the parser is built at `main.py:9232-9237`.
+    ///
+    /// The old floor was not cosmetic: on a 0.12 host every `hermes kanban …`
+    /// argv Scarf sends is an UNKNOWN verb, which Hermes routes to the agent
+    /// and exits 0 (charter C5), so the board read as *empty* rather than
+    /// *unsupported* and the project-upgrade pass tried to mint a tenant
+    /// through a verb that does not exist.
+    ///
+    /// **What each version range renders differently than Scarf's last
+    /// release** (charter C1):
+    /// - **< 0.12** — nothing changes; the flag was already `false`.
+    /// - **0.12.x** — the five consumers now hide, exactly as they already
+    ///   did below 0.12: the sidebar's Kanban entry
+    ///   (`SidebarView.sections:54`), the cockpit's Board panel
+    ///   (`ProjectCockpitView.visiblePanels:270`), the `hasKanban:` argument
+    ///   to `AppCoordinator.upgradeProject` from both the cockpit
+    ///   (`:248`) and the projects well (`SidebarProjectsWell:499`), which
+    ///   skips `ProjectUpgradeService`'s tenant-mint step, and the iOS
+    ///   project Kanban tab (`ProjectDetailView.visibleTabs:70`). This is
+    ///   the intended correction: every one of those surfaces was driving a
+    ///   verb the host does not have.
+    /// - **>= 0.13** — byte-identical to the last release.
+    public var hasKanban: Bool { atLeastSemver(0, 13, 0) }
 
     /// `/queue` slash command in the ACP adapter (v0.13+). Queues a prompt
     /// to run after the current turn completes without interrupting.
@@ -259,6 +303,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Cross-platform allowlist keys: `allowed_channels` (Slack / Mattermost
     /// / Google Chat), `allowed_chats` (Telegram / WhatsApp), `allowed_rooms`
     /// (Matrix / DingTalk). Settable per platform in `config.yaml` (v0.13+).
+    ///
+    /// **The v0.13 floor is KEPT, and it hides one key for one release**
+    /// (round-6 decision 5; P55 tag walk). `gateway/config.py` at
+    /// **`v2026.4.30`** (= 0.12.0) reads exactly ONE allowlist:
+    /// Discord's `allowed_channels` (`:770-771`). Telegram there has only
+    /// `group_allowed_chats` (`:828-832`) — NOT `allowed_chats` — and Slack,
+    /// Mattermost, DingTalk and Matrix have no allowlist read at all. At
+    /// **`v2026.5.7`** (= 0.13.0) the whole family arrives: Slack `:812-813`,
+    /// Discord `:839-840`, Telegram `allowed_chats` `:902-903`, DingTalk
+    /// `:991-992`, Mattermost `:1013-1014`, Matrix `allowed_rooms`
+    /// `:1030-1031`.
+    ///
+    /// So the accepted cost of the single flag is narrower than the round-6
+    /// report stated: on a **0.12.x** host, and only there, `GatewayBehaviorSection`
+    /// (`:49`) and the iOS `SettingsView` (`:433`) hide the allowlist field
+    /// for **Discord alone**, whose key that host does honour;
+    /// `GatewayBehaviorViewModel.swift:154` correspondingly writes no list
+    /// key. Every other platform's key genuinely does not exist there, and
+    /// no per-platform flag is worth one key on one release.
     public var hasGatewayAllowlists: Bool { atLeastSemver(0, 13, 0) }
 
     /// `busy_ack_enabled` config to suppress per-message "agent is working…"
@@ -385,11 +448,14 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,
-    /// `clear` (v0.14+). Available in ACP and gateway contexts. Scarf
-    /// renders the active subgoals as a trailing line under the goal pill
-    /// in `SessionInfoBar`.
+    /// `clear` (v0.14+). A TUI/gateway command, **not** an ACP one: like
+    /// `/goal` it is absent from the adapter's `_COMMANDS` at every tag
+    /// (`acp_adapter/commands.py:44-66` @ `v2026.9.7`). The doc here used to
+    /// say "available in ACP and gateway contexts" and that Scarf renders
+    /// the subgoals under the goal pill; P55 removed that pill (round-6
+    /// decision 3) and the claim was never true of ACP.
     ///
-    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// **No consumer** — nothing in Scarf reads this flag. Kept because the
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 
@@ -726,7 +792,21 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// bootstrap token (`BWS_ACCESS_TOKEN`) replacing per-provider keys.
     public var hasBitwarden: Bool { atLeastSemver(0, 15, 0) }
 
-    /// `hermes audit` — on-demand OSV.dev supply-chain audit verb.
+    /// `hermes security audit` — on-demand OSV.dev supply-chain audit verb.
+    ///
+    /// **The verb is `hermes security audit`, not `hermes audit`** (P55 doc
+    /// fix; charter C5). `audit` is a SUBCOMMAND of `security`
+    /// (`hermes_cli/main.py:12358` `dest="security_command"`, the `"audit"`
+    /// sub-parser at `:12363`, dispatched by `cmd_security` at `:6218-6225`,
+    /// all @ **`v2026.5.28`**); a bare `hermes audit` is an unknown verb and
+    /// would route to the agent at exit 0. `HealthViewModel.runSecurityAudit`
+    /// sends the correct argv — only this doc named the wrong one.
+    ///
+    /// **Floor v0.15.0, re-walked and unchanged.** `hermes_cli/security_audit.py`
+    /// is absent at `v2026.5.16` (`pyproject.toml` = 0.14.0) and present at
+    /// `v2026.5.28` (= **0.15.0**), whose blob is byte-identical to the one at
+    /// `v2026.5.29` (0.15.1) that `HealthViewModel`'s parser comment cites.
+    /// No version range renders differently than the last release.
     public var hasHermesAudit: Bool { atLeastSemver(0, 15, 0) }
 
     /// xAI May-15 model retirement detection + `hermes migrate xai`
@@ -1301,9 +1381,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.20.4 (v2026.8.18) flags
     //
     // Group name kept for continuity with the v0.20.4 audit that created it;
-    // the re-floor walk moved most of its members DOWN a patch or three —
-    // each flag's own doc comment carries its verified tag. Only
-    // `hasMCPIdentityHeader` is still a genuine v0.20.4 floor.
+    // the re-floor walk moved EVERY member DOWN a patch or three — each
+    // flag's own doc comment carries its verified tag, and since P55 re-floored
+    // `hasMCPIdentityHeader` to v0.20.1 no member of this group still has a
+    // v0.20.4 floor. The MARK is a location, never evidence.
 
     /// `is_job_runnable()` now blocks a cron job from firing whenever
     /// `state == "paused"` or `paused_at` is set, regardless of `enabled`
@@ -1327,6 +1408,44 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// on a pre-0.20.1 host), so nothing reads this flag. Kept because the
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCronPauseMarkerGate: Bool { isV0201OrLater }
+
+    /// The two ways a task leaves the Kanban **Review** column from Scarf:
+    /// `review -> done` via `hermes kanban complete`, and `review ->
+    /// ready|todo` via `hermes kanban reopen-review` (v0.20.1+).
+    ///
+    /// **Floor walked both ways, and it is NOT `hasKanbanV015`.** Round-6
+    /// decision 6 named that flag; the source says otherwise, so C2 wins.
+    /// `complete_task`'s UPDATE reads
+    /// `AND status IN ('running', 'ready', 'blocked')` at **v2026.8.3**
+    /// (`pyproject.toml` = `0.20.0`, `hermes_cli/kanban_db.py` — the clause
+    /// appears twice, once per `expected_run_id` arm) and
+    /// `AND status IN ('running', 'ready', 'blocked', 'review')` at
+    /// **v2026.8.13** (`0.20.1`). At the v0.15 floor `v2026.5.28` the clause
+    /// is the three-status form, so gating on `hasKanbanV015` would have
+    /// offered a drag that `complete_task` returns `False` for — `kanban
+    /// complete` then prints `cannot complete <id> (unknown id or terminal
+    /// state)` and exits 1 (`hermes_cli/kanban_output.py:61-69`
+    /// `_bulk_apply`), i.e. a card that springs back with a refusal, on five
+    /// releases' worth of hosts.
+    ///
+    /// `reopen-review` lands at the SAME tag — `reopen-review` /
+    /// `reopen_review` occur zero times under `hermes_cli/` at every tag
+    /// through `v2026.8.3` and twice from `v2026.8.13` on — so one flag
+    /// covers both doors rather than two flags that would always agree. At
+    /// `v2026.9.7` the verb is `hermes_cli/kanban_parser.py:323-326`
+    /// (`task_ids` `nargs="+"` plus a plain `--reason`), dispatched at
+    /// `hermes_cli/kanban.py:1243` to `_cmd_reopen_review` (`:990-1008`),
+    /// which calls `reopen_review_task` (`kanban_db.py:3295-3328`):
+    /// `UPDATE tasks SET status = ? … WHERE id = ? AND status = 'review'`,
+    /// where the new status is `_landing_status_after_parents` — `ready` or
+    /// `todo`, both of which Scarf's board collapses into **Up Next**.
+    ///
+    /// **C1 for an added gate.** This gates a surface that did not exist:
+    /// before P56 every drag out of Review threw "No CLI path exists for
+    /// this transition." on EVERY host. Below the floor that refusal is
+    /// unchanged, so no range renders differently from the last release;
+    /// above it, two refusals become two working verbs.
+    public var hasKanbanReviewExits: Bool { isV0201OrLater }
 
     /// The 14 inline built-in personalities were removed from
     /// `config.yaml`'s `agent.personalities` block; canon moved to
@@ -1388,8 +1507,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasSkillsUpdateForce: Bool { isV0203OrLater }
 
     /// Per-MCP-server `identity_header` (plus `strict_redirect_headers`
-    /// and stdio `cwd`) in the MCP catalog config (v0.20.4+).
-    public var hasMCPIdentityHeader: Bool { isV0204OrLater }
+    /// and stdio `cwd`) in the MCP catalog config.
+    ///
+    /// **Floor v0.20.1, not v0.20.4** (P55 re-walk; charter C2). Both blobs
+    /// opened:
+    ///
+    /// - **`v2026.8.3`** (`pyproject.toml` = **0.20.0**): `tools/mcp_tool.py`
+    ///   contains `identity_header` zero times, `strict_redirect_headers`
+    ///   zero times, and no `cwd=config.get("cwd")`.
+    /// - **`v2026.8.13`** (**0.20.1**): all three arrive together —
+    ///   `identity_header` documented in the module header at `:40` with
+    ///   `_resolve_identity_header` at `:1335` and `_apply_identity_header`
+    ///   at `:1389`; `strict_redirect_headers` read at `:3035`; the stdio
+    ///   server's `cwd=config.get("cwd")` at `:2705`.
+    ///
+    /// **What each version range renders differently than Scarf's last
+    /// release** (charter C1): only **0.20.1 – 0.20.3** changes. The single
+    /// consumer — `MCPServerEditorView.swift:67`'s identity-header section —
+    /// now appears on those hosts, which do honour all three keys, instead
+    /// of being hidden as if they did not. Below 0.20.1 and at 0.20.4+ the
+    /// rendering is identical to the last release.
+    public var hasMCPIdentityHeader: Bool { isV0201OrLater }
 
     // MARK: v0.20.5 (v2026.8.19) flags
 
@@ -1443,6 +1581,67 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// **No consumer yet** — no Scarf cron-write path passes
     /// `--reasoning-effort`, so nothing reads this flag today.
     public var hasCronReasoningEffort: Bool { isV0205OrLater }
+
+    // Moved here from the v0.21 MARK group by round-6 P59: the floor is
+    // v0.20.5 and a v0.20.5 group exists, so the declaration now sits with the
+    // flags its group tests cover — and it is enumerated in all four of them.
+    // (Where no group matches a re-floored flag — `hasMCPIdentityHeader` and
+    // `hasKanbanReviewExits`, both v0.20.1 — P55 and P56b kept it in place and
+    // said so in the MARK: the MARK is a location, never evidence. Here the
+    // right location already existed, so the note is not needed twice.)
+
+    /// The full argv Scarf needs to CREATE a bot's canonical Bot Chat:
+    /// `hermes -p <bot> chat --in ~ -c "Bot Chat" --create-if-missing -Q
+    /// --query-file <path>` (see
+    /// `BotConversationViewModel.createCanonicalBotChat`).
+    ///
+    /// **Source-verified per flag, at the `hasBotMode` floor tag
+    /// v2026.8.16.2 (0.20.3) and at v2026.8.31 (0.21.0):**
+    /// - `-c/--continue` — present at 0.20.3 (`hermes_cli/_parser.py:401`).
+    /// - `--create-if-missing` — present at 0.20.3 (`_parser.py:410`).
+    /// - `-Q/--quiet` — present at 0.20.3 (`_parser.py:368`).
+    /// - `--in` — present at 0.20.3 (`_parser.py:390`).
+    /// - **`--query-file` — ABSENT at 0.20.3.** `git grep query-file
+    ///   v2026.8.16.2 -- '*.py'` returns nothing; the chat parser there has
+    ///   only `-q/--query` (`_parser.py:304`).
+    ///
+    /// argparse rejects the WHOLE invocation on an unknown flag, so below
+    /// the floor the create would fail with a parser error rather than doing
+    /// anything. The creation path is therefore floored at the tag where
+    /// every flag exists, and the pane says so instead of offering a button
+    /// that cannot work. Reading and messaging an EXISTING Bot Chat goes over
+    /// ACP and stays on the `hasBotMode` floor.
+    ///
+    /// `--query-file` is not substitutable with `-q <text>` here: the body is
+    /// arbitrary user text that would ride a remote `bash -lc` command line.
+    ///
+    /// **That tag is v0.20.5, not v0.21** (P55 re-walk; charter C2 — the
+    /// "first appears at v0.21" line above was the un-walked half of an
+    /// otherwise per-flag-verified doc). Both blobs opened:
+    ///
+    /// - **`v2026.8.18`** (`pyproject.toml` = **0.20.4**):
+    ///   `hermes_cli/_parser.py` contains neither `--query-file` nor
+    ///   `query_file`.
+    /// - **`v2026.8.19`** (**0.20.5**): the chat parser's mutually-exclusive
+    ///   query group is `hermes_cli/_parser.py:303-316` (opened at `:303`,
+    ///   closed at `:316`). Both members are cited on their
+    ///   `add_argument(` line: `-q`/`--query` at `:304` and `--query-file`
+    ///   at `:307`. Every other flag of the argv is present at that same
+    ///   tag: `--in` `:401`, `--continue`/`-c` `:411-412`,
+    ///   `--create-if-missing` `:421`, `-Q`/`--quiet` `:379-380`.
+    ///   `--profile`/`-p` is **not a parser argument at all**: `main.
+    ///   _apply_profile_override` consumes it before argparse runs, and
+    ///   `_parser.py:20-23` is only the `PRE_ARGPARSE_INHERITED_FLAGS`
+    ///   table that records it for relaunch (`:16-19` says so).
+    ///
+    /// **What each version range renders differently than Scarf's last
+    /// release** (charter C1): only **0.20.5 and 0.20.6** change. The single
+    /// consumer — `BotConversationView.swift:27`'s create affordance — now
+    /// offers the button on hosts whose parser accepts every flag of the
+    /// argv, instead of showing the unsupported note. Below 0.20.5 (where
+    /// the argv would die on an unknown flag) and at 0.21+ the rendering is
+    /// identical to the last release.
+    public var hasBotChatCreationCLI: Bool { isV0205OrLater }
 
     // MARK: v0.21 (v2026.8.31) flags
     //
@@ -1547,33 +1746,6 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// unsupported `--deliver` value makes argparse reject the whole
     /// `cron create`. Absent at v2026.8.19, present at v2026.8.27.
     public var hasCronBotChatDelivery: Bool { isV0206OrLater }
-
-    /// The full argv Scarf needs to CREATE a bot's canonical Bot Chat:
-    /// `hermes -p <bot> chat --in ~ -c "Bot Chat" --create-if-missing -Q
-    /// --query-file <path>` (see
-    /// `BotConversationViewModel.createCanonicalBotChat`).
-    ///
-    /// **Source-verified per flag, at the `hasBotMode` floor tag
-    /// v2026.8.16.2 (0.20.3) and at v2026.8.31 (0.21.0):**
-    /// - `-c/--continue` — present at 0.20.3 (`hermes_cli/_parser.py:401`).
-    /// - `--create-if-missing` — present at 0.20.3 (`_parser.py:410`).
-    /// - `-Q/--quiet` — present at 0.20.3 (`_parser.py:368`).
-    /// - `--in` — present at 0.20.3 (`_parser.py:390`).
-    /// - **`--query-file` — ABSENT at 0.20.3.** `git grep query-file
-    ///   v2026.8.16.2 -- '*.py'` returns nothing; the chat parser there has
-    ///   only `-q/--query` (`_parser.py:304`). It first appears at v0.21
-    ///   (`hermes_cli/_parser.py:362`).
-    ///
-    /// argparse rejects the WHOLE invocation on an unknown flag, so on a
-    /// 0.20.3–0.20.6 host the create would fail with a parser error rather
-    /// than doing anything. The creation path is therefore floored at the
-    /// tag where every flag exists — v0.21 — and the pane says so instead of
-    /// offering a button that cannot work. Reading and messaging an
-    /// EXISTING Bot Chat goes over ACP and stays on the `hasBotMode` floor.
-    ///
-    /// `--query-file` is not substitutable with `-q <text>` here: the body is
-    /// arbitrary user text that would ride a remote `bash -lc` command line.
-    public var hasBotChatCreationCLI: Bool { isV021OrLater }
 
     /// `hermes browser close-profile` and the rest of the new top-level
     /// `browser` subcommand (registered in `_BUILTIN_SUBCOMMANDS` at

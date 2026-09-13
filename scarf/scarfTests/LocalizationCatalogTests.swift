@@ -136,6 +136,11 @@ struct LocalizationCatalogTests {
         // call site is under `Scarf iOS`.
         "Duplicate cron job",
         "Pick a future time — a one-shot more than %lld s in the past can never fire.",
+        // P56: the edit sheet's title, the last of the three `CronEditorView`
+        // titles without a row ("New cron job" has one because `CronView` on
+        // the Mac uses the same literal). The other twenty-one unlocalized
+        // `.help(…)` literals stay on `t-3bcd1d7f`.
+        "Edit cron job",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
@@ -431,6 +436,75 @@ struct LocalizationF7RecoveryTests {
             }
             let missing = LocalizationCatalogTests.shippedLocales.subtracting(locales.keys).sorted()
             if !missing.isEmpty { offenders.append("\(key) → missing \(missing.joined(separator: ","))") }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: offenders.sorted().joined(separator: "\n")))
+    }
+
+    // MARK: - P60: a catalogue row a call site cannot reach
+
+    /// **A row in six locales is worth nothing if the call site's TYPE picks
+    /// the verbatim overload.**
+    ///
+    /// `CronEditorView.init(title:)` took a `String` and fed it to
+    /// `.navigationTitle(title)`, which has a `StringProtocol` overload that
+    /// renders its argument verbatim. All three titles — "Edit cron job",
+    /// "New cron job", "Duplicate cron job" — already had rows in all six
+    /// shipped locales (two of them hand-maintained in ``iosOnlyKeys`` for
+    /// exactly this sheet), and not one of them ever resolved.
+    ///
+    /// This asserts the SPELLING at the call site, not the behaviour: the
+    /// parameter is a `LocalizedStringResource`, which makes each literal a
+    /// resource literal, and the title goes through `Text(title)`, which has
+    /// no verbatim overload to fall into. A behavioural test cannot see this
+    /// — the wrong overload renders the English string, which is what the
+    /// test's own locale expects.
+    @Test("the iOS cron editor's title resolves through the catalogue")
+    func cronEditorTitleIsALocalizedResource() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()   // …/scarf/scarfTests
+                .deletingLastPathComponent()   // …/scarf
+                .deletingLastPathComponent()   // repo root
+                .appendingPathComponent("scarf/Scarf iOS/Cron/CronListView.swift"),
+            encoding: .utf8)
+
+        #expect(source.contains("let title: LocalizedStringResource"), """
+            `CronEditorView.title` is a `String` again — `.navigationTitle` \
+            takes the `StringProtocol` overload and renders it verbatim, so \
+            the three catalogue rows below are unreachable.
+            """)
+        #expect(source.contains("title: LocalizedStringResource,"),
+                "the initialiser's parameter type drifted from the stored property's")
+        #expect(source.contains(".navigationTitle(Text(title))"), """
+            the title no longer goes through `Text`, which is the one \
+            spelling with no verbatim overload to fall into
+            """)
+        #expect(!source.contains("title: String"),
+                "a `String` title parameter is back on this view")
+
+        // The three spellings the call sites pass, and their rows. The keys
+        // are read FROM the source rather than typed here, so a renamed
+        // title cannot leave this test asserting a string nobody passes
+        // (round-6 lesson 6, and the P54b hand-maintained-list gotcha).
+        let pattern = try NSRegularExpression(pattern: #"title: "([^"]+)""#)
+        let ns = source as NSString
+        let titles = pattern
+            .matches(in: source, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 1)) }
+        #expect(Set(titles) == ["Edit cron job", "New cron job", "Duplicate cron job"],
+                "the CronEditorView call sites' titles changed: \(Set(titles).sorted())")
+
+        let catalog = LocalizationCatalogTests.catalog
+        var offenders: [String] = []
+        for key in Set(titles) {
+            guard let locales = catalog.strings[key] else {
+                offenders.append("\(key): not in catalog"); continue
+            }
+            let missing = LocalizationCatalogTests.shippedLocales
+                .subtracting(locales.keys).sorted()
+            if !missing.isEmpty {
+                offenders.append("\(key) → missing \(missing.joined(separator: ","))")
+            }
         }
         #expect(offenders.isEmpty, Comment(rawValue: offenders.sorted().joined(separator: "\n")))
     }

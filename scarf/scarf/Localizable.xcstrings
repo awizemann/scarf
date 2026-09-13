@@ -1669,6 +1669,46 @@
         }
       }
     },
+    "%@ printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "%@ reasoning" : {
       "localizations" : {
         "de" : {
@@ -4183,6 +4223,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 项缺少运行前脚本（文件仍留在此主机上）"
+          }
+        }
+      }
+    },
+    "%lld w/o their model pin (the target host's default model runs them)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ohne Modell-Pin (das Standardmodell des Zielhosts führt sie aus)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sin su modelo fijado (los ejecuta el modelo predeterminado del host de destino)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sans leur modèle épinglé (le modèle par défaut de l'hôte cible les exécute)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件はモデル固定なし（ターゲットホストの既定モデルで実行されます）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sem o modelo fixado (o modelo padrão do host de destino os executa)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个未保留模型固定（将由目标主机的默认模型运行）"
           }
         }
       }
@@ -6770,6 +6850,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前配置"
+          }
+        }
+      }
+    },
+    "Active profile set to %@ — restart Scarf to refresh." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktives Profil auf %@ gesetzt — starte Scarf neu, um es zu aktualisieren."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfil activo establecido en %@: reinicia Scarf para actualizar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profil actif défini sur %@ — redémarrez Scarf pour actualiser."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アクティブなプロファイルを %@ に設定しました。更新するには Scarf を再起動してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfil ativo definido como %@ — reinicie o Scarf para atualizar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已将活动配置文件设为 %@ — 请重启 Scarf 以刷新。"
           }
         }
       }
@@ -15111,6 +15231,46 @@
         }
       }
     },
+    "Backup failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup fehlgeschlagen: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La copia de seguridad falló: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la sauvegarde : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バックアップに失敗しました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha no backup: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份失败:%@"
+          }
+        }
+      }
+    },
     "Backup Now" : {
       "localizations" : {
         "de" : {
@@ -20533,46 +20693,6 @@
         }
       }
     },
-    "Clear goal" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ziel löschen"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Borrar objetivo"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effacer l'objectif"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゴールをクリア"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Limpar objetivo"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "清除目标"
-          }
-        }
-      }
-    },
     "Clear Pin" : {
       "localizations" : {
         "de" : {
@@ -21560,6 +21680,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在上传到云端语音识别提供方之前,使用 ffmpeg 在客户端压缩停顿。可减少上传时间、按分钟计费的成本和幻觉风险。短于 12 秒的片段跳过裁剪;失败时会原样上传原始音频。"
+          }
+        }
+      }
+    },
+    "Collection failed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erfassung fehlgeschlagen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falló la recopilación"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la collecte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "収集に失敗しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha na coleta"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收集失败"
           }
         }
       }
@@ -29069,6 +29229,126 @@
         }
       }
     },
+    "Hermes has no per-task start. This runs one dispatcher pass over the whole board, which spawns workers for every assigned task that is ready — in priority order, so it may start a different task first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes kann keine einzelne Aufgabe starten. Dies führt einen Dispatcher-Durchlauf über das gesamte Board aus und startet Worker für jede zugewiesene Aufgabe, die bereit ist — in Prioritätsreihenfolge, es kann also zuerst eine andere Aufgabe beginnen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes no puede iniciar una tarea concreta. Esto ejecuta una pasada del despachador sobre todo el tablero y lanza trabajadores para cada tarea asignada que esté lista, por orden de prioridad, así que puede empezar primero por otra tarea."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes ne peut pas démarrer une tâche en particulier. Ceci lance une passe du répartiteur sur tout le tableau et crée des workers pour chaque tâche assignée et prête — par ordre de priorité, il peut donc commencer par une autre tâche."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes にはタスク単位の開始はありません。これはボード全体に対してディスパッチャーを 1 回実行し、割り当て済みで準備できたすべてのタスクのワーカーを起動します。優先度順のため、別のタスクが先に始まることがあります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes não inicia uma tarefa específica. Isto executa uma passagem do despachante por todo o quadro e cria workers para cada tarefa atribuída que esteja pronta — por ordem de prioridade, então pode começar por outra tarefa."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 无法单独启动某个任务。此操作会对整个看板运行一次调度，为每个已分配且就绪的任务启动工作进程——按优先级顺序，因此可能会先启动其他任务。"
+          }
+        }
+      }
+    },
+    "Run dispatcher" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dispatcher ausführen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ejecutar el despachador"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lancer le répartiteur"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ディスパッチャーを実行"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Executar o despachante"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行调度器"
+          }
+        }
+      }
+    },
+    "Start work on '%@'?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbeit an „%@“ starten?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Empezar a trabajar en «%@»?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Démarrer le travail sur « %@ » ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」の作業を開始しますか？"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciar o trabalho em \"%@\"?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始处理 “%@” 吗？"
+          }
+        }
+      }
+    },
     "Delete preset '%@'?" : {
       "comment" : "A confirmation dialog asking the user to confirm deleting a model preset.",
       "isCommentAutoGenerated" : true,
@@ -29467,6 +29747,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除..."
+          }
+        }
+      }
+    },
+    "Deleted %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ gelöscht"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ eliminado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ supprimé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を削除しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ excluído"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已删除 %@"
           }
         }
       }
@@ -40328,87 +40648,6 @@
         }
       }
     },
-    "Goal · %lld" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ziel · %lld"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objetivo · %lld"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objectif · %lld"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゴール · %lld"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objetivo · %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目标 · %lld"
-          }
-        }
-      }
-    },
-    "Goal locked: %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ziel fixiert: %@"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objetivo fijado: %@"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objectif verrouillé : %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゴールを固定: %@"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objetivo travado: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目标已锁定:%@"
-          }
-        }
-      }
-    },
     "goal mode" : {
       "localizations" : {
         "de" : {
@@ -41201,6 +41440,46 @@
         }
       }
     },
+    "hermes backup printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes backup` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "Hermes binary" : {
       "localizations" : {
         "de" : {
@@ -41321,6 +41600,46 @@
         }
       }
     },
+    "hermes debug share printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes debug share` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "Hermes default" : {
       "comment" : "The empty-value row of the effort and image-gen model pickers: Hermes, not the model provider, supplies the default.",
       "localizations" : {
@@ -41358,6 +41677,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hermes 默认值"
+          }
+        }
+      }
+    },
+    "Hermes found retired xAI models but wrote no changes. The config still names them — check it by hand." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat ausgemusterte xAI-Modelle gefunden, aber keine Änderungen geschrieben. Die Konfiguration nennt sie weiterhin — prüfe sie von Hand."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes encontró modelos de xAI retirados, pero no escribió ningún cambio. La configuración sigue nombrándolos: revísala a mano."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes a trouvé des modèles xAI retirés mais n'a écrit aucune modification. La configuration les nomme toujours — vérifiez-la à la main."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes は廃止された xAI モデルを見つけましたが、変更は書き込まれませんでした。設定にはまだ記載されています — 手動で確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes encontrou modelos xAI desativados, mas não gravou alterações. A configuração ainda os nomeia — verifique-a manualmente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 找到了已停用的 xAI 模型,但未写入任何更改。配置中仍然引用它们 — 请手动检查。"
           }
         }
       }
@@ -41527,6 +41886,46 @@
         }
       }
     },
+    "hermes import printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes import` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "Hermes installs plugins disabled unless told otherwise. Portable Agent Plugin packages always install disabled." : {
       "localizations" : {
         "de" : {
@@ -41683,6 +42082,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未找到 Hermes"
+          }
+        }
+      }
+    },
+    "hermes memory reset exited with status %d." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` wurde mit Exit-Code %d beendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` terminó con el código de salida %d."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` s'est terminé avec le code de sortie %d."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` は終了コード %d で終了しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` terminou com o código de saída %d."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` 以退出码 %d 结束。"
+          }
+        }
+      }
+    },
+    "hermes memory reset printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` 未输出任何结果。请检查主机。"
           }
         }
       }
@@ -42426,6 +42905,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未检测到 Hermes 版本"
+          }
+        }
+      }
+    },
+    "hermes webhook test printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes webhook test` 未输出任何结果。请检查主机。"
           }
         }
       }
@@ -45148,6 +45667,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "导入服务器…"
+          }
+        }
+      }
+    },
+    "Imported" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インポート済み"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已导入"
           }
         }
       }
@@ -56877,6 +57436,206 @@
         }
       }
     },
+    "That isn't a readable timestamp. Use an ISO8601 time, like \"2026-09-20T09:00:00\"." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist kein lesbarer Zeitstempel. Verwende eine ISO8601-Zeit, z. B. „2026-09-20T09:00:00“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eso no es una marca de tiempo legible. Usa una hora ISO8601, como «2026-09-20T09:00:00»."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce n'est pas un horodatage lisible. Utilisez une heure ISO8601, par exemple « 2026-09-20T09:00:00 »."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは読み取れるタイムスタンプではありません。「2026-09-20T09:00:00」のような ISO8601 形式で指定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isso não é um carimbo de data/hora legível. Use um horário ISO8601, como \"2026-09-20T09:00:00\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是可识别的时间戳。请使用 ISO8601 时间，例如 “2026-09-20T09:00:00”。"
+          }
+        }
+      }
+    },
+    "Interval jobs need a minutes value this form can't set. Pick \"cron\" or \"once\", or create the job from the Mac app." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Intervall-Jobs brauchen einen Minutenwert, den dieses Formular nicht setzen kann. Wähle „cron“ oder „once“ oder lege den Job in der Mac-App an."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las tareas de intervalo necesitan un valor de minutos que este formulario no puede establecer. Elige «cron» u «once», o crea la tarea desde la app de Mac."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les tâches à intervalle ont besoin d'une valeur en minutes que ce formulaire ne peut pas définir. Choisissez « cron » ou « once », ou créez la tâche depuis l'app Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インターバルジョブにはこのフォームでは設定できない分数が必要です。「cron」か「once」を選ぶか、Mac アプリで作成してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tarefas de intervalo precisam de um valor em minutos que este formulário não define. Escolha \"cron\" ou \"once\", ou crie a tarefa no app do Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "间隔任务需要一个此表单无法设置的分钟值。请选择 “cron” 或 “once”，或在 Mac 应用中创建该任务。"
+          }
+        }
+      }
+    },
+    "That isn't a cron expression. Use five or more fields, like \"0 9 * * 1-5\"." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist kein Cron-Ausdruck. Verwende fünf oder mehr Felder, z. B. „0 9 * * 1-5“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eso no es una expresión cron. Usa cinco campos o más, como «0 9 * * 1-5»."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce n'est pas une expression cron. Utilisez au moins cinq champs, par exemple « 0 9 * * 1-5 »."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは cron 式ではありません。「0 9 * * 1-5」のように 5 つ以上のフィールドを指定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isso não é uma expressão cron. Use cinco campos ou mais, como \"0 9 * * 1-5\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 cron 表达式。请使用五个或更多字段，例如 “0 9 * * 1-5”。"
+          }
+        }
+      }
+    },
+    "Enter a cron expression — a cron job without one is saved but never runs." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gib einen Cron-Ausdruck ein — ein Cron-Job ohne ihn wird gespeichert, läuft aber nie."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Introduce una expresión cron: una tarea cron sin ella se guarda pero nunca se ejecuta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saisissez une expression cron — sans elle, la tâche est enregistrée mais ne s'exécute jamais."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron 式を入力してください。式がない cron ジョブは保存されても実行されません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informe uma expressão cron — sem ela, a tarefa é salva mas nunca é executada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请输入 cron 表达式——没有表达式的定时任务会被保存，但永远不会运行。"
+          }
+        }
+      }
+    },
+    "Edit cron job" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cron-Job bearbeiten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editar tarea cron"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modifier la tâche cron"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron ジョブを編集"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editar tarefa cron"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑定时任务"
+          }
+        }
+      }
+    },
     "New folder name" : {
       "localizations" : {
         "de" : {
@@ -61255,6 +62014,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无限制 — agent 会在任意房间中响应。"
+          }
+        }
+      }
+    },
+    "No result: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Ergebnis: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin resultado: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun résultat : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結果なし: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem resultado: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无结果:%@"
           }
         }
       }
@@ -71538,6 +72337,46 @@
         }
       }
     },
+    "Profile '%@' created" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profil „%@“ erstellt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfil «%@» creado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profil « %@ » créé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロファイル「%@」を作成しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfil '%@' criado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已创建配置文件“%@”"
+          }
+        }
+      }
+    },
     "Profile id" : {
       "localizations" : {
         "de" : {
@@ -78423,6 +79262,46 @@
         }
       }
     },
+    "Removed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entfernt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除済み"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移除"
+          }
+        }
+      }
+    },
     "Removed %@" : {
       "comment" : "A title that says \"Removed\" followed by the name of a project.",
       "isCommentAutoGenerated" : true,
@@ -79033,6 +79912,46 @@
         }
       }
     },
+    "Renamed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Umbenannt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renombrado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renommé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名前を変更しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renomeado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已重命名"
+          }
+        }
+      }
+    },
     "Rename…" : {
       "localizations" : {
         "de" : {
@@ -79629,6 +80548,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在回复"
+          }
+        }
+      }
+    },
+    "Report collected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bericht erfasst"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informe recopilado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapport collecté"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "レポートを収集しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Relatório coletado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收集报告"
           }
         }
       }
@@ -81135,6 +82094,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "恢复失败"
+          }
+        }
+      }
+    },
+    "Restore failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiederherstellung fehlgeschlagen: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La restauración falló: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la restauration : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "復元に失敗しました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha na restauração: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复失败:%@"
           }
         }
       }
@@ -99094,6 +100093,126 @@
         }
       }
     },
+    "Test failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test fehlgeschlagen: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La prueba falló: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec du test : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テストに失敗しました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha no teste: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试失败:%@"
+          }
+        }
+      }
+    },
+    "Test fired — %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test ausgelöst — %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prueba enviada: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test déclenché — %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テストを送信しました — %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teste disparado — %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试已发送 — %@"
+          }
+        }
+      }
+    },
+    "Test fired — check logs" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test ausgelöst — prüfe die Logs"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prueba enviada: revisa los registros"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test déclenché — consultez les journaux"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テストを送信しました — ログを確認してください"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teste disparado — verifique os logs"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试已发送 — 请查看日志"
+          }
+        }
+      }
+    },
     "Test passed" : {
       "localizations" : {
         "de" : {
@@ -100753,6 +101872,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅限本设备 — 请在每台设备上单独生成密钥。"
+          }
+        }
+      }
+    },
+    "Hermes chat has no /%@ — sent as an ordinary prompt." : {
+      "comment" : "Transient chat notice after the user typed /goal or /subgoal. Both are real Hermes TUI/gateway commands, but the ACP adapter Scarf chats through has never had either, so the text went to the model as an ordinary prompt. %@ is the command name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hermes-Chat kennt kein /%@ — als normaler Prompt gesendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El chat de Hermes no tiene /%@: se envió como un prompt normal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le chat Hermes n’a pas de /%@ — envoyé comme une invite ordinaire."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes のチャットには /%@ がありません。通常のプロンプトとして送信しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O chat do Hermes não tem /%@ — enviado como um prompt comum."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 聊天没有 /%@ — 已作为普通提示发送。"
           }
         }
       }
@@ -107421,6 +108581,46 @@
         }
       }
     },
+    "Upload complete" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload abgeschlossen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subida completada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoi terminé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロードが完了しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload concluído"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上传完成"
+          }
+        }
+      }
+    },
     "Upload debug report?" : {
       "localizations" : {
         "de" : {
@@ -107457,6 +108657,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上传调试报告?"
+          }
+        }
+      }
+    },
+    "Upload failed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload fehlgeschlagen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La subida falló"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de l'envoi"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロードに失敗しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha no upload"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上传失败"
+          }
+        }
+      }
+    },
+    "Upload partly complete. %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload teilweise abgeschlossen. %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subida parcialmente completada. %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoi partiellement terminé. %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップロードは一部のみ完了しました。%@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload parcialmente concluído. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上传部分完成。%@"
           }
         }
       }

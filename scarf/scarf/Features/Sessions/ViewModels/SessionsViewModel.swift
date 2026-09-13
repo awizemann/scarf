@@ -528,9 +528,9 @@ final class SessionsViewModel {
             // channel on a remote host — and ran inline on the MainActor,
             // freezing the sheet (and the whole window) for the round-trip.
             // Detached, matching `loadImpl()`'s attribution batch.
-            let result = await Task.detached {
+            let result = await OffPool.run {
                 ctx.runHermes(SessionsViewModel.renameArgv(sessionId: sessionId, title: title))
-            }.value
+            }
             guard let self else { return }
             self.isRenaming = false
             guard result.exitCode == 0 else {

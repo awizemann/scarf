@@ -500,7 +500,7 @@ final class BotConversationViewModel {
         guard let name = HermesProfileScope.normalize(profile) else {
             return "“\(profile)” isn’t a valid Hermes profile name."
         }
-        return await Task.detached {
+        return await OffPool.run {
             let transport = context.makeTransport()
             // A file, not an argument: the body is arbitrary user text and
             // the remote path runs it through `bash -lc`. This is the same
@@ -553,6 +553,6 @@ final class BotConversationViewModel {
                     : detail
             }
             return nil
-        }.value
+        }
     }
 }

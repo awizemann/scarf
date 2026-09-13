@@ -66,14 +66,23 @@ struct WebhooksView: View {
         ) {
             HStack(spacing: ScarfSpace.s2) {
                 if let msg = viewModel.message {
+                    // Three seals, not two (P54b): an exit-0 run that
+                    // proved nothing is neutral amber with a question mark,
+                    // never the refusal's triangle.
                     Label(
                         msg,
-                        systemImage: viewModel.messageIsError
-                            ? "exclamationmark.triangle.fill"
-                            : "info.circle.fill"
+                        systemImage: viewModel.messageIsUnconfirmed
+                            ? "questionmark.circle.fill"
+                            : (viewModel.messageIsError
+                               ? "exclamationmark.triangle.fill"
+                               : "info.circle.fill")
                     )
                     .scarfStyle(.caption)
-                    .foregroundStyle(viewModel.messageIsError ? ScarfColor.warning : ScarfColor.success)
+                    .foregroundStyle(
+                        viewModel.messageIsError
+                            ? ScarfColor.danger
+                            : (viewModel.messageIsUnconfirmed
+                               ? ScarfColor.warning : ScarfColor.success))
                 }
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())

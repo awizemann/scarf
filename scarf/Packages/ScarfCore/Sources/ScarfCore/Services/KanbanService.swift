@@ -422,6 +422,45 @@ public actor KanbanService {
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "unblock")
     }
 
+    /// The exact argv `reopen-review` runs — `static` for the same reason
+    /// `completeArgv` is: the test asserts the PRODUCTION command line.
+    ///
+    /// `task_ids` is a `nargs="+"` positional and `--reason` a plain
+    /// `add_argument` (`hermes_cli/kanban_parser.py:323-326` @ `v2026.9.7`),
+    /// so this is the `unblock` shape, not the `archive` one: exactly ONE
+    /// list-valued parser, which is what makes `--` safe here (P54's
+    /// counter-example is `archive`, whose `--rm` would be starved by the
+    /// separator). The reason goes over as a single `--reason=…` token so a
+    /// value beginning with `-` is not read as the next flag.
+    ///
+    /// Refusals exit 1: `_cmd_reopen_review` (`hermes_cli/kanban.py:990-1008`)
+    /// returns `_bulk_apply`'s verdict, which is `1 if failed`
+    /// (`hermes_cli/kanban_output.py:61-69`) and prints `cannot reopen <id>
+    /// (not in review?)` on stderr. So the exit code IS the verdict here and
+    /// `ensureSuccess` needs no output judging (charter C5).
+    nonisolated static func reopenReviewArgv(
+        board: String? = nil, taskIds: [String], reason: String? = nil
+    ) -> [String] {
+        var args = prefix(board: board, ["reopen-review"])
+        if let reason, !reason.trimmingCharacters(in: .whitespaces).isEmpty {
+            args.append(HermesCLIOption.joined("--reason", reason))
+        }
+        args.append("--")
+        args.append(contentsOf: taskIds)
+        return args
+    }
+
+    /// `review -> ready|todo` — send a task back to its implementer.
+    /// **Callers must gate on `HermesCapabilities.hasKanbanReviewExits`**
+    /// (v0.20.1); the verb does not exist below it and Hermes routes an
+    /// unknown `kanban` verb to the agent (charter C5).
+    public func reopenReview(taskIds: [String], reason: String? = nil) async throws {
+        guard !taskIds.isEmpty else { return }
+        let args = Self.reopenReviewArgv(board: board, taskIds: taskIds, reason: reason)
+        let (code, _, stderr) = await runHermes(args: args, timeout: 15)
+        try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "reopen-review")
+    }
+
     /// Same `--` guard as `complete`/`unblock`: `task_ids` is `nargs="*"`
     /// here (`hermes_cli/kanban_parser.py:336` @ `v2026.9.7`).
     nonisolated static func archiveArgv(board: String? = nil, taskIds: [String]) -> [String] {
@@ -514,6 +553,22 @@ public actor KanbanService {
     /// <ids…>`. There's no separate `purge` verb; the `--rm` flag on
     /// `archive` performs the destructive removal. Only valid on tasks
     /// already in `archived`.
+    ///
+    /// **No `--` here, deliberately** (P54, round-6). The round-6 report
+    /// listed this beside `archiveArgv`'s separator as `--` residue; it is
+    /// not. `archive` carries BOTH `task_ids` (`nargs="*"`) and
+    /// `--rm`/`purge_ids` (`nargs="+"`) — `hermes_cli/kanban_parser.py:335-338`
+    /// @ `v2026.9.7` — and argparse's `--` ends option parsing, so
+    /// `archive --rm -- a b` hands `a b` to the POSITIONAL `task_ids` and
+    /// leaves `--rm` with none. That is either an exit-2 "expected at least
+    /// one argument" or, worse, a silent ARCHIVE where the user asked for a
+    /// permanent delete. `archiveArgv` (the non-`--rm` form) takes the
+    /// separator precisely because `task_ids` is the only consumer there.
+    ///
+    /// A task id beginning with a dash is therefore still unreachable on
+    /// this one verb. Hermes generates the ids, so none does today, and
+    /// there is no argparse spelling that would fix it — the separator is
+    /// the wrong tool, not a missing one.
     public func purge(taskIds: [String]) async throws {
         guard !taskIds.isEmpty else { return }
         var args = prefix("archive", "--rm")
@@ -533,8 +588,12 @@ public actor KanbanService {
     /// Forbidden transitions throw `KanbanError.forbiddenTransition`
     /// rather than returning an empty plan, so callers can surface the
     /// reason to the user.
+    /// `caps` has NO default: it IS the fix (addendum lesson 10). A default
+    /// would let a call site silently take `.empty` and hide the Review
+    /// column's two exits on a host that has them.
     public nonisolated static func plan(
-        for transition: KanbanTransition
+        for transition: KanbanTransition,
+        caps: HermesCapabilities
     ) throws -> KanbanTransitionPlan {
         let from = transition.from
         let to = transition.to
@@ -584,6 +643,46 @@ public actor KanbanService {
                 to: to.displayName,
                 reason: "Review is managed by the dispatcher."
             )
+        }
+
+        // Round-6 decision 6 — the Review column used to be a dead end in
+        // BOTH directions: `to == .review` is refused above (the dispatcher
+        // owns entry), and every drag OUT fell through to the `default:` arm
+        // below, which says "No CLI path exists for this transition." That
+        // was false on any host at or above v0.20.1. Both doors are real:
+        //
+        // - `review -> done`: `complete_task`'s UPDATE takes
+        //   `status IN ('running', 'ready', 'blocked', 'review')`
+        //   (`hermes_cli/kanban_db.py` @ `v2026.8.13`; the clause is the
+        //   three-status form at `v2026.8.3`, which is why the floor is
+        //   v0.20.1 and not `hasKanbanV015` — see `hasKanbanReviewExits`).
+        // - `review -> upNext`: `reopen_review_task`
+        //   (`kanban_db.py:3295-3328` @ `v2026.9.7`) moves `review` to
+        //   `_landing_status_after_parents`, i.e. `ready` or `todo` — both
+        //   of which this board collapses into Up Next.
+        //
+        // Below the floor the honest refusal stands, worded so the user
+        // knows it is the HOST and not the gesture.
+        if from == .review, to == .done || to == .upNext {
+            // The version refusal is scoped to the two destinations the gate
+            // is ABOUT. Raising it for `review -> blocked` too would name an
+            // upgrade that does not help: `block_task` updates only rows
+            // `WHERE … AND status IN ('running', 'ready')`
+            // (`hermes_cli/kanban_db.py:2929` @ `v2026.9.7`) at every tag,
+            // the same reason `scheduled -> blocked` is absent — so that one
+            // falls through to the `default:` refusal on EVERY host, as it
+            // should. Inventing a two-step for it would land the card
+            // somewhere the user did not drop it.
+            guard caps.hasKanbanReviewExits else {
+                throw KanbanError.forbiddenTransition(
+                    from: from.displayName,
+                    to: to.displayName,
+                    reason: "Moving a task out of Review needs Hermes v0.20.1 or newer. Approve or reopen it from the Hermes CLI on the host."
+                )
+            }
+            return to == .done
+                ? KanbanTransitionPlan(steps: [.complete(resultRequired: false)])
+                : KanbanTransitionPlan(steps: [.reopenReview])
         }
 
         switch (from, to) {
@@ -720,6 +819,9 @@ public enum KanbanTransitionStep: Sendable, Equatable {
     case block(reasonRequired: Bool)
     case complete(resultRequired: Bool)
     case archive
+    /// `review -> ready|todo`. Gated: see
+    /// `HermesCapabilities.hasKanbanReviewExits`.
+    case reopenReview
 }
 
 public struct KanbanTransitionPlan: Sendable, Equatable {

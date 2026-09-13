@@ -31,7 +31,9 @@ final class ProfilesViewModel {
     func load() {
         isLoading = true
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["profile", "list"], timeout: 20)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "list"], timeout: 20)
+            }
             let (parsed, active) = Self.parseProfileList(result.output)
             await MainActor.run {
                 self.isLoading = false
@@ -44,7 +46,9 @@ final class ProfilesViewModel {
     func showDetail(_ profile: HermesProfile) {
         detailOutput = "Loading…"
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["profile", "show", profile.name], timeout: 15)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "show", "--", profile.name], timeout: 15)
+            }
             await MainActor.run {
                 self.detailOutput = result.output
             }
@@ -60,11 +64,13 @@ final class ProfilesViewModel {
     /// picks up the new home directory.
     func switchTo(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 60)
+            }
             await MainActor.run {
                 if result.exitCode == 0 {
                     HermesProfileResolver.invalidateCache()
-                    self.message = "Active profile set to \(profile.name) — restart Scarf to refresh."
+                    self.message = String(localized: "Active profile set to \(profile.name) — restart Scarf to refresh.")
                 } else {
                     self.message = Self.failureMessage(result.output)
                 }
@@ -85,7 +91,9 @@ final class ProfilesViewModel {
     @MainActor
     func switchAndRelaunch(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 30)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 30)
+            }
             let switched = await MainActor.run { () -> Bool in
                 guard result.exitCode == 0 else {
                     self.message = Self.failureMessage(result.output)
@@ -124,8 +132,13 @@ final class ProfilesViewModel {
         }
     }
 
+    /// P60: the idle twin of `rename` / `delete` below. `profile_name` is a
+    /// plain positional (`hermes_cli/subcommands/profile.py:19` @
+    /// `v2026.9.7`), so a name beginning with `-` is read as a flag here too
+    /// — `--` was added to the two destructive verbs at P47 and this one was
+    /// left. The separator goes last, after every option.
     func create(name: String, cloneConfig: Bool, cloneAll: Bool, noSkills: Bool = false) {
-        var args = ["profile", "create", name]
+        var args = ["profile", "create"]
         if cloneAll { args.append("--clone-all") }
         else if cloneConfig { args.append("--clone") }
         // v0.13+: Empty-profile creation. The wire is independent of
@@ -135,11 +148,17 @@ final class ProfilesViewModel {
         // the toggle under --clone-all (Decision H, see ProfilesView)
         // but the wire is permissive.
         if noSkills { args.append("--no-skills") }
-        runAndReload(args, success: "Profile '\(name)' created")
+        args += ["--", name]
+        runAndReload(args, success: String(localized: "Profile '\(name)' created"))
     }
 
+    /// `rename` takes two plain positionals — `old_name` and `new_name`
+    /// (`hermes_cli/subcommands/profile.py:77`, `:79` @ `v2026.9.7`) — and
+    /// no list-valued option stands behind them, so `--` is safe here by
+    /// P47's rule and necessary for the same reason it is on `show`/`use`:
+    /// a profile whose name begins with `-` is otherwise parsed as a flag.
     func rename(_ profile: HermesProfile, to newName: String) {
-        runAndReload(["profile", "rename", profile.name, newName], success: "Renamed")
+        runAndReload(["profile", "rename", "--", profile.name, newName], success: String(localized: "Renamed"))
     }
 
     /// Deletes a profile.
@@ -156,7 +175,7 @@ final class ProfilesViewModel {
     /// confirmation dialog — `-y` skips Hermes's prompt, so Scarf's own
     /// prompt becomes the only one the user ever sees.
     func delete(_ profile: HermesProfile) {
-        runAndReload(["profile", "delete", "-y", "--", profile.name], success: "Deleted \(profile.name)")
+        runAndReload(["profile", "delete", "-y", "--", profile.name], success: String(localized: "Deleted \(profile.name)"))
     }
 
     /// Export always lands on **this Mac**, whichever host Hermes runs on
@@ -172,7 +191,7 @@ final class ProfilesViewModel {
     func export(_ profile: HermesProfile, to url: URL) {
         let outputPath = HermesProfileArchive.normalizedOutputPath(url.path)
         guard context.isRemote else {
-            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: "Exported")
+            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: String(localized: "Exported"))
             return
         }
         message = "Exporting \(profile.name)…"
@@ -211,7 +230,7 @@ final class ProfilesViewModel {
     }
 
     func `import`(from path: String) {
-        runAndReload(["profile", "import", path], success: "Imported")
+        runAndReload(["profile", "import", "--", path], success: String(localized: "Imported"))
     }
 
     /// The one useful line out of a CLI failure. Hermes is Python, so a
@@ -227,9 +246,19 @@ final class ProfilesViewModel {
         return "Failed: \(last.prefix(200))"
     }
 
+    /// Run a profile mutation and reload the list.
+    ///
+    /// `success` arrives ALREADY LOCALIZED from the caller (P54, round-6):
+    /// three call sites passed a bare literal, so "Renamed" / "Exported" /
+    /// "Imported" / "Deleted <name>" reached the banner in English on every
+    /// locale. `String(localized:)` at the call site is what puts them in the
+    /// catalogue — extraction is a compile-time scan of the literal, so
+    /// wrapping the PARAMETER here would localize nothing.
     private func runAndReload(_ args: [String], success: String) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: args, timeout: 60)
+            }
             await MainActor.run {
                 self.message = result.exitCode == 0 ? success : Self.failureMessage(result.output)
                 self.load()

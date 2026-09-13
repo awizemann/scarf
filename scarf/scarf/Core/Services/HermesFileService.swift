@@ -907,12 +907,19 @@ struct HermesFileService: Sendable {
         // reports the failure on stdout instead. Judged by the emitter's own
         // anchored lines; see ``HermesMCPTestVerdict``.
         let output = result.1
+        // P54, round-6 (lesson 12): the verdict has THREE states and this
+        // kept only the bool, so `.unconfirmed` — exit 0 with neither
+        // marker — reached both views as a hard "Test failed". The
+        // confidence rides along now; `succeeded` still answers "may the UI
+        // claim it passed?" and is false for both negative answers.
+        let outcome = HermesMCPTestVerdict.judge(output: output, exitCode: result.0)
         return MCPTestResult(
             serverName: name,
-            succeeded: HermesMCPTestVerdict.judge(output: output, exitCode: result.0).succeeded,
+            succeeded: outcome.succeeded,
             output: output,
             tools: tools,
-            elapsed: elapsed
+            elapsed: elapsed,
+            confidence: outcome.confidence
         )
     }
 

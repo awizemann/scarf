@@ -25,19 +25,13 @@ struct SessionInfoBar: View {
     /// name. Nil for non-project chats and for projects that aren't
     /// git repos.
     var gitBranch: String? = nil
-    /// Active locked goal (Hermes v0.13 `/goal`). Nil hides the pill.
-    /// Optimistic — set by `RichChatViewModel.recordActiveGoal(text:)`
-    /// when the user sends `/goal …`.
-    var activeGoal: HermesActiveGoal? = nil
-    /// Invoked when the user picks "Clear goal" from the goal pill's
-    /// context menu. Caller dispatches `/goal --clear` so the optimistic
-    /// pill clear and the server-side authoritative state stay in sync.
-    var onClearGoal: (() -> Void)? = nil
-    /// Active subgoals layered onto the goal via `/subgoal` (Hermes v0.14).
-    /// Empty list renders as just the goal pill; populated list adds a
-    /// trailing count badge inside the pill with the full list in the
-    /// tooltip. Optimistic mirror lives on `RichChatViewModel.activeSubgoals`.
-    var activeSubgoals: [String] = []
+    // The goal pill (`activeGoal` / `onClearGoal` / `activeSubgoals`) lived
+    // here until P55. It rendered an OPTIMISTIC mirror of `/goal` and
+    // `/subgoal` — names the ACP adapter has never dispatched at any tag
+    // (`acp_adapter/commands.py:44-66` @ `v2026.9.7`), so the pill was
+    // Scarf-invented state, on every host. Round-6 decision 3 dropped it;
+    // `RichChatViewModel.acpUnhandledSlashNotice(name:)` is what the chat
+    // says now.
     /// Hermes config's `approvals.mode`. v0.14 surfaces a warning when
     /// this is `"yolo"` so users notice they've opted out of dangerous-
     /// command approvals. Pre-v0.14 hosts can still set the mode but
@@ -188,14 +182,6 @@ struct SessionInfoBar: View {
                     }
                 }
 
-                // Goal pill (v2.8 / Hermes v0.13). `.info` keeps it
-                // visually decodable from the rust accent (project /
-                // branch) and the warning amber (queue chip). The
-                // pill renders only when `activeGoal` is non-nil —
-                // pre-v0.13 hosts can't reach the `/goal` send path
-                // through the slash menu (it's filtered out in
-                // `availableCommands`), so the pill stays absent there
-                // by transitive impossibility.
                 // v0.14 — YOLO mode warning badge. Renders only when
                 // the user has explicitly opted in via
                 // `approvals.mode = yolo` AND the connected host is on
@@ -213,34 +199,6 @@ struct SessionInfoBar: View {
                     .background(Capsule().fill(ScarfColor.warning.opacity(0.18)))
                     .foregroundStyle(ScarfColor.warning)
                     .help("YOLO mode is on — dangerous commands run without approval. Toggle via `/yolo` or change approvals.mode in Settings → Agent.")
-                }
-
-                if let activeGoal {
-                    HStack(spacing: 4) {
-                        Image(systemName: "scope")
-                        Text(Self.truncatedGoal(activeGoal.text))
-                        if !activeSubgoals.isEmpty {
-                            // v0.14 — surface the active subgoal count as
-                            // a compact "+N" badge inside the goal pill.
-                            // Full list shows in the tooltip below so the
-                            // chrome stays one-line at chat-bar height.
-                            Text("+\(activeSubgoals.count)")
-                                .scarfStyle(.captionUppercase)
-                                .padding(.horizontal, 4)
-                                .background(Capsule().fill(ScarfColor.info.opacity(0.28)))
-                        }
-                    }
-                    .scarfStyle(.caption)
-                    .padding(.horizontal, ScarfSpace.s2)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(ScarfColor.info.opacity(0.16)))
-                    .foregroundStyle(ScarfColor.info)
-                    .help(Self.goalTooltip(goal: activeGoal.text, subgoals: activeSubgoals))
-                    .contextMenu {
-                        if let onClearGoal {
-                            Button("Clear goal", role: .destructive, action: onClearGoal)
-                        }
-                    }
                 }
 
                 // Model badge — renders the active preset name when
@@ -464,19 +422,4 @@ struct SessionInfoBar: View {
         count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 
-    /// Cap goal text in the chip to keep the SessionInfoBar from
-    /// wrapping when the user locks a long goal. Full goal text is
-    /// available in the tooltip via `.help(...)`.
-    static func truncatedGoal(_ text: String) -> String {
-        text.count <= 36 ? text : String(text.prefix(33)) + "…"
-    }
-
-    /// Build the help-tooltip body for the goal pill. Includes the
-    /// goal text plus a numbered list of any active subgoals so the
-    /// user can hover-read the full state without opening a sheet.
-    static func goalTooltip(goal: String, subgoals: [String]) -> String {
-        if subgoals.isEmpty { return "Goal locked: \(goal)" }
-        let lines = subgoals.enumerated().map { idx, s in "  \(idx + 1). \(s)" }
-        return "Goal locked: \(goal)\nSubgoals:\n" + lines.joined(separator: "\n")
-    }
 }

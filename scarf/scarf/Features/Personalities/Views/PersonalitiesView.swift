@@ -22,7 +22,7 @@ struct PersonalitiesView: View {
                 HStack(spacing: ScarfSpace.s2) {
                     OutcomeMessageBar(
                         text: viewModel.message,
-                        isFailure: viewModel.messageIsFailure,
+                        kind: viewModel.messageKind,
                         onDismiss: { viewModel.dismissMessage() }
                     )
                     Button("Edit config.yaml") { viewModel.openConfigInEditor() }

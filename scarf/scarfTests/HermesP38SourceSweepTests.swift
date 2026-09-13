@@ -233,8 +233,21 @@ struct HermesP38SourceSweepTests {
                 // P46's note listed this shape as a known false positive;
                 // round-5 P48 tightens the matcher rather than exempting the
                 // file it lives in.
-                if let close = next.range(of: "]", range: open.upperBound..<next.endIndex),
-                   next[close.upperBound...].hasPrefix("?") { break }
+                let close = next.range(of: "]", range: open.upperBound..<next.endIndex)
+                if let close, next[close.upperBound...].hasPrefix("?") { break }
+                // And so is one COMPARED TO NIL (`strings[key] == nil`).
+                // An Array subscript is non-Optional, so `== nil` / `!= nil`
+                // on it does not compile — a subscript that is compared to
+                // nil is therefore an Optional-returning one, i.e. a
+                // Dictionary read, which returns nil rather than trapping.
+                // Third spelling of the same fact, after the string literal
+                // and the `?` chain; tightening the matcher again rather
+                // than exempting the file (P48's rule).
+                if let close {
+                    let rest = next[close.upperBound...]
+                        .trimmingCharacters(in: .whitespaces)
+                    if rest.hasPrefix("== nil") || rest.hasPrefix("!= nil") { break }
+                }
                 offenders.append(
                     (line: j + 1, text: next.trimmingCharacters(in: .whitespaces)))
                 break
@@ -344,11 +357,11 @@ struct HermesP38SourceSweepTests {
             "the assertion is that a FAILURE did not auto-clear after the "
             + "success path's 3 s TTL — a non-event, so there is nothing to "
             + "poll; the wait must outlast the real timer to mean anything",
-        "GwF4OutcomeMessageChannelTests.swift:64":
+        "GwF4OutcomeMessageChannelTests.swift:65":
             "same non-event: a failure must still be on screen after the "
             + "success TTL has elapsed. The sibling that asserts a success DOES "
             + "clear polls for it instead",
-        "GwF4OutcomeMessageChannelTests.swift:94":
+        "GwF4OutcomeMessageChannelTests.swift:95":
             "same non-event, with the extra condition that an EARLIER success's "
             + "pending timer must not wipe the refusal that landed after it",
         "ProcessACPChannelTests.swift:80":
@@ -573,6 +586,35 @@ struct SubscriptAfterCountMatcherP48bTests {
             #expect(byLine[1]?.first == "a")
             """
         #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+    }
+
+    /// A variable-keyed dictionary read COMPARED TO NIL is the third safe
+    /// spelling (P56). `strings[key] == nil` cannot be an Array subscript —
+    /// those are non-Optional and `== nil` does not compile on one — so the
+    /// comparison itself proves the read returns `nil` rather than trapping.
+    /// The key is a variable here, which is why the string-literal arm above
+    /// did not cover it.
+    @Test func aNilComparedDictionaryReadIsNotAHit() {
+        let source = """
+            #expect(strings.count > 1000)
+            #expect(strings[key] == nil, "orphaned row")
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).isEmpty)
+        let present = """
+            #expect(strings.count > 1000)
+            #expect(strings[key] != nil)
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: present).isEmpty)
+    }
+
+    /// The planted needle for that arm: the exemption must not swallow a
+    /// real Array subscript that merely mentions nil LATER on the line.
+    @Test func theNilArmDoesNotSwallowARealArrayTrap() {
+        let source = """
+            #expect(items.count == 2)
+            #expect(items[0].owner == nil)
+            """
+        #expect(HermesP38SourceSweepTests.subscriptAfterCountOffenses(in: source).count == 1)
     }
 
     /// …and the `#require` the sweep asks for really does end the window,

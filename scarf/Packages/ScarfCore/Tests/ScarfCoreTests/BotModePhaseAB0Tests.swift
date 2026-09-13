@@ -303,22 +303,69 @@ import Foundation
     @Test func lifecycleArgvMatchesTheArgparse() {
         #expect(BotsService.Lifecycle.create(
             name: "athena", cloneFrom: nil, cloneAll: false, noSkills: false, description: nil
-        ).argv == ["profile", "create", "athena"])
+        ).argv == ["profile", "create", "--", "athena"])
 
         #expect(BotsService.Lifecycle.create(
             name: "athena", cloneFrom: "template", cloneAll: false, noSkills: true, description: "Researcher."
-        ).argv == ["profile", "create", "athena", "--clone-from", "template", "--no-skills", "--description", "Researcher."])
+        ).argv == ["profile", "create", "--clone-from", "template", "--no-skills", "--description", "Researcher.", "--", "athena"])
 
         // `--clone-from` implies `--clone` unless `--clone-all` is set, so
         // `--clone` is never emitted alongside either.
         #expect(BotsService.Lifecycle.create(
             name: "athena", cloneFrom: "template", cloneAll: true, noSkills: false, description: nil
-        ).argv == ["profile", "create", "athena", "--clone-all", "--clone-from", "template"])
+        ).argv == ["profile", "create", "--clone-all", "--clone-from", "template", "--", "athena"])
 
         // No TTY to answer the prompt on, so `--yes` is mandatory — and the
         // confirmation therefore belongs entirely to the UI.
-        #expect(BotsService.Lifecycle.delete(name: "athena").argv == ["profile", "delete", "athena", "--yes"])
-        #expect(BotsService.Lifecycle.rename(from: "a", to: "b").argv == ["profile", "rename", "a", "b"])
+        #expect(BotsService.Lifecycle.delete(name: "athena").argv == ["profile", "delete", "--yes", "--", "athena"])
+        #expect(BotsService.Lifecycle.rename(from: "a", to: "b").argv == ["profile", "rename", "--", "a", "b"])
+    }
+
+    /// P60. `profile_name` / `old_name` / `new_name` are PLAIN positionals
+    /// (`hermes_cli/subcommands/profile.py:19`, `:41`, `:77`, `:79` @
+    /// `v2026.9.7`) — no `nargs`, no default — so a name the user typed
+    /// beginning with `-` is read as an unknown flag and argparse exits 2.
+    /// `--` ends option parsing; it is safe on this parser by P47's rule,
+    /// because no option here is list-valued (every one is `store_true` or
+    /// takes exactly one value), so `--` cannot terminate an option's own
+    /// argument list.
+    ///
+    /// The shape is the invariant, not the literal argv: every option comes
+    /// BEFORE the separator and every positional AFTER it. `delete` used to
+    /// put `--yes` after the name, which — once `--` is present — would have
+    /// handed argparse a second positional for a parser that takes one.
+    @Test func aLeadingDashNameIsNotReadAsAFlag() {
+        // (argv, the positionals that must sit AFTER the separator).
+        let cases: [(argv: [String], positionals: [String])] = [
+            (BotsService.Lifecycle.create(
+                name: "--clone-all", cloneFrom: nil, cloneAll: false,
+                noSkills: false, description: nil).argv, ["--clone-all"]),
+            (BotsService.Lifecycle.create(
+                name: "-x", cloneFrom: "template", cloneAll: true,
+                noSkills: true, description: "Researcher.").argv, ["-x"]),
+            (BotsService.Lifecycle.delete(name: "--yes").argv, ["--yes"]),
+            (BotsService.Lifecycle.rename(from: "-a", to: "-b").argv, ["-a", "-b"]),
+        ]
+        for (argv, positionals) in cases {
+            // Exactly one separator: a second `--` is a literal argument to
+            // Hermes, not a separator.
+            #expect(argv.filter { $0 == "--" }.count == 1, Comment(rawValue:
+                "no `--`, or more than one, in \(argv) — a name beginning with"
+                + " `-` reaches argparse as a flag"))
+            guard let separator = argv.firstIndex(of: "--") else { continue }
+            // Everything after it is the user's text, verbatim and in order —
+            // and nothing else. Each of these fixtures is a name that IS a
+            // real flag on this parser, which is the only way to tell the
+            // separator from luck.
+            #expect(Array(argv.dropFirst(separator + 1)) == positionals,
+                    Comment(rawValue: "tail of \(argv) is not \(positionals)"))
+            // And `--yes`, the one flag `delete` needs, is on the NEAR side:
+            // an option past the separator is a positional, and
+            // `profile delete` takes exactly one.
+            if let yes = argv.firstIndex(of: "--yes") {
+                #expect(yes < separator || positionals == ["--yes"])
+            }
+        }
     }
 
     @Test func onlyDeletionIsMarkedDestructive() {

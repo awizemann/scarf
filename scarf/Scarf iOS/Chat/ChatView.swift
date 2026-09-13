@@ -50,13 +50,6 @@ struct ChatView: View {
         capabilitiesStore?.capabilities.hasACPImagePrompts ?? false
     }
 
-    /// v0.13 `/goal` capability — drives the goal pill in `projectContextBar`.
-    /// Read-only on iOS in v2.8.0; users send `/goal` from the Mac. The pill
-    /// drops automatically when `vm.activeGoal` clears.
-    private var supportsActiveGoal: Bool {
-        capabilitiesStore?.capabilities.hasGoals ?? false
-    }
-
     /// v0.13 ACP `/queue` capability — drives the queue-count chip. Tap is a
     /// no-op in v2.8.0 (no popover); previews live on the Mac app.
     private var supportsACPQueue: Bool {
@@ -971,14 +964,15 @@ struct ChatView: View {
     @ViewBuilder
     private var projectContextBar: some View {
         // v2.8.0 (WS-9): the bar is no longer project-only — a non-empty
-        // active goal OR a non-empty queue mirror also light it up. Project
-        // chip, goal pill, and queue chip render independently and the bar
-        // shows when ANY of them is present.
+        // queue mirror also lights it up. Project chip and queue chip render
+        // independently and the bar shows when EITHER is present. The goal
+        // pill was the third member until P55 dropped it (round-6 decision
+        // 3): `/goal` is not an ACP command at any tag, so the pill mirrored
+        // state no host had been asked to hold.
         let projectName = controller.currentProjectName ?? ""
         let hasProject = !projectName.isEmpty
-        let hasGoal = supportsActiveGoal && controller.vm.activeGoal != nil
         let hasQueue = supportsACPQueue && !controller.vm.queuedPrompts.isEmpty
-        if hasProject || hasGoal || hasQueue {
+        if hasProject || hasQueue {
             HStack(spacing: 8) {
                 if hasProject {
                     Image(systemName: "folder.fill")
@@ -1007,7 +1001,6 @@ struct ChatView: View {
                         }
                     }
                 }
-                if hasGoal { goalChip }
                 if hasQueue { queueChip }
                 Spacer()
                 if hasProject && !controller.vm.projectScopedCommands.isEmpty {
@@ -1032,7 +1025,6 @@ struct ChatView: View {
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.tint.opacity(0.1))
-            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: hasGoal)
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: hasQueue)
             .sheet(isPresented: $showSlashCommandsSheet) {
                 ProjectSlashCommandsBrowser(
@@ -1040,28 +1032,6 @@ struct ChatView: View {
                     commands: controller.vm.projectScopedCommands
                 )
             }
-        }
-    }
-
-    /// v0.13 goal pill — purely informational mirror of the agent's
-    /// currently-locked `/goal`. Read-only on iOS; `/goal --clear` lives on
-    /// the Mac app and the pill drops on the next VM update. Semantic
-    /// `.subheadline` font so the goal text scales with Dynamic Type
-    /// (it's content the user reads, not chrome). VoiceOver gets the full
-    /// untruncated text via the accessibility label.
-    @ViewBuilder
-    private var goalChip: some View {
-        if let goal = controller.vm.activeGoal {
-            Label(truncatedGoalText(goal.text), systemImage: "scope")
-                .labelStyle(.titleAndIcon)
-                .font(.subheadline)
-                .foregroundStyle(ScarfColor.info)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(ScarfColor.info.opacity(0.16), in: Capsule())
-                .lineLimit(1)
-                .accessibilityLabel("Goal locked: \(goal.text)")
-                .transition(.opacity.combined(with: .scale(scale: 0.92)))
         }
     }
 
@@ -1083,13 +1053,6 @@ struct ChatView: View {
                 .accessibilityLabel("\(count) prompt\(count == 1 ? "" : "s") queued — manage on the Mac app")
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
         }
-    }
-
-    /// Trim long goal text to fit a chip beside the project name on iPhone
-    /// portrait. The full text rides VoiceOver via the chip's accessibility
-    /// label.
-    private func truncatedGoalText(_ text: String) -> String {
-        text.count <= 28 ? text : String(text.prefix(25)) + "…"
     }
 
     /// Shown while we're opening the SSH exec channel + spawning
@@ -1375,16 +1338,16 @@ final class ChatController {
             // (`hermes_cli/config.py:3450-3452` @ v2026.9.7). Both halves now
             // come from ``HermesConfigSet``, exactly as
             // `IOSSettingsViewModel.saveValue` does.
-            let provider = Self.runConfigSet(ctx, hermes: hermes,
-                                             key: "model.provider", value: trimmedProvider)
+            let provider = await Self.runConfigSet(ctx, hermes: hermes,
+                                                   key: "model.provider", value: trimmedProvider)
             let providerOK = provider.outcome?.succeeded == true
             var modelResult: ProcessResult? = nil
             var modelError: String? = nil
             var modelOutcome: HermesCLIOutcome? = nil
             var modelOK = true
             if providerOK, !trimmedModel.isEmpty {
-                let model = Self.runConfigSet(ctx, hermes: hermes,
-                                              key: "model.default", value: trimmedModel)
+                let model = await Self.runConfigSet(ctx, hermes: hermes,
+                                                    key: "model.default", value: trimmedModel)
                 modelResult = model.result
                 modelError = model.error
                 modelOutcome = model.outcome
@@ -1449,14 +1412,14 @@ final class ChatController {
         hermes: String,
         key: String,
         value: String
-    ) -> (result: ProcessResult?, error: String?, outcome: HermesCLIOutcome?) {
+    ) async -> (result: ProcessResult?, error: String?, outcome: HermesCLIOutcome?) {
         let argv = HermesConfigSet.argv(key: key, value: value)
             .map(escapeShellArg)
             .map { "'\($0)'" }
             .joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
         do {
-            let result = try ctx.makeTransport().runProcess(
+            let result = try await ctx.makeTransport().asyncRunProcess(
                 executable: "/bin/sh",
                 args: ["-c", script],
                 stdin: nil,
@@ -1706,20 +1669,6 @@ final class ChatController {
             capabilities: vm.capabilitiesGate
         )
         switch parsedSlash.name {
-        case "goal":
-            // TODO(WS-2-Q7): verify on a real v0.13 host.
-            let arg = RichChatViewModel.parseGoalArgument(parsedSlash.args)
-            switch arg {
-            case .set(let goalText):
-                vm.recordActiveGoal(text: goalText)
-                vm.transientHint = "Goal locked: \(RichChatViewModel.truncatedToastGoal(goalText))"
-            case .clear:
-                vm.recordActiveGoal(text: nil)
-                vm.transientHint = "Goal cleared."
-            case .empty:
-                vm.transientHint = "Sent /goal — see the agent reply for current goal."
-            }
-            scheduleTransientHintClear(snapshot: vm.transientHint)
         // `wasAgentWorking` is the second gate (round-4, P44b): the queue
         // mirror and the "runs after current turn" hint are only true of a
         // session with a turn in flight. On an idle session the adapter
@@ -1733,25 +1682,6 @@ final class ChatController {
                 vm.recordQueuedPrompt(text: queuedText)
             }
             vm.transientHint = "Queued — runs after current turn."
-            scheduleTransientHintClear(snapshot: vm.transientHint)
-        case "subgoal":
-            // v0.14 — mirror the Mac dispatch so iOS users who run
-            // `/subgoal …` see the same trailing-line pill update as
-            // Mac users on the same session.
-            let arg = RichChatViewModel.parseSubgoalArgument(parsedSlash.args)
-            switch arg {
-            case .add(let subText):
-                vm.recordSubgoalAdded(subText)
-                vm.transientHint = "Subgoal added."
-            case .remove(let idx):
-                vm.recordSubgoalRemoved(idx)
-                vm.transientHint = "Subgoal \(idx) removed."
-            case .clear:
-                vm.recordSubgoalsCleared()
-                vm.transientHint = "Subgoals cleared."
-            case .empty:
-                vm.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
-            }
             scheduleTransientHintClear(snapshot: vm.transientHint)
         // `wasAgentWorking` is the second gate, the `/queue` row's shape one
         // line up: `_rewrite_prompt_for_interrupt` strips a `/steer` prefix
@@ -1775,7 +1705,17 @@ final class ChatController {
             // `where` clauses above keep the optimistic mirrors off that
             // path; this says what was actually sent. The working indicator
             // needs no gating here — `addUserMessage` raised it already.
-            if let notice = RichChatViewModel.subFloorSlashNotice(
+            //
+            // `/goal` and `/subgoal` land here on EVERY host (round-6
+            // decision 3, Mac twin in `ChatViewModel.sendPrompt`): the ACP
+            // adapter's command table has never carried either name at any
+            // tag (`acp_adapter/commands.py:44-66` @ `v2026.9.7`), so the
+            // text is an ordinary prompt everywhere and the optimistic pill
+            // these arms used to paint was Scarf-invented state.
+            if let notice = RichChatViewModel.acpUnhandledSlashNotice(name: parsedSlash.name) {
+                vm.transientHint = notice
+                scheduleTransientHintClear(snapshot: vm.transientHint)
+            } else if let notice = RichChatViewModel.subFloorSlashNotice(
                 name: parsedSlash.name,
                 capabilities: vm.capabilitiesGate
             ) {

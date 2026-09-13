@@ -17,10 +17,17 @@ public struct KanbanCreateRequest: Sendable, Equatable {
     public var maxRuntimeSeconds: Int?
     public var createdBy: String?
     public var skills: [String]
-    /// v0.15: git branch a worktree-workspace task should operate on,
-    /// passed verbatim as `--branch <name>`. Only meaningful with a
-    /// `.worktree` / `.worktreePath` workspace. `nil`/empty → omitted.
-    public var branch: String?
+    // `branch` is GONE (P56). It emitted `--branch <name>` ungated, and
+    // `--branch` first exists at `v2026.5.28` (0.15.0) — it occurs zero times
+    // in `hermes_cli/kanban.py` at `v2026.5.16` (0.14.0), where argparse
+    // would have exited 2 on the whole `kanban create`. But no production
+    // caller ever set it: the only writers were two tests. Deleting the
+    // parameter is strictly smaller than the alternative (a new capability
+    // flag, its four-test floor group, and a gate on a field nothing fills)
+    // and it cannot regress a surface that was never reachable — which is
+    // also why it needs no C1 argument: every host renders exactly as
+    // before. Re-add it WITH its flag the day a create form grows the field;
+    // the floor walk is recorded here so it costs nothing to redo.
     /// v0.13: per-task FAILURE budget. `--max-retries N` is write-once at
     /// create time — no `set_max_retries` verb. Despite the flag's name it
     /// is a ceiling on *consecutive failures*, not on extra attempts:
@@ -61,7 +68,6 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         createdBy: String? = nil,
         skills: [String] = [],
         maxRetries: Int? = nil,
-        branch: String? = nil,
         completionContract: String? = nil
     ) {
         self.title = title
@@ -77,7 +83,6 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         self.createdBy = createdBy
         self.skills = skills
         self.maxRetries = maxRetries
-        self.branch = branch
         self.completionContract = completionContract
     }
 
@@ -97,9 +102,6 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         }
         if let workspace {
             args.append(HermesCLIOption.joined("--workspace", workspace.cliValue))
-        }
-        if let branch, !branch.isEmpty {
-            args.append(HermesCLIOption.joined("--branch", branch))
         }
         if let tenant, !tenant.isEmpty {
             args.append(HermesCLIOption.joined("--tenant", tenant))

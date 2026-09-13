@@ -104,7 +104,7 @@ public final class CuratorViewModel {
         // how often the report file is missing or oversized.
         let parsed = await ScarfMon.measureAsync(.diskIO, "curator.load") {
             await Task.detached(priority: .userInitiated) { () -> (HermesCuratorStatus, String?) in
-                let textResult = Self.runCuratorStatus(context: context)
+                let textResult = await Self.runCuratorStatus(context: context)
                 let stateData = context.readData(context.paths.curatorStateFile)
                 let parsed = HermesCuratorStatusParser.parse(text: textResult, stateFileJSON: stateData)
                 // Best-effort markdown report: the state file points at the
@@ -276,13 +276,18 @@ public final class CuratorViewModel {
     /// Run the curator manually. On v0.13+ hosts this blocks for the
     /// duration of the run (default 600s timeout); pre-v0.13 returns
     /// immediately. Caller passes the capability-decided flag.
+    /// Round-6 decision 2: when Hermes ran PRUNE-ONLY because
+    /// `curator.consolidate` is off, its own sentence replaces the terse
+    /// success message — the ``pin(_:)`` unmanaged-nudge shape.
+    /// ``CuratorService/runNow(synchronous:timeout:)`` returns that note or
+    /// `nil`; `runWithReload` already prefers a non-nil override, so this is
+    /// the whole wiring. No `--consolidate` is passed (decision 2).
     public func runNow(synchronous: Bool, timeout: TimeInterval = 600) async {
         await runWithReload(
             verb: "run",
             successMessage: synchronous ? "Curator run complete" : "Curator run started"
         ) {
             try await self.service.runNow(synchronous: synchronous, timeout: timeout)
-            return nil
         }
     }
 
@@ -446,10 +451,11 @@ public final class CuratorViewModel {
     nonisolated private static func runHermes(
         context: ServerContext,
         args: [String]
-    ) -> (exitCode: Int32, output: String) {
+    ) async -> (exitCode: Int32, output: String) {
         let transport = context.makeTransport()
         do {
-            let result = try transport.runProcess(
+            // Round-6 decision 11: the `async` seam (charter C10).
+            let result = try await transport.asyncRunProcess(
                 executable: context.paths.hermesBinary,
                 args: args,
                 stdin: nil,
@@ -465,7 +471,7 @@ public final class CuratorViewModel {
         }
     }
 
-    nonisolated private static func runCuratorStatus(context: ServerContext) -> String {
-        runHermes(context: context, args: ["curator", "status"]).output
+    nonisolated private static func runCuratorStatus(context: ServerContext) async -> String {
+        await runHermes(context: context, args: ["curator", "status"]).output
     }
 }

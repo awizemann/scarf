@@ -21,6 +21,7 @@ struct GwF4OutcomeMessageChannelTests {
     private final class Host: OutcomeMessageHosting {
         var message: String?
         var messageIsFailure = false
+        var messageIsUnconfirmed = false
     }
 
     // MARK: - The outcome is a stored fact, not a string comparison

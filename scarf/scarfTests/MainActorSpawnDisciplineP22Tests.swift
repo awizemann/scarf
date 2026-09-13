@@ -687,6 +687,188 @@ struct MainActorSpawnDisciplineP22Tests {
     /// another thread, which is the same C10 violation in different clothes:
     /// an `isRunning` spin, or a `wait(` on a semaphore or a group bound in
     /// the same file (`blockingWaiters`).
+    // MARK: - The login-shell environment probe (round-6 P58)
+
+    /// Five main-actor sites resolved `HermesFileService.enrichedEnvironment()`
+    /// inline: `SpotifyAuthFlow.start`, `OAuthFlowController.defaultProcess`,
+    /// `MCPLoginController.defaultProcess`, `HealthViewModel`'s dashboard
+    /// spawn and `HermesProxyService.start`.
+    ///
+    /// It is not a `Process` WAIT, so ``isSynchronousWait(at:in:blockingWaiters:)``
+    /// never looked at it — but C10's first clause is "never block the main
+    /// actor on process spawns", and this is two `zsh` probes at 5 s + 3 s
+    /// behind a `swift_once`. `scarfApp` warms it on a detached task at
+    /// launch; a main-actor reader that arrives while that warm-up is still
+    /// running BLOCKS on the once-token, so the cost lands on the click that
+    /// opens a sign-in sheet. `NousAuthFlow` was fixed for exactly this in
+    /// `c93c2287` and its four twins were not, which is the "idle twin"
+    /// lesson one more time.
+    ///
+    /// Separate from the wait sweep rather than another needle in it,
+    /// because the OPT-OUTS differ: for a blocking wait `Task.detached` is
+    /// deliberately NOT an opt-out (it leaves the pool question to the P52
+    /// sweep), while for "is this on the main actor" it plainly is.
+    @Test func noMainActorShellEnvProbe() throws {
+        /// Basenames allowed to read it on the main actor, each with the task
+        /// that will remove it.
+        let allowed: [String: (path: String, task: String)] = [
+            "ChatViewModel.swift": (
+                "scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift",
+                "t-406d56d6 — `launchTerminal(arguments:)` reads it for the "
+                + "remote terminal's SSH_AUTH_SOCK. Found by this sweep on the "
+                + "run that introduced it, outside P58's named scope; the "
+                + "function is synchronous and its callers are not, so the fix "
+                + "is a split like `SpotifyAuthFlow`'s, not a hoist."
+            ),
+            "scarfApp.swift": (
+                "scarf/scarf/scarfApp.swift",
+                "Not a call: two CLOSURES handed to `SSHTransport"
+                + ".environmentEnricher` / `LocalTransport.environmentEnricher`, "
+                + "invoked later by the transports on whatever thread is doing "
+                + "the spawn. No task — there is nothing to fix."
+            ),
+        ]
+
+        var offenders: [String] = []
+        var reached: Set<String> = []
+        var filesScanned = 0
+
+        for (relative, defaultsToMainActor) in Self.sweepRoots {
+            let root = Self.repoRoot.appendingPathComponent(relative)
+            let files = try #require(
+                FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil),
+                Comment(rawValue: "\(relative) does not exist"))
+            while let url = files.nextObject() as? URL {
+                guard url.pathExtension == "swift" else { continue }
+                guard let src = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                filesScanned += 1
+                let lines = src.components(separatedBy: "\n")
+                let hasMainActorAttribute = lines.contains {
+                    $0.trimmingCharacters(in: .whitespaces) == "@MainActor"
+                }
+                guard defaultsToMainActor || hasMainActorAttribute else { continue }
+                for (index, line) in lines.enumerated() {
+                    guard Self.isMainActorShellEnvProbe(at: index, in: lines) else { continue }
+                    let name = url.lastPathComponent
+                    reached.insert(name)
+                    guard allowed[name] == nil else { continue }
+                    offenders.append(
+                        "\(name):\(index + 1) — \(line.trimmingCharacters(in: .whitespaces))")
+                }
+            }
+        }
+
+        #expect(filesScanned > 450, Comment(rawValue:
+            "the sweep read only \(filesScanned) Swift files — it cannot have covered the roots"))
+        #expect(offenders.isEmpty, Comment(rawValue: """
+            `HermesFileService.enrichedEnvironment()` is resolved on the main \
+            actor (charter C10): it is a `swift_once` over two `zsh` probes at \
+            5 s + 3 s, so a reader that beats the launch warm-up freezes the \
+            window for up to eight seconds. Hoist it through `OffPool.run` \
+            before the spawn, as `NousAuthFlow.start()` does: \
+            \(offenders.joined(separator: "; "))
+            """))
+        let stale = Set(allowed.keys).subtracting(reached)
+        #expect(stale.isEmpty, Comment(rawValue:
+            "allowed file(s) no longer match — drop them from `allowed`: "
+            + stale.sorted().joined(separator: ", ")))
+    }
+
+    /// A main-actor-isolated read of the login-shell environment.
+    ///
+    /// Not a hit when the line ITSELF carries the hop (`OffPool.run { … }`,
+    /// `Task.detached`, `Thread.detachNewThread`) — that is the cure, and a
+    /// sweep whose first report is the fix is a sweep nobody reads (round-6
+    /// P53's lesson, one file over) — nor when the enclosing chain carries
+    /// one, nor on the declaration itself.
+    static func isMainActorShellEnvProbe(at index: Int, in lines: [String]) -> Bool {
+        let line = lines[index]
+        guard line.contains("enrichedEnvironment()") else { return false }
+        let bare = line.trimmingCharacters(in: .whitespaces)
+        if bare.hasPrefix("//") { return false }
+        if bare.contains("func enrichedEnvironment") { return false }
+        for hop in Self.offActorHops where line.contains(hop) { return false }
+
+        // Same indent walk as the wait sweep, with `Task.detached` and
+        // `OffPool.run` added to the opt-outs: both leave the main actor,
+        // which is the only question this test asks.
+        var minIndent = Self.indent(of: line)
+        var needDeclarationStart = false
+        let declarationStarts = ["func ", "var ", "init(", "subscript",
+                                 "class ", "struct ", "enum ", "extension "]
+        var i = index - 1
+        while i >= 0 {
+            let candidate = lines[i]
+            defer { i -= 1 }
+            let trimmed = candidate.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            let indent = Self.indent(of: candidate)
+            if needDeclarationStart {
+                guard indent <= minIndent else { continue }
+            } else {
+                guard indent < minIndent else { continue }
+            }
+            minIndent = indent
+            if trimmed.contains("nonisolated") { return false }
+            for hop in Self.offActorHops where trimmed.contains(hop) { return false }
+            needDeclarationStart = !declarationStarts.contains { trimmed.contains($0) }
+                && !trimmed.hasPrefix("//")
+            if indent == 0, !needDeclarationStart { break }
+        }
+        return true
+    }
+
+    /// The three spellings that take work off the main actor.
+    static let offActorHops = ["OffPool.run", "Task.detached", "Thread.detachNewThread"]
+
+    /// Planted shapes, so the matcher above is a check rather than a claim.
+    @Test func theShellEnvMatcherIsCalibrated() {
+        let cured = """
+            func start() {
+                startTask = Task { [weak self] in
+                    let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+                    self?.launch(localEnvironment: env)
+                }
+            }
+            """.components(separatedBy: "\n")
+        for i in cured.indices {
+            #expect(!Self.isMainActorShellEnvProbe(at: i, in: cured),
+                    Comment(rawValue: "the cure is reported as the defect: \(cured[i])"))
+        }
+
+        let broken = """
+            func start() {
+                var env = HermesFileService.enrichedEnvironment()
+                env["PYTHONUNBUFFERED"] = "1"
+            }
+            """.components(separatedBy: "\n")
+        #expect(broken.indices.contains { Self.isMainActorShellEnvProbe(at: $0, in: broken) },
+                "the matcher misses the inline main-actor read — it checks nothing")
+
+        let hoisted = """
+            nonisolated func probe() {
+                let env = HermesFileService.enrichedEnvironment()
+            }
+            """.components(separatedBy: "\n")
+        for i in hoisted.indices {
+            #expect(!Self.isMainActorShellEnvProbe(at: i, in: hoisted),
+                    "`nonisolated` is still an opt-out")
+        }
+
+        // The multi-line hop: the call is a line BELOW `Task.detached {`.
+        let detached = """
+            func warm() {
+                Task.detached {
+                    _ = HermesFileService.enrichedEnvironment()
+                }
+            }
+            """.components(separatedBy: "\n")
+        for i in detached.indices {
+            #expect(!Self.isMainActorShellEnvProbe(at: i, in: detached),
+                    "a detached closure is off the main actor, whatever P52 says about the pool")
+        }
+    }
+
     static func isSynchronousWait(
         at index: Int, in lines: [String], blockingWaiters: Set<String>
     ) -> Bool {

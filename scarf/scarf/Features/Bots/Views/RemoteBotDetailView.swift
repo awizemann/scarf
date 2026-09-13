@@ -91,7 +91,7 @@ struct RemoteBotDetailView: View {
                     // reads, so a failure line here was painted green.
                     OutcomeMessageBar(
                         text: viewModel.message,
-                        isFailure: viewModel.messageIsFailure,
+                        kind: viewModel.messageKind,
                         onDismiss: { viewModel.dismissMessage() }
                     )
                     Spacer()

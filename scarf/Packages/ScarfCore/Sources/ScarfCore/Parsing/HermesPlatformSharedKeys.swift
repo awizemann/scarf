@@ -104,13 +104,57 @@ public enum HermesPlatformSharedKeys {
     /// The `platforms.<p>` fall-through is also the answer for a config that
     /// mentions the platform nowhere: a first-run write has to land
     /// somewhere, and the nested spelling is the modern one Hermes documents.
+    /// P57: a FLAT dotted key is not evidence of a block. `slack.enabled: true`
+    /// written at the top level is, to PyYAML, the independent mapping key
+    /// `"slack.enabled"` — `yaml_cfg.get("slack")` is then `None`,
+    /// `isinstance(None, dict)` is `False`, and `platform_section`
+    /// (`gateway/config_loader.py:171-180` @ `v2026.9.7`) falls through to
+    /// `gateway.platforms.slack` / `platforms.slack`. Scarf's flat parse
+    /// records that line as `values["slack.enabled"]`, which matches the
+    /// `slack.` descendant prefix below, so `isBlock("slack")` answered TRUE
+    /// and the form both READ from and WROTE to a section Hermes does not
+    /// bridge from — and the write then CREATED the real top-level block,
+    /// silently unbridging every nested shared key beside it. The parser
+    /// already tracks these paths for the last-wins purge; ``ParsedYAML``
+    /// now surfaces them, and they are excluded from the prefix scan.
+    /// Hand-edited configs only: no Scarf writer emits a dotted key.
+    ///
+    /// P57b: the exclusion is by the dot's DEPTH, not by the prefix match.
+    /// P57 excluded every path under a dotted literal, which also excluded a
+    /// dotted key nested INSIDE a real block — `slack:` + `  a.b:` + `    c: 1`
+    /// is `{"slack": {"a.b": {"c": 1}}}` to PyYAML (probed, 6.0.3), a genuine
+    /// `slack` dict that `platform_section` takes as the top-level block,
+    /// and post-P57 Scarf answered `platforms.slack` for it. A dotted key is
+    /// evidence AGAINST section `S` only when its dot crosses `S`'s own
+    /// boundary — i.e. when it was written SHALLOWER than `S` is deep
+    /// (``ParsedYAML/dottedLiteralParentDepths``). A dotted key written at or
+    /// below `S`'s depth is an ordinary child of a real `S` block.
     public static func bridgeSourcePrefix(platform: String, in parsed: ParsedYAML) -> String {
         func isBlock(_ section: String) -> Bool {
-            if parsed.maps[section] != nil { return true }
             let dot = section + "."
-            return parsed.values.keys.contains { $0.hasPrefix(dot) }
-                || parsed.lists.keys.contains { $0.hasPrefix(dot) }
-                || parsed.maps.keys.contains { $0.hasPrefix(dot) }
+            let sectionDepth = section.split(separator: ".").count
+            // A descendant OF a dotted literal is no better evidence than the
+            // literal itself: `slack.enabled:` opened as a block header makes
+            // `{"slack.enabled": {…}}`, still not a `slack` dict — but only
+            // when that literal was written above `section`'s level.
+            func underDottedLiteral(_ key: String) -> Bool {
+                parsed.dottedLiteralPaths.contains { literal in
+                    guard key == literal || key.hasPrefix(literal + ".") else { return false }
+                    return (parsed.dottedLiteralParentDepths[literal] ?? 0) < sectionDepth
+                }
+            }
+            func hasChild<V>(_ table: [String: V]) -> Bool {
+                table.keys.contains { $0.hasPrefix(dot) && !underDottedLiteral($0) }
+            }
+            // The recorded-map test runs under the SAME exclusion. P57b: a
+            // dotted key whose path IS the section — `gateway:` + a literal
+            // `platforms.slack:` header — records `maps["gateway.platforms.
+            // slack"]`, and answering on that alone let the dotted spelling
+            // claim the nested section it only looks like. PyYAML reads that
+            // file as `{'gateway': {'platforms.slack': {…}}}`, where
+            // `gateway["platforms"]` is None.
+            if parsed.maps[section] != nil, !underDottedLiteral(section) { return true }
+            return hasChild(parsed.values) || hasChild(parsed.lists) || hasChild(parsed.maps)
         }
         if isBlock(platform) { return platform }
         if isBlock("gateway.platforms.\(platform)") { return "gateway.platforms.\(platform)" }

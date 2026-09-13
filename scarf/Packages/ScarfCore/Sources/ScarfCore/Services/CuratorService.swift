@@ -38,11 +38,16 @@ public actor CuratorService {
     /// view always has something to render.
     public func status() async -> HermesCuratorStatus {
         let context = self.context
-        return await Task.detached(priority: .utility) { () -> HermesCuratorStatus in
+        // P60: `OffPool.run`, not `Task.detached` — the body is a CLI spawn
+        // (or an SSH exec) plus a transport read, i.e. two blocking round
+        // trips, and `Task.detached` would park a cooperative-pool thread
+        // through both (charter C10). The whole closure is synchronous, so
+        // the wrap is exact.
+        return await OffPool.run { () -> HermesCuratorStatus in
             let textResult = Self.runHermesSync(context: context, args: ["curator", "status"], timeout: 30)
             let stateData = context.readData(context.paths.curatorStateFile)
             return HermesCuratorStatusParser.parse(text: textResult.output, stateFileJSON: stateData)
-        }.value
+        }
     }
 
     /// `hermes curator list-archived`. Hermes has no `--json` flag on
@@ -72,10 +77,27 @@ public actor CuratorService {
 
     // MARK: - Writes (legacy v0.12 verbs; service form)
 
-    public func runNow(synchronous: Bool, timeout: TimeInterval) async throws {
+    /// `hermes curator run` — returns Hermes's prune-only note when the run
+    /// was half of what "Run Now" implies, `nil` otherwise.
+    ///
+    /// P54, round-6 **decision 2**. `_cmd_run` prints
+    /// `curator: consolidation is off — running prune-only …`
+    /// (`hermes_cli/curator.py:159-163` @ `v2026.9.7`) and still `return 0`s
+    /// (`:186`) whenever `curator.consolidate` is false in config — which is
+    /// its default. Scarf said "Curator run complete" over it, so a user who
+    /// had never enabled consolidation believed the LLM merge pass had run.
+    ///
+    /// Decision 2: surface the note beside the success; **do NOT pass
+    /// `--consolidate`** (`:620-623`). Forcing the LLM pass from a button
+    /// would spend tokens on a setting the user turned off. Same shape as
+    /// ``pin(_:)``'s unmanaged nudge, and detected by content for the same
+    /// reason — a host that never prints the line simply never matches.
+    @discardableResult
+    public func runNow(synchronous: Bool, timeout: TimeInterval) async throws -> String? {
         let resolvedTimeout = synchronous ? timeout : 30
         let (code, stdout, stderr) = await runHermes(args: ["curator", "run"], timeout: resolvedTimeout)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "run")
+        return HermesCuratorRunNote.pruneOnlyNote(in: stdout)
     }
 
     public func pause() async throws {
@@ -87,6 +109,21 @@ public actor CuratorService {
         let (code, stdout, stderr) = await runHermes(args: ["curator", "resume"], timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "resume")
     }
+
+    // MARK: - The `--`-separated skill verbs
+    //
+    // **`--` before the skill positional on all four of `pin`, `unpin`,
+    // `restore` and `archive`** (P54, round-6). Each takes the shared
+    // `_SKILL = _arg("skill", help="Skill name")` positional
+    // (`hermes_cli/curator.py:595`, wired at `:626`, `:627`, `:639`,
+    // `:641-642` @ `v2026.9.7`) — a plain positional, no `nargs=REMAINDER`
+    // anywhere in the table — so argparse's separator applies and a skill
+    // name beginning with a dash stops exiting 2. The separator is the last
+    // token before the name because nothing follows it.
+    //
+    // A `//` block, not `///`: it documents the four declarations below as a
+    // group, and a `///` attached to no declaration is swallowed by
+    // DocC/Quick Help rather than shown on any of them (P54b).
 
     /// `hermes curator pin <name>`. A pin on an eligible-but-unmanaged skill
     /// (no `created_by` provenance marker) still exits 0 — the pin IS
@@ -105,7 +142,7 @@ public actor CuratorService {
     /// stdout when stderr is empty), so no extra handling is needed there.
     @discardableResult
     public func pin(_ name: String) async throws -> String? {
-        let (code, stdout, stderr) = await runHermes(args: ["curator", "pin", name], timeout: 15)
+        let (code, stdout, stderr) = await runHermes(args: ["curator", "pin", "--", name], timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "pin")
         return Self.unmanagedNudge(from: stdout)
     }
@@ -116,7 +153,7 @@ public actor CuratorService {
     /// discarded on success. Surfaced the same way.
     @discardableResult
     public func unpin(_ name: String) async throws -> String? {
-        let (code, stdout, stderr) = await runHermes(args: ["curator", "unpin", name], timeout: 15)
+        let (code, stdout, stderr) = await runHermes(args: ["curator", "unpin", "--", name], timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "unpin")
         return Self.unmanagedNudge(from: stdout)
     }
@@ -133,7 +170,7 @@ public actor CuratorService {
     }
 
     public func restore(_ name: String) async throws {
-        let (code, stdout, stderr) = await runHermes(args: ["curator", "restore", name], timeout: 30)
+        let (code, stdout, stderr) = await runHermes(args: ["curator", "restore", "--", name], timeout: 30)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "restore")
     }
 
@@ -143,7 +180,7 @@ public actor CuratorService {
     /// skill from the active set to the archived set. No `--json` is
     /// expected; the verb's success channel is the exit code.
     public func archive(_ name: String) async throws {
-        let (code, stdout, stderr) = await runHermes(args: ["curator", "archive", name], timeout: 30)
+        let (code, stdout, stderr) = await runHermes(args: ["curator", "archive", "--", name], timeout: 30)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "archive")
     }
 
@@ -698,10 +735,14 @@ public actor CuratorService {
         timeout: TimeInterval
     ) async -> (exitCode: Int32, stdout: String, stderr: String) {
         let context = self.context
-        return await Task.detached(priority: .utility) { () -> (Int32, String, String) in
+        // P60: the one seam every `CuratorService` verb funnels through, so
+        // one `Task.detached` here parked a pool thread for the whole of
+        // every `hermes curator …` invocation. `timeout` is unchanged — it
+        // is still the bound `runHermesSync` passes down.
+        return await OffPool.run { () -> (Int32, String, String) in
             let result = Self.runHermesSync(context: context, args: args, timeout: timeout)
             return (result.exitCode, result.output, result.stderr)
-        }.value
+        }
     }
 
     /// Synchronous, transport-level invocation. `output` is stdout; the

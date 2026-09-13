@@ -183,6 +183,21 @@ final class FleetApplyViewModel {
             if !preRunScript.isEmpty {
                 out.append("\(preRunScript.count) cron job\(preRunScript.count == 1 ? "" : "s") run a pre-run script whose output is injected into the prompt; the script file stays on this host, so the copy runs without it.")
             }
+            // Round-6 decision 8 — the same DOWNGRADE shape as the pre-run
+            // script note above, for the same kind of reason. `cron create`
+            // would ACCEPT `--model` / `--provider` / `--reasoning-effort`
+            // (`hermes_cli/subcommands/cron.py:66-77` @ `v2026.9.7`), and
+            // that is precisely why forwarding them is wrong: a model id is
+            // resolved against the TARGET's provider config and credential
+            // pools, so a pin the target has never heard of lands green and
+            // fails on its first run. Dropping it lets the target resolve its
+            // own default (`_compute_provider_model_snapshots`,
+            // `cron/jobs.py:1599-1620`) — a defensible outcome, but a silent
+            // change of which model runs the job, and whose bill.
+            let modelPinned = cronCopySet.copyable.filter(\.hasModelPin)
+            if !modelPinned.isEmpty {
+                out.append("\(modelPinned.count) cron job\(modelPinned.count == 1 ? "" : "s") pin their own model, provider or reasoning effort; those pins are this host's, so the copy follows the target host's defaults.")
+            }
             if !cronCopySet.unsupportedSchedule.isEmpty {
                 out.append("\(cronCopySet.unsupportedSchedule.count) cron job\(cronCopySet.unsupportedSchedule.count == 1 ? "" : "s") have a schedule that can't be recreated from the CLI.")
             }

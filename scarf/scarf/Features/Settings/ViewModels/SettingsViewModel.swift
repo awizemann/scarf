@@ -161,6 +161,11 @@ final class SettingsViewModel {
     /// refusals — under a green checkmark, so a refused save looked exactly
     /// like a successful one. `OutcomeMessageBar` reads this stored fact.
     var saveMessageIsFailure = false
+    /// P54b: the third seal state. ``runBackup()`` and ``runRestore(fromPath:)``
+    /// consume three-state verdicts, and the exit-0-proved-nothing arm used
+    /// to ride the failure flag — a red triangle and a "Failed:" VoiceOver
+    /// prefix over a refusal Hermes never made.
+    var saveMessageIsUnconfirmed = false
     var isLoading = false
 
     /// `hasLoaded` lets a plain section re-entry skip the config/env re-read
@@ -1135,7 +1140,7 @@ final class SettingsViewModel {
     /// hanging Settings for the round-trip. The read itself is unchanged.
     func bitwardenStatus() async -> String {
         let ctx = context
-        return await Task.detached { ctx.runHermes(["secrets", "bitwarden", "status"]).output }.value
+        return await OffPool.run { ctx.runHermes(["secrets", "bitwarden", "status"]).output }
     }
 
     // MARK: - Performance / Advanced
@@ -1402,35 +1407,99 @@ final class SettingsViewModel {
 
     var backupInProgress = false
 
+    /// Run `hermes backup`, judged by what it PRINTED (P54, round-6).
+    ///
+    /// `result.exitCode == 0` used to mean "Backup saved", and Hermes has two
+    /// exit-0 arms that saved nothing or saved less than everything — see
+    /// ``HermesBackupVerdict``.
+    ///
+    /// **The Finder reveal is NOT gated on a complete backup**, deliberately:
+    /// a partial archive is on disk, is restorable, and is exactly the thing
+    /// the user wants to look at. What changed is the SENTENCE beside it —
+    /// `extractZipPath` matches `Backup incomplete: /…/x.zip` just as
+    /// happily as the complete line, so the old code revealed a partial
+    /// archive under a bare "Backup saved" and said nothing. The note now
+    /// travels with it. The nothing-to-back-up arm writes no zip at all and
+    /// so reveals nothing, which falls out of `zipPath` being nil.
     func runBackup() {
         backupInProgress = true
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["backup"], timeout: 300)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: HermesBackupVerdict.argv, timeout: 300)
+            }
+            let outcome = HermesBackupVerdict.judge(output: result.output, exitCode: result.exitCode)
             let zipPath = Self.extractZipPath(from: result.output)
             await MainActor.run {
                 self.backupInProgress = false
-                if result.exitCode == 0 {
-                    if let zipPath {
-                        // NSWorkspace operates on the *local* Mac's filesystem;
-                        // a remote backup path doesn't exist here, so revealing
-                        // it would silently no-op (or worse, reveal an
-                        // unrelated local file with the same path). Surface the
-                        // remote location in the saveMessage instead.
-                        if self.context.isRemote {
-                            let host = self.context.displayName
-                            self.showSuccess(String(localized: "Backup saved on \(host): \(zipPath)"))
-                        } else {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
-                            self.showSuccess(String(localized: "Backup saved"))
-                        }
+                guard outcome.succeeded else {
+                    // Three states, not two (P54b). `backupFailureSummary`
+                    // has said "printed no result" since P54; the SEAL still
+                    // said failure, so the neutral sentence arrived under a
+                    // red triangle announced as "Failed:". Keyed on
+                    // `confidence`, the way `MCPServerTestResultView` keys
+                    // its glyph and tint.
+                    let text = Self.backupFailureSummary(outcome: outcome)
+                    if outcome.confidence == .unconfirmed {
+                        self.showUnconfirmed(text)
                     } else {
-                        self.showSuccess(String(localized: "Backup complete"))
+                        self.showSaveFailure(text)
+                    }
+                    return
+                }
+                // A partial archive is still on disk and still worth
+                // revealing — but the note travels with it.
+                if let zipPath {
+                    // NSWorkspace operates on the *local* Mac's filesystem;
+                    // a remote backup path doesn't exist here, so revealing
+                    // it would silently no-op (or worse, reveal an
+                    // unrelated local file with the same path). Surface the
+                    // remote location in the saveMessage instead.
+                    if self.context.isRemote {
+                        let host = self.context.displayName
+                        self.showSuccess(Self.withNote(
+                            String(localized: "Backup saved on \(host): \(zipPath)"), outcome.warning))
+                    } else {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
+                        self.showSuccess(Self.withNote(String(localized: "Backup saved"), outcome.warning))
                     }
                 } else {
-                    self.showSaveFailure(String(localized: "Backup failed"))
+                    // No path in the output: the nothing-to-back-up arm
+                    // (which writes no zip) lands here, and its note is the
+                    // whole message.
+                    self.showSuccess(Self.withNote(String(localized: "Backup complete"), outcome.warning))
                 }
             }
         }
+    }
+
+    /// Append Hermes's own note to a success sentence, when there is one.
+    /// A `static` so both backup and restore share one spelling and both are
+    /// reachable from a test without a live `hermes` (the P47b convention).
+    nonisolated static func withNote(_ text: String, _ note: String?) -> String {
+        guard let note, !note.isEmpty else { return text }
+        return "\(text) \(note)"
+    }
+
+    /// The text a failed `hermes backup` shows — three branches, not two
+    /// (the P47b lesson). ``HermesBackupVerdict`` returns `.unconfirmed` for
+    /// an exit-0 run that printed neither `Backup complete: ` nor
+    /// `Backup incomplete: ` nor `No files to back up.`, and quoting the exit
+    /// code there would be the original bug in a new voice.
+    nonisolated static func backupFailureSummary(outcome: HermesCLIOutcome) -> String {
+        // `.unconfirmed` is gated on the CONFIDENCE ALONE, not on whether
+        // there is a line to quote. `judge` fills `detail` with `lines.last`
+        // on every arm, and on an unconfirmed run that tail is some
+        // unrelated progress line — `Scanning ~/.hermes ...` — which
+        // "Backup failed: Scanning ~/.hermes ..." would present as Hermes's
+        // reason for a refusal it never made. Same guard shape as
+        // ``HealthViewModel/sessionsOptimizeSummary(outcome:exitCode:trimmed:)``.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty
+        else {
+            return outcome.confidence == .unconfirmed
+                ? String(localized: "hermes backup printed no result. Check the host.")
+                : String(localized: "Backup failed")
+        }
+        return String(localized: "Backup failed: \(detail)")
     }
 
     /// Restore from a backup `.zip`. The path may be local (the user picked
@@ -1442,23 +1511,62 @@ final class SettingsViewModel {
     func runRestore(fromPath path: String) {
         backupInProgress = true
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["import", path], timeout: 300)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(
+                    args: HermesImportVerdict.argv(path: path), timeout: 300
+                )
+            }
+            let outcome = HermesImportVerdict.judge(
+                output: result.output, exitCode: result.exitCode
+            )
             await MainActor.run {
                 self.backupInProgress = false
-                self.applySaveOutcome(
-                    result.exitCode == 0
-                        ? .success(String(localized: "Restore complete — restart Scarf"))
-                        : .failure(String(localized: "Restore failed"))
-                )
-                if result.exitCode == 0 {
+                if outcome.succeeded {
+                    self.applySaveOutcome(.success(Self.withNote(
+                        String(localized: "Restore complete — restart Scarf"), outcome.warning)))
                     self.load(force: true)
+                } else {
+                    // Three states, not two (P54b) — see ``runBackup()``.
+                    let text = Self.restoreFailureSummary(outcome: outcome)
+                    self.applySaveOutcome(
+                        outcome.confidence == .unconfirmed ? .unconfirmed(text) : .failure(text))
                 }
             }
         }
     }
 
+    /// The text a failed `hermes import` shows — three branches, not two.
+    /// Before P54 this was a bare "Restore failed" over an `Aborted.`/exit 1
+    /// that no user could have prevented; with `--force` the remaining
+    /// failures are real, and Hermes names them (`Error: File not found: …`,
+    /// `Error: Not a valid zip file: …`, `Error: zip does not appear to be a
+    /// Hermes backup …` — `hermes_cli/backup.py:923`, `:926`, `:934` @
+    /// `v2026.9.7`; each `print` is followed by its `sys.exit(1)` at `:924`,
+    /// `:927`, `:935`. The third prints `Error: {reason}` from
+    /// `_validate_backup_zip`, whose refusal string is `:693`. (P59: the three
+    /// numbers were `:921`/`:924`/`:936` — `:921` is `zip_path = …`, `:924` is
+    /// the exit under the FIRST print, and `:936` is `prefix = _detect_prefix`.)
+    nonisolated static func restoreFailureSummary(outcome: HermesCLIOutcome) -> String {
+        // Confidence alone — see ``backupFailureSummary(outcome:)``.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty
+        else {
+            return outcome.confidence == .unconfirmed
+                ? String(localized: "hermes import printed no result. Check the host.")
+                : String(localized: "Restore failed")
+        }
+        return String(localized: "Restore failed: \(detail)")
+    }
+
     /// Pull the first absolute `.zip` path out of `hermes backup` stdout.
-    /// Hermes prints a line like "Backup saved to /Users/foo/.hermes-backups/hermes-2026-04-14.zip (5.4 MB)".
+    ///
+    /// Hermes prints `Backup complete: {out_path}` — or
+    /// `Backup incomplete: {out_path}` — at `hermes_cli/backup.py:666` @
+    /// `v2026.9.7` (two separate `print`s at `:645`/`:647` @ `v2026.7.30`).
+    /// **Not** "Backup saved to …", which this comment claimed for three
+    /// rounds and which Hermes has never printed at any tag walked. The
+    /// regex is indifferent to the wording — it takes the first absolute
+    /// `.zip` path anywhere in the output — so nothing depended on the false
+    /// sentence, but the next reader would have.
     nonisolated static func extractZipPath(from output: String) -> String? {
         let pattern = #"(/[^\s]+\.zip)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
@@ -1590,5 +1698,9 @@ extension SettingsViewModel: OutcomeMessageHosting {
     var messageIsFailure: Bool {
         get { saveMessageIsFailure }
         set { saveMessageIsFailure = newValue }
+    }
+    var messageIsUnconfirmed: Bool {
+        get { saveMessageIsUnconfirmed }
+        set { saveMessageIsUnconfirmed = newValue }
     }
 }

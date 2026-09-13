@@ -73,10 +73,15 @@ public final class IOSSettingsViewModel {
         // process-wide. Capabilities decide how the marker is read — below
         // v0.20.5 `get_managed_system` never opens it and any marker means
         // managed (`hermes_cli/config.py:327-330` @ v2026.6.19).
-        managedInstall = await Task.detached {
+        // P60: `capabilitiesSync` SPAWNS `hermes --version` and waits on a
+        // cold cache, and the marker read is a transport stat+read behind
+        // it — two blocking round trips, so this is `OffPool.run` rather
+        // than `Task.detached`, which would park a pool thread through both
+        // (charter C10).
+        managedInstall = await OffPool.run {
             let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
             return HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
-        }.value
+        }
 
         guard let text else {
             // Neither read found the file. If the Hermes CLI still
@@ -169,14 +174,15 @@ public final class IOSSettingsViewModel {
         let argv = HermesConfigSet.argv(key: key, value: value).map(shellEscape).joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
 
-        let result: ProcessResult = try await Task.detached {
-            try ctx.makeTransport().runProcess(
-                executable: "/bin/sh",
-                args: ["-c", script],
-                stdin: nil,
-                timeout: 15
-            )
-        }.value
+        // Round-6 decision 11: the `async` seam, so the wait is a suspension
+        // rather than a cooperative-pool thread blocked on the exec that runs
+        // on that same pool (charter C10).
+        let result: ProcessResult = try await ctx.makeTransport().asyncRunProcess(
+            executable: "/bin/sh",
+            args: ["-c", script],
+            stdin: nil,
+            timeout: 15
+        )
 
         // P39: judged by OUTPUT, exactly like `unsetValue` below and for the
         // same reason — `set_config_value`'s managed-install arm prints to
@@ -228,14 +234,15 @@ public final class IOSSettingsViewModel {
         let argv = HermesConfigUnset.argv(key: key).map(shellEscape).joined(separator: " ")
         let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
 
-        let result: ProcessResult = try await Task.detached {
-            try ctx.makeTransport().runProcess(
-                executable: "/bin/sh",
-                args: ["-c", script],
-                stdin: nil,
-                timeout: 15
-            )
-        }.value
+        // Round-6 decision 11: the `async` seam, so the wait is a suspension
+        // rather than a cooperative-pool thread blocked on the exec that runs
+        // on that same pool (charter C10).
+        let result: ProcessResult = try await ctx.makeTransport().asyncRunProcess(
+            executable: "/bin/sh",
+            args: ["-c", script],
+            stdin: nil,
+            timeout: 15
+        )
 
         let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
         let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -79,9 +79,7 @@ struct WebhooksView: View {
         isLoading = true
         defer { isLoading = false }
         let ctx = context
-        let result = await Task.detached {
-            return Self.runHermesList(context: ctx)
-        }.value
+        let result = await Self.runHermesList(context: ctx)
         if Self.detectNotEnabled(result) {
             self.notEnabled = true
             self.webhooks = []
@@ -99,10 +97,10 @@ struct WebhooksView: View {
             : nil
     }
 
-    nonisolated private static func runHermesList(context: ServerContext) -> String {
+    nonisolated private static func runHermesList(context: ServerContext) async -> String {
         let transport = context.makeTransport()
         do {
-            let r = try transport.runProcess(
+            let r = try await transport.asyncRunProcess(
                 executable: context.paths.hermesBinary,
                 args: ["webhook", "list"],
                 stdin: nil,

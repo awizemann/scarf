@@ -153,6 +153,15 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     // MARK: - ServerTransport: processes
 
+    /// **This is not dead code, and P58's write-up said it was.** Decision 11
+    /// gave the iOS bridge an `async` seam and the note recorded that `runSync`
+    /// "survives only for the SFTP file verbs" — measured at P58b, the
+    /// SYNCHRONOUS `runProcess` still has a live iOS caller:
+    /// `ServerContext.UserHomeCache.probe` (`ServerContext.swift:343`), which
+    /// is unguarded ScarfCore compiled for iOS and reaches this type through
+    /// `ServerContext.sshTransportFactory`. Converting it to `asyncRunProcess`
+    /// belongs to `t-02f830f4` with the rest of the end-to-end conversion;
+    /// until then `runSync` has eight callers, not seven.
     public func runProcess(
         executable: String,
         args: [String],
@@ -171,6 +180,34 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         return try runSync(deadline: timeout + Self.syncGrace) {
             try await self.asyncRunProcess(executable: executable, args: args, timeout: timeout)
         }
+    }
+
+    /// The `async` seam (round-6 decision 11) — no bridge at all.
+    ///
+    /// ``ServerTransport``'s default implementation wraps the SYNCHRONOUS
+    /// `runProcess` in an `OffPool.run`, which for this transport would be
+    /// two hops around work that is already `async`: `runSync` blocks a
+    /// thread on a semaphore while `asyncRunProcess` runs on the cooperative
+    /// pool, so a caller on a pool thread competes with the work it waits
+    /// for. Overriding here deletes both. `runSync` stays for the SFTP file
+    /// verbs, whose `ServerTransport` signatures are synchronous.
+    ///
+    /// The partial-stdout-on-timeout contract is unchanged and is now the
+    /// only one in play: `asyncRunProcess`'s drain and budget arms share one
+    /// ``PartialStdout`` accumulator (round-6 P53), where the bridge could
+    /// only ever report `Data()`.
+    public func asyncRunProcess(
+        executable: String,
+        args: [String],
+        stdin: Data?,
+        timeout: TimeInterval
+    ) async throws -> ProcessResult {
+        if stdin != nil {
+            throw TransportError.other(
+                message: "CitadelServerTransport.runProcess does not support stdin yet")
+        }
+        return try await asyncRunProcess(
+            executable: executable, args: args, timeout: timeout)
     }
 
     public func streamLines(
@@ -672,7 +709,31 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // scopes via this same `config.remoteHome`.
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
             forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
-        let cmd = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+        // `COLUMNS` rides the same assignment prefix as `PATH` and
+        // `HERMES_HOME` (P54, round-6). Citadel's raw exec channel is not a
+        // TTY and forwards none of the client's environment, so the remote
+        // `rich` takes its 80-column non-TTY default
+        // (`Console.width` → `COLUMNS` → 80) and wraps any line longer than
+        // that. Scarf judges Hermes runs by matching whole printed lines, so
+        // a wrap can split a marker in half — the shipped case P40b found is
+        // `✓ Plugin <name> updated.` (`hermes_cli/plugins_cmd.py:828` @
+        // `v2026.9.7`), matched as a column-0 prefix AND an `updated.` tail.
+        //
+        // The Mac's two transports have carried a wide `COLUMNS` since P40b
+        // (``ScarfCore/LocalTransport/subprocessEnvironment(forExecutable:)``
+        // and `SSHTransport.composedRemoteCommand`). This is the THIRD spawn
+        // family and it was the one without — every judged `runProcess` the
+        // iOS runtime makes comes through here. The value is read from
+        // `LocalTransport.wideColumns` rather than written out, so the three
+        // families cannot drift to three different widths.
+        //
+        // The remaining exec family, `_streamScriptImpl`, deliberately does
+        // NOT carry it: it pipes a `/bin/sh` script (sqlite3, the bots
+        // scan), none of whose output is verdict-matched, and the Mac twin
+        // (`SSHTransport.streamScript` → `SSHScriptRunner`) does not carry it
+        // either. Parity is the point in both directions.
+        let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
             + hermesHome
             + Self.shellJoin([executable] + args)
         // Citadel's `executeCommand` discards captured output when the
@@ -762,6 +823,16 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// ``ScarfCore/OffPool`` documents ("the result is dropped, never the
     /// work"), written down here because a caller that reads a timeout as
     /// "the remote command stopped" would be wrong.
+    ///
+    /// **And its own expiry throws `partialStdout: Data()` on purpose**
+    /// (P60). `PartialStdout` exists so the INNER budget — the one
+    /// `asyncRunProcess` races the drain against — can report the bytes the
+    /// drain had accumulated, and that arm is the one a real slow command
+    /// hits. This arm is the backstop BEHIND it: reaching it means the async
+    /// op blew past its own timeout plus ``syncGrace`` and never returned at
+    /// all, so the detached task still owns its drain and there is no
+    /// accumulator to read from here. Empty is the honest answer, not a
+    /// missing hand-off to `PartialStdout`.
     nonisolated private func runSync<T: Sendable>(
         deadline: TimeInterval,
         _ op: @escaping @Sendable () async throws -> T

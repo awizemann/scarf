@@ -93,17 +93,36 @@ struct MemoryListView: View {
     /// find hermes even when it's in `~/.local/bin` or `/opt/homebrew/bin`.
     private func resetMemory(context: ServerContext) async {
         let hermes = context.paths.hermesBinary
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
+        // `COLUMNS` first, for the same reason the Mac's transports carry it
+        // (P40b) and `CitadelServerTransport.asyncRunProcess` now does
+        // (P54): this spawn is JUDGED BY OUTPUT — `HermesMemoryResetVerdict`
+        // matches whole lines — and `rich` wraps at 80 columns when stdout
+        // is not a TTY.
+        //
+        // It is set HERE as well as in the transport because this script is
+        // handed to `/bin/sh -c` as one string: the transport's own prefix
+        // sets `COLUMNS` for the `sh`, and `sh` does export it to `hermes`,
+        // but this call site is the only thing that keeps working if the
+        // context ever hands back a transport that composes its command
+        // differently. Belt and braces on a line that is free.
+        //
+        // The assignment leads, as it must: `sh` reads a command line's
+        // leading `VAR=value` pairs left to right, and the first token that
+        // is not an assignment becomes the command.
+        let script = "COLUMNS=\(LocalTransport.wideColumns) "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" "
+            + "\(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
         let ctx = context
         do {
-            let result = try await Task.detached {
-                try ctx.makeTransport().runProcess(
-                    executable: "/bin/sh",
-                    args: ["-c", script],
-                    stdin: nil,
-                    timeout: 15
-                )
-            }.value
+            // Round-6 decision 11: the `async` seam, so the wait is a
+            // SUSPENSION rather than a cooperative-pool thread blocked on a
+            // semaphore while the exec it waits for runs on that same pool.
+            let result = try await ctx.makeTransport().asyncRunProcess(
+                executable: "/bin/sh",
+                args: ["-c", script],
+                stdin: nil,
+                timeout: 15
+            )
             let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
             let stdout = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
             let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
@@ -124,10 +143,13 @@ struct MemoryListView: View {
                 // A non-zero exit names the status; an exit-0 run that
                 // printed neither marker is `.unconfirmed`, and "status 0"
                 // would be the old bug in a new voice — say that Hermes
-                // printed nothing this side recognises instead.
-                resetError = outcome.detail ?? (result.exitCode != 0
-                    ? "hermes memory reset exited with status \(result.exitCode)."
-                    : "hermes memory reset printed no result. Check the host.")
+                // printed nothing this side recognises instead. Shared with
+                // the Mac twin through
+                // ``HermesMemoryResetVerdict/failureSummary`` — `detail ??`
+                // collapsed the unconfirmed arm into the quoted one whenever
+                // the run printed ANY line.
+                resetError = HermesMemoryResetVerdict.failureSummary(
+                    outcome: outcome, exitCode: result.exitCode)
             }
         } catch {
             resetError = "Couldn't reach Hermes: \(error.localizedDescription)"

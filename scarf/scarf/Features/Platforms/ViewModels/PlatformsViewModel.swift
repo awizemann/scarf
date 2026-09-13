@@ -25,6 +25,8 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
     /// announcement come from this stored fact, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
     var restartInProgress: Bool = false
 
     /// Per-platform "has config on disk" set, computed off-main in `load()`
@@ -256,7 +258,11 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// so the three arms can be tested without a live `hermes`.
     static func restartBanner(_ outcome: HermesCLIOutcome) -> OutcomeMessage {
         if outcome.confidence == .unconfirmed {
-            return .success(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
+            // `.unconfirmed`, not `.success` (P55b): the prose already says
+            // nothing was proven, and a green seal over it asserts a restart
+            // Hermes never confirmed — the exact two-state bug P54b's third
+            // `Kind` arm exists to end.
+            return .unconfirmed(GatewayActionBanner.unconfirmed(.restart, detail: outcome.detail))
         }
         return outcome.succeeded
             ? .success(String(localized: "Gateway restarted"))
@@ -269,6 +275,10 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // nothing has failed yet, and replaced the moment the CLI returns.
         message = String(localized: "Restarting gateway…")
         messageIsFailure = false
+        // The third flag has to be cleared too (P55b): a prior `.unconfirmed`
+        // verdict does not auto-clear, so leaving it set paints the amber
+        // question mark over this in-progress line.
+        messageIsUnconfirmed = false
         Task.detached { [weak self, fileService] in
             // P40: judged by output, like every other gateway-service call
             // site — `_cmd_restart` has exit-0 refusal arms

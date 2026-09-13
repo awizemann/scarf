@@ -366,17 +366,39 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// Pass `.empty` caps to be conservative (drop the version-gated flags) —
     /// e.g. when the target's `hermes --version` probe failed.
     ///
+    /// **`repeat` IS forwarded** (round-6 decision 7). The claim above that
+    /// it is "not modeled on `HermesCronJob`" stopped being true at P38,
+    /// which added `repeatSpec` — the note outlived the code it described,
+    /// and a bounded source job (`repeat.times = 3`) was copied UNBOUNDED,
+    /// running forever on every target. `--repeat` takes no capability gate:
+    /// `cron_create.add_argument("--repeat", type=int, …)` is present at
+    /// every tag Scarf supports — `hermes_cli/subcommands/cron.py:38` @
+    /// `v2026.9.7` and `hermes_cli/main.py:3936` @ `v2026.3.30` (0.6.0, the
+    /// charter's minimum) — and first appears at `v2026.3.17` (0.3.0), below
+    /// the floor. An older target therefore renders it IDENTICALLY: the flag
+    /// parses, `normalize_repeat_value` coerces it (`cron/jobs.py:591`), and
+    /// the copy is bounded exactly as the source is. `repeat.completed` is
+    /// deliberately NOT carried — a fresh job has run zero times, and
+    /// `create_job` stamps `{"times": repeat, "completed": 0}` regardless
+    /// (`cron/jobs.py:1779`).
+    ///
     /// NOT forwarded, each with a concrete reason (all dropped today too):
-    /// - `repeat` — not modeled on `HermesCronJob` (a loaded job carries no
-    ///   repeat count; only the template spec does), so nothing to forward.
     /// - `context_from` — YAML-only; Hermes exposes no `--context-from` CLI flag.
     /// - `pre_run_script` / `no_agent` — `pre_run_script` is a FILE PATH on the
     ///   source host that fleet-apply does not replicate to the target, so
     ///   forwarding `--script` would dangle. `no_agent` (script-only) jobs are
     ///   therefore skipped + surfaced by the caller, not built here. A
     ///   script-replicating copy is tracked separately.
-    /// - `model` — the source's model reference may not be configured on the
-    ///   target (would error at create or first run).
+    /// - `model` / `provider` / `reasoning_effort` — the inference PIN. Not
+    ///   forwarded because the source's model reference may not be configured
+    ///   on the target at all (`cron create --model` would land a job that
+    ///   errors at first run), and `_compute_provider_model_snapshots`
+    ///   (`cron/jobs.py:1599-1620` @ `v2026.9.7`) resolves the unpinned axes
+    ///   against the TARGET's own config, which is the honest answer for a
+    ///   copy. Round-6 decision 8 makes it a DOWNGRADE NOTE rather than a
+    ///   silence, in the P50 `pre_run_script` shape: `HermesCronJob.hasModelPin`
+    ///   is the predicate, `FleetApplyViewModel.caveats` the preview seam and
+    ///   `FleetApplyExecutor`'s `modelPinDowngrades` the report seam.
     /// - `silent` — JSON-only field; `cron create` has no flag for it.
     /// - `monitor_script` / `monitor_url` / `--continuity` — NOT dropped
     ///   silently any more. A monitor job's whole behaviour is "run the agent
@@ -419,7 +441,12 @@ public struct FleetApplyPlan: Sendable, Equatable {
             name: job.name,
             deliver: job.deliver,
             failureDeliver: job.failureDeliver,
-            repeatCount: nil,
+            // Round-6 decision 7. `nil` means "run forever" on both sides —
+            // `repeatSpec.times` is `nil` for an unbounded job and
+            // `create_job` stores `{"times": None, …}` for a missing
+            // `--repeat` (`cron/jobs.py:1779`) — so an unbounded source
+            // still emits no flag and nothing changes for it.
+            repeatCount: job.repeatSpec.times,
             skills: job.skills ?? [],
             workdir: job.workdir.map { rewriteCronPrompt($0, sourceRoot: sourceRoot, targetRoot: targetRoot) },
             schedule: schedule.argumentValue,

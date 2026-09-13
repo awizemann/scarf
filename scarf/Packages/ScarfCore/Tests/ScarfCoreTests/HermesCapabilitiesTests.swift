@@ -127,7 +127,6 @@ import Foundation
         // v0.12 surfaces on.
         #expect(caps.hasCurator)
         #expect(caps.hasFallbackCommand)
-        #expect(caps.hasKanban)
         #expect(caps.hasOneShot)
         #expect(caps.hasSkillURLInstall)
         #expect(caps.hasACPImagePrompts)
@@ -143,6 +142,10 @@ import Foundation
         // flush_memories was REMOVED in v0.12 — flag inverts.
         #expect(!caps.hasFlushMemoriesAux)
         // v0.13 surfaces stay off on a v0.12 host.
+        // `hasKanban` is one of them since P55: `hermes_cli/kanban.py` does
+        // not exist at v2026.4.30 and `kanban` appears zero times in
+        // `commands.py` / `main.py` there.
+        #expect(!caps.hasKanban)
         #expect(!caps.hasGoals)
         #expect(!caps.hasACPQueue)
         #expect(!caps.hasKanbanDiagnostics)
@@ -800,6 +803,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
@@ -815,6 +819,7 @@ import Foundation
         #expect(!caps.hasSkillsProjectTrust)
         #expect(!caps.hasSkillsUpdateForce)
         #expect(!caps.hasMCPIdentityHeader)
+        #expect(!caps.hasKanbanReviewExits)
         #expect(!caps.isV0201OrLater)
         #expect(!caps.isV0203OrLater)
         #expect(!caps.isV0204OrLater)
@@ -823,12 +828,15 @@ import Foundation
         #expect(caps.isV020OrLater)
     }
 
-    @Test func v0203HostHidesOnlyTheGenuineV0204Flag() {
-        // P23 re-floor: of this group only `hasMCPIdentityHeader` is really
-        // a v0.20.4 surface. The other seven land at 0.20.1 / 0.20.3 and a
-        // 0.20.3 host has every one of them.
+    @Test func v0203HostHasEveryFlagInTheV0204Group() {
+        // P23 re-floored most of the group to 0.20.1 / 0.20.3, P55 re-floored
+        // `hasMCPIdentityHeader` to 0.20.1, and P56 added
+        // `hasKanbanReviewExits` at a 0.20.1 floor — so NO member of the
+        // v0.20.4 MARK group is a v0.20.4 surface any more and a 0.20.3 host
+        // has every one of them.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)")
-        #expect(!caps.hasMCPIdentityHeader)
+        #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(!caps.isV0204OrLater)
         #expect(caps.hasCronPauseMarkerGate)
         #expect(caps.hasBuiltinPersonalitiesInCode)
@@ -854,6 +862,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
@@ -868,6 +877,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
@@ -896,6 +906,11 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
         #expect(caps.hasVersionFlagFullOutput)
         #expect(caps.hasCronReasoningEffort)
+        // P59: `hasBotChatCreationCLI` was declared in the v0.21 MARK group on
+        // its v0.20.5 floor and enumerated in NO group test — neither the
+        // v0.21 four (where it would have contradicted them) nor these. It is
+        // a v0.20.5 flag; this is where a reader goes to learn that.
+        #expect(caps.hasBotChatCreationCLI)
         #expect(caps.isV0205OrLater)
     }
 
@@ -905,6 +920,9 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
         #expect(!caps.hasVersionFlagFullOutput)
         #expect(!caps.hasCronReasoningEffort)
+        // …and its `chat` parser has no `--query-file`, so the Bot Chat
+        // creation argv would die on an unknown flag.
+        #expect(!caps.hasBotChatCreationCLI)
         #expect(!caps.isV0205OrLater)
         // The v0.20.4 surface stays alive on a v0.20.4 host.
         #expect(caps.hasCuratorLedger)
@@ -917,6 +935,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.30)")
         #expect(caps.hasVersionFlagFullOutput)
         #expect(caps.hasCronReasoningEffort)
+        #expect(caps.hasBotChatCreationCLI)
         #expect(caps.isV0205OrLater)
     }
 
@@ -925,6 +944,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.9.1)")
         #expect(caps.hasVersionFlagFullOutput)
         #expect(caps.hasCronReasoningEffort)
+        #expect(caps.hasBotChatCreationCLI)
         #expect(caps.isV0205OrLater)
     }
 
@@ -979,8 +999,13 @@ import Foundation
         #expect(!caps.hasBrowserCloseProfile)
         #expect(!caps.isV021OrLater)
         #expect(!caps.isV0206OrLater)
-        // The v0.20.5 surface stays alive on a v0.20.5 host.
+        // The v0.20.5 surface stays alive on a v0.20.5 host — including
+        // `hasBotChatCreationCLI`, which was DECLARED in the v0.21 group and
+        // is a v0.20.5 flag. P59 moved the declaration into the v0.20.5 group
+        // and named it here, because "every v0.21 flag is off at 0.20.5" was
+        // read as covering everything that group contained.
         #expect(caps.hasCronReasoningEffort)
+        #expect(caps.hasBotChatCreationCLI)
         #expect(caps.isV0205OrLater)
     }
 

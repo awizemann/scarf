@@ -31,15 +31,31 @@ struct AuthLogoutUnconfirmedP53Tests {
         #expect(text.contains("printed no result"), "got: \(text)")
     }
 
-    /// Exit 0 with output Hermes did print but neither marker matched: the
-    /// line IS the only thing worth showing, and still no exit code.
-    @Test("an unconfirmed run with output quotes the output, not the status")
-    func anUnconfirmedRunQuotesItsLine() {
+    /// Exit 0 with output Hermes did print but neither marker matched.
+    ///
+    /// **Round-6 P59 reversed this arm.** P53 kept the tail, reasoning that
+    /// on an unconfirmed verdict "the line is the only thing worth showing";
+    /// P54b then settled the house rule the other way on `backup`,
+    /// `sessions optimize` and `debug share` — `.unconfirmed` is gated on the
+    /// CONFIDENCE ALONE, because `judge` fills `detail` with `lines.last` on
+    /// that arm too and the tail is whatever the CLI happened to print last.
+    /// Rendering it after "Remove failed: " asserts that Hermes gave that
+    /// sentence as its reason for a refusal it never made — the same defect
+    /// as quoting "exit 0", in a more convincing voice. The hand-picked
+    /// fixture below reads well; `Scanning credentials ...` does not, and
+    /// the formatter cannot tell them apart.
+    @Test("an unconfirmed run names neither the tail nor the status")
+    func anUnconfirmedRunQuotesNeither() {
         let outcome = HermesAuthLogoutVerdict.judge(
             output: "Provider anthropic is managed by your administrator.", exitCode: 0)
         #expect(outcome.confidence == .unconfirmed)
+        #expect(outcome.detail?.isEmpty == false,
+                "the fixture must carry a tail, or it cannot tell the two gates apart")
         let text = CredentialPoolsViewModel.removeFailureSummary(outcome: outcome, exitCode: 0)
-        #expect(text.contains("managed by your administrator"), "got: \(text)")
+        #expect(text == "hermes auth logout printed no result. Check the host.", """
+            An unconfirmed run's tail is presented as the reason for a \
+            refusal: \(text)
+            """)
         #expect(!text.contains("exit 0"), "got: \(text)")
     }
 

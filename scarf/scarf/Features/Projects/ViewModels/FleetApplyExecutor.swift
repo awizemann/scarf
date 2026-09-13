@@ -273,6 +273,7 @@ struct FleetApplyExecutor: Sendable {
         var created = 0, skipped = 0, failed = 0, deliverAllDowngrades = 0, scriptOnlySkipped = 0
         var monitorSkipped = 0, continuityDowngrades = 0, crossJobContextDowngrades = 0
         var preRunScriptDowngrades = 0
+        var modelPinDowngrades = 0
         var cancelledRemaining = 0
         var createdNames: [String] = []
         // First failing `cron create`'s combined stdout+stderr — the only
@@ -379,6 +380,16 @@ struct FleetApplyExecutor: Sendable {
                 // script file is `t-848d3adc`. Counted on the success arm,
                 // same rule as the two notes above.
                 if job.hasPreRunScript { preRunScriptDowngrades += 1 }
+                // Round-6 decision 8, the P50 shape exactly. `cron create`
+                // WOULD take `--model` / `--provider` / `--reasoning-effort`
+                // (`hermes_cli/subcommands/cron.py:66-77` @ `v2026.9.7`) —
+                // an accepted flag whose value names something only the
+                // SOURCE host has, so forwarding it lands a green "created"
+                // job that fails at first run against a model the target has
+                // no provider or credential for. Dropped, and counted on the
+                // success arm with its three siblings: the copy runs, it just
+                // runs on the target's own default model.
+                if job.hasModelPin { modelPinDowngrades += 1 }
             } else {
                 failed += 1
                 if firstFailureDetail == nil {
@@ -440,6 +451,9 @@ struct FleetApplyExecutor: Sendable {
         }
         if preRunScriptDowngrades > 0 {
             parts.append(String(localized: "\(preRunScriptDowngrades) w/o their pre-run script (the file stays on this host)"))
+        }
+        if modelPinDowngrades > 0 {
+            parts.append(String(localized: "\(modelPinDowngrades) w/o their model pin (the target host's default model runs them)"))
         }
         let status = Self.cronFieldStatus(
             created: created, failed: failed,

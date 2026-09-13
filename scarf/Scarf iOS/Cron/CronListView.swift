@@ -268,7 +268,16 @@ private struct CronRow: View {
 /// (delivery_failures, last_run_at, etc.) pass through untouched
 /// when editing an existing job.
 struct CronEditorView: View {
-    let title: String
+    /// P60: a `LocalizedStringResource`, not a `String`.
+    ///
+    /// `.navigationTitle(_:)` has a `StringProtocol` overload that renders
+    /// its argument VERBATIM, and a `String` parameter selected it — so the
+    /// three call sites' literals ("Edit cron job", "New cron job",
+    /// "Duplicate cron job") reached the bar untranslated even though all
+    /// three already have rows in `Localizable.xcstrings` in six locales.
+    /// A `LocalizedStringResource` makes the literals resource literals at
+    /// the call site and forces the resolving path through `Text`.
+    let title: LocalizedStringResource
     let onSave: (HermesCronJob) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -297,7 +306,7 @@ struct CronEditorView: View {
 
     init(
         initial: HermesCronJob?,
-        title: String,
+        title: LocalizedStringResource,
         recoveryOffer: CronRecoveryOffer,
         onSave: @escaping (HermesCronJob) -> Void
     ) {
@@ -382,6 +391,16 @@ struct CronEditorView: View {
                                 .accessibilityIdentifier("cron.editor.pastOneShot")
                         }
                     }
+                    // Save is already grey; without this the user has no way
+                    // to learn WHICH field is refused, and the failure this
+                    // stops is invisible — Hermes takes the record and the
+                    // job simply never fires.
+                    if let refusal = scheduleRefusal {
+                        Text(refusal.message)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .accessibilityIdentifier("cron.editor.scheduleRefusal")
+                    }
                 }
 
                 Section("Optional") {
@@ -396,7 +415,7 @@ struct CronEditorView: View {
                         .textInputAutocapitalization(.never)
                 }
             }
-            .navigationTitle(title)
+            .navigationTitle(Text(title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -495,10 +514,31 @@ struct CronEditorView: View {
         existing != nil && recoveryOffer.refusesResume
     }
 
+    /// The schedule-shape validations `hermes cron edit` performs and this
+    /// form is the only place to perform — the full `update_job` gate table,
+    /// and why each of these three lands here, is on
+    /// `HermesCronJob.scheduleFormRefusal`. P56, addendum lesson 14.
+    ///
+    /// `carriedIntervalMinutes` is what `buildJob` would WRITE, not what the
+    /// record holds: the sheet has no minutes field, and `buildJob` keeps the
+    /// stored `minutes` only while the kind is unchanged, so a kind switch
+    /// into `interval` has none to carry.
+    private var scheduleRefusal: CronScheduleFormRefusal? {
+        HermesCronJob.scheduleFormRefusal(
+            kind: scheduleKind,
+            expression: scheduleExpression,
+            runAt: scheduleRunAt,
+            carriedIntervalMinutes: existing?.schedule.kind == scheduleKind
+                ? existing?.schedule.minutes
+                : nil
+        )
+    }
+
     private var isValid: Bool {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         return !n.isEmpty && !p.isEmpty && !oneShotTimeIsUnusable
+            && scheduleRefusal == nil
     }
 
     private func buildJob() -> HermesCronJob {
@@ -571,7 +611,30 @@ struct CronEditorView: View {
             // an edit doesn't reset last_run_at, failure counts, etc.
             // Every field the editor doesn't own must be forwarded, or
             // a save silently strips it from jobs.json.
-            nextRunAt: existing?.nextRunAt,
+            //
+            // `next_run_at` is the ONE runtime field a schedule change
+            // invalidates, so it is forwarded only while the schedule stands
+            // still. The due scan fires on the STORED instant —
+            // `_evaluate_due_job` reads `job.get("next_run_at")` and
+            // recomputes only when it is absent (`cron/jobs.py:2910`,
+            // `:2925` @ `v2026.9.7`) — so a re-timed job carrying the old
+            // value keeps the old appointment. What happens next depends on
+            // the kind, and only ONE kind repairs itself: `_reanchor_stale_cron`
+            // (`:2801-2819`) re-anchors a `cron` instant that no longer sits
+            // on its expression's lattice, and nothing does that for an
+            // `interval` (it fires once early) or a `once` — where
+            // `_retire_expired_oneshot` (`:2853-2865`) RETIRES the record
+            // past the grace window without ever running it. A job the user
+            // moved to next Tuesday is deleted for missing last Tuesday.
+            //
+            // Clearing it hands the recomputation to Hermes, which is exactly
+            // what `clearingNextRunAt()` documents for the `setEnabled`
+            // fallback (`IOSCronViewModel:218-219`): `_recover_missing_next_run`
+            // (`:2690-2710`) recomputes from the CURRENT schedule and
+            // persists. The same helper is not reused here because `buildJob`
+            // assembles the record field-by-field and has no instance to
+            // transform; the value it would produce is the same `nil`.
+            nextRunAt: scheduleMoved ? nil : existing?.nextRunAt,
             lastRunAt: existing?.lastRunAt,
             lastError: existing?.lastError,
             preRunScript: existing?.preRunScript,

@@ -212,7 +212,7 @@ struct BotsView: View {
                 if viewModel.isWorking { ProgressView().controlSize(.small) }
                 OutcomeMessageBar(
                     text: viewModel.message,
-                    isFailure: viewModel.messageIsFailure,
+                    kind: viewModel.messageKind,
                     onDismiss: { viewModel.dismissMessage() }
                 )
                 // The only place that re-reads activity: an explicit reload.

@@ -314,13 +314,13 @@ struct SectionAuditF5KanbanTests {
     /// (not blocked/scheduled?)". The planner omitted `scheduled`, so a
     /// parked card could not be dragged anywhere.
     @Test func plannerAcceptsScheduledAsAnUnblockSource() throws {
-        let toUpNext = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .upNext))
+        let toUpNext = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .upNext), caps: .empty)
         #expect(toUpNext.steps == [.unblock])
 
-        let toRunning = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .running))
+        let toRunning = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .running), caps: .empty)
         #expect(toRunning.steps == [.unblock, .dispatch])
 
-        let toDone = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .done))
+        let toDone = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .done), caps: .empty)
         #expect(toDone.steps == [.unblock, .complete(resultRequired: false)])
     }
 
@@ -330,7 +330,7 @@ struct SectionAuditF5KanbanTests {
     /// would have produced a verb that always fails.
     @Test func plannerStillRejectsScheduledToBlocked() {
         #expect(throws: KanbanError.self) {
-            _ = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .blocked))
+            _ = try KanbanService.plan(for: KanbanTransition(from: .scheduled, to: .blocked), caps: .empty)
         }
     }
 
@@ -338,15 +338,15 @@ struct SectionAuditF5KanbanTests {
     /// the explicit Schedule action, which is the `schedule` verb.
     @Test func plannerStillRejectsDragsIntoScheduled() {
         #expect(throws: KanbanError.self) {
-            _ = try KanbanService.plan(for: KanbanTransition(from: .upNext, to: .scheduled))
+            _ = try KanbanService.plan(for: KanbanTransition(from: .upNext, to: .scheduled), caps: .empty)
         }
     }
 
     /// Regression guard for the blocked-source cases the scheduled cases
     /// were modelled on — they must keep their existing plans.
     @Test func plannerKeepsBlockedSourcePlansUnchanged() throws {
-        #expect(try KanbanService.plan(for: KanbanTransition(from: .blocked, to: .upNext)).steps == [.unblock])
-        #expect(try KanbanService.plan(for: KanbanTransition(from: .blocked, to: .running)).steps
+        #expect(try KanbanService.plan(for: KanbanTransition(from: .blocked, to: .upNext), caps: .empty).steps == [.unblock])
+        #expect(try KanbanService.plan(for: KanbanTransition(from: .blocked, to: .running), caps: .empty).steps
             == [.unblock, .dispatch])
     }
 }

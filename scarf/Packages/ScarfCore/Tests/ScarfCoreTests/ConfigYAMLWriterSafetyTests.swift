@@ -351,8 +351,25 @@ struct ConfigYAMLWriterSafetyTests {
     /// and `>` were recognised, so the body of a `|-` scalar was parsed as a
     /// nested mapping and its `key: value`-looking lines became phantom
     /// config keys.
-    @Test func chompedAndIndentedBlockScalarHeadersAreNotMappings() {
-        for header in ["|-", "|+", ">-", ">+", "|2", "|2-", "|  # note"] {
+    /// **P57b turned this from a spelling into a rule.** It used to assert
+    /// `values["agent.system_prompt"] == nil`, which pinned the old
+    /// behaviour (the header opened a stack frame and the body was parsed as
+    /// YAML) rather than the invariant it was written for: the header must
+    /// never come back as the folded garbage `"|- role: assistant tone: dry"`,
+    /// and the sibling key must survive. Both still hold — and the value is
+    /// now the BODY, which is what PyYAML loads. Every expectation below is
+    /// `yaml.safe_load(doc)["agent"]["system_prompt"]` printed by 6.0.3.
+    @Test func chompedAndIndentedBlockScalarHeadersCarryTheirBody() {
+        let expected: [String: String] = [
+            "|-":        "role: assistant\ntone: dry",
+            "|+":        "role: assistant\ntone: dry\n",
+            ">-":        "role: assistant tone: dry",
+            ">+":        "role: assistant tone: dry\n",
+            "|2":        "role: assistant\ntone: dry\n",
+            "|2-":       "role: assistant\ntone: dry",
+            "|  # note": "role: assistant\ntone: dry\n",
+        ]
+        for (header, body) in expected {
             let yaml = """
             agent:
               system_prompt: \(header)
@@ -361,15 +378,13 @@ struct ConfigYAMLWriterSafetyTests {
               verbose: false
             """
             let parsed = HermesYAML.parseNestedYAML(yaml)
-            // The header opens a block, so `system_prompt` holds no scalar —
-            // it must NOT come back as the folded garbage
-            // `"|- role: assistant tone: dry"` the old code produced by
-            // treating the header as a plain value and then joining every
-            // deeper line onto it.
-            #expect(
-                parsed.values["agent.system_prompt"] == nil,
-                "\(header): block scalar header was read as a scalar value: \(parsed.values["agent.system_prompt"] ?? "nil")"
-            )
+            #expect(parsed.values["agent.system_prompt"] == body,
+                    "\(header): got \(parsed.values["agent.system_prompt"] ?? "nil")")
+            // Never the folded garbage the pre-P19 reader produced.
+            #expect(parsed.values["agent.system_prompt"]?.hasPrefix("|") != true)
+            #expect(parsed.values["agent.system_prompt"]?.hasPrefix(">") != true)
+            // The body is not parsed as YAML: no phantom child keys.
+            #expect(parsed.values["agent.system_prompt.role"] == nil, "\(header): phantom child key")
             #expect(parsed.values["agent.verbose"] == "false", "\(header): lost the sibling key")
         }
     }

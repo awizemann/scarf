@@ -74,7 +74,7 @@ import Foundation
             title: "-dash title", body: "-body", assignee: "-alice",
             parentIds: ["--p"], tenant: "-scarf:x", priority: -1,
             idempotencyKey: "-k", maxRuntimeSeconds: 60, createdBy: "-bob",
-            skills: ["--s"], maxRetries: 2, branch: "-feat/x",
+            skills: ["--s"], maxRetries: 2,
             completionContract: "-local"
         ).argv()
         #expect(argv.contains("--body=-body"))
@@ -85,10 +85,9 @@ import Foundation
         #expect(argv.contains("--created-by=-bob"))
         #expect(argv.contains("--skill=--s"))
         #expect(argv.contains("--idempotency-key=-k"))
-        #expect(argv.contains("--branch=-feat/x"))
         #expect(argv.contains("--completion-contract=-local"))
         for flag in ["--body", "--assignee", "--tenant", "--priority", "--parent",
-                     "--created-by", "--skill", "--idempotency-key", "--branch",
+                     "--created-by", "--skill", "--idempotency-key",
                      "--completion-contract", "--max-runtime", "--max-retries"] {
             #expect(!argv.contains(flag), "\(flag) is still a two-token pair")
         }

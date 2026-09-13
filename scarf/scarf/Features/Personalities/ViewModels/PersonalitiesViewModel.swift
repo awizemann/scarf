@@ -48,6 +48,8 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
     /// announcement come from this stored fact, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     /// Picker rows for the active selection: neutral `default`, the resolved
     /// names, plus the current selection if it matches none of them.
@@ -112,9 +114,9 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
         Task { [weak self] in
             // `hermes config set` is a process spawn — an SSH exec channel on
             // a remote host. Detached, matching `load()` right above.
-            let result = await Task.detached {
+            let result = await OffPool.run {
                 ctx.runHermes(HermesConfigSet.argv(key: "display.personality", value: name))
-            }.value
+            }
             guard let self else { return }
             self.isSaving = false
             // P39: output-judged — `set_config_value`'s managed-install arm

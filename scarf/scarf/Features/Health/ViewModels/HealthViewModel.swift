@@ -729,7 +729,7 @@ final class HealthViewModel {
             // Longer than the 60 s default on purpose: `hermes dump` walks
             // state.db and the config tree, and on a remote host that is an
             // SSH round trip over the whole thing.
-            let result = await Task.detached { ctx.runHermes(["dump"], timeout: 120) }.value
+            let result = await OffPool.run { ctx.runHermes(["dump"], timeout: 120) }
             guard let self else { return }
             self.isRunningDump = false
             self.diagnosticsOutput = result.output
@@ -771,18 +771,60 @@ final class HealthViewModel {
         actionMessage = local ? "Collecting debug report…" : "Uploading debug report…"
         let argv = Self.debugShareArguments(local: local, capabilities: capabilities)
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: argv, timeout: 120)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: argv, timeout: 120)
+            }
+            // P54, round-6: judged by output. `run_debug_share` prints
+            // `  (failed to upload: …)` AFTER the `Debug report uploaded:`
+            // block, at exit 0 (`hermes_cli/debug.py:490`, `:494` @
+            // `v2026.9.7`), so a run that got two of three pastes up read
+            // identically to a clean one. See ``HermesDebugShareVerdict``.
+            let outcome = HermesDebugShareVerdict.judge(
+                output: result.output, exitCode: result.exitCode, local: local
+            )
             await MainActor.run {
                 self.isSharingDebug = false
                 self.diagnosticsOutput = result.output
-                self.actionMessage = result.exitCode == 0
-                    ? (local ? "Report collected" : "Upload complete")
-                    : (local ? "Collection failed" : "Upload failed")
+                self.actionMessage = Self.debugShareSummary(outcome: outcome, local: local)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                     self?.actionMessage = nil
                 }
             }
         }
+    }
+
+    /// The strip text for a `debug share`, decided in one place so it is
+    /// reachable from a test without a live `hermes` (the P47b convention).
+    /// Three branches, not two: `.unconfirmed` is exit 0 with no
+    /// `Debug report uploaded:` line, where there is no failure to report and
+    /// nothing worth quoting — and the exit code stays out of it.
+    nonisolated static func debugShareSummary(outcome: HermesCLIOutcome, local: Bool) -> String {
+        if outcome.succeeded {
+            let base = local
+                ? String(localized: "Report collected")
+                : String(localized: "Upload complete")
+            // `--local` never uploads, so the verdict returns no warning for
+            // it (``HermesDebugShareVerdict/judge(output:exitCode:local:)``
+            // short-circuits) and `base` stands alone. A warning here is
+            // therefore always the partial-UPLOAD arm.
+            guard let note = outcome.warning, !note.isEmpty else { return base }
+            // A partial upload is NOT "Upload complete": the links are in
+            // the output either way, but the list is short and only Hermes
+            // knows which target dropped out.
+            return String(localized: "Upload partly complete. \(note)")
+        }
+        // Confidence alone, the same guard shape `sessionsOptimizeSummary`
+        // uses: `judge` fills `detail` with `lines.last` on every arm, so an
+        // unconfirmed run would otherwise be reported as failing with an
+        // unrelated `Uploading...` line as its stated reason.
+        if outcome.confidence == .unconfirmed {
+            return String(localized: "hermes debug share printed no result. Check the host.")
+        }
+        let base = local
+            ? String(localized: "Collection failed")
+            : String(localized: "Upload failed")
+        guard let detail = outcome.detail, !detail.isEmpty else { return base }
+        return "\(base). \(detail)"
     }
 
     /// argv for `debug share`. Extracted so the gate is testable without a
@@ -835,7 +877,9 @@ final class HealthViewModel {
         isRunningAudit = true
         auditMessage = String(localized: "Running supply-chain audit…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
+            }
             await MainActor.run {
                 self.isRunningAudit = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -850,7 +894,10 @@ final class HealthViewModel {
                     // otherwise. `_render_human`'s two heads (:255, :257) and
                     // its `  {severity}  {name}=={version}  {osv-id}` rows
                     // (:264) are what distinguish them, byte-identical back to
-                    // v2026.5.29 — the `hasHermesAudit` floor (charter C1).
+                    // **v2026.5.28** — the `hasHermesAudit` FLOOR tag
+                    // (0.15.0), whose `security_audit.py` blob is
+                    // byte-identical to the v2026.5.29 (0.15.1) one this
+                    // comment used to cite (charter C1).
                     let report = HermesSecurityAuditReport.parse(result.output)
                     if report.findingCount > 0 {
                         let summary = report.severitySummary
@@ -890,9 +937,11 @@ final class HealthViewModel {
         isRunningSessionsOptimize = true
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(
-                args: HermesSessionsOptimizeVerdict.argv, timeout: 120
-            )
+            let result = await OffPool.run {
+                fileService.runHermesCLI(
+                    args: HermesSessionsOptimizeVerdict.argv, timeout: 120
+                )
+            }
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -960,7 +1009,9 @@ final class HealthViewModel {
         isMigratingXAI = true
         migrateXAIMessage = String(localized: "Migrating xAI model…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["migrate", "xai", "--apply"], timeout: 120)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["migrate", "xai", "--apply"], timeout: 120)
+            }
             let config = fileService.loadConfig()
             await MainActor.run {
                 self.isMigratingXAI = false
@@ -968,20 +1019,56 @@ final class HealthViewModel {
                 self.configuredProvider = config.provider
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 if result.exitCode == 0 {
-                    // `migrate xai --apply` exits 0 even when there's nothing to
-                    // migrate / no changes were written — don't claim success.
-                    let lower = trimmed.lowercased()
-                    if lower.contains("nothing to migrate") || lower.contains("no changes") {
-                        self.migrateXAIMessage = String(localized: "No retired xAI model to migrate.")
-                    } else {
-                        self.migrateXAIMessage = String(localized: "Migrated to \(config.model). You may need to restart the gateway.")
-                    }
+                    self.migrateXAIMessage = Self.migrateXAISummary(
+                        output: trimmed, model: config.model
+                    )
                 } else {
                     let tail = trimmed.split(separator: "\n").suffix(3).joined(separator: " · ")
                     self.migrateXAIMessage = String(localized: "Migration failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }
+    }
+
+    /// The strip text for an exit-0 `hermes migrate xai --apply`.
+    ///
+    /// P54, round-6. `_cmd_xai` has **two different** exit-0 arms and the old
+    /// substring test (`"no changes"`) folded them into one sentence:
+    ///
+    /// - `✓ No retired xAI models in config — nothing to migrate.`
+    ///   (`hermes_cli/migrate.py:44` @ `v2026.9.7`, `return 0` at `:45`).
+    ///   Nothing to do, and nothing wrong.
+    /// - `⚠ No changes written.` (`:74`, `return 0` at `:75`). Reached ONLY
+    ///   after `find_retired_xai_refs` found references (`:43` returned
+    ///   early otherwise) and `apply_migration` came back with
+    ///   `config_changed == False` — the rewrite was attempted against a
+    ///   config that still holds retired models and did not land. The user
+    ///   was told "No retired xAI model to migrate.", which is the opposite
+    ///   of what happened, and the Health warning they clicked the button to
+    ///   clear stays up with no explanation.
+    ///
+    /// Copy only — the verb is already output-judged, and both arms are
+    /// genuinely exit 0. Matched on the glyph-stripped, trimmed line so
+    /// `rich`'s colour and the two-space indent do not matter; the two heads
+    /// are distinct prefixes, so neither can match the other.
+    ///
+    /// Tag walk: both lines opened at `v2026.6.19` (`:50`, `:94`),
+    /// `v2026.7.30` (`:50`, `:94`), `v2026.8.19` (`:50`, `:94`) and
+    /// `v2026.9.7` (`:44`, `:74`) — byte-identical at all four; only the
+    /// line numbers moved.
+    nonisolated static func migrateXAISummary(output: String, model: String) -> String {
+        let lines = HermesCLIVerdict.significantLines(output)
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        if lines.contains(where: { head($0).hasPrefix("No retired xAI models in config") }) {
+            return String(localized: "No retired xAI model to migrate.")
+        }
+        if lines.contains(where: { head($0).hasPrefix("No changes written.") }) {
+            return String(localized: """
+                Hermes found retired xAI models but wrote no changes. \
+                The config still names them — check it by hand.
+                """)
+        }
+        return String(localized: "Migrated to \(model). You may need to restart the gateway.")
     }
 
     // MARK: - Version probe (capability-gated argv, Hermes v0.20.5)
@@ -1179,7 +1266,6 @@ final class HealthViewModel {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         proc.arguments = ["dashboard", "--no-open", "--port", String(port)]
-        proc.environment = HermesFileService.enrichedEnvironment()
         // Discard stdout/stderr — we rely on the HTTP probe for liveness and
         // don't want a growing pipe buffer to block the subprocess.
         proc.standardOutput = FileHandle.nullDevice
@@ -1191,9 +1277,21 @@ final class HealthViewModel {
         // live process or the error; everything that touches view state stays
         // on MainActor.
         Task { [weak self] in
-            let spawnError: (any Error)? = await Task.detached {
+            // C10 (round-6 P58): the environment is resolved off the pool
+            // too, not just the spawn. `enrichedEnvironment()` reads a
+            // `static let` whose initialiser is two `zsh` probes at 5 s + 3 s
+            // behind a `swift_once`, so setting it on the main actor froze
+            // the window for up to eight seconds on the Start click — the
+            // spawn below had been moved off and the line feeding it had not.
+            proc.environment = await OffPool.run { HermesFileService.enrichedEnvironment() }
+            // `OffPool.run`, not `Task.detached`: `run()` blocks on the
+            // fork/exec (and on `ssh` for a remote context), and a blocking
+            // call on the cooperative pool is the shape the P52 sweep exists
+            // to catch. P58 moved `HermesProxyService`'s identical spawn and
+            // left these three on the pool — round-6 lesson 3, the siblings.
+            let spawnError: (any Error)? = await OffPool.run {
                 do { try proc.run(); return nil } catch { return error }
-            }.value
+            }
             guard let self else { return }
             if let spawnError {
                 Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(spawnError.localizedDescription, privacy: .public)")

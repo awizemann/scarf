@@ -1297,12 +1297,13 @@ final class ChatViewModel {
 
         // Non-interruptive slash commands keep the "Agent working…"
         // indicator off and surface a transient toast confirming the
-        // command was accepted. v2.5 added `/steer`; v2.8 / Hermes
-        // v0.13 adds `/goal` (lock the agent on a target across turns)
-        // and `/queue` (queue a prompt for after the current turn).
-        // Each gets its own optimistic side-effect on RichChatViewModel
-        // so the chat header pill / queue chip update synchronously
-        // without waiting for a server round-trip.
+        // command was accepted. v2.5 added `/steer`; v2.8 / Hermes v0.13
+        // adds `/queue` (queue a prompt for after the current turn), whose
+        // optimistic side-effect on RichChatViewModel lets the queue chip
+        // update synchronously without waiting for a server round-trip.
+        // `/goal` and `/subgoal` had arms here until P55 and no longer do:
+        // the ACP adapter dispatches neither, so there is nothing to mirror
+        // (round-6 decision 3, see the `default:` arm).
         //
         // CAPABILITY-AWARE (round-4 decision 12). The menu has hidden
         // `/steer` and `/queue` below their v0.13 floor since P37, but the
@@ -1322,29 +1323,6 @@ final class ChatViewModel {
             && !idleSteer
         let parsed = parsedForWire
         switch parsed.name {
-        case "goal":
-            // TODO(WS-2-Q7): once a v0.13 host confirms the
-            // wire-shape, this branch fires only when the host
-            // advertises `hasGoals`; pre-v0.13 hosts hide the menu
-            // row, but a power-user typing `/goal` directly still
-            // lands here. We keep the optimistic write so the pill
-            // appears synchronously — the agent's "unknown command"
-            // reply on a pre-v0.13 host paints the inconsistency in
-            // user-visible chat content (acceptable v1 behavior;
-            // see WS-2 plan "Inconsistency caveat").
-            let arg = RichChatViewModel.parseGoalArgument(parsed.args)
-            switch arg {
-            case .set(let goalText):
-                richChatViewModel.recordActiveGoal(text: goalText)
-                richChatViewModel.transientHint = "Goal locked: \(RichChatViewModel.truncatedToastGoal(goalText))"
-                maybeTriggerKanbanOnboarding()
-            case .clear:
-                richChatViewModel.recordActiveGoal(text: nil)
-                richChatViewModel.transientHint = "Goal cleared."
-            case .empty:
-                richChatViewModel.transientHint = "Sent /goal — see the agent reply for current goal."
-            }
-            scheduleHintClear()
         // `wasAgentWorking` is the second gate: the queue chip and the
         // "runs after current turn" hint are only true of a session with a
         // turn in flight.
@@ -1354,28 +1332,6 @@ final class ChatViewModel {
                 richChatViewModel.recordQueuedPrompt(text: queuedText)
             }
             richChatViewModel.transientHint = "Queued — runs after current turn."
-            scheduleHintClear()
-        case "subgoal":
-            // v0.14 — /subgoal layers extra success criteria onto the
-            // active /goal loop. Same optimistic-mirror pattern as
-            // /goal: parse the arg, mutate the local mirror, surface a
-            // transient hint, then send the slash verbatim to Hermes.
-            // Hermes is the authoritative store; the mirror just
-            // drives the goal-pill trailing line in `SessionInfoBar`.
-            let arg = RichChatViewModel.parseSubgoalArgument(parsed.args)
-            switch arg {
-            case .add(let subText):
-                richChatViewModel.recordSubgoalAdded(subText)
-                richChatViewModel.transientHint = "Subgoal added."
-            case .remove(let idx):
-                richChatViewModel.recordSubgoalRemoved(idx)
-                richChatViewModel.transientHint = "Subgoal \(idx) removed."
-            case .clear:
-                richChatViewModel.recordSubgoalsCleared()
-                richChatViewModel.transientHint = "Subgoals cleared."
-            case .empty:
-                richChatViewModel.transientHint = "Sent /subgoal — see the agent reply for current subgoals."
-            }
             scheduleHintClear()
         // `wasAgentWorking` is the second gate, exactly as `/queue` has it:
         // the "applies after the next tool call" promise is only true of a
@@ -1393,7 +1349,26 @@ final class ChatViewModel {
             // A sub-floor `/steer` / `/queue` lands here too, which is the
             // point: it takes the ordinary-prompt path, indicator included,
             // and says so once.
-            if let notice = RichChatViewModel.subFloorSlashNotice(
+            //
+            // `/goal` and `/subgoal` land here on EVERY host (round-6
+            // decision 3): both are real TUI/gateway commands, but the ACP
+            // adapter's command table has never carried either at any tag
+            // (`acp_adapter/commands.py:44-66` @ `v2026.9.7`), so the text
+            // Scarf sends is an ordinary prompt everywhere. Until P55 they
+            // had `case` arms that painted a goal pill and a "Goal locked"
+            // toast for state Hermes had never been asked to hold;
+            // `acpUnhandledSlashNotice` says what was actually sent instead.
+            if let notice = RichChatViewModel.acpUnhandledSlashNotice(name: parsed.name) {
+                richChatViewModel.transientHint = notice
+                scheduleHintClear()
+                // The kanban teaching moment rode on the dropped `/goal`
+                // arm and moves here with it: a user typing `/goal <text>`
+                // is describing a target, which is what the board is for.
+                // `--clear`-shaped arguments and a bare `/goal` are not.
+                if parsed.name == "goal", Self.goalArgumentDescribesATarget(parsed.args) {
+                    maybeTriggerKanbanOnboarding()
+                }
+            } else if let notice = RichChatViewModel.subFloorSlashNotice(
                 name: parsed.name,
                 capabilities: richChatViewModel.capabilitiesGate
             ) {
@@ -2731,18 +2706,58 @@ final class ChatViewModel {
         "scarf.kanbanOnboarding.dismissed.\(context.id.uuidString)"
     }
 
+    /// Whether a `/goal` argument tail reads as "here is my target" rather
+    /// than a clear. The only surviving reader of a `/goal` argument: it
+    /// decides whether the kanban teaching sheet is worth raising, never
+    /// what Scarf sends (the whole line goes to Hermes verbatim).
+    static func goalArgumentDescribesATarget(_ raw: String) -> Bool {
+        let lowered = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !lowered.isEmpty && lowered != "clear" && lowered != "--clear"
+    }
+
+    /// The version + dismissal half of the decision, pure so it can be tested
+    /// without a host (the detector half needs a live config.yaml).
+    ///
+    /// **`hasKanban`, not "has a version".** The sheet's button runs
+    /// `hermes tools enable kanban --platform cli`
+    /// (`KanbanToolsetEnabler`), and on a host below the flag's floor
+    /// `kanban` is not a toolset — Hermes routes the unknown argv to the
+    /// AGENT and exits 0, which charter C5 exists to stop. The detector
+    /// cannot save us: it reads `config.yaml`, and a 0.12 config has no
+    /// `kanban` in its toolsets for exactly the reason the sheet must not
+    /// offer to add one, so `.disabled` is precisely the answer a pre-floor
+    /// host gives.
+    ///
+    /// `.empty` capabilities (not yet detected, or detection failed) are
+    /// `false` on every flag, so an unwired window stays quiet rather than
+    /// teaching a feature it cannot confirm exists.
+    static func shouldOfferKanbanOnboarding(
+        capabilities: HermesCapabilities, dismissed: Bool
+    ) -> Bool {
+        capabilities.hasKanban && !dismissed
+    }
+
     /// Decide whether to surface the toolset-off teaching sheet after
     /// the user just sent `/goal`. Skipped when:
-    /// - The host pre-dates v0.12 — kanban itself doesn't exist yet.
+    /// - The host pre-dates **v0.13** — `hermes_cli/kanban.py` does not
+    ///   exist at `v2026.4.30` (0.12.0) and the string `kanban` appears zero
+    ///   times in its `commands.py` / `main.py`. At `v2026.5.7` (0.13.0)
+    ///   `hermes_cli/kanban.py` exists AND the slash roster gains
+    ///   `CommandDef("kanban", …)` — which lives in `hermes_cli/commands.py`
+    ///   at `:163`, not in `kanban.py` (P59 cited the wrong file; P60
+    ///   re-opened both tags). The release notes said 0.12, which is why the
+    ///   flag's floor moved in P55 (charter C2) and why this comment said
+    ///   0.12 until P59.
     /// - The user has dismissed this sheet on this host before.
     /// - The detector reports the toolset is already enabled (or the
     ///   detector couldn't classify, in which case we silently skip
     ///   rather than nag with a misleading banner).
     private func maybeTriggerKanbanOnboarding() {
         let dismissedKey = kanbanOnboardingDismissedKey
-        if UserDefaults.standard.bool(forKey: dismissedKey) {
-            return
-        }
+        guard Self.shouldOfferKanbanOnboarding(
+            capabilities: capabilitiesStore?.capabilities ?? .empty,
+            dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
+        ) else { return }
         let context = self.context
         Task { [weak self] in
             let detector = KanbanToolsetDetector(context: context)
