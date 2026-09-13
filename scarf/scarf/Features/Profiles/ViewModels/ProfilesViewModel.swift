@@ -44,7 +44,7 @@ final class ProfilesViewModel {
     func showDetail(_ profile: HermesProfile) {
         detailOutput = "Loading…"
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["profile", "show", profile.name], timeout: 15)
+            let result = fileService.runHermesCLI(args: ["profile", "show", "--", profile.name], timeout: 15)
             await MainActor.run {
                 self.detailOutput = result.output
             }
@@ -60,11 +60,11 @@ final class ProfilesViewModel {
     /// picks up the new home directory.
     func switchTo(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 60)
+            let result = fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 60)
             await MainActor.run {
                 if result.exitCode == 0 {
                     HermesProfileResolver.invalidateCache()
-                    self.message = "Active profile set to \(profile.name) — restart Scarf to refresh."
+                    self.message = String(localized: "Active profile set to \(profile.name) — restart Scarf to refresh.")
                 } else {
                     self.message = Self.failureMessage(result.output)
                 }
@@ -85,7 +85,7 @@ final class ProfilesViewModel {
     @MainActor
     func switchAndRelaunch(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 30)
+            let result = fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 30)
             let switched = await MainActor.run { () -> Bool in
                 guard result.exitCode == 0 else {
                     self.message = Self.failureMessage(result.output)
@@ -135,11 +135,11 @@ final class ProfilesViewModel {
         // the toggle under --clone-all (Decision H, see ProfilesView)
         // but the wire is permissive.
         if noSkills { args.append("--no-skills") }
-        runAndReload(args, success: "Profile '\(name)' created")
+        runAndReload(args, success: String(localized: "Profile '\(name)' created"))
     }
 
     func rename(_ profile: HermesProfile, to newName: String) {
-        runAndReload(["profile", "rename", profile.name, newName], success: "Renamed")
+        runAndReload(["profile", "rename", profile.name, newName], success: String(localized: "Renamed"))
     }
 
     /// Deletes a profile.
@@ -156,7 +156,7 @@ final class ProfilesViewModel {
     /// confirmation dialog — `-y` skips Hermes's prompt, so Scarf's own
     /// prompt becomes the only one the user ever sees.
     func delete(_ profile: HermesProfile) {
-        runAndReload(["profile", "delete", "-y", "--", profile.name], success: "Deleted \(profile.name)")
+        runAndReload(["profile", "delete", "-y", "--", profile.name], success: String(localized: "Deleted \(profile.name)"))
     }
 
     /// Export always lands on **this Mac**, whichever host Hermes runs on
@@ -172,7 +172,7 @@ final class ProfilesViewModel {
     func export(_ profile: HermesProfile, to url: URL) {
         let outputPath = HermesProfileArchive.normalizedOutputPath(url.path)
         guard context.isRemote else {
-            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: "Exported")
+            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: String(localized: "Exported"))
             return
         }
         message = "Exporting \(profile.name)…"
@@ -211,7 +211,7 @@ final class ProfilesViewModel {
     }
 
     func `import`(from path: String) {
-        runAndReload(["profile", "import", path], success: "Imported")
+        runAndReload(["profile", "import", "--", path], success: String(localized: "Imported"))
     }
 
     /// The one useful line out of a CLI failure. Hermes is Python, so a
@@ -227,6 +227,14 @@ final class ProfilesViewModel {
         return "Failed: \(last.prefix(200))"
     }
 
+    /// Run a profile mutation and reload the list.
+    ///
+    /// `success` arrives ALREADY LOCALIZED from the caller (P54, round-6):
+    /// three call sites passed a bare literal, so "Renamed" / "Exported" /
+    /// "Imported" / "Deleted <name>" reached the banner in English on every
+    /// locale. `String(localized:)` at the call site is what puts them in the
+    /// catalogue — extraction is a compile-time scan of the literal, so
+    /// wrapping the PARAMETER here would localize nothing.
     private func runAndReload(_ args: [String], success: String) {
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: args, timeout: 60)

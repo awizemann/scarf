@@ -2,16 +2,48 @@ import SwiftUI
 import ScarfCore
 
 struct MCPServerTestResultView: View {
+    // MARK: - Three states, not two (P54, round-6)
+
+    /// `hermes mcp test` exits 0 whether the probe connected, refused, or
+    /// printed nothing recognisable at all
+    /// (``HermesMCPTestVerdict``). This view had a two-way `if` on
+    /// `succeeded`, so the third state wore the failure's red seal and the
+    /// words "Test failed" — asserting a refusal the run never proved. The
+    /// honest answer is a neutral amber: we do not know.
+    static func glyph(for confidence: HermesCLIOutcome.Confidence) -> String {
+        switch confidence {
+        case .confirmed: "checkmark.seal.fill"
+        case .failed: "xmark.seal.fill"
+        case .unconfirmed: "questionmark.circle.fill"
+        }
+    }
+
+    static func tint(for confidence: HermesCLIOutcome.Confidence) -> Color {
+        switch confidence {
+        case .confirmed: .green
+        case .failed: .red
+        case .unconfirmed: .orange
+        }
+    }
+
+    static func headline(for confidence: HermesCLIOutcome.Confidence) -> Text {
+        switch confidence {
+        case .confirmed: Text("Test passed")
+        case .failed: Text("Test failed")
+        case .unconfirmed: Text("No result — Hermes printed nothing recognisable")
+        }
+    }
+
     let result: MCPTestResult
     @State private var showOutput = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: result.succeeded ? "checkmark.seal.fill" : "xmark.seal.fill")
-                    .foregroundStyle(result.succeeded ? .green : .red)
+                Image(systemName: Self.glyph(for: result.confidence))
+                    .foregroundStyle(Self.tint(for: result.confidence))
                 VStack(alignment: .leading, spacing: 2) {
-                    (result.succeeded ? Text("Test passed") : Text("Test failed"))
+                    Self.headline(for: result.confidence)
                         .font(.subheadline.bold())
                     Text("\(result.elapsed.formatted(.number.precision(.fractionLength(1))))s · \(result.tools.count) tools")
                         .font(.caption)
@@ -48,7 +80,7 @@ struct MCPServerTestResultView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background((result.succeeded ? Color.green : Color.red).opacity(0.08))
+        .background(Self.tint(for: result.confidence).opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

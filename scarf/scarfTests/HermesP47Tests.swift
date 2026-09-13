@@ -250,11 +250,19 @@ struct PositionalSeparatorP47Tests {
         #expect(source.contains("[\"sessions\", \"delete\", \"--yes\", sessionId]") == false)
     }
 
+    /// **Moved, not lost (P54).** Round-6 gave both webhook verbs a verdict,
+    /// and the argv moved onto it so the separator and the markers it is
+    /// judged by cannot drift apart. The guarantee P47 wrote is unchanged —
+    /// `webhook remove|test` still carry `--` before their positional — so
+    /// this follows the argv to its new home rather than being deleted.
     @Test func theWebhookAndAuthResetPositionalsAreSeparated() throws {
         let webhooks = try PluginsManagedLockP47Tests
             .source("scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift")
-        #expect(webhooks.contains("[\"webhook\", \"remove\", \"--\", webhook.name]"))
-        #expect(webhooks.contains("[\"webhook\", \"test\", \"--\", webhook.name]"))
+        #expect(webhooks.contains("HermesWebhookRemoveVerdict.argv(name: webhook.name)"))
+        #expect(webhooks.contains("HermesWebhookTestVerdict.argv(name: webhook.name)"))
+        // The separator itself, asserted where it now lives.
+        #expect(HermesWebhookRemoveVerdict.argv(name: "ci") == ["webhook", "remove", "--", "ci"])
+        #expect(HermesWebhookTestVerdict.argv(name: "ci") == ["webhook", "test", "--", "ci"])
         let pools = try PluginsManagedLockP47Tests
             .source("scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift")
         #expect(pools.contains("[\"auth\", \"reset\", \"--\", provider]"))

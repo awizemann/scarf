@@ -226,14 +226,37 @@ final class WebhooksViewModel {
         return CreatedWebhookSecret(name: name, url: url, secret: secret)
     }
 
+    /// Remove one dynamic webhook route, judged by what Hermes PRINTED
+    /// (P54, round-6).
+    ///
+    /// `webhook` is `_forward_command`ed without `forward_return`
+    /// (`hermes_cli/main.py:1755-1772` @ `v2026.9.7`), so every arm exits 0:
+    /// the disabled-platform gate that returns before the handler even runs
+    /// (`webhook.py:99-101`), `No subscription named '<name>'.` (`:188`) and
+    /// the real removal (`:193`) were all rendered as "Removed" — and, with
+    /// `runAndReload` never touching `messageIsError`, all three in the
+    /// SUCCESS colour. See ``HermesWebhookRemoveVerdict``.
     func remove(_ webhook: HermesWebhook) {
         // P47: `--` before the positional. `name` is the subparser's only
         // positional and it carries no flags
         // (`hermes_cli/subcommands/webhook.py:42-43` @ `v2026.9.7`), so a
         // route name beginning with a dash exited 2 instead of being removed.
-        runAndReload(["webhook", "remove", "--", webhook.name], success: "Removed")
+        // The argv lives on the verdict now, so the separator and the markers
+        // it is judged by cannot drift apart.
+        runAndReload(
+            HermesWebhookRemoveVerdict.argv(name: webhook.name),
+            success: String(localized: "Removed"),
+            judge: HermesWebhookRemoveVerdict.judge(output:exitCode:),
+            verb: "hermes webhook remove"
+        )
     }
 
+    /// Fire a test POST at one route, judged by what Hermes PRINTED
+    /// (P54, round-6). `_cmd_test`'s bare `except Exception` prints
+    /// `  Error: {e}` and `  Is the gateway running? (hermes gateway run)`
+    /// (`hermes_cli/webhook.py:217-219` @ `v2026.9.7`) and then exits 0, so
+    /// a gateway that is simply not running read as "Test fired".
+    /// See ``HermesWebhookTestVerdict``.
     func test(_ webhook: HermesWebhook) {
         Task.detached { [fileService, self] in
             // P47: `--` before the positional, as on `remove`. `webhook test`
@@ -242,28 +265,95 @@ final class WebhooksViewModel {
             // Scarf passes no payload, so the separator is the last token
             // before the name.
             let result = fileService.runHermesCLI(
-                args: ["webhook", "test", "--", webhook.name], timeout: 30
+                args: HermesWebhookTestVerdict.argv(name: webhook.name), timeout: 30
+            )
+            let outcome = HermesWebhookTestVerdict.judge(
+                output: result.output, exitCode: result.exitCode
             )
             await MainActor.run {
-                self.message = result.exitCode == 0 ? "Test fired — check logs" : "Test failed"
+                self.message = Self.testSummary(outcome: outcome)
+                self.messageIsError = !outcome.succeeded
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     self?.message = nil
+                    self?.messageIsError = false
                 }
             }
         }
     }
 
-    private func runAndReload(_ args: [String], success: String) {
+    /// The banner text for a `webhook test`, decided in one place so it is
+    /// reachable from a test without a live `hermes` (the P47b convention).
+    ///
+    /// Three branches, not two (the P47b lesson): `.unconfirmed` is exit 0
+    /// with none of the four markers, and it must not borrow the failure
+    /// voice OR quote an exit code the verdict just declared meaningless.
+    /// The success branch quotes Hermes's `Response ({status}): {body}` line
+    /// because a delivered POST the gateway answered 500 to is a success
+    /// here and a problem there, and the status is the only thing that says
+    /// which.
+    nonisolated static func testSummary(outcome: HermesCLIOutcome) -> String {
+        if outcome.succeeded {
+            guard let detail = outcome.detail, !detail.isEmpty else {
+                return String(localized: "Test fired — check logs")
+            }
+            return String(localized: "Test fired — \(detail)")
+        }
+        // Confidence alone: `judge` always fills `detail` with `lines.last`,
+        // and on an unconfirmed run that is the `Sending test POST to …`
+        // progress line — "Test failed: Sending test POST to …" would blame
+        // Hermes for a refusal it never made.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty
+        else {
+            return outcome.confidence == .unconfirmed
+                ? String(localized: "hermes webhook test printed no result. Check the host.")
+                : String(localized: "Test failed")
+        }
+        return String(localized: "Test failed: \(detail)")
+    }
+
+    /// Run a webhook mutation and reload, judged by `judge` rather than by
+    /// the exit code.
+    ///
+    /// `judge` has no default: it IS the fix (round-6 lesson 10), and a
+    /// default would let the next verb slide back onto the exit code without
+    /// anyone writing that down.
+    private func runAndReload(
+        _ args: [String],
+        success: String,
+        judge: @escaping @Sendable (String, Int32) -> HermesCLIOutcome,
+        verb: String
+    ) {
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: args, timeout: 60)
+            let outcome = judge(result.output, result.exitCode)
             await MainActor.run {
-                self.message = result.exitCode == 0 ? success : "Failed"
+                self.message = Self.mutationSummary(outcome: outcome, success: success, verb: verb)
+                self.messageIsError = !outcome.succeeded
                 self.load(force: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     self?.message = nil
+                    self?.messageIsError = false
                 }
             }
         }
+    }
+
+    /// The banner text for a judged webhook mutation. Three branches.
+    nonisolated static func mutationSummary(
+        outcome: HermesCLIOutcome, success: String, verb: String
+    ) -> String {
+        if outcome.succeeded {
+            guard let note = outcome.warning, !note.isEmpty else { return success }
+            return "\(success) \(note)"
+        }
+        // Confidence alone — see ``testSummary(outcome:)``.
+        guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty
+        else {
+            return outcome.confidence == .unconfirmed
+                ? String(localized: "\(verb) printed no result. Check the host.")
+                : String(localized: "Failed")
+        }
+        return String(localized: "Failed: \(detail)")
     }
 
     // The old `parseWebhookList` lived here. It opened a new record only

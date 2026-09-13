@@ -772,17 +772,57 @@ final class HealthViewModel {
         let argv = Self.debugShareArguments(local: local, capabilities: capabilities)
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: argv, timeout: 120)
+            // P54, round-6: judged by output. `run_debug_share` prints
+            // `  (failed to upload: …)` AFTER the `Debug report uploaded:`
+            // block, at exit 0 (`hermes_cli/debug.py:490`, `:494` @
+            // `v2026.9.7`), so a run that got two of three pastes up read
+            // identically to a clean one. See ``HermesDebugShareVerdict``.
+            let outcome = HermesDebugShareVerdict.judge(
+                output: result.output, exitCode: result.exitCode, local: local
+            )
             await MainActor.run {
                 self.isSharingDebug = false
                 self.diagnosticsOutput = result.output
-                self.actionMessage = result.exitCode == 0
-                    ? (local ? "Report collected" : "Upload complete")
-                    : (local ? "Collection failed" : "Upload failed")
+                self.actionMessage = Self.debugShareSummary(outcome: outcome, local: local)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                     self?.actionMessage = nil
                 }
             }
         }
+    }
+
+    /// The strip text for a `debug share`, decided in one place so it is
+    /// reachable from a test without a live `hermes` (the P47b convention).
+    /// Three branches, not two: `.unconfirmed` is exit 0 with no
+    /// `Debug report uploaded:` line, where there is no failure to report and
+    /// nothing worth quoting — and the exit code stays out of it.
+    nonisolated static func debugShareSummary(outcome: HermesCLIOutcome, local: Bool) -> String {
+        if outcome.succeeded {
+            let base = local
+                ? String(localized: "Report collected")
+                : String(localized: "Upload complete")
+            // `--local` never uploads, so the verdict returns no warning for
+            // it (``HermesDebugShareVerdict/judge(output:exitCode:local:)``
+            // short-circuits) and `base` stands alone. A warning here is
+            // therefore always the partial-UPLOAD arm.
+            guard let note = outcome.warning, !note.isEmpty else { return base }
+            // A partial upload is NOT "Upload complete": the links are in
+            // the output either way, but the list is short and only Hermes
+            // knows which target dropped out.
+            return String(localized: "Upload partly complete. \(note)")
+        }
+        // Confidence alone, the same guard shape `sessionsOptimizeSummary`
+        // uses: `judge` fills `detail` with `lines.last` on every arm, so an
+        // unconfirmed run would otherwise be reported as failing with an
+        // unrelated `Uploading...` line as its stated reason.
+        if outcome.confidence == .unconfirmed {
+            return String(localized: "hermes debug share printed no result. Check the host.")
+        }
+        let base = local
+            ? String(localized: "Collection failed")
+            : String(localized: "Upload failed")
+        guard let detail = outcome.detail, !detail.isEmpty else { return base }
+        return "\(base). \(detail)"
     }
 
     /// argv for `debug share`. Extracted so the gate is testable without a
@@ -968,20 +1008,56 @@ final class HealthViewModel {
                 self.configuredProvider = config.provider
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 if result.exitCode == 0 {
-                    // `migrate xai --apply` exits 0 even when there's nothing to
-                    // migrate / no changes were written — don't claim success.
-                    let lower = trimmed.lowercased()
-                    if lower.contains("nothing to migrate") || lower.contains("no changes") {
-                        self.migrateXAIMessage = String(localized: "No retired xAI model to migrate.")
-                    } else {
-                        self.migrateXAIMessage = String(localized: "Migrated to \(config.model). You may need to restart the gateway.")
-                    }
+                    self.migrateXAIMessage = Self.migrateXAISummary(
+                        output: trimmed, model: config.model
+                    )
                 } else {
                     let tail = trimmed.split(separator: "\n").suffix(3).joined(separator: " · ")
                     self.migrateXAIMessage = String(localized: "Migration failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }
+    }
+
+    /// The strip text for an exit-0 `hermes migrate xai --apply`.
+    ///
+    /// P54, round-6. `_cmd_xai` has **two different** exit-0 arms and the old
+    /// substring test (`"no changes"`) folded them into one sentence:
+    ///
+    /// - `✓ No retired xAI models in config — nothing to migrate.`
+    ///   (`hermes_cli/migrate.py:44` @ `v2026.9.7`, `return 0` at `:45`).
+    ///   Nothing to do, and nothing wrong.
+    /// - `⚠ No changes written.` (`:74`, `return 0` at `:75`). Reached ONLY
+    ///   after `find_retired_xai_refs` found references (`:43` returned
+    ///   early otherwise) and `apply_migration` came back with
+    ///   `config_changed == False` — the rewrite was attempted against a
+    ///   config that still holds retired models and did not land. The user
+    ///   was told "No retired xAI model to migrate.", which is the opposite
+    ///   of what happened, and the Health warning they clicked the button to
+    ///   clear stays up with no explanation.
+    ///
+    /// Copy only — the verb is already output-judged, and both arms are
+    /// genuinely exit 0. Matched on the glyph-stripped, trimmed line so
+    /// `rich`'s colour and the two-space indent do not matter; the two heads
+    /// are distinct prefixes, so neither can match the other.
+    ///
+    /// Tag walk: both lines opened at `v2026.6.19` (`:50`, `:94`),
+    /// `v2026.7.30` (`:50`, `:94`), `v2026.8.19` (`:50`, `:94`) and
+    /// `v2026.9.7` (`:44`, `:74`) — byte-identical at all four; only the
+    /// line numbers moved.
+    nonisolated static func migrateXAISummary(output: String, model: String) -> String {
+        let lines = HermesCLIVerdict.significantLines(output)
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        if lines.contains(where: { head($0).hasPrefix("No retired xAI models in config") }) {
+            return String(localized: "No retired xAI model to migrate.")
+        }
+        if lines.contains(where: { head($0).hasPrefix("No changes written.") }) {
+            return String(localized: """
+                Hermes found retired xAI models but wrote no changes. \
+                The config still names them — check it by hand.
+                """)
+        }
+        return String(localized: "Migrated to \(model). You may need to restart the gateway.")
     }
 
     // MARK: - Version probe (capability-gated argv, Hermes v0.20.5)

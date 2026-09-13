@@ -276,13 +276,18 @@ public final class CuratorViewModel {
     /// Run the curator manually. On v0.13+ hosts this blocks for the
     /// duration of the run (default 600s timeout); pre-v0.13 returns
     /// immediately. Caller passes the capability-decided flag.
+    /// Round-6 decision 2: when Hermes ran PRUNE-ONLY because
+    /// `curator.consolidate` is off, its own sentence replaces the terse
+    /// success message — the ``pin(_:)`` unmanaged-nudge shape.
+    /// ``CuratorService/runNow(synchronous:timeout:)`` returns that note or
+    /// `nil`; `runWithReload` already prefers a non-nil override, so this is
+    /// the whole wiring. No `--consolidate` is passed (decision 2).
     public func runNow(synchronous: Bool, timeout: TimeInterval = 600) async {
         await runWithReload(
             verb: "run",
             successMessage: synchronous ? "Curator run complete" : "Curator run started"
         ) {
             try await self.service.runNow(synchronous: synchronous, timeout: timeout)
-            return nil
         }
     }
 

@@ -238,6 +238,32 @@ struct MCPServersView: View {
         .listStyle(.sidebar)
     }
 
+    // MARK: - Test-result row, three states (P54, round-6)
+
+    static func rowGlyph(for confidence: HermesCLIOutcome.Confidence) -> String {
+        switch confidence {
+        case .confirmed: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .unconfirmed: "questionmark.circle.fill"
+        }
+    }
+
+    static func rowTint(for confidence: HermesCLIOutcome.Confidence) -> Color {
+        switch confidence {
+        case .confirmed: ScarfColor.success
+        case .failed: ScarfColor.danger
+        case .unconfirmed: ScarfColor.warning
+        }
+    }
+
+    static func rowHelp(for result: MCPTestResult) -> Text {
+        switch result.confidence {
+        case .confirmed: Text("\(result.tools.count) tools")
+        case .failed: Text("Test failed")
+        case .unconfirmed: Text("No result — Hermes printed nothing recognisable")
+        }
+    }
+
     @ViewBuilder
     private func serverRow(_ server: HermesMCPServer) -> some View {
         HStack(spacing: 8) {
@@ -259,9 +285,13 @@ struct MCPServersView: View {
             if viewModel.testingNames.contains(server.name) {
                 ProgressView().controlSize(.small)
             } else if let result = viewModel.testResults[server.name] {
-                Image(systemName: result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(result.succeeded ? ScarfColor.success : ScarfColor.danger)
-                    .help(result.succeeded ? Text("\(result.tools.count) tools") : Text("Test failed"))
+                // P54, round-6 (lesson 12): three states, not two. An
+                // `.unconfirmed` probe — `hermes mcp test` at exit 0 with
+                // neither marker — used to wear the danger colour and claim
+                // "Test failed"; it now says it knows nothing.
+                Image(systemName: Self.rowGlyph(for: result.confidence))
+                    .foregroundStyle(Self.rowTint(for: result.confidence))
+                    .help(Self.rowHelp(for: result))
             }
         }
     }

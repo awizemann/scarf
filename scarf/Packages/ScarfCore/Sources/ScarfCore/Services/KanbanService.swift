@@ -514,6 +514,22 @@ public actor KanbanService {
     /// <ids…>`. There's no separate `purge` verb; the `--rm` flag on
     /// `archive` performs the destructive removal. Only valid on tasks
     /// already in `archived`.
+    ///
+    /// **No `--` here, deliberately** (P54, round-6). The round-6 report
+    /// listed this beside `archiveArgv`'s separator as `--` residue; it is
+    /// not. `archive` carries BOTH `task_ids` (`nargs="*"`) and
+    /// `--rm`/`purge_ids` (`nargs="+"`) — `hermes_cli/kanban_parser.py:335-338`
+    /// @ `v2026.9.7` — and argparse's `--` ends option parsing, so
+    /// `archive --rm -- a b` hands `a b` to the POSITIONAL `task_ids` and
+    /// leaves `--rm` with none. That is either an exit-2 "expected at least
+    /// one argument" or, worse, a silent ARCHIVE where the user asked for a
+    /// permanent delete. `archiveArgv` (the non-`--rm` form) takes the
+    /// separator precisely because `task_ids` is the only consumer there.
+    ///
+    /// A task id beginning with a dash is therefore still unreachable on
+    /// this one verb. Hermes generates the ids, so none does today, and
+    /// there is no argparse spelling that would fix it — the separator is
+    /// the wrong tool, not a missing one.
     public func purge(taskIds: [String]) async throws {
         guard !taskIds.isEmpty else { return }
         var args = prefix("archive", "--rm")
