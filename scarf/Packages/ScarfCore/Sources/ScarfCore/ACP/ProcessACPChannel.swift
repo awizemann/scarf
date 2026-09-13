@@ -32,6 +32,16 @@ public actor ProcessACPChannel: ACPChannel {
     private let stderrContinuation: AsyncThrowingStream<String, Error>.Continuation
     public nonisolated let stderr: AsyncThrowingStream<String, Error>
 
+    /// Whether the child is still alive. Test seam for the close watchdog's
+    /// escalation — the process itself stays private.
+    var childIsRunning: Bool { process.isRunning }
+
+    /// How long ``close()``'s watchdog waits between escalations — SIGINT,
+    /// then SIGTERM, then SIGKILL. Two seconds each: long enough for a
+    /// healthy `hermes acp` to flush and exit on the interrupt, short enough
+    /// that a wedged one is bounded rather than permanent.
+    static let closeGrace: TimeInterval = 2
+
     private var isClosed = false
     private let stdoutReader: PipeReader
     private let stderrReader: PipeReader
@@ -237,12 +247,30 @@ public actor ProcessACPChannel: ACPChannel {
             // SIGINT for graceful Python shutdown — raises KeyboardInterrupt
             // cleanly instead of aborting in the middle of a JSON write.
             process.interrupt()
-            // Watchdog: force-kill if still running after 2s. A stuck
+            // Watchdog: insist if still running after the grace. A stuck
             // child shouldn't keep the app's close() hanging.
+            //
+            // Round-6 P58: this escalated SIGINT → SIGTERM and stopped there,
+            // so a child that traps or ignores both — a Python whose
+            // `KeyboardInterrupt` handler is itself wedged, an `ssh` blocked
+            // in an uninterruptible read on a half-open connection — survived
+            // the watchdog entirely, and the "force-kill" the comment
+            // promised never happened. Same escalation the rest of the app
+            // uses (`Process.waitUntilExit(timeout:)`, `HermesProxyService
+            // .stop()`): ask, wait a bounded grace, then SIGKILL, pid-guarded
+            // because `kill(0, …)` signals the whole process group — Scarf
+            // included. `isRunning` means it launched, so a non-positive pid
+            // should be impossible, which is why it is asserted rather than
+            // trusted (round-5 P48b's proxy Stop shape).
             let watchdog = process
             Task.detached {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if watchdog.isRunning { watchdog.terminate() }
+                try? await Task.sleep(nanoseconds: UInt64(Self.closeGrace * 1_000_000_000))
+                guard watchdog.isRunning else { return }
+                watchdog.terminate()
+                try? await Task.sleep(nanoseconds: UInt64(Self.closeGrace * 1_000_000_000))
+                guard watchdog.isRunning else { return }
+                let pid = watchdog.processIdentifier
+                if pid > 0 { kill(pid, SIGKILL) }
             }
         }
 

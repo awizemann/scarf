@@ -6,7 +6,7 @@ import Foundation
 
 /// Real-subprocess coverage for `ProcessACPChannel`'s reader path
 /// (t-5451bd1b sub-fix c). The channel's blocking `availableData`
-/// loops were reworked onto `DispatchSourceRead` (see `PipeLineReader`)
+/// loops were reworked onto `DispatchSourceRead` (see `PipeReader`)
 /// so live channels no longer park two cooperative-pool threads each;
 /// these tests pin the framing semantics the rework must preserve:
 /// `\n` line splitting, empty-line skipping, EOF → stream finish,
