@@ -143,10 +143,13 @@ struct MemoryListView: View {
                 // A non-zero exit names the status; an exit-0 run that
                 // printed neither marker is `.unconfirmed`, and "status 0"
                 // would be the old bug in a new voice — say that Hermes
-                // printed nothing this side recognises instead.
-                resetError = outcome.detail ?? (result.exitCode != 0
-                    ? "hermes memory reset exited with status \(result.exitCode)."
-                    : "hermes memory reset printed no result. Check the host.")
+                // printed nothing this side recognises instead. Shared with
+                // the Mac twin through
+                // ``HermesMemoryResetVerdict/failureSummary`` — `detail ??`
+                // collapsed the unconfirmed arm into the quoted one whenever
+                // the run printed ANY line.
+                resetError = HermesMemoryResetVerdict.failureSummary(
+                    outcome: outcome, exitCode: result.exitCode)
             }
         } catch {
             resetError = "Couldn't reach Hermes: \(error.localizedDescription)"

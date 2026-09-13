@@ -609,10 +609,13 @@ struct MemoryView: View {
                 // A non-zero exit names the status; an exit-0 run that
                 // printed neither marker is `.unconfirmed`, and "status 0"
                 // would be the old bug in a new voice — say that Hermes
-                // printed nothing this side recognises instead.
-                resetAlert = .failure(outcome.detail ?? (result.exitCode != 0
-                    ? "hermes memory reset exited with status \(result.exitCode)."
-                    : "hermes memory reset printed no result. Check the host."))
+                // printed nothing this side recognises instead. The three
+                // branches live in ``HermesMemoryResetVerdict/failureSummary``
+                // so this view and its iOS twin cannot drift: `detail ??`
+                // collapsed the unconfirmed arm into the quoted one whenever
+                // the run printed ANY line, which is most of them.
+                resetAlert = .failure(HermesMemoryResetVerdict.failureSummary(
+                    outcome: outcome, exitCode: result.exitCode))
             }
         }
     }

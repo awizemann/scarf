@@ -2112,6 +2112,31 @@ public enum HermesMemoryResetVerdict {
             succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed
         )
     }
+
+    /// The text a failed `hermes memory reset` shows — three branches, not
+    /// two (round-6 P59).
+    ///
+    /// `.unconfirmed` is gated on the CONFIDENCE ALONE, not on whether there
+    /// is a line to quote — the same invariant
+    /// ``SettingsViewModel/backupFailureSummary(outcome:)`` and
+    /// `HealthViewModel.sessionsOptimizeSummary` carry. `judge` fills
+    /// `detail` with `lines.last` on the unconfirmed arm too, and on a run
+    /// that printed neither marker that tail is some unrelated line —
+    /// rendering it as the alert's reason presents a sentence Hermes never
+    /// said as its refusal. Both consumers (Mac `MemoryView`, iOS
+    /// `MemoryListView`) had `outcome.detail ?? (exit-code branch)`, which
+    /// reaches the honest sentence only when the output was EMPTY.
+    ///
+    /// A `static` formatter rather than an inline branch in each view,
+    /// because inline this text is reachable only through a live `hermes` —
+    /// and because there are two views, which is how the arms diverged.
+    public static func failureSummary(outcome: HermesCLIOutcome, exitCode: Int32) -> String {
+        if outcome.confidence == .unconfirmed {
+            return String(localized: "hermes memory reset printed no result. Check the host.")
+        }
+        if let detail = outcome.detail, !detail.isEmpty { return detail }
+        return String(localized: "hermes memory reset exited with status \(exitCode).")
+    }
 }
 
 // MARK: - sessions optimize — hermes_cli/sessions_cmd.py
