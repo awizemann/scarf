@@ -159,7 +159,7 @@ struct PlatformsView: View {
             Spacer()
             OutcomeMessageBar(
                 text: viewModel.message,
-                isFailure: viewModel.messageIsFailure,
+                kind: viewModel.messageKind,
                 onDismiss: { viewModel.dismissMessage() }
             )
             if viewModel.restartInProgress {

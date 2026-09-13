@@ -209,7 +209,7 @@ struct SettingsView: View {
             Spacer()
             OutcomeMessageBar(
                 text: viewModel.saveMessage,
-                isFailure: viewModel.saveMessageIsFailure,
+                kind: viewModel.messageKind,
                 onDismiss: { viewModel.dismissMessage() }
             )
             HStack(spacing: ScarfSpace.s2) {

@@ -36,6 +36,8 @@ final class SlackSetupViewModel: PlatformSetupForm {
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     let replyToModeOptions = ["off", "first", "all"]
 

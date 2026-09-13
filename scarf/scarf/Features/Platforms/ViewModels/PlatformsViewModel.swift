@@ -25,6 +25,8 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
     /// announcement come from this stored fact, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
     var restartInProgress: Bool = false
 
     /// Per-platform "has config on disk" set, computed off-main in `load()`

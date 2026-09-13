@@ -48,6 +48,8 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
     /// announcement come from this stored fact, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     /// Picker rows for the active selection: neutral `default`, the resolved
     /// names, plus the current selection if it matches none of them.

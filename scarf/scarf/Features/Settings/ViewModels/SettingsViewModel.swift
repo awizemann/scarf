@@ -161,6 +161,11 @@ final class SettingsViewModel {
     /// refusals — under a green checkmark, so a refused save looked exactly
     /// like a successful one. `OutcomeMessageBar` reads this stored fact.
     var saveMessageIsFailure = false
+    /// P54b: the third seal state. ``runBackup()`` and ``runRestore(fromPath:)``
+    /// consume three-state verdicts, and the exit-0-proved-nothing arm used
+    /// to ride the failure flag — a red triangle and a "Failed:" VoiceOver
+    /// prefix over a refusal Hermes never made.
+    var saveMessageIsUnconfirmed = false
     var isLoading = false
 
     /// `hasLoaded` lets a plain section re-entry skip the config/env re-read
@@ -1425,7 +1430,18 @@ final class SettingsViewModel {
             await MainActor.run {
                 self.backupInProgress = false
                 guard outcome.succeeded else {
-                    self.showSaveFailure(Self.backupFailureSummary(outcome: outcome))
+                    // Three states, not two (P54b). `backupFailureSummary`
+                    // has said "printed no result" since P54; the SEAL still
+                    // said failure, so the neutral sentence arrived under a
+                    // red triangle announced as "Failed:". Keyed on
+                    // `confidence`, the way `MCPServerTestResultView` keys
+                    // its glyph and tint.
+                    let text = Self.backupFailureSummary(outcome: outcome)
+                    if outcome.confidence == .unconfirmed {
+                        self.showUnconfirmed(text)
+                    } else {
+                        self.showSaveFailure(text)
+                    }
                     return
                 }
                 // A partial archive is still on disk and still worth
@@ -1506,7 +1522,10 @@ final class SettingsViewModel {
                         String(localized: "Restore complete — restart Scarf"), outcome.warning)))
                     self.load(force: true)
                 } else {
-                    self.applySaveOutcome(.failure(Self.restoreFailureSummary(outcome: outcome)))
+                    // Three states, not two (P54b) — see ``runBackup()``.
+                    let text = Self.restoreFailureSummary(outcome: outcome)
+                    self.applySaveOutcome(
+                        outcome.confidence == .unconfirmed ? .unconfirmed(text) : .failure(text))
                 }
             }
         }
@@ -1671,5 +1690,9 @@ extension SettingsViewModel: OutcomeMessageHosting {
     var messageIsFailure: Bool {
         get { saveMessageIsFailure }
         set { saveMessageIsFailure = newValue }
+    }
+    var messageIsUnconfirmed: Bool {
+        get { saveMessageIsUnconfirmed }
+        set { saveMessageIsUnconfirmed = newValue }
     }
 }

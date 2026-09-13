@@ -25,6 +25,8 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
     /// announcement come from this stored fact, never from the prose.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     /// `hasLoaded` lets a plain section re-entry skip the re-read (the VM is
     /// cached in `AppCoordinator` and persists across switches); Reload and

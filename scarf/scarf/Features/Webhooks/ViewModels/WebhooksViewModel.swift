@@ -53,6 +53,14 @@ final class WebhooksViewModel {
     /// every message in the success colour, so an honest "subscribe failed"
     /// still read as green-checkmark good news. (F9)
     var messageIsError = false
+    /// The third seal state (P54b): an exit-0 run that printed none of the
+    /// verdict's markers. `messageIsError = !outcome.succeeded` folded it
+    /// into the error colour, so "hermes webhook test printed no result"
+    /// — a sentence whose whole point is that nothing was proven — arrived
+    /// under the same warning triangle a real refusal gets. Amber/neutral,
+    /// the way ``MCPServerTestResultView`` renders the same three-way
+    /// verdict. Mutually exclusive with ``messageIsError``.
+    var messageIsUnconfirmed = false
 
     /// True when hermes's webhook gateway isn't configured. In that state,
     /// `hermes webhook list` returns setup instructions rather than a list of
@@ -272,10 +280,11 @@ final class WebhooksViewModel {
             )
             await MainActor.run {
                 self.message = Self.testSummary(outcome: outcome)
-                self.messageIsError = !outcome.succeeded
+                self.applyConfidence(outcome.confidence)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     self?.message = nil
                     self?.messageIsError = false
+                    self?.messageIsUnconfirmed = false
                 }
             }
         }
@@ -311,6 +320,13 @@ final class WebhooksViewModel {
         return String(localized: "Test failed: \(detail)")
     }
 
+    /// Paint the banner from the verdict's three-state `confidence`, not
+    /// from a two-way read of `succeeded` (round-6 lesson 12, P54b).
+    private func applyConfidence(_ confidence: HermesCLIOutcome.Confidence) {
+        messageIsError = confidence == .failed
+        messageIsUnconfirmed = confidence == .unconfirmed
+    }
+
     /// Run a webhook mutation and reload, judged by `judge` rather than by
     /// the exit code.
     ///
@@ -328,11 +344,12 @@ final class WebhooksViewModel {
             let outcome = judge(result.output, result.exitCode)
             await MainActor.run {
                 self.message = Self.mutationSummary(outcome: outcome, success: success, verb: verb)
-                self.messageIsError = !outcome.succeeded
+                self.applyConfidence(outcome.confidence)
                 self.load(force: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                     self?.message = nil
                     self?.messageIsError = false
+                    self?.messageIsUnconfirmed = false
                 }
             }
         }

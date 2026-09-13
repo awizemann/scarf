@@ -85,6 +85,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// Outcome of `message` (GW-F4). This channel carried "Install failed"
     /// and "Installed and enabled" alike, and the header painted both green.
     var messageIsFailure = false
+    /// P54b: the third seal state — an exit-0 run that proved nothing.
+    var messageIsUnconfirmed = false
 
     private var pluginsDir: String { context.paths.pluginsDir }
 
