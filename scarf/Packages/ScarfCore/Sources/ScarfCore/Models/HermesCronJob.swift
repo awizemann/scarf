@@ -1206,7 +1206,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// Shape-only, deliberately. This is `parse_schedule`'s own pre-filter —
     /// five-or-more whitespace fields, each matching `[A-Za-z\d*\-,/]+`
-    /// (`:755-756`) — not a croniter reimplementation. Scarf cannot evaluate
+    /// (`:757-758`) — not a croniter reimplementation. Scarf cannot evaluate
     /// a cron expression, and guessing at range validity would refuse
     /// expressions the host accepts; the host still gets the final word.
     ///
@@ -1245,7 +1245,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
 
     /// `parse_schedule`'s cron-expression pre-filter, ported verbatim:
     /// `len(parts) >= 5 and all(re.match(r'^[A-Za-z\d\*\-,/]+$', p) for p
-    /// in parts[:5])` (`cron/jobs.py:755-756` @ `v2026.9.7`). Letters are
+    /// in parts[:5])` (`cron/jobs.py:757-758` @ `v2026.9.7`). Letters are
     /// allowed on purpose — croniter reads `JAN-DEC` / `MON-FRI`.
     nonisolated static func cronExpressionHasParseableShape(_ expr: String) -> Bool {
         let parts = expr.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
@@ -1630,7 +1630,7 @@ public enum CronScheduleFormRefusal: Sendable, Equatable, CaseIterable {
     /// `nil` on `if not expr` (`cron/jobs.py:1112-1114` @ `v2026.9.7`).
     case cronExpressionMissing
     /// `kind == "cron"` with an expression `parse_schedule`'s own pre-filter
-    /// would reject (`cron/jobs.py:755-756`). Worse than blank: a non-empty
+    /// would reject (`cron/jobs.py:757-758`). Worse than blank: a non-empty
     /// value reaches `croniter(expr, base_time)` (`:1122`) untried.
     case cronExpressionMalformed
     /// `kind == "interval"` with no `minutes` to write. `_interval_schedule`

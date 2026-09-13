@@ -16,7 +16,7 @@ import Foundation
     }
 
     /// `parse_schedule`'s pre-filter is "five or more whitespace fields, each
-    /// `[A-Za-z\d*\-,/]+`" (`cron/jobs.py:755-756` @ `v2026.9.7`). Four
+    /// `[A-Za-z\d*\-,/]+`" (`cron/jobs.py:757-758` @ `v2026.9.7`). Four
     /// fields is not a cron expression; nor is prose.
     @Test(arguments: ["0 9 * *", "every monday", "9am", "0 9 * * @daily"])
     func aMalformedCronExpressionIsRefused(_ expr: String) {
@@ -93,7 +93,7 @@ import Foundation
     /// refuse a record the host wrote.
     /// Faithful to the pre-filter, which inspects `parts[:5]` and nothing
     /// beyond — so a trailing seventh field passes here exactly as it passes
-    /// `parse_schedule` (`cron/jobs.py:755-756` @ `v2026.9.7`), and croniter
+    /// `parse_schedule` (`cron/jobs.py:757-758` @ `v2026.9.7`), and croniter
     /// is left to reject it on the host. Scarf refuses what Hermes's own
     /// pre-filter refuses and no more: guessing at croniter's grammar would
     /// refuse expressions the host accepts.
