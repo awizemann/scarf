@@ -1540,8 +1540,12 @@ final class SettingsViewModel {
     /// that no user could have prevented; with `--force` the remaining
     /// failures are real, and Hermes names them (`Error: File not found: …`,
     /// `Error: Not a valid zip file: …`, `Error: zip does not appear to be a
-    /// Hermes backup …` — `hermes_cli/backup.py:921`, `:924`, `:936` @
-    /// `v2026.9.7`, all `sys.exit(1)`).
+    /// Hermes backup …` — `hermes_cli/backup.py:923`, `:926`, `:934` @
+    /// `v2026.9.7`; each `print` is followed by its `sys.exit(1)` at `:924`,
+    /// `:927`, `:935`. The third prints `Error: {reason}` from
+    /// `_validate_backup_zip`, whose refusal string is `:693`. (P59: the three
+    /// numbers were `:921`/`:924`/`:936` — `:921` is `zip_path = …`, `:924` is
+    /// the exit under the FIRST print, and `:936` is `prefix = _detect_prefix`.)
     nonisolated static func restoreFailureSummary(outcome: HermesCLIOutcome) -> String {
         // Confidence alone — see ``backupFailureSummary(outcome:)``.
         guard outcome.confidence != .unconfirmed, let detail = outcome.detail, !detail.isEmpty

@@ -1582,6 +1582,67 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `--reasoning-effort`, so nothing reads this flag today.
     public var hasCronReasoningEffort: Bool { isV0205OrLater }
 
+    // Moved here from the v0.21 MARK group by round-6 P59: the floor is
+    // v0.20.5 and a v0.20.5 group exists, so the declaration now sits with the
+    // flags its group tests cover — and it is enumerated in all four of them.
+    // (Where no group matches a re-floored flag — `hasMCPIdentityHeader` and
+    // `hasKanbanReviewExits`, both v0.20.1 — P55 and P56b kept it in place and
+    // said so in the MARK: the MARK is a location, never evidence. Here the
+    // right location already existed, so the note is not needed twice.)
+
+    /// The full argv Scarf needs to CREATE a bot's canonical Bot Chat:
+    /// `hermes -p <bot> chat --in ~ -c "Bot Chat" --create-if-missing -Q
+    /// --query-file <path>` (see
+    /// `BotConversationViewModel.createCanonicalBotChat`).
+    ///
+    /// **Source-verified per flag, at the `hasBotMode` floor tag
+    /// v2026.8.16.2 (0.20.3) and at v2026.8.31 (0.21.0):**
+    /// - `-c/--continue` — present at 0.20.3 (`hermes_cli/_parser.py:401`).
+    /// - `--create-if-missing` — present at 0.20.3 (`_parser.py:410`).
+    /// - `-Q/--quiet` — present at 0.20.3 (`_parser.py:368`).
+    /// - `--in` — present at 0.20.3 (`_parser.py:390`).
+    /// - **`--query-file` — ABSENT at 0.20.3.** `git grep query-file
+    ///   v2026.8.16.2 -- '*.py'` returns nothing; the chat parser there has
+    ///   only `-q/--query` (`_parser.py:304`).
+    ///
+    /// argparse rejects the WHOLE invocation on an unknown flag, so below
+    /// the floor the create would fail with a parser error rather than doing
+    /// anything. The creation path is therefore floored at the tag where
+    /// every flag exists, and the pane says so instead of offering a button
+    /// that cannot work. Reading and messaging an EXISTING Bot Chat goes over
+    /// ACP and stays on the `hasBotMode` floor.
+    ///
+    /// `--query-file` is not substitutable with `-q <text>` here: the body is
+    /// arbitrary user text that would ride a remote `bash -lc` command line.
+    ///
+    /// **That tag is v0.20.5, not v0.21** (P55 re-walk; charter C2 — the
+    /// "first appears at v0.21" line above was the un-walked half of an
+    /// otherwise per-flag-verified doc). Both blobs opened:
+    ///
+    /// - **`v2026.8.18`** (`pyproject.toml` = **0.20.4**):
+    ///   `hermes_cli/_parser.py` contains neither `--query-file` nor
+    ///   `query_file`.
+    /// - **`v2026.8.19`** (**0.20.5**): the chat parser's mutually-exclusive
+    ///   query group is `hermes_cli/_parser.py:303-316` (opened at `:303`,
+    ///   closed at `:316`). Both members are cited on their
+    ///   `add_argument(` line: `-q`/`--query` at `:304` and `--query-file`
+    ///   at `:307`. Every other flag of the argv is present at that same
+    ///   tag: `--in` `:401`, `--continue`/`-c` `:411-412`,
+    ///   `--create-if-missing` `:421`, `-Q`/`--quiet` `:379-380`.
+    ///   `--profile`/`-p` is **not a parser argument at all**: `main.
+    ///   _apply_profile_override` consumes it before argparse runs, and
+    ///   `_parser.py:20-23` is only the `PRE_ARGPARSE_INHERITED_FLAGS`
+    ///   table that records it for relaunch (`:16-19` says so).
+    ///
+    /// **What each version range renders differently than Scarf's last
+    /// release** (charter C1): only **0.20.5 and 0.20.6** change. The single
+    /// consumer — `BotConversationView.swift:27`'s create affordance — now
+    /// offers the button on hosts whose parser accepts every flag of the
+    /// argv, instead of showing the unsupported note. Below 0.20.5 (where
+    /// the argv would die on an unknown flag) and at 0.21+ the rendering is
+    /// identical to the last release.
+    public var hasBotChatCreationCLI: Bool { isV0205OrLater }
+
     // MARK: v0.21 (v2026.8.31) flags
     //
     // v0.21 ("Pantheon") is an additive cycle. Note the intermediate
@@ -1685,59 +1746,6 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// unsupported `--deliver` value makes argparse reject the whole
     /// `cron create`. Absent at v2026.8.19, present at v2026.8.27.
     public var hasCronBotChatDelivery: Bool { isV0206OrLater }
-
-    /// The full argv Scarf needs to CREATE a bot's canonical Bot Chat:
-    /// `hermes -p <bot> chat --in ~ -c "Bot Chat" --create-if-missing -Q
-    /// --query-file <path>` (see
-    /// `BotConversationViewModel.createCanonicalBotChat`).
-    ///
-    /// **Source-verified per flag, at the `hasBotMode` floor tag
-    /// v2026.8.16.2 (0.20.3) and at v2026.8.31 (0.21.0):**
-    /// - `-c/--continue` — present at 0.20.3 (`hermes_cli/_parser.py:401`).
-    /// - `--create-if-missing` — present at 0.20.3 (`_parser.py:410`).
-    /// - `-Q/--quiet` — present at 0.20.3 (`_parser.py:368`).
-    /// - `--in` — present at 0.20.3 (`_parser.py:390`).
-    /// - **`--query-file` — ABSENT at 0.20.3.** `git grep query-file
-    ///   v2026.8.16.2 -- '*.py'` returns nothing; the chat parser there has
-    ///   only `-q/--query` (`_parser.py:304`).
-    ///
-    /// argparse rejects the WHOLE invocation on an unknown flag, so below
-    /// the floor the create would fail with a parser error rather than doing
-    /// anything. The creation path is therefore floored at the tag where
-    /// every flag exists, and the pane says so instead of offering a button
-    /// that cannot work. Reading and messaging an EXISTING Bot Chat goes over
-    /// ACP and stays on the `hasBotMode` floor.
-    ///
-    /// `--query-file` is not substitutable with `-q <text>` here: the body is
-    /// arbitrary user text that would ride a remote `bash -lc` command line.
-    ///
-    /// **That tag is v0.20.5, not v0.21** (P55 re-walk; charter C2 — the
-    /// "first appears at v0.21" line above was the un-walked half of an
-    /// otherwise per-flag-verified doc). Both blobs opened:
-    ///
-    /// - **`v2026.8.18`** (`pyproject.toml` = **0.20.4**):
-    ///   `hermes_cli/_parser.py` contains neither `--query-file` nor
-    ///   `query_file`.
-    /// - **`v2026.8.19`** (**0.20.5**): the chat parser's mutually-exclusive
-    ///   query group is `hermes_cli/_parser.py:303-316` (opened at `:303`,
-    ///   closed at `:316`). Both members are cited on their
-    ///   `add_argument(` line: `-q`/`--query` at `:304` and `--query-file`
-    ///   at `:307`. Every other flag of the argv is present at that same
-    ///   tag: `--in` `:401`, `--continue`/`-c` `:411-412`,
-    ///   `--create-if-missing` `:421`, `-Q`/`--quiet` `:379-380`.
-    ///   `--profile`/`-p` is **not a parser argument at all**: `main.
-    ///   _apply_profile_override` consumes it before argparse runs, and
-    ///   `_parser.py:20-23` is only the `PRE_ARGPARSE_INHERITED_FLAGS`
-    ///   table that records it for relaunch (`:16-19` says so).
-    ///
-    /// **What each version range renders differently than Scarf's last
-    /// release** (charter C1): only **0.20.5 and 0.20.6** change. The single
-    /// consumer — `BotConversationView.swift:27`'s create affordance — now
-    /// offers the button on hosts whose parser accepts every flag of the
-    /// argv, instead of showing the unsupported note. Below 0.20.5 (where
-    /// the argv would die on an unknown flag) and at 0.21+ the rendering is
-    /// identical to the last release.
-    public var hasBotChatCreationCLI: Bool { isV0205OrLater }
 
     /// `hermes browser close-profile` and the rest of the new top-level
     /// `browser` subcommand (registered in `_BUILTIN_SUBCOMMANDS` at

@@ -1639,9 +1639,10 @@ public enum CronScheduleFormRefusal: Sendable, Equatable, CaseIterable {
     /// and `compute_next_run` returns `nil` (`:1106-1110`).
     case intervalMinutesMissing
     /// `kind == "once"` with a `run_at` no reader can parse. `parse_schedule`
-    /// raises `Invalid timestamp` (`cron/jobs.py:779-780`); a direct
-    /// `jobs.json` write instead leaves `_parse_aware` answering `nil`
-    /// (`:816-822`) forever.
+    /// raises `Invalid timestamp` (`cron/jobs.py:781` @ `v2026.9.7` — the
+    /// `raise ValueError(f"Invalid timestamp '{schedule}': {e}")` under the
+    /// `except ValueError` at `:780`); a direct `jobs.json` write instead
+    /// leaves `_parse_aware` answering `nil` (`:817-823`) forever.
     case oneShotTimeUnparseable
 
     public var message: String {

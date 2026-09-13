@@ -111,8 +111,11 @@ import Testing
         #expect(caps("0.20.3").hasBotMode)
         #expect(!caps("0.20.3").hasBotChatCreationCLI)
         #expect(!caps("0.20.4").hasBotChatCreationCLI)
-        // P55 re-floor: `--query-file` is `hermes_cli/_parser.py:308` at
-        // v2026.8.19 = 0.20.5, absent at v2026.8.18 = 0.20.4.
+        // P55 re-floor: `--query-file` is `hermes_cli/_parser.py:307` at
+        // v2026.8.19 = 0.20.5, absent at v2026.8.18 = 0.20.4. The line is the
+        // `add_argument(` call, which is how its sibling `-q`/`--query` is
+        // cited (`:304`); `:308` is the argument STRING on the next line, and
+        // P59 made the three sites agree on the call line.
         #expect(caps("0.20.5").hasBotChatCreationCLI)
         #expect(caps("0.20.6").hasBotChatCreationCLI)
         #expect(caps("0.21.0").hasBotChatCreationCLI)
