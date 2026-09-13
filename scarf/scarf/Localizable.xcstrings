@@ -57196,6 +57196,206 @@
         }
       }
     },
+    "That isn't a readable timestamp. Use an ISO8601 time, like \"2026-09-20T09:00:00\"." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist kein lesbarer Zeitstempel. Verwende eine ISO8601-Zeit, z. B. „2026-09-20T09:00:00“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eso no es una marca de tiempo legible. Usa una hora ISO8601, como «2026-09-20T09:00:00»."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce n'est pas un horodatage lisible. Utilisez une heure ISO8601, par exemple « 2026-09-20T09:00:00 »."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは読み取れるタイムスタンプではありません。「2026-09-20T09:00:00」のような ISO8601 形式で指定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isso não é um carimbo de data/hora legível. Use um horário ISO8601, como \"2026-09-20T09:00:00\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是可识别的时间戳。请使用 ISO8601 时间，例如 “2026-09-20T09:00:00”。"
+          }
+        }
+      }
+    },
+    "Interval jobs need a minutes value this form can't set. Pick \"cron\" or \"once\", or create the job from the Mac app." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Intervall-Jobs brauchen einen Minutenwert, den dieses Formular nicht setzen kann. Wähle „cron“ oder „once“ oder lege den Job in der Mac-App an."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las tareas de intervalo necesitan un valor de minutos que este formulario no puede establecer. Elige «cron» u «once», o crea la tarea desde la app de Mac."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les tâches à intervalle ont besoin d'une valeur en minutes que ce formulaire ne peut pas définir. Choisissez « cron » ou « once », ou créez la tâche depuis l'app Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インターバルジョブにはこのフォームでは設定できない分数が必要です。「cron」か「once」を選ぶか、Mac アプリで作成してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tarefas de intervalo precisam de um valor em minutos que este formulário não define. Escolha \"cron\" ou \"once\", ou crie a tarefa no app do Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "间隔任务需要一个此表单无法设置的分钟值。请选择 “cron” 或 “once”，或在 Mac 应用中创建该任务。"
+          }
+        }
+      }
+    },
+    "That isn't a cron expression. Use five or more fields, like \"0 9 * * 1-5\"." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist kein Cron-Ausdruck. Verwende fünf oder mehr Felder, z. B. „0 9 * * 1-5“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eso no es una expresión cron. Usa cinco campos o más, como «0 9 * * 1-5»."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce n'est pas une expression cron. Utilisez au moins cinq champs, par exemple « 0 9 * * 1-5 »."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは cron 式ではありません。「0 9 * * 1-5」のように 5 つ以上のフィールドを指定してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isso não é uma expressão cron. Use cinco campos ou mais, como \"0 9 * * 1-5\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是 cron 表达式。请使用五个或更多字段，例如 “0 9 * * 1-5”。"
+          }
+        }
+      }
+    },
+    "Enter a cron expression — a cron job without one is saved but never runs." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gib einen Cron-Ausdruck ein — ein Cron-Job ohne ihn wird gespeichert, läuft aber nie."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Introduce una expresión cron: una tarea cron sin ella se guarda pero nunca se ejecuta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saisissez une expression cron — sans elle, la tâche est enregistrée mais ne s'exécute jamais."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron 式を入力してください。式がない cron ジョブは保存されても実行されません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informe uma expressão cron — sem ela, a tarefa é salva mas nunca é executada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请输入 cron 表达式——没有表达式的定时任务会被保存，但永远不会运行。"
+          }
+        }
+      }
+    },
+    "Edit cron job" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cron-Job bearbeiten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editar tarea cron"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modifier la tâche cron"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron ジョブを編集"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Editar tarefa cron"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑定时任务"
+          }
+        }
+      }
+    },
     "New folder name" : {
       "localizations" : {
         "de" : {

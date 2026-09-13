@@ -1130,6 +1130,96 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         return naive.addingTimeInterval(12 * 3600) < cutoff
     }
 
+    /// The validations `hermes cron edit` performs on a SCHEDULE that the iOS
+    /// form has to perform itself — P56, addendum lesson 14.
+    ///
+    /// iOS never shells `cron edit`: `IOSCronViewModel.saveJobs` rewrites
+    /// `cron/jobs.json` through `GuardedJSONStore`, so no argparse and no
+    /// `update_job` stands behind the form. Everything `cron edit` would have
+    /// refused has to be refused here or it lands on disk. The full
+    /// enumeration of `update_job`'s gates at `v2026.9.7` (reached from
+    /// `cron_edit` → `_cron_api(action="update")`, `hermes_cli/cron.py:619`),
+    /// and where each one lives on iOS:
+    ///
+    /// | `update_job` gate | `cron/jobs.py` @ `v2026.9.7` | iOS |
+    /// |---|---|---|
+    /// | `_IMMUTABLE_JOB_FIELDS` (`id`) | `:369`, raised `:1932-1935` | the form never rewrites `id` |
+    /// | `_UPDATE_FIELD_NORMALIZERS` (`workdir`, `monitor_script`, `monitor_url`, `reasoning_effort`) | `:1591-1596` | no field for any of them; forwarded verbatim |
+    /// | `_reject_terminal_activation` | `:1865-1878` | `CronEditorView.enabledIsLocked` (P50b) |
+    /// | `_validate_job_mode_invariants` | `:1944-1949` | no field for `script`/`no_agent`/monitor, so the merged record cannot change |
+    /// | `job_payload_is_empty` | `:428-435`, raised `:1950-1951` | `isValid` requires a non-blank prompt — strictly stronger |
+    /// | `parse_schedule` cron-expression shape + `croniter(expr)` | `:716-726`, `:755-758` | **here**, `.cronExpressionMissing` / `.cronExpressionMalformed` |
+    /// | `parse_schedule` ISO timestamp parse | `:762-780` | **here**, `.oneShotTimeUnparseable` |
+    /// | `_interval_schedule` always yields an int `minutes` | `:729-730` | **here**, `.intervalMinutesMissing` |
+    /// | `_next_run_or_reject_past_oneshot` / `_fill_missing_next_run` | `:1899-1910`, `:1912-1927` | `CronEditorView.oneShotTimeIsUnusable` (P50 decision 13) |
+    ///
+    /// The three refused here all produce the same silent shape when they
+    /// reach `jobs.json`: `compute_next_run` (`:1096-1123`) answers `nil` for
+    /// a `cron` kind with no `expr` (`:1112-1114`) and for an `interval` with
+    /// no `minutes` (`:1106-1110`), and `_parse_aware` answers `nil` for an
+    /// unreadable `run_at` (`:816-822`), so the due scan's recovery path
+    /// (`_recover_missing_next_run`, `:2690-2710`) can never arm the record.
+    /// The job sits in the list saying "scheduled" and never fires. A
+    /// malformed-but-non-empty `expr` is worse than silent: `compute_next_run`
+    /// hands it straight to `croniter(expr, base_time)` (`:1122`) with no
+    /// `try`, so it raises inside the tick.
+    ///
+    /// Shape-only, deliberately. This is `parse_schedule`'s own pre-filter —
+    /// five-or-more whitespace fields, each matching `[A-Za-z\d*\-,/]+`
+    /// (`:755-756`) — not a croniter reimplementation. Scarf cannot evaluate
+    /// a cron expression, and guessing at range validity would refuse
+    /// expressions the host accepts; the host still gets the final word.
+    ///
+    /// `carriedIntervalMinutes` is what the form would actually WRITE (the
+    /// existing record's `minutes`, and only while the kind is unchanged) —
+    /// not what the record holds. There is no minutes field on the sheet, so
+    /// a new `interval` job, or one switched to `interval` from another kind,
+    /// has nowhere to get one; naming that beats writing a job that can never
+    /// fire. Growing the form a minutes field is `t-f0a5b2ce`.
+    ///
+    /// No parameter takes a default: each one IS the fix (addendum lesson 10).
+    public nonisolated static func scheduleFormRefusal(
+        kind: String,
+        expression: String,
+        runAt: String,
+        carriedIntervalMinutes: Int?
+    ) -> CronScheduleFormRefusal? {
+        switch kind {
+        case "cron":
+            let expr = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+            if expr.isEmpty { return .cronExpressionMissing }
+            return cronExpressionHasParseableShape(expr) ? nil : .cronExpressionMalformed
+        case "interval":
+            return carriedIntervalMinutes == nil ? .intervalMinutesMissing : nil
+        case "once":
+            let text = runAt.trimmingCharacters(in: .whitespacesAndNewlines)
+            // An EMPTY one-shot time is `oneShotTimeIsUnusable`'s refusal, not
+            // this one — two messages for one field would be a worse form.
+            if text.isEmpty { return nil }
+            if CronScheduleFormatter.isoDate(text) != nil { return nil }
+            return parseHermesTimestamp(text) == nil ? .oneShotTimeUnparseable : nil
+        default:
+            return nil
+        }
+    }
+
+    /// `parse_schedule`'s cron-expression pre-filter, ported verbatim:
+    /// `len(parts) >= 5 and all(re.match(r'^[A-Za-z\d\*\-,/]+$', p) for p
+    /// in parts[:5])` (`cron/jobs.py:755-756` @ `v2026.9.7`). Letters are
+    /// allowed on purpose — croniter reads `JAN-DEC` / `MON-FRI`.
+    nonisolated static func cronExpressionHasParseableShape(_ expr: String) -> Bool {
+        let parts = expr.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+        guard parts.count >= 5 else { return false }
+        // ASCII-exact, like the Python character class: a full-width digit or
+        // an accented letter is NOT a cron field, and `CharacterSet
+        // .alphanumerics` would have accepted both.
+        return parts.prefix(5).allSatisfy { part in
+            !part.isEmpty && part.allSatisfy { ch in
+                ch.isASCII && (ch.isLetter || ch.isNumber || "*-,/".contains(ch))
+            }
+        }
+    }
+
     public nonisolated var deliveryDisplay: String? {
         guard let deliver, !deliver.isEmpty else { return nil }
         // v0.9.0 extends Discord routing to threads: `discord:<chat>:<thread>`.
@@ -1485,5 +1575,45 @@ public struct CronDispatchStamp: Sendable, Equatable {
             .filter { $0.0 > 0 }
             .map { "\($0.0)\($0.1)" }
         return parts.isEmpty ? "0m" : parts.joined(separator: " ")
+    }
+}
+
+/// One schedule-shape refusal the iOS cron form makes on `hermes cron edit`'s
+/// behalf — see `HermesCronJob.scheduleFormRefusal(kind:expression:runAt:carriedIntervalMinutes:)`
+/// for the full table of `update_job` gates and which of them each case ports.
+///
+/// Each `message` says what is missing AND what happens without it, because
+/// the failure it prevents is invisible: Hermes accepts the record, the list
+/// row reads "scheduled", and the job simply never runs.
+public enum CronScheduleFormRefusal: Sendable, Equatable, CaseIterable {
+    /// `kind == "cron"` with a blank expression. `compute_next_run` returns
+    /// `nil` on `if not expr` (`cron/jobs.py:1112-1114` @ `v2026.9.7`).
+    case cronExpressionMissing
+    /// `kind == "cron"` with an expression `parse_schedule`'s own pre-filter
+    /// would reject (`cron/jobs.py:755-756`). Worse than blank: a non-empty
+    /// value reaches `croniter(expr, base_time)` (`:1122`) untried.
+    case cronExpressionMalformed
+    /// `kind == "interval"` with no `minutes` to write. `_interval_schedule`
+    /// (`cron/jobs.py:729-730`) always produces one; the iOS form has no
+    /// field for it, so a new or kind-switched interval job would carry none
+    /// and `compute_next_run` returns `nil` (`:1106-1110`).
+    case intervalMinutesMissing
+    /// `kind == "once"` with a `run_at` no reader can parse. `parse_schedule`
+    /// raises `Invalid timestamp` (`cron/jobs.py:779-780`); a direct
+    /// `jobs.json` write instead leaves `_parse_aware` answering `nil`
+    /// (`:816-822`) forever.
+    case oneShotTimeUnparseable
+
+    public var message: String {
+        switch self {
+        case .cronExpressionMissing:
+            return String(localized: "Enter a cron expression — a cron job without one is saved but never runs.")
+        case .cronExpressionMalformed:
+            return String(localized: "That isn't a cron expression. Use five or more fields, like \"0 9 * * 1-5\".")
+        case .intervalMinutesMissing:
+            return String(localized: "Interval jobs need a minutes value this form can't set. Pick \"cron\" or \"once\", or create the job from the Mac app.")
+        case .oneShotTimeUnparseable:
+            return String(localized: "That isn't a readable timestamp. Use an ISO8601 time, like \"2026-09-20T09:00:00\".")
+        }
     }
 }

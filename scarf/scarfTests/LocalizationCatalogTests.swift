@@ -136,6 +136,11 @@ struct LocalizationCatalogTests {
         // call site is under `Scarf iOS`.
         "Duplicate cron job",
         "Pick a future time — a one-shot more than %lld s in the past can never fire.",
+        // P56: the edit sheet's title, the last of the three `CronEditorView`
+        // titles without a row ("New cron job" has one because `CronView` on
+        // the Mac uses the same literal). The other twenty-one unlocalized
+        // `.help(…)` literals stay on `t-3bcd1d7f`.
+        "Edit cron job",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
