@@ -268,6 +268,25 @@ struct PositionalSeparatorP47Tests {
         #expect(pools.contains("[\"auth\", \"reset\", \"--\", provider]"))
     }
 
+    /// **P60: the three `profile` verbs.** `profile_name` / `old_name` /
+    /// `new_name` are plain positionals
+    /// (`hermes_cli/subcommands/profile.py:19`, `:41`, `:77`, `:79` @
+    /// `v2026.9.7`), and P47 gave `rename` and `delete` their separator and
+    /// left `create` — on both the Mac VM and `BotsService.Lifecycle`, whose
+    /// three argvs had none at all (`BotModePhaseAB0Tests` covers those).
+    /// A bot or profile name beginning with `-` exits 2 with a usage block.
+    @Test func theProfileCreatePositionalIsSeparated() throws {
+        let source = try PluginsManagedLockP47Tests
+            .source("scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift")
+        // The name is no longer glued to the verb…
+        #expect(!source.contains("[\"profile\", \"create\", name]"))
+        // …and the separator is appended after every option, before it.
+        #expect(source.contains("args += [\"--\", name]"))
+        // Its two siblings, unchanged.
+        #expect(source.contains("[\"profile\", \"rename\", \"--\", profile.name, newName]"))
+        #expect(source.contains("[\"profile\", \"delete\", \"-y\", \"--\", profile.name]"))
+    }
+
     /// `skills update` has no `--yes` flag — `name` (optional) and `--force`
     /// are its whole parser (`hermes_cli/subcommands/skills.py:79-83` @
     /// `v2026.9.7`). The code was right; the iOS doc comment was not.

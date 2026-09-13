@@ -132,8 +132,13 @@ final class ProfilesViewModel {
         }
     }
 
+    /// P60: the idle twin of `rename` / `delete` below. `profile_name` is a
+    /// plain positional (`hermes_cli/subcommands/profile.py:19` @
+    /// `v2026.9.7`), so a name beginning with `-` is read as a flag here too
+    /// — `--` was added to the two destructive verbs at P47 and this one was
+    /// left. The separator goes last, after every option.
     func create(name: String, cloneConfig: Bool, cloneAll: Bool, noSkills: Bool = false) {
-        var args = ["profile", "create", name]
+        var args = ["profile", "create"]
         if cloneAll { args.append("--clone-all") }
         else if cloneConfig { args.append("--clone") }
         // v0.13+: Empty-profile creation. The wire is independent of
@@ -143,6 +148,7 @@ final class ProfilesViewModel {
         // the toggle under --clone-all (Decision H, see ProfilesView)
         // but the wire is permissive.
         if noSkills { args.append("--no-skills") }
+        args += ["--", name]
         runAndReload(args, success: String(localized: "Profile '\(name)' created"))
     }
 
