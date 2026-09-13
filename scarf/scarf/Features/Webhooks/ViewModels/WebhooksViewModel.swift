@@ -85,7 +85,9 @@ final class WebhooksViewModel {
         hasLoaded = true
         isLoading = true
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["webhook", "list"], timeout: 30)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["webhook", "list"], timeout: 30)
+            }
             let notEnabled = Self.detectNotEnabled(result.output)
             let parsed = notEnabled ? [] : HermesWebhookList.parse(result.output).map(HermesWebhook.init)
             await MainActor.run {
@@ -162,7 +164,9 @@ final class WebhooksViewModel {
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: args, timeout: 60)
+            }
             // `_cmd_subscribe` exits 0 on EVERY failure path — an invalid
             // name, `--deliver-only` without a real target, a bad script —
             // each is a `print(...)` then a bare `return`, so the exit code
@@ -272,9 +276,11 @@ final class WebhooksViewModel {
             // (`hermes_cli/subcommands/webhook.py:45-48` @ `v2026.9.7`);
             // Scarf passes no payload, so the separator is the last token
             // before the name.
-            let result = fileService.runHermesCLI(
-                args: HermesWebhookTestVerdict.argv(name: webhook.name), timeout: 30
-            )
+            let result = await OffPool.run {
+                fileService.runHermesCLI(
+                    args: HermesWebhookTestVerdict.argv(name: webhook.name), timeout: 30
+                )
+            }
             let outcome = HermesWebhookTestVerdict.judge(
                 output: result.output, exitCode: result.exitCode
             )
@@ -340,7 +346,9 @@ final class WebhooksViewModel {
         verb: String
     ) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: args, timeout: 60)
+            }
             let outcome = judge(result.output, result.exitCode)
             await MainActor.run {
                 self.message = Self.mutationSummary(outcome: outcome, success: success, verb: verb)

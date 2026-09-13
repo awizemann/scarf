@@ -1424,7 +1424,9 @@ final class SettingsViewModel {
     func runBackup() {
         backupInProgress = true
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: HermesBackupVerdict.argv, timeout: 300)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: HermesBackupVerdict.argv, timeout: 300)
+            }
             let outcome = HermesBackupVerdict.judge(output: result.output, exitCode: result.exitCode)
             let zipPath = Self.extractZipPath(from: result.output)
             await MainActor.run {
@@ -1509,9 +1511,11 @@ final class SettingsViewModel {
     func runRestore(fromPath path: String) {
         backupInProgress = true
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(
-                args: HermesImportVerdict.argv(path: path), timeout: 300
-            )
+            let result = await OffPool.run {
+                fileService.runHermesCLI(
+                    args: HermesImportVerdict.argv(path: path), timeout: 300
+                )
+            }
             let outcome = HermesImportVerdict.judge(
                 output: result.output, exitCode: result.exitCode
             )

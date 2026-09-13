@@ -31,7 +31,9 @@ final class ProfilesViewModel {
     func load() {
         isLoading = true
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["profile", "list"], timeout: 20)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "list"], timeout: 20)
+            }
             let (parsed, active) = Self.parseProfileList(result.output)
             await MainActor.run {
                 self.isLoading = false
@@ -44,7 +46,9 @@ final class ProfilesViewModel {
     func showDetail(_ profile: HermesProfile) {
         detailOutput = "Loading…"
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["profile", "show", "--", profile.name], timeout: 15)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "show", "--", profile.name], timeout: 15)
+            }
             await MainActor.run {
                 self.detailOutput = result.output
             }
@@ -60,7 +64,9 @@ final class ProfilesViewModel {
     /// picks up the new home directory.
     func switchTo(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 60)
+            }
             await MainActor.run {
                 if result.exitCode == 0 {
                     HermesProfileResolver.invalidateCache()
@@ -85,7 +91,9 @@ final class ProfilesViewModel {
     @MainActor
     func switchAndRelaunch(_ profile: HermesProfile) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 30)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["profile", "use", "--", profile.name], timeout: 30)
+            }
             let switched = await MainActor.run { () -> Bool in
                 guard result.exitCode == 0 else {
                     self.message = Self.failureMessage(result.output)
@@ -242,7 +250,9 @@ final class ProfilesViewModel {
     /// wrapping the PARAMETER here would localize nothing.
     private func runAndReload(_ args: [String], success: String) {
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: args, timeout: 60)
+            }
             await MainActor.run {
                 self.message = result.exitCode == 0 ? success : Self.failureMessage(result.output)
                 self.load()
