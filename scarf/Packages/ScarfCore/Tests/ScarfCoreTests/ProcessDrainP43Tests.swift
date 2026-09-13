@@ -202,10 +202,26 @@ struct ProcessDrainP43Tests {
         let elapsed = Date().timeIntervalSince(started)
         let error = try #require(thrown, "zipping 8 MB of noise cannot finish inside 25 ms")
         #expect("\(error)".contains("did not finish"))
-        // The bound is the point: a refusal that took as long as the work
-        // would have is not a bound. Generous against the primitive's two
-        // signal graces plus the drain grace.
-        #expect(elapsed < 8, "the refusal took \(elapsed)s — that is not a bounded budget")
+        // **What the ceiling is for, and why it is 30 s** (round-6 P59).
+        //
+        // It was 8 s and it is the recurring load flake in the full parallel
+        // `swift test` — which is a sign the assertion was being read as a
+        // measurement. It is not one, and it cannot be: the UNBOUNDED zip of
+        // this fixture takes ~200 ms, i.e. FASTER than the refusal path, so
+        // no elapsed threshold can tell "bounded" from "ran to completion".
+        // The discriminator is that it THREW `did not finish`, which is
+        // asserted above. All this ceiling can catch is the one failure the
+        // throw cannot — a HANG, where the wait never returns at all.
+        //
+        // So the number is sized to the primitive's worst case plus room for
+        // a loaded grader, not shaved to it: `timeout` 0.025 + the SIGTERM
+        // grace (2 s, `ProcessTimeout.swift:80`) + the SIGKILL grace (2 s,
+        // same constant, applied twice) + `Process.drainGrace` (1 s,
+        // `:246`) ≈ 5.03 s of bounded waiting. 30 s leaves ~25 s of slack for
+        // fork/exec and scheduling on a machine running the rest of this
+        // suite in parallel, and still fails a wait that never returns
+        // (P58b's rule: raise the ceiling, and write down the reason).
+        #expect(elapsed < 30, "the refusal took \(elapsed)s — that is not a bounded budget")
     }
 
     @Test("the archive budgets are named and ordered")
