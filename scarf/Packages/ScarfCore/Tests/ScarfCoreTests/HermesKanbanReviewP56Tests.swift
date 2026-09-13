@@ -97,6 +97,25 @@ import Foundation
         }
     }
 
+    /// …and it is refused for the RIGHT reason on an old host too. The
+    /// version guard is scoped to the two destinations it is about; raising
+    /// it here would name an upgrade that does not help, since `block_task`
+    /// refuses a `review` row at every tag.
+    @Test func theBlockedRefusalNeverBlamesTheHostVersion() {
+        for caps in [Self.modern, Self.old] {
+            do {
+                _ = try KanbanService.plan(
+                    for: KanbanTransition(from: .review, to: .blocked), caps: caps)
+                Issue.record("review -> blocked was planned")
+            } catch let err as KanbanError {
+                #expect(err.errorDescription?.contains("v0.20.1") == false,
+                        "the blocked refusal blames the host version: \(err.errorDescription ?? "")")
+            } catch {
+                Issue.record("wrong error type: \(error)")
+            }
+        }
+    }
+
     /// Review is still not a drag DESTINATION — the dispatcher owns entry —
     /// and the new source arms must not have opened it.
     @Test func reviewIsStillNotADestination() {

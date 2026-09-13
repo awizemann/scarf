@@ -663,7 +663,16 @@ public actor KanbanService {
         //
         // Below the floor the honest refusal stands, worded so the user
         // knows it is the HOST and not the gesture.
-        if from == .review {
+        if from == .review, to == .done || to == .upNext {
+            // The version refusal is scoped to the two destinations the gate
+            // is ABOUT. Raising it for `review -> blocked` too would name an
+            // upgrade that does not help: `block_task` updates only rows
+            // `WHERE … AND status IN ('running', 'ready')`
+            // (`hermes_cli/kanban_db.py:2929` @ `v2026.9.7`) at every tag,
+            // the same reason `scheduled -> blocked` is absent — so that one
+            // falls through to the `default:` refusal on EVERY host, as it
+            // should. Inventing a two-step for it would land the card
+            // somewhere the user did not drop it.
             guard caps.hasKanbanReviewExits else {
                 throw KanbanError.forbiddenTransition(
                     from: from.displayName,
@@ -671,20 +680,9 @@ public actor KanbanService {
                     reason: "Moving a task out of Review needs Hermes v0.20.1 or newer. Approve or reopen it from the Hermes CLI on the host."
                 )
             }
-            switch to {
-            case .done:
-                return KanbanTransitionPlan(steps: [.complete(resultRequired: false)])
-            case .upNext:
-                return KanbanTransitionPlan(steps: [.reopenReview])
-            default:
-                // `review -> blocked` is NOT one of them: `block_task`
-                // updates only rows `WHERE … AND status IN ('running',
-                // 'ready')` (`hermes_cli/kanban_db.py:2929` @ `v2026.9.7`),
-                // the same reason `scheduled -> blocked` is absent. Fall
-                // through to the `default:` refusal rather than invent a
-                // two-step that would land the card somewhere else.
-                break
-            }
+            return to == .done
+                ? KanbanTransitionPlan(steps: [.complete(resultRequired: false)])
+                : KanbanTransitionPlan(steps: [.reopenReview])
         }
 
         switch (from, to) {
