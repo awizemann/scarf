@@ -803,6 +803,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
@@ -818,6 +819,7 @@ import Foundation
         #expect(!caps.hasSkillsProjectTrust)
         #expect(!caps.hasSkillsUpdateForce)
         #expect(!caps.hasMCPIdentityHeader)
+        #expect(!caps.hasKanbanReviewExits)
         #expect(!caps.isV0201OrLater)
         #expect(!caps.isV0203OrLater)
         #expect(!caps.isV0204OrLater)
@@ -827,12 +829,14 @@ import Foundation
     }
 
     @Test func v0203HostHasEveryFlagInTheV0204Group() {
-        // P23 re-floored seven of the eight to 0.20.1 / 0.20.3, and P55
-        // re-floored the eighth (`hasMCPIdentityHeader`) to 0.20.1 — so NO
-        // member of the v0.20.4 MARK group is a v0.20.4 surface any more and
-        // a 0.20.3 host has all eight.
+        // P23 re-floored most of the group to 0.20.1 / 0.20.3, P55 re-floored
+        // `hasMCPIdentityHeader` to 0.20.1, and P56 added
+        // `hasKanbanReviewExits` at a 0.20.1 floor — so NO member of the
+        // v0.20.4 MARK group is a v0.20.4 surface any more and a 0.20.3 host
+        // has every one of them.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)")
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(!caps.isV0204OrLater)
         #expect(caps.hasCronPauseMarkerGate)
         #expect(caps.hasBuiltinPersonalitiesInCode)
@@ -858,6 +862,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
@@ -872,6 +877,7 @@ import Foundation
         #expect(caps.hasSkillsProjectTrust)
         #expect(caps.hasSkillsUpdateForce)
         #expect(caps.hasMCPIdentityHeader)
+        #expect(caps.hasKanbanReviewExits)
         #expect(caps.isV0204OrLater)
     }
 
