@@ -375,46 +375,6 @@ import Foundation
         #expect(RichChatViewModel.sessionRequiredCommandNames.contains("compress"))
     }
 
-    @Test func parseGoalArgumentRecognizesClearVariants() {
-        #expect(RichChatViewModel.parseGoalArgument("--clear") == .clear)
-        #expect(RichChatViewModel.parseGoalArgument("clear") == .clear)
-        #expect(RichChatViewModel.parseGoalArgument("Clear") == .clear)
-        #expect(RichChatViewModel.parseGoalArgument("  --clear  ") == .clear)
-    }
-
-    @Test func parseGoalArgumentReturnsSetForArbitraryText() {
-        #expect(
-            RichChatViewModel.parseGoalArgument("finish v2.8 on time")
-                == .set("finish v2.8 on time")
-        )
-        // Whitespace around set text is trimmed.
-        #expect(
-            RichChatViewModel.parseGoalArgument("   ship it   ")
-                == .set("ship it")
-        )
-    }
-
-    @Test func parseGoalArgumentReturnsEmptyForBlank() {
-        #expect(RichChatViewModel.parseGoalArgument("") == .empty)
-        #expect(RichChatViewModel.parseGoalArgument("   ") == .empty)
-        #expect(RichChatViewModel.parseGoalArgument("\n\t") == .empty)
-    }
-
-    @MainActor
-    @Test func recordActiveGoalSetsAndClears() {
-        let vm = RichChatViewModel(context: .local)
-        #expect(vm.activeGoal == nil)
-        vm.recordActiveGoal(text: "ship v2.8")
-        let goal = vm.activeGoal
-        #expect(goal?.text == "ship v2.8")
-        vm.recordActiveGoal(text: nil)
-        #expect(vm.activeGoal == nil)
-        // Empty / whitespace also clears.
-        vm.recordActiveGoal(text: "x")
-        vm.recordActiveGoal(text: "   ")
-        #expect(vm.activeGoal == nil)
-    }
-
     @MainActor
     @Test func recordQueuedPromptAppendsAndPopsFIFO() {
         let vm = RichChatViewModel(context: .local)
@@ -428,78 +388,6 @@ import Foundation
         let next = vm.popQueuedPrompt()
         #expect(next?.text == "second")
         #expect(vm.queuedPrompts.first?.text == "third")
-    }
-
-    // MARK: - /subgoal (Hermes v0.14)
-
-    @Test func parseSubgoalArgumentRecognizesClear() {
-        #expect(RichChatViewModel.parseSubgoalArgument("clear") == .clear)
-        #expect(RichChatViewModel.parseSubgoalArgument("Clear") == .clear)
-        #expect(RichChatViewModel.parseSubgoalArgument("--clear") == .clear)
-        #expect(RichChatViewModel.parseSubgoalArgument("  --clear  ") == .clear)
-    }
-
-    @Test func parseSubgoalArgumentRecognizesRemoveN() {
-        #expect(RichChatViewModel.parseSubgoalArgument("remove 1") == .remove(1))
-        #expect(RichChatViewModel.parseSubgoalArgument("remove 12") == .remove(12))
-        #expect(RichChatViewModel.parseSubgoalArgument("rm 3") == .remove(3))
-        // Non-positive indices fall through to .add so Hermes can reject them.
-        #expect(RichChatViewModel.parseSubgoalArgument("remove 0") == .add("remove 0"))
-        #expect(RichChatViewModel.parseSubgoalArgument("remove -1") == .add("remove -1"))
-        #expect(RichChatViewModel.parseSubgoalArgument("remove abc") == .add("remove abc"))
-    }
-
-    @Test func parseSubgoalArgumentRecognizesEmpty() {
-        #expect(RichChatViewModel.parseSubgoalArgument("") == .empty)
-        #expect(RichChatViewModel.parseSubgoalArgument("   ") == .empty)
-    }
-
-    @Test func parseSubgoalArgumentDefaultIsAdd() {
-        #expect(
-            RichChatViewModel.parseSubgoalArgument("don't break the API")
-                == .add("don't break the API")
-        )
-        // Whitespace is trimmed.
-        #expect(
-            RichChatViewModel.parseSubgoalArgument("  no regressions  ")
-                == .add("no regressions")
-        )
-    }
-
-    @MainActor
-    @Test func recordSubgoalAddedAppends() {
-        let vm = RichChatViewModel(context: .local)
-        vm.recordSubgoalAdded("a")
-        vm.recordSubgoalAdded("b")
-        vm.recordSubgoalAdded("c")
-        #expect(vm.activeSubgoals == ["a", "b", "c"])
-        // Whitespace-only input is a no-op.
-        vm.recordSubgoalAdded("   ")
-        #expect(vm.activeSubgoals == ["a", "b", "c"])
-    }
-
-    @MainActor
-    @Test func recordSubgoalRemovedAtIndex() {
-        let vm = RichChatViewModel(context: .local)
-        vm.recordSubgoalAdded("a")
-        vm.recordSubgoalAdded("b")
-        vm.recordSubgoalAdded("c")
-        // 1-indexed: removing 2 drops "b".
-        vm.recordSubgoalRemoved(2)
-        #expect(vm.activeSubgoals == ["a", "c"])
-        // Out-of-range is a silent no-op.
-        vm.recordSubgoalRemoved(99)
-        vm.recordSubgoalRemoved(0)
-        #expect(vm.activeSubgoals == ["a", "c"])
-    }
-
-    @MainActor
-    @Test func recordSubgoalsClearedEmptiesList() {
-        let vm = RichChatViewModel(context: .local)
-        vm.recordSubgoalAdded("a")
-        vm.recordSubgoalAdded("b")
-        vm.recordSubgoalsCleared()
-        #expect(vm.activeSubgoals.isEmpty)
     }
 
     @MainActor
@@ -578,15 +466,12 @@ import Foundation
     }
 
     @MainActor
-    @Test func resetClearsGoalAndQueue() {
+    @Test func resetClearsQueue() {
         let vm = RichChatViewModel(context: .local)
-        vm.recordActiveGoal(text: "x")
         vm.recordQueuedPrompt(text: "a")
         vm.recordQueuedPrompt(text: "b")
-        #expect(vm.activeGoal != nil)
         #expect(vm.queuedPrompts.count == 2)
         vm.reset()
-        #expect(vm.activeGoal == nil)
         #expect(vm.queuedPrompts.isEmpty)
     }
 

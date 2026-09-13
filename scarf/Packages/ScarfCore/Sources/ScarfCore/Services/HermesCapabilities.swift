@@ -185,13 +185,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `/goal` slash command + Persistent Goals + Checkpoints v2 single-store
     /// (v0.13+).
     ///
-    /// **CLI/gateway only.** This doc used to say `RichChatViewModel` adds
-    /// `/goal` to the non-interruptive command list; it does not, and has not
-    /// since the ACP roster was reconciled — `/goal` is not an
-    /// `acp_adapter/` name at any tag, so a row for it would no-op against an
-    /// ACP host. The consumers are the optimistic goal PILL
-    /// (`ChatViewModel.swift:1269`, iOS `ChatView.swift:56`) and the
-    /// typed-command path that feeds it.
+    /// **CLI/gateway only, and CONSUMER-FREE since P55.** `/goal` is a real
+    /// Hermes command in the TUI and gateway (`hermes_cli/commands.py:113` @
+    /// `v2026.5.7`) but has never been an `acp_adapter/` name at any tag
+    /// (`_COMMANDS`, `acp_adapter/commands.py:44-66` @ `v2026.9.7`), and
+    /// Scarf's chat speaks ACP. Its last two readers were the optimistic goal
+    /// PILL and the typed-command path that fed it; round-6 decision 3
+    /// dropped both, because a pill for state no Hermes was asked to hold is
+    /// Scarf inventing state (charter identity). Kept, unretired, because the
+    /// floor is source-verified and because a future tag could add the name
+    /// to the ACP table — the follow-on P55 filed is `t-e9c464a9`.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes kanban` task board CLI.
@@ -445,11 +448,14 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,
-    /// `clear` (v0.14+). Available in ACP and gateway contexts. Scarf
-    /// renders the active subgoals as a trailing line under the goal pill
-    /// in `SessionInfoBar`.
+    /// `clear` (v0.14+). A TUI/gateway command, **not** an ACP one: like
+    /// `/goal` it is absent from the adapter's `_COMMANDS` at every tag
+    /// (`acp_adapter/commands.py:44-66` @ `v2026.9.7`). The doc here used to
+    /// say "available in ACP and gateway contexts" and that Scarf renders
+    /// the subgoals under the goal pill; P55 removed that pill (round-6
+    /// decision 3) and the claim was never true of ACP.
     ///
-    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// **No consumer** — nothing in Scarf reads this flag. Kept because the
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 

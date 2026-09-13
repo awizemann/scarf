@@ -31,11 +31,6 @@ struct ChatTranscriptPane: View {
                 acpCompressionCount: richChat.acpCompressionCount,
                 projectName: chatViewModel.currentProjectName,
                 gitBranch: chatViewModel.currentGitBranch,
-                activeGoal: richChat.activeGoal,
-                onClearGoal: {
-                    chatViewModel.sendText("/goal --clear", images: [], inputMode: .quickCommand)
-                },
-                activeSubgoals: richChat.activeSubgoals,
                 approvalMode: chatViewModel.approvalMode,
                 queuedPrompts: richChat.queuedPrompts,
                 capabilities: capabilitiesStore?.capabilities ?? .empty,

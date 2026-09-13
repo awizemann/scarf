@@ -9,9 +9,11 @@ import ScarfDesign
 /// agent can't decompose a goal into kanban tasks even if it wanted
 /// to.
 ///
-/// The sheet doesn't block the goal itself — `recordActiveGoal` has
-/// already landed by the time we present this. The sheet exists to
-/// teach + offer one-click enablement, not to gate the goal.
+/// The sheet doesn't block the prompt itself — it is raised from the
+/// `default:` arm of `ChatViewModel.sendPrompt`'s slash switch, after the
+/// text has gone to Hermes as an ordinary prompt (P55: `/goal` is not an
+/// ACP command at any tag, so there is no goal state to gate). The sheet
+/// exists to teach + offer one-click enablement.
 struct ChatKanbanOnboardingSheet: View {
     let onEnable: () async -> Void
     let onOpenTools: () -> Void

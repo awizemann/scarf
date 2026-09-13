@@ -676,15 +676,14 @@ public final class RichChatViewModel {
     /// burns a turn asking the model about "/steer", which is why the
     /// capability gate is load-bearing rather than cosmetic.
     ///
-    /// `/goal` and `/subgoal` are deliberately NOT here — see
-    /// ``HermesCapabilities.hasGoals``.
-    // NOTE: `/goal` and `/subgoal` are NOT advertised here. They are
-    // gateway-only verbs — the ACP adapter does not advertise them in its
-    // command set (re-verified against Hermes v0.16), so surfacing them in
-    // the ACP slash menu showed rows that no-op against an ACP host. The
-    // optimistic goal/subgoal pill plumbing (`recordActiveGoal`,
-    // `activeSubgoals`, the `SessionInfoBar` pill) is left intact for the
-    // typed-command path and for any future gateway-fronted surface.
+    /// `/goal` and `/subgoal` are deliberately NOT here — and since P55
+    /// neither is their optimistic mirror; see
+    /// ``acpUnhandledSlashNotice(name:)``.
+    // NOTE: `/goal` and `/subgoal` are NOT advertised here. The ACP
+    // adapter's `_COMMANDS` table has never carried either name at ANY
+    // tag (`acp_adapter/commands.py:44-66` @ `v2026.9.7`;
+    // `acp_adapter/server.py:163-173` @ `v2026.5.7`), so over ACP the text
+    // falls through to the model as an ordinary prompt (`commands.py:94-95`).
     public static let nonInterruptiveCommands: [HermesSlashCommand] = [
         HermesSlashCommand(
             name: "steer",
@@ -866,15 +865,6 @@ public final class RichChatViewModel {
     @ObservationIgnored
     public var capabilitiesGate: HermesCapabilities = .empty
 
-    /// Optimistic local mirror of the agent's currently-locked goal.
-    /// Set by `recordActiveGoal(text:)` the moment the user sends
-    /// `/goal …`; cleared on `/goal --clear` or `reset()`. Pre-v0.13
-    /// hosts can't reach this code path (the slash menu hides `/goal`),
-    /// but a typed-out `/goal foo` against an older host would still
-    /// land here briefly until Hermes' "unknown command" reply lands —
-    /// see WS-2 plan "Inconsistency caveat".
-    public private(set) var activeGoal: HermesActiveGoal?
-
     /// Optimistic mirror of prompts the user has queued via `/queue …`
     /// while a turn is in flight. Hermes is the authoritative owner
     /// server-side; this list drives the chat-header chip + popover and
@@ -1017,26 +1007,6 @@ public final class RichChatViewModel {
         capabilitiesGate = caps
     }
 
-    /// Optimistic write triggered when the user sends `/goal <text>`.
-    /// Pass `nil` (or empty) to clear (the `/goal --clear` path). The
-    /// pill renders synchronously off this state; there is no
-    /// authoritative server read-back in v2.8.0 — see WS-2 plan Q1.
-    // TODO(WS-2-Q1): hook a Hermes-supplied goal-state read-back path
-    // here once we know whether v0.13 exposes goal state via an ACP
-    // session-startup notification, a session-sidecar JSON field, or a
-    // `/goal --status` reply. Until then `activeGoal` is purely
-    // user-set and does not survive a session resume.
-    public func recordActiveGoal(text: String?) {
-        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            activeGoal = HermesActiveGoal(
-                text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                setAt: Date()
-            )
-        } else {
-            activeGoal = nil
-        }
-    }
-
     /// Append an optimistically-queued prompt to the local mirror
     /// (driven by `/queue <text>`). No-op for empty / whitespace input.
     public func recordQueuedPrompt(text: String) {
@@ -1044,14 +1014,6 @@ public final class RichChatViewModel {
         guard !trimmed.isEmpty else { return }
         queuedPrompts.append(HermesQueuedPrompt(text: trimmed))
     }
-
-    /// Optimistic local mirror of subgoals layered onto the active goal
-    /// via `/subgoal <text>` (v0.14+). Order matches the order they were
-    /// added; `/subgoal remove N` drops the Nth (1-indexed) entry;
-    /// `/subgoal clear` empties the list. Hermes owns the authoritative
-    /// state server-side — this mirror just drives the trailing line of
-    /// the goal pill in `SessionInfoBar`.
-    public private(set) var activeSubgoals: [String] = []
 
     /// Per-session edit auto-approval mode (Hermes v0.15+ ACP
     /// `session/set_mode`). Optimistic mirror — the chat-header picker
@@ -1071,60 +1033,6 @@ public final class RichChatViewModel {
     /// `modes`/current-mode out of `ACPClient.newSession` (deferred).
     public var activeApprovalMode: ACPApprovalMode = .default
 
-    /// Parse the argument slug from a `/subgoal …` invocation. Pure
-    /// function — exposed for unit tests. The chat dispatch uses the
-    /// result to apply the right optimistic mutation before the prompt
-    /// is sent verbatim to Hermes.
-    public enum SubgoalCommandArgument: Equatable {
-        case add(String)
-        case remove(Int)
-        case clear
-        /// User typed `/subgoal` with no argument — Hermes will reply
-        /// with usage; Scarf shows a neutral hint and doesn't touch
-        /// the local mirror.
-        case empty
-    }
-
-    public static func parseSubgoalArgument(_ raw: String) -> SubgoalCommandArgument {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .empty }
-        let lowered = trimmed.lowercased()
-        if lowered == "clear" || lowered == "--clear" { return .clear }
-        // `remove N` form. Accept any whitespace-separated single integer
-        // following the verb; reject negatives or non-numeric inputs by
-        // falling through to .add (which is harmless — Hermes will
-        // reject server-side and the mirror won't move).
-        if lowered.hasPrefix("remove ") || lowered.hasPrefix("rm ") {
-            let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            if parts.count == 2, let idx = Int(parts[1]), idx > 0 {
-                return .remove(idx)
-            }
-        }
-        return .add(trimmed)
-    }
-
-    /// Append a subgoal to the local mirror. Optimistic — Hermes owns
-    /// the canonical list server-side. No-op for empty input.
-    public func recordSubgoalAdded(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        activeSubgoals.append(trimmed)
-    }
-
-    /// Drop the Nth subgoal (1-indexed) from the local mirror, matching
-    /// Hermes's `/subgoal remove N` semantics. Out-of-range indices are
-    /// silently ignored.
-    public func recordSubgoalRemoved(_ oneBasedIndex: Int) {
-        let zeroIdx = oneBasedIndex - 1
-        guard activeSubgoals.indices.contains(zeroIdx) else { return }
-        activeSubgoals.remove(at: zeroIdx)
-    }
-
-    /// Clear all subgoals from the local mirror.
-    public func recordSubgoalsCleared() {
-        activeSubgoals.removeAll()
-    }
-
     /// Drain the next queued prompt off the local mirror, FIFO. Called
     /// from `handlePromptComplete` once a turn settles — Hermes runs
     /// the actual queued prompt server-side; popping here keeps the
@@ -1133,30 +1041,6 @@ public final class RichChatViewModel {
     @discardableResult
     public func popQueuedPrompt() -> HermesQueuedPrompt? {
         queuedPrompts.isEmpty ? nil : queuedPrompts.removeFirst()
-    }
-
-    /// Parse the argument slug from a `/goal …` invocation. Pure
-    /// function — exposed for unit tests. The chat dispatch reads this
-    /// to decide whether to set, clear, or no-op the optimistic pill.
-    public enum GoalCommandArgument: Equatable {
-        case set(String)
-        case clear
-        /// User typed `/goal` with no argument — Hermes will reply
-        /// with usage; Scarf shows a neutral hint and doesn't touch
-        /// the pill state.
-        case empty
-    }
-
-    public static func parseGoalArgument(_ raw: String) -> GoalCommandArgument {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .empty }
-        // Accept `--clear`, `clear`, and case-insensitive variants so
-        // typos don't accidentally lock the goal text to literal
-        // "Clear". `--clear` is the canonical form (matches Hermes
-        // CLI flag style).
-        let lowered = trimmed.lowercased()
-        if lowered == "--clear" || lowered == "clear" { return .clear }
-        return .set(trimmed)
     }
 
     /// True when `text` is a non-interruptive command that should NOT
@@ -1238,6 +1122,34 @@ public final class RichChatViewModel {
         return String(localized: "This Hermes has no /\(name) — sent as an ordinary prompt.")
     }
 
+    /// Slash names Scarf used to answer locally that the ACP adapter has
+    /// never dispatched, at ANY tag — so on EVERY host the text reaches the
+    /// model as an ordinary prompt.
+    ///
+    /// `goal` and `subgoal` ARE real Hermes commands — `/goal` in the TUI
+    /// and gateway from `hermes_cli/commands.py:113` @ `v2026.5.7` and
+    /// `/subgoal` from `v2026.5.16` — but Scarf's chat speaks ACP, and the
+    /// adapter's command table has never carried either: `_COMMANDS` is
+    /// `acp_adapter/commands.py:44-66` @ `v2026.9.7` and
+    /// `_SLASH_COMMANDS` is `acp_adapter/server.py:163-173` @ `v2026.5.7`,
+    /// nine names in both, neither of them these. `_handle_slash_command`
+    /// returns `None` for an unknown name and the raw text falls through to
+    /// the LLM (`commands.py:94-95`).
+    ///
+    /// Until P55 both names had an optimistic client mirror (a goal pill, a
+    /// subgoal count, "Goal locked" toasts) painting state no Hermes had
+    /// been asked for. Round-6 decision 3 dropped the mirrors; this notice
+    /// is what the `default:` arm says instead.
+    public static let acpUnhandledSlashNames: Set<String> = ["goal", "subgoal"]
+
+    /// The one-line notice for a name in ``acpUnhandledSlashNames``. `nil`
+    /// for every other name. Capability-free on purpose: there is no host
+    /// version on which the answer differs.
+    public static func acpUnhandledSlashNotice(name: String?) -> String? {
+        guard let name, acpUnhandledSlashNames.contains(name) else { return nil }
+        return String(localized: "Hermes chat has no /\(name) — sent as an ordinary prompt.")
+    }
+
     /// Look up the full project-scoped command payload by slash trigger.
     /// `ChatViewModel.sendPrompt` calls this when the input matches a
     /// `.projectScoped` source and needs the body for client-side
@@ -1269,14 +1181,6 @@ public final class RichChatViewModel {
             )
         }
         return (name: String(withoutSlash), args: "")
-    }
-
-    /// Cap goal text in transient toasts so a 1 KB user-typed goal
-    /// doesn't blow out the hint pill. The header pill applies its
-    /// own 33-char cap; the toast is shorter so the hint stays
-    /// glanceable.
-    public static func truncatedToastGoal(_ text: String) -> String {
-        text.count <= 60 ? text : String(text.prefix(57)) + "…"
     }
 
     /// Slash commands Scarf handles entirely on the client and that
@@ -1905,15 +1809,13 @@ public final class RichChatViewModel {
         turnDurations = [:]
         transientHint = nil
         clearPendingPermissions()
-        // v2.8 / Hermes v0.13 — drop optimistic v0.13 surfaces on
+        // v2.8 / Hermes v0.13 — drop the optimistic queue mirror on
         // session reset so a fresh chat (or a resume into a different
-        // session) doesn't paint stale goal / queue state from the
-        // previous one. The capabilities gate stays on whatever the
-        // controller most recently published; it's a host-level value
-        // that doesn't change with session boundaries.
-        activeGoal = nil
+        // session) doesn't paint stale queue state from the previous one.
+        // The capabilities gate stays on whatever the controller most
+        // recently published; it's a host-level value that doesn't change
+        // with session boundaries.
         queuedPrompts = []
-        activeSubgoals = []
         // v0.15 — the per-session edit auto-approval mode is session-
         // scoped; a fresh chat starts back at the default "ask before
         // edits" posture rather than carrying the previous session's mode.

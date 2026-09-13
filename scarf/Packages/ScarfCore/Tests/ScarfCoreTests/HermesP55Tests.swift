@@ -199,3 +199,119 @@ struct HermesP55DocTests {
         #expect(src.contains(#"public static let disableAliases = ["disabled", "false", "off"]"#))
     }
 }
+
+/// Round-6 decision 3: the `/goal` and `/subgoal` optimistic mirrors are
+/// gone, and the names take the ordinary-prompt notice on every host.
+///
+/// The ACP adapter has never dispatched either name at any tag —
+/// `_SLASH_COMMANDS` (`acp_adapter/server.py:163-173` @ `v2026.5.7`) and
+/// `SlashCommandsMixin._COMMANDS` (`acp_adapter/commands.py:44-66` @
+/// `v2026.9.7`) are the same nine names — so an unknown name falls through
+/// to the model (`commands.py:94-95`) and the text is a plain prompt.
+@Suite("Hermes P55 — /goal and /subgoal are not ACP commands")
+struct HermesP55GoalMirrorTests {
+
+    @Test("the notice fires for /goal and /subgoal")
+    func noticeFiresForBothNames() throws {
+        let goal = try #require(RichChatViewModel.acpUnhandledSlashNotice(name: "goal"))
+        let subgoal = try #require(RichChatViewModel.acpUnhandledSlashNotice(name: "subgoal"))
+        #expect(goal.contains("/goal"))
+        #expect(subgoal.contains("/subgoal"))
+        #expect(goal.contains("ordinary prompt"))
+        #expect(goal != subgoal)
+    }
+
+    @Test("the notice fires for no other name")
+    func noticeIsSilentElsewhere() {
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: nil) == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "steer") == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "queue") == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "compress") == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "new") == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "") == nil)
+    }
+
+    /// Capability-free on purpose: there is no host version on which the
+    /// adapter answers these names, so the notice must not vary with one.
+    @Test("the answer is the same on every host generation")
+    func noticeIsCapabilityFree() {
+        #expect(RichChatViewModel.acpUnhandledSlashNames == ["goal", "subgoal"])
+        // And neither name is in the dispatched non-interruptive roster, on
+        // any host — that roster is `steer` + `queue` and nothing else.
+        #expect(RichChatViewModel.nonInterruptiveCommands.map(\.name).sorted() == ["queue", "steer"])
+        for line in [
+            "Hermes Agent v0.12.0 (2026.4.30)",
+            "Hermes Agent v0.13.0 (2026.5.7)",
+            "Hermes Agent v0.14.0 (2026.5.16)",
+            "Hermes Agent v0.21.1 (2026.9.7)"
+        ] {
+            let caps = HermesCapabilities.parseLine(line)
+            #expect(RichChatViewModel.subFloorSlashNotice(name: "goal", capabilities: caps) == nil)
+            #expect(RichChatViewModel.subFloorSlashNotice(name: "subgoal", capabilities: caps) == nil)
+        }
+    }
+
+    /// A typed `/goal` must not be treated as non-interruptive: it burns a
+    /// real turn, so the working indicator has to stay on.
+    @MainActor
+    @Test("/goal and /subgoal are interruptive turns")
+    func goalIsAnOrdinaryTurn() {
+        let vm = RichChatViewModel(context: .local)
+        #expect(!vm.isNonInterruptiveSlash("/goal ship v2.9"))
+        #expect(!vm.isNonInterruptiveSlash("/subgoal no regressions"))
+        #expect(!vm.isDispatchedNonInterruptiveSlash("/goal ship v2.9"))
+        #expect(!vm.isDispatchedNonInterruptiveSlash("/subgoal no regressions"))
+    }
+
+    /// The pill/toast state itself is gone — not merely unset. An API that
+    /// still exists is an API a later phase re-wires.
+    @MainActor
+    @Test("no goal or subgoal mirror state survives anywhere in the tree")
+    func mirrorStateIsGoneFromEveryTarget() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let ownPath = URL(fileURLWithPath: #filePath).standardizedFileURL.path
+        let retired = [
+            "recordActiveGoal", "recordSubgoalAdded", "recordSubgoalRemoved",
+            "recordSubgoalsCleared", "activeGoal", "activeSubgoals", "parseGoalArgument",
+            "parseSubgoalArgument", "truncatedToastGoal", "HermesActiveGoal",
+            "onClearGoal", "goalTooltip"
+        ]
+        var scanned = 0
+        var hits: [String] = []
+        for root in [
+            "scarf/scarf", "scarf/Packages/ScarfCore/Sources",
+            "scarf/Packages/ScarfIOS/Sources", "scarf/Scarf iOS"
+        ] {
+            let dir = repoRoot.appendingPathComponent(root)
+            let walker = try #require(
+                FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil)
+            )
+            var filesHere = 0
+            while let url = walker.nextObject() as? URL {
+                guard url.pathExtension == "swift" else { continue }
+                guard url.standardizedFileURL.path != ownPath else { continue }
+                filesHere += 1
+                // Comment lines are stripped before matching: a tombstone
+                // naming what was removed is the record this phase leaves
+                // behind, not a consumer of it (P49b's lesson, applied to
+                // comments rather than string literals).
+                let body = try String(contentsOf: url, encoding: .utf8)
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                    .joined(separator: "\n")
+                for symbol in retired where body.contains(symbol) {
+                    hits.append("\(url.lastPathComponent): \(symbol)")
+                }
+            }
+            // Per-root floor: a root that silently resolved to nothing would
+            // otherwise make this test vacuously green.
+            #expect(filesHere > 0, "no Swift files under \(root)")
+            scanned += filesHere
+        }
+        #expect(scanned > 300, "scanned only \(scanned) files")
+        #expect(hits.isEmpty, "retired goal-mirror API survives: \(hits)")
+    }
+}
