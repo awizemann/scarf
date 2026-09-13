@@ -661,6 +661,57 @@ struct ThreeStateSealP54bTests {
         #expect(host.messageIsUnconfirmed == false)
     }
 
+    /// P55b: `PlatformsViewModel.restartBanner` mapped the `.unconfirmed`
+    /// verdict to `.success(...)` — the neutral sentence under the GREEN
+    /// checkmark, announced as a completed restart. Same two-state bug as
+    /// Settings', in the other direction.
+    @Test @MainActor func gatewayRestartUnconfirmedIsNotSealedGreen() {
+        let unknown = HermesCLIOutcome(
+            succeeded: false, detail: nil, warning: nil, confidence: .unconfirmed)
+        let banner = PlatformsViewModel.restartBanner(unknown)
+        #expect(banner.kind == .unconfirmed)
+        #expect(banner.isFailure == false)
+        #expect(banner.text == GatewayActionBanner.unconfirmed(.restart, detail: nil))
+        // And the proven arms are untouched.
+        #expect(PlatformsViewModel.restartBanner(
+            HermesCLIOutcome(succeeded: true, detail: nil, warning: nil, confidence: .confirmed)
+        ).kind == .success)
+        #expect(PlatformsViewModel.restartBanner(
+            HermesCLIOutcome(succeeded: false, detail: "no", warning: nil, confidence: .failed)
+        ).kind == .failure)
+    }
+
+    /// P55b: the two sites that set `message` + `messageIsFailure` by hand
+    /// for an in-progress line left `messageIsUnconfirmed` set. It never
+    /// auto-clears, so the amber question mark survived onto the next line.
+    @Test @MainActor func anInProgressLineClearsTheUnconfirmedFlagToo() {
+        let host = SealProbe()
+        host.applySaveOutcome(.unconfirmed("printed no result"))
+        #expect(host.messageKind == .unconfirmed)
+        // What the in-progress sites do, verbatim.
+        host.message = "Restarting gateway…"
+        host.messageIsFailure = false
+        host.messageIsUnconfirmed = false
+        #expect(host.messageKind == .success)
+    }
+
+    /// …and the two shipped sites actually spell it. A source scan because
+    /// both are inside `Task.detached` bodies with no injectable seam.
+    @Test func bothInProgressSitesClearAllThreeFlags() throws {
+        for (path, marker) in [
+            ("scarf/Features/Platforms/ViewModels/PlatformsViewModel.swift",
+             "message = String(localized: \"Restarting gateway…\")"),
+            ("scarf/Features/Plugins/ViewModels/PluginsViewModel.swift",
+             "message = String(localized: \"Installing \\(identifier)…\")")
+        ] {
+            let code = P54Source.codeOnly(try P54Source.read(path))
+            let at = try #require(code.range(of: marker), "in-progress line moved in \(path)")
+            let window = code[at.upperBound...].prefix(260)
+            #expect(window.contains("messageIsFailure = false"), "\(path)")
+            #expect(window.contains("messageIsUnconfirmed = false"), "\(path)")
+        }
+    }
+
     @Test @MainActor func theKindRecomposesFromTheTwoStoredFlags() {
         let host = SealProbe()
         host.applySaveOutcome(.failure("no"))
