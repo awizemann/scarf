@@ -785,20 +785,35 @@ public struct SSHTransport: ServerTransport {
                 // reaches the reader after the child exits.
                 try? outPipe.fileHandleForWriting.close()
                 try? errPipe.fileHandleForWriting.close()
-                let handle = outPipe.fileHandleForReading
-                var buffer = Data()
-                while true {
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break } // EOF
-                    buffer.append(chunk)
-                    while let nl = buffer.firstIndex(of: 0x0A) {
-                        let lineData = Data(buffer[buffer.startIndex..<nl])
-                        buffer = Data(buffer[buffer.index(after: nl)...])
-                        if let text = String(data: lineData, encoding: .utf8) {
-                            continuation.yield(text)
-                        }
+                // Event-driven stdout (round-6 decision 10). The loop this
+                // replaces was `while true { handle.availableData }` on a
+                // `Task.detached`, i.e. a blocking `read(2)` holding one of
+                // the cooperative pool's per-core threads for the whole life
+                // of the stream — and the consumer here is a `tail -F` that
+                // never ends, so one open Logs pane held one thread forever
+                // (charter C10). `PipeReader` parks none between reads, and
+                // it OWNS the read end from this point on.
+                let eof = PipeEOFSignal()
+                let reader = PipeReader(
+                    handle: outPipe.fileHandleForReading,
+                    label: "com.scarf.transport.ssh.streamLines",
+                    framing: .lines(failOnInvalidUTF8: false, deliverPartialAtEOF: true)
+                ) { event in
+                    switch event {
+                    case .line(let text):
+                        continuation.yield(text)
+                    case .chunk:
+                        break // unreachable under `.lines`
+                    case .finished:
+                        eof.signal()
                     }
                 }
+                // Hand it to the box BEFORE awaiting: a consumer that let go
+                // during the spawn has already settled, and `adoptReader`
+                // cancels rather than stores — otherwise this await never
+                // ends.
+                child.adoptReader(reader)
+                await eof.wait()
                 // Bounded, and the child is reaped rather than orphaned:
                 // stdout has reached EOF, so a healthy child is milliseconds
                 // from exiting and this ceiling is for the one that is not.
@@ -807,9 +822,10 @@ public struct SSHTransport: ServerTransport {
                 child.finish()
                 let stderrText = String(
                     data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
-                // The stdout read end is ours; the stderr read end belongs to
-                // the drain, which closes it in the reader that drained it.
-                try? outPipe.fileHandleForReading.close()
+                // Both read ends belong to someone else now: stdout to the
+                // `PipeReader` (it closes the fd in its cancel handler, after
+                // any in-flight read), stderr to the drain. Closing either
+                // here would be a double close, i.e. a recycled-fd hazard.
                 if proc.terminationStatus == 255 {
                     SSHConnectionGate.shared.recordFailure(gateKey)
                 } else {
@@ -886,12 +902,35 @@ public struct SSHTransport: ServerTransport {
                 let errDrain = Process.startDraining(pipes: [errPipe])
                 try? outPipe.fileHandleForWriting.close()
                 try? errPipe.fileHandleForWriting.close()
-                let handle = outPipe.fileHandleForReading
-                while true {
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break }
-                    continuation.yield(chunk)
+                // Event-driven stdout (round-6 decision 10). The loop this
+                // replaces was `while true { handle.availableData }` on a
+                // `Task.detached`, i.e. a blocking `read(2)` holding one of
+                // the cooperative pool's per-core threads for the whole life
+                // of the stream — and the consumer here is a `tail -F` that
+                // never ends, so one open Logs pane held one thread forever
+                // (charter C10). `PipeReader` parks none between reads, and
+                // it OWNS the read end from this point on.
+                let eof = PipeEOFSignal()
+                let reader = PipeReader(
+                    handle: outPipe.fileHandleForReading,
+                    label: "com.scarf.transport.ssh.streamRawBytes",
+                    framing: .rawChunks
+                ) { event in
+                    switch event {
+                    case .chunk(let data):
+                        continuation.yield(data)
+                    case .line:
+                        break // unreachable under `.rawChunks`
+                    case .finished:
+                        eof.signal()
+                    }
                 }
+                // Hand it to the box BEFORE awaiting: a consumer that let go
+                // during the spawn has already settled, and `adoptReader`
+                // cancels rather than stores — otherwise this await never
+                // ends.
+                child.adoptReader(reader)
+                await eof.wait()
                 // Bounded, and the child is reaped rather than orphaned:
                 // stdout has reached EOF, so a healthy child is milliseconds
                 // from exiting and this ceiling is for the one that is not.
@@ -900,9 +939,10 @@ public struct SSHTransport: ServerTransport {
                 child.finish()
                 let stderrText = String(
                     data: reaped.data.first ?? Data(), encoding: .utf8) ?? ""
-                // The stdout read end is ours; the stderr read end belongs to
-                // the drain, which closes it in the reader that drained it.
-                try? outPipe.fileHandleForReading.close()
+                // Both read ends belong to someone else now: stdout to the
+                // `PipeReader` (it closes the fd in its cancel handler, after
+                // any in-flight read), stderr to the drain. Closing either
+                // here would be a double close, i.e. a recycled-fd hazard.
                 if proc.terminationStatus == 255 {
                     SSHConnectionGate.shared.recordFailure(gateKey)
                 } else {

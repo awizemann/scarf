@@ -26,6 +26,11 @@ import Foundation
 final class StreamingChild: @unchecked Sendable {
     private let lock = NSLock()
     private var proc: Process?
+    /// The stdout reader, once the spawn has one. Cancelling it closes the
+    /// read end and delivers EOF, which is what lets the producer task stop
+    /// waiting and reap — without it, a consumer that walks away leaves the
+    /// task parked on `PipeEOFSignal.wait()` until the child happens to die.
+    private var reader: PipeReader?
     private var settled = false
 
     /// The spawn succeeded. Hand the child over, or reap it immediately if
@@ -38,13 +43,27 @@ final class StreamingChild: @unchecked Sendable {
         if alreadySettled { Self.reap(process) }
     }
 
+    /// The stdout reader is live. Same race as `adopt`: a consumer that gave
+    /// up while the spawn was in flight has already settled us, so the reader
+    /// is cancelled here instead of being stored.
+    func adoptReader(_ pipeReader: PipeReader) {
+        lock.lock()
+        let alreadySettled = settled
+        if !alreadySettled { reader = pipeReader }
+        lock.unlock()
+        if alreadySettled { pipeReader.cancel() }
+    }
+
     /// The consumer is gone. Stop the child.
     func cancel() {
         lock.lock()
         settled = true
         let process = proc
+        let pipeReader = reader
         proc = nil
+        reader = nil
         lock.unlock()
+        pipeReader?.cancel()
         if let process { Self.reap(process) }
     }
 
@@ -53,6 +72,9 @@ final class StreamingChild: @unchecked Sendable {
         lock.lock()
         settled = true
         proc = nil
+        // The producer is past EOF, so the reader has already cancelled
+        // itself; drop our reference so the fd's owner goes away with it.
+        reader = nil
         lock.unlock()
     }
 
