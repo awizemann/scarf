@@ -118,19 +118,42 @@ public enum HermesPlatformSharedKeys {
     /// already tracks these paths for the last-wins purge; ``ParsedYAML``
     /// now surfaces them, and they are excluded from the prefix scan.
     /// Hand-edited configs only: no Scarf writer emits a dotted key.
+    ///
+    /// P57b: the exclusion is by the dot's DEPTH, not by the prefix match.
+    /// P57 excluded every path under a dotted literal, which also excluded a
+    /// dotted key nested INSIDE a real block — `slack:` + `  a.b:` + `    c: 1`
+    /// is `{"slack": {"a.b": {"c": 1}}}` to PyYAML (probed, 6.0.3), a genuine
+    /// `slack` dict that `platform_section` takes as the top-level block,
+    /// and post-P57 Scarf answered `platforms.slack` for it. A dotted key is
+    /// evidence AGAINST section `S` only when its dot crosses `S`'s own
+    /// boundary — i.e. when it was written SHALLOWER than `S` is deep
+    /// (``ParsedYAML/dottedLiteralParentDepths``). A dotted key written at or
+    /// below `S`'s depth is an ordinary child of a real `S` block.
     public static func bridgeSourcePrefix(platform: String, in parsed: ParsedYAML) -> String {
         func isBlock(_ section: String) -> Bool {
-            if parsed.maps[section] != nil { return true }
             let dot = section + "."
+            let sectionDepth = section.split(separator: ".").count
             // A descendant OF a dotted literal is no better evidence than the
             // literal itself: `slack.enabled:` opened as a block header makes
-            // `{"slack.enabled": {…}}`, still not a `slack` dict.
+            // `{"slack.enabled": {…}}`, still not a `slack` dict — but only
+            // when that literal was written above `section`'s level.
             func underDottedLiteral(_ key: String) -> Bool {
-                parsed.dottedLiteralPaths.contains { key == $0 || key.hasPrefix($0 + ".") }
+                parsed.dottedLiteralPaths.contains { literal in
+                    guard key == literal || key.hasPrefix(literal + ".") else { return false }
+                    return (parsed.dottedLiteralParentDepths[literal] ?? 0) < sectionDepth
+                }
             }
             func hasChild<V>(_ table: [String: V]) -> Bool {
                 table.keys.contains { $0.hasPrefix(dot) && !underDottedLiteral($0) }
             }
+            // The recorded-map test runs under the SAME exclusion. P57b: a
+            // dotted key whose path IS the section — `gateway:` + a literal
+            // `platforms.slack:` header — records `maps["gateway.platforms.
+            // slack"]`, and answering on that alone let the dotted spelling
+            // claim the nested section it only looks like. PyYAML reads that
+            // file as `{'gateway': {'platforms.slack': {…}}}`, where
+            // `gateway["platforms"]` is None.
+            if parsed.maps[section] != nil, !underDottedLiteral(section) { return true }
             return hasChild(parsed.values) || hasChild(parsed.lists) || hasChild(parsed.maps)
         }
         if isBlock(platform) { return platform }

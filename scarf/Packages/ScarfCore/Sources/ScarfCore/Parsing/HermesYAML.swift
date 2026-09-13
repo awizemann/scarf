@@ -36,16 +36,32 @@ public struct ParsedYAML: Sendable {
     /// flat `slack.enabled:` line as a block.
     public var dottedLiteralPaths: Set<String>
 
+    /// For each ``dottedLiteralPaths`` member, how many enclosing BLOCK keys
+    /// it sat under — 0 for a dotted key written at the top level, 1 for one
+    /// written inside a single block, and so on.
+    ///
+    /// The depth is what says whether the dot CROSSES a section's boundary.
+    /// `slack.enabled: true` at the top level (depth 0) is PyYAML's
+    /// independent key `"slack.enabled"` and no `slack` dict exists; but
+    /// `slack:` + `  a.b:` (depth 1) is `{"slack": {"a.b": …}}`, which IS a
+    /// `slack` dict and which `platform_section` reads as the top-level
+    /// block. The path alone cannot tell the two apart — both are the string
+    /// `slack.a.b`-shaped prefix match — so the parser records the depth it
+    /// alone knows. Round-6 P57b.
+    public var dottedLiteralParentDepths: [String: Int]
+
     public init(
         values: [String: String] = [:],
         lists: [String: [String]] = [:],
         maps: [String: [String: String]] = [:],
-        dottedLiteralPaths: Set<String> = []
+        dottedLiteralPaths: Set<String> = [],
+        dottedLiteralParentDepths: [String: Int] = [:]
     ) {
         self.values = values
         self.lists = lists
         self.maps = maps
         self.dottedLiteralPaths = dottedLiteralPaths
+        self.dottedLiteralParentDepths = dottedLiteralParentDepths
     }
 }
 
@@ -177,6 +193,7 @@ public enum HermesYAML {
         /// the `gateway.` prefix. P37 already caught the FIRST-open case; the
         /// re-open case was still wrong.
         var dottedLiteralPaths: Set<String> = []
+        var dottedLiteralParentDepths: [String: Int] = [:]
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
         // Indent of the most recent scalar `key: value` line at the current
@@ -360,7 +377,15 @@ public enum HermesYAML {
             }
 
             let path = currentPath(joinedWith: key)
-            if key.contains(".") { dottedLiteralPaths.insert(path) }
+            if key.contains(".") {
+                dottedLiteralPaths.insert(path)
+                // `stack.count` is the number of enclosing block keys, which
+                // is exactly the nesting depth the dot has to cross to be
+                // evidence against a section. Counting components of the
+                // parent STRING would be wrong the moment a dotted key is
+                // itself opened as a header.
+                dottedLiteralParentDepths[path] = stack.count
+            }
             lastScalarIndent = indent
             lastScalarPath = nil
             lastScalarParent = nil
@@ -492,7 +517,9 @@ public enum HermesYAML {
                 lastScalarParent = (path: parentPath, key: key)
             }
         }
-        return ParsedYAML(values: values, lists: lists, maps: maps, dottedLiteralPaths: dottedLiteralPaths)
+        return ParsedYAML(values: values, lists: lists, maps: maps,
+                          dottedLiteralPaths: dottedLiteralPaths,
+                          dottedLiteralParentDepths: dottedLiteralParentDepths)
     }
 
     /// True when `text` opens a quoted scalar that has not closed yet — the
