@@ -4227,6 +4227,46 @@
         }
       }
     },
+    "%lld w/o their model pin (the target host's default model runs them)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ohne Modell-Pin (das Standardmodell des Zielhosts führt sie aus)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sin su modelo fijado (los ejecuta el modelo predeterminado del host de destino)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sans leur modèle épinglé (le modèle par défaut de l'hôte cible les exécute)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件はモデル固定なし（ターゲットホストの既定モデルで実行されます）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld sem o modelo fixado (o modelo padrão do host de destino os executa)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个未保留模型固定（将由目标主机的默认模型运行）"
+          }
+        }
+      }
+    },
     "%lld warnings" : {
       "localizations" : {
         "de" : {

@@ -982,6 +982,46 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         noAgent != true && !(preRunScript?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
     }
 
+    /// Whether this job pins its own inference — a `--model`, a `--provider`,
+    /// or a `--reasoning-effort`. Round-6 decision 8; the sibling of
+    /// `hasPreRunScript`, and used the same way: a fleet copy still CREATES
+    /// the job, and the note says what did not come with it.
+    ///
+    /// **Why the copier does not forward the pin.** All three flags exist on
+    /// `cron create` at the target tag (`--model` / `--provider`
+    /// `hermes_cli/subcommands/cron.py:66-72`, `--reasoning-effort` `:73-77`
+    /// @ `v2026.9.7`) and would be ACCEPTED — which is exactly the P50
+    /// `--script` trap: an accepted flag is not a copyable field when the
+    /// value names something only the source host has. A model id is
+    /// resolved against the target's own provider config and credential
+    /// pools; forwarding one the target has never heard of lands a green
+    /// "created" job that fails on its first run, days later. Dropping the
+    /// pin instead lets `_compute_provider_model_snapshots`
+    /// (`cron/jobs.py:1599-1620`) resolve the target's own default, which is
+    /// the only answer Scarf can stand behind — and the note is what stops
+    /// that being a silent change of which model (and whose bill) runs the
+    /// user's job.
+    ///
+    /// Reads `provider` / `reasoning_effort` out of `extra` because Scarf
+    /// keeps every unmodeled key verbatim there; `nonEmptyString` is what
+    /// makes `""` mean "not set", as Hermes's own
+    /// `_normalize_job_optional_text` does (`cron/jobs.py:1522-1527`).
+    public nonisolated var hasModelPin: Bool {
+        !modelPinFields.isEmpty
+    }
+
+    /// The pinned axes, as short human labels — what the downgrade note
+    /// names. Empty exactly when `hasModelPin` is false.
+    public nonisolated var modelPinFields: [String] {
+        var out: [String] = []
+        if let model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
+            out.append("model")
+        }
+        if Self.nonEmptyString(extra["provider"]) != nil { out.append("provider") }
+        if Self.nonEmptyString(extra["reasoning_effort"]) != nil { out.append("reasoning effort") }
+        return out
+    }
+
     /// `extra[key]` as a trimmed non-empty string, or `nil`. Hermes writes
     /// these optional text fields as `None` OR `""` depending on the path
     /// (`_normalize_job_optional_text`, `cron/jobs.py:1583-1584`), and an
