@@ -835,6 +835,32 @@ public enum HermesYAML {
     /// host ignores a value it honours. Parser trims and `.strip()` mirrors
     /// answer to different sources; do not unify them.
     public static func normalizedScalar(_ s: String) -> String {
+        normalizedScalarCore(s, decodeEscapes: false)
+    }
+
+    /// ``normalizedScalar(_:)`` with the DOUBLE-quoted body's backslash
+    /// escapes decoded — the Python `str` PyYAML actually loaded, before any
+    /// `.strip()`.
+    ///
+    /// `normalizedScalar` hands a double-quoted body back VERBATIM because
+    /// its other caller is about to RE-EMIT the value, and re-emitting a
+    /// decoded body would change the file. A reader that is about to TYPE the
+    /// value needs the opposite: `yaml.dump({"k": "true\t"})` emits
+    /// `k: "true\t"` (PyYAML 6.0.3, probed), whose body is the seven
+    /// characters `t r u e \ t` — so a verbatim compare recognises nothing
+    /// and a true-by-default key reads ON for a host that has it OFF. The
+    /// escape table is ``YAMLScalar/unquote(_:)``'s, the one PyYAML's own
+    /// `ESCAPE_REPLACEMENTS` is mirrored in; there is not a second one.
+    /// Round-6 P57b.
+    ///
+    /// Single-quoted bodies have no escapes but `''`, which
+    /// ``normalizedScalar(_:)`` already undoubles, so this differs from it
+    /// only inside double quotes.
+    public static func unquotedScalar(_ s: String) -> String {
+        normalizedScalarCore(s, decodeEscapes: true)
+    }
+
+    private static func normalizedScalarCore(_ s: String, decodeEscapes: Bool) -> String {
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if let quote = trimmed.first, quote == "'" || quote == "\"" {
             // `closingQuoteIndex` skips a DOUBLED `''`, which is YAML's only
@@ -842,12 +868,17 @@ public enum HermesYAML {
             // emit. `firstIndex(of:)` stopped at the first half of the pair,
             // so `'it''s'` read back as `it` — and the surviving half then
             // re-doubled on the next save.
+            //
+            // It also skips a `\X` pair inside a DOUBLE-quoted span, so the
+            // body handed to `YAMLScalar.unquote` below is the same span
+            // PyYAML closed and re-wrapping it in `"` is lossless.
             let body = trimmed.dropFirst()
             if let close = closingQuoteIndex(in: body, quote: quote) {
                 let inner = String(body[body.startIndex..<close])
-                return quote == "'"
-                    ? inner.replacingOccurrences(of: "''", with: "'")
-                    : inner
+                if quote == "'" {
+                    return inner.replacingOccurrences(of: "''", with: "'")
+                }
+                return decodeEscapes ? YAMLScalar.unquote("\"" + inner + "\"") : inner
             }
         }
         var out = trimmed
@@ -920,7 +951,11 @@ public enum HermesYAML {
     /// `str.strip()` removes all 29 characters for which `c.isspace()` holds,
     /// U+00A0 and the `Zs` block included.
     public static func strippedScalar(_ s: String) -> String {
-        normalizedScalar(s).trimmingCharacters(in: .whitespacesAndNewlines)
+        // P57b: ``unquotedScalar(_:)``, not ``normalizedScalar(_:)``. Python
+        // strips the DECODED string; `"false\t"` is six characters plus a tab
+        // to PyYAML and eight literal ones to a verbatim body compare, and
+        // `yaml.dump` really does emit that spelling.
+        unquotedScalar(s).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Whether the scalar as written is QUOTED — i.e. a Python `str` to
