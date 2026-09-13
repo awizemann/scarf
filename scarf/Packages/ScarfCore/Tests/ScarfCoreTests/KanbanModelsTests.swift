@@ -226,21 +226,24 @@ import Foundation
         #expect(!HermesCLIOption.contains("--body", in: argv))
         #expect(!HermesCLIOption.contains("--assignee", in: argv))
         #expect(!argv.contains("--triage"))
-        // v0.15 `--branch` is absent by default.
+        // `--branch` is gone entirely (P56).
         #expect(!HermesCLIOption.contains("--branch", in: argv))
     }
 
-    @Test func createRequestArgvIncludesBranch() {
-        // v0.15 worktree tasks carry a `--branch <name>` flag.
+    /// P56. `--branch` was emitted UNGATED and first exists at `v2026.5.28`
+    /// (0.15.0) — absent from `hermes_cli/kanban.py` at `v2026.5.16`
+    /// (0.14.0), where argparse would have exited 2 on the whole create. No
+    /// production caller ever set it, so the parameter was deleted rather
+    /// than gated. This is the alarm on that: a `--branch` back in the argv
+    /// means the flag returned without its capability floor.
+    @Test func createRequestArgvNeverCarriesBranch() {
         let req = KanbanCreateRequest(
             title: "worktree task",
-            workspace: .worktreePath("/tmp/wt"),
-            branch: "feat/x"
+            workspace: .worktreePath("/tmp/wt")
         )
         let argv = req.argv()
-        #expect(HermesCLIOption.contains("--branch", in: argv))
-        #expect(HermesCLIOption.value(of: "--branch", in: argv) == "feat/x")
-        // `worktree:<path>` workspace spec round-trips.
+        #expect(!HermesCLIOption.contains("--branch", in: argv))
+        // `worktree:<path>` workspace spec still round-trips.
         #expect(HermesCLIOption.value(of: "--workspace", in: argv) == "worktree:/tmp/wt")
     }
 
@@ -343,21 +346,24 @@ import Foundation
         // `dispatch`, not `claim`. See KanbanTransitionStep doc for the
         // rationale — claim doesn't spawn a worker; the dispatcher does.
         let plan = try KanbanService.plan(
-            for: KanbanTransition(from: .upNext, to: .running)
+            for: KanbanTransition(from: .upNext, to: .running),
+            caps: .empty
         )
         #expect(plan.steps == [.dispatch])
     }
 
     @Test func planRunningToBlockedRequiresReason() throws {
         let plan = try KanbanService.plan(
-            for: KanbanTransition(from: .running, to: .blocked)
+            for: KanbanTransition(from: .running, to: .blocked),
+            caps: .empty
         )
         #expect(plan.requiresBlockReason)
     }
 
     @Test func planBlockedToRunningChainsTwoVerbs() throws {
         let plan = try KanbanService.plan(
-            for: KanbanTransition(from: .blocked, to: .running)
+            for: KanbanTransition(from: .blocked, to: .running),
+            caps: .empty
         )
         // unblock then dispatch
         #expect(plan.steps.count == 2)
@@ -372,7 +378,8 @@ import Foundation
     @Test func planDoneToAnythingForbidden() {
         do {
             _ = try KanbanService.plan(
-                for: KanbanTransition(from: .done, to: .upNext)
+                for: KanbanTransition(from: .done, to: .upNext),
+                caps: .empty
             )
             Issue.record("expected error")
         } catch let err as KanbanError {
@@ -389,7 +396,8 @@ import Foundation
     @Test func planTriageToUpNextForbidden() {
         do {
             _ = try KanbanService.plan(
-                for: KanbanTransition(from: .triage, to: .upNext)
+                for: KanbanTransition(from: .triage, to: .upNext),
+                caps: .empty
             )
             Issue.record("expected error")
         } catch let err as KanbanError {
@@ -405,7 +413,8 @@ import Foundation
 
     @Test func planNoOpProducesEmptyPlan() throws {
         let plan = try KanbanService.plan(
-            for: KanbanTransition(from: .running, to: .running)
+            for: KanbanTransition(from: .running, to: .running),
+            caps: .empty
         )
         #expect(plan.steps.isEmpty)
     }

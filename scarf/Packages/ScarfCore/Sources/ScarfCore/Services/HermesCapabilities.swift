@@ -1409,6 +1409,44 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCronPauseMarkerGate: Bool { isV0201OrLater }
 
+    /// The two ways a task leaves the Kanban **Review** column from Scarf:
+    /// `review -> done` via `hermes kanban complete`, and `review ->
+    /// ready|todo` via `hermes kanban reopen-review` (v0.20.1+).
+    ///
+    /// **Floor walked both ways, and it is NOT `hasKanbanV015`.** Round-6
+    /// decision 6 named that flag; the source says otherwise, so C2 wins.
+    /// `complete_task`'s UPDATE reads
+    /// `AND status IN ('running', 'ready', 'blocked')` at **v2026.8.3**
+    /// (`pyproject.toml` = `0.20.0`, `hermes_cli/kanban_db.py` — the clause
+    /// appears twice, once per `expected_run_id` arm) and
+    /// `AND status IN ('running', 'ready', 'blocked', 'review')` at
+    /// **v2026.8.13** (`0.20.1`). At the v0.15 floor `v2026.5.28` the clause
+    /// is the three-status form, so gating on `hasKanbanV015` would have
+    /// offered a drag that `complete_task` returns `False` for — `kanban
+    /// complete` then prints `cannot complete <id> (unknown id or terminal
+    /// state)` and exits 1 (`hermes_cli/kanban_output.py:61-69`
+    /// `_bulk_apply`), i.e. a card that springs back with a refusal, on five
+    /// releases' worth of hosts.
+    ///
+    /// `reopen-review` lands at the SAME tag — `reopen-review` /
+    /// `reopen_review` occur zero times under `hermes_cli/` at every tag
+    /// through `v2026.8.3` and twice from `v2026.8.13` on — so one flag
+    /// covers both doors rather than two flags that would always agree. At
+    /// `v2026.9.7` the verb is `hermes_cli/kanban_parser.py:323-326`
+    /// (`task_ids` `nargs="+"` plus a plain `--reason`), dispatched at
+    /// `hermes_cli/kanban.py:1243` to `_cmd_reopen_review` (`:990-1008`),
+    /// which calls `reopen_review_task` (`kanban_db.py:3295-3328`):
+    /// `UPDATE tasks SET status = ? … WHERE id = ? AND status = 'review'`,
+    /// where the new status is `_landing_status_after_parents` — `ready` or
+    /// `todo`, both of which Scarf's board collapses into **Up Next**.
+    ///
+    /// **C1 for an added gate.** This gates a surface that did not exist:
+    /// before P56 every drag out of Review threw "No CLI path exists for
+    /// this transition." on EVERY host. Below the floor that refusal is
+    /// unchanged, so no range renders differently from the last release;
+    /// above it, two refusals become two working verbs.
+    public var hasKanbanReviewExits: Bool { isV0201OrLater }
+
     /// The 14 inline built-in personalities were removed from
     /// `config.yaml`'s `agent.personalities` block; canon moved to
     /// `hermes_cli/personality.py:17` `BUILTIN_PERSONALITIES` in code
