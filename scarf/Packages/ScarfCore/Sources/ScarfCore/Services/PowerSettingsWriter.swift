@@ -29,6 +29,20 @@ public enum HermesReasoningEffort {
     /// writer canonicalises it (see `canonicalDisableSpelling`). The UI never
     /// offers any of the three, but must not reject a row that uses them.
     ///
+    /// **The quoted-vs-bare gap, accepted** (round-6 decision 4). Hermes's
+    /// own set is `{"none", "false", "disabled"}` at every tag from
+    /// `v2026.7.7` (`hermes_constants.py:816`) through `v2026.9.7` (`:885`),
+    /// and `off` is in neither it nor `VALID_REASONING_EFFORTS`. So BARE
+    /// `reasoning_effort: off` is disabled — PyYAML resolves it to `False`
+    /// and `str(False).strip().lower()` is `"false"` — while QUOTED
+    /// `reasoning_effort: "off"` stays the string `off`, matches neither
+    /// set, and `parse_reasoning_effort` returns `None`, i.e. the host
+    /// silently uses its default effort. Scarf's reader unquotes, so both
+    /// spellings look identical to it and no notice can distinguish them.
+    /// Not fixed: the quoted form can only come from a hand-edited config,
+    /// the picker offers `none`, and the next save through this writer
+    /// canonicalises it away.
+    ///
     /// All three are v0.18.1-and-later spellings — see
     /// ``HermesCapabilities/hasReasoningDisableAliases`` for the tag walk —
     /// so whether one of them is "reasoning off" or "an unsupported value

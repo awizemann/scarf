@@ -127,7 +127,6 @@ import Foundation
         // v0.12 surfaces on.
         #expect(caps.hasCurator)
         #expect(caps.hasFallbackCommand)
-        #expect(caps.hasKanban)
         #expect(caps.hasOneShot)
         #expect(caps.hasSkillURLInstall)
         #expect(caps.hasACPImagePrompts)
@@ -143,6 +142,10 @@ import Foundation
         // flush_memories was REMOVED in v0.12 — flag inverts.
         #expect(!caps.hasFlushMemoriesAux)
         // v0.13 surfaces stay off on a v0.12 host.
+        // `hasKanban` is one of them since P55: `hermes_cli/kanban.py` does
+        // not exist at v2026.4.30 and `kanban` appears zero times in
+        // `commands.py` / `main.py` there.
+        #expect(!caps.hasKanban)
         #expect(!caps.hasGoals)
         #expect(!caps.hasACPQueue)
         #expect(!caps.hasKanbanDiagnostics)
@@ -823,12 +826,13 @@ import Foundation
         #expect(caps.isV020OrLater)
     }
 
-    @Test func v0203HostHidesOnlyTheGenuineV0204Flag() {
-        // P23 re-floor: of this group only `hasMCPIdentityHeader` is really
-        // a v0.20.4 surface. The other seven land at 0.20.1 / 0.20.3 and a
-        // 0.20.3 host has every one of them.
+    @Test func v0203HostHasEveryFlagInTheV0204Group() {
+        // P23 re-floored seven of the eight to 0.20.1 / 0.20.3, and P55
+        // re-floored the eighth (`hasMCPIdentityHeader`) to 0.20.1 — so NO
+        // member of the v0.20.4 MARK group is a v0.20.4 surface any more and
+        // a 0.20.3 host has all eight.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)")
-        #expect(!caps.hasMCPIdentityHeader)
+        #expect(caps.hasMCPIdentityHeader)
         #expect(!caps.isV0204OrLater)
         #expect(caps.hasCronPauseMarkerGate)
         #expect(caps.hasBuiltinPersonalitiesInCode)

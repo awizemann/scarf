@@ -99,17 +99,22 @@ import Testing
 
     /// `--query-file` is absent from `hermes chat` at v2026.8.16.2 (0.20.3),
     /// the `hasBotMode` floor, and argparse rejects the whole invocation on an
-    /// unknown flag — so the creation path must be floored at v0.21 even
-    /// though every OTHER flag it uses (`-c`, `--create-if-missing`, `-Q`,
-    /// `--in`) is present at 0.20.3.
-    @Test("Bot Chat creation is floored at v0.21, above the hasBotMode floor")
-    func botChatCreationIsFlooredAtV021() {
+    /// unknown flag — so the creation path must be floored above `hasBotMode`
+    /// even though every OTHER flag it uses (`-c`, `--create-if-missing`,
+    /// `-Q`, `--in`) is present at 0.20.3. P55 walked the remaining gap: the
+    /// flag arrives at v2026.8.19 = **0.20.5**, not v0.21.
+    @Test("Bot Chat creation is floored at v0.20.5, above the hasBotMode floor")
+    func botChatCreationIsFlooredAboveBotMode() {
         func caps(_ version: String) -> HermesCapabilities {
             HermesCapabilities.parseLine("Hermes Agent v\(version)")
         }
         #expect(caps("0.20.3").hasBotMode)
         #expect(!caps("0.20.3").hasBotChatCreationCLI)
-        #expect(!caps("0.20.6").hasBotChatCreationCLI)
+        #expect(!caps("0.20.4").hasBotChatCreationCLI)
+        // P55 re-floor: `--query-file` is `hermes_cli/_parser.py:308` at
+        // v2026.8.19 = 0.20.5, absent at v2026.8.18 = 0.20.4.
+        #expect(caps("0.20.5").hasBotChatCreationCLI)
+        #expect(caps("0.20.6").hasBotChatCreationCLI)
         #expect(caps("0.21.0").hasBotChatCreationCLI)
         #expect(caps("0.22.0").hasBotChatCreationCLI)
     }

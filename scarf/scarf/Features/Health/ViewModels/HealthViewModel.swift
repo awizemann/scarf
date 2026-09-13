@@ -890,7 +890,10 @@ final class HealthViewModel {
                     // otherwise. `_render_human`'s two heads (:255, :257) and
                     // its `  {severity}  {name}=={version}  {osv-id}` rows
                     // (:264) are what distinguish them, byte-identical back to
-                    // v2026.5.29 — the `hasHermesAudit` floor (charter C1).
+                    // **v2026.5.28** — the `hasHermesAudit` FLOOR tag
+                    // (0.15.0), whose `security_audit.py` blob is
+                    // byte-identical to the v2026.5.29 (0.15.1) one this
+                    // comment used to cite (charter C1).
                     let report = HermesSecurityAuditReport.parse(result.output)
                     if report.findingCount > 0 {
                         let summary = report.severitySummary
