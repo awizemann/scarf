@@ -1011,7 +1011,7 @@ public enum HermesYAML {
     /// is significant: `yes`/`Yes`/`YES` resolve, `yEs` does not and stays a
     /// string. Bare `y` / `n` are NOT in the resolver's regex either, whatever
     /// the YAML 1.1 spec says.
-    private static let pyYAMLTrue: Set<String> = ["yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
+    static let pyYAMLTrue: Set<String> = ["yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
     private static let pyYAMLFalse: Set<String> = ["no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
 
     /// `mattermost.require_mention` as read from a config.yaml scalar.

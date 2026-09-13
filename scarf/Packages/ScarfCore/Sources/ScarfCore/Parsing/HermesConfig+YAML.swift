@@ -148,20 +148,39 @@ public extension HermesConfig {
         // boolean key in the file reads `1` as on. `boolTrueDefault` therefore
         // reported the ack ON for a host that had suppressed it.
         //
+        // **P57b: there is NO `.strip()` anywhere on this path, and P57's
+        // `strippedScalar` invented one.** `_bridge_section_to_env` exports
+        // `str(section[key])` VERBATIM (`gateway/run.py:1816-1821` @
+        // `v2026.9.7`) and `run_busy.py:727` compares `.lower()` of that to
+        // the literal `"true"` — so quoted `' true'` is the string `" true"`,
+        // which is not `"true"`, and the ack is DISABLED on the host while
+        // post-P57 Scarf drew it ON. A trim is a per-READER claim about the
+        // Hermes side (`_bool_token` really does `str(value).strip().lower()`,
+        // `gateway/config.py:29-32`); it is not a reader-wide default.
+        //
+        // The two arms are therefore different vocabularies, and the QUOTES
+        // are the whole difference — the same shape
+        // ``HermesYAML/mattermostRequireMention(configScalar:)`` documents:
+        //
+        //   - QUOTED → a Python `str`, no resolver touches it, so the answer
+        //     is `body.lower() == "true"` EXACTLY. `'yes'` and `'on'` are the
+        //     strings `yes`/`on` and DISABLE the ack; only `'true'` (in any
+        //     case) enables it. The body is escape-DECODED, because that is
+        //     what PyYAML loaded.
+        //   - BARE → PyYAML's bool resolver runs first, so its nine true
+        //     spellings all become `True` → `"true"` → enabled; anything the
+        //     resolver leaves a string is compared lowered, which is why a
+        //     mixed-case `tRuE` (not in the resolver's regex) is ALSO enabled.
+        //     An int is `str(int)` and never `"true"`, so `1` and `01`
+        //     disable — the int resolver stays out of this key.
+        //
         // Absent key → the bridge never runs → `os.environ.get(…, "true")` →
         // enabled, which is why this is still a true-by-default key.
         func busyAckEnabled() -> Bool {
             guard let raw = values["display.busy_ack_enabled"] else { return true }
-            // The YAML 1.1 spellings PyYAML's bool resolver loads as `True`;
-            // `str(True).lower()` is the only thing that equals "true".
-            //
-            // P57: on the scalar STRIPPED inside its quotes, because the
-            // comparison downstream is `os.environ.get(…).lower() == "true"`
-            // over a value Hermes itself `str()`-ed — `" true"` in quotes is
-            // the string `true`. Deliberately still NOT `boolishValue`: `1`
-            // is `str(1)` == `"1"` here, which is not `"true"`, so the int
-            // resolver must NOT be consulted for this key.
-            return ["true", "yes", "on"].contains(HermesYAML.strippedScalar(raw).lowercased())
+            let body = HermesYAML.unquotedScalar(raw)
+            if HermesYAML.isQuotedScalar(raw) { return body.lowercased() == "true" }
+            return HermesYAML.pyYAMLTrue.contains(body) || body.lowercased() == "true"
         }
         func int(_ key: String, default def: Int) -> Int {
             Int(scalar(key) ?? "") ?? def

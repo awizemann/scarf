@@ -99,11 +99,21 @@ struct HermesP57BoolishTests {
         #expect(HermesYAML.strippedScalar("  false  ") == "false")
     }
 
-    /// `display.busy_ack_enabled` keeps its NARROWER vocabulary: the trim moved
-    /// inside the quotes but `1` must still not read as ON, because the
-    /// comparison downstream is against the literal `"true"`.
-    @Test func busyAckKeepsItsOwnVocabularyWhileGainingTheTrim() {
-        #expect(HermesConfig(yaml: "display:\n  busy_ack_enabled: ' true'\n").displayBusyAckEnabled == true)
+    /// `display.busy_ack_enabled` keeps its NARROWER vocabulary: `1` must not
+    /// read as ON, because the comparison downstream is against the literal
+    /// `"true"`.
+    ///
+    /// **P57b corrected this test's first row.** P57 gave the key
+    /// `strippedScalar` and asserted quoted `' true'` reads as ON. It does
+    /// not: nothing on this key's path strips —
+    /// `_bridge_section_to_env` exports `str(section[key])` verbatim
+    /// (`gateway/run.py:1816-1821` @ `v2026.9.7`) and `run_busy.py:727`
+    /// compares that to `"true"` — so the host has the ack OFF. The full
+    /// argument and its 918-row oracle corpus are in
+    /// ``HermesP57bBusyAckCorpusTests``.
+    @Test func busyAckKeepsItsOwnVocabularyAndTakesNoTrim() {
+        #expect(HermesConfig(yaml: "display:\n  busy_ack_enabled: ' true'\n").displayBusyAckEnabled == false)
+        #expect(HermesConfig(yaml: "display:\n  busy_ack_enabled: 'true'\n").displayBusyAckEnabled == true)
         #expect(HermesConfig(yaml: "display:\n  busy_ack_enabled: '  no  '\n").displayBusyAckEnabled == false)
         // Still NOT boolish: an int `1` is `str(1)` == "1", not "true".
         #expect(HermesConfig(yaml: "display:\n  busy_ack_enabled: 1\n").displayBusyAckEnabled == false)
