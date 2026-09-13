@@ -56,6 +56,14 @@ final class MCPLoginController {
     private(set) var errorMessage: String?
 
     private var process: Process?
+    /// The hop that resolves the login-shell environment before a LOCAL
+    /// spawn (C10, round-6 P58). `enrichedEnvironment()` reads a `static let`
+    /// whose initialiser is two `zsh` probes at 5 s + 3 s behind a
+    /// `swift_once`, so a main-actor reader arriving during the launch
+    /// warm-up blocks the window for up to eight seconds — on the click that
+    /// opens this sheet. Held so `stop()` can retire a start that has not
+    /// reached `proc.run()` yet.
+    private var startTask: Task<Void, Never>?
     private var stdoutPipe: Pipe?
     /// Everything the reader has decoded but the main actor has not consumed
     /// yet, plus whether the reader has seen EOF. Reads land on the pipe's own
@@ -113,7 +121,31 @@ final class MCPLoginController {
         args += ["--", server]
         runningServer = server
 
-        let proc = (makeLoginProcess ?? defaultProcess)(args)
+        // C10: resolve the login-shell environment OFF the main actor
+        // before spawning — see ``startTask``. An injected process or a
+        // remote context needs none of it (ssh forwards no environment, so
+        // the remote branch wraps the command in `env PYTHONUNBUFFERED=1 …`).
+        guard makeLoginProcess == nil, !context.isRemote else {
+            launch(args: args, server: server, inbox: inbox, localEnvironment: nil)
+            return
+        }
+        startTask = Task { [weak self] in
+            let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+            guard let self, !Task.isCancelled else { return }
+            self.launch(args: args, server: server, inbox: inbox, localEnvironment: env)
+        }
+    }
+
+    /// Build and spawn the run. `localEnvironment` is the pre-resolved
+    /// login-shell environment for a local, non-injected run; `nil` otherwise.
+    private func launch(
+        args: [String],
+        server: String,
+        inbox: ProcessOutputInbox,
+        localEnvironment: [String: String]?
+    ) {
+        let proc = makeLoginProcess?(args)
+            ?? defaultProcess(args, localEnvironment: localEnvironment)
 
         let outPipe = Pipe()
         proc.standardOutput = outPipe
@@ -223,7 +255,9 @@ final class MCPLoginController {
     /// Python block-buffers when stdout is a pipe, and the device prompt —
     /// the entire point of the sheet — arrives only once the process is done
     /// waiting, i.e. too late to be used.
-    private func defaultProcess(_ args: [String]) -> Process {
+    private func defaultProcess(
+        _ args: [String], localEnvironment: [String: String]?
+    ) -> Process {
         if context.isRemote {
             return context.makeTransport().makeProcess(
                 executable: "env",
@@ -234,7 +268,9 @@ final class MCPLoginController {
             executable: context.paths.hermesBinary,
             args: args
         )
-        var env = HermesFileService.enrichedEnvironment()
+        // Pre-resolved off the main actor by the caller (C10, P58); the
+        // `?? [:]` arm is unreachable on the local branch this sits in.
+        var env = localEnvironment ?? [:]
         env["PYTHONUNBUFFERED"] = "1"
         proc.environment = env
         return proc
@@ -244,6 +280,8 @@ final class MCPLoginController {
     /// calls this on dismiss so a device flow doesn't keep polling the token
     /// endpoint after the user walked away.
     func stop() {
+        startTask?.cancel()
+        startTask = nil
         // Retire this run BEFORE terminating it: `terminate()` fires the
         // termination handler asynchronously, and without the generation
         // bump (and without clearing the handler on the process itself)

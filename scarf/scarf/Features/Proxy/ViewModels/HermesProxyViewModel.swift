@@ -62,9 +62,13 @@ final class HermesProxyViewModel {
     /// local server — remote SSH is deferred).
     var isLocal: Bool { context.id == ServerContext.local.id }
 
-    func start() {
+    /// `async` since round-6 P58: the service resolves the login-shell
+    /// environment and forks off the main actor now (C10), so the start is a
+    /// suspension rather than a synchronous freeze. The button's `Task` is
+    /// what awaits it.
+    func start() async {
         guard let port = Int(portText.trimmingCharacters(in: .whitespaces)) else { return }
-        service.start(
+        await service.start(
             provider: providerSelection,
             host: HermesProxyService.defaultHost,
             port: port

@@ -771,7 +771,9 @@ final class HealthViewModel {
         actionMessage = local ? "Collecting debug report…" : "Uploading debug report…"
         let argv = Self.debugShareArguments(local: local, capabilities: capabilities)
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: argv, timeout: 120)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: argv, timeout: 120)
+            }
             // P54, round-6: judged by output. `run_debug_share` prints
             // `  (failed to upload: …)` AFTER the `Debug report uploaded:`
             // block, at exit 0 (`hermes_cli/debug.py:490`, `:494` @
@@ -875,7 +877,9 @@ final class HealthViewModel {
         isRunningAudit = true
         auditMessage = String(localized: "Running supply-chain audit…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
+            }
             await MainActor.run {
                 self.isRunningAudit = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -933,9 +937,11 @@ final class HealthViewModel {
         isRunningSessionsOptimize = true
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(
-                args: HermesSessionsOptimizeVerdict.argv, timeout: 120
-            )
+            let result = await OffPool.run {
+                fileService.runHermesCLI(
+                    args: HermesSessionsOptimizeVerdict.argv, timeout: 120
+                )
+            }
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1003,7 +1009,9 @@ final class HealthViewModel {
         isMigratingXAI = true
         migrateXAIMessage = String(localized: "Migrating xAI model…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["migrate", "xai", "--apply"], timeout: 120)
+            let result = await OffPool.run {
+                fileService.runHermesCLI(args: ["migrate", "xai", "--apply"], timeout: 120)
+            }
             let config = fileService.loadConfig()
             await MainActor.run {
                 self.isMigratingXAI = false
@@ -1258,7 +1266,6 @@ final class HealthViewModel {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         proc.arguments = ["dashboard", "--no-open", "--port", String(port)]
-        proc.environment = HermesFileService.enrichedEnvironment()
         // Discard stdout/stderr — we rely on the HTTP probe for liveness and
         // don't want a growing pipe buffer to block the subprocess.
         proc.standardOutput = FileHandle.nullDevice
@@ -1270,6 +1277,13 @@ final class HealthViewModel {
         // live process or the error; everything that touches view state stays
         // on MainActor.
         Task { [weak self] in
+            // C10 (round-6 P58): the environment is resolved off the pool
+            // too, not just the spawn. `enrichedEnvironment()` reads a
+            // `static let` whose initialiser is two `zsh` probes at 5 s + 3 s
+            // behind a `swift_once`, so setting it on the main actor froze
+            // the window for up to eight seconds on the Start click — the
+            // spawn below had been moved off and the line feeding it had not.
+            proc.environment = await OffPool.run { HermesFileService.enrichedEnvironment() }
             let spawnError: (any Error)? = await Task.detached {
                 do { try proc.run(); return nil } catch { return error }
             }.value

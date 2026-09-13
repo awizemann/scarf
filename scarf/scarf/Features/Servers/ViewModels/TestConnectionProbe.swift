@@ -252,8 +252,13 @@ struct TestConnectionProbe {
         // Diagnostic envelope: always include the ssh command + the
         // SSH_AUTH_SOCK presence at the top of the stderr blob so the
         // user immediately sees whether agent inheritance worked.
+        // `shellEnv`, not a second `enrichedEnvironment()` call: the value is
+        // memoised, but reading it HERE on the main actor is only free
+        // because the hoisted read above happened to populate the
+        // `swift_once` first — an ordering dependency nobody wrote down, and
+        // one that breaks the moment this line moves above it (round-6 P58).
         let agentEnv = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
-            ?? HermesFileService.enrichedEnvironment()["SSH_AUTH_SOCK"]
+            ?? shellEnv["SSH_AUTH_SOCK"]
             ?? "(not set)"
         let envSummary = "SSH_AUTH_SOCK = \(agentEnv)\n\n"
 

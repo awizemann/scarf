@@ -69,7 +69,7 @@ final class HermesProxyService {
     /// from `HermesFileService.enrichedEnvironment()` so it can find
     /// node / npx / system tools even when Scarf was launched via
     /// Finder (no login shell).
-    func start(provider: String, host: String = defaultHost, port: Int = defaultPort) {
+    func start(provider: String, host: String = defaultHost, port: Int = defaultPort) async {
         guard !isRunning else { return }
         guard context.id == ServerContext.local.id else {
             lastError = "Hermes Proxy can only be launched against the local server in this release."
@@ -79,7 +79,6 @@ final class HermesProxyService {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: context.paths.hermesBinary)
         proc.arguments = ["proxy", "start", "--provider", provider, "--host", host, "--port", String(port)]
-        proc.environment = HermesFileService.enrichedEnvironment()
 
         let pipe = Pipe()
         proc.standardError = pipe
@@ -124,15 +123,24 @@ final class HermesProxyService {
             }
         }
 
-        do {
-            try proc.run()
+        // C10 (round-6 P58). Two blocking calls sat on the main actor here:
+        // `enrichedEnvironment()`, a `swift_once` over two `zsh` probes at
+        // 5 s + 3 s, and `proc.run()`, a fork/exec that resolves PATH and can
+        // block for tens of milliseconds — far longer on a loaded or wedged
+        // filesystem. `stop()` was moved off the actor in round-5 P48 and
+        // `start()`, which is the same class and the same click, was not.
+        // Both go through `OffPool.run` (a real thread; `Task.detached` is
+        // still the cooperative pool). Everything that touches view state
+        // stays on the main actor, below.
+        let spawnError: (any Error)? = await run(proc: proc)
+        if spawnError == nil {
             child = proc
             isRunning = true
             routedProvider = provider
             endpoint = URL(string: "http://\(host):\(port)/v1")
             lastError = nil
             logger.info("hermes proxy started on \(host, privacy: .public):\(port, privacy: .public) with provider \(provider, privacy: .public)")
-        } catch {
+        } else if let error = spawnError {
             lastError = "Could not launch hermes proxy: \(error.localizedDescription)"
             logger.error("hermes proxy launch failed: \(error.localizedDescription, privacy: .public)")
             // Tear down the half-initialized pipe. `run()` threw, so nothing
@@ -144,6 +152,20 @@ final class HermesProxyService {
             pipe.fileHandleForReading.readabilityHandler = nil
             try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()
+        }
+    }
+
+    /// Resolve the login-shell environment and spawn, both off the
+    /// cooperative pool. Returns the `run()` error, or `nil` on success.
+    ///
+    /// `nonisolated` so neither half can be scheduled back onto the main
+    /// actor by an inherited isolation — the P22 sweep reads that keyword as
+    /// the opt-out, and here it is load-bearing rather than decorative.
+    private nonisolated func run(proc: Process) async -> (any Error)? {
+        let env = await OffPool.run { HermesFileService.enrichedEnvironment() }
+        return await OffPool.run {
+            proc.environment = env
+            do { try proc.run(); return nil } catch { return error }
         }
     }
 
