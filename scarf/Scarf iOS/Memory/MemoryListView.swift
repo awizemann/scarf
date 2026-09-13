@@ -93,7 +93,25 @@ struct MemoryListView: View {
     /// find hermes even when it's in `~/.local/bin` or `/opt/homebrew/bin`.
     private func resetMemory(context: ServerContext) async {
         let hermes = context.paths.hermesBinary
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
+        // `COLUMNS` first, for the same reason the Mac's transports carry it
+        // (P40b) and `CitadelServerTransport.asyncRunProcess` now does
+        // (P54): this spawn is JUDGED BY OUTPUT — `HermesMemoryResetVerdict`
+        // matches whole lines — and `rich` wraps at 80 columns when stdout
+        // is not a TTY.
+        //
+        // It is set HERE as well as in the transport because this script is
+        // handed to `/bin/sh -c` as one string: the transport's own prefix
+        // sets `COLUMNS` for the `sh`, and `sh` does export it to `hermes`,
+        // but this call site is the only thing that keeps working if the
+        // context ever hands back a transport that composes its command
+        // differently. Belt and braces on a line that is free.
+        //
+        // The assignment leads, as it must: `sh` reads a command line's
+        // leading `VAR=value` pairs left to right, and the first token that
+        // is not an assignment becomes the command.
+        let script = "COLUMNS=\(LocalTransport.wideColumns) "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" "
+            + "\(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
         let ctx = context
         do {
             let result = try await Task.detached {

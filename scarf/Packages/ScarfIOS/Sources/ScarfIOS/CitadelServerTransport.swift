@@ -672,7 +672,31 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // scopes via this same `config.remoteHome`.
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
             forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
-        let cmd = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+        // `COLUMNS` rides the same assignment prefix as `PATH` and
+        // `HERMES_HOME` (P54, round-6). Citadel's raw exec channel is not a
+        // TTY and forwards none of the client's environment, so the remote
+        // `rich` takes its 80-column non-TTY default
+        // (`Console.width` → `COLUMNS` → 80) and wraps any line longer than
+        // that. Scarf judges Hermes runs by matching whole printed lines, so
+        // a wrap can split a marker in half — the shipped case P40b found is
+        // `✓ Plugin <name> updated.` (`hermes_cli/plugins_cmd.py:828` @
+        // `v2026.9.7`), matched as a column-0 prefix AND an `updated.` tail.
+        //
+        // The Mac's two transports have carried a wide `COLUMNS` since P40b
+        // (``ScarfCore/LocalTransport/subprocessEnvironment(forExecutable:)``
+        // and `SSHTransport.composedRemoteCommand`). This is the THIRD spawn
+        // family and it was the one without — every judged `runProcess` the
+        // iOS runtime makes comes through here. The value is read from
+        // `LocalTransport.wideColumns` rather than written out, so the three
+        // families cannot drift to three different widths.
+        //
+        // The remaining exec family, `_streamScriptImpl`, deliberately does
+        // NOT carry it: it pipes a `/bin/sh` script (sqlite3, the bots
+        // scan), none of whose output is verdict-matched, and the Mac twin
+        // (`SSHTransport.streamScript` → `SSHScriptRunner`) does not carry it
+        // either. Parity is the point in both directions.
+        let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
             + hermesHome
             + Self.shellJoin([executable] + args)
         // Citadel's `executeCommand` discards captured output when the
