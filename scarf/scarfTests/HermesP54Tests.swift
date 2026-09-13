@@ -588,7 +588,51 @@ struct BannerCatalogueP54bTests {
     /// exists to say "we do not know" announced itself in English to every
     /// non-English VoiceOver user. A hand-maintained key list cannot catch
     /// that — the key was never added to it — so this reads the file.
-    static let scannedFiles = ["scarf/Features/Common/OutcomeMessageBar.swift"]
+    ///
+    /// P60 widened the roots to `HermesCLIOutcome.swift`, which is where the
+    /// verdict formatters live and where the same gap had opened again:
+    /// `HermesMemoryResetVerdict.failureSummary`'s two sentences — added by
+    /// P59 when it collapsed the Mac and iOS twins into one formatter — had
+    /// no catalogue rows at all, beside four siblings in the same file that
+    /// are translated in six locales. Same shape, same cause, one file away.
+    static let scannedFiles = [
+        "scarf/Features/Common/OutcomeMessageBar.swift",
+        "Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift",
+    ]
+
+    /// The minimum number of keys each scanned file must yield, so a file
+    /// that stopped matching cannot pass over nothing (the P52 lesson about
+    /// a sweep that reads zero files). Well under each file's real count.
+    static let scannedFileFloor: [String: Int] = [
+        "scarf/Features/Common/OutcomeMessageBar.swift": 3,
+        "Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift": 5,
+    ]
+
+    /// The catalogue spellings a scanned key could have.
+    ///
+    /// ``localizedKeys(in:)`` writes `%@` for EVERY interpolation, because a
+    /// source scan cannot know the interpolated type — but Swift's extractor
+    /// can, and it writes `%d` for an `Int32` and `%lld` for an `Int`.
+    /// `hermes memory reset exited with status \(exitCode)` is
+    /// `…status %d.` in the catalogue, and a scan that insisted on `%@` would
+    /// report a row that is right there. So each `%@` is tried as `%@`, `%d`
+    /// and `%lld`, and a key matches if ANY spelling has a row. This is a
+    /// relaxation of the KEY, never of the requirement: a key with no row
+    /// under any spelling still fails, in every one of the six locales.
+    static func catalogueSpellings(of key: String) -> [String] {
+        let parts = key.components(separatedBy: "%@")
+        guard parts.count > 1 else { return [key] }
+        // Bounded: three specifiers per slot would be 3^n, so a key with
+        // more than three interpolations is only tried as written.
+        guard parts.count <= 4 else { return [key] }
+        var out = [parts[0]]
+        for part in parts.dropFirst() {
+            out = out.flatMap { prefix in
+                ["%@", "%d", "%lld"].map { prefix + $0 + part }
+            }
+        }
+        return out
+    }
 
     /// Every `String(localized: "…")` literal in `source`, in its CATALOGUE
     /// spelling: `\(foo)` resolved to `%@`, which is what the lookup uses at
@@ -653,18 +697,40 @@ struct BannerCatalogueP54bTests {
                 Comment(rawValue: "scan found: \(found)"))
     }
 
+    /// The specifier relaxation, planted (P60). Its job is to find the row an
+    /// `Int32` interpolation actually has; its job is NOT to let a key with
+    /// no row pass.
+    @Test func theSpecifierRelaxationIsCalibrated() throws {
+        let strings = try Self.catalogue()
+        // The real case: the scan writes `%@`, the catalogue holds `%d`.
+        let scanned = "hermes memory reset exited with status %@."
+        #expect(strings[scanned] == nil, "the `%@` spelling exists — this fixture is stale")
+        let resolved = Self.catalogueSpellings(of: scanned).first { strings[$0] != nil }
+        #expect(resolved == "hermes memory reset exited with status %d.")
+        // A key with no row under ANY spelling still fails.
+        let invented = "scarf p60 invented key %@ that no catalogue holds"
+        #expect(Self.catalogueSpellings(of: invented).allSatisfy { strings[$0] == nil })
+        // A key with no interpolation is tried as written, once.
+        #expect(Self.catalogueSpellings(of: "Exported") == ["Exported"])
+        #expect(Self.catalogueSpellings(of: "a %@ b %@ c").count == 9)
+    }
+
     @Test func everyScannedFileSKeysAreInTheCatalogue() throws {
         let strings = try Self.catalogue()
         for relative in Self.scannedFiles {
             let keys = Self.localizedKeys(in: try P54Source.read(relative))
-            // Premise floor: a file that stopped matching would pass over
-            // nothing (the P52 lesson about a sweep that reads zero files).
-            #expect(keys.count >= 3, Comment(rawValue:
-                "the scan found \(keys.count) keys in \(relative) — the matcher is broken"))
+            // Premise floor, PER FILE: a file that stopped matching would
+            // pass over nothing (the P52 lesson about a sweep that reads zero
+            // files), and a shared floor is cleared by the bigger file alone.
+            let floor = Self.scannedFileFloor[relative] ?? 3
+            #expect(keys.count >= floor, Comment(rawValue:
+                "the scan found \(keys.count) keys in \(relative), below the floor of"
+                + " \(floor) — the matcher is broken"))
             for key in keys {
-                #expect(strings[key] != nil, Comment(rawValue:
+                let spelling = Self.catalogueSpellings(of: key).first { strings[$0] != nil }
+                #expect(spelling != nil, Comment(rawValue:
                     "no catalogue row for \(key) (in \(relative))"))
-                guard let row = strings[key] as? [String: Any] else { continue }
+                guard let spelling, let row = strings[spelling] as? [String: Any] else { continue }
                 let localizations = row["localizations"] as? [String: Any] ?? [:]
                 for locale in Self.locales {
                     let unit = (localizations[locale] as? [String: Any])?["stringUnit"] as? [String: Any]

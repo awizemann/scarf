@@ -42086,6 +42086,86 @@
         }
       }
     },
+    "hermes memory reset exited with status %d." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` wurde mit Exit-Code %d beendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` terminó con el código de salida %d."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` s'est terminé avec le code de sortie %d."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` は終了コード %d で終了しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` terminou com o código de saída %d."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` 以退出码 %d 结束。"
+          }
+        }
+      }
+    },
+    "hermes memory reset printed no result. Check the host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` hat kein Ergebnis ausgegeben. Prüfe den Host."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` no imprimió ningún resultado. Comprueba el host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` n'a affiché aucun résultat. Vérifiez l'hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` は結果を出力しませんでした。ホストを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` não imprimiu nenhum resultado. Verifique o host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes memory reset` 未输出任何结果。请检查主机。"
+          }
+        }
+      }
+    },
     "hermes peer add spark --url http://spark.lan:8377 --key <API_SERVER_KEY>" : {
 
     },
