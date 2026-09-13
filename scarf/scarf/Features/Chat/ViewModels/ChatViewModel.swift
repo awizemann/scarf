@@ -2706,13 +2706,6 @@ final class ChatViewModel {
         "scarf.kanbanOnboarding.dismissed.\(context.id.uuidString)"
     }
 
-    /// Decide whether to surface the toolset-off teaching sheet after
-    /// the user just sent `/goal`. Skipped when:
-    /// - The host pre-dates v0.12 — kanban itself doesn't exist yet.
-    /// - The user has dismissed this sheet on this host before.
-    /// - The detector reports the toolset is already enabled (or the
-    ///   detector couldn't classify, in which case we silently skip
-    ///   rather than nag with a misleading banner).
     /// Whether a `/goal` argument tail reads as "here is my target" rather
     /// than a clear. The only surviving reader of a `/goal` argument: it
     /// decides whether the kanban teaching sheet is worth raising, never
@@ -2722,11 +2715,46 @@ final class ChatViewModel {
         return !lowered.isEmpty && lowered != "clear" && lowered != "--clear"
     }
 
+    /// The version + dismissal half of the decision, pure so it can be tested
+    /// without a host (the detector half needs a live config.yaml).
+    ///
+    /// **`hasKanban`, not "has a version".** The sheet's button runs
+    /// `hermes tools enable kanban --platform cli`
+    /// (`KanbanToolsetEnabler`), and on a host below the flag's floor
+    /// `kanban` is not a toolset — Hermes routes the unknown argv to the
+    /// AGENT and exits 0, which charter C5 exists to stop. The detector
+    /// cannot save us: it reads `config.yaml`, and a 0.12 config has no
+    /// `kanban` in its toolsets for exactly the reason the sheet must not
+    /// offer to add one, so `.disabled` is precisely the answer a pre-floor
+    /// host gives.
+    ///
+    /// `.empty` capabilities (not yet detected, or detection failed) are
+    /// `false` on every flag, so an unwired window stays quiet rather than
+    /// teaching a feature it cannot confirm exists.
+    static func shouldOfferKanbanOnboarding(
+        capabilities: HermesCapabilities, dismissed: Bool
+    ) -> Bool {
+        capabilities.hasKanban && !dismissed
+    }
+
+    /// Decide whether to surface the toolset-off teaching sheet after
+    /// the user just sent `/goal`. Skipped when:
+    /// - The host pre-dates **v0.13** — `hermes_cli/kanban.py` does not
+    ///   exist at `v2026.4.30` (0.12.0) and the string `kanban` appears zero
+    ///   times in its `commands.py` / `main.py`; the file and
+    ///   `CommandDef("kanban", …)` arrive at `v2026.5.7` (0.13.0). The
+    ///   release notes said 0.12, which is why the flag's floor moved in P55
+    ///   (charter C2) and why this comment said 0.12 until P59.
+    /// - The user has dismissed this sheet on this host before.
+    /// - The detector reports the toolset is already enabled (or the
+    ///   detector couldn't classify, in which case we silently skip
+    ///   rather than nag with a misleading banner).
     private func maybeTriggerKanbanOnboarding() {
         let dismissedKey = kanbanOnboardingDismissedKey
-        if UserDefaults.standard.bool(forKey: dismissedKey) {
-            return
-        }
+        guard Self.shouldOfferKanbanOnboarding(
+            capabilities: capabilitiesStore?.capabilities ?? .empty,
+            dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
+        ) else { return }
         let context = self.context
         Task { [weak self] in
             let detector = KanbanToolsetDetector(context: context)
