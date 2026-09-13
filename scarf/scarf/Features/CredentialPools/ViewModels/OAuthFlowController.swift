@@ -132,6 +132,12 @@ final class OAuthFlowController {
         pendingExit = nil
         didFinish = false
 
+        // `isRunning` is raised HERE, before the environment hop, not in
+        // `launch`: its whole point is that the sheet shows the run as live
+        // FROM THE CLICK, and the hop can take a second on a cold
+        // `swift_once` (round-6 P58). `stop()` lowers it.
+        isRunning = true
+
         // C10: resolve the login-shell environment OFF the main actor
         // before spawning — see ``startTask``. An injected process or a
         // remote context needs none of it (ssh forwards no environment, so
@@ -224,7 +230,7 @@ final class OAuthFlowController {
         // appear after the spawn.
         stdinPipe = inPipe
         stdoutPipe = outPipe
-        isRunning = true
+        // `isRunning` was raised in `start()`, before the environment hop.
         let spawnGeneration = generation
         Task { [weak self] in
             let spawnError: (any Error)? = await Task.detached {

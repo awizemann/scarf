@@ -121,6 +121,12 @@ final class MCPLoginController {
         args += ["--", server]
         runningServer = server
 
+        // `isRunning` is raised HERE, before the environment hop, not in
+        // `launch`: its whole point is that the sheet shows the run as live
+        // FROM THE CLICK, and the hop can take a second on a cold
+        // `swift_once` (round-6 P58). `stop()` lowers it.
+        isRunning = true
+
         // C10: resolve the login-shell environment OFF the main actor
         // before spawning — see ``startTask``. An injected process or a
         // remote context needs none of it (ssh forwards no environment, so
@@ -205,11 +211,9 @@ final class MCPLoginController {
         // ABOVE, before the process can produce a byte, and `pump()` still
         // judges only once EOF and the exit status are both in.
         //
-        // `isRunning` is raised HERE rather than after the spawn: the sheet
-        // must show the run as live from the click, and raising it in the
-        // continuation could re-raise it after a fast process had already
-        // finished.
-        isRunning = true
+        // `isRunning` was raised in `start()`, before the environment hop —
+        // raising it in the spawn continuation could re-raise it after a fast
+        // process had already finished.
         let spawnGeneration = generation
         Task { [weak self] in
             let spawnError: (any Error)? = await Task.detached {

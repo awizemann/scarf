@@ -37,6 +37,9 @@ final class HermesProxyService {
     /// the proxy is stopped. Owned exclusively by this service — the
     /// view model reads `isRunning` instead of touching the Process.
     private var child: Process?
+    /// A start that has left the main actor for its environment hop and its
+    /// fork, and has not come back. See ``start(provider:host:port:)``.
+    private var isStarting = false
 
     /// Tracks startup-time stderr output for the panel's log tail. Cap
     /// is generous enough to fit the boot banner + a few lines of
@@ -70,7 +73,13 @@ final class HermesProxyService {
     /// node / npx / system tools even when Scarf was launched via
     /// Finder (no login shell).
     func start(provider: String, host: String = defaultHost, port: Int = defaultPort) async {
-        guard !isRunning else { return }
+        // `isStarting` as well as `isRunning`, because this is `async` since
+        // round-6 P58: `isRunning` is only raised AFTER the spawn returns, so
+        // a second click landing during the environment hop used to be
+        // impossible (the whole function ran in one main-actor turn) and now
+        // is not. Two children on port 8645, one of them unowned, is what the
+        // second latch prevents.
+        guard !isRunning, !isStarting else { return }
         guard context.id == ServerContext.local.id else {
             lastError = "Hermes Proxy can only be launched against the local server in this release."
             return
@@ -132,7 +141,9 @@ final class HermesProxyService {
         // Both go through `OffPool.run` (a real thread; `Task.detached` is
         // still the cooperative pool). Everything that touches view state
         // stays on the main actor, below.
+        isStarting = true
         let spawnError: (any Error)? = await run(proc: proc)
+        isStarting = false
         if spawnError == nil {
             child = proc
             isRunning = true
