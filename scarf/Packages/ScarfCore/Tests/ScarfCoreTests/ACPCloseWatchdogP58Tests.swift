@@ -59,5 +59,38 @@ struct ACPCloseWatchdogP58Tests {
         #expect(ProcessACPChannel.closeGrace > 0)
         #expect(ProcessACPChannel.closeGrace <= 5)
     }
+
+    /// P58b — the watchdog's SIGTERM step must not be `Process.terminate()`.
+    ///
+    /// `guard watchdog.isRunning` is a check, not a hold: the child can be
+    /// reaped in the gap, and `terminate()` on a reaped process raises an
+    /// ObjC exception, i.e. an untrappable crash in Swift. `kill(2)` on a
+    /// stale pid returns ESRCH instead. Asserted at the source because the
+    /// window is a race no test can open on demand.
+    @Test("the close watchdog signals by pid, never through `terminate()`")
+    func theWatchdogDoesNotCallTerminate() throws {
+        let channel = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()   // …/ScarfCoreTests
+                .deletingLastPathComponent()   // …/Tests
+                .deletingLastPathComponent()   // …/ScarfCore
+                .appendingPathComponent("Sources/ScarfCore/ACP/ProcessACPChannel.swift"),
+            encoding: .utf8)
+        let code = channel.components(separatedBy: "\n")
+            .map { line -> String in
+                guard let slashes = line.range(of: "//") else { return line }
+                return String(line[line.startIndex..<slashes.lowerBound])
+            }
+            .joined(separator: "\n")
+        #expect(!code.contains("watchdog.terminate()"), """
+            The close watchdog still calls `Process.terminate()` on a child it \
+            only checked `isRunning` on. Signal the pid instead — a reaped \
+            process makes `terminate()` raise, and an ObjC exception is not \
+            catchable in Swift.
+            """)
+        #expect(code.contains("kill(pid, SIGTERM)") && code.contains("kill(pid, SIGKILL)"),
+                "the watchdog no longer escalates SIGTERM → SIGKILL by pid")
+    }
+
 }
 #endif

@@ -262,15 +262,30 @@ public actor ProcessACPChannel: ACPChannel {
             // included. `isRunning` means it launched, so a non-positive pid
             // should be impossible, which is why it is asserted rather than
             // trusted (round-5 P48b's proxy Stop shape).
+            //
+            // P58b: the SIGTERM step is `kill(pid, SIGTERM)`, not
+            // `terminate()`. `guard watchdog.isRunning` is a CHECK, not a
+            // hold — the child can be reaped in the gap between the guard and
+            // the call, and `Process.terminate()` on a reaped process raises
+            // an ObjC exception, which in Swift is an untrappable crash.
+            // `kill(2)` on a stale pid cannot trap: it returns ESRCH, or at
+            // worst signals a recycled pid. **The residual window is pid
+            // recycling** — between the guard and the `kill` the kernel could
+            // hand this number to an unrelated process, and neither this
+            // shape nor `terminate()` can close that without a pidfd; it is
+            // accepted here because the gap is one statement wide and the two
+            // signals are the ones a wedged child had two `closeGrace`
+            // windows to answer.
             let watchdog = process
             Task.detached {
                 try? await Task.sleep(nanoseconds: UInt64(Self.closeGrace * 1_000_000_000))
                 guard watchdog.isRunning else { return }
-                watchdog.terminate()
+                let pid = watchdog.processIdentifier
+                guard pid > 0 else { return }
+                kill(pid, SIGTERM)
                 try? await Task.sleep(nanoseconds: UInt64(Self.closeGrace * 1_000_000_000))
                 guard watchdog.isRunning else { return }
-                let pid = watchdog.processIdentifier
-                if pid > 0 { kill(pid, SIGKILL) }
+                kill(pid, SIGKILL)
             }
         }
 

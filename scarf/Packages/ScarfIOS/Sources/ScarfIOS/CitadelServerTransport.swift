@@ -153,6 +153,15 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     // MARK: - ServerTransport: processes
 
+    /// **This is not dead code, and P58's write-up said it was.** Decision 11
+    /// gave the iOS bridge an `async` seam and the note recorded that `runSync`
+    /// "survives only for the SFTP file verbs" — measured at P58b, the
+    /// SYNCHRONOUS `runProcess` still has a live iOS caller:
+    /// `ServerContext.UserHomeCache.probe` (`ServerContext.swift:343`), which
+    /// is unguarded ScarfCore compiled for iOS and reaches this type through
+    /// `ServerContext.sshTransportFactory`. Converting it to `asyncRunProcess`
+    /// belongs to `t-02f830f4` with the rest of the end-to-end conversion;
+    /// until then `runSync` has eight callers, not seven.
     public func runProcess(
         executable: String,
         args: [String],
