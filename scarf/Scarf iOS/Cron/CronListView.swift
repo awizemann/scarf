@@ -268,7 +268,16 @@ private struct CronRow: View {
 /// (delivery_failures, last_run_at, etc.) pass through untouched
 /// when editing an existing job.
 struct CronEditorView: View {
-    let title: String
+    /// P60: a `LocalizedStringResource`, not a `String`.
+    ///
+    /// `.navigationTitle(_:)` has a `StringProtocol` overload that renders
+    /// its argument VERBATIM, and a `String` parameter selected it — so the
+    /// three call sites' literals ("Edit cron job", "New cron job",
+    /// "Duplicate cron job") reached the bar untranslated even though all
+    /// three already have rows in `Localizable.xcstrings` in six locales.
+    /// A `LocalizedStringResource` makes the literals resource literals at
+    /// the call site and forces the resolving path through `Text`.
+    let title: LocalizedStringResource
     let onSave: (HermesCronJob) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -297,7 +306,7 @@ struct CronEditorView: View {
 
     init(
         initial: HermesCronJob?,
-        title: String,
+        title: LocalizedStringResource,
         recoveryOffer: CronRecoveryOffer,
         onSave: @escaping (HermesCronJob) -> Void
     ) {
@@ -406,7 +415,7 @@ struct CronEditorView: View {
                         .textInputAutocapitalization(.never)
                 }
             }
-            .navigationTitle(title)
+            .navigationTitle(Text(title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
