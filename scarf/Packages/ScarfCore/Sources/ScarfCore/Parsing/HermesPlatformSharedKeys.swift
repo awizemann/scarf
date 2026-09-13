@@ -104,13 +104,34 @@ public enum HermesPlatformSharedKeys {
     /// The `platforms.<p>` fall-through is also the answer for a config that
     /// mentions the platform nowhere: a first-run write has to land
     /// somewhere, and the nested spelling is the modern one Hermes documents.
+    /// P57: a FLAT dotted key is not evidence of a block. `slack.enabled: true`
+    /// written at the top level is, to PyYAML, the independent mapping key
+    /// `"slack.enabled"` — `yaml_cfg.get("slack")` is then `None`,
+    /// `isinstance(None, dict)` is `False`, and `platform_section`
+    /// (`gateway/config_loader.py:171-180` @ `v2026.9.7`) falls through to
+    /// `gateway.platforms.slack` / `platforms.slack`. Scarf's flat parse
+    /// records that line as `values["slack.enabled"]`, which matches the
+    /// `slack.` descendant prefix below, so `isBlock("slack")` answered TRUE
+    /// and the form both READ from and WROTE to a section Hermes does not
+    /// bridge from — and the write then CREATED the real top-level block,
+    /// silently unbridging every nested shared key beside it. The parser
+    /// already tracks these paths for the last-wins purge; ``ParsedYAML``
+    /// now surfaces them, and they are excluded from the prefix scan.
+    /// Hand-edited configs only: no Scarf writer emits a dotted key.
     public static func bridgeSourcePrefix(platform: String, in parsed: ParsedYAML) -> String {
         func isBlock(_ section: String) -> Bool {
             if parsed.maps[section] != nil { return true }
             let dot = section + "."
-            return parsed.values.keys.contains { $0.hasPrefix(dot) }
-                || parsed.lists.keys.contains { $0.hasPrefix(dot) }
-                || parsed.maps.keys.contains { $0.hasPrefix(dot) }
+            // A descendant OF a dotted literal is no better evidence than the
+            // literal itself: `slack.enabled:` opened as a block header makes
+            // `{"slack.enabled": {…}}`, still not a `slack` dict.
+            func underDottedLiteral(_ key: String) -> Bool {
+                parsed.dottedLiteralPaths.contains { key == $0 || key.hasPrefix($0 + ".") }
+            }
+            func hasChild<V>(_ table: [String: V]) -> Bool {
+                table.keys.contains { $0.hasPrefix(dot) && !underDottedLiteral($0) }
+            }
+            return hasChild(parsed.values) || hasChild(parsed.lists) || hasChild(parsed.maps)
         }
         if isBlock(platform) { return platform }
         if isBlock("gateway.platforms.\(platform)") { return "gateway.platforms.\(platform)" }
