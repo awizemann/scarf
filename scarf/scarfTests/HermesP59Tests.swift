@@ -65,8 +65,10 @@ struct MemoryResetConsumersP59Tests {
 /// unknown verb: Hermes routes it to the AGENT and exits 0 (charter C5). The
 /// trigger had NO version gate at all, while its own doc comment claimed a
 /// v0.12 skip that no line implemented — and the floor is v0.13 anyway
-/// (`hermes_cli/kanban.py` does not exist at `v2026.4.30`; it and
-/// `CommandDef("kanban", …)` arrive at `v2026.5.7`, the P55 re-walk).
+/// (`hermes_cli/kanban.py` does not exist at `v2026.4.30`; the module
+/// arrives at `v2026.5.7`, and the slash roster's `CommandDef("kanban", …)`
+/// is `hermes_cli/commands.py:163` at that tag — NOT in `kanban.py`, which
+/// is what P59 wrote and P60 re-opened both tags to correct).
 ///
 /// The detector cannot stand in for the gate: it reads `config.yaml`, and a
 /// 0.12 config has no `kanban` in its toolsets for exactly the reason the

@@ -823,6 +823,16 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// ``ScarfCore/OffPool`` documents ("the result is dropped, never the
     /// work"), written down here because a caller that reads a timeout as
     /// "the remote command stopped" would be wrong.
+    ///
+    /// **And its own expiry throws `partialStdout: Data()` on purpose**
+    /// (P60). `PartialStdout` exists so the INNER budget — the one
+    /// `asyncRunProcess` races the drain against — can report the bytes the
+    /// drain had accumulated, and that arm is the one a real slow command
+    /// hits. This arm is the backstop BEHIND it: reaching it means the async
+    /// op blew past its own timeout plus ``syncGrace`` and never returned at
+    /// all, so the detached task still owns its drain and there is no
+    /// accumulator to read from here. Empty is the honest answer, not a
+    /// missing hand-off to `PartialStdout`.
     nonisolated private func runSync<T: Sendable>(
         deadline: TimeInterval,
         _ op: @escaping @Sendable () async throws -> T

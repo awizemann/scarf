@@ -331,6 +331,16 @@ extension PipeReader {
 /// and a later `wait()` returns immediately. Signalling twice is a no-op —
 /// `PipeReader` promises `.finished` exactly once, but the cancel path can
 /// reach this from two directions and a double resume of a continuation traps.
+///
+/// **ONE waiter. This latch is not a broadcast** (P60, stated rather than
+/// changed). `waiter` is a single slot, so a second concurrent `wait()`
+/// OVERWRITES the first continuation and that first caller is never resumed —
+/// it hangs until its own task is cancelled. Every call site today is
+/// one-await-per-signal: each streaming spawn constructs its own signal and
+/// awaits it from the single task that owns the spawn, which is why a single
+/// slot is the honest shape rather than a latent bug. If a second waiter is
+/// ever needed, hold an ARRAY of continuations and resume all of them in
+/// `signal()` — do not simply add the call and hope the timing works out.
 final class PipeEOFSignal: @unchecked Sendable {
     private let lock = NSLock()
     private var fired = false

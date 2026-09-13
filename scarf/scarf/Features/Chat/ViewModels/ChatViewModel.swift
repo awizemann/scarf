@@ -2741,10 +2741,13 @@ final class ChatViewModel {
     /// the user just sent `/goal`. Skipped when:
     /// - The host pre-dates **v0.13** — `hermes_cli/kanban.py` does not
     ///   exist at `v2026.4.30` (0.12.0) and the string `kanban` appears zero
-    ///   times in its `commands.py` / `main.py`; the file and
-    ///   `CommandDef("kanban", …)` arrive at `v2026.5.7` (0.13.0). The
-    ///   release notes said 0.12, which is why the flag's floor moved in P55
-    ///   (charter C2) and why this comment said 0.12 until P59.
+    ///   times in its `commands.py` / `main.py`. At `v2026.5.7` (0.13.0)
+    ///   `hermes_cli/kanban.py` exists AND the slash roster gains
+    ///   `CommandDef("kanban", …)` — which lives in `hermes_cli/commands.py`
+    ///   at `:163`, not in `kanban.py` (P59 cited the wrong file; P60
+    ///   re-opened both tags). The release notes said 0.12, which is why the
+    ///   flag's floor moved in P55 (charter C2) and why this comment said
+    ///   0.12 until P59.
     /// - The user has dismissed this sheet on this host before.
     /// - The detector reports the toolset is already enabled (or the
     ///   detector couldn't classify, in which case we silently skip
