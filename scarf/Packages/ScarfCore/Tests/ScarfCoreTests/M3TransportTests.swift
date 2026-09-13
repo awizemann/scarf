@@ -35,11 +35,17 @@ import Foundation
     }
 
     @Test func localStreamLinesFinishesOnEOFWithoutTrailingNewline() async throws {
-        // If the subprocess emits "a\nb" (no trailing newline), we
-        // yield "a" and DROP "b" — the stream framer treats partial
-        // trailing content as unterminated. This is the documented
-        // behaviour and matches what the HermesLogService tail path
-        // sees over SSH.
+        // A subprocess that emits "a\nb" (no trailing newline) yields BOTH.
+        //
+        // **This flipped in round-6 P58, deliberately.** The blocking loop
+        // this test was written against dropped whatever sat in its buffer at
+        // EOF, and the drop was recorded here as "the documented behaviour"
+        // — but nothing depended on it: the consumer is `HermesLogService`'s
+        // tail, which renders lines into a list, so the dropped line was a
+        // line of the user's log that silently never appeared. The framing
+        // that DOES need the drop is ACP's, where a trailing fragment is half
+        // a JSON-RPC frame, and it keeps it: `PipeReader.Framing.lines`
+        // carries `deliverPartialAtEOF`, false for ACP and true here.
         let transport = LocalTransport()
         let stream = transport.streamLines(
             executable: "/bin/sh",
@@ -49,7 +55,7 @@ import Foundation
         for try await line in stream {
             collected.append(line)
         }
-        #expect(collected == ["a"])
+        #expect(collected == ["a", "b"])
     }
 
     @Test func localStreamLinesSurfacesNonZeroExit() async throws {
