@@ -57,6 +57,46 @@ struct OffPoolDisciplineP52Tests {
         "scarf/Packages/ScarfIOS/Sources",
     ]
 
+    /// Per-root floors (P60 finding 3, P38's table shape).
+    ///
+    /// The sweep's premise check was a shared `> 0` per root, which is not a
+    /// floor: `scarf/Packages/ScarfIOS/Sources` is 14 files and `scarf/Scarf
+    /// iOS` 50, so a root that half-stopped enumerating — or one whose walk
+    /// found a single file — still "passed". Each floor is set well under
+    /// the root's real population so ordinary deletion cannot make the floor
+    /// the thing that fails, and well over zero so a broken enumeration
+    /// cannot hide.
+    ///
+    /// Populations at P60: 299 / 50 / 217 / 14.
+    private static let perRootFloor: [String: Int] = [
+        "scarf/scarf": 200,
+        "scarf/Scarf iOS": 30,
+        "scarf/Packages/ScarfCore/Sources": 150,
+        "scarf/Packages/ScarfIOS/Sources": 8,
+    ]
+
+    /// P60 finding 4, the assertion P22 has and this sweep did not
+    /// (`MainActorSpawnDisciplineP22Tests.swift:433`): MEMBERSHIP, not just
+    /// existence. A root can be DELETED from ``roots`` and its floor above
+    /// goes with it, which is exactly how `ScarfIOS` was absent from all
+    /// three C10 sweeps for five rounds without a single test going red.
+    @Test("every root the sweep walks is present and exists")
+    func sweepRootsAreThePinnedRoster() {
+        #expect(Set(Self.roots) == Set(Self.perRootFloor.keys),
+                "a root has no floor, or a floor has no root — the two lists have drifted")
+        #expect(Self.roots.contains("scarf/Packages/ScarfIOS/Sources"),
+                "the iOS runtime package is no longer swept")
+        #expect(Self.roots.contains("scarf/Scarf iOS"),
+                "the iOS app target is no longer swept")
+        for relative in Self.roots {
+            var isDir: ObjCBool = false
+            let path = Self.repoRoot.appendingPathComponent(relative).path
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+            #expect(exists && isDir.boolValue,
+                    Comment(rawValue: "sweep root \(relative) is missing"))
+        }
+    }
+
     /// The calls whose bodies BLOCK their thread for a user-visible span, and
     /// which a phase has already put inside a `Task.detached` at least once.
     ///
@@ -107,6 +147,28 @@ struct OffPoolDisciplineP52Tests {
         "runHermesSplit(",
         "readText(",
         "readFile(",
+        // P60. The round-7 review's finding, and the same shape twice more:
+        // `runHermesCLI(` cannot match `runHermesCLISplit(` — the needle's
+        // trailing `(` is the boundary, which is exactly what keeps the two
+        // baselines from double-counting — so NINE split sites in detached
+        // bodies were invisible to a sweep that names only the non-split
+        // call.
+        // `runHermesSync(` is `CuratorService`'s own nonisolated static
+        // wrapper (`CuratorService.swift:742`), one frame above
+        // `transport.runProcess`. `capabilitiesSync(`
+        // (`HermesVersionCache.swift:208`) is the synchronous capability
+        // probe: on a cold cache it SPAWNS `hermes --version` and waits.
+        // The generalisable rule, stated once here because P58, P59 and P60
+        // each learned it separately: **a needle must be accompanied by
+        // every one-call wrapper of it in the tree.** When you add a needle,
+        // grep the tree for functions whose whole body is that call — a
+        // `Split` sibling, a `…Sync` façade, a `ServerContext` convenience —
+        // and add each of them too, because a wrapper blocks for exactly as
+        // long as the thing it wraps and is invisible to the wrapped call's
+        // spelling.
+        "runHermesCLISplit(",
+        "runHermesSync(",
+        "capabilitiesSync(",
     ]
 
     /// Needles whose ASYNC twin shares their spelling, so an occurrence that
@@ -176,14 +238,20 @@ struct OffPoolDisciplineP52Tests {
     /// and wrote the rest down here rather than either leaving the needles
     /// narrow or dumping 22 fresh failures on the next phase.
     ///
-    /// Round-6 P59 widened them again, from seven to eleven
+    /// Round-6 P59 widened them again, from eight to twelve
     /// (`runHermes(`, `runHermesSplit(`, `readText(`, `readFile(`), fixed
     /// the ten sites its finding named — nine `ctx.runHermes` ViewModel
     /// bodies and `KanbanToolsetDetector` — and re-baselined the rest. The
-    /// baseline is 38 hits across 26 keys; it was 29 before, and it grew
-    /// because the sweep can now SEE more, not because the tree got worse:
-    /// converting `BotConversationViewModel` took three `runProcess(` hits
-    /// off it in the same pass.
+    /// baseline was 38 hits across 26 keys after P59; it was 29 before that,
+    /// and it grows because the sweep can now SEE more, not because the tree
+    /// got worse: converting `BotConversationViewModel` took three
+    /// `runProcess(` hits off it in the same pass.
+    ///
+    /// Round-7 P60 widened them a fourth time, from twelve to fifteen
+    /// (`runHermesCLISplit(`, `runHermesSync(`, `capabilitiesSync(`),
+    /// converted the three sites that were the plain
+    /// `await Task.detached { … }.value` shape and baselined eleven more:
+    /// **49 hits across 32 keys**.
     ///
     /// It is COUNTED so it cannot rot into a licence: one more
     /// `runHermesCLI(` in `CronViewModel` is a new offender even though the
@@ -242,6 +310,40 @@ struct OffPoolDisciplineP52Tests {
         "ProjectCockpitViewModel.swift:readText(": 2,
         "SettingsViewModel.swift:readText(": 3,
         "SkillsViewModel.swift:readText(": 1,
+        // P60's three needles (`runHermesCLISplit(`, `runHermesSync(`,
+        // `capabilitiesSync(`). P60 converted the three sites that were the
+        // plain `await Task.detached { … }.value` shape — `CuratorService`'s
+        // `status()` and its single `runHermes` seam, and
+        // `IOSSettingsViewModel`'s managed-install probe — and baselined
+        // these eleven, which belong to `t-406d56d6`.
+        //
+        // Reasons, one per key. None is the plain shape: every one is a
+        // multi-statement `Task.detached` body that ends in
+        // `await MainActor.run { … }`, so `OffPool.run`'s SYNCHRONOUS
+        // closure cannot take the body whole, and the conversion is a split
+        // of the load (blocking half off-pool, publish half on the main
+        // actor) rather than a wrap.
+        //
+        //   SettingsViewModel:runHermesCLISplit — `approvals suggest --json`
+        //     and its `--apply <n>` sibling; the apply body also calls
+        //     `svc.loadConfig()` between the CLI and the hop.
+        //   SettingsViewModel:capabilitiesSync — inside the four-call heavy
+        //     load, alongside `loadConfig`/`loadGatewayState`/`readText`.
+        //   PluginsViewModel:capabilitiesSync + :runHermesCLISplit — one
+        //     detached body that probes capabilities, then branches into
+        //     either a CLI call or a directory walk, then runs
+        //     `plugins compat`.
+        //   CronViewModel:runHermesCLISplit — `cron runs`, `cron incidents`,
+        //     `cron doctor`, each parsing before its main-actor hop.
+        //   PeersViewModel:runHermesCLISplit — `peer dm` (600 s), `peer run`
+        //     (120 s) and the run-status poll; the DM's timeout is the CLI's
+        //     own `DM_TIMEOUT_S` and must survive any conversion.
+        "SettingsViewModel.swift:runHermesCLISplit(": 2,
+        "SettingsViewModel.swift:capabilitiesSync(": 1,
+        "PluginsViewModel.swift:runHermesCLISplit(": 1,
+        "PluginsViewModel.swift:capabilitiesSync(": 1,
+        "CronViewModel.swift:runHermesCLISplit(": 3,
+        "PeersViewModel.swift:runHermesCLISplit(": 3,
     ]
 
     /// A `Task.detached` closure the sweep may keep, keyed
@@ -562,14 +664,65 @@ struct OffPoolDisciplineP52Tests {
         #expect(!Self.containsNeedle("runHermes(", in: "svc.runHermesCLI(args: [])"))
     }
 
+    /// The three needles P60 added, planted, plus the near-miss that is the
+    /// whole reason they were invisible: `runHermesCLI(` CANNOT match
+    /// `runHermesCLISplit(`, because the needle's trailing `(` is a literal
+    /// character and `Split` sits between the name and the paren. That is
+    /// the property the two baselines rely on to avoid double-counting, and
+    /// it is also what hid eleven split sites for three rounds — so it is
+    /// asserted in both directions here rather than assumed.
+    @Test("the P60 needles match the split and sync wrappers, and the CLI needle does not")
+    func wrapperNeedlesAreCalibrated() throws {
+        let planted = """
+            func probe() {
+                Task.detached {
+                    let split = svc.runHermesCLISplit(args: ["plugins", "compat"], timeout: 45)
+                    let sync = Self.runHermesSync(context: ctx, args: ["curator", "status"], timeout: 30)
+                    let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
+                    _ = (split, sync, caps)
+                }
+            }
+            """
+        let closure = try #require(Self.detachedClosures(in: planted).first)
+        let hits = Set(Self.pooledBlockingNeedles(in: closure.body))
+        #expect(hits == Set(["runHermesCLISplit(", "runHermesSync(", "capabilitiesSync("]),
+                "the P60 needle set missed \(Set(["runHermesCLISplit(", "runHermesSync(", "capabilitiesSync("]).subtracting(hits))")
+
+        // The boundary, both ways. This is the finding: a sweep that names
+        // `runHermesCLI(` sees NOTHING of `runHermesCLISplit(`.
+        #expect(!Self.containsNeedle("runHermesCLI(", in: "svc.runHermesCLISplit(args: [])"), """
+            `runHermesCLI(` matched `runHermesCLISplit(` — if that ever \
+            becomes true the two baseline keys double-count every split site.
+            """)
+        #expect(Self.containsNeedle("runHermesCLISplit(", in: "svc.runHermesCLISplit(args: [])"))
+        // And the left boundary still holds for the two new wrappers.
+        #expect(Self.containsNeedle("runHermesSync(", in: "Self.runHermesSync(context: c)"))
+        #expect(!Self.containsNeedle("runHermesSync(", in: "let x = asyncRunHermesSync(c)"))
+        #expect(Self.containsNeedle("capabilitiesSync(", in: "cache.capabilitiesSync(for: ctx)"))
+        #expect(!Self.containsNeedle("capabilitiesSync(", in: "x.hermesCapabilitiesSync(for: ctx)"))
+        // The cure: wrapped in `OffPool.run`, none of the three is a hit.
+        #expect(Self.pooledBlockingNeedles(in: """
+                let caps = await OffPool.run {
+                    HermesVersionCache.shared.capabilitiesSync(for: ctx)
+                }
+                _ = caps
+            """).isEmpty)
+    }
+
     /// The baseline's own size, pinned (lesson 6: a number in a comment is a
-    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 38
-    /// hits across 26 keys; this is what re-measures it, so a phase that
-    /// adds or clears an entry must restate the prose.
+    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 49
+    /// hits across 32 keys; this is what re-measures it, so a phase that
+    /// adds or clears an entry must restate the prose. The needle set's own
+    /// size is pinned for the same reason. The vocabulary has been widened
+    /// four times and the count is now 15: 2 (P52) → 7 (P58) → 8 (P58b's
+    /// `run()`) → 12 (P59) → 15 (P60). Every widening restates it here, and
+    /// this assertion is the only place the number is executed.
     @Test("the pending-site baseline is the size its documentation claims")
     func baselineSizeIsPinned() {
-        #expect(Self.pendingOffPoolSites.count == 26)
-        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 38)
+        #expect(Self.pendingOffPoolSites.count == 32)
+        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 49)
+        #expect(Self.blockingNeedles.count == 15)
+        #expect(Set(Self.blockingNeedles).count == 15, "a needle is listed twice")
     }
 
     /// The walker must not read PROSE. `PipeReader.swift`'s doc comment
@@ -688,10 +841,13 @@ struct OffPoolDisciplineP52Tests {
             + " (good) without taking them off the baseline, which leaves a licence for"
             + " someone to put them back: " + shrunk.sorted().joined(separator: "; ")))
 
-        // Premise floor, per root: a sweep that read nothing "passes".
+        // Premise floor, per root (P60 finding 3). A shared `> 0` is not a
+        // floor: a root that enumerated ONE file cleared it.
         for root in Self.roots {
-            #expect((scannedByRoot[root] ?? 0) > 0, Comment(rawValue:
-                "the sweep read no Swift files under \(root) — the walk is broken"))
+            let floor = Self.perRootFloor[root] ?? 0
+            #expect((scannedByRoot[root] ?? 0) >= floor, Comment(rawValue:
+                "the sweep read \(scannedByRoot[root] ?? 0) Swift files under \(root),"
+                + " below the floor of \(floor) — the walk is broken or the root moved"))
         }
 
         #expect(offenders.isEmpty, Comment(rawValue: """

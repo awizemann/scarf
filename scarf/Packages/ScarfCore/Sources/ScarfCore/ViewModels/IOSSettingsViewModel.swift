@@ -73,10 +73,15 @@ public final class IOSSettingsViewModel {
         // process-wide. Capabilities decide how the marker is read — below
         // v0.20.5 `get_managed_system` never opens it and any marker means
         // managed (`hermes_cli/config.py:327-330` @ v2026.6.19).
-        managedInstall = await Task.detached {
+        // P60: `capabilitiesSync` SPAWNS `hermes --version` and waits on a
+        // cold cache, and the marker read is a transport stat+read behind
+        // it — two blocking round trips, so this is `OffPool.run` rather
+        // than `Task.detached`, which would park a pool thread through both
+        // (charter C10).
+        managedInstall = await OffPool.run {
             let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
             return HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
-        }.value
+        }
 
         guard let text else {
             // Neither read found the file. If the Hermes CLI still

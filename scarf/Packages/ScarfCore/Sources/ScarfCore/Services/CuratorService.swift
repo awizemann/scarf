@@ -38,11 +38,16 @@ public actor CuratorService {
     /// view always has something to render.
     public func status() async -> HermesCuratorStatus {
         let context = self.context
-        return await Task.detached(priority: .utility) { () -> HermesCuratorStatus in
+        // P60: `OffPool.run`, not `Task.detached` — the body is a CLI spawn
+        // (or an SSH exec) plus a transport read, i.e. two blocking round
+        // trips, and `Task.detached` would park a cooperative-pool thread
+        // through both (charter C10). The whole closure is synchronous, so
+        // the wrap is exact.
+        return await OffPool.run { () -> HermesCuratorStatus in
             let textResult = Self.runHermesSync(context: context, args: ["curator", "status"], timeout: 30)
             let stateData = context.readData(context.paths.curatorStateFile)
             return HermesCuratorStatusParser.parse(text: textResult.output, stateFileJSON: stateData)
-        }.value
+        }
     }
 
     /// `hermes curator list-archived`. Hermes has no `--json` flag on
@@ -730,10 +735,14 @@ public actor CuratorService {
         timeout: TimeInterval
     ) async -> (exitCode: Int32, stdout: String, stderr: String) {
         let context = self.context
-        return await Task.detached(priority: .utility) { () -> (Int32, String, String) in
+        // P60: the one seam every `CuratorService` verb funnels through, so
+        // one `Task.detached` here parked a pool thread for the whole of
+        // every `hermes curator …` invocation. `timeout` is unchanged — it
+        // is still the bound `runHermesSync` passes down.
+        return await OffPool.run { () -> (Int32, String, String) in
             let result = Self.runHermesSync(context: context, args: args, timeout: timeout)
             return (result.exitCode, result.output, result.stderr)
-        }.value
+        }
     }
 
     /// Synchronous, transport-level invocation. `output` is stdout; the
