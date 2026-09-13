@@ -574,6 +574,106 @@ struct BannerCatalogueP54bTests {
         let strings = try Self.catalogue()
         #expect(strings["P54b planted needle — never a real key"] == nil)
     }
+
+    // MARK: - P59 — the list is a list, so scan the file instead
+
+    /// The files whose EVERY `String(localized:)` key must be in the
+    /// catalogue, read out of the source rather than retyped here.
+    ///
+    /// Round-6 P59's finding: `OutcomeMessageBar.spoken(_:)` is the VoiceOver
+    /// label for all three seals, and P54b added the third arm —
+    /// `String(localized: "No result: \(text)")` — beside the two that
+    /// already had rows. `Failed: %@` and `Succeeded: %@` are translated in
+    /// six locales; `No result: %@` had no row at all, so the one seal that
+    /// exists to say "we do not know" announced itself in English to every
+    /// non-English VoiceOver user. A hand-maintained key list cannot catch
+    /// that — the key was never added to it — so this reads the file.
+    static let scannedFiles = ["scarf/Features/Common/OutcomeMessageBar.swift"]
+
+    /// Every `String(localized: "…")` literal in `source`, in its CATALOGUE
+    /// spelling: `\(foo)` resolved to `%@`, which is what the lookup uses at
+    /// run time. Only single-line, single-literal calls are matched — the
+    /// shape this file uses — and ``theScanIsCalibrated`` proves the matcher
+    /// still finds them.
+    static func localizedKeys(in source: String) -> [String] {
+        var keys: [String] = []
+        var rest = source[source.startIndex...]
+        while let open = rest.range(of: "String(localized: \"") {
+            var i = open.upperBound
+            var key = ""
+            var escaped = false
+            var closed = false
+            while i < rest.endIndex {
+                let c = rest[i]
+                if escaped {
+                    // `\(` opens an interpolation; anything else is a plain
+                    // escape and the character itself is the key's.
+                    if c == "(" {
+                        var depth = 1
+                        i = rest.index(after: i)
+                        while i < rest.endIndex, depth > 0 {
+                            if rest[i] == "(" { depth += 1 }
+                            if rest[i] == ")" { depth -= 1 }
+                            i = rest.index(after: i)
+                        }
+                        key += "%@"
+                        escaped = false
+                        continue
+                    }
+                    key.append(c)
+                    escaped = false
+                } else if c == "\\" {
+                    escaped = true
+                } else if c == "\"" {
+                    closed = true
+                    i = rest.index(after: i)
+                    break
+                } else if c == "\n" {
+                    break
+                } else {
+                    key.append(c)
+                }
+                i = rest.index(after: i)
+            }
+            if closed, !key.isEmpty { keys.append(key) }
+            rest = rest[i...]
+        }
+        return keys
+    }
+
+    @Test func theScanIsCalibrated() {
+        let planted = #"""
+            case .unconfirmed: String(localized: "No result: \(text)")
+            case .failure: String(localized: "Failed: \(text)")
+            let plain = String(localized: "Exported")
+            let quoted = String(localized: "Said \"yes\" to \(name)")
+            """#
+        let found = Self.localizedKeys(in: planted)
+        #expect(found == ["No result: %@", "Failed: %@", "Exported", #"Said "yes" to %@"#],
+                Comment(rawValue: "scan found: \(found)"))
+    }
+
+    @Test func everyScannedFileSKeysAreInTheCatalogue() throws {
+        let strings = try Self.catalogue()
+        for relative in Self.scannedFiles {
+            let keys = Self.localizedKeys(in: try P54Source.read(relative))
+            // Premise floor: a file that stopped matching would pass over
+            // nothing (the P52 lesson about a sweep that reads zero files).
+            #expect(keys.count >= 3, Comment(rawValue:
+                "the scan found \(keys.count) keys in \(relative) — the matcher is broken"))
+            for key in keys {
+                #expect(strings[key] != nil, Comment(rawValue:
+                    "no catalogue row for \(key) (in \(relative))"))
+                guard let row = strings[key] as? [String: Any] else { continue }
+                let localizations = row["localizations"] as? [String: Any] ?? [:]
+                for locale in Self.locales {
+                    let unit = (localizations[locale] as? [String: Any])?["stringUnit"] as? [String: Any]
+                    #expect((unit?["value"] as? String)?.isEmpty == false, Comment(rawValue:
+                        "\(key) is untranslated in \(locale) (in \(relative))"))
+                }
+            }
+        }
+    }
 }
 
 /// The iOS memory-reset script sets `COLUMNS` before `PATH`.
