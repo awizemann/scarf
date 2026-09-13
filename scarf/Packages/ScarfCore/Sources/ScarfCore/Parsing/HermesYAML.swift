@@ -25,15 +25,27 @@ public struct ParsedYAML: Sendable {
     /// Nested `key: value` maps captured under a section header →
     /// `maps["section"] = [key: value, ...]`.
     public var maps: [String: [String: String]]
+    /// Paths whose LEAF key literally contains a `.` — a flat dotted key
+    /// (`slack.enabled: true`) rather than a nesting of `slack:` +
+    /// `enabled:`. PyYAML keeps such a key as an INDEPENDENT top-level key
+    /// of the mapping, so it is NOT evidence that a `slack:` block exists.
+    /// Round-6 P57 surfaced it from the parser's internals for
+    /// ``HermesPlatformSharedKeys/bridgeSourcePrefix(platform:in:)``, which
+    /// has to answer Hermes's `isinstance(section, dict)`
+    /// (`gateway/config_loader.py:171-180` @ `v2026.9.7`) and was reading a
+    /// flat `slack.enabled:` line as a block.
+    public var dottedLiteralPaths: Set<String>
 
     public init(
         values: [String: String] = [:],
         lists: [String: [String]] = [:],
-        maps: [String: [String: String]] = [:]
+        maps: [String: [String: String]] = [:],
+        dottedLiteralPaths: Set<String> = []
     ) {
         self.values = values
         self.lists = lists
         self.maps = maps
+        self.dottedLiteralPaths = dottedLiteralPaths
     }
 }
 
@@ -207,12 +219,11 @@ public enum HermesYAML {
         let rawLines = yaml.components(separatedBy: "\n")
         for rawLine in rawLines {
             let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
-            // Skip comment-only and blank lines but preserve indent semantics.
+            // Blank lines are skipped but preserve indent semantics.
             let trimmed = line.trimmingCharacters(in: yamlWhitespace)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            if trimmed.isEmpty { continue }
 
             let indent = line.prefix(while: { $0 == " " }).count
-            let isListItem = trimmed.hasPrefix("- ")
 
             // Folded/continued scalar line (see `lastScalarIndent`) — not a
             // key, not a list item, and must not touch the stack. Join it
@@ -222,7 +233,38 @@ public enum HermesYAML {
             // in real YAML a key line can never sit deeper than the sibling
             // scalar before it (see the `lastScalarIndent` note above), so
             // this cannot swallow a genuine nested block body.
-            if !isListItem, let last = lastScalarIndent, indent > last {
+            //
+            // P57: this test runs ABOVE the comment skip and ABOVE the
+            // list-item test, because `yaml.dump` folds at column 80 with no
+            // `width=` override (`utils.atomic_yaml_write` →
+            // `yaml.dump(…, Dumper=IndentDumper, default_flow_style=False,
+            // sort_keys=False, allow_unicode=True)`, `utils.py:262-271` @
+            // `v2026.9.7`) and a fold point lands wherever the spaces are —
+            // routinely leaving a continuation line that BEGINS with `- ` or
+            // `#`. Below the two guards, `- ` was read as a list item (value
+            // truncated, plus a phantom `lists[…]` entry at the enclosing
+            // path) and `#` was dropped as a comment (value truncated, and a
+            // single-quoted fold additionally lost its closing quote, so
+            // `normalizedScalar` kept the dangling `'` and then cut the text
+            // at the ` #` it could now see). Found with a PyYAML 6.0.3
+            // oracle over a corpus of folded `yaml.dump` documents; the run's
+            // counts are in the P57 section of the v0.21.1 decisions note.
+            //
+            // The `#` arm is NARROWER than the `- ` arm, and the emitter is
+            // the reason: PyYAML never emits a PLAIN scalar whose
+            // continuation begins with `#` (a `#` after a space forces a
+            // quoting style — pinned by
+            // `HermesP57FoldedContinuationTests.theEmitterNeverFoldsAPlainScalarOntoAHashLine`,
+            // which re-measures it against the live emitter),
+            // so a deeper `#` line can only be scalar CONTENT when the
+            // scalar accumulated so far is an UNCLOSED quoted scalar.
+            // Otherwise it is a genuine indented comment, which PyYAML
+            // discards (`gateway:\n  port: 8080\n      # c\n  host: local`
+            // loads as `{'gateway': {'port': 8080, 'host': 'local'}}`), and
+            // so does the comment skip below.
+            if let last = lastScalarIndent, indent > last,
+               !trimmed.hasPrefix("#")
+                   || (lastScalarPath.map { isOpenQuotedScalar(values[$0] ?? "") } ?? false) {
                 if let path = lastScalarPath {
                     let joined = (values[path].map { $0.isEmpty ? trimmed : $0 + " " + trimmed }) ?? trimmed
                     values[path] = joined
@@ -240,6 +282,12 @@ public enum HermesYAML {
                 }
                 continue
             }
+
+            // Skip comment-only lines (a continuation that reached here is a
+            // real comment — see the P57 note above).
+            if trimmed.hasPrefix("#") { continue }
+
+            let isListItem = trimmed.hasPrefix("- ")
 
             // Pop stack entries with indent >= current indent.
             // Exception: a list item at the same indent as its parent key is
@@ -444,7 +492,17 @@ public enum HermesYAML {
                 lastScalarParent = (path: parentPath, key: key)
             }
         }
-        return ParsedYAML(values: values, lists: lists, maps: maps)
+        return ParsedYAML(values: values, lists: lists, maps: maps, dottedLiteralPaths: dottedLiteralPaths)
+    }
+
+    /// True when `text` opens a quoted scalar that has not closed yet — the
+    /// one shape in which a continuation line beginning with `#` is CONTENT
+    /// rather than a comment. `yaml.dump` quotes any scalar carrying a `#`
+    /// after a space, so a folded `#` continuation always sits inside an
+    /// open quote; a plain scalar never has one. Round-6 P57.
+    static func isOpenQuotedScalar(_ text: String) -> Bool {
+        guard let quote = text.first, quote == "'" || quote == "\"" else { return false }
+        return closingQuoteIndex(in: text.dropFirst(), quote: quote) == nil
     }
 
     /// True when `afterColon` is a YAML block-scalar header: `|` or `>`
@@ -824,10 +882,81 @@ public enum HermesYAML {
     /// boolean spelling in config.yaml — there is no per-key variant.
     public static func boolishValue(_ raw: String?) -> Bool? {
         guard let raw else { return nil }
-        let v = normalizedScalar(raw).lowercased()
+        // P57: the trim runs AFTER unquoting. `_bool_token` strips the STRING
+        // PyYAML handed it, and for a quoted scalar that string is the quoted
+        // BODY — so `require_mention: " false"` is `false` to Hermes while a
+        // verbatim body compare recognised nothing and fell to the caller's
+        // default. P41b's `HermesApprovalMode.normalize` lesson, two readers
+        // over. The OUTER trim in `normalizedScalar` is unaffected.
+        let v = strippedScalar(raw).lowercased()
         if ["true", "1", "yes", "on"].contains(v) { return true }
         if ["false", "0", "no", "off"].contains(v) { return false }
+        // P57: PyYAML types a BARE scalar before any Hermes reader sees it,
+        // and `str(int)` of the result is what `_bool_token` compares — so
+        // `01`, `+1`, `0x1` and `0b1` are all the token `"1"` (truthy) and
+        // `00`, `-0`, `0x0`, `0b0` are all `"0"` (falsy), none of which a
+        // literal word compare matches. A QUOTED spelling is a `str` and
+        // stays unrecognised, which is why this is gated on the raw scalar
+        // being bare (`isQuotedScalar`), exactly as
+        // ``mattermostRequireMention(configScalar:)`` gates its own int pass.
+        if !isQuotedScalar(raw) { return pyYAMLIntBoolToken(strippedScalar(raw)) }
         return nil
+    }
+
+    /// ``normalizedScalar(_:)`` plus Python's `str.strip()` applied INSIDE the
+    /// quotes — the exact input every Hermes boolish/typed reader compares.
+    ///
+    /// `_bool_token` is `str(value).strip().lower()`
+    /// (`gateway/config.py:29-32` @ `v2026.9.7`) over the object PyYAML
+    /// loaded, so for `k: " false"` the object is the `str` `" false"` and
+    /// the token is `false`. ``normalizedScalar(_:)`` alone trims OUTSIDE the
+    /// quotes and hands back the body verbatim, which is right for a value
+    /// Scarf is going to re-emit and wrong for one it is about to TYPE.
+    /// Round-6 P57.
+    ///
+    /// The trim is `.whitespacesAndNewlines` and deliberately not
+    /// ``yamlWhitespace``: round-5 decision 14's invariant is that a PARSER
+    /// trim and a `.strip()` MIRROR answer to different sources, and
+    /// `str.strip()` removes all 29 characters for which `c.isspace()` holds,
+    /// U+00A0 and the `Zs` block included.
+    public static func strippedScalar(_ s: String) -> String {
+        normalizedScalar(s).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the scalar as written is QUOTED — i.e. a Python `str` to
+    /// PyYAML, which no implicit resolver (bool or int) ever touches.
+    static func isQuotedScalar(_ raw: String) -> Bool {
+        guard let first = raw.trimmingCharacters(in: .whitespacesAndNewlines).first else { return false }
+        return first == "\'" || first == "\""
+    }
+
+    /// `_bool_token`'s answer for a BARE scalar PyYAML's `int` resolver
+    /// claims: `true` for the value 1, `false` for 0, `nil` for anything
+    /// else (including every other integer, whose `str()` is in neither
+    /// token set, and every scalar the resolver leaves a string).
+    ///
+    /// Only 0 and 1 matter because `str(int)` is what is compared: `str(2)`
+    /// is `"2"`, `str(-1)` is `"-1"`. A leading `+` is dropped by `str()`,
+    /// a leading `-` is not — so `+1` is truthy and `-1` is unrecognised,
+    /// while `-0` is `"0"` and falsy. Round-6 P57, on P53b's resolver port.
+    static func pyYAMLIntBoolToken(_ scalar: String) -> Bool? {
+        guard let isZero = pyYAMLIntIsZero(scalar) else { return nil }
+        if isZero { return false }
+        var body = Substring(scalar)
+        if body.first == "-" { return nil }   // `str(-n)` keeps the sign
+        if body.first == "+" { body = body.dropFirst() }
+        let radix: Int
+        let digits: Substring
+        if body.hasPrefix("0b") { radix = 2; digits = body.dropFirst(2) }
+        else if body.hasPrefix("0x") { radix = 16; digits = body.dropFirst(2) }
+        else if body.first == "0", body.count > 1 { radix = 8; digits = body.dropFirst() }
+        else { radix = 10; digits = body }
+        // The sexagesimal alternative (`1:30`) cannot reach 1 — its first
+        // group is `[1-9]` and it carries at least one `:XX` group, so the
+        // value is at least 60 — and `Int(_:radix:)` rejects the colon here,
+        // which is the same answer.
+        guard let value = Int(digits.filter { $0 != "_" }, radix: radix) else { return nil }
+        return value == 1 ? true : nil
     }
 
     // MARK: - Mattermost's own boolean vocabulary
