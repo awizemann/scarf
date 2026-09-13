@@ -1284,9 +1284,14 @@ final class HealthViewModel {
             // the window for up to eight seconds on the Start click — the
             // spawn below had been moved off and the line feeding it had not.
             proc.environment = await OffPool.run { HermesFileService.enrichedEnvironment() }
-            let spawnError: (any Error)? = await Task.detached {
+            // `OffPool.run`, not `Task.detached`: `run()` blocks on the
+            // fork/exec (and on `ssh` for a remote context), and a blocking
+            // call on the cooperative pool is the shape the P52 sweep exists
+            // to catch. P58 moved `HermesProxyService`'s identical spawn and
+            // left these three on the pool — round-6 lesson 3, the siblings.
+            let spawnError: (any Error)? = await OffPool.run {
                 do { try proc.run(); return nil } catch { return error }
-            }.value
+            }
             guard let self else { return }
             if let spawnError {
                 Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(spawnError.localizedDescription, privacy: .public)")

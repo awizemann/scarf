@@ -82,6 +82,16 @@ struct OffPoolDisciplineP52Tests {
         "waitUntilExit(",
         "runHermesCLI(",
         "runProcess(",
+        // Round-6 P58b. `Process.run()` is a fork/exec that resolves PATH and
+        // can block for a user-visible span — `HermesProxyService` moved its
+        // spawn off the pool for exactly that reason and stated it, while
+        // three siblings (`HealthViewModel`, `MCPLoginController`,
+        // `OAuthFlowController`) kept `Task.detached { try proc.run() }`. One
+        // rationale, four call sites: either the needle finds them or the
+        // rationale was wrong. The bare `run()` spelling is what a `Process`
+        // call looks like; `OffPool.run { … }` takes a closure and never
+        // spells the empty parens, so the cure is not a hit.
+        "run()",
     ]
 
     /// Does `line` contain `needle` as its own identifier?
@@ -143,6 +153,19 @@ struct OffPoolDisciplineP52Tests {
         "ProfilesViewModel.swift:runHermesCLI(": 1,
         "ProfilesViewModel.swift:runProcess(": 1,
         "LogTailWidgetView.swift:runProcess(": 1,
+        // Round-6 P58b's `run()` needle. P58b converted the four sites its
+        // finding named (`HermesProxyService` was already off; `HealthViewModel`,
+        // `MCPLoginController` and `OAuthFlowController` joined it); these
+        // seven are the rest of the tree and belong to `t-406d56d6`. All are
+        // `Task.detached` spawn bodies in the transports and the connection
+        // probe, where the `run()` sits alongside the pipe wiring and the
+        // drain it owns — a mechanical `OffPool.run` wrap around the whole
+        // body would move the continuation plumbing too, so they are a
+        // deliberate follow-up rather than a one-line change.
+        "SSHTransport.swift:run()": 2,
+        "SSHScriptRunner.swift:run()": 2,
+        "LocalTransport.swift:run()": 2,
+        "TestConnectionProbe.swift:run()": 1,
     ]
 
     /// A `Task.detached` closure the sweep may keep, keyed
@@ -371,6 +394,7 @@ struct OffPoolDisciplineP52Tests {
                     _ = proc.waitUntilExit(timeout: 5)
                     _ = fileService.runHermesCLI(args: [])
                     _ = try transport.runProcess(executable: "x", args: [])
+                    try proc.run()
                     _ = (chunk, all)
                 }
             }
@@ -378,7 +402,8 @@ struct OffPoolDisciplineP52Tests {
         let closure = try #require(Self.detachedClosures(in: planted).first)
         let hits = Set(Self.pooledBlockingNeedles(in: closure.body))
         #expect(hits == Set(["availableData", "readDataToEndOfFile",
-                             "waitUntilExit(", "runHermesCLI(", "runProcess("]),
+                             "waitUntilExit(", "runHermesCLI(", "runProcess(",
+                             "run()"]),
                 "the widened needle set missed \(Set(Self.blockingNeedles).subtracting(hits))")
 
         // The near-misses. `asyncRunProcess(` IS the cure decision 11 added,
@@ -389,6 +414,7 @@ struct OffPoolDisciplineP52Tests {
                 _ = try await transport.asyncRunProcess(executable: "x", args: [])
                 _ = await proc.waitUntilExitAsync(timeout: 5)
                 _ = await proc.waitDrainingAsync(timeout: 5, drain: d)
+                _ = await OffPool.run { try? proc.run() }
             """
         #expect(Self.pooledBlockingNeedles(in: cures).isEmpty, """
             The sweep reports the ASYNC seams as blocking: \
@@ -398,6 +424,8 @@ struct OffPoolDisciplineP52Tests {
             """)
         #expect(Self.containsNeedle("runProcess(", in: "try t.runProcess(x)"))
         #expect(!Self.containsNeedle("runProcess(", in: "try await t.asyncRunProcess(x)"))
+        #expect(Self.containsNeedle("run()", in: "try proc.run()"))
+        #expect(!Self.containsNeedle("run()", in: "await OffPool.run { work() }"))
     }
 
     /// The walker must not read PROSE. `PipeReader.swift`'s doc comment

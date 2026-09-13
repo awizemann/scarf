@@ -141,6 +141,12 @@ final class HermesProxyService {
         // Both go through `OffPool.run` (a real thread; `Task.detached` is
         // still the cooperative pool). Everything that touches view state
         // stays on the main actor, below.
+        //
+        // P58b: the `proc.run()` half of that rationale is now the tree's
+        // answer rather than this file's. `HealthViewModel`, `MCPLoginController`
+        // and `OAuthFlowController` spawned the same way on `Task.detached`
+        // and were converted with it, and `run()` is a needle in the P52
+        // sweep — so the claim is enforced instead of asserted.
         isStarting = true
         let spawnError: (any Error)? = await run(proc: proc)
         isStarting = false

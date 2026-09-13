@@ -43,6 +43,13 @@ struct OffPoolP52Tests {
     @Test("N blocking calls do not queue behind one another")
     func blockingCallsDoNotSerialise() async {
         let count = 32
+        // A CEILING, not a budget. `allArrived` failed 2 of 6 full parallel
+        // runs on P58b's reviewer's machine at 10 s: 32 threads all reaching
+        // their rendezvous is a load bet when the rest of the suite is also
+        // spawning. Under the REGRESSION the 32nd call never arrives at all,
+        // so the ceiling is only ever paid in full when the suite is red —
+        // same reasoning as `StreamingSpawnPipeReaderP58Tests`' park test.
+        let bound: DispatchTimeInterval = .seconds(60)
         let arrived = DispatchSemaphore(value: 0)
         let release = DispatchSemaphore(value: 0)
         async let workers: Void = withTaskGroup(of: Void.self) { group in
@@ -52,7 +59,7 @@ struct OffPoolP52Tests {
                         arrived.signal()
                         // Bounded so a regression FAILS rather than hangs the
                         // host; only ever reached on the failure path.
-                        _ = release.wait(timeout: .now() + 10)
+                        _ = release.wait(timeout: .now() + bound)
                     }
                 }
             }
@@ -63,7 +70,7 @@ struct OffPoolP52Tests {
         // `DispatchSemaphore.wait` is unavailable from an async context, for
         // the very reason this whole suite is about.
         let allArrived = await OffPool.run { () -> Bool in
-            for _ in 0..<count where arrived.wait(timeout: .now() + 10) == .timedOut {
+            for _ in 0..<count where arrived.wait(timeout: .now() + bound) == .timedOut {
                 return false
             }
             return true
