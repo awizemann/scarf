@@ -233,9 +233,57 @@ public enum HermesYAML {
         // not a space or end-of-line) and EVERY section header in a CRLF
         // config.yaml was silently dropped, taking its whole subtree with
         // it. Strip it per line; the parser has no other use for it.
+        // A `|` / `>` block scalar owns every following line indented deeper
+        // than its key, VERBATIM — no comment skip, no list-item test, no
+        // `key: value` scan. P57b: the header used to open a stack frame like
+        // an empty section, so the body was parsed as YAML. Hermes's own docs
+        // tell users to hand-edit `~/.hermes/config.yaml` with
+        // `agent:\n  system_prompt: |` over a body full of `#####` and `- `
+        // lines (`optional-skills/security/godmode/SKILL.md:136-148` @
+        // `v2026.9.7`), and `agent.personalities.<name>.system_prompt` — which
+        // ``HermesPersonalities/entries(fromConfigYAML:)`` reads — is the same
+        // shape. The value was lost entirely and the body left phantom
+        // `lists[…]` / `values[…]` entries behind it.
+        var pendingBlock: PendingBlockScalar?
+        func closePendingBlock() {
+            guard let pending = pendingBlock else { return }
+            pendingBlock = nil
+            let rendered = pending.rendered
+            values[pending.path] = rendered
+            if let parentPath = pending.parentPath {
+                // A block scalar is never quoted and never carries a trailing
+                // comment, so neither decoder runs on it — the body IS the
+                // value, which is the whole point of the style.
+                maps[parentPath, default: [:]][pending.key] = rendered
+            }
+        }
+
         let rawLines = yaml.components(separatedBy: "\n")
         for rawLine in rawLines {
             let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+
+            if var pending = pendingBlock {
+                let lineIndent = line.prefix(while: { $0 == " " }).count
+                let isBlank = line.trimmingCharacters(in: yamlWhitespace).isEmpty
+                if isBlank || lineIndent > pending.keyIndent {
+                    if !isBlank, pending.bodyIndent == nil {
+                        // "The indentation of the first non-empty line", or the
+                        // explicit indicator counted from the KEY's column.
+                        pending.bodyIndent = pending.explicitIndent.map { pending.keyIndent + $0 }
+                            ?? lineIndent
+                    }
+                    if let strip = pending.bodyIndent {
+                        pending.lines.append(String(line.dropFirst(min(strip, line.count))))
+                    } else {
+                        // A blank line before the body's indent is known is a
+                        // blank line, whatever spaces it carries.
+                        pending.lines.append("")
+                    }
+                    pendingBlock = pending
+                    continue
+                }
+                closePendingBlock()
+            }
             // Blank lines are skipped but preserve indent semantics.
             let trimmed = line.trimmingCharacters(in: yamlWhitespace)
             if trimmed.isEmpty { continue }
@@ -454,6 +502,18 @@ public enum HermesYAML {
                         lists.removeValue(forKey: key)
                     }
                 }
+                if let header = blockScalarHeader(afterColon) {
+                    pendingBlock = PendingBlockScalar(
+                        path: path,
+                        parentPath: stack.isEmpty ? nil : currentPath(),
+                        key: key,
+                        keyIndent: indent,
+                        folded: header.folded,
+                        chomp: header.chomp,
+                        explicitIndent: header.indent)
+                    lastScalarIndent = nil
+                    continue
+                }
                 stack.append((indent: indent, name: key))
                 lastScalarIndent = nil
                 continue
@@ -517,6 +577,7 @@ public enum HermesYAML {
                 lastScalarParent = (path: parentPath, key: key)
             }
         }
+        closePendingBlock()
         return ParsedYAML(values: values, lists: lists, maps: maps,
                           dottedLiteralPaths: dottedLiteralPaths,
                           dottedLiteralParentDepths: dottedLiteralParentDepths)
@@ -530,6 +591,91 @@ public enum HermesYAML {
     static func isOpenQuotedScalar(_ text: String) -> Bool {
         guard let quote = text.first, quote == "'" || quote == "\"" else { return false }
         return closingQuoteIndex(in: text.dropFirst(), quote: quote) == nil
+    }
+
+    /// A `|` / `>` block scalar being accumulated by ``parseNestedYAML(_:)``.
+    ///
+    /// Chomping and folding follow PyYAML 6.0.3, probed rather than reasoned
+    /// about (the fixtures are in `HermesP57bBlockScalarTests`):
+    ///
+    ///   - CLIP (no indicator) — trailing empty lines dropped, ONE final
+    ///     newline kept, and none at all when the content is empty;
+    ///   - STRIP (`-`) — no trailing newline;
+    ///   - KEEP (`+`) — every trailing empty line survives as a newline.
+    ///
+    /// Folding (`>`) joins a single break between two lines at the base
+    /// indent with a SPACE; `n` breaks (i.e. `n-1` blank lines) become `n-1`
+    /// newlines; and a break on either side of a MORE-indented line stays a
+    /// newline, which is YAML's escape hatch for keeping verse inside a
+    /// folded scalar.
+    struct PendingBlockScalar {
+        let path: String
+        let parentPath: String?
+        let key: String
+        /// Column of the KEY line — every deeper line belongs to the body.
+        let keyIndent: Int
+        let folded: Bool
+        /// `-` strip, `+` keep, `nil` clip.
+        let chomp: Character?
+        /// Explicit indentation indicator, counted from ``keyIndent``.
+        let explicitIndent: Int?
+        /// Detected on the first non-empty body line unless explicit.
+        var bodyIndent: Int?
+        /// Body lines with ``bodyIndent`` removed, blank lines as `""`.
+        var lines: [String] = []
+
+        var rendered: String {
+            var content = lines
+            var trailingBlanks = 0
+            while content.last?.isEmpty == true {
+                content.removeLast()
+                trailingBlanks += 1
+            }
+            let body = folded ? Self.fold(content) : content.joined(separator: "\n")
+            switch chomp {
+            case "-": return body
+            case "+": return body + String(repeating: "\n", count: trailingBlanks + (body.isEmpty ? 0 : 1))
+            default:  return body.isEmpty ? "" : body + "\n"
+            }
+        }
+
+        private static func fold(_ content: [String]) -> String {
+            var out = ""
+            var breaks = 0
+            var started = false
+            var previousWasMoreIndented = false
+            for line in content {
+                if line.isEmpty { breaks += 1; continue }
+                let moreIndented = line.first == " " || line.first == "\t"
+                if !started {
+                    // Leading blank lines are newlines, not folds.
+                    out += String(repeating: "\n", count: breaks)
+                } else if breaks > 0 {
+                    out += String(repeating: "\n", count: breaks)
+                } else {
+                    out += (previousWasMoreIndented || moreIndented) ? "\n" : " "
+                }
+                out += line
+                started = true
+                previousWasMoreIndented = moreIndented
+                breaks = 0
+            }
+            return out
+        }
+    }
+
+    /// ``isBlockScalarHeader(_:)``'s parse, kept beside it so the two cannot
+    /// disagree about what a header is.
+    static func blockScalarHeader(_ afterColon: String) -> (folded: Bool, chomp: Character?, indent: Int?)? {
+        guard isBlockScalarHeader(afterColon), let first = afterColon.first else { return nil }
+        var rest = Substring(afterColon.dropFirst())
+        if let hash = rest.firstIndex(of: "#") { rest = rest[rest.startIndex..<hash] }
+        var chomp: Character?
+        var indent: Int?
+        for ch in rest.trimmingCharacters(in: yamlWhitespace) {
+            if ch == "-" || ch == "+" { chomp = ch } else if let d = ch.wholeNumberValue { indent = d }
+        }
+        return (folded: first == ">", chomp: chomp, indent: indent)
     }
 
     /// True when `afterColon` is a YAML block-scalar header: `|` or `>`
