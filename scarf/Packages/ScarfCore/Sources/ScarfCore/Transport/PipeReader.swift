@@ -45,8 +45,7 @@ final class PipeReader: @unchecked Sendable {
     enum Framing: Sendable {
         /// Yield every read verbatim as `Data`. No framing, no decoding.
         case rawChunks
-        /// Split on `\n` (0x0A); the terminator is not included and empty
-        /// frames are skipped.
+        /// Split on `\n` (0x0A); the terminator is not included.
         ///
         /// - `failOnInvalidUTF8`: a frame that is not valid UTF-8 ends the
         ///   stream with `.invalidUTF8` (ACP stdout, where a frame that
@@ -57,7 +56,18 @@ final class PipeReader: @unchecked Sendable {
         ///   an unparseable half-JSON object; true for the streaming
         ///   transports, where the child's last line legitimately may not
         ///   end in a newline and dropping it loses user-visible output.
-        case lines(failOnInvalidUTF8: Bool, deliverPartialAtEOF: Bool)
+        /// - `skipEmpty`: drop a zero-length frame (a blank line) instead of
+        ///   yielding `""`. **The two line semantics differ and neither is
+        ///   the default**: ACP skips, because an empty JSON-RPC frame is
+        ///   nothing and a reader that yields `""` makes the decoder parse
+        ///   it; the streaming transports do NOT, because their consumer is
+        ///   `HermesLogService`'s Logs pane and a blank line is a separator
+        ///   the user wrote and expects to see. P58 hoisted this primitive
+        ///   out of ACP and carried ACP's skip with it, silently deleting
+        ///   every blank line from the Logs pane — hence the explicit
+        ///   parameter (round-6 lesson 10: a parameter that IS the fix gets
+        ///   no default).
+        case lines(failOnInvalidUTF8: Bool, deliverPartialAtEOF: Bool, skipEmpty: Bool)
     }
 
     /// Why the reader stopped.
@@ -97,12 +107,17 @@ final class PipeReader: @unchecked Sendable {
             case .rawChunks:
                 emit(.chunk(data))
                 return true
-            case .lines(let failOnInvalidUTF8, _):
+            case .lines(let failOnInvalidUTF8, _, let skipEmpty):
                 buffer.append(data)
                 while let nl = buffer.firstIndex(of: 0x0A) {
                     let lineData = Data(buffer[buffer.startIndex..<nl])
                     buffer = Data(buffer[buffer.index(after: nl)...])
-                    guard !lineData.isEmpty else { continue }
+                    if lineData.isEmpty {
+                        // A blank line: nothing to decode either way, so the
+                        // only question is whether the sink wants to see it.
+                        if !skipEmpty { emit(.line("")) }
+                        continue
+                    }
                     if let text = String(data: lineData, encoding: .utf8) {
                         emit(.line(text))
                     } else if failOnInvalidUTF8 {
@@ -121,8 +136,12 @@ final class PipeReader: @unchecked Sendable {
         func finish(_ reason: FinishReason) {
             if done { return }
             done = true
+            // An EMPTY buffer at EOF is not a partial line — it means the
+            // last line ended in `\n` and was already emitted (blank lines
+            // included, under `skipEmpty: false`). Only a genuinely
+            // unterminated tail is flushed here.
             if reason == .eof,
-               case .lines(_, let deliverPartialAtEOF) = framing,
+               case .lines(_, let deliverPartialAtEOF, _) = framing,
                deliverPartialAtEOF, !buffer.isEmpty,
                let text = String(data: buffer, encoding: .utf8) {
                 emit(.line(text))
@@ -259,8 +278,11 @@ final class PipeReader: @unchecked Sendable {
 extension PipeReader {
     /// The `ProcessACPChannel` shape: newline frames into an
     /// `AsyncThrowingStream<String, Error>`, no trailing partial line (a
-    /// half-written JSON-RPC frame is not a frame), and an invalid-UTF8
-    /// frame ends the stdout stream with `ACPChannelError.invalidEncoding`.
+    /// half-written JSON-RPC frame is not a frame), empty frames skipped (an
+    /// empty JSON-RPC frame is nothing), and an invalid-UTF8 frame ends the
+    /// stdout stream with `ACPChannelError.invalidEncoding`. **This is the
+    /// only caller that skips empties** — the streaming transports yield
+    /// `""` for a blank log line.
     static func acpLines(
         handle: FileHandle,
         label: String,
@@ -272,7 +294,10 @@ extension PipeReader {
             label: label,
             framing: .lines(
                 failOnInvalidUTF8: failOnInvalidUTF8,
-                deliverPartialAtEOF: false
+                deliverPartialAtEOF: false,
+                // An empty JSON-RPC frame is nothing; ACP has always skipped
+                // blank lines and this factory is the ONLY place that does.
+                skipEmpty: true
             )
         ) { event in
             switch event {

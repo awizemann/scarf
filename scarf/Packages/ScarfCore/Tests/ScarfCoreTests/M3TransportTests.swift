@@ -46,6 +46,12 @@ import Foundation
         // that DOES need the drop is ACP's, where a trailing fragment is half
         // a JSON-RPC frame, and it keeps it: `PipeReader.Framing.lines`
         // carries `deliverPartialAtEOF`, false for ACP and true here.
+        //
+        // The SAME split applies to blank lines, and P58b had to add it after
+        // the fact: `.lines` also carries `skipEmpty`, true for ACP (an empty
+        // JSON-RPC frame is nothing) and false here (a blank line is a line of
+        // the user's log). Neither flag has a default — the two line semantics
+        // are different and every adopter states which one it wants.
         let transport = LocalTransport()
         let stream = transport.streamLines(
             executable: "/bin/sh",

@@ -797,7 +797,13 @@ public struct SSHTransport: ServerTransport {
                 let reader = PipeReader(
                     handle: outPipe.fileHandleForReading,
                     label: "com.scarf.transport.ssh.streamLines",
-                    framing: .lines(failOnInvalidUTF8: false, deliverPartialAtEOF: true)
+                    framing: .lines(
+                        failOnInvalidUTF8: false,
+                        deliverPartialAtEOF: true,
+                        // A blank line is a line of the user's log.
+                        // ACP skips empty frames; a log tail must not.
+                        skipEmpty: false
+                    )
                 ) { event in
                     switch event {
                     case .line(let text):

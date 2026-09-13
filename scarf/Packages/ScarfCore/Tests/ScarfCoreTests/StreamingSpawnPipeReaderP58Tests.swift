@@ -20,21 +20,72 @@ struct StreamingSpawnPipeReaderP58Tests {
 
     // MARK: - The primitive
 
-    @Test("lines arrive, split on newline, with empty frames skipped")
+    /// The streaming-transport framing: blank lines are LINES.
+    ///
+    /// P58 hoisted this primitive out of `ProcessACPChannel` and carried ACP's
+    /// `guard !lineData.isEmpty else { continue }` with it, which silently
+    /// deleted every blank separator line from the Logs pane — the only
+    /// consumer of `streamLines`. `skipEmpty` is per caller for the same
+    /// reason `deliverPartialAtEOF` is.
+    @Test("lines arrive, split on newline, with blank lines preserved")
     func linesArrive() async throws {
         let pipe = Pipe()
         let inbox = EventInbox()
         let reader = PipeReader(
             handle: pipe.fileHandleForReading,
             label: "test.lines",
-            framing: .lines(failOnInvalidUTF8: false, deliverPartialAtEOF: true),
+            framing: .lines(
+                failOnInvalidUTF8: false, deliverPartialAtEOF: true, skipEmpty: false),
             sink: { inbox.append($0) }
         )
         try pipe.fileHandleForWriting.write(contentsOf: Data("alpha\n\nbeta\n".utf8))
-        try #require(inbox.waitForLines(2), "reader never delivered both lines")
+        try #require(inbox.waitForLines(3), "reader never delivered all three lines")
+        #expect(inbox.lines == ["alpha", "", "beta"])
+        reader.cancel()
+        _ = inbox.waitForFinish()
+    }
+
+    /// ACP's framing, pinned: an empty JSON-RPC frame is nothing, so the
+    /// shared primitive must keep skipping blank lines for ACP even though
+    /// the transports now keep them.
+    @Test("ACP framing still skips empty frames")
+    func acpFramingSkipsEmptyFrames() async throws {
+        let pipe = Pipe()
+        let inbox = EventInbox()
+        let reader = PipeReader(
+            handle: pipe.fileHandleForReading,
+            label: "test.acp-empty",
+            framing: .lines(
+                failOnInvalidUTF8: true, deliverPartialAtEOF: false, skipEmpty: true),
+            sink: { inbox.append($0) }
+        )
+        try pipe.fileHandleForWriting.write(contentsOf: Data("alpha\n\nbeta\n".utf8))
+        try #require(inbox.waitForLines(2), "reader never delivered both frames")
+        PipeReaderTestSupport.settle(0.2) // a third line would have landed by now
         #expect(inbox.lines == ["alpha", "beta"])
         reader.cancel()
         _ = inbox.waitForFinish()
+    }
+
+    /// A blank line at EOF with no trailing newline is still nothing to
+    /// flush: an empty buffer is not a partial line. Guards the interaction
+    /// between the two flags.
+    @Test("a trailing newline leaves no partial line to flush")
+    func trailingNewlineLeavesNoPartial() async throws {
+        let pipe = Pipe()
+        let inbox = EventInbox()
+        let reader = PipeReader(
+            handle: pipe.fileHandleForReading,
+            label: "test.blank-eof",
+            framing: .lines(
+                failOnInvalidUTF8: false, deliverPartialAtEOF: true, skipEmpty: false),
+            sink: { inbox.append($0) }
+        )
+        try pipe.fileHandleForWriting.write(contentsOf: Data("alpha\n\n".utf8))
+        try pipe.fileHandleForWriting.close()
+        try #require(inbox.waitForFinish(), "reader never finished")
+        #expect(inbox.lines == ["alpha", ""])
+        withExtendedLifetime(reader) {}
     }
 
     /// The one semantic this port CHANGES, deliberately. The loop it replaces
@@ -49,7 +100,8 @@ struct StreamingSpawnPipeReaderP58Tests {
         let reader = PipeReader(
             handle: pipe.fileHandleForReading,
             label: "test.partial",
-            framing: .lines(failOnInvalidUTF8: false, deliverPartialAtEOF: true),
+            framing: .lines(
+                failOnInvalidUTF8: false, deliverPartialAtEOF: true, skipEmpty: false),
             sink: { inbox.append($0) }
         )
         try pipe.fileHandleForWriting.write(contentsOf: Data("done\nhalf".utf8))
@@ -68,7 +120,8 @@ struct StreamingSpawnPipeReaderP58Tests {
         let reader = PipeReader(
             handle: pipe.fileHandleForReading,
             label: "test.acp-partial",
-            framing: .lines(failOnInvalidUTF8: true, deliverPartialAtEOF: false),
+            framing: .lines(
+                failOnInvalidUTF8: true, deliverPartialAtEOF: false, skipEmpty: true),
             sink: { inbox.append($0) }
         )
         try pipe.fileHandleForWriting.write(contentsOf: Data("done\nhalf".utf8))
@@ -120,7 +173,8 @@ struct StreamingSpawnPipeReaderP58Tests {
         let reader = PipeReader(
             handle: pipe.fileHandleForReading,
             label: "test.cancel",
-            framing: .lines(failOnInvalidUTF8: false, deliverPartialAtEOF: true),
+            framing: .lines(
+                failOnInvalidUTF8: false, deliverPartialAtEOF: true, skipEmpty: false),
             sink: { inbox.append($0) }
         )
         reader.cancel()
@@ -157,6 +211,50 @@ struct StreamingSpawnPipeReaderP58Tests {
             got.append(line)
         }
         #expect(got == ["one", "two"])
+    }
+
+    /// The Logs-pane regression itself, end to end. `printf 'a\n\nb\n'`
+    /// yielded `["a", "", "b"]` before P58 and `["a", "b"]` after it.
+    @Test("LocalTransport.streamLines preserves the child's blank lines")
+    func localStreamLinesPreservesBlankLines() async throws {
+        var got: [String] = []
+        for try await line in LocalTransport().streamLines(
+            executable: "/bin/sh", args: ["-c", "printf 'a\\n\\nb\\n'"]
+        ) {
+            got.append(line)
+        }
+        #expect(got == ["a", "", "b"])
+    }
+
+    /// `SSHTransport.streamLines` needs a reachable host, so its half of the
+    /// same claim is asserted at the source: both streaming transports must
+    /// spell `skipEmpty: false`, and nothing but `acpLines` may spell `true`.
+    /// Round-6 lesson 3 — when a fix lands on one member of a family, the
+    /// siblings are walked before the commit.
+    @Test("both streaming transports ask for blank lines; only ACP skips them")
+    func bothStreamingTransportsKeepBlankLines() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // …/ScarfCoreTests
+            .deletingLastPathComponent()   // …/Tests
+            .deletingLastPathComponent()   // …/ScarfCore
+            .appendingPathComponent("Sources/ScarfCore")
+        for name in ["Transport/LocalTransport.swift", "Transport/SSHTransport.swift"] {
+            let text = try String(
+                contentsOf: sources.appendingPathComponent(name), encoding: .utf8)
+            #expect(text.contains("skipEmpty: false"), """
+                \(name) does not state `skipEmpty: false` for its                 `streamLines` framing — its Logs-pane consumer loses every                 blank line.
+                """)
+            #expect(!text.contains("skipEmpty: true"), "\(name) skips blank lines")
+        }
+        let reader = try String(
+            contentsOf: sources.appendingPathComponent("Transport/PipeReader.swift"),
+            encoding: .utf8)
+        // Exactly one `skipEmpty: true` in the primitive: the `acpLines`
+        // factory. A second would mean a new adopter inherited ACP's
+        // semantics without stating it.
+        let skippers = reader.components(separatedBy: "skipEmpty: true").count - 1
+        #expect(skippers == 1,
+                "expected only `acpLines` to skip empty frames, found \(skippers)")
     }
 
     @Test("LocalTransport.streamRawBytes yields the child's bytes")
@@ -240,16 +338,22 @@ struct StreamingSpawnPipeReaderP58Tests {
         PipeReaderTestSupport.settle(0.5)
 
         let probes = 4
+        // A CEILING, not a budget. Under the full suite's load four trivial
+        // probes were measured taking 6.5 s of a 10 s bound — a load bet, not
+        // a signal. Under the regression the pool can schedule NOTHING, so the
+        // probes never arrive and the ceiling is paid in full exactly once;
+        // green, it costs whatever the machine actually takes.
+        let parkProbeTimeout: TimeInterval = 60
         let arrived = DispatchSemaphore(value: 0)
         for _ in 0..<probes {
             Task.detached { arrived.signal() }
         }
         let allArrived = PipeReaderTestSupport.waitAll(
-            arrived, count: probes, timeout: 10)
+            arrived, count: probes, timeout: parkProbeTimeout)
 
         #expect(allArrived, """
             \(streamCount) open streams starved the cooperative pool: \(probes) \
-            trivial tasks could not run inside 10 s. The stdout loop is \
+            trivial tasks could not run inside \(parkProbeTimeout) s. The stdout loop is \
             blocking a pool thread per stream again.
             """)
     }
@@ -295,9 +399,12 @@ struct StreamingSpawnPipeReaderP58Tests {
         var chunkBytes: [UInt8] { lock.lock(); defer { lock.unlock() }; return [UInt8](storedChunks) }
         var finishCount: Int { lock.lock(); defer { lock.unlock() }; return finishes }
 
-        /// Bounded so a regression fails instead of hanging the host.
+        /// Bounded so a regression fails instead of hanging the host. The
+        /// bound is a CEILING paid only when the reader is broken — under
+        /// full-suite load these waits are a load bet at 10 s, so they are
+        /// generous (same reasoning as `parkProbeTimeout`).
         func waitForLines(_ count: Int) -> Bool {
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(60)
             while Date() < deadline {
                 if lines.count >= count { return true }
                 _ = progress.wait(timeout: .now() + 0.05)
@@ -306,7 +413,7 @@ struct StreamingSpawnPipeReaderP58Tests {
         }
 
         func waitForFinish() -> Bool {
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(60)
             while Date() < deadline {
                 if finishCount > 0 { return true }
                 _ = progress.wait(timeout: .now() + 0.05)
