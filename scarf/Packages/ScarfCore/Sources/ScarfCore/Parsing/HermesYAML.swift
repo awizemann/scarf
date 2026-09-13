@@ -258,7 +258,14 @@ public enum HermesYAML {
             }
         }
 
-        let rawLines = yaml.components(separatedBy: "\n")
+        // `components(separatedBy:)` yields a PHANTOM final "" for a
+        // document that ends with its terminating newline. Outside a block
+        // scalar it is skipped as blank and costs nothing; INSIDE one it is
+        // appended as a body line, so a `+`-chomped scalar counts it as a
+        // trailing blank and grows one spurious newline (`|+` over "a\n"
+        // rendered "a\n\n" where PyYAML says "a\n"). Drop it at the source.
+        var rawLines = yaml.components(separatedBy: "\n")
+        if yaml.hasSuffix("\n") { rawLines.removeLast() }
         for rawLine in rawLines {
             let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
 
