@@ -1127,12 +1127,14 @@ public final class RichChatViewModel {
     /// model as an ordinary prompt.
     ///
     /// `goal` and `subgoal` ARE real Hermes commands — `/goal` in the TUI
-    /// and gateway from `hermes_cli/commands.py:113` @ `v2026.5.7` and
+    /// and gateway from `hermes_cli/commands.py:103` @ `v2026.5.7` and
     /// `/subgoal` from `v2026.5.16` — but Scarf's chat speaks ACP, and the
     /// adapter's command table has never carried either: `_COMMANDS` is
     /// `acp_adapter/commands.py:44-66` @ `v2026.9.7` and
-    /// `_SLASH_COMMANDS` is `acp_adapter/server.py:163-173` @ `v2026.5.7`,
-    /// nine names in both, neither of them these. `_handle_slash_command`
+    /// `_SLASH_COMMANDS` is `acp_adapter/server.py:163-173` @ `v2026.5.7`.
+    /// Nine names in each — not the SAME nine (`compact` at `v2026.5.7`
+    /// became `compress` by `v2026.9.7`) — but `goal` and `subgoal` are in
+    /// neither roster at either tag. `_handle_slash_command`
     /// returns `None` for an unknown name and the raw text falls through to
     /// the LLM (`commands.py:94-95`).
     ///

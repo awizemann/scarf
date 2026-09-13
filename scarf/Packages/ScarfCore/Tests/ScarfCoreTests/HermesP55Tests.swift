@@ -92,11 +92,14 @@ struct HermesP55CapabilityFloorTests {
 
     // MARK: - hasBotChatCreationCLI: 0.21 → 0.20.5
 
-    /// `--query-file` is `hermes_cli/_parser.py:308` (in the chat parser's
-    /// mutually-exclusive query group at `:302-314`) at `v2026.8.19` = 0.20.5
+    /// `--query-file` is `hermes_cli/_parser.py:307` (its `add_argument(`
+    /// line, inside the chat parser's mutually-exclusive query group at
+    /// `:303-316`, beside `-q`/`--query` at `:304`) at `v2026.8.19` = 0.20.5
     /// and absent from that file at `v2026.8.18` = 0.20.4. Every other flag
-    /// of the create argv is present at 0.20.5: `-p` `:22`, `--in` `:401`,
-    /// `-c` `:412`, `--create-if-missing` `:421`, `-Q` `:379`.
+    /// of the create argv is present at 0.20.5: `--in` `:401`, `-c` `:412`,
+    /// `--create-if-missing` `:421`, `-Q` `:379`. `-p`/`--profile` is not a
+    /// parser argument — it is stripped before argparse, and `:20-23` is the
+    /// `PRE_ARGPARSE_INHERITED_FLAGS` relaunch table, not an argument.
     @Test("hasBotChatCreationCLI — the v0.20.5 version line parses")
     func botChatFloorParses() {
         let c = caps("Hermes Agent v0.20.5 (2026.8.19)")
@@ -206,7 +209,9 @@ struct HermesP55DocTests {
 /// The ACP adapter has never dispatched either name at any tag —
 /// `_SLASH_COMMANDS` (`acp_adapter/server.py:163-173` @ `v2026.5.7`) and
 /// `SlashCommandsMixin._COMMANDS` (`acp_adapter/commands.py:44-66` @
-/// `v2026.9.7`) are the same nine names — so an unknown name falls through
+/// `v2026.9.7`) carry nine names each (the rosters are not identical —
+/// v2026.5.7 has `compact` where v2026.9.7 has `compress` — but neither
+/// has ever carried `goal` or `subgoal`), so an unknown name falls through
 /// to the model (`commands.py:94-95`) and the text is a plain prompt.
 @Suite("Hermes P55 — /goal and /subgoal are not ACP commands")
 struct HermesP55GoalMirrorTests {
@@ -273,11 +278,17 @@ struct HermesP55GoalMirrorTests {
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let ownPath = URL(fileURLWithPath: #filePath).standardizedFileURL.path
+        // Matched on WORD BOUNDARIES, not by substring: `hasGoal` is a
+        // retired iOS strand while `hasGoals` is the live capability flag,
+        // and a `contains` sweep cannot tell them apart (P55b).
         let retired = [
             "recordActiveGoal", "recordSubgoalAdded", "recordSubgoalRemoved",
             "recordSubgoalsCleared", "activeGoal", "activeSubgoals", "parseGoalArgument",
             "parseSubgoalArgument", "truncatedToastGoal", "HermesActiveGoal",
-            "onClearGoal", "goalTooltip"
+            "onClearGoal", "goalTooltip",
+            // P55b: the write-up claims these went too, so the sweep says so.
+            "truncatedGoal", "goalChip", "supportsActiveGoal", "hasGoal",
+            "Goal locked"
         ]
         var scanned = 0
         var hits: [String] = []
@@ -302,7 +313,11 @@ struct HermesP55GoalMirrorTests {
                     .split(separator: "\n", omittingEmptySubsequences: false)
                     .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                     .joined(separator: "\n")
-                for symbol in retired where body.contains(symbol) {
+                for symbol in retired
+                where body.range(
+                    of: "\\b\(NSRegularExpression.escapedPattern(for: symbol))\\b",
+                    options: .regularExpression
+                ) != nil {
                     hits.append("\(url.lastPathComponent): \(symbol)")
                 }
             }
@@ -313,5 +328,19 @@ struct HermesP55GoalMirrorTests {
         }
         #expect(scanned > 300, "scanned only \(scanned) files")
         #expect(hits.isEmpty, "retired goal-mirror API survives: \(hits)")
+
+        // Calibration (round-6 lesson 7): the word-boundary matcher must
+        // FIND a planted needle, and must NOT confuse `hasGoal` with the
+        // live `hasGoals` flag it is a prefix of.
+        func matches(_ symbol: String, in body: String) -> Bool {
+            body.range(
+                of: "\\b\(NSRegularExpression.escapedPattern(for: symbol))\\b",
+                options: .regularExpression
+            ) != nil
+        }
+        #expect(matches("hasGoal", in: "let x = hasGoal ?? false"))
+        #expect(!matches("hasGoal", in: "public var hasGoals: Bool { true }"))
+        #expect(matches("Goal locked", in: "toast(\"Goal locked: x\")"))
+        #expect(!matches("goalChip", in: "goalChipper"))
     }
 }

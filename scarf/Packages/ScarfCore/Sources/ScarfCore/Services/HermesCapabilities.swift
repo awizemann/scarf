@@ -186,7 +186,7 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// (v0.13+).
     ///
     /// **CLI/gateway only, and CONSUMER-FREE since P55.** `/goal` is a real
-    /// Hermes command in the TUI and gateway (`hermes_cli/commands.py:113` @
+    /// Hermes command in the TUI and gateway (`hermes_cli/commands.py:103` @
     /// `v2026.5.7`) but has never been an `acp_adapter/` name at any tag
     /// (`_COMMANDS`, `acp_adapter/commands.py:44-66` @ `v2026.9.7`), and
     /// Scarf's chat speaks ACP. Its last two readers were the optimistic goal
@@ -1681,11 +1681,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     ///   `hermes_cli/_parser.py` contains neither `--query-file` nor
     ///   `query_file`.
     /// - **`v2026.8.19`** (**0.20.5**): the chat parser's mutually-exclusive
-    ///   query group is `hermes_cli/_parser.py:302-314` — `-q/--query` at
-    ///   `:304` and `--query-file` at `:308`. Every other flag of the argv is
-    ///   present at that same tag: `--profile`/`-p` `:21-22`, `--in` `:401`,
-    ///   `--continue`/`-c` `:411-412`, `--create-if-missing` `:421`,
-    ///   `-Q`/`--quiet` `:379-380`.
+    ///   query group is `hermes_cli/_parser.py:303-316` (opened at `:303`,
+    ///   closed at `:316`). Both members are cited on their
+    ///   `add_argument(` line: `-q`/`--query` at `:304` and `--query-file`
+    ///   at `:307`. Every other flag of the argv is present at that same
+    ///   tag: `--in` `:401`, `--continue`/`-c` `:411-412`,
+    ///   `--create-if-missing` `:421`, `-Q`/`--quiet` `:379-380`.
+    ///   `--profile`/`-p` is **not a parser argument at all**: `main.
+    ///   _apply_profile_override` consumes it before argparse runs, and
+    ///   `_parser.py:20-23` is only the `PRE_ARGPARSE_INHERITED_FLAGS`
+    ///   table that records it for relaunch (`:16-19` says so).
     ///
     /// **What each version range renders differently than Scarf's last
     /// release** (charter C1): only **0.20.5 and 0.20.6** change. The single
