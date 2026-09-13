@@ -90,9 +90,10 @@ import ScarfCore
         #expect(vm.tasks(in: .upNext).map(\.id) == ["t_a"])
     }
 
-    /// Every route into Running ends in `.dispatch` — `blocked` and
-    /// `scheduled` sources plan `[.unblock, .dispatch]` — so the confirmation
-    /// is keyed on the DESTINATION, not on the one `upNext` case.
+    /// Every route into Running that the planner ACCEPTS ends in
+    /// `.dispatch` — `blocked` and `scheduled` sources plan
+    /// `[.unblock, .dispatch]` — so the confirmation is keyed on the plan
+    /// containing that step (P60), not on the one `upNext` case.
     @Test(arguments: [("blocked", KanbanBoardColumn.blocked), ("scheduled", .scheduled)])
     func everySourceIntoRunningAsksFirst(_ pair: (String, KanbanBoardColumn)) {
         let vm = Self.board([Self.task("t_a", status: pair.0)])
@@ -108,6 +109,40 @@ import ScarfCore
         vm.attemptMove(taskId: "t_a", to: .upNext)
         #expect(vm.pendingDispatch == nil)
         #expect(vm.tasks(in: .upNext).map(\.id) == ["t_a"])
+    }
+
+    /// **P60: a REFUSED transition must not ask first.**
+    ///
+    /// The confirmation used to be parked on `destination == .running`
+    /// BEFORE `KanbanService.plan` ran, so every source the planner refuses
+    /// on the way to Running showed the board-wide dispatch sheet, took the
+    /// user's yes, and only then failed with a banner — the sheet asking
+    /// permission for a pass that was never going to happen.
+    ///
+    /// The four refused sources, each from `KanbanService.plan`:
+    /// Done is terminal (no `reopen` verb); Triage is promoted by a
+    /// specifier agent; Review → Running is neither of the two exits the
+    /// round-6 decision-6 gate opens (`done` / `upNext`), so it falls to the
+    /// `default:` refusal on every host; and Archived lives outside the
+    /// board, so it falls there too.
+    ///
+    /// Ordering it after the plan fixes both halves at once: no sheet, and
+    /// the refusal reaches `lastError` on the first gesture.
+    @Test(arguments: [("done", KanbanBoardColumn.done), ("triage", .triage),
+                      ("review", .review), ("archived", .archived)])
+    func aRefusedDestinationDoesNotAskFirst(_ pair: (String, KanbanBoardColumn)) {
+        let vm = Self.board([Self.task("t_a", status: pair.0)])
+        vm.showArchived = true
+        vm.attemptMove(taskId: "t_a", to: .running)
+
+        #expect(vm.pendingDispatch == nil, """
+            a transition the planner REFUSES asked for a board-wide dispatch \
+            confirmation first — the sheet is parked ahead of the plan
+            """)
+        #expect(vm.lastError != nil,
+                "the refusal never reached the banner: the move was parked instead")
+        // And the card did not move.
+        #expect(vm.tasks(in: pair.1).map(\.id) == ["t_a"])
     }
 
     /// The parked move carries the card's TITLE, because the confirmation

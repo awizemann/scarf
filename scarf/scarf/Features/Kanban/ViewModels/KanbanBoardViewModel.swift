@@ -310,17 +310,13 @@ final class KanbanBoardViewModel {
         let source = effectiveColumn(task)
         if source == destination { return }
 
-        // Round-6 decision 9. Every route into Running ends in `.dispatch`,
-        // which is board-wide (see `PendingDispatch`). Park the move and ask
-        // first — including the optimistic mutation, so a cancelled drop
-        // leaves the card exactly where the user picked it up rather than
-        // sitting in Running until the next poll disagrees.
-        if destination == .running, !confirmed {
-            pendingDispatch = PendingDispatch(
-                taskId: taskId, taskTitle: task.title, source: source)
-            return
-        }
-
+        // The plan is computed FIRST, and it is pure — no CLI, no I/O, just
+        // `KanbanService.plan`'s table (P60). Parking the confirmation ahead
+        // of it asked the user to approve a board-wide dispatch for a
+        // transition the planner then REFUSED: Done, Triage, Review without
+        // `hasKanbanReviewExits`, and Archived all throw on the way to
+        // Running, so the sheet appeared, the user said yes, and the move
+        // failed afterwards with a banner.
         let plan: KanbanTransitionPlan
         do {
             plan = try KanbanService.plan(
@@ -336,6 +332,24 @@ final class KanbanBoardViewModel {
             return
         } catch {
             lastError = error.localizedDescription
+            return
+        }
+
+        // Round-6 decision 9. `.dispatch` is board-wide (see
+        // `PendingDispatch`), so any plan that contains it needs the
+        // confirmation — which is the PLAN's property, not the destination's.
+        // Keying on `destination == .running` was the same claim by proxy and
+        // it was wrong in both directions at once: it asked on a refused
+        // transition that never dispatches, and it is the plan that decides
+        // (Blocked → Running is `[.unblock, .dispatch]`, and a future route
+        // into Running without a dispatch step would not need asking).
+        //
+        // Parked BEFORE the optimistic mutation, so a cancelled drop leaves
+        // the card exactly where the user picked it up rather than sitting in
+        // Running until the next poll disagrees.
+        if !confirmed, plan.steps.contains(.dispatch) {
+            pendingDispatch = PendingDispatch(
+                taskId: taskId, taskTitle: task.title, source: source)
             return
         }
 
