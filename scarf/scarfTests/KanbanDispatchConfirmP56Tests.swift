@@ -37,10 +37,16 @@ import ScarfCore
         return vm
     }
 
-    /// The test the decision asks for: **the dispatch does not run until
-    /// confirmed.** Proven by the two observable effects `attemptMove` has
-    /// when it proceeds — the optimistic status override, and the CLI task it
-    /// spawns. Neither happens; a parked move is recorded instead.
+    /// The test the decision asks for: **the drop parks instead of
+    /// dispatching.** What it actually observes is the synchronous half of
+    /// `attemptMove` — a parked `pendingDispatch` is recorded, the optimistic
+    /// status override does NOT land (the card is still in Up Next), and
+    /// `lastError` stays nil. It does NOT observe the argv: `service` is a
+    /// concrete `KanbanService` built in `KanbanBoardViewModel.init`
+    /// (`KanbanBoardViewModel.swift:41`) with no injection point, so no spy
+    /// can record what would have been spawned. The absent override is the
+    /// proxy: `attemptMove` applies it on the same path that starts the CLI
+    /// task, so no override means that path was not taken.
     @Test func aDropOnRunningParksInsteadOfDispatching() {
         let vm = Self.board([Self.task("t_a", status: "ready")])
         vm.attemptMove(taskId: "t_a", to: .running)
