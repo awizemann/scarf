@@ -401,7 +401,10 @@ struct SeparatorsAndLocalizationP54Tests {
     /// `profile use|show|import` each take a plain positional
     /// (`hermes_cli/subcommands/profile.py:15-16`, `:65-66`, `:89-90` @
     /// `v2026.9.7`), so all three take the separator — `export` and `delete`
-    /// already had it.
+    /// already had it. `rename` is the fourth (P54b): TWO plain positionals,
+    /// `old_name` (`:77`) and `new_name` (`:79`), with no list-valued option
+    /// behind them, so P47's rule applies to it too and P54 edited the line
+    /// without adding the separator.
     @Test func everyProfilePositionalCarriesTheSeparator() throws {
         let code = P54Source.codeOnly(
             try P54Source.read("scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift"))
@@ -409,6 +412,7 @@ struct SeparatorsAndLocalizationP54Tests {
             "[\"profile\", \"show\", \"--\", profile.name]",
             "[\"profile\", \"use\", \"--\", profile.name]",
             "[\"profile\", \"import\", \"--\", path]",
+            "[\"profile\", \"rename\", \"--\", profile.name, newName]",
         ] {
             #expect(code.contains(fragment), "missing separator: \(fragment)")
         }
@@ -416,12 +420,19 @@ struct SeparatorsAndLocalizationP54Tests {
         #expect(!code.contains("[\"profile\", \"show\", profile.name]"))
         #expect(!code.contains("[\"profile\", \"use\", profile.name]"))
         #expect(!code.contains("[\"profile\", \"import\", path]"))
+        #expect(!code.contains("[\"profile\", \"rename\", profile.name, newName]"))
     }
 
     /// Every `runAndReload` success word in the Profiles pane reaches the
     /// banner through `String(localized:)`. Extraction is a compile-time
-    /// scan of the LITERAL, so a bare `"Renamed"` shipped English on every
-    /// locale no matter what the parameter's type said.
+    /// scan of the LITERAL, so a bare `"Renamed"` could never be extracted
+    /// at all, no matter what the parameter's type said.
+    ///
+    /// **The wrap is necessary and NOT sufficient** (P54b): a wrapped key
+    /// with no row in `Localizable.xcstrings` still renders its English
+    /// source on every locale — which is what all twenty-two of P54's new
+    /// keys did until `everyP54BannerKeyHasACatalogueRow` was written. This
+    /// test proves the call site; that one proves the catalogue.
     @Test func everyProfileBannerLiteralIsLocalized() throws {
         let code = P54Source.codeOnly(
             try P54Source.read("scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift"))
@@ -446,9 +457,225 @@ struct SeparatorsAndLocalizationP54Tests {
     @Test func webhookBannersAreLocalizedAndColoured() throws {
         let code = P54Source.codeOnly(
             try P54Source.read("scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift"))
-        #expect(code.contains("self.messageIsError = !outcome.succeeded"))
+        // P54b: the seal is three-state now, so the paint is one helper
+        // keyed on `confidence` rather than a two-way read of `succeeded`.
+        #expect(code.contains("self.applyConfidence(outcome.confidence)"))
+        #expect(code.contains("messageIsError = confidence == .failed"))
+        #expect(code.contains("messageIsUnconfirmed = confidence == .unconfirmed"))
+        #expect(!code.contains("messageIsError = !outcome.succeeded"))
         for bare in ["= \"Test fired", "= \"Test failed\"", "? success : \"Failed\""] {
             #expect(!code.contains(bare), "unlocalized/exit-code banner survives: \(bare)")
         }
     }
+}
+
+// MARK: - P54b — the catalogue, the iOS COLUMNS prefix and the third seal
+
+/// Every user-facing key P54 wrapped in `String(localized:)` must have a row
+/// in `Localizable.xcstrings` with all six shipping locales translated.
+///
+/// P54 wrapped thirty-four keys and added rows for none of them: the wrap is
+/// what makes a literal EXTRACTABLE, but the catalogue is what makes it
+/// translated, and Xcode's extraction only runs when someone opens the
+/// catalogue in the app target. Thirteen of the thirty-four happened to
+/// collide with rows other phases had already added; the other twenty-two
+/// shipped English on de/es/fr/ja/pt-BR/zh-Hans.
+///
+/// The keys are the CATALOGUE spellings, i.e. with the interpolations
+/// resolved to their format specifiers (`\(detail)` → `%@`), because that is
+/// what `String(localized:)` looks up at run time.
+@Suite("P54b · every P54 banner key has a catalogue row")
+struct BannerCatalogueP54bTests {
+
+    /// The six locales Scarf ships besides the `en` source.
+    static let locales = ["de", "es", "fr", "ja", "pt-BR", "zh-Hans"]
+
+    /// Every key the P54 commits introduced at a `String(localized:)` call
+    /// site, in its catalogue spelling.
+    static let keys: [String] = [
+        "Active profile set to %@ — restart Scarf to refresh.",
+        "Backup complete",
+        "Backup failed",
+        "Backup failed: %@",
+        "Backup saved",
+        "Backup saved on %@: %@",
+        "Collection failed",
+        "Deleted %@",
+        "Exported",
+        "Failed",
+        "Failed: %@",
+        "Hermes found retired xAI models but wrote no changes. The config still names them — check it by hand.",
+        "Imported",
+        "Migrated to %@. You may need to restart the gateway.",
+        "No retired xAI model to migrate.",
+        "Profile '%@' created",
+        "Removed",
+        "Renamed",
+        "Report collected",
+        "Restore complete — restart Scarf",
+        "Restore failed",
+        "Restore failed: %@",
+        "Test failed",
+        "Test failed: %@",
+        "Test fired — %@",
+        "Test fired — check logs",
+        "Upload complete",
+        "Upload failed",
+        "Upload partly complete. %@",
+        "%@ printed no result. Check the host.",
+        "hermes backup printed no result. Check the host.",
+        "hermes debug share printed no result. Check the host.",
+        "hermes import printed no result. Check the host.",
+        "hermes webhook test printed no result. Check the host.",
+    ]
+
+    /// `strings` out of the catalogue, decoded once.
+    static func catalogue() throws -> [String: Any] {
+        let text = try P54Source.read("scarf/Localizable.xcstrings")
+        let data = try #require(text.data(using: .utf8))
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let unwrapped = try #require(root)
+        return try #require(unwrapped["strings"] as? [String: Any])
+    }
+
+    @Test func everyP54BannerKeyHasACatalogueRow() throws {
+        let strings = try Self.catalogue()
+        for key in Self.keys {
+            #expect(strings[key] != nil, "no catalogue row for: \(key)")
+        }
+    }
+
+    @Test func everyP54BannerKeyIsTranslatedInAllSixLocales() throws {
+        let strings = try Self.catalogue()
+        for key in Self.keys {
+            guard let row = strings[key] as? [String: Any] else { continue }
+            let localizations = row["localizations"] as? [String: Any] ?? [:]
+            for locale in Self.locales {
+                let unit = (localizations[locale] as? [String: Any])?["stringUnit"] as? [String: Any]
+                let value = unit?["value"] as? String
+                let present = (value?.isEmpty == false)
+                #expect(present, "\(key) is untranslated in \(locale)")
+            }
+        }
+    }
+
+    /// The calibration floor: if the key list is emptied (or the catalogue
+    /// path stops resolving) the two tests above would pass over nothing.
+    @Test func theKeyListAndTheCatalogueAreBothNonTrivial() throws {
+        #expect(Self.keys.count >= 34, "the P54 key list shrank: \(Self.keys.count)")
+        #expect(Set(Self.keys).count == Self.keys.count, "duplicate key in the list")
+        let strings = try Self.catalogue()
+        #expect(strings.count > 2000, "catalogue looks truncated: \(strings.count) rows")
+    }
+
+    /// A planted needle: a key that is NOT in the catalogue must be seen as
+    /// missing, so the membership test is really testing membership.
+    @Test func aKeyThatIsNotInTheCatalogueIsSeenAsMissing() throws {
+        let strings = try Self.catalogue()
+        #expect(strings["P54b planted needle — never a real key"] == nil)
+    }
+}
+
+/// The iOS memory-reset script sets `COLUMNS` before `PATH`.
+///
+/// `sh` reads a command line's leading `VAR=value` pairs left to right and
+/// stops at the first token that is not an assignment, so the width has to
+/// lead — after `PATH=` it is still an assignment and still applies, but the
+/// invariant the comment states ("the assignment leads, as it must") is the
+/// thing a later edit breaks by inserting the command in between. P54 fixed
+/// the ordering and shipped no test for it (P54b).
+@Suite("P54b · the iOS memory-reset script keeps its width prefix")
+struct IOSColumnsPrefixP54bTests {
+
+    @Test func columnsLeadsThePathAssignment() throws {
+        let code = P54Source.codeOnly(try P54Source.read("Scarf iOS/Memory/MemoryListView.swift"))
+        let needle = "let script = \"COLUMNS=\\(LocalTransport.wideColumns) \""
+        #expect(code.contains(needle), "the script no longer starts with COLUMNS=")
+        // …and `PATH=` follows it rather than preceding it.
+        let columnsIndex = try #require(code.range(of: needle))
+        let pathIndex = try #require(code.range(of: "PATH=\\\"$HOME/.local/bin"))
+        #expect(columnsIndex.lowerBound < pathIndex.lowerBound,
+                "PATH= now precedes COLUMNS= in the composed script")
+        // A planted floor: the transport constant is the source of the
+        // width, not a literal number.
+        #expect(!code.contains("COLUMNS=400 "), "the width was inlined as a literal")
+    }
+}
+
+/// The shared message bar's seal is three-state (P54b).
+///
+/// `SettingsViewModel.runBackup`/`runRestore` routed the `.unconfirmed` arm
+/// through `showSaveFailure` / `.failure`, so "hermes backup printed no
+/// result" — a sentence whose whole point is that nothing was proven —
+/// arrived under the red triangle and was announced as "Failed: …". The text
+/// was three-state and the seal was two.
+@Suite("P54b · the seal has three states, not two")
+struct ThreeStateSealP54bTests {
+
+    @Test func theNeutralArmIsNotAFailure() {
+        #expect(OutcomeMessage.unconfirmed("x").kind == .unconfirmed)
+        #expect(OutcomeMessage.unconfirmed("x").isFailure == false)
+        #expect(OutcomeMessage.failure("x").isFailure)
+        #expect(OutcomeMessage.success("x").isFailure == false)
+    }
+
+    @Test func theThreeSealsAreAllDifferent() {
+        let glyphs = [OutcomeMessage.Kind.success, .unconfirmed, .failure]
+            .map(OutcomeMessageBar.glyph(for:))
+        #expect(Set(glyphs).count == 3, "two seals share a glyph: \(glyphs)")
+        #expect(glyphs[1] == "questionmark.circle.fill")
+        let tints = [OutcomeMessage.Kind.success, .unconfirmed, .failure]
+            .map(OutcomeMessageBar.tint(for:))
+        #expect(tints[0] != tints[1])
+        #expect(tints[1] != tints[2], "the neutral arm is painted the failure's colour")
+    }
+
+    /// The amber arm is the one `MCPServerTestResultView` already uses for
+    /// the same verdict — the citation the fix is modelled on.
+    @Test func theNeutralTintMatchesTheMCPPaneItIsModelledOn() {
+        #expect(OutcomeMessageBar.glyph(for: .unconfirmed)
+                == MCPServerTestResultView.glyph(for: .unconfirmed))
+    }
+
+    @Test func settingsRoutesTheUnconfirmedArmToTheNeutralSeal() throws {
+        let code = P54Source.codeOnly(
+            try P54Source.read("scarf/Features/Settings/ViewModels/SettingsViewModel.swift"))
+        #expect(code.contains("self.showUnconfirmed(text)"))
+        #expect(code.contains("outcome.confidence == .unconfirmed ? .unconfirmed(text) : .failure(text)"))
+        // The two-way spellings P54 shipped are gone.
+        #expect(!code.contains("self.showSaveFailure(Self.backupFailureSummary(outcome: outcome))"))
+        #expect(!code.contains(".failure(Self.restoreFailureSummary(outcome: outcome))"))
+    }
+
+    /// A neutral message must not fade: "we do not know" is a thing the user
+    /// has to read and act on, exactly like a refusal.
+    @Test @MainActor func theNeutralArmDoesNotAutoClear() {
+        let host = SealProbe()
+        host.applySaveOutcome(.unconfirmed("printed no result"))
+        #expect(host.message == "printed no result")
+        #expect(host.messageIsUnconfirmed)
+        #expect(host.messageIsFailure == false)
+        #expect(host.messageKind == .unconfirmed)
+        host.dismissMessage()
+        #expect(host.message == nil)
+        #expect(host.messageIsUnconfirmed == false)
+    }
+
+    @Test @MainActor func theKindRecomposesFromTheTwoStoredFlags() {
+        let host = SealProbe()
+        host.applySaveOutcome(.failure("no"))
+        #expect(host.messageKind == .failure)
+        host.applySaveOutcome(.success("yes"))
+        #expect(host.messageKind == .success)
+        #expect(host.messageIsUnconfirmed == false)
+    }
+}
+
+/// A minimal conformer, so the protocol's own arithmetic is exercised
+/// without standing up a feature view model.
+@MainActor
+private final class SealProbe: OutcomeMessageHosting {
+    var message: String?
+    var messageIsFailure = false
+    var messageIsUnconfirmed = false
 }

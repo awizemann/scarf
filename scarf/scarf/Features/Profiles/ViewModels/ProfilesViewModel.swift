@@ -138,8 +138,13 @@ final class ProfilesViewModel {
         runAndReload(args, success: String(localized: "Profile '\(name)' created"))
     }
 
+    /// `rename` takes two plain positionals — `old_name` and `new_name`
+    /// (`hermes_cli/subcommands/profile.py:77`, `:79` @ `v2026.9.7`) — and
+    /// no list-valued option stands behind them, so `--` is safe here by
+    /// P47's rule and necessary for the same reason it is on `show`/`use`:
+    /// a profile whose name begins with `-` is otherwise parsed as a flag.
     func rename(_ profile: HermesProfile, to newName: String) {
-        runAndReload(["profile", "rename", profile.name, newName], success: String(localized: "Renamed"))
+        runAndReload(["profile", "rename", "--", profile.name, newName], success: String(localized: "Renamed"))
     }
 
     /// Deletes a profile.
