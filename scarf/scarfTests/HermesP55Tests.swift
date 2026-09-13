@@ -170,4 +170,28 @@ struct HermesP55CatalogueTests {
         // P44's sibling notice is a different key and must still be there.
         #expect(strings["This Hermes has no /%@ — sent as an ordinary prompt."] != nil)
     }
+
+    /// P55b: deleting the pill left its three rows in the catalogue with no
+    /// `String(localized:)` anywhere to extract them — dead weight that a
+    /// later `contains` grep would read as "the pill is still there".
+    @Test("the dropped goal-pill rows are gone from the catalogue")
+    func retiredGoalRowsAreGone() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(
+            contentsOf: repoRoot.appendingPathComponent("scarf/scarf/Localizable.xcstrings")
+        )
+        let root = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let strings = try #require(root["strings"] as? [String: Any])
+        #expect(strings.count > 1000, "catalogue decoded only \(strings.count) keys")
+        for key in ["Goal locked: %@", "Clear goal", "Goal · %lld"] {
+            #expect(strings[key] == nil, "orphaned goal-pill row still in the catalogue: \(key)")
+        }
+        // Calibration: a key that IS present proves the lookup works, so the
+        // four `== nil` expectations above are not vacuously green.
+        #expect(strings[Self.key] != nil)
+    }
 }
