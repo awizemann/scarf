@@ -2208,6 +2208,21 @@ public enum HermesSessionsOptimizeVerdict {
 /// - `No files to back up.` (`:266`, `:585`, `:734`, `:633`) and
 ///   `Warnings ({n} files skipped):` (`:326`, `:673`, `:842`, `:679`) are
 ///   byte-identical at all four.
+///
+/// **C1 below the window — `v0.6.0`–`v0.17.0` (lesson 13).** The
+/// `.unconfirmed` arm this verdict added is a GATE on a surface that had
+/// none, so it owes an answer for every range outside the walk.
+/// `hermes_cli/backup.py` does not exist before `v2026.4.13`; at the oldest
+/// tag in the repo, `v2026.3.30` (v0.6.0), `hermes_cli/main.py` carries no
+/// `backup` parser at all, so the verb is unknown and routes to the agent at
+/// exit 0 (C5). Agent prose never contains `Backup complete: `, so this
+/// verdict returns `.unconfirmed` and the pane says "hermes backup printed
+/// no result. Check the host." — where, before P54, the SAME host read
+/// "Backup saved" over a backup that never happened. The gate makes that
+/// range strictly more honest, which is what C1 asks of an added gate. From
+/// `v2026.4.13` onward the markers are really there (`:217` complete, `:175`
+/// nothing-to-back-up, `:229` warnings), so the confirmed and refusal arms
+/// fire exactly as at the target tag.
 public enum HermesBackupVerdict {
     /// `backup`. No positional, no flag Scarf passes — nothing to separate.
     public static let argv = ["backup"]
@@ -2324,6 +2339,18 @@ public enum HermesBackupVerdict {
 ///   `v2026.9.7`** (`:959`; absent at the other three). An older host never
 ///   prints it, so the shrink note simply never fires there — additive, and
 ///   the only arm of this verdict that is.
+///
+/// **C1 below the window — `v0.6.0`–`v0.17.0` (lesson 13).** Same shape as
+/// ``HermesBackupVerdict``: `hermes_cli/backup.py` (which hosts
+/// `run_import`) and `hermes_cli/subcommands/import_cmd.py` are both absent
+/// before `v2026.4.13`, and `v2026.3.30` has no `import` parser in
+/// `hermes_cli/main.py`. On such a host `hermes import --force -- <path>`
+/// is an unknown verb routed to the agent at exit 0, prints no
+/// `Import complete: `, and lands on `.unconfirmed` — "hermes import printed
+/// no result. Check the host." Before P54 that host read "Restore complete —
+/// restart Scarf". `Import complete: ` and `Warnings ({n} files skipped):`
+/// are present from `v2026.4.13` (`:384`, `:388`), so the confirmed arm
+/// fires from there on.
 public enum HermesImportVerdict {
     /// `import --force -- <path>`.
     ///
@@ -2426,6 +2453,20 @@ public enum HermesImportVerdict {
 /// `Is the gateway running? (hermes gateway run)`
 /// `:298`/`:307`/`:307`/`:219`). So the verdicts change no pane's rendering
 /// on any host in that range except where it was already wrong (C1).
+///
+/// **C1 below the window — `v0.6.0`–`v0.17.0` (lesson 13).** Unlike backup,
+/// import and debug share, `hermes_cli/webhook.py` exists at the OLDEST tag
+/// in the repo, `v2026.3.30` (v0.6.0), and every marker these three verdicts
+/// judge by is already there:
+/// `  Webhook platform is not enabled. To set it up:` (`:84`),
+/// `  No subscription named '{name}'.` (`:211`, `:226`),
+/// `  Removed webhook subscription: {name}` (`:217`),
+/// `  Response ({status}): {body}` (`:257`) and
+/// `  Is the gateway running? (hermes gateway run)` (`:260`). So on every
+/// host Scarf supports the confirmed and refusal arms fire on real lines,
+/// and the `.unconfirmed` arm can only be reached by a genuinely silent
+/// run — there is no version range where this added gate hides a working
+/// surface.
 enum HermesWebhookGate {
     static let disabledPrefix = "Webhook platform is not enabled."
 
@@ -2584,6 +2625,17 @@ public enum HermesWebhookTestVerdict {
 /// `v2026.9.7` (`:490`, `:494`) — byte-identical at all four, only the line
 /// numbers moved, so C1 holds.
 public enum HermesDebugShareVerdict {
+    // **C1 below the window — `v0.6.0`–`v0.17.0` (lesson 13).**
+    // `hermes_cli/debug.py` does not exist before `v2026.4.13`, and
+    // `v2026.3.30` (v0.6.0) has no `debug` parser in `hermes_cli/main.py`:
+    // `hermes debug share` is an unknown verb there, routed to the agent at
+    // exit 0, so no `Debug report uploaded:` line appears and this verdict
+    // returns `.unconfirmed` — "hermes debug share printed no result. Check
+    // the host." Before P54 the same host read "Upload complete". From
+    // `v2026.4.13` both markers are present and unchanged
+    // (`debug.py:311` uploaded, `:316` `(failed to upload: …)`), so the
+    // confirmed and partial arms fire there as they do at the target tag.
+
     /// `Debug report uploaded:` (`debug.py:490`). Column 0 after the
     /// leading `\n`.
     static let successPrefix = "Debug report uploaded:"

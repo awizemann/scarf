@@ -105,14 +105,20 @@ public actor CuratorService {
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "resume")
     }
 
-    /// **`--` before the skill positional on all four of `pin`, `unpin`,
-    /// `restore` and `archive`** (P54, round-6). Each takes the shared
-    /// `_SKILL = _arg("skill", help="Skill name")` positional
-    /// (`hermes_cli/curator.py:595`, wired at `:626`, `:627`, `:639`,
-    /// `:641-642` @ `v2026.9.7`) — a plain positional, no `nargs=REMAINDER`
-    /// anywhere in the table — so argparse's separator applies and a skill
-    /// name beginning with a dash stops exiting 2. The separator is the last
-    /// token before the name because nothing follows it.
+    // MARK: - The `--`-separated skill verbs
+    //
+    // **`--` before the skill positional on all four of `pin`, `unpin`,
+    // `restore` and `archive`** (P54, round-6). Each takes the shared
+    // `_SKILL = _arg("skill", help="Skill name")` positional
+    // (`hermes_cli/curator.py:595`, wired at `:626`, `:627`, `:639`,
+    // `:641-642` @ `v2026.9.7`) — a plain positional, no `nargs=REMAINDER`
+    // anywhere in the table — so argparse's separator applies and a skill
+    // name beginning with a dash stops exiting 2. The separator is the last
+    // token before the name because nothing follows it.
+    //
+    // A `//` block, not `///`: it documents the four declarations below as a
+    // group, and a `///` attached to no declaration is swallowed by
+    // DocC/Quick Help rather than shown on any of them (P54b).
 
     /// `hermes curator pin <name>`. A pin on an eligible-but-unmanaged skill
     /// (no `created_by` provenance marker) still exits 0 — the pin IS

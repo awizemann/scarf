@@ -16,7 +16,7 @@ enum P54Fixtures {
 
     // MARK: backup — hermes_cli/backup.py
 
-    /// `_run_backup_locked`'s clean path: the scan lines (`:625`, `:641`),
+    /// `_run_backup_locked`'s clean path: the scan lines (`:627`, `:640`),
     /// the `Backup complete: ` block (`:666-670`) and the restore hint
     /// (`:681`).
     static let backupComplete = """
@@ -74,7 +74,7 @@ enum P54Fixtures {
         """
 
     /// Partial restore: `Warnings (N files skipped):` (`:955`) from
-    /// `_import_members`' `errors` list (`:895`, `:911`).
+    /// `_import_members`' `errors` list (`:889`, `:911`).
     static let importWithWarnings = """
         Backup contains 812 files
         Target: ~/.hermes
@@ -202,8 +202,10 @@ enum P54Fixtures {
 
     // MARK: curator run — hermes_cli/curator.py
 
-    /// `_cmd_run` with `curator.consolidate` false (`:159-163`, `:175-180`),
-    /// returning 0 at `:186`.
+    /// `_cmd_run` with `curator.consolidate` false: the prune-only note
+    /// (`:159-163`) and the auto counters (`:172-176`). The background and
+    /// dry-run lines (`:177-180`) do not fire on this arm; it returns 0 at
+    /// `:186`.
     static let curatorPruneOnly = """
         curator: running review pass...
         curator: consolidation is off — running prune-only (deterministic stale/archive). Pass --consolidate or set `curator.consolidate: true` to enable the LLM merge pass.
