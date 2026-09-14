@@ -44,7 +44,25 @@ struct ChatView: View {
     @State private var isEncodingAttachment = false
     @State private var attachmentError: String?
 
+    /// Push-to-talk dictation state machine (ScarfIOS). Phase drives
+    /// the mic button + status strip; finished transcripts arrive via
+    /// `.onChange(of: pushToTalk.transcript)` and land in the draft as
+    /// EDITABLE text — dictation never sends.
+    @State private var pushToTalk = PushToTalkController()
+    /// Gesture bookkeeping for the hold-to-talk mic button: true once
+    /// the long-press threshold completes (recording started), and set
+    /// when the finger drags far enough away to cancel the take.
+    @State private var dictationHoldStarted = false
+    @State private var dictationCancelledByDrag = false
+
     private static let maxAttachments = 5
+
+    /// Hold duration before a mic-button press starts the take. Short
+    /// enough to feel instant, long enough that a stray tap doesn't
+    /// clip a fraction of a second of audio.
+    private static let dictationHoldStart: TimeInterval = 0.2
+    /// Finger travel (pt) from the mic button that cancels the take.
+    private static let dictationCancelDistance: CGFloat = 60
 
     private var supportsImagePrompts: Bool {
         capabilitiesStore?.capabilities.hasACPImagePrompts ?? false
@@ -599,6 +617,10 @@ struct ChatView: View {
             if !controller.attachments.isEmpty || isEncodingAttachment || attachmentError != nil {
                 attachmentStrip
             }
+            if pushToTalk.phase != .idle || pushToTalk.notice != nil {
+                dictationStatusStrip
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             composerRow
         }
         .padding(.horizontal, ScarfSpace.s3)
@@ -611,6 +633,15 @@ struct ChatView: View {
                 showSlashMenu = next
             }
         }
+        // A finished dictation lands in the draft as plain editable
+        // text (review-before-send contract), then the caret hops into
+        // the field so the transcript is immediately revisable.
+        .onChange(of: pushToTalk.transcript) { _, delivery in
+            guard let delivery else { return }
+            controller.insertDictatedText(delivery.text)
+            composerFocused = true
+        }
+        .animation(ScarfAnimation.fast, value: pushToTalk.phase)
         #if canImport(PhotosUI)
         .photosPicker(
             isPresented: $showPhotoPicker,
@@ -767,6 +798,11 @@ struct ChatView: View {
                 controller.scheduleDraftSave()
             }
 
+            // Hold-to-talk dictation mic. NOT a Button — a tap action
+            // would race the hold gesture; the sequenced long-press +
+            // drag gesture below owns the interaction entirely.
+            dictationMicButton
+
             // Big circular send button. Filled with the brand accent when
             // ready, swapped to a flat gray when disabled — opacity dims
             // alone read as "not quite tappable" (issue #69), the explicit
@@ -798,6 +834,152 @@ struct ChatView: View {
         // TextField's width shift rides the keyboard slide instead of
         // popping.
         .animation(ScarfAnimation.fast, value: composerFocused)
+    }
+
+    // MARK: - Push-to-talk dictation
+
+    /// Hold-to-talk mic affordance. Sizing/tint mirror the paperclip
+    /// and keyboard-dismiss siblings (44 pt target, size-20 symbol);
+    /// fills with the danger tint + pulses while a take is running.
+    private var dictationMicButton: some View {
+        Image(systemName: pushToTalk.phase == .recording ? "mic.fill" : "mic")
+            .font(.system(size: 20, weight: .regular))
+            .foregroundStyle(dictationMicTint)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .symbolEffect(.pulse, isActive: pushToTalk.phase == .recording)
+            .gesture(dictationGesture)
+            .animation(ScarfAnimation.fast, value: pushToTalk.phase)
+            .accessibilityLabel("Dictate message")
+            .accessibilityHint("Hold to record; release to transcribe. Slide away to cancel.")
+    }
+
+    private var dictationMicTint: Color {
+        if dictationDisabled { return ScarfColor.foregroundFaint }
+        return pushToTalk.phase == .recording ? ScarfColor.danger : ScarfColor.foregroundMuted
+    }
+
+    /// Mirror of the TextField/paperclip `.disabled` predicates —
+    /// dictation drafts locally but stays consistent with the
+    /// composer's connection gating.
+    private var dictationDisabled: Bool {
+        controller.state != .ready
+    }
+
+    /// 0.2 s hold starts the take; dragging > 60 pt away cancels it
+    /// (the finger never has to return to the button); lifting
+    /// anywhere short of that ends the take and kicks transcription.
+    /// Guards on `dictationHoldStarted` because the sequenced gesture
+    /// can emit `.first` events for touches that later fail before
+    /// the drag phase engages.
+    private var dictationGesture: some Gesture {
+        LongPressGesture(minimumDuration: Self.dictationHoldStart)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard !dictationDisabled else { return }
+                switch value {
+                case .first:
+                    guard !dictationHoldStarted else { return }
+                    dictationHoldStarted = true
+                    pushToTalk.holdBegan()
+                case .second(true, let drag?):
+                    guard dictationHoldStarted, !dictationCancelledByDrag else { return }
+                    let distance = hypot(drag.translation.width, drag.translation.height)
+                    if distance > Self.dictationCancelDistance {
+                        dictationCancelledByDrag = true
+                        pushToTalk.holdCancelled()
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in
+                let started = dictationHoldStarted
+                let cancelled = dictationCancelledByDrag
+                dictationHoldStarted = false
+                dictationCancelledByDrag = false
+                guard started, !cancelled else { return }
+                pushToTalk.holdReleased()
+            }
+    }
+
+    /// One-line status above the composer while dictation is running
+    /// or has something to say. Same shape as the connection banner
+    /// strips: tinted background, caption copy, no chrome.
+    @ViewBuilder
+    private var dictationStatusStrip: some View {
+        switch pushToTalk.phase {
+        case .recording:
+            dictationStrip(
+                icon: "waveform",
+                text: Text("Recording… slide away to cancel"),
+                tint: ScarfColor.danger
+            )
+        case .transcribing:
+            dictationStrip(
+                icon: nil,
+                text: Text("Transcribing…"),
+                tint: ScarfColor.info,
+                showsSpinner: true
+            )
+        case .idle:
+            if let notice = pushToTalk.notice {
+                dictationStrip(
+                    icon: "exclamationmark.circle",
+                    text: Self.dictationNoticeText(notice),
+                    tint: ScarfColor.warning
+                )
+            }
+        }
+    }
+
+    private func dictationStrip(
+        icon: String?,
+        text: Text,
+        tint: Color,
+        showsSpinner: Bool = false
+    ) -> some View {
+        HStack(spacing: 8) {
+            if showsSpinner {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(tint)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+            }
+            text
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.16))
+    }
+
+    /// Maps each controller notice to a Text literal so the copy stays
+    /// extractable into the string catalog — a computed String would
+    /// silently leak English (see docs/I18N.md guardrails).
+    private static func dictationNoticeText(_ notice: PushToTalkNotice) -> Text {
+        switch notice {
+        case .microphonePermissionDenied:
+            Text("Microphone access is off. Enable it in Settings to dictate.")
+        case .speechPermissionDenied:
+            Text("Speech recognition is off. Enable it in Settings to dictate.")
+        case .permissionsRestricted:
+            Text("Dictation isn't available — speech recognition is restricted on this device.")
+        case .recorderFailed:
+            Text("Couldn't start recording. Try again.")
+        case .transcriptionFailed:
+            Text("Transcription failed. Try again.")
+        case .nothingHeard:
+            Text("Nothing was heard. Hold the microphone button while you speak.")
+        case .cancelled:
+            Text("Dictation cancelled.")
+        }
     }
 
     /// Send is enabled when ready AND we have either text or at least
@@ -1575,6 +1757,18 @@ final class ChatController {
         } else {
             draft = "/\(command.name)"
         }
+        scheduleDraftSave()
+    }
+
+    /// Append a finished dictation transcript to the draft as plain,
+    /// editable text — never auto-sent. A space separates it from
+    /// text already in the composer so consecutive takes read as one
+    /// message the user can review and send.
+    func insertDictatedText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let base = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = base.isEmpty ? trimmed : base + " " + trimmed
         scheduleDraftSave()
     }
 

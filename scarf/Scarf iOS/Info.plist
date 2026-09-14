@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ScarfGo uses the microphone only while you hold the dictate button, to record a short voice memo for transcription.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>ScarfGo transcribes your dictation on this device so you can review and edit it before sending.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIImageName</key>
