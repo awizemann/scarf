@@ -1347,40 +1347,45 @@ final class HealthViewModel {
         let terminateOwned = owned?.isRunning == true
         if terminateOwned { dashboardProcess = nil }
 
-        // C10: `terminate()` and the `lsof` probe are both process work — and
-        // `lsof` is a whole spawn whose `waitUntilExit()` had no timeout, so a
-        // hung lsof froze the window. Off the main actor, then hop back.
-        let ceiling = Self.dashboardStopCeiling
+        // The dashboard is a DAEMON: nothing waits on it, so the only budget
+        // it can be given is on the way OUT. A bare `terminate()` was the
+        // whole of this — no escalation and no ceiling — so a uvicorn that
+        // ignores SIGTERM, or is wedged in an uninterruptible wait, left the
+        // Stop button looking like it had worked while the child ran on,
+        // holding the port against the next Start. Exactly the shape round-5
+        // P48 fixed in `HermesProxyService.stop()`, and this is that sibling,
+        // spelled the same way it is there:
+        //
+        // SIGTERM goes FIRST, here, before the wait. `waitUntilExit(timeout:)`
+        // signals only once its budget is SPENT, so handing it the ceiling and
+        // nothing else would poll a child nobody had asked to leave. The ask
+        // is free and immediate; the ceiling is the grace AFTER it.
+        //
+        // A THREAD, and NOT inside the `Task` below: the primitive is a
+        // `Thread.sleep` poll loop, and a `Task`/`Task.detached` closure is
+        // the cooperative pool — one thread per core, unable to grow. That is
+        // what `ProcessAsyncWaitP43cTests` proves, and it caught this
+        // arrangement when the escalation was nested in the Task.
+        if terminateOwned, let owned {
+            let ceiling = Self.dashboardStopCeiling
+            owned.terminate()
+            Thread.detachNewThread {
+                _ = owned.waitUntilExit(timeout: ceiling)
+            }
+        }
+
+        // C10: the `lsof` probe is process work too — a whole spawn whose
+        // `waitUntilExit()` had no timeout, so a hung lsof froze the window.
+        // Off the main actor, then hop back.
         Task { [weak self] in
-            await Task.detached {
-                if terminateOwned, let owned {
-                    // The dashboard is a DAEMON: nothing waits on it, so the
-                    // only budget it can be given is on the way OUT. A bare
-                    // `terminate()` was the whole of this — no escalation and
-                    // no ceiling — so a uvicorn that ignores SIGTERM or is
-                    // wedged in an uninterruptible wait left the Stop button
-                    // looking like it had worked while the child ran on,
-                    // holding the port against the next Start. Exactly the
-                    // shape round-5 P48 fixed in `HermesProxyService.stop()`,
-                    // and this is that sibling: SIGTERM first (free and
-                    // immediate), then the ceiling as the grace AFTER it —
-                    // `waitUntilExit(timeout:)` is bounded poll → pid-guarded
-                    // SIGKILL → bounded poll, and returns either way.
-                    //
-                    // A THREAD, not this `Task.detached`: the primitive is a
-                    // `Thread.sleep` poll loop, and the cooperative pool is
-                    // one thread per core and cannot grow.
-                    owned.terminate()
-                    Thread.detachNewThread {
-                        _ = owned.waitUntilExit(timeout: ceiling)
-                    }
-                } else if let pid = await Self.dashboardListenerPID(port: port) {
-                    // External instance — signal only the process actually
-                    // bound to our dashboard port, not anything that happens
-                    // to mention "hermes dashboard" in its argv.
-                    _ = Darwin.kill(pid, SIGTERM)
-                }
-            }.value
+            // Owned children were already signalled and escalated above, off
+            // the pool; only the EXTERNAL case has work left here.
+            if !terminateOwned, let pid = await Self.dashboardListenerPID(port: port) {
+                // Signal only the process actually bound to our dashboard
+                // port, not anything that happens to mention
+                // "hermes dashboard" in its argv.
+                _ = Darwin.kill(pid, SIGTERM)
+            }
             // Same settle delay as before, now a suspension rather than a
             // main-queue timer.
             try? await Task.sleep(nanoseconds: 1_200_000_000)
