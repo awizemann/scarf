@@ -36,6 +36,28 @@ nonisolated enum Analytics {
     /// re-buckets every existing install into a new anonymous identity.
     private static let installIdSalt = "scarf-macos-2026"
 
+    /// The consent Scarf grants the stats client: `.all` =
+    /// `[.usage, .diagnostics, .identity]`.
+    ///
+    /// Decision 2026-09-14 (matching Birdwatch's 2026-08-18 call and
+    /// ShabuBox's `.all` at startup): grant `.identity` so the SDK keeps ONE
+    /// random UUID in its own defaults suite (`com.wizemann.stats.com.scarf.app`)
+    /// and sends `SHA256(uuid + installIdSalt)` as the install id — a hashed
+    /// random UUID per install so active-install and retention counts are
+    /// real. Without it the SDK minted a fresh install id per session: every
+    /// install showed one session, cohorts grew by a row per launch, and the
+    /// Retention page could not be drawn. This is one install, not a person:
+    /// no cross-device or cross-app identity, and `userId` is only ever sent
+    /// by `identify()`, which Scarf never calls. Nothing else in the payload
+    /// changes.
+    ///
+    /// Applied twice on purpose: here at construction, and again by
+    /// `StatsUsageTracker` via `setConsent` before anything else reaches the
+    /// client, because the SDK persists consent in its suite and that stored
+    /// value outranks `StatsConfiguration.consent` — an install that first
+    /// ran under the older grant would otherwise keep it forever.
+    static let consent: StatsConsent = .all
+
     /// Info.plist key carrying the swift-stats write key.
     static let writeKeyInfoPlistKey = "SwiftStatsWriteKey"
 
@@ -121,25 +143,13 @@ nonisolated enum Analytics {
             projectId: "scarf",
             installIdSalt: installIdSalt,
             sink: sink,
-            // Explicit, not inherited: this is the same value as
-            // `StatsConsent.default`, spelled out so the posture is a
-            // decision rather than a package default that could shift
-            // under us. There is no per-event consent routing in the
-            // package — the groups gate *layers*, not individual events:
-            //
-            // - `.usage` gates event emission itself. EVERY event Scarf
-            //   records rides this one group, including the taxonomy's
-            //   "Diagnostics" events (`perf_measure`,
-            //   `bootstrap_task_failed`) — denying it emits nothing at all.
-            // - `.diagnostics` gates only the per-batch context block (OS,
-            //   device model, app version, locale, screen, color scheme).
-            //   Denying it sends the documented unknown values there; it
-            //   does not suppress any event.
-            // - `.identity` is deliberately NOT granted: it would buy a
-            //   stable cross-launch install id and a `userId` field, and
-            //   Scarf never calls `identify()`. Without it the install id
-            //   is ephemeral per session and no `userId` is ever sent.
-            consent: [.usage, .diagnostics],
+            // See `Analytics.consent` for the decision. The groups gate
+            // *layers*, not individual events: `.usage` gates emission
+            // itself (every event Scarf records rides it), `.diagnostics`
+            // gates the per-batch context block (OS, device model, app
+            // version, locale, screen, color scheme), `.identity` keeps the
+            // install id stable across launches.
+            consent: consent,
             autoEvents: [.appOpen, .appBackground, .sessions],
             storageDirectory: storageDirectory,
             isPreRelease: isPreRelease,

@@ -94,8 +94,27 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     /// lazily from the launch path is safe.
     let client: StatsClient?
 
-    init(client: StatsClient? = StatsUsageTracker.makeSharedClient()) {
+    /// The launch-time consent grant. Every call into `client` below awaits
+    /// it first, so the grant is ORDERED before the first lifecycle signal
+    /// (which opens the session and mints the install id) and the first
+    /// `setEnabled`. `record` is the SDK's synchronous buffered entry point;
+    /// its buffer is only drained by those gated calls, so the first event
+    /// of the process is stamped under the granted consent too. `setConsent`
+    /// only ever wipes state when a group is REVOKED, so granting the same
+    /// set every launch is a no-op on the identity. Nil when built without a
+    /// grant (tests that drive consent by hand).
+    private let bootstrap: Task<Void, Never>?
+
+    init(
+        client: StatsClient? = StatsUsageTracker.makeSharedClient(),
+        consent: StatsConsent? = Analytics.consent
+    ) {
         self.client = client
+        if let client, let consent {
+            bootstrap = Task { await client.setConsent(consent) }
+        } else {
+            bootstrap = nil
+        }
     }
 
     /// Builds the shipping client, or `nil` on any degrade path.
@@ -144,7 +163,11 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     /// Fire-and-forget passthrough for `NSApplication.didBecomeActive`.
     func applicationDidBecomeActive() {
         guard let client else { return }
-        Task { await client.applicationDidBecomeActive() }
+        let bootstrap = bootstrap
+        Task {
+            await bootstrap?.value
+            await client.applicationDidBecomeActive()
+        }
     }
 
     /// Fire-and-forget passthrough for `NSApplication.didResignActive`.
@@ -156,17 +179,25 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     /// session if the user comes back inside the 30-minute macOS gap.
     func applicationDidEnterBackground() {
         guard let client else { return }
-        Task { await client.applicationDidEnterBackground() }
+        let bootstrap = bootstrap
+        Task {
+            await bootstrap?.value
+            await client.applicationDidEnterBackground()
+        }
     }
 
     /// Master switch. `false` stops collection and clears the queue.
     func setEnabled(_ newValue: Bool) async {
+        await bootstrap?.value
         await client?.setEnabled(newValue)
     }
 
     /// `false` when analytics is switched off *or* unavailable.
     var isEnabled: Bool {
-        get async { await client?.isEnabled ?? false }
+        get async {
+            await bootstrap?.value
+            return await client?.isEnabled ?? false
+        }
     }
 }
 

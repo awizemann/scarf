@@ -410,7 +410,7 @@ struct AdvancedTab: View {
             Text("")
                 .font(.caption)
                 .frame(width: 160, alignment: .trailing)
-            Text("Anonymous usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf.")
+            Text("Anonymous usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so active installs can be counted without identifying you.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

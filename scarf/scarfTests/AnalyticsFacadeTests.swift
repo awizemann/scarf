@@ -42,6 +42,11 @@ struct AnalyticsFacadeTests {
         #expect(configuration.appId == "com.scarf.app")
         #expect(configuration.projectId == "scarf")
         #expect(configuration.installIdSalt == "scarf-macos-2026")
+        // Decision 2026-09-14: `.identity` is granted so the install id
+        // persists across launches (see `Analytics.consent`).
+        #expect(configuration.consent == .all)
+        #expect(configuration.consent.contains(.identity))
+        #expect(Analytics.consent == [.usage, .diagnostics, .identity])
         #expect(configuration.autoEvents == [.appOpen, .appBackground, .sessions])
         #expect(configuration.isPreRelease == true)
     }
