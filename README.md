@@ -67,6 +67,16 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted without identifying you. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
+## What's New in 3.2.0
+
+- **Hermes v0.21.2** — every v0.21.1 surface a Mac client can use (paused cron create, failure delivery, dispatch diagnostics, Kanban Review exits and completion contracts, MCP device-code OAuth, credential-pool reorder, fast-mode tiers, Perplexity/Keenable web backends), all capability-gated; v0.21.2 verified at the tag and on a live host, with Backup Now passing `--keep 0` so Hermes's new prune never deletes a backup you kept.
+- **Settings that tell the truth** — the YAML reader was oracled against PyYAML across hundreds of thousands of documents and every disagreement on the keys Scarf reads is fixed; wrong defaults corrected; writers no longer emit YAML Hermes rejects or corrupt a config with a block scalar.
+- **Buttons that report what Hermes did** — every shelled verb is judged on its output with three honest states; Restore from backup works again.
+- **Gated to the version that shipped it** — twelve capability floors corrected in both directions; `/goal` and `/subgoal` no longer pretend to be commands.
+- **The app stops blocking itself** — backup, restore, logs, streaming spawns and shell probes off the cooperative pool and the main actor, with a sweep that keeps them off.
+- **A real UI release gate** — Smoke, Full and Live XCUITest plans, green on Hermes v0.21.1 and v0.21.2.
+- Full notes: [releases/v3.2.0/RELEASE_NOTES.md](releases/v3.2.0/RELEASE_NOTES.md).
+
 ## What's New in 3.1.0
 
 - **A sidebar built around your projects** — projects live at the top of the sidebar in their own panel with folders, filtering, the full context menu, and a New Project button; the other sections collapse and expand, and Scarf remembers your arrangement.
