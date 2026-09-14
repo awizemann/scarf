@@ -65,7 +65,7 @@ import Foundation
     /// raises
     /// `yaml.parser.ParserError: while parsing a block collection … expected <block end>, but found '<scalar>'`.
     @Test("setListChecked replaces a `|` block scalar body along with its header")
-    func listOverLiteralBlockScalar() {
+    func listOverLiteralBlockScalar() throws {
         let out = GatewayConfigWriter.setListChecked(
             in: Self.reviewerInput,
             platform: "slack",
@@ -73,8 +73,7 @@ import Foundation
             items: ["c1", "c2"]
         ).appliedText(orUnchanged: Self.reviewerInput)
 
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(text == """
         slack:
           allowed_channels:
@@ -99,7 +98,7 @@ import Foundation
         "every block-scalar header spelling is replaced with its body",
         arguments: ["|", ">", "|-", "|+", ">-", ">+", "|2", "| # keep"]
     )
-    func everyBlockScalarHeaderSpelling(header: String) {
+    func everyBlockScalarHeaderSpelling(header: String) throws {
         let input = """
         slack:
           allowed_channels: \(header)
@@ -114,8 +113,7 @@ import Foundation
             key: "allowed_channels",
             items: ["c1"]
         ).appliedText(orUnchanged: input)
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(!text.contains("old one"), "header \(header) orphaned its body:\n\(text)")
         #expect(!text.contains("old two"), "header \(header) orphaned its body:\n\(text)")
         expectPyYAML(
@@ -130,7 +128,7 @@ import Foundation
     /// line behind the replacement. Blank interior lines belong to the body
     /// too, so the walk must not stop at them.
     @Test("a `#`-looking or blank body line inside the scalar is not preserved")
-    func hashLookingBodyLineIsNotAComment() {
+    func hashLookingBodyLineIsNotAComment() throws {
         let input = """
         slack:
           allowed_channels: |
@@ -146,8 +144,7 @@ import Foundation
             key: "allowed_channels",
             items: ["c1"]
         ).appliedText(orUnchanged: input)
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(!text.contains("not a comment"))
         #expect(!text.contains("still body"))
         expectPyYAML(
@@ -160,15 +157,14 @@ import Foundation
     /// Emptying the list DELETES a block-scalar key outright — the header and
     /// the body, not the header alone.
     @Test("clearing the list removes the block scalar's body too")
-    func clearingRemovesTheBody() {
+    func clearingRemovesTheBody() throws {
         let out = GatewayConfigWriter.setListChecked(
             in: Self.reviewerInput,
             platform: "slack",
             key: "allowed_channels",
             items: []
         ).appliedText(orUnchanged: Self.reviewerInput)
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(!text.contains("allowed_channels"))
         #expect(!text.contains("old"))
         expectPyYAML(text, loadsAs: #"{"slack": {"reply_to_mode": "first"}}"#, "cleared")
@@ -177,7 +173,7 @@ import Foundation
     // MARK: - setMapChecked over a block scalar
 
     @Test("setMapChecked replaces a block scalar body along with its header")
-    func mapOverBlockScalar() {
+    func mapOverBlockScalar() throws {
         let input = """
         agent:
           reasoning_overrides: |
@@ -191,8 +187,7 @@ import Foundation
             key: "reasoning_overrides",
             pairs: [(key: "claude-*", value: "high")]
         ).appliedText(orUnchanged: input)
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(!text.contains("old body"))
         expectPyYAML(
             text,
@@ -230,7 +225,7 @@ import Foundation
     }
 
     @Test("a plain block header still preserves its interior comments")
-    func blockHeaderCommentsPreserved() {
+    func blockHeaderCommentsPreserved() throws {
         let input = """
         slack:
           allowed_channels:
@@ -245,8 +240,7 @@ import Foundation
             key: "allowed_channels",
             items: ["c1"]
         ).appliedText(orUnchanged: input)
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(text.contains("# keep me"))
     }
 
@@ -255,7 +249,7 @@ import Foundation
     /// `PowerSettingsWriter` delegates to `GatewayConfigWriter`, so it CARRIED
     /// the same defect and is fixed by the same change.
     @Test("PowerSettingsWriter.setExcludedProviders survives a block scalar")
-    func powerSettingsWriterBlockScalar() {
+    func powerSettingsWriterBlockScalar() throws {
         let input = """
         model_catalog:
           excluded_providers: |
@@ -268,8 +262,7 @@ import Foundation
             providers: ["xai"],
             capabilities: Self.v021
         )
-        let text = try? #require(out)
-        guard let text else { return }
+        let text = try #require(out)
         #expect(!text.contains("old"))
         expectPyYAML(
             text,
