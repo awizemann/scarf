@@ -579,7 +579,7 @@ final class MessagingGatewayViewModel {
             // requested") in red.
             let outcome = HermesPairingVerdict.approve(output: result.output, exitCode: result.exitCode)
             if !outcome.succeeded {
-                self.pairingError = outcome.detail ?? String(localized: "Approve failed")
+                self.pairingError = Self.pairingFailureSummary(outcome: outcome, approving: true)
             }
             self.load(force: true)
         }
@@ -610,10 +610,38 @@ final class MessagingGatewayViewModel {
             } else {
                 // Same rule as `approvePairing`: the banner owns pairing
                 // feedback, the service row keeps its own message.
-                self.pairingError = outcome.detail ?? String(localized: "Revoke failed")
+                self.pairingError = Self.pairingFailureSummary(outcome: outcome, approving: false)
             }
             self.load(force: true)
         }
+    }
+
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the pairing change's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    ///
+    /// Pairing is the sharpest case of the three-branch rule, because both
+    /// verbs run with `fallbackDetail: false` (each refusal is followed by a
+    /// next-step hint, so the last significant line is chatter). `detail` is
+    /// therefore nil on the unconfirmed arm BY DESIGN, and the two-way `if`
+    /// rendered the bare "Approve failed" / "Revoke failed" — asserting a
+    /// refusal on a run that printed nothing either way.
+    nonisolated static func pairingFailureSummary(
+        outcome: HermesCLIOutcome,
+        approving: Bool
+    ) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = approving ? "hermes pairing approve" : "hermes pairing revoke"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        if let detail = outcome.detail, !detail.isEmpty { return detail }
+        return approving
+            ? String(localized: "Approve failed")
+            : String(localized: "Revoke failed")
     }
 
     /// True while a service action or pairing mutation is running. The view

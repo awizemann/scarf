@@ -82,6 +82,26 @@ public final class ProjectSkillsViewModel {
         }
     }
 
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the trust change's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    nonisolated static func trustFailureSummary(
+        trusted: Bool,
+        outcome: HermesCLIOutcome
+    ) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = trusted ? "hermes skills trust" : "hermes skills untrust"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        let base = trusted ? "Trust failed" : "Untrust failed"
+        if let detail = outcome.detail, !detail.isEmpty { return "\(base): \(detail)" }
+        return base
+    }
+
     private func finishTrust(trusted: Bool, outcome: HermesCLIOutcome) async {
         isBusy = false
         if outcome.succeeded {
@@ -89,8 +109,7 @@ public final class ProjectSkillsViewModel {
                 ? "Trusted — this repo's skills will load in sessions started here."
                 : "Untrusted — this repo's skills will no longer load."
         } else {
-            let base = trusted ? "Trust failed" : "Untrust failed"
-            message = outcome.detail.map { "\(base): \($0)" } ?? base
+            message = Self.trustFailureSummary(trusted: trusted, outcome: outcome)
         }
         await load()
         try? await Task.sleep(nanoseconds: 4_000_000_000)
