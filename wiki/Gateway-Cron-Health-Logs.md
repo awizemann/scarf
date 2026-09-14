@@ -3,7 +3,7 @@ title: Gateway-Cron-Health-Logs
 type: note
 permalink: scarf-wiki/gateway-cron-health-logs
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-13
 ---
 
 # Gateway / Cron / Health / Logs / Settings
@@ -111,6 +111,8 @@ Restructured in 1.6 into a 10-tab layout exposing ~60 previously hidden config f
 | **Advanced** | Logging level / rotation, checkpoints, human-delay simulation, compression thresholds. |
 
 **Backup & Restore** lives at the bottom — wraps `hermes backup` (zips the current profile) and `hermes import` (unzips into the active profile). One-click via `context.runHermes`.
+
+> **Fixed 2026-09-13 (round-6 decision 1, commits `018194b7` + `acefd89a`).** Restore **never once worked** into a live Hermes home before this. `run_import` gates on `not args.force and not _confirm_import_overwrite(...)` (`hermes_cli/backup.py:942` @ `v2026.9.7`), and that confirm calls a bare `input()` (`:836`) on the closed stdin a GUI child inherits — `EOFError` → `Aborted.` → exit 1. Scarf now passes `--force`; its own restore sheet **is** the consent, and it deliberately does not pipe `y` (that would be Scarf consenting on the user's behalf). Both verbs are judged on their output rather than their exit code, in three states — success, failure, and a neutral "Hermes printed no result I can read" (`Backup incomplete:` / `Warnings (N skipped):` / `No files to back up.` all used to render as "Backup saved").
 
 ScarfGo's Settings tab is **read view + Quick Edits** — see [ScarfGo](ScarfGo) and [Platform Differences](Platform-Differences). The 7 quick-edit keys (`model.default` / `provider`, `agent.approval_mode` / `max_turns`, `display.streaming` / `show_cost` / `show_reasoning`) shell out to `hermes config set`. Other keys remain read-only on iOS.
 

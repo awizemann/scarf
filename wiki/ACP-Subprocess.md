@@ -2,7 +2,7 @@
 title: ACP-Subprocess
 type: note
 permalink: scarf-wiki/acp-subprocess
-updated: 2026-07-14
+updated: 2026-09-13
 created: 2026-05-29
 ---
 
@@ -101,7 +101,7 @@ The client emits `ACPEvent.permissionRequest`. The UI (Rich Chat) shows a sheet;
 
 ## Internals
 
-- **Read loop** runs detached: `availableData` → buffer → split on `\n` → JSON-decode each line → `handleMessage`.
+- **Read loop** is `ScarfCore/Transport/PipeReader.swift` (round-6 P58, commit `d0d4031c`): a `DispatchSourceRead` → buffer → split on `\n` → JSON-decode each line → `handleMessage`. It parks **no** thread. _Until 2026-09-13 this was a detached `Task` blocking in `availableData` — ACP's own private `PipeLineReader`, now hoisted and generalised over framing (`.rawChunks` / `.lines`) and shared with the four streaming transports._ ACP keeps its exact semantics through the `acpLines` factory: a trailing partial line with no newline is **dropped** (`deliverPartialAtEOF: false` — half a JSON-RPC frame is not a frame) and blank lines are skipped (`skipEmpty` — the log transports set it the other way, since a blank line is a line of the user's log; P58b `081f4437`). The reader OWNS the read end: the fd is closed in the `DispatchSourceRead` cancel handler and nowhere else, before the `.finished` event.
 - **Stderr loop** captures the subprocess's stderr into a 50-line ring buffer for attaching to user-visible errors.
 - **Pending requests dict** maps JSON-RPC `id` → `CheckedContinuation<AnyCodable?, Error>`. Responses resume the matching continuation; the read loop dispatches them by `id`.
 - **30-second control-message timeout** fires for `initialize`/`session/new`/etc. There is no timeout on `session/prompt` — that one streams for as long as the model takes.

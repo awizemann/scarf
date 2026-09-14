@@ -3,14 +3,16 @@ title: Slash-Commands
 type: note
 permalink: scarf-wiki/slash-commands
 created: 2026-05-29
-updated: 2026-06-02
+updated: 2026-09-13
 ---
 
 # Slash Commands (project-scoped + global)
 
 Scarf surfaces three layers of slash commands in the chat menu:
 
-1. **ACP-advertised** — whatever Hermes pushes via `available_commands_update` after `session/new` (`/clear`, `/compact`, `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`, plus capability-gated `/goal`, `/queue`, `/subgoal`, `/yolo`, `/sessions`, `/codex-runtime`).
+1. **ACP-advertised** — whatever Hermes pushes via `available_commands_update` after `session/new` (`/clear`, `/compact`, `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`, plus capability-gated `/queue`, `/yolo`, `/sessions`, `/codex-runtime`).
+
+   > **Updated 2026-09-13 (round-6 decision 3, commit `a275f59a`):** `/goal` and `/subgoal` are **no longer offered**. Both ARE real Hermes commands in the TUI and gateway (`hermes_cli/commands.py:103` @ `v2026.5.7` and v2026.5.16 respectively), but neither has ever been on the ACP adapter's `_COMMANDS` table at ANY tag (`acp_adapter/commands.py:44-66` @ `v2026.9.7`), and unknown ACP commands fall through to the model as ordinary prompt text (`:94-95`). Scarf chats over ACP, so the pills were optimistic mirrors that did nothing on every host. Typing `/goal …` now shows the "sent as an ordinary prompt" notice instead.
 2. **Project-scoped** — `.md` files you author at `<project>/.scarf/slash-commands/`. Available only in chats scoped to that project. Win over global commands of the same name.
 3. **Global `/scarf-*` commands** (v2.10.1+) — bundled Scarf-specific commands installed to `~/.hermes/scarf/slash-commands/` on launch. Available in **every** chat (pre-session, global, project-scoped). Documented below under "Bundled global commands".
 
