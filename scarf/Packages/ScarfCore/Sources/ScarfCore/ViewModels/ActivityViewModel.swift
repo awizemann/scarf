@@ -133,7 +133,24 @@ public final class ActivityViewModel {
         // results without re-opening — cleanup() closes on disappear.
         let opened = await dataService.refresh()
         guard opened else {
-            loadError = "Couldn't reach \(context.displayName) — check the SSH connection and pull-to-refresh to retry."
+            // Mirror `DashboardViewModel.loadImpl`'s rule: on a LOCAL
+            // context a state.db that does not exist yet is a fresh
+            // install, and an empty feed is the honest render — the
+            // sweep's isolated home has no state.db and this banner was
+            // the section-sweep red filed as t-a9ef75f0. Only a database
+            // that exists and cannot be read, or any remote failure,
+            // earns the warning — and the copy names SSH only when there
+            // is an SSH connection to check.
+            if !context.isRemote, !FileManager.default.fileExists(atPath: context.paths.stateDB) {
+                isLoading = false
+                return
+            }
+            if context.isRemote {
+                loadError = "Couldn't reach \(context.displayName) — check the SSH connection and pull-to-refresh to retry."
+            } else {
+                let detail = (await dataService.lastOpenError).map { " (\($0))" } ?? ""
+                loadError = "Can't read Hermes state on \(context.displayName)\(detail). Pull to refresh to retry."
+            }
             isLoading = false
             return
         }
