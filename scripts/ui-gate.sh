@@ -133,6 +133,14 @@ HERMES_VERSION="$("$HERMES_BIN" --version 2>/dev/null | head -n1 || echo unknown
 declare -a RESULT_LINES=()
 OVERALL_STATUS=0
 
+# Serial on purpose. The Full plan carries scarfTests as well as scarfUITests,
+# and the unit half is only green SERIALLY: several suites share process-wide
+# state (ChatViewModelStartLifecycleTests, MainActorBlockingWritesP11Tests and
+# friends) and fail under Xcode's default parallel execution — on main too, not
+# just on a branch (round-7 audit, 2026-09-13: 124 issues / 12 suites parallel,
+# 0 serial). The 3.2.0 cut hit exactly that: 16/16 UI tests passed and the gate
+# still said FAIL. `-parallel-testing-enabled NO` is the signal every report
+# quotes; the UI plans are serial by nature so they lose nothing.
 run_plan() {
   local plan="$1"
   local bundle="$RUN_TMP/${plan}.xcresult"
@@ -150,6 +158,7 @@ run_plan() {
     -derivedDataPath "$DERIVED_DATA" \
     -resultBundlePath "$bundle" \
     -skipPackagePluginValidation -skipMacroValidation \
+    -parallel-testing-enabled NO \
     2>&1 | tee "$log_file" | grep --line-buffered -E "Test Suite|Test Case|error:|BUILD FAILED|BUILD SUCCEEDED|\*\* TEST (SUCCEEDED|FAILED) \*\*"
   status=${PIPESTATUS[0]}
   set -e
