@@ -5,11 +5,11 @@ permalink: scarf/architecture/hermes-pairing-approve-revoke-refuse-at-exit-0-jud
 tags: [hermes, cli, gateway, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Features/Gateway/Views/GatewayView.swift]
 source_paths_inferred: false
-source_sha: 5be08f2e2f9dac58c870c04dfb57276608c00dba
+source_sha: 1376fd58393f25e47f7db1b04ef69800761a33ff
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-10
-reviewed_by: claude-opus-5
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 `hermes pairing approve` and `pairing revoke` are `-> None` handlers reached through a `-> None` `pairing_command`, so Python turns every refusal into exit status 0. Scarf judges both by the emitter's own success line via `HermesPairingVerdict` (`ScarfCore/Services/HermesCLIOutcome.swift`), keeps the row on a refusal, and quotes Hermes's line verbatim into a dismissable sticky banner in `GatewayView`'s pairing section — the lockout arm needs TWO lines, because the countdown is printed separately from the refusal and is the only remediation the operator gets.

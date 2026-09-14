@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-mcp-config-is-a-yaml-mcp-servers-block-scar
 tags: [hermes, mcp, config, phase-5, registration]
 source_paths: [scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/scarfApp.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-09-03
 updated: 2026-09-10
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 
@@ -23,7 +23,7 @@ Format facts VERIFIED against Hermes v0.21.0 on this machine (charter C5), not f
 
 ## Relations
 - relates_to [[scarf-projects MCP server: bundled helper, ScarfCore services, no parallel writers]]
-- relates_to [[Hermes Version Compatibility Target]]
+- relates_to [[hermes-version-compatibility-target]]
 
 
 ## R2: the patcher fails closed, backs up, and verifies independently

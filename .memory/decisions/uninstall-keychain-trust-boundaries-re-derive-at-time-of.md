@@ -22,7 +22,7 @@ reviewed_by: audit:claude-code (background)
 ## Relations
 - relates_to [[Path containment for untrusted dirs must resolve symlinks, not just normalize lexically]]
 - relates_to [[Template Configuration Schema (v2)]]
-- relates_to [[Project Templates (.scarftemplate)]]
+- relates_to [[project-templates-scarftemplate]]
 
 
 ## S2 follow-up (t-a2c169f0): the `.env` block slug was still believed

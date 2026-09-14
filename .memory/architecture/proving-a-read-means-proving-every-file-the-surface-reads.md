@@ -5,10 +5,10 @@ permalink: scarf/architecture/proving-a-read-means-proving-every-file-the-surfac
 tags: [platforms, config, guarded-write, resilience, dataloss]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-10
+reviewed: 2026-09-12
 reviewed_by: claude-opus-5
 ---
 

@@ -25,6 +25,6 @@ reviewed_by: audit:claude-code (background)
 - [known-caveat] If any PARENT directory of the project contains .hermes.md or HERMES.md, those SHADOW the project's AGENTS.md (higher in priority order). No fix in v2.3 — deferred pending input on handling authored .hermes.md files #caveats
 
 ## Relations
-- relates_to [[Project Templates (.scarftemplate)]]
-- relates_to [[Kanban Board Architecture (v2.7.5)]]
+- relates_to [[project-templates-scarftemplate]]
+- relates_to [[kanban-board-architecture-v2-7-5]]
 - relates_to [[Model Presets Feature]]

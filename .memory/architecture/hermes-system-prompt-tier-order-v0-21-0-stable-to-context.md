@@ -5,6 +5,8 @@ permalink: scarf/architecture/hermes-system-prompt-tier-order-v0-21-0-stable-to-
 tags: [hermes, context-assembly, agents-md, memory, verified]
 created: 2026-09-01
 updated: 2026-09-01
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Verified against the v0.21.0 audit tree at ~/.hermes/hermes-agent-v0.21.0-audit while designing the "project charter as a Scarf feature" brief (t-94ea4f69, documents/charter-for-users-design-brief.md). Paths below are relative to that tree. This is the ordering any Scarf feature that needs text to outrank accumulated memory must reason from.

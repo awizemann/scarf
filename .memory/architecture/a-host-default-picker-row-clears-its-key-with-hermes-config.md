@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-host-default-picker-row-clears-its-key-with-herm
 tags: [hermes, capability-gating, settings, cli-verdict]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/IOSSettingsViewModel.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/Scarf iOS/Settings/SettingEditorSheet.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: df6993cd705c900a653c8d90b7059b5e6c20256f
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-10
-reviewed_by: claude-opus-5
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 The absence-sentinel row ("Host default (smart)") that P20 introduced for `approvals.mode` is a READ affordance with a WRITE of its own, and the write is `unset`, not `set ''`. P35 wired it on both platforms; the surrounding contract is what future sentinel rows must copy.
@@ -24,7 +24,7 @@ The absence-sentinel row ("Host default (smart)") that P20 introduced for `appro
 - [gotcha] `hermes config unset` must be judged by OUTPUT, never exit code: the managed-install arm prints `Cannot unset configuration values: …` and RETURNS (`hermes_cli/config.py:3550-3552`), which Python turns into exit 0 #verification
 - [invariant] Success is the emitter's own anchored `✓ Unset <key> from <path>`; the other two refusals (`_exit_if_key_managed`, `Config key not set:`) `sys.exit(1)` #verification
 - [constraint] `config set <key> ''` is NOT an unset for a str-typed key — the empty string lands on disk and `_normalize_approval_mode('')` resolves it to `manual` #settings
-- [convention] The verdict is a per-verb opt-in (`SettingsViewModel.enqueueConfigWrite(verdict:)`): `config set` keeps the exit-code rule because every one of its refusals exits non-zero #settings
+- [convention] The verdict is a per-verb opt-in (`SettingsViewModel.enqueueConfigWrite(verdict:)`): both `config set` and `config unset` are judged by OUTPUT with `failureWins: true`, because both have a managed-install arm that exits 0 after printing a refusal #settings
 
 ## Relations
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]

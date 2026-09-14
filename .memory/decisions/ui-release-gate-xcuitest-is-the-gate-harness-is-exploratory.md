@@ -5,11 +5,11 @@ permalink: scarf/decisions/ui-release-gate-xcuitest-is-the-gate-harness-is-explo
 tags: [testing, release, harness, xcuitest]
 source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarfUITests/TemplateInstallUITests.swift, scarf/scarf/Navigation/AppCoordinator.swift, scripts/release.sh]
 source_paths_inferred: false
-source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
+source_sha: 96089feb0abaf78cf728e1ead67c4aa47f21cd11
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 Decided 2026-09-08 with Alan. Full plan: documents/testing/ui-release-gate-plan-2026-09-08.md. Harness "replay" is a viewer of a finished run's events.jsonl, not a re-executor, and its autonomous runs are LLM-driven and non-deterministic, so it cannot be a pass/fail gate.

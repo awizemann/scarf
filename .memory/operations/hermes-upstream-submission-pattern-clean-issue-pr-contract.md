@@ -4,6 +4,8 @@ type: note
 permalink: scarf/operations/hermes-upstream-submission-pattern-clean-issue-pr-contract
 created: 2026-07-13
 updated: 2026-07-14
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 How to submit to NousResearch/hermes-agent without getting lost/closed (assembled 2026-07-13 from their CONTRIBUTING.md + AGENTS.md at main; a prior submission was lost for not following the provider/auth pattern — this note is the antidote).
@@ -17,7 +19,7 @@ How to submit to NousResearch/hermes-agent without getting lost/closed (assemble
 
 ## Relations
 - relates_to [[Local provider config keys — Hermes reader-verified (v0.17.0)]]
-- relates_to [[Hermes Version Compatibility Target]]
+- relates_to [[hermes-version-compatibility-target]]
 
 
 ## THE authentication pattern (solved 2026-07-14 — this is what lost the earlier submission)

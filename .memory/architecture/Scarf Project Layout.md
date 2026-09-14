@@ -2,14 +2,14 @@
 title: Scarf Project Layout
 type: note
 permalink: scarf/architecture/scarf-project-layout
-tags:
-- layout
-- paths
-source_sha: 1ebbf6c45e34bf8a4304b3b465026ff7216b112f
-reviewed: 2026-05-29
+tags: [layout, paths]
+source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Package.swift, scarf/Packages/ScarfIOS/Package.swift]
+source_paths_inferred: false
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-05-29
 updated: 2026-05-29
-reviewed_by: human
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

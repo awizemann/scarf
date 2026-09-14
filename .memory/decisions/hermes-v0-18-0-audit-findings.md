@@ -1,22 +1,23 @@
 ---
 title: Hermes v0.18.0 Audit Findings
 type: note
-permalink: scarf/integration/hermes-v0-18-0-audit-findings
+permalink: scarf/decisions/hermes-v0-18-0-audit-findings
 tags: [hermes, v018, audit, verification, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-04
 updated: 2026-09-10
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 
 ## Observations
-- [verdict] Light-to-moderate cycle. All upgrade-forced and pre-existing findings implemented in commit 9338c595 (2026-07-04). state.db schema DID change (first since v0.16): `messages.compacted INTEGER NOT NULL DEFAULT 0` (hermes_state.py:764, SCHEMA_VERSION 16→17). ACP wire is a clean NO-OP — `_ADVERTISED_COMMANDS` and all session_update/permission/mode shapes byte-identical (acp_adapter/server.py:465); nothing new reaches the ACP client unhandled. #verdict #implemented
+- [verdict] Light-to-moderate cycle through v0.18.1. All v0.18.0 upgrade-forced and pre-existing findings implemented in commit 9338c595 (2026-07-04). v0.18.1 cron compatibility work added post-audit. state.db schema DID change (first since v0.16): `messages.compacted INTEGER NOT NULL DEFAULT 0` (hermes_state.py:764, SCHEMA_VERSION 16→17). ACP wire is a clean NO-OP — `_ADVERTISED_COMMANDS` and all session_update/permission/mode shapes byte-identical (acp_adapter/server.py:465); nothing new reaches the ACP client unhandled. #verdict #implemented
 - [schema] In-place compaction (`archive_and_compact()`, hermes_state.py:3346) marks summarized-away rows active=0+compacted=1; rewind/undo rows stay active=0+compacted=0. Hermes `search_messages` now filters `(m.active = 1 OR m.compacted = 1)` (hermes_state.py:4224). FIXED: Scarf now schema-detects `hasCompactedColumn` and widens the clause when present (HermesDataService.swift:882-884). #upgrade-forced #done
 - [providers] v0.18 removes `google-gemini-cli` (OAuth) entirely, replacing it with `vertex` (Google Vertex AI, OAuth2 SA/ADC; hermes_cli/models.py:1035) + 4 aliases google-vertex/vertex-ai/gcp-vertex/vertexai (models.py:1197-1200); drops aliases gemini-cli/gemini-oauth. Adds overlay-only provider `moa` (Mixture of Agents, transport openai_chat, auth virtual, base moa://local; providers.py:47-51). FIXED: Both `vertex` and `moa` added to ModelCatalogService.overlayOnlyProviders; google-gemini-cli aliases removed; check-hermes-tables.py passes. #upgrade-forced #done
-- [cron] NEW per-job `attach_to_session` optional bool (cron/jobs.py:867,1024 — zero matches at v2026.6.19; verified new in v0.18). FIXED: Scarf's HermesCronJob now models it (HermesCronJob.swift:43, case .attachToSession); round-trip preserved in withEnabled() (line 239). #upgrade-forced #done
+- [cron-v0.18.0] NEW per-job `attach_to_session` optional bool (cron/jobs.py:867,1024 — zero matches at v2026.6.19; verified new in v0.18). FIXED: Scarf's HermesCronJob now models it (HermesCronJob.swift:43, case .attachToSession); round-trip preserved in withEnabled() (line 239). #upgrade-forced #done
+- [cron-v0.18.1] NEW in v0.18.1 (v2026.7.7 / 0.18.1): `resume_job` refuses to resume one-shot jobs whose `run_at` is past Hermes's grace window with error "Cannot resume: one-shot time … is in the past" (cron/jobs.py:1991-1996). FIXED: Scarf adds pre-emptive predicate `isPastDeadlineOneShot()` to check deadline independently of terminal state (HermesCronJob.swift, refactored `oneShotIsUnresumable()`), and gates recovery offer on `hostRefusesPastOneShotResume` capability (recoveryOffer() signature), enabling correct pre-refusal on older hosts that accept the operation. #upgrade-forced #done
 - [preexisting-webtools] Scarf's Web Tools tab silent no-op on BOTH sides, pre-existing since at least v0.14: Scarf was writing `web_tools.backend`/`web_tools.search.backend`/`web_tools.extract.backend` and reading the same dead keys (Hermes reads `web.backend`/`web.search_backend`/`web.extract_backend`). FIXED: Both SettingsViewModel (`:610-612` as of 2026-09-10) and HermesConfig+YAML (`:946-948`) now use the correct `web.*` keys. #preexisting #bug #done
 - [preexisting-cron] `HermesCronJob.withEnabled()` omits `workdir`, `contextFrom`, `noAgent` from the copy — toggling enabled permanently dropped those fields from jobs.json. FIXED: withEnabled() now forwards all fields (lines 236-239); method moved onto HermesCronJob (line 203) so next field addition can't miss it; HermesConfig.buildJob() also updated. #preexisting #bug #done
 - [cli] All 42+ Scarf CLI invocations survive v0.18 unchanged (zero breaking argparse changes). New optional verbs worth roadmap consideration: `hermes serve` (headless backend, --port/--no-open), `hermes journey` (learning timeline), `hermes mcp reauth [name|--all]` (OAuth refresh). `hermes status --all` flag removed — Scarf never used it. #no-op
@@ -26,6 +27,6 @@ reviewed_by: claude-opus-5
 - [no-op-list] Deliberate NO-OPs (don't re-litigate): gateway /resume+/sessions IDOR series, browser private-network guard, compaction END-MARKER fixes, compression interrupt queueing, kanban creator-wake routing, codex-runtime migration plumbing, MoA desktop preset persistence, delegate toolsets-arg removal, contextvar isolation (GHSA-96vc-wcxf-jjff), _save_mcp_server bool return. All server/desktop-internal. #no-ops
 
 ## Relations
-- extends [[Hermes Version Targeting Strategy]]
+- extends [[hermes-version-targeting-strategy]]
 - relates_to [[Hermes v0.17 Compatibility Decisions]]
 - implements [[Hermes Release Audit Process]]

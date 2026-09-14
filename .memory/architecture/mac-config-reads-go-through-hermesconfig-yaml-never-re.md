@@ -5,10 +5,10 @@ permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-neve
 tags: [settings, config-parsing, drift]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-07-14
 updated: 2026-07-14
-reviewed: 2026-09-10
+reviewed: 2026-09-12
 reviewed_by: claude-opus-5
 ---
 
@@ -18,6 +18,7 @@ reviewed_by: claude-opus-5
 - [convention] New config keys are added ONLY in ScarfCore (HermesConfig model + HermesConfig+YAML parser); the Mac app must never grow its own key->field mapping #convention
 - [fact] HermesFileService.parseNestedYAML/stripYAMLQuotes are now thin delegates to HermesYAML with ParsedYAML type-aliased to ScarfCore's, keeping the 5 app features (Plugins, QuickCommands, Personalities, EmailSetup, CredentialPools) on the canonical raw-YAML parser #parsing
 - [fact] HermesFileServiceConfigParityTests (scarfTests) pins the drifted key set + save-then-reload flow; it fails if an app-side mapping ever reappears #tests
+- [fact] Shared keys reading now uses platform-aware bridge logic (P46): `gateway_restart_notification` routes through `sharedPlatformScalar` for slack/telegram to prevent unintended top-level config block creation on nested-only hosts — an active enforcement preventing the very drift this convention guards against #enforcement #shared-keys
 
 ## Drift-audit systemic finding (2026-07-14)
 - [fact] A full app-target-vs-ScarfCore duplication sweep confirmed the config parser was mostly a ONE-OFF, not a pervasive pattern: ACP wire encoding, path/home resolution (HermesPathSet/HermesProfileScope), capability gating (HermesCapabilities), ModelPreflight, and the YAML helpers (post-3e0184d) all have single owners with app-side delegation. Architecture is sound. #audit

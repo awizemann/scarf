@@ -5,11 +5,11 @@ permalink: scarf/architecture/skills-update-prints-the-already-installed-warning
 tags: [hermes, skills, cli, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesSkillsHubParser.swift]
 source_paths_inferred: false
-source_sha: 5be08f2e2f9dac58c870c04dfb57276608c00dba
+source_sha: df6993cd705c900a653c8d90b7059b5e6c20256f
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-10
-reviewed_by: claude-opus-5
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 `hermes skills update` runs `do_install(..., force=True)` per skill, and `do_install` prints its already-installed warning BEFORE it looks at `force` — so on the update path that line is printed for every skill, including the ones that update perfectly. Scarf therefore judges update refusals with `HermesCLIMarkers.skillsUpdateFailure` (the install set minus that pair), not `skillsInstallFailure`.

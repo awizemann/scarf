@@ -12,9 +12,9 @@ reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
-- [gotcha] Cron- and CLI-created Hermes sessions are NOT ACP-persisted, so ACP `session/load` returns null/empty by design (Hermes `load_session`→None→`{}` on the wire); ACPClient.loadSession throws `invalidResponse(... not restorable)` (ACPClient.swift:340). Resuming one must NOT surface that raw error. #acp #chat
-- [convention] Both resume paths must fall back the same way: on loadSession failure, open a fresh ACP session (`client.newSession(cwd:)`) and replay the transcript from state.db via `loadSessionHistory(sessionId: <original>, acpSessionId: <new>)`. Mac did this (ChatViewModel.swift:1559); iOS `_startResumingImpl` (ChatView.swift ~2447) was missing it and dead-ended on cron sessions — fixed 2026-08-19 (commit a75be27). #parity
-- [fact] The iOS reconnect ladder (`attemptReconnect`, ChatView.swift:2122) is deliberately NOT given the new-session fallback — it retries the SAME active session; adding a fallback there would mask transient failures. Only the Dashboard→tap RESUME path gets the fallback. #reconnect
+- [gotcha] Cron- and CLI-created Hermes sessions are NOT ACP-persisted, so ACP `session/load` returns null/empty by design (Hermes `load_session`→None→`{}` on the wire); ACPClient.loadSession throws `invalidResponse(... not restorable)` (ACPClient.swift:458). Resuming one must NOT surface that raw error. #acp #chat
+- [convention] The full resume fallback pattern: on loadSession failure, open a fresh ACP session (`client.newSession(cwd:)`) and replay the transcript from state.db via `loadSessionHistory(sessionId: <original>, acpSessionId: <new>)`. iOS `_startResumingImpl` (ChatView.swift:2558-2574) implements this completely. Mac has the fallback in TWO resume entry points: `startACPSession` (ChatViewModel.swift:1122, fallback only—no transcript replay) and `autoStartACPAndSend` (ChatViewModel.swift:1817-1843, full pattern with fallback + replay). The Discord between Mac paths is historical; both are valid for their call sites. iOS mirrors the `autoStartACPAndSend` pattern. #parity
+- [fact] The iOS reconnect ladder (`attemptReconnect`, ChatView.swift:2175) is deliberately NOT given the new-session fallback — it retries the SAME active session; adding a fallback there would mask transient failures. Only the Dashboard→tap RESUME path gets the fallback. #reconnect
 
 ## Relations
 - relates_to [[ScarfGo iOS Companion App]]

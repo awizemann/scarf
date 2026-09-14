@@ -1,14 +1,14 @@
 ---
 title: Hermes Version Compatibility Target
 type: note
-permalink: scarf/integration/hermes-version-compatibility-target
+permalink: scarf/project/hermes-version-compatibility-target
 tags: [hermes, compatibility, versioning]
 source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, documents/hermes-v0.21.1-audit-report.md, wiki/Hermes-Version-Compatibility.md]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-05-29
 updated: 2026-09-10
-reviewed: 2026-09-10
+reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
 
@@ -22,7 +22,7 @@ reviewed_by: claude-opus-5
 
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]
-- relates_to [[Hermes Version Targeting Strategy]]
+- relates_to [[hermes-version-targeting-strategy]]
 - documented_in [[scarf-wiki/hermes-version-compatibility]]
 
 - [runbook] **The provider-table gate, exact command:** `./scripts/check-hermes-tables.py --tag v2026.9.7` from the repo root — it must exit 0 AND the verdict must read `lanes=5/5` (at v2026.9.7 that is `OK    aliases=87 aggregators=8 overlays=25 lanes=5/5 read from tag v2026.9.7`, with 3 dormant-overlay WARNs for `arcee`/`lmstudio`/`tencent-tokenhub` and 1 non-literal-plugin WARN for `kimi-coding` — all expected). It reads Hermes at the TAG via `git show`, never the checkout's working tree, and it FAILS CLOSED: a `SKIPPED lane N` line exits 2, so a plain exit-0 check is not enough — read `lanes=5/5`. `--tag` defaults to `HERMES_TARGET_TAG` in the script, which is the one place the repo records the target tag (bump it with the capability floors); `--worktree` reads the working tree for local work; `--allow-skip` accepts a partial run and must not be used to clear the gate. The script's own tests: `python3 -m unittest discover -s scripts/tests -t .`. #maintenance

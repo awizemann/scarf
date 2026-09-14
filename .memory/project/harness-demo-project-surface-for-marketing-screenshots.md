@@ -21,4 +21,4 @@ reviewed_by: audit:claude-code (background)
 
 ## Relations
 - relates_to [[README and docs marketing structure convention]]
-- relates_to [[Project Templates (.scarftemplate)]]
+- relates_to [[project-templates-scarftemplate]]

@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-vnode-watch-dies-on-the-first-atomic-replace-unl
 tags: [watcher, fsevents, projects, phase-5, gotcha]
 source_paths: [scarf/scarf/Core/Services/HermesFileWatcher.swift, scarf/scarfTests/HermesFileWatcherAtomicReplaceTests.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/LocalTransport.swift]
 source_paths_inferred: false
-source_sha: 76e73d5b89a01a39b64f9ef50b962bf14376cfbd
+source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-09-03
 updated: 2026-09-04
-reviewed: 2026-09-08
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-12
+reviewed_by: claude-opus-5
 ---
 
 Found during the Phase-5 adversarial audit (projects-first-class, t-3d915f7f) and fixed there. `HermesFileWatcher.makeSource` armed a `DispatchSource` vnode watch with `eventMask: [.write, .extend, .rename, .delete]` — and nearly every file it watches is written by `transport.writeFile`, which uses atomic file replacement: temp file in the same directory, with mode set BEFORE `rename(2)` replaces the destination (a security fix to prevent secrets being observable with loose permissions). The watched INODE is therefore never modified, only unlinked.

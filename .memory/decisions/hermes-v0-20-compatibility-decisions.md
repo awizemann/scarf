@@ -4,11 +4,11 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: d53d3cbe85a799e9262db55d8b0c0d041b990ce4
 created: 2026-08-03
-updated: 2026-09-10
-reviewed: 2026-09-10
-reviewed_by: claude-opus-5
+updated: 2026-09-11
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
@@ -21,7 +21,11 @@ reviewed_by: claude-opus-5
 
 ## Relations
 - extends [[Hermes v0.18 Compatibility Decisions]]
-- relates_to [[Hermes v0.20.0 Audit Findings]]
+- relates_to [[hermes-version-targeting-strategy]]
+<!-- The former `[[Hermes v0.20.0 Audit Findings]]` edge was dangling: that note was never written
+     (the v0.20.0 findings were folded straight into this decisions note). Removed 2026-09-11
+     by the round-4 memory audit. -->
+
 - relates_to [[Hermes v0.20.5 Compatibility Decisions]]
 - implements [[Hermes Capability Gating Pattern]]
 

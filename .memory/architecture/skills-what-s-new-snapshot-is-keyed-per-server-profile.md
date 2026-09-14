@@ -4,7 +4,7 @@ type: note
 permalink: scarf/architecture/skills-what-s-new-snapshot-is-keyed-per-server-profile
 tags: [ios, scarfgo, profiles, skills, issue-120, snapshot]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SkillSnapshotService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileScope.swift, scarf/Scarf iOS/Skills/SkillsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift]
-source_sha: 479886cf715072b2f386431c01089bbd3e560510
+source_sha: 1e88ab3e7007da3eebe60b408146d5c27b8fe986
 created: 2026-06-25
 updated: 2026-06-25
 reviewed: 2026-09-10

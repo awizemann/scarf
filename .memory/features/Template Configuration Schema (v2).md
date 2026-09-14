@@ -23,5 +23,5 @@ reviewed_by: audit:claude-code (background)
 - [drift-rule] Schema is Swift-primary. New TemplateConfigField.FieldType case → update in order: TemplateConfig.swift (model + validation) → tools/build-catalog.py (SUPPORTED_CONFIG_FIELD_TYPES + type-specific rules) → widgets.js (summariseConstraint) → TemplateConfigSheet.swift (new control subview) → tests on both sides #maintenance
 
 ## Relations
-- extends [[Project Templates (.scarftemplate)]]
+- extends [[project-templates-scarftemplate]]
 - relates_to [[Template Catalog Pipeline]]

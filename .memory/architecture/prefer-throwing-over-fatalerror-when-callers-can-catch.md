@@ -5,10 +5,10 @@ permalink: scarf/architecture/prefer-throwing-over-fatalerror-when-callers-can-c
 tags: [error-handling, architecture, rule, audit-2026-06-13]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/SQLValueInliner.swift, scarf/scarf/Features/MCPServers/Views/MCPServerPresetPickerView.swift]
 source_paths_inferred: false
-source_sha: 479886cf715072b2f386431c01089bbd3e560510
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-06-13
 updated: 2026-06-13
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 

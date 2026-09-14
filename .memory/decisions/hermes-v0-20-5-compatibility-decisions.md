@@ -3,6 +3,7 @@ title: Hermes v0.20.5 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-20-5-compatibility-decisions
 tags: [hermes, compatibility, v0.20.5, decisions]
+status: deprecated
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Settings/Views/Tabs/VoiceTab.swift, scarf/scarf/Features/CredentialPools/Views/CredentialPoolsView.swift]
 source_paths_inferred: false
 source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
@@ -25,4 +26,4 @@ reviewed_by: claude-opus-5
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.20.5 Audit Findings]]
-- relates_to [[Hermes Version Compatibility Target]]
+- relates_to [[hermes-version-compatibility-target]]

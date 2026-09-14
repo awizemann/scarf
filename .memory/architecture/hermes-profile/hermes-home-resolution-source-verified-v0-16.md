@@ -2,14 +2,14 @@
 title: Hermes profile / HERMES_HOME resolution (source-verified v0.16)
 type: note
 permalink: scarf/architecture/hermes-profile/hermes-home-resolution-source-verified-v0-16
+tags: [hermes, profiles, HERMES_HOME, integration, verified]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift]
+source_paths_inferred: false
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-06-25
 updated: 2026-06-25
-tags:
-- hermes
-- profiles
-- HERMES_HOME
-- integration
-- verified
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Source-verified against the installed editable Hermes 0.16 at `~/.hermes/hermes-agent/` (2026-06-25). Durable reference for any Scarf profile work — especially ScarfGo per-connection profile scoping ([[ScarfGo iOS Companion App]]).

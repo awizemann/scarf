@@ -2,12 +2,9 @@
 title: Template Catalog Pipeline
 type: note
 permalink: scarf/ops/template-catalog-pipeline
-tags:
-- templates
-- catalog
-- gh-pages
+tags: [templates, catalog, gh-pages]
+source_paths: [tools/build-catalog.py, tools/test_build_catalog.py, scripts/catalog.sh, site/index.html.tmpl, site/template.html.tmpl, site/widgets.js, .github/workflows/validate-template-pr.yml]
 source_sha: 8d2293330e574b9e3b4ff42f6fcd155af248ab59
-source_paths: tools/build-catalog.py, tools/test_build_catalog.py, scripts/catalog.sh, site/index.html.tmpl, site/template.html.tmpl, site/widgets.js, .github/workflows/validate-template-pr.yml
 created: 2026-05-29
 updated: 2026-05-29
 ---
@@ -24,5 +21,5 @@ updated: 2026-05-29
 - [drift-rule] Schema is Swift-primary. When ProjectDashboardWidget.type gains a new case or ProjectTemplateManifest adds a field: update Swift first, then mirror into tools/build-catalog.py (SUPPORTED_WIDGET_TYPES, _validate_manifest, _validate_contents_claim). Python test suite's real-bundle test catches drift on the example template but NOT on the full widget vocabulary — add a synthetic fixture to test_build_catalog.py for any new widget type #maintenance
 
 ## Relations
-- extends [[Project Templates (.scarftemplate)]]
+- extends [[project-templates-scarftemplate]]
 - complements [[Build and Release Workflow]]

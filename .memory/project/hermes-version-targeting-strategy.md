@@ -1,19 +1,19 @@
 ---
 title: Hermes Version Targeting Strategy
 type: note
-permalink: scarf/integration/hermes-version-targeting-strategy
+permalink: scarf/project/hermes-version-targeting-strategy
 tags: [hermes, versioning, capability-gating]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-05-29
-updated: 2026-09-10
-reviewed: 2026-09-10
+updated: 2026-09-11
+reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
 
 ## Observations
-- [current-target] Scarf targets Hermes **v0.21.1 (v2026.9.7)** as of the `feat/hermes-v0211-parity` branch (2026-09-08; shipping Scarf version TBD at release prep) — the last SHIPPED release, v3.1.0, targets v0.21.0 (v2026.8.31) — landed through a series of capability flag additions across v0.18 (v2026.7.1), v0.19 (v2026.7.20), v0.20 (v2026.8.3), v0.20.3 (v2026.8.16.2), v0.20.4 (v2026.8.18), v0.20.5 (v2026.8.19), v0.20.6 (v2026.8.27), and v0.21 (v2026.8.31). All versions v0.6.0 through v0.21.1 are verified; older hosts degrade gracefully. NOTE: the vendored hermes-agent checkout at ~/Developer/ScarfBox/Vendor/hermes-agent may sit on an older tag — `git show <target-tag>:<path>` or a detached worktree when verifying against v0.21.0 #target
+- [current-target] Scarf targets Hermes **v0.21.1 (v2026.9.7)** as of the `feat/hermes-v0211-parity` branch (2026-09-08; shipping Scarf version TBD at release prep) — the last SHIPPED release, v3.1.0, targets v0.21.0 (v2026.8.31) — landed through a series of capability flag additions across v0.18 (v2026.7.1), v0.19 (v2026.7.20), v0.20 (v2026.8.3), v0.20.3 (v2026.8.16.2), v0.20.4 (v2026.8.18), v0.20.5 (v2026.8.19), v0.20.6 (v2026.8.27), and v0.21 (v2026.8.31). All versions v0.6.0 through v0.21.1 are verified; older hosts degrade gracefully. NOTE: the Hermes checkout used for tag walks is **`~/.hermes/hermes-agent`** — `git -C ~/.hermes/hermes-agent show <target-tag>:<path>`, and never touch its working tree. (The older pointer to `~/Developer/ScarfBox/Vendor/hermes-agent` is stale and sent the round-4 memory auditor to the wrong path; corrected 2026-09-11.) A checkout may sit on an older tag, so always `show <tag>:<path>` rather than reading the working tree #target
 - [philosophy] Every release-gated UI surface is capability-gated via HermesCapabilities flags. Pre-target hosts must render byte-identical to prior Scarf versions — never throw on unknown CLI subcommands #gating
 - [flag-grouping] Group HermesCapabilities flags at the top of the file by introducing release: `MARK: v0.14 (v2026.5.16) flags`, `MARK: v0.15 (v2026.5.28) flags`, etc. Current file has sections through v0.21.1 (v2026.9.7). CAUTION (P23): a MARK group's NAME is not evidence for its members' floors — flags filed under the "v0.20" and "v0.20.4" marks turned out to be 0.18.1–0.20.3. `git ls-tree` the file or grep the subparser at the tag before trusting the heading #convention
 - [verification] Verify exact flag/config/wire shapes against the tagged Hermes source (e.g. `v2026.8.31`) BEFORE implementation — flags like HERMES_INFERENCE_MODEL silently no-op for ACP because `_make_agent` doesn't consult them #pitfalls

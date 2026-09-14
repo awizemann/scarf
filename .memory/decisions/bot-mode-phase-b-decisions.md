@@ -5,11 +5,11 @@ permalink: scarf/decisions/bot-mode-phase-b-decisions
 tags: [bot-mode, phase-b, hermes, profiles, config, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotAgentConfigService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotAgentConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift]
 source_paths_inferred: false
-source_sha: 0e6c636e352285ddfa58b1c556209cef1075f081
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-09-01
-updated: 2026-09-01
-reviewed: 2026-09-07
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-11
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Shared log for the Bot Mode Phase B cycle (per-bot AGENT configuration: model pin, skills/toolsets/MCP enablement, SOUL.md). P0 = the ScarfCore foundation, `BotAgentConfigService` + `BotAgentConfig`. All findings source-verified at Hermes tag v2026.8.31 (0.21.0).
@@ -74,3 +74,6 @@ Closed the three should-fixes plus cheap nits from the Phase B fresh-eyes audit 
 
 - [decision] **`BotsViewModel.rename` shares `requestSelection`'s unsaved-edits floor, and re-keying isn't safe.** `agentCache`/`routinesCache` are keyed by profile name, so a rename that didn't check `unsavedAgentEdits(forProfile: from)` first would strand a dirty SOUL.md buffer under a name nothing addresses any more — the same guard already blocks a plain roster switch. On success, both caches are **invalidated for the old name, never re-keyed**: `BotAgentViewModel`/`BotRoutinesViewModel` capture their profile name in an immutable `let` used on every backend call, so moving the cached instance to the new dictionary key would leave it silently issuing reads/writes against the profile directory that no longer exists at that path. Invalidating and letting the next `agentViewModel(for:)`/`routinesViewModel(for:)` build fresh is the only safe move — and it's only safe here because the guard above already confirmed there's no unsaved buffer to lose in the drop #p4 #fixup
 - [decision] **A `@ViewBuilder` body must never write a stored property, in either capability-mirror helper.** `BotsView.agentViewModel(for:)` had the exact anti-pattern P3 already removed from `routinesViewModel(for:)` — writing `vm.capabilities` from inside the `detail` body, which SwiftUI can re-evaluate for reasons unrelated to a capability change. Fixed the same way: the fetch accessor is pure, and a new `mirrorAgentCapability(forProfile:)` does the write from `.onAppear`/`.onChange(of: hasCronResumeRunNow)`/`.onChange(of: selectedProfileName)`, alongside `mirrorRoutinesCapability`. Both helpers' doc comments now name each other so a future reader sees this is an enforced pair, not one fixed instance #p4 #fixup
+
+
+- [decision] Round-4 P39 (decision 11): the bot **model-pin CLEAR** is `hermes config unset`, gated on `BotAgentViewModel.canClearModelPin = canEditConfig && capabilities.hasConfigUnset` and judged by OUTPUT through `HermesConfigUnset.judge(output:exitCode:)` — the verb has an exit-0 managed-install arm. The floor is MOOT in practice (`hasBotMode` is v0.20.3, `hasConfigUnset` v0.19.0, so no host reaches a bot's config surface without the verb) and that is PINNED rather than commented: `BotAgentUnsetP39Tests.theConfigUnsetFloorIsMootUnderBotModeButStillStructural` asserts the implication, so the day it stops holding is a test failure. The guard still lives in `BotAgentConfigService.unsetValue`. #capability-gating #p39

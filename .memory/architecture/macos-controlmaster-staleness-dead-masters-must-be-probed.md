@@ -2,8 +2,13 @@
 title: macOS ControlMaster staleness: dead masters must be probed and reset, nothing self-heals (gh#123)
 type: note
 permalink: scarf/architecture/macos-controlmaster-staleness-dead-masters-must-be-probed
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHScriptRunner.swift]
+source_paths_inferred: false
+source_sha: 94c88e7f1322110b4bfd71534d632d453bdc177e
 created: 2026-07-12
 updated: 2026-07-12
+reviewed: 2026-09-12
+reviewed_by: audit:claude-code (background)
 ---
 
 Root cause + fix for gh#123 ("remote stops working until remove/re-add"), fixed 2026-07-12, commit 155c83f.

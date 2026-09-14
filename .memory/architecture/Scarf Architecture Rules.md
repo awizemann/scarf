@@ -2,15 +2,15 @@
 title: Scarf Architecture Rules
 type: note
 permalink: scarf/architecture/scarf-architecture-rules
-tags:
-- architecture
-- rules
-source_sha: 64bb87b88f785636aea2386ba3837723f7b81eec
-reviewed: 2026-06-28
+tags: [architecture, rules]
+aliases: [Core Engineering Constraints, scarf/architecture/core-engineering-constraints]
+source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Package.swift]
+source_paths_inferred: false
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-05-29
 updated: 2026-05-29
-reviewed_by: audit:claude-code (audit)
-aliases: [Core Engineering Constraints, scarf/architecture/core-engineering-constraints]
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

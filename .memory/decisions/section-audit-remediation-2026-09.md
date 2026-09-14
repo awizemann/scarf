@@ -5,11 +5,11 @@ permalink: scarf/decisions/section-audit-remediation-2026-09
 tags: [security, miniapps, widgets, audit, decision]
 source_paths: [scarf/scarf/Features/Projects/Views/Widgets/WidgetPathResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppManifest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppPermission.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectHermesShadowDetector.swift, scarf/Packages/ScarfDesign/Sources/ScarfDesign/ScarfLinkPolicy.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/SQLValueInliner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesWebhookList.swift, scarf/scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift, scarf/scarf/Features/Plugins/ViewModels/PluginsViewModel.swift, scarf/Scarf iOS/Projects/Widgets/WebviewWidgetView.swift]
 source_paths_inferred: false
-source_sha: 871ced409d12711f2ddd74a0cf5301b640294fb5
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-09-02
 updated: 2026-09-10
-reviewed: 2026-09-10
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Shared log for the 2026-09 section-audit remediation cycle (Memophant task t-fee68403). Fix package F1 covered the Projects-surface security blockers plus the mini-app agent-session companion; commit 4c77993 on main. Later packages in the same cycle append here.

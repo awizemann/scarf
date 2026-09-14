@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-watcher-tick-is-a-hint-not-a-command-project-sur
 tags: [projects, performance, watcher, transport, gotcha]
 source_paths: [scarf/scarf/Features/Projects/ViewModels/ProjectCockpitViewModel.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetSignatureBatch.swift, scarf/scarf/Features/Projects/Views/Widgets/MarkdownFileWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/LogTailWidgetView.swift, scarf/scarf/Features/Projects/Views/ProjectCockpitView.swift, scarf/scarf/Features/Projects/ViewModels/ProjectMenuProbeCache.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift]
 source_paths_inferred: false
-source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
+source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-08
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-12
+reviewed_by: claude-opus-5
 ---
 
 From the P7 projects audit's Performance section (documents/reports/2026-09-03-projects-full-surface-audit.md), remediated in batch PF (t-45594d27). The theme the audit named was "everything hangs off the watcher tick": the tick fires every 0.5-1.5s during an active stream, and four separate project surfaces treated it as an instruction to reload everything they own.

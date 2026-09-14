@@ -4,6 +4,8 @@ type: note
 permalink: scarf/operations/decoding-bridged-swift-error-codes-niocore-channelerror
 created: 2026-07-18
 updated: 2026-07-18
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

@@ -8,8 +8,8 @@ source_paths_inferred: false
 source_sha: 74cd8321517a52f3e067f378ee6c0b84c836c499
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-10
-reviewed_by: audit:claude-code (background)
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Everything a reader of Hermes's `messages_fts` needs in order to know what

@@ -8,7 +8,7 @@ source_paths_inferred: false
 source_sha: 479886cf715072b2f386431c01089bbd3e560510
 created: 2026-09-08
 updated: 2026-09-10
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 

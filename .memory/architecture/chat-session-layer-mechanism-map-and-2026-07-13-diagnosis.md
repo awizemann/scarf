@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ProcessACPChannel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift]
 source_paths_inferred: false
-source_sha: 0c96d1da1ad909a2e75855b7fbc78555fc625e42
+source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-07-13
-updated: 2026-07-13
-reviewed: 2026-09-04
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-13
+reviewed: 2026-09-13
+reviewed_by: claude-opus-5
 ---
 
 Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on main — feat/local-models' chat diff is 47 lines in the preflight path and touches none of this; it only supplied triggers: Ollama cold-swap latency, config churn).
@@ -46,3 +46,19 @@ Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on
 - [fact] App target sets SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor — all supersede/watchdog state is MainActor-serialized; interleaving analysis reduces to MainActor job ordering. Load-bearing for the whole Fix-3 design. #concurrency
 
 - [done] deleteSession-of-active leak (59485c1, t-01bd55ec): deleteSession now mirrors startACPSession's entry teardown when the deleted session is the attached one — beginStartIntent (supersedes any in-flight start), richChatViewModel.reset() FIRST (keeps stopACP's attachment-gated cancelled-bubble closed), then stopACP (bounded 2s session/cancel iff inFlightPromptSessionId marks a mid-flight turn, client.stop, watchdog disarm), acpStatus parked at idle, delete-specific toast. Non-active delete returns before teardown (pinned). Server-side `hermes sessions delete --yes` semantics unchanged, now behind an injectable sessionDeleteRunner seam (acpClientFactory pattern) for CLI-free tests. Pre-fix evidence: mid-turn test failed 5 issues (no cancel, channel never closed, stale acpStatus/hasActiveProcess), idle test 3 issues. 242 scarfTests + 901 ScarfCore green. NOTE: SessionsViewModel.confirmDelete is a second, independent delete surface that never touches the chat client — if the Sessions pane deletes the chat-active session the same leak shape exists there (different VM, out of t-01bd55ec scope). #fix-delete
+
+
+## Round-6 P58 — the same starvation mechanism was still live in the transports
+
+- [fact] **The `DispatchSourceRead` cure that moved ACP off the wedge stayed private for fourteen
+  months, and the identical blocking loop ran in four other places the whole time.**
+  `LocalTransport`/`SSHTransport` × `streamLines`/`streamRawBytes` each read stdout with
+  `Task.detached { while true { handle.availableData } }`. `HermesLogService` drives them with
+  `tail -F`, which never exits, so one open Logs pane held one cooperative-pool thread for as long
+  as the pane was open — the same "pool thread parked in `read(2)` starves unrelated
+  Swift-concurrency work" mechanism this note's diagnosis names, on a surface nobody connected to it
+- [decision] **The reader is `ScarfCore/Transport/PipeReader.swift` now, shared by ACP and the four
+  spawns**, generalised over framing rather than copied. ACP's exact semantics (fail on invalid
+  UTF-8, DROP a trailing partial frame) survive as one `acpLines` factory; the transports take the
+  lenient framing and DELIVER the partial line. If this wedge is ever re-diagnosed, both consumers
+  are one file #c10

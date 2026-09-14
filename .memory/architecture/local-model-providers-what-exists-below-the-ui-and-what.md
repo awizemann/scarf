@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/local-model-providers-what-exists-below-the-ui-and-what
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift]
 source_paths_inferred: false
-source_sha: 940dbaf144b8689f79e76dd6d373de5ffccc3ce5
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-13
 updated: 2026-07-13
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 

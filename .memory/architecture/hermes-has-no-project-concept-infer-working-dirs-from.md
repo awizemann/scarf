@@ -1,20 +1,13 @@
 ---
 title: Hermes has no project concept — infer working dirs from checkpoints, sessions.cwd, cron, kanban
 type: note
-permalink: scarf/integration/hermes-has-no-project-concept-infer-working-dirs-from-checkpoints-sessions-cwd-cron-kanban
-tags:
-- hermes
-- projects
-- storage
-- integration
-- import
-- enumeration
-- reference
+permalink: scarf/architecture/hermes-has-no-project-concept-infer-working-dirs-from
+tags: [hermes, projects, storage, integration, import, enumeration, reference]
 created: 2026-06-20
-updated: 2026-06-20
+updated: 2026-09-11
 ---
 
-Researched from the vendored Hermes source (`~/Developer/ScarfBox/Vendor/hermes-agent`) + the live `~/.hermes` (2026-06, Hermes v2.10/state.db schema_v14). The substrate for a future "import Hermes-only projects into Scarf" feature (Phase-1 "projects amazing" part 2).
+Researched (2026-06) from the then-vendored Hermes source at `~/Developer/ScarfBox/Vendor/hermes-agent` — **that path is retired; the Hermes checkout for tag walks is now `~/.hermes/hermes-agent`** (`git -C ~/.hermes/hermes-agent show <tag>:<path>`, never touch its working tree) — plus the live `~/.hermes` (2026-06, Hermes v2.10/state.db schema_v14). The substrate for a future "import Hermes-only projects into Scarf" feature (Phase-1 "projects amazing" part 2).
 
 ## Observations
 
@@ -26,7 +19,7 @@ Researched from the vendored Hermes source (`~/Developer/ScarfBox/Vendor/hermes-
   1. **Checkpoint workdir registry** — `~/.hermes/checkpoints/store/projects/<sha256(abspath)[:16]>.json` → `{workdir, created_at, last_touch}`. Purpose-built ledger; survives session deletion. Often EMPTY in fresh homes (no checkpoints taken yet).
   2. **`sessions.cwd`** in `~/.hermes/state.db` (SQLite, `schema_version` 14): `SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL AND source IN ('acp','cli')`. Reliably set for **acp** (the path Scarf/GUI clients use) + local-cli; **NULL** for cron/telegram/gateway + pre-column rows (no backfill). Also `model_config` JSON carries `.cwd` for acp.
   3. **Cron `workdir`** — `~/.hermes/cron/jobs.json` `jobs[].workdir` (absolute, validated-to-exist). When absent, the dir often only appears inside `jobs[].prompt`/`script` text (heuristic path-extraction, low confidence).
-  4. **Kanban** — `~/.hermes/kanban.db` `tasks.workspace_path` (where `workspace_kind='dir'`) + `tasks.tenant` (Scarf mints `scarf:<slug>`; non-`scarf:` tenants = CLI-user projects worth surfacing). No `project_id` column.
+  4. **Kanban** — `~/.hermes/kanban.db` `tasks.workspace_path` (where `workspace_kind='dir'`) + `tasks.tenant` (Scarf mints `scarf:<slug>`; non-`scarf:` tenants = CLI-user projects worth surfacing). There IS a `project_id TEXT` column (`hermes_cli/kanban_db.py:866-869` @ v2026.9.7), but it references Hermes's own per-profile `projects.db` and a non-resolving id is silently dropped at create (`:1124-1127`) — so it is not a Scarf key and not a discovery source (corrected in P42).
   5. **On-disk `.scarf/` scan** — dirs containing `.scarf/project.json`|`manifest.json` not present in the registry (catches scaffolded/cloned projects dropped from `projects.json`).
 
 - [algorithm] Union sources 1–5 → normalize (expand `~`, resolve symlinks, drop trailing `/`) → exclude `~/.hermes` itself + `~/.hermes/profiles/*` → set-subtract registry `path`s → rank survivors by recency (`last_touch` / `started_at` / `last_run_at`). #import

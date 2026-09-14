@@ -2,8 +2,13 @@
 title: iOS runtime SSH keys must resolve per server entry — singleton Keychain load() picks the wrong key (gh#133)
 type: note
 permalink: scarf/architecture/ios-runtime-ssh-keys-must-resolve-per-server-entry
+source_paths: [scarf/Packages/ScarfIOS/Sources/ScarfIOS/SSHKeyResolver.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/KeychainSSHKeyStore.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelSSHService.swift]
+source_paths_inferred: false
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-18
 updated: 2026-07-18
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

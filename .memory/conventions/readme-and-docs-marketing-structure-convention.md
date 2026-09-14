@@ -7,7 +7,7 @@ source_paths_inferred: false
 source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
 created: 2026-08-13
 updated: 2026-08-13
-reviewed: 2026-09-10
+reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
 
@@ -21,4 +21,4 @@ reviewed_by: claude-opus-5
 
 ## Relations
 - relates_to [[Release Distribution and Updates]]
-- relates_to [[Hermes Version Compatibility Target]]
+- relates_to [[hermes-version-compatibility-target]]

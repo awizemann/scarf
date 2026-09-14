@@ -2,11 +2,11 @@
 title: Wiki Maintenance Workflow
 type: note
 permalink: scarf/ops/wiki-maintenance-workflow
-tags:
-- docs
-- wiki
+tags: [docs, wiki]
 created: 2026-05-29
 updated: 2026-07-14
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 ## Observations

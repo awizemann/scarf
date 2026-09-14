@@ -2,13 +2,13 @@
 title: Local provider config keys — Hermes reader-verified (v0.17.0)
 type: note
 permalink: scarf/architecture/local-provider-config-keys-hermes-reader-verified-v0-17-0
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift]
+source_paths_inferred: false
+source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-13
 updated: 2026-07-14
-source_sha: 1d075b7d4c3e8904c9eeaed03de35d70db6b0d72
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift
-source_paths_inferred: false
-reviewed: 2026-07-14
-reviewed_by: claude-opus-4-8
+reviewed: 2026-09-11
+reviewed_by: claude-opus-5
 ---
 
 Reader-verified 2026-07-13 against the LIVE local Hermes install: **Hermes Agent v0.17.0 (2026.6.19), upstream 291eae63**, source at `~/.hermes/hermes-agent` (the venv `hermes` binary runs this checkout). All claims cite the code that `resolve_runtime_provider()` actually executes at request time (hermes_cli/runtime_provider.py + hermes_cli/auth.py) — NOT `hermes config set` acceptance, per the v0.18 gotcha. Gateway agents use the exact same reader (gateway/run.py:1790 calls `resolve_runtime_provider()`), so no extra keys are needed for gateway/remote sessions.

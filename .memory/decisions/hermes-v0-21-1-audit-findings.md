@@ -1,14 +1,14 @@
 ---
 title: Hermes v0.21.1 Audit Findings
 type: note
-permalink: scarf/integration/hermes-v0-21-1-audit-findings
+permalink: scarf/decisions/hermes-v0-21-1-audit-findings
 tags: [hermes, audit, compatibility, v0.21.1, hermes-v0-21-1]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesSearchIndex.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/WebToolsBackendRoster.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py, documents/hermes-v0.21.1-audit-report.md]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-10
+reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
 
@@ -26,7 +26,7 @@ and the deliberate NO-OPs. Decisions and per-phase rationale live in
 - [decision] Deliberate NO-OPs this cycle, as amended in Phase 8 — `hasComputerUseDoctorJSON` and `hasGatewayMultiplexerStatus` were DELETED rather than left unconsumed (an unread flag is drift bait; the multiplexer verdict is output-detected, which is correct on every host, and the doctor payload is cua-driver's with no stable contract): no `sessions.*` retention UI (user declined; A11 verified safe without one); deliveries.db / cron executions table stay server-side; ACP `plan` and `usage_update` still fall to `.unknown` (B8, product decision); `computer-use doctor --json` is not consumed (its payload is cua-driver's, with no stable contract) — the normalized `permissions status --json` is read instead; no `--nous` / `--no-redact` surface for `debug share`; no `plugins compat <path>` author mode; no setup forms for the nine new gateway platform rows (spun out as t-1ca040c2); no `image_gen.provider` picker for the new meta-ai backend (t-e7af69d4); `sessions.tool_names` is schema-tested but not decoded into the session model (no consumer). #noop
 
 ## Relations
-- relates_to [[Hermes Version Compatibility Target]]
+- relates_to [[hermes-version-compatibility-target]]
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]
 - relates_to [[Hermes v0.21.0 Audit Findings]]

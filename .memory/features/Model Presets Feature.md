@@ -3,12 +3,13 @@ title: Model Presets Feature
 type: note
 permalink: scarf/features/model-presets-feature
 tags: [models, presets, acp]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ModelPreset.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift]
-source_sha: 76e73d5b89a01a39b64f9ef50b962bf14376cfbd
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
+source_paths_inferred: false
+source_sha: 96089feb0abaf78cf728e1ead67c4aa47f21cd11
 created: 2026-05-29
-updated: 2026-09-04
-reviewed: 2026-09-08
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-12
+reviewed: 2026-09-12
+reviewed_by: claude-opus-5
 ---
 
 ## Observations
@@ -18,7 +19,7 @@ reviewed_by: audit:claude-code (background)
 - [binding] ProjectTemplateManifest gains optional modelPresetID: String? (UUID-as-string) at <project>/.scarf/manifest.json. Bound by id, NOT name — renames don't break bindings. Writer: ProjectModelPresetBinding (Mac). Cross-platform reader: ProjectModelPresetReader in ScarfCore #projects
 - [application] PRIMARY surface is ACP session/set_model RPC, not env vars. HERMES_INFERENCE_MODEL is only read by oneshot.py for -z mode; ACP's _make_agent ignores it. Apply via ACPClient.setSessionModel(sessionId:modelID:) immediately after newSession returns sessionId, BEFORE unlocking the prompt #application #pitfalls
 - [mid-chat] ChatModelBadge in SessionInfoBar shows active preset name or 'Default'. Tap → popover lists presets + 'Use global default'. Optimistic UI: badge flips immediately, reverts on RPC failure. 'Use global default' resolves config.yaml model name and sends that — there is no clear-override verb on session/set_model #ui
-- [gating] Single flag HermesCapabilities.hasACPSetSessionModel (>= v0.13.0). Pre-v0.13 hosts hide: .models sidebar entry, 'Set Model…' context-menu in ProjectsSidebar, ChatModelBadge, and iOS ProjectDetailView 'Model:' line #gating
+- [gating] **UNGATED since P49 (round-5 decision 9, `c718237d`, 2026-09-12).** `hasACPSetSessionModel` was RETIRED and deleted: `set_session_model` is in `acp_adapter/server.py` at `:482` @ v2026.3.30 = **0.6.0**, Scarf's supported minimum, with a working body — so the "v0.13+" floor was a bug with a version number, hiding the `.models` sidebar entry, the 'Set Model…' context menu, `ChatModelBadge`, the Chat Settings item and the iOS `ProjectDetailView` 'Model:' line from every 0.6.0–0.12 host that has the RPC. All five surfaces now render unconditionally; no flag reads remain (`HermesP49Tests`). Historical: the flag was `>= v0.13.0` from the v0.15 cycle until P49 #gating
 - [iOS] iOS surface is read-only — ProjectDetailView shows compact 'Model: <preset name>' line when binding exists. No CRUD or per-project rebinding in v1 (Mac-only) #ios
 - [cron-deferred] Per-cron-job model override is DEFERRED. `hermes cron create/edit` accept no --model flag; top-level `hermes -m` only applies to -z/--tui. HermesCronJob.model: String? data field exists but no CLI write path #deferred
 - [anti-patterns] Don't invent env-var injection in ACPClient+Mac.swift (silent no-op). Don't pass -m to `hermes acp` subcommand (top-level flag, ACP rejects). Don't bind by preset name (renames break refs). Don't try to 'clear' via RPC (no verb) #pitfalls
