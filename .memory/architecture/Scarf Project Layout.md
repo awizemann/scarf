@@ -5,11 +5,11 @@ permalink: scarf/architecture/scarf-project-layout
 tags: [layout, paths]
 source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Package.swift, scarf/Packages/ScarfIOS/Package.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-14
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

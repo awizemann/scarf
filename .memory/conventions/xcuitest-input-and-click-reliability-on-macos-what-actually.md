@@ -5,11 +5,11 @@ permalink: scarf/conventions/xcuitest-input-and-click-reliability-on-macos-what-
 tags: [testing, xcuitest, gotcha, a11y, swiftui]
 source_paths: [scarf/scarf/Features/Settings/Views/SettingsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-14
+reviewed_by: audit:claude-code (background)
 ---
 
 Learned building the P2c config journeys (t-877c6e6f, 2026-09-08). Every item was OBSERVED on Alan's Mac Studio across ~12 full `xcodebuild test` cycles, not inferred — several first presented as product bugs and were not.

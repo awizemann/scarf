@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/ssh-circuit-breaker-gates-all-outbound-connection-attempts
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHConnectionGate.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHScriptRunner.swift]
 source_paths_inferred: false
-source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
+source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
 created: 2026-08-13
 updated: 2026-08-13
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-14
+reviewed_by: audit:claude-code (background)
 ---
 
 Every outbound SSH attempt on macOS goes through the per-host circuit breaker `SSHConnectionGate` (gh#138). Rationale: Scarf uses system ssh, so a user's `ProxyCommand` can have side effects per connection attempt — Cloudflare Zero Trust's `cloudflared` opens a browser OAuth tab, Secretive/hardware agents prompt. Background pollers (watchPaths 3s, connection status 15s) must never retry a dead host unboundedly.

@@ -5,11 +5,11 @@ permalink: scarf/decisions/bot-mode-phase-b-decisions
 tags: [bot-mode, phase-b, hermes, profiles, config, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotAgentConfigService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotAgentConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
 created: 2026-09-01
 updated: 2026-09-11
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-14
+reviewed_by: audit:claude-code (background)
 ---
 
 Shared log for the Bot Mode Phase B cycle (per-bot AGENT configuration: model pin, skills/toolsets/MCP enablement, SOUL.md). P0 = the ScarfCore foundation, `BotAgentConfigService` + `BotAgentConfig`. All findings source-verified at Hermes tag v2026.8.31 (0.21.0).

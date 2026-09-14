@@ -12,11 +12,6 @@ reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
 
-Source-grounded findings for the Hermes v0.21.1 (v2026.9.7) cycle, plus the
-corrections the phase agents made to `documents/hermes-v0.21.1-audit-report.md`
-and the deliberate NO-OPs. Decisions and per-phase rationale live in
-[[Hermes v0.21.1 Compatibility Decisions]].
-
 ## Observations
 - [fact] Hermes v0.21.1 (v2026.9.7), audited 2026-09-08 over the v2026.8.31 delta (~5,995 commits, mostly a `hermes_cli` modularization): state.db `messages` DDL byte-identical (sessions gained additive `tool_names` / `compression_recovery_deadline`, new `conversation_generations` table, SCHEMA_VERSION 26→30 all FTS-only), ACP wire byte-clean (same 9 advertised commands, same 9 `session_update` discriminators), zero removals/renames/arity changes on the 88 argv Scarf issues, provider tables and gateway platform roster value-identical. A light additive cycle — the real work was five new surfaces plus eight pre-existing bugs. Full report: documents/hermes-v0.21.1-audit-report.md #verdict
 - [gotcha] Corrections the phases made to the audit report, so the next audit does not re-litigate them: Tavily is a one-release removal WINDOW (0.21.0 only), not a floor; `keenable`'s floor is v0.20.5 not v0.20.6; four Phase-4 surfaces (`skills search --json` v0.17, `browse-sh` v0.15, the provider `--source` filters + `debug share -y` + `computer-use permissions status --json` v0.18) are far older than they look because the modularization moved their argparse blocks; B7 is FOUR unreachable providers, not six (`gemini` is reachable via models.dev's `google`, `custom` is Scarf's own surface); the cron lifecycle refusal arrives as stdout JSON, not stderr; the MCP device-code prompt is on STDERR, not stdout; there is NO full FTS rebuild at first v0.21.1 open and the rebuild keys date to v2026.7.30; `--completion-contract` has no `kanban edit` half. #verification
@@ -26,7 +21,7 @@ and the deliberate NO-OPs. Decisions and per-phase rationale live in
 - [decision] Deliberate NO-OPs this cycle, as amended in Phase 8 — `hasComputerUseDoctorJSON` and `hasGatewayMultiplexerStatus` were DELETED rather than left unconsumed (an unread flag is drift bait; the multiplexer verdict is output-detected, which is correct on every host, and the doctor payload is cua-driver's with no stable contract): no `sessions.*` retention UI (user declined; A11 verified safe without one); deliveries.db / cron executions table stay server-side; ACP `plan` and `usage_update` still fall to `.unknown` (B8, product decision); `computer-use doctor --json` is not consumed (its payload is cua-driver's, with no stable contract) — the normalized `permissions status --json` is read instead; no `--nous` / `--no-redact` surface for `debug share`; no `plugins compat <path>` author mode; no setup forms for the nine new gateway platform rows (spun out as t-1ca040c2); no `image_gen.provider` picker for the new meta-ai backend (t-e7af69d4); `sessions.tool_names` is schema-tested but not decoded into the session model (no consumer). #noop
 
 ## Relations
-- relates_to [[Hermes Version Management]]
+- relates_to [[Hermes Version Compatibility Target]]
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]
 - relates_to [[Hermes v0.21.0 Audit Findings]]

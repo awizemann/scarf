@@ -6456,3 +6456,8 @@ Not a parity cycle. Hermes shipped v0.21.2 four days after our v0.21.1 target; A
 - [gotcha] **A Hermes default can change under a verb Scarf shells with no argv change at all.** The C5 walk asks "does the argv still parse"; this one parsed identically and deleted files. On a target bump, diff every `add_argument(... default=...)` on the verbs Scarf issues, not only the added/removed arguments #capability-gating
 - [todo] Not adopted this cycle, on t-ad965a68: the CLI now re-derives `repeat` when a cron edit flips one-shot ↔ recurring (`_rederive_repeat_for_schedule_change`) and snapshots the unpinned model at create; the iOS `jobs.json` form does neither #ios
 - [fact] Counts after the bump: ScarfCore filtered 174/9, Mac serial 1442/213, scripts 20/20, both schemes build #testing
+
+
+## 3.2.0 cut — the UI gate ran the unit half in parallel (2026-09-14)
+
+- [gotcha] **`scripts/ui-gate.sh` had no `-parallel-testing-enabled NO`.** The Full plan carries scarfTests + scarfUITests; all 16 UI tests passed and the gate still reported FAIL because the 1442 unit tests ran under Xcode's default parallelism and hit the known shared-state suites (`ChatViewModelStartLifecycleTests`, `MainActorBlockingWritesP11Tests`) — the exact fact round 7 recorded ("serial is the usable signal") one line above the machinery that did not know it. Round-6 lesson 3 again: a fact in a report must reach the script that runs the gate. Fixed by adding the flag with a comment naming the suites; the `.serialized` remedy for those suites stays on P63 (`t-d2000dc5`) #testing #process
