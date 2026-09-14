@@ -153,6 +153,31 @@ struct CitadelTransportPoolLiveTests {
         #expect(pool.pooledCount == 1)
         await pool.evictAll()
     }
+
+    /// A command that has already exited by the time its output stream ends
+    /// (every fast one) must come back as a result, not as
+    /// "NIOCore.ChannelError error 6" — Citadel's `withExec` closes a channel
+    /// the remote already closed, and NIOSSH fails that with `alreadyClosed`.
+    /// Both the zero and the non-zero exit are asserted, because the same
+    /// close also REPLACED `CommandFailed` for a non-zero exit.
+    @Test func fastExecCompletesInsteadOfThrowingAlreadyClosed() async throws {
+        let env = try #require(LiveEnv.load())
+        let (bundle, config) = try liveAuthorize(env)
+        let t = liveTransport(ServerID(), config, bundle)
+
+        let ok = try t.runProcess(executable: "/bin/sh", args: ["-c", "echo hi"], stdin: nil, timeout: 20)
+        #expect(ok.exitCode == 0)
+        #expect(ok.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) == "hi")
+
+        let failed = try t.runProcess(executable: "/bin/sh", args: ["-c", "echo nope >&2; exit 3"], stdin: nil, timeout: 20)
+        #expect(failed.exitCode == 3)
+        #expect(failed.stderrString.contains("nope"))
+
+        // The dashboard's own shape: a heredoc script through streamScript.
+        let script = try await t.streamScript("set -e\necho version\necho '[{\"n\":1}]'", timeout: 20)
+        #expect(script.exitCode == 0)
+        #expect(script.stdoutString.contains("version"))
+    }
 }
 
 #endif // canImport(Citadel)

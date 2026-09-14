@@ -325,7 +325,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         var started = false
         var collected: ProcessResult?
         do {
-            try await client.withExec(cmd) { inbound, _ in
+            try await client.withExecTolerantClose(cmd) { inbound, _ in
                 started = true
                 let boxed = UncheckedBox(value: inbound)
                 // The bytes the drain has accumulated SO FAR, readable from

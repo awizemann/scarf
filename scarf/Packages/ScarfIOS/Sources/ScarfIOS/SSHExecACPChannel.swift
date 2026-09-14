@@ -87,7 +87,7 @@ public actor SSHExecACPChannel: ACPChannel {
         let errCont = stderrCont
         execTask = Task { [weak self] in
             do {
-                try await client.withExec(command) { inbound, outbound in
+                try await client.withExecTolerantClose(command) { inbound, outbound in
                     await self?.writerBecameAvailable(outbound)
                     for try await event in inbound {
                         if Task.isCancelled { break }

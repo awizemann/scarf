@@ -50,7 +50,7 @@ struct CitadelExecChannelP48bTests {
     @Test("the drain runs inside withExec and the timeout throws out of it")
     func theTimeoutThrowsFromInsideWithExec() throws {
         let code = Self.codeOnly(try Self.transportSource())
-        #expect(code.contains("client.withExec(cmd)"))
+        #expect(code.contains("client.withExecTolerantClose(cmd)"))
         // BRACE-MATCHED, not line-sliced. This read the literal
         // `throw TransportError.timeout(seconds: timeout` and the end of the
         // closure as a newline plus exactly eight spaces — so wrapping the
@@ -58,7 +58,7 @@ struct CitadelExecChannelP48bTests {
         // argument) made the `#require` find the DRAIN's throw instead, far
         // past the closure, and the test failed on a formatting change rather
         // than on the property it names.
-        let opened = try #require(code.range(of: "client.withExec(cmd)"))
+        let opened = try #require(code.range(of: "client.withExecTolerantClose(cmd)"))
         let chars = Array(code[opened.upperBound...])
         let open = try #require(chars.firstIndex(of: "{"), "the withExec closure is gone")
         var depth = 0
