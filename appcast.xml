@@ -6,6 +6,120 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.2.0</title>
+      <sparkle:version>71</sparkle:version>
+      <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 14 Sep 2026 15:11:21 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.2.0</p>
+<p>This release moves Scarf to <strong>Hermes v0.21.2</strong> and ships the largest correctness pass in the app&#x27;s history. After the v0.21.1 parity work landed, every surface Scarf reads or drives — config reads and writes, the CLI verbs it shells, cron and kanban, the capability floors, chat over ACP, and the process and SSH plumbing underneath — went through six rounds of adversarial audit, each round re-deriving the last round&#x27;s fixes at the source. Two hundred and some defects were fixed, most of them pre-existing and invisible until the audit read the surrounding code: settings that showed the wrong value, buttons that reported success over a refusal, features gated to the wrong Hermes version, and background work that quietly blocked the app. Then the release gate ran for real: the UI test plans pass, on both Hermes v0.21.1 and v0.21.2.</p>
+<h2>Hermes v0.21.1 and v0.21.2</h2>
+<p>Everything the v0.21.1 line added that a Mac client can use is here, each behind a capability flag so older hosts keep working exactly as before:</p>
+<ul>
+  <li><strong>Cron</strong>: create a job paused, choose failure delivery, and see dispatch diagnostics on the job; the Review column of the Kanban board now has both exits (approve to Done, send back to Up Next) on hosts that support them, and dragging a card to Running confirms before it runs a dispatcher pass over the board.</li>
+  <li><strong>Kanban completion contracts</strong>, with the real failure reason shown on the card.</li>
+  <li><strong>MCP device-code OAuth</strong>: sign in to an MCP server that shows you a code, and a login that finds the token where Hermes actually stores it.</li>
+  <li><strong>Credential pools</strong>: reorder a pool and clear one credential&#x27;s cooldown.</li>
+  <li><strong>Settings</strong>: the fast-mode tier picker, split telemetry opt-ins, the Perplexity and Keenable web backends (Tavily is back too), and the new v0.21 config keys.</li>
+  <li><strong>Health</strong>: <code>debug share</code> that reports what it actually uploaded, <code>plugins compat</code>, and a Computer Use permissions card.</li>
+  <li><strong>Fleet apply</strong> copies a job&#x27;s repeat limit and tells you when a model pin can&#x27;t be copied to another host.</li>
+</ul>
+<p><strong>Hermes v0.21.2</strong> (the state.db reliability patch) was verified at the tag and against a live host: the schema, the ACP wire, and every command Scarf issues are unchanged. One thing did change: <code>hermes backup</code> now deletes older <code>hermes-backup-*.zip</code> files in its output folder by default. Scarf&#x27;s Backup Now passes <code>--keep 0</code> on v0.21.2 hosts, so it never deletes a backup you kept.</p>
+<h2>Settings that tell the truth</h2>
+<p>Scarf reads config.yaml with its own YAML reader so it can show a setting without shelling a command. The audit ran that reader against PyYAML across hundreds of thousands of generated documents and fixed every disagreement on the keys Scarf reads: folded long strings, quoted escapes, <code>yes</code>/<code>on</code>/<code>1</code> and their quoted forms, block scalars (a personality with a multi-line system prompt used to render empty), flat dotted keys, and the exact <code>busy_ack_enabled</code> rule Hermes applies. Several defaults were wrong in the misleading direction — approval mode shown as Manual on a host running <code>smart</code>, memory limits parsing to zero, toggles shown on against a false default — and are now read from Hermes&#x27;s real defaults at the target version. The writers were fixed too: Scarf no longer emits YAML that PyYAML rejects, no longer deletes your comments, and no longer corrupts a config whose list key holds a block scalar (which made Hermes discard the whole file).</p>
+<h2>Buttons that report what Hermes did</h2>
+<p>Hermes prints a refusal and exits 0 more often than you&#x27;d think: a managed install refusing a config write, <code>auth logout</code> with nothing to log out, <code>sessions optimize</code> with nothing to do, a plugin that installed but could not be enabled, a webhook that was never subscribed. Scarf used to read exit 0 as success. Every verb Scarf shells is now judged on what Hermes printed, with three honest states: it worked, it refused (and why), or it printed nothing recognisable (and Scarf says so instead of guessing). Restore from backup, which failed on every live Hermes home because the CLI waited on a confirmation prompt nobody could answer, now works.</p>
+<h2>Gated to the version that actually shipped it</h2>
+<p>Every capability flag was walked against the Hermes source at its floor tag and the tag before. Twelve floors were wrong, in both directions: the Kanban board was offered to v0.12 hosts that have no <code>kanban</code> command (every click routed to the agent), while MCP identity headers, bot chat creation, and the model chip were hidden from hosts that support them. <code>/goal</code> and <code>/subgoal</code>, which the chat composer treated as commands, were never commands over ACP on any version and are now sent as ordinary prompts with a notice. The Web Dashboard row is hidden on hosts without the <code>dashboard</code> verb.</p>
+<h2>The app stops blocking itself</h2>
+<p>Backup, restore, the Logs pane&#x27;s <code>tail -F</code>, the four streaming spawns, every gateway and skills command, and the launch-time shell probe all ran blocking work on Swift&#x27;s cooperative thread pool or the main actor. On a slow SSH host one of these could freeze the window whose whole purpose is showing you what the agent is doing. They now run on real threads or through the transports&#x27; async seam, every subprocess has a timeout, and a source-scan test fails the build if a new blocking call sneaks back in. The Logs pane also stopped dropping blank lines, and the Activity section stopped showing &quot;check the SSH connection&quot; on a local Mac that simply had no state.db yet.</p>
+<h2>iOS</h2>
+<p>ScarfGo&#x27;s cron editor writes <code>jobs.json</code> directly, so every validation <code>cron edit</code> performs now lives in the form: a re-timed job no longer fires at its old time, a spent one-shot can&#x27;t be re-enabled, and malformed schedules are refused before they&#x27;re written. iOS shares the corrected YAML reader, the three-state verdicts, and the async transport seam. The iOS build rides the next TestFlight release.</p>
+<h2>Usage analytics</h2>
+<p>The anonymous install identifier now persists across launches so active installs and retention can be counted. It is a random value stored only on your Mac and sent as a hash; nothing else about what is collected changed, and the opt-out in Settings → Advanced still turns everything off. The privacy policy, README, and the Settings disclosure describe it.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>A UI release gate: Smoke (every section renders), Full (nine journeys: install a skill, model presets, settings persistence, cron and kanban, projects, template install) and Live (a real chat over ACP) XCUITest plans, wired into <code>release.sh</code>.</li>
+  <li>ScarfCore grew from 2,176 to <strong>3,293 tests</strong>; the Mac app target from 745 to <strong>1,442</strong>, including source-scan sweeps for spawn discipline, catalogue coverage, argv separators, and citation accuracy.</li>
+  <li>A provider-table gate that reads Hermes at the target tag and fails closed.</li>
+  <li>Every Hermes citation in the code was re-opened at its tag; the memory that guides this work carries the lessons.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight; the iOS fixes above ride its next build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.2. Everything newer than your host&#x27;s version stays hidden; nothing changes on a host you don&#x27;t upgrade.</li>
+  <li>If you use Backup Now on a Hermes v0.21.2 host, Scarf keeps every backup; the CLI&#x27;s own default keeps three.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.2.0/Scarf-v3.2.0-Universal.zip"
+                 sparkle:edSignature="/VE6wEKG3t4EVM6gsiV7yQ1KOKWz1tY5yafCkY+EiXiMW+bzCT6tAkawe2K610PROTfj5Ap5BR8Qx+HtWTtMBA=="
+                 length="32609629"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.1.0</title>
       <sparkle:version>69</sparkle:version>
       <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
