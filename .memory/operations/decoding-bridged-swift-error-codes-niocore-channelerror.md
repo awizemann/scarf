@@ -2,6 +2,9 @@
 title: Decoding bridged Swift error codes: NIOCore.ChannelError error 0 = connectTimeout; Citadel hard-codes a 10s SSH login timeout
 type: note
 permalink: scarf/operations/decoding-bridged-swift-error-codes-niocore-channelerror
+source_paths: [scarf/Packages/ScarfIOS/Sources/ScarfIOS/SSHClient+ExecCompletion.swift, scripts/verify-ios-transport-pool.sh]
+source_paths_inferred: true
+source_sha: b114f72fcfbabf7abe398123c841957874af59eb
 created: 2026-07-18
 updated: 2026-09-14
 reviewed: 2026-09-11

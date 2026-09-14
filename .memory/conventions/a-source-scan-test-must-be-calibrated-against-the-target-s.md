@@ -5,11 +5,11 @@ permalink: scarf/conventions/a-source-scan-test-must-be-calibrated-against-the-t
 tags: [testing, concurrency, c10, verification]
 source_paths: [scarf/scarfTests/MainActorSpawnDisciplineP22Tests.swift, scarf/scarf.xcodeproj/project.pbxproj, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: b114f72fcfbabf7abe398123c841957874af59eb
 created: 2026-09-10
 updated: 2026-09-13
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-14
+reviewed_by: audit:claude-code (background)
 ---
 
 Written in P37 of the round-3 whole-surface audit, after the first draft of `MainActorSpawnDisciplineP22Tests.noNewSynchronousWaitRunsOnTheMainActor` passed while `HealthViewModel.dashboardListenerPID` sat right there doing an `lsof` wait on the main actor. The failure was not in the rule being checked but in the test's model of the language, and the same four mistakes are available to any future scan test.
