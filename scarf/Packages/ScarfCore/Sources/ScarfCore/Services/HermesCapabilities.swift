@@ -2277,6 +2277,11 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s >= version
     }
 
+    /// Hermes voice-live gateway (`/api/audio/voice-live/session`) shipped
+    /// with GPT-Live in v0.21.3. Unknown and older hosts keep the surface
+    /// hidden so Scarf never presents a dead release-gated control.
+    public var hasGPTLiveVoice: Bool { atLeastSemver(0, 21, 3) }
+
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         atLeast(SemVer(major: major, minor: minor, patch: patch))
     }

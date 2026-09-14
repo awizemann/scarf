@@ -509,6 +509,12 @@ private struct ContextBoundRoot: View {
             .windowFrameAutosave("Scarf.Window.\(context.id)")
             .onAppear { fileWatcher.startWatching() }
             .onDisappear { fileWatcher.stopWatching() }
+            // Publish this window's server to the shared speech service so
+            // Hermes Voice playback synthesizes against the right install.
+            // ContextBoundRoot is rebuilt (`.id`) on server/profile change,
+            // so onAppear re-fires exactly when the context changes; with
+            // multiple windows the most recently appeared window wins.
+            .onAppear { MessageSpeechService.shared.serverContext = context }
             // Re-detect Hermes capabilities when the app comes back to
             // the foreground. The user may have run `hermes update` in
             // a Terminal while Scarf was backgrounded — without this,

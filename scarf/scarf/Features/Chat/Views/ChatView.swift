@@ -12,6 +12,7 @@ struct ChatView: View {
     /// same as `.empty` capabilities.
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var showErrorDetails = false
+    @State private var showLiveVoice = false
 
     /// Side-pane visibility toggles (issue #58). Drive the new
     /// sidebar.left / sidebar.right toolbar buttons; `RichChatView.body`
@@ -98,6 +99,9 @@ struct ChatView: View {
                 coordinator.selectedSessionId = nil
                 viewModel.resumeSession(pendingId)
             }
+        }
+        .sheet(isPresented: $showLiveVoice) {
+            VoiceLiveView(context: viewModel.context)
         }
         .onChange(of: fileWatcher.lastChangeDate) {
             // Debounced rather than immediate. During an active ACP
@@ -410,6 +414,17 @@ struct ChatView: View {
 
             if viewModel.hasActiveProcess && viewModel.displayMode == .terminal {
                 voiceControls
+            }
+
+            if capabilitiesStore?.capabilities.hasGPTLiveVoice == true {
+                Button {
+                    showLiveVoice = true
+                } label: {
+                    Label("Live Voice", systemImage: "waveform.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Start a GPT-Live voice session")
             }
 
             // Side-pane toggles (issue #58). Only meaningful in rich-chat

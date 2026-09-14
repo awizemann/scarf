@@ -85,7 +85,11 @@ final class SettingsViewModel {
     /// dropped, the same rule `DisplayTab.busyInputModeOptions` applies — a
     /// plugin-registered provider (`PluginContext.register_tts_provider`) is a
     /// perfectly valid `tts.provider` that no built-in list can enumerate, and
-    /// a blank picker over it would be overwritten by the next save.
+    /// a blank picker over it would be overwritten by the next save. That
+    /// append rule is also how `kokoro` (hermes-s2s plugin, local) renders:
+    /// a host already configured with it sees a selected row, and Scarf's
+    /// Hermes Voice playback synthesizes through the venv directly
+    /// regardless of host version.
     static func ttsProviders(capabilities: HermesCapabilities, current: String = "") -> [String] {
         var out = ttsProvidersBase
         if capabilities.hasGeminiKittenTTS { out += ["gemini", "kittentts"] }
@@ -832,6 +836,13 @@ final class SettingsViewModel {
     func setTTSOpenAIVoice(_ value: String) { setSetting("tts.openai.voice", value: value) }
     func setTTSNeuTTSModel(_ value: String) { setSetting("tts.neutts.model", value: value) }
     func setTTSNeuTTSDevice(_ value: String) { setSetting("tts.neutts.device", value: value) }
+    // Kokoro (hermes-s2s plugin): Hermes Voice playback synthesizes
+    // through the venv named by `tts.kokoro.python` directly —
+    // see HermesSpeechService for why the orchestrator is bypassed.
+    func setTTSKokoroVoice(_ value: String) { setSetting("tts.kokoro.voice", value: value) }
+    func setTTSKokoroSpeed(_ value: Double) { setSetting("tts.kokoro.speed", value: String(value)) }
+    func setTTSKokoroLangCode(_ value: String) { setSetting("tts.kokoro.lang_code", value: value) }
+    func setTTSKokoroPython(_ value: String) { setSetting("tts.kokoro.python", value: value) }
     // v0.13: xAI TTS / Custom Voices. Key confirmed at v2026.9.7 —
     // `hermes_cli/config_defaults.py:1023` seeds `tts.xai.voice_id: "eve"`
     // (the alternatives WS-8-Q2 listed, `tts.xai.voice` and a top-level
