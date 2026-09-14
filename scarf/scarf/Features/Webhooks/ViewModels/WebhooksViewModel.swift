@@ -162,6 +162,9 @@ final class WebhooksViewModel {
         // as the WhatsApp token argv in F2.
         if !secret.isEmpty { args += ["--secret", secret] }
         args += ["--", name]
+        // Frozen before the closure: a captured `var` is a Release-only
+        // Sendable error (SWIFT_TREAT_WARNINGS_AS_ERRORS).
+        let argv = args
         // `_cmd_subscribe` normalizes before writing: lowercased, spaces to
         // hyphens. The reload check has to look for THAT name, not what the
         // user typed, or a "Weather Hook" subscribe would look absent.
@@ -170,7 +173,7 @@ final class WebhooksViewModel {
             .replacingOccurrences(of: " ", with: "-")
         Task.detached { [fileService, self] in
             let result = await OffPool.run {
-                fileService.runHermesCLI(args: args, timeout: 60)
+                fileService.runHermesCLI(args: argv, timeout: 60)
             }
             // `_cmd_subscribe` exits 0 on EVERY failure path — an invalid
             // name, `--deliver-only` without a real target, a bad script —

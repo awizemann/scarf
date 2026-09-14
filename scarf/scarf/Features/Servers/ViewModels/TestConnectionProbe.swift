@@ -14,7 +14,10 @@ struct TestConnectionProbe {
     /// deadline and the message the user reads can never drift apart — they
     /// were two independent literals, `20` and the string "Timed out after
     /// 20s" (round-5 P48).
-    static let probeTimeout: TimeInterval = 20
+    // `nonisolated`: read inside the detached probe closure; the app target
+    // defaults declarations to `@MainActor`, and Release treats the cross-actor
+    // read as an error.
+    nonisolated static let probeTimeout: TimeInterval = 20
 
     func run() async -> AddServerViewModel.TestResult {
         let host = config.host.trimmingCharacters(in: .whitespaces)

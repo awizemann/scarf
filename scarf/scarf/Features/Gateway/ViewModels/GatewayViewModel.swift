@@ -100,14 +100,18 @@ final class MessagingGatewayViewModel {
     /// a wedged SSH host must not pin a load task for a full minute while
     /// file-watcher ticks pile up behind it. Nothing user-visible changes on
     /// a healthy host: only the spinner's worst case moves.
-    static let probeTimeout: TimeInterval = 30
+    // `nonisolated`: read from off-actor closures (`Task.detached`/`OffPool.run`);
+    // a main-actor-isolated static is a Release-only error (SWIFT_TREAT_WARNINGS_AS_ERRORS).
+    nonisolated static let probeTimeout: TimeInterval = 30
 
     /// Cap on each MUTATION spawn (`gateway start|stop|restart`, `pairing
     /// approve|revoke`). These used `ctx.runHermes(...)` with the silent 60 s
     /// default; the value is deliberately unchanged (a `gateway restart` on a
     /// busy host legitimately takes seconds) but it is now NAMED at the site,
     /// which is what `HermesCLIRunner`'s contract asks of every caller.
-    static let mutationTimeout: TimeInterval = 60
+    // `nonisolated`: read from off-actor closures (`Task.detached`/`OffPool.run`);
+    // a main-actor-isolated static is a Release-only error (SWIFT_TREAT_WARNINGS_AS_ERRORS).
+    nonisolated static let mutationTimeout: TimeInterval = 60
 
     init(
         context: ServerContext = .local,
@@ -217,7 +221,7 @@ final class MessagingGatewayViewModel {
                 ? HermesGatewayListService.fetch(context: ctx, runner: injected)
                 : nil
             if Task.isCancelled { return }
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 // Newest load clears the spinner even when a mutation
                 // invalidated its DATA — only a genuinely newer load in
