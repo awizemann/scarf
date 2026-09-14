@@ -70,7 +70,7 @@ struct CLIVerdictCallSitesP54Tests {
     @Test func settingsJudgesBackupByOutput() throws {
         let code = P54Source.codeOnly(
             try P54Source.read("scarf/Features/Settings/ViewModels/SettingsViewModel.swift"))
-        #expect(code.contains("HermesBackupVerdict.argv"))
+        #expect(code.contains("HermesBackupVerdict.argv(capabilities: capabilities)"))
         #expect(code.contains("HermesBackupVerdict.judge("))
         #expect(!code.contains("args: [\"backup\"]"))
     }

@@ -89,7 +89,7 @@ MODELS_DEV_CACHE = os.path.expanduser("~/.hermes/models_dev_cache.json")
 # `--tag`. Bump it in the same commit that bumps a capability floor in
 # HermesCapabilities.swift; the audit trail for what the tag means lives in the
 # `// MARK: vX.Y (<tag>) flags` sections there, not here.
-HERMES_TARGET_TAG = "v2026.9.7"
+HERMES_TARGET_TAG = "v2026.9.11"
 
 failures = []
 warnings = []

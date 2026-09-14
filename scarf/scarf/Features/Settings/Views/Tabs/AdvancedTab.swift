@@ -565,7 +565,7 @@ struct AdvancedTab: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 160, alignment: .trailing)
                 Button {
-                    viewModel.runBackup()
+                    viewModel.runBackup(capabilities: capabilities)
                 } label: {
                     Label("Backup Now", systemImage: "arrow.down.doc")
                 }

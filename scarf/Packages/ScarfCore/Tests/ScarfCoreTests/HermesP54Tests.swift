@@ -274,7 +274,7 @@ struct HermesBackupVerdictP54Tests {
     }
 
     @Test func theArgvIsBare() {
-        #expect(HermesBackupVerdict.argv == ["backup"])
+        #expect(HermesBackupVerdict.baseArgv == ["backup"])
     }
 }
 

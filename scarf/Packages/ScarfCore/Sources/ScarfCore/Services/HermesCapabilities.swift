@@ -2087,6 +2087,35 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `git ls-tree v2026.8.31 plugins/web/` has no `perplexity` entry.
     public var hasPerplexityWebBackend: Bool { isV0211OrLater }
 
+    // MARK: v0.21.2 (v2026.9.11) flags
+    //
+    // "The state.db patch release": 986 commits over v0.21.1, verified at
+    // the tag on 2026-09-14. SCHEMA_VERSION stays 30, no table is removed and
+    // every column Scarf probes is present (`scripts/check-hermes-tables.py
+    // --tag v2026.9.11` exits 0); hosted rooms moved to `shared-state.db`,
+    // which Scarf never reads; the ACP adapter changed four lines of
+    // `/model` provider detection (`acp_adapter/server.py`); no verb or flag
+    // Scarf issues was removed and every output marker Scarf judges on is
+    // byte-identical. The one behaviour change Scarf must answer is
+    // `hermes backup`'s new prune default, below. New verbs (`vault`, `auth
+    // upgrade`, `plugins browse|validate`) have no Scarf surface, so no flag.
+
+    /// `hermes backup -k/--keep N` — `hermes_cli/subcommands/backup.py:23-26`
+    /// @ v2026.9.11 (`type=int, default=3`), consumed at
+    /// `hermes_cli/backup.py:696-698`: after a full backup, delete older
+    /// `hermes-backup-*.zip` files in the OUTPUT DIRECTORY beyond the newest
+    /// N; `0` keeps everything. Absent at v2026.9.7 (`git show
+    /// "v2026.9.7:hermes_cli/subcommands/backup.py"` has no `keep`), where
+    /// the flag is an argparse error at exit 2.
+    ///
+    /// Scarf passes `--keep 0` on hosts that have it: the default output is
+    /// `~/hermes-backup-<timestamp>.zip`, so the CLI default would delete a
+    /// user's older backups from their home directory on a click that says
+    /// "Backup Now" — a deletion nobody asked for. C1: below the floor the
+    /// argv is the bare `backup` it has always been; at and above it the only
+    /// difference from the CLI is that nothing is pruned.
+    public var hasBackupKeep: Bool { isV0212OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -2233,6 +2262,12 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Perplexity backend), so those must be checked with `atLeastSemver(0,
     /// 21, 1)` rather than the minor-only `isV021OrLater`.
     public var isV0211OrLater: Bool { atLeastSemver(0, 21, 1) }
+
+    /// Whether the connected host is on v0.21.2 or newer. Patch-level floor
+    /// for the v0.21.2 group (`backup --keep`), same rationale as
+    /// `isV0211OrLater`: a v0.21.1 host satisfies every minor-level check
+    /// and lacks the flag.
+    public var isV0212OrLater: Bool { atLeastSemver(0, 21, 2) }
 
     /// Public form of the private floor test, for tables that carry their
     /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than

@@ -129,7 +129,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.1** (v2026.9.7) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.2** (v2026.9.11) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
@@ -141,7 +141,8 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 | v0.20.5 (2026-08-19) | Verified — full-output `--version` probe, unlimited max turns, unseeded `stt.provider`, profile display names, OpenCode Free |
 | v0.20.6 (2026-08-27) | Verified — cron incidents/doctor/Run Now, bot-chat delivery, `browser close-profile`, curator pin/unpin diagnostics, essential `hermes-agent` skill |
 | v0.21.0 "Pantheon" (2026-08-31) | Verified — Peers (`hermes peer`), dotted-key escaping, MCP catalog 20 → 65 servers, turn-lease default 1800 → 5s, two new providers |
-| v0.21.1 (2026-09-07) | **Verified — current target** — Tavily back, `perplexity` web backend, bounded `service_tier` modes, shared-metrics telemetry, `plugins compat --json`, cron `--paused`/`--failure-deliver`, MCP device-code OAuth, `messages_fts` 8 KB tool-content prefix |
+| v0.21.2 (2026-09-11) | **Verified — current target** — the state.db reliability patch; schema, ACP wire and every Scarf argv unchanged at the tag; `hermes backup --keep 0` passed so Hermes's new prune default never deletes your older backups |
+| v0.21.1 (2026-09-07) | Verified — Tavily back, `perplexity` web backend, bounded `service_tier` modes, shared-metrics telemetry, `plugins compat --json`, cron `--paused`/`--failure-deliver`, MCP device-code OAuth, `messages_fts` 8 KB tool-content prefix |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 

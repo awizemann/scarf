@@ -1421,11 +1421,13 @@ final class SettingsViewModel {
     /// archive under a bare "Backup saved" and said nothing. The note now
     /// travels with it. The nothing-to-back-up arm writes no zip at all and
     /// so reveals nothing, which falls out of `zipPath` being nil.
-    func runBackup() {
+    /// `capabilities` decides the argv (`--keep 0` on v0.21.2+); no default,
+    /// because the parameter IS the fix (round-5 lesson 10).
+    func runBackup(capabilities: HermesCapabilities) {
         backupInProgress = true
         Task.detached { [fileService, self] in
             let result = await OffPool.run {
-                fileService.runHermesCLI(args: HermesBackupVerdict.argv, timeout: 300)
+                fileService.runHermesCLI(args: HermesBackupVerdict.argv(capabilities: capabilities), timeout: 300)
             }
             let outcome = HermesBackupVerdict.judge(output: result.output, exitCode: result.exitCode)
             let zipPath = Self.extractZipPath(from: result.output)

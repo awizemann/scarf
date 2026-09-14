@@ -2249,8 +2249,18 @@ public enum HermesSessionsOptimizeVerdict {
 /// nothing-to-back-up, `:229` warnings), so the confirmed and refusal arms
 /// fire exactly as at the target tag.
 public enum HermesBackupVerdict {
-    /// `backup`. No positional, no flag Scarf passes — nothing to separate.
-    public static let argv = ["backup"]
+    /// `backup`, before the host's flags are applied. No positional — nothing
+    /// to separate. Call sites use ``argv(capabilities:)``.
+    public static let baseArgv = ["backup"]
+
+    /// The argv for this host. On v0.21.2+ (`HermesCapabilities.hasBackupKeep`)
+    /// appends `--keep 0` so Hermes's new default (`--keep 3`, `hermes_cli/
+    /// subcommands/backup.py:23-26` @ v2026.9.11) does not delete the user's
+    /// older `~/hermes-backup-*.zip` files on Scarf's "Backup Now"; below the
+    /// floor the flag does not parse, so the argv is the bare verb.
+    public static func argv(capabilities: HermesCapabilities) -> [String] {
+        capabilities.hasBackupKeep ? baseArgv + ["--keep", "0"] : baseArgv
+    }
 
     /// `Backup complete: {out_path}` (`backup.py:666`). The trailing space
     /// and colon are load-bearing: `Backup incomplete: ` is NOT a superset
