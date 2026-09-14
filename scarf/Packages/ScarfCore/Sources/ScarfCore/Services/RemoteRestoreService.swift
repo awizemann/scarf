@@ -203,14 +203,14 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // restore if the probe times out — the user can still pick
         // an override.
         let transport = context.makeTransport()
-        let homeProbe = try? transport.runProcess(
+        let homeProbe = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", "echo \"$HOME\""],
             stdin: nil,
             timeout: 30
         )
         let resolvedHome = homeProbe?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        let versionProbe = try? transport.runProcess(
+        let versionProbe = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", "hermes --version 2>/dev/null || true"],
             stdin: nil,
@@ -256,7 +256,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // path nothing had created and reported success either way.
         let mkdirResult: ProcessResult
         do {
-            mkdirResult = try transport.runProcess(
+            mkdirResult = try await transport.asyncRunProcess(
                 executable: "/bin/bash",
                 args: ["-lc", mkdirCmd],
                 stdin: nil,
