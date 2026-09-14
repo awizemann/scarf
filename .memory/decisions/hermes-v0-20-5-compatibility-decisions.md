@@ -26,4 +26,4 @@ reviewed_by: claude-opus-5
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.20.5 Audit Findings]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]

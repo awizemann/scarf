@@ -26,7 +26,7 @@ The repeatable process for auditing a new Hermes release against Scarf. Canonica
 - [persist] On each cycle, write a `decisions/hermes-vX-compatibility-decisions` note (what shipped + why, incl. the deliberate NO-OPs so the next audit doesn't re-litigate them) and an `integration/hermes-vX-wire-verification` note; update the version-target notes + `wiki/Hermes-Version-Compatibility.md` (this wiki page drifts — was two cycles stale at v0.17); then hand to the `scarf-release-prep` skill for the cut. #persist
 
 ## Relations
-- relates_to [[hermes-version-targeting-strategy]]
+- relates_to [[Hermes Version Management]]
 - relates_to [[Hermes Capability Gating Pattern]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]
 - relates_to [[Hermes v0.21.1 Audit Findings]]

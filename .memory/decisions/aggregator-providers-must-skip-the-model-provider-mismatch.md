@@ -20,7 +20,7 @@ reviewed_by: claude-opus-5
 - [fix] Landed on main as d1285b0 (2026-07-03) with tests in ModelPreflightTests. #fixed
 
 ## Relations
-- extends [[hermes-version-targeting-strategy]]
+- extends [[Hermes Version Management]]
 - relates_to [[Hermes v0.15 Capability Gating Decisions]]
 
 

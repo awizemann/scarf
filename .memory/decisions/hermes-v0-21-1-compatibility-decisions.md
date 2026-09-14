@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-09-08
-updated: 2026-09-13
+updated: 2026-09-14
 reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
@@ -6445,3 +6445,14 @@ BUILD SUCCEEDED.
 
 Pre-fix issue counts (the "fails without the fix" evidence): 36 / 8 of 10 /
 3 / 17 + 9.
+
+
+## Hermes v0.21.2 (v2026.9.11) — target bump (2026-09-14)
+
+Not a parity cycle. Hermes shipped v0.21.2 four days after our v0.21.1 target; Alan asked whether to check before release prep. A targeted check at the tag found nothing breaking, and the target was bumped on `main` in one commit.
+
+- [fact] Verified at the tag: SCHEMA_VERSION 30 unchanged, no table removed, every column Scarf probes present, `check-hermes-tables.py --tag v2026.9.11` `lanes=5/5`; hosted rooms moved to `shared-state.db` (Scarf never reads them); `acp_adapter/server.py` changed four lines of `/model` provider detection; no verb or flag Scarf issues was removed (`plugins search` lost two args Scarf never passes); every judged output marker byte-identical; Smoke + Live UI plans green against the installed 0.21.2 #capability-gating
+- [decision] **`hermes backup` gets `--keep 0` on v0.21.2+** (`hasBackupKeep = isV0212OrLater`, the v0.21.2 MARK group's only flag): from v2026.9.11 the CLI defaults to `--keep 3` and deletes older `~/hermes-backup-*.zip` in the output directory (`subcommands/backup.py:23-26`, `backup.py:696-698`); Scarf's "Backup Now" must not delete files nobody asked to delete. `HermesBackupVerdict.argv(capabilities:)` has no default (lesson 10); below the floor the flag is an argparse error so the argv stays bare #c6
+- [gotcha] **A Hermes default can change under a verb Scarf shells with no argv change at all.** The C5 walk asks "does the argv still parse"; this one parsed identically and deleted files. On a target bump, diff every `add_argument(... default=...)` on the verbs Scarf issues, not only the added/removed arguments #capability-gating
+- [todo] Not adopted this cycle, on t-ad965a68: the CLI now re-derives `repeat` when a cron edit flips one-shot ↔ recurring (`_rederive_repeat_for_schedule_change`) and snapshots the unpinned model at create; the iOS `jobs.json` form does neither #ios
+- [fact] Counts after the bump: ScarfCore filtered 174/9, Mac serial 1442/213, scripts 20/20, both schemes build #testing

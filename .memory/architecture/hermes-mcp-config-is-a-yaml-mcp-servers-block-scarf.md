@@ -23,7 +23,7 @@ Format facts VERIFIED against Hermes v0.21.0 on this machine (charter C5), not f
 
 ## Relations
 - relates_to [[scarf-projects MCP server: bundled helper, ScarfCore services, no parallel writers]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]
 
 
 ## R2: the patcher fails closed, backs up, and verifies independently

@@ -20,4 +20,4 @@ reviewed_by: human
 
 ## Relations
 - consumed_by [[Scarf Project Overview]]
-- relates_to [[hermes-version-targeting-strategy]]
+- relates_to [[Hermes Version Management]]

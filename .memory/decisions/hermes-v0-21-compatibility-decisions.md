@@ -28,7 +28,7 @@ Removal flags use INVERSE semantics (`true` = still show it) and differ delibera
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.21.0 Audit Findings]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]
 - extends [[Hermes v0.20.5 Compatibility Decisions]]
 
 - [gotcha] `hermes gateway status` never prints \"service is loaded\" anywhere — GatewayViewModel.swift's old `contains(\"service is loaded\")` could never match (that string exists only as a Python code comment in gateway.py); `contains(\"stale\")` matched by accident against unrelated log noise. Verified against real print statements in hermes_cli/gateway.py, identical at v2026.8.19 (0.20.5) and v2026.8.31 (0.21.0). ⚠️ v0.21.1 adds a THIRD verdict ahead of both — the default-profile multiplexer branch, printed with no PID; see [[Hermes v0.21.1 Compatibility Decisions]] #verification

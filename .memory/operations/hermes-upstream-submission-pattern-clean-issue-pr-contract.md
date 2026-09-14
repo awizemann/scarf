@@ -19,7 +19,7 @@ How to submit to NousResearch/hermes-agent without getting lost/closed (assemble
 
 ## Relations
 - relates_to [[Local provider config keys — Hermes reader-verified (v0.17.0)]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]
 
 
 ## THE authentication pattern (solved 2026-07-14 — this is what lost the earlier submission)

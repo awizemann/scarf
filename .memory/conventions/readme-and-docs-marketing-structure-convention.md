@@ -21,4 +21,4 @@ reviewed_by: claude-opus-5
 
 ## Relations
 - relates_to [[Release Distribution and Updates]]
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]

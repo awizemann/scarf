@@ -21,7 +21,7 @@ reviewed_by: audit:claude-code (background)
 - [done] v0.21.0 adoption phase (Sep 2026): tasks t-90c8afa2 (cron incidents/doctor/resume), t-e81e9f48 (peer CLI basics), t-432e7d7d (swift-stats analytics) completed. Adoption work blocked on v0.21.0 gates implemented and verified. v0.21.1 adds new adoption surfaces (see v0.21.1 audit) #adopt
 
 ## Relations
-- relates_to [[hermes-version-compatibility-target]]
+- relates_to [[Hermes Version Management]]
 - implements [[Hermes Capability Gating Pattern]]
 - superseded_by [[Hermes v0.21.1 Audit Findings]] (released 2026-09-07; documents/hermes-v0.21.1-audit-report.md)
 - relates_to [[Hermes v0.20.5 Audit Findings]]

@@ -21,7 +21,7 @@ reviewed_by: audit:claude-code (background)
 
 ## Relations
 - extends [[Hermes v0.18 Compatibility Decisions]]
-- relates_to [[hermes-version-targeting-strategy]]
+- relates_to [[Hermes Version Management]]
 <!-- The former `[[Hermes v0.20.0 Audit Findings]]` edge was dangling: that note was never written
      (the v0.20.0 findings were folded straight into this decisions note). Removed 2026-09-11
      by the round-4 memory audit. -->
