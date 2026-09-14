@@ -92,6 +92,7 @@
 - [ ] Audit P63: C10 residue r7 — async-func blocking seams (backup/restore/logs), sweep domain, launchTerminal env (id: t-d2000dc5) (added: 2026-09-13) (priority: high)
 - [ ] Audit P64: YAML writer/reader residue r7 — block-scalar writer corruption, anchors, duplicate sections, str() comments, nulls (id: t-d1d324ff) (added: 2026-09-13) (priority: high)
 - [ ] Audit P65: cron/kanban residue r7 — iOS model snapshots, duplicate strips, Review entrance, unconfirmed dispatch twins, cron split (id: t-ad965a68) (added: 2026-09-13) (priority: high)
+- [ ] UI gate: unit-test host exited with code 0 mid-test once during the 3.2.0 cut (SessionDeletedSignalTests) (id: t-28fcd354) (added: 2026-09-14)
 
 ## Doing
 
