@@ -22,5 +22,13 @@ To faithfully copy a no_agent job: (1) read the source `pre_run_script` file via
 
 ## Artifacts
 
+**P50 (2026-09-12) narrowed but did not close this.** Round-5 decision 12 shipped the *lesser case* named in the description — an AGENT job that also carries a `pre_run_script` — as a **surfaced downgrade**, not a silent loss: `HermesCronJob.hasPreRunScript` + a caveat in `FleetApplyViewModel`'s apply preview and a count on `FleetApplyExecutor`'s success arm ("N w/o their pre-run script"). Commit `39b888d1` on `fix/whole-surface-audit-r5`.
 
+What P50 established while deciding, which sharpens this ticket:
+
+- **There is no `--pre-run-script` flag; the setter is `cron create --script`** (`hermes_cli/subcommands/cron.py:41-46` @ `v2026.9.7`), mapped onto the record's `script` key by `_JOB_ARG_FIELDS` (`hermes_cli/cron.py:540`). So the argv half of this feature is a one-liner — the flag exists and is accepted on create.
+- **And `cron create` validates nothing**: the only existence check on the path is `cron doctor`'s `_script_health_issue` (`hermes_cli/cron.py:453-465`), run on demand, which resolves against `HERMES_HOME/scripts` and reports `script not found` / `script resolves outside HERMES_HOME/scripts`. A forwarded `--script` therefore lands a green "created" job that injects nothing, and the user finds out days later. That is the whole reason this ticket is file replication and not a flag.
+- So the remaining work is exactly steps (1) and (2) of the description — read the source `script` through the source transport, write it under the TARGET's `~/.hermes/scripts/` (`_scripts_dir_for_cron` is `CRON_DIR.parent / "scripts"`, `hermes_cli/cron.py:447-450`), dir-created — plus forwarding `--script` (and `--no-agent` for the `no_agent` case, still gated on `caps.hasCronNoAgent`).
+
+Recommendation is unchanged: **DEFER**. The honest-note behaviour now covers both shapes (script-only jobs are declined and counted; scripted agent jobs are copied and counted), so nothing is silent any more.
 

@@ -1,7 +1,7 @@
 ---
 id: t-a9ef75f0
 title: Activity section shows an error banner in the UI sweep, failing testEverySectionRenders
-status: todo
+status: done
 added: 2026-09-10
 ---
 
@@ -26,5 +26,5 @@ Also worth checking in the same pass: `ConfigJourneyUITests.testModelPresetCreat
 
 ## Artifacts
 
-
+Fixed in `e8887a66` on main (2026-09-14): `ActivityViewModel.loadImpl` mirrors `DashboardViewModel`'s rule — a LOCAL context whose state.db does not exist renders the empty feed; a local database that exists but cannot be read warns without naming SSH; remote failures keep the SSH copy. Tests: `ScarfCoreTests/ActivityAbsentStateDBTests` (2). Smoke plan green afterwards: all 28 sections render, 127 s. The `ConfigJourneyUITests.testModelPresetCreateAndDeleteWritesPresetStore` load-sensitivity note stays open on the Full-plan run.
 
