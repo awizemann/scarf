@@ -131,12 +131,18 @@ public actor HermesLogService {
         remoteTailBuffer.removeAll(keepingCapacity: false)
     }
 
-    public func readLastLines(count: Int = QueryDefaults.logLineLimit) -> [LogEntry] {
+    /// `async` because the remote branch below spawns `tail -n` over SSH.
+    /// It used to be a synchronous ACTOR method holding a 30 s blocking wait,
+    /// so opening the Logs pane on a remote server froze the actor — and with
+    /// it every other caller — for the whole round trip (charter C10). Every
+    /// caller already `await`ed it across the actor hop, so nothing changed
+    /// at the call sites.
+    public func readLastLines(count: Int = QueryDefaults.logLineLimit) async -> [LogEntry] {
         guard let path = currentPath else { return [] }
         if context.isRemote {
             // For the initial load we bypass the streaming tail and run a
             // one-shot `tail -n <count>` for a clean bounded read.
-            let result = try? transport.runProcess(
+            let result = try? await transport.asyncRunProcess(
                 executable: "/usr/bin/tail",
                 args: ["-n", String(count), path],
                 stdin: nil,

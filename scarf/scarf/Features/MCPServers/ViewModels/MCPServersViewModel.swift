@@ -164,11 +164,29 @@ final class MCPServersViewModel {
                     self.load(force: true)
                     self.showRestartBanner = true
                 } else {
-                    self.activeError = outcome.detail
-                        .map { "Remove failed: \($0)" } ?? "Remove failed"
+                    self.activeError = Self.removeFailureSummary(outcome: outcome)
                 }
             }
         }
+    }
+
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the remove's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    static func removeFailureSummary(outcome: HermesCLIOutcome) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = "hermes mcp remove"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        // These two were never localized and stay as they were — the only
+        // NEW user-facing string here is the neutral sentence above, and it
+        // reuses the catalogue row the six sibling verbs already share.
+        if let detail = outcome.detail, !detail.isEmpty { return "Remove failed: \(detail)" }
+        return "Remove failed"
     }
 
     func toggleEnabled(name: String) {

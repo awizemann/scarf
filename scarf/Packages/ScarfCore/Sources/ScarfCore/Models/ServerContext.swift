@@ -340,7 +340,7 @@ private actor UserHomeCache {
     private func probe(context: ServerContext) async -> String {
         if !context.isRemote { return NSHomeDirectory() }
         let transport = context.makeTransport()
-        let result = try? transport.runProcess(
+        let result = try? await transport.asyncRunProcess(
             executable: "/bin/sh",
             args: ["-c", "echo $HOME"],
             stdin: nil,

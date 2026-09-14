@@ -137,14 +137,15 @@ public enum GatewayConfigWriter {
 
         let updated: String
         switch location {
-        case .found(let blockRange, let indents):
+        case .found(let blockRange, let indents, let blockScalar):
             updated = replaceBlock(
                 in: lines,
                 blockRange: blockRange,
                 key: key,
                 items: trimmedItems,
                 keyIndent: indents.key,
-                itemIndent: indents.item
+                itemIndent: indents.item,
+                blockScalar: blockScalar
             )
         case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt, let indents):
             if trimmedItems.isEmpty { return .unchanged }
@@ -234,9 +235,11 @@ public enum GatewayConfigWriter {
 
         let updated: String
         switch locateBlock(in: lines, platform: section, key: key) {
-        case .found(let blockRange, let indents):
+        case .found(let blockRange, let indents, let blockScalar):
             var newLines = Array(lines.prefix(blockRange.lowerBound))
-            let comments = preservedComments(in: lines, blockRange: blockRange, key: key)
+            let comments = blockScalar
+                ? PreservedComments(headerComment: nil, interior: [])
+                : preservedComments(in: lines, blockRange: blockRange, key: key)
             if !trimmedPairs.isEmpty {
                 newLines.append("\(spaces(indents.key))\(key):\(comments.headerSuffix)")
                 newLines.append(contentsOf: comments.interior)
@@ -395,7 +398,11 @@ public enum GatewayConfigWriter {
         /// Block found; the closed range covers the header line + all bullet
         /// rows attributed to it. Replacing this slice with the new block
         /// completes the edit.
-        case found(ClosedRange<Int>, BlockIndents)
+        /// `blockScalar` is true when the header was `key: |` / `key: >`
+        /// (with any chomp/indent indicator) and the range therefore covers
+        /// the header PLUS the scalar's literal body lines. Those body lines
+        /// are text, not YAML, so none of them is preserved as a comment.
+        case found(ClosedRange<Int>, BlockIndents, blockScalar: Bool)
         /// The top-level `<platform>:` section exists, but the leaf `<key>:`
         /// is absent under it. `insertAfter` is the line index after which
         /// the new key should be inserted (last line in the platform's
@@ -441,6 +448,7 @@ public enum GatewayConfigWriter {
         // key is missing.
         var bodyIndent: Int?
         var keyIdx: Int?
+        var keyIsBlockScalar = false
         var i = platformIdx + 1
         var lastBodyIdx = platformIdx
         while i < lines.count {
@@ -460,13 +468,20 @@ public enum GatewayConfigWriter {
                 switch kind {
                 case .blockHeader:
                     keyIdx = i
+                case .blockScalarHeader:
+                    keyIdx = i
+                    keyIsBlockScalar = true
                 case .inlineValue:
                     // `key: {…}` / `key: […]` / `key: scalar` — the whole
                     // block is this single line; replacing it completes the
                     // edit. (Stock cli-config.yaml.example ships
                     // `reasoning_overrides: {}` uncommented — treating this
                     // as key-missing used to splice a DUPLICATE key.)
-                    return .found(i...i, BlockIndents(key: indent, item: indent * 2))
+                    return .found(
+                        i...i,
+                        BlockIndents(key: indent, item: indent * 2),
+                        blockScalar: false
+                    )
                 }
                 break
             }
@@ -488,6 +503,27 @@ public enum GatewayConfigWriter {
         }
 
         let keyIndent = leadingSpaces(lines[keyIdx])
+
+        if keyIsBlockScalar {
+            // A block scalar's value is EVERY more-indented line that follows —
+            // blank lines and `#`-looking lines included, since inside a
+            // literal/folded block those are text, not comments. Absorb them
+            // all so the replacement takes the body along with the header.
+            var last = keyIdx
+            var j = keyIdx + 1
+            while j < lines.count {
+                let line = lines[j]
+                if line.trimmingCharacters(in: .whitespaces).isEmpty { j += 1; continue }
+                if leadingSpaces(line) <= keyIndent { break }
+                last = j
+                j += 1
+            }
+            return .found(
+                keyIdx...last,
+                BlockIndents(key: keyIndent, item: keyIndent + step),
+                blockScalar: true
+            )
+        }
 
         // Walk down the bullet rows until we leave the block (a non-bullet
         // at or above the key's indent). Block-style YAML allows bullets at
@@ -522,7 +558,8 @@ public enum GatewayConfigWriter {
 
         return .found(
             keyIdx...endIdx,
-            BlockIndents(key: keyIndent, item: itemIndent ?? (keyIndent + step))
+            BlockIndents(key: keyIndent, item: itemIndent ?? (keyIndent + step)),
+            blockScalar: false
         )
     }
 
@@ -534,6 +571,14 @@ public enum GatewayConfigWriter {
         /// `key: <something>` — an inline value (flow dict `{…}`, flow list
         /// `[…]`, or scalar) occupying a single line.
         case inlineValue
+        /// `key: |` / `key: >` (with any chomping or indentation indicator,
+        /// and an optional trailing comment) — a BLOCK SCALAR header whose
+        /// value is the more-indented lines that follow. Classifying this as
+        /// `.inlineValue` replaced the header alone and ORPHANED the body,
+        /// which PyYAML rejects with a ScannerError; `gateway/config.py`
+        /// (`:775-791` @ v2026.9.7) then discards the whole config.yaml
+        /// layer. The body must be replaced together WITH the header.
+        case blockScalarHeader
     }
 
     /// Match `trimmed` against the target key, tolerating an inline flow /
@@ -545,6 +590,7 @@ public enum GatewayConfigWriter {
         let rest = trimmed.dropFirst(header.count)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if rest.isEmpty || rest.hasPrefix("#") { return .blockHeader }
+        if HermesYAML.blockScalarHeader(rest) != nil { return .blockScalarHeader }
         return .inlineValue
     }
 
@@ -678,10 +724,13 @@ public enum GatewayConfigWriter {
         key: String,
         items: [String],
         keyIndent: Int,
-        itemIndent: Int
+        itemIndent: Int,
+        blockScalar: Bool
     ) -> String {
         var newLines = Array(lines.prefix(blockRange.lowerBound))
-        let comments = preservedComments(in: lines, blockRange: blockRange, key: key)
+        let comments = blockScalar
+            ? PreservedComments(headerComment: nil, interior: [])
+            : preservedComments(in: lines, blockRange: blockRange, key: key)
         if !items.isEmpty {
             newLines.append("\(spaces(keyIndent))\(key):\(comments.headerSuffix)")
             newLines.append(contentsOf: comments.interior)

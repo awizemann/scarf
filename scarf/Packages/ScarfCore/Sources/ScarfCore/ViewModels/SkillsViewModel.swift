@@ -947,6 +947,46 @@ public final class SkillsViewModel {
         )
     }
 
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the install's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    nonisolated static func installFailureSummary(outcome: HermesCLIOutcome) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = "hermes skills install"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        if let detail = outcome.detail, !detail.isEmpty { return "Install failed — \(detail)" }
+        return "Install failed"
+    }
+
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the uninstall's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    ///
+    /// The exit code is NOT quoted on the unconfirmed arm: the verdict
+    /// reaches `.unconfirmed` only at exit 0, so "(exit 0)" was a number that
+    /// the verdict had already declared meaningless, printed beside a claim
+    /// of failure.
+    nonisolated static func uninstallFailureSummary(
+        outcome: HermesCLIOutcome,
+        exitCode: Int32
+    ) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = "hermes skills uninstall"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        if let detail = outcome.detail, !detail.isEmpty { return "Uninstall failed — \(detail)" }
+        return "Uninstall failed (exit \(exitCode))"
+    }
+
     @MainActor
     private func finishInstall(identifier: String, exitCode: Int32, output: String) async {
         isHubLoading = false
@@ -954,7 +994,7 @@ public final class SkillsViewModel {
         if outcome.succeeded {
             hubMessage = "Installed \(identifier)"
         } else {
-            hubMessage = outcome.detail.map { "Install failed — \($0)" } ?? "Install failed"
+            hubMessage = Self.installFailureSummary(outcome: outcome)
         }
         await load()
         try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -967,8 +1007,7 @@ public final class SkillsViewModel {
         if outcome.succeeded {
             hubMessage = "Uninstalled"
         } else {
-            hubMessage = outcome.detail.map { "Uninstall failed — \($0)" }
-                ?? "Uninstall failed (exit \(exitCode))"
+            hubMessage = Self.uninstallFailureSummary(outcome: outcome, exitCode: exitCode)
         }
         await load()
         try? await Task.sleep(nanoseconds: 2_000_000_000)

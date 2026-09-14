@@ -114,7 +114,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         // 1. Resolve $HOME so the absolute paths in the manifest are
         //    canonical (e.g. `/home/alan/.hermes`, not the
         //    `~`-prefixed `HermesPathSet.home`).
-        let homeResult = try transport.runProcess(
+        let homeResult = try await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", "echo \"$HOME\""],
             stdin: nil,
@@ -128,7 +128,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         // 2. Hermes version. Optional — older builds may not implement
         //    `--version`. Empty/missing isn't fatal; the manifest just
         //    won't carry a version stamp.
-        let versionResult = try? transport.runProcess(
+        let versionResult = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", "hermes --version 2>/dev/null || true"],
             stdin: nil,
@@ -149,7 +149,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         //    `du -sb '~/.hermes' 2>/dev/null` swallows the same
         //    error silently — that's why preflight looked green).
         let hermesHome = Self.expandTilde(context.paths.home, home: resolvedHome)
-        let hermesSize = Self.estimateBytes(transport: transport, path: hermesHome)
+        let hermesSize = await Self.estimateBytes(transport: transport, path: hermesHome)
 
         // 4. Enumerate projects via the existing transport-aware
         //    service. Empty registry → empty list, not an error.
@@ -161,7 +161,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         for project in registry.projects where !project.archived {
             let expanded = Self.expandTilde(project.path, home: resolvedHome)
             let reachable = transport.fileExists(expanded)
-            let bytes = reachable ? Self.estimateBytes(transport: transport, path: expanded) : nil
+            let bytes = reachable ? await Self.estimateBytes(transport: transport, path: expanded) : nil
             projectSummaries.append(PreflightSummary.ProjectSummary(
                 id: project.path,                       // path is the registry's stable handle
                 name: project.name,
@@ -173,7 +173,7 @@ public final class RemoteBackupService: @unchecked Sendable {
 
         // 5. Is `sqlite3` on PATH? Drives the WAL-checkpoint toggle.
         //    Missing → we still archive, just without quiescing.
-        let sqliteCheck = try? transport.runProcess(
+        let sqliteCheck = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", "command -v sqlite3 >/dev/null 2>&1 && echo yes || echo no"],
             stdin: nil,
@@ -233,7 +233,7 @@ public final class RemoteBackupService: @unchecked Sendable {
             progress(.checkpointingDB)
             let stateDB = preflight.hermesHomePath + "/state.db"
             let cmd = "sqlite3 \(Self.shellQuote(stateDB)) 'PRAGMA wal_checkpoint(TRUNCATE);' || true"
-            let result = try? transport.runProcess(
+            let result = try? await transport.asyncRunProcess(
                 executable: "/bin/bash",
                 args: ["-lc", cmd],
                 stdin: nil,
@@ -476,9 +476,9 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// `du -sb` (GNU) is the most portable way to get raw bytes —
     /// on macOS `du -sk` returns kilobytes. Returns nil if neither
     /// works.
-    private static func estimateBytes(transport: any ServerTransport, path: String) -> Int64? {
+    private static func estimateBytes(transport: any ServerTransport, path: String) async -> Int64? {
         let cmd = "du -sb \(shellQuote(path)) 2>/dev/null | awk '{print $1}'"
-        guard let r = try? transport.runProcess(
+        guard let r = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
             args: ["-lc", cmd],
             stdin: nil,

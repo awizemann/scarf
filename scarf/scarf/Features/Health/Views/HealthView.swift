@@ -410,7 +410,18 @@ struct HealthView: View {
             }
             .padding(.horizontal, ScarfSpace.s6)
             .padding(.vertical, ScarfSpace.s3)
-            if !viewModel.context.isRemote {
+            // C1 + C5: `hermes dashboard` does not exist below v0.9.0 — the
+            // string `dashboard` occurs nowhere in `hermes_cli/main.py` at
+            // `v2026.4.8` (0.8.0), and `def cmd_dashboard(args)` first
+            // appears at `:4458` of `v2026.4.13` (0.9.0), registered at
+            // `:4180` / `:5978`. On 0.6.0-0.8.x this row spawned a verb
+            // argparse does not know, which Hermes routes to the AGENT, so
+            // "Start" looked like it worked and nothing ever bound the port.
+            // Hosts at 0.9.0 and later render byte-identically to the
+            // previous release; the only range that changes is the one where
+            // the control could never have worked.
+            if !viewModel.context.isRemote,
+               capabilitiesStore?.capabilities.hasDashboardCommand == true {
                 Divider()
                 webDashboardRow
             }

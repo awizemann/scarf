@@ -86,13 +86,38 @@ final class ToolsViewModel {
             // user has no idea whether they mis-clicked or the CLI refused.
             // Reuse the Settings extraction so the CLI's own sentence (or a
             // Python traceback tail) becomes one readable line.
-            toggleFailureMessage = (outcome.detail ?? SettingsViewModel.failureReason(from: result.output))
-                .map { String(localized: "Couldn’t \(action) \(tool.name): \($0)") }
-                ?? String(localized: "Couldn’t \(action) \(tool.name)")
+            toggleFailureMessage = Self.toggleFailureSummary(
+                outcome: outcome, output: result.output, action: action, toolset: tool.name
+            )
             logger.warning("tools \(action, privacy: .public) refused (exit \(result.exitCode))")
         } else {
             toggleFailureMessage = nil
         }
+    }
+
+    /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``
+    /// shape, round-6 P54b/P59). `.unconfirmed` is gated on the CONFIDENCE
+    /// ALONE — never on whether there is a line to quote. A two-way `if`
+    /// reaches the honest sentence only when the output was EMPTY, so an
+    /// exit-0 run that printed something the verdict does not recognise had
+    /// its unrelated tail line rendered as the toggle's refusal: a sentence
+    /// Hermes never said, presented as its reason.
+    static func toggleFailureSummary(
+        outcome: HermesCLIOutcome,
+        output: String,
+        action: String,
+        toolset: String
+    ) -> String {
+        if outcome.confidence == .unconfirmed {
+            let verb = "hermes tools \(action)"
+            return String(localized: "\(verb) printed no result. Check the host.")
+        }
+        // Reuse the Settings extraction so the CLI's own sentence (or a
+        // Python traceback tail) becomes one readable line.
+        if let reason = outcome.detail ?? SettingsViewModel.failureReason(from: output) {
+            return String(localized: "Couldn’t \(action) \(toolset): \(reason)")
+        }
+        return String(localized: "Couldn’t \(action) \(toolset)")
     }
 
     /// Sticky failure banner for the last toggle. `nil` = no failure
