@@ -11,7 +11,7 @@ struct VoiceLiveView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s4) {
             header
-            meter
+            MicLevelMeter(viewModel: viewModel, tint: statusColor)
             transcript
             controls
         }
@@ -47,49 +47,28 @@ struct VoiceLiveView: View {
         }
     }
 
-    private var meter: some View {
-        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-            HStack {
-                Text("Microphone")
-                    .font(.caption)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
-                Spacer()
-                Text(levelLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(ScarfColor.foregroundFaint)
-            }
-
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(ScarfColor.backgroundSecondary)
-                    Capsule()
-                        .fill(statusColor)
-                        .frame(width: max(8, proxy.size.width * min(max(viewModel.micLevel * 3, 0), 1)))
-                }
-            }
-            .frame(height: 8)
-            .accessibilityLabel("Microphone level")
-            .accessibilityValue(levelLabel)
-        }
-    }
-
     private var transcript: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-                if viewModel.userTranscript.isEmpty && viewModel.assistantTranscript.isEmpty {
+                if !viewModel.hasTranscriptContent {
                     Text("Speak naturally once the session is listening.")
                         .font(.body)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                if !viewModel.userTranscript.isEmpty {
-                    transcriptBlock(title: "You", text: viewModel.userTranscript, color: ScarfColor.foregroundPrimary)
+                ForEach(Array(viewModel.userTranscriptBlocks.enumerated()), id: \.offset) { block in
+                    transcriptBlock(title: "You", text: block.element, color: ScarfColor.foregroundPrimary)
+                }
+                if !viewModel.userTranscriptLive.isEmpty {
+                    transcriptBlock(title: "You", text: viewModel.userTranscriptLive, color: ScarfColor.foregroundPrimary)
                 }
 
-                if !viewModel.assistantTranscript.isEmpty {
-                    transcriptBlock(title: "Hermes", text: viewModel.assistantTranscript, color: ScarfColor.foregroundMuted)
+                ForEach(Array(viewModel.assistantTranscriptBlocks.enumerated()), id: \.offset) { block in
+                    transcriptBlock(title: "Hermes", text: block.element, color: ScarfColor.foregroundMuted)
+                }
+                if !viewModel.assistantTranscriptLive.isEmpty {
+                    transcriptBlock(title: "Hermes", text: viewModel.assistantTranscriptLive, color: ScarfColor.foregroundMuted)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,6 +154,43 @@ struct VoiceLiveView: View {
             return ScarfColor.danger
         default:
             return ScarfColor.foregroundMuted
+        }
+    }
+}
+
+/// The mic-level readout, isolated into its own view type so the
+/// ~10 Hz level ticks re-evaluate only this subtree (a few view
+/// values) instead of the whole session body — the transcript, whose
+/// Texts grow over the session, sits in the parent's observation
+/// scope and would otherwise re-diff on every tick.
+private struct MicLevelMeter: View {
+    let viewModel: VoiceLiveViewModel
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            HStack {
+                Text("Microphone")
+                    .font(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Spacer()
+                Text(levelLabel)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(ScarfColor.backgroundSecondary)
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: max(8, proxy.size.width * min(max(viewModel.micLevel * 3, 0), 1)))
+                }
+            }
+            .frame(height: 8)
+            .accessibilityLabel("Microphone level")
+            .accessibilityValue(levelLabel)
         }
     }
 

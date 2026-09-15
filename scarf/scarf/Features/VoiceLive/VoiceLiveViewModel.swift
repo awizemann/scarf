@@ -20,8 +20,13 @@ import os
 @MainActor
 final class VoiceLiveViewModel {
     private(set) var phase: VoiceLivePhase = .idle
-    private(set) var userTranscript = ""
-    private(set) var assistantTranscript = ""
+    /// Committed utterance blocks — one entry per finished user
+    /// utterance / assistant speaking turn. Deltas append to the live
+    /// tails only, so per-delta work never re-lays-out settled text.
+    private(set) var userTranscriptBlocks: [String] = []
+    private(set) var userTranscriptLive = ""
+    private(set) var assistantTranscriptBlocks: [String] = []
+    private(set) var assistantTranscriptLive = ""
     /// Live mic RMS (0…1) from the input tap — real level data, not a
     /// cosmetic animation.
     private(set) var micLevel: Double = 0
@@ -131,7 +136,14 @@ final class VoiceLiveViewModel {
     // MARK: - Event routing
 
     private func handle(_ event: RealtimeVoiceEvent) async {
-        phase = VoiceLivePhaseReducer.next(phase, after: event)
+        let next = VoiceLivePhaseReducer.next(phase, after: event)
+        // @Observable fires observers on every assignment, equal or not.
+        // Transcript/audio deltas arrive at delta cadence and rarely move
+        // the phase — skip the write so the view body doesn't re-evaluate
+        // for a no-op.
+        if next != phase {
+            phase = next
+        }
 
         switch event {
         case .outputAudioDelta(_, let data):
@@ -143,28 +155,49 @@ final class VoiceLiveViewModel {
             await engine?.cutPlayback()
 
         case .userTranscriptDelta(let delta):
-            userTranscript += delta
+            userTranscriptLive += delta
 
         case .userTranscriptCompleted(let final):
-            userTranscript = final
+            commitUserTranscript(final.isEmpty ? userTranscriptLive : final)
 
         case .assistantTranscriptDelta(let delta):
-            assistantTranscript += delta
+            assistantTranscriptLive += delta
 
         case .outputItemStarted:
-            // New speaking turn → new paragraph in the transcript log.
-            if !assistantTranscript.isEmpty {
-                assistantTranscript += "\n"
-            }
+            // New speaking turn → settle the previous turn as its own
+            // block so only the in-flight tail re-lays out per delta.
+            commitAssistantTranscript()
 
         case .closed:
             // Terminal: the service finished its stream. Keep the
             // transcripts on screen; silence the mic meter.
+            commitUserTranscript(userTranscriptLive)
+            commitAssistantTranscript()
             micLevel = 0
 
         default:
             break
         }
+    }
+
+    private func commitUserTranscript(_ text: String) {
+        let settled = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !settled.isEmpty else { return }
+        userTranscriptBlocks.append(settled)
+        userTranscriptLive = ""
+    }
+
+    private func commitAssistantTranscript() {
+        let settled = assistantTranscriptLive.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !settled.isEmpty else { return }
+        assistantTranscriptBlocks.append(settled)
+        assistantTranscriptLive = ""
+    }
+
+    /// True once any transcript content exists — drives the empty state.
+    var hasTranscriptContent: Bool {
+        !userTranscriptBlocks.isEmpty || !userTranscriptLive.isEmpty
+            || !assistantTranscriptBlocks.isEmpty || !assistantTranscriptLive.isEmpty
     }
 
     // MARK: - Teardown
