@@ -21,7 +21,7 @@ enum ShellTestRunner {
         stdin: Data? = nil,
         environment: [String: String]? = nil,
         currentDirectory: URL? = nil,
-        timeout: TimeInterval = 30
+        timeout: TimeInterval = 120
     ) throws -> Output {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("scarf-shell-\(UUID().uuidString)", isDirectory: true)

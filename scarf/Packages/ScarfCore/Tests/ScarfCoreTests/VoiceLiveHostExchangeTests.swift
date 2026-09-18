@@ -48,8 +48,10 @@ import Foundation
         #expect(script.contains(#"export HERMES_HOME="$HOME/.hermes""#) || script.contains(#"export HERMES_HOME="$HOME"'/.hermes'"#))
     }
 
-    /// Citadel sends the script base64-encoded as one argv token; stay far
-    /// below Linux MAX_ARG_STRLEN (128 KiB) with a worst-case history.
+    /// Keep the worst-case script small: it crosses SSH on the exec
+    /// channel's stdin (iOS, `CitadelServerTransport.streamScript`) or ssh's
+    /// stdin (Mac), and the old iOS path — one base64 argv token — was bound
+    /// by Linux MAX_ARG_STRLEN (128 KiB). A generous ceiling either way.
     @Test func worstCaseScriptStaysSmall() {
         let offer = String(repeating: "a=candidate:1 1 udp 2122260223 192.168.1.10 51234 typ host\r\n", count: 40)
         let turns = (0..<60).map { VoiceLiveText.SeedTurn(role: $0 % 2 == 0 ? .user : .assistant, text: String(repeating: "x", count: 1_500)) }
@@ -176,6 +178,23 @@ import Foundation
         }
     }
 
+    /// Over SSH the script starts in `$HOME`, and `python -c` puts the
+    /// working directory first on `sys.path`: a `~/tools/voice_live.py`
+    /// must not shadow Hermes's. The script `cd /`s first.
+    @Test func aToolsPackageInTheWorkingDirectoryCannotShadowHermes() throws {
+        let env = try FakeHermes(mode: "ok")
+        let cwd = env.root.appendingPathComponent("home-with-tools")
+        let tools = cwd.appendingPathComponent("tools")
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        try Data().write(to: tools.appendingPathComponent("__init__.py"))
+        try Data("""
+        def create_webrtc_session(sdp_offer, history=None):
+            return {"session": {"id": "SHADOW"}, "transport": {"type": "webrtc", "sdp": "shadow"}}
+        """.utf8).write(to: tools.appendingPathComponent("voice_live.py"))
+        let answer = try env.run(offer: Self.offer, from: cwd)
+        #expect(answer.sessionID == "sess_fake")
+    }
+
     @Test func realScriptReportsUnsupportedWhenTheModuleIsMissing() throws {
         #expect(throws: VoiceLiveHostError.unsupported) { try FakeHermes(mode: "missing").run(offer: Self.offer) }
     }
@@ -230,12 +249,12 @@ import Foundation
 
         deinit { try? FileManager.default.removeItem(at: root) }
 
-        func run(offer: String) throws -> VoiceLiveSessionAnswer {
+        func run(offer: String, from directory: URL? = nil) throws -> VoiceLiveSessionAnswer {
             let script = VoiceLiveHostExchange.script(
                 hermesBinary: root.appendingPathComponent("venv/bin/hermes").path,
                 hermesHome: home.path,
                 requestJSON: VoiceLiveHostExchange.requestJSON(offerSDP: offer, history: [VoiceLiveHistoryMessage(role: .user, text: "hi")]))
-            let out = try ShellTestRunner.run(arguments: ["-c", script])
+            let out = try ShellTestRunner.run(arguments: ["-c", script], currentDirectory: directory)
             return try VoiceLiveHostExchange.parse(stdout: out.stdout, stderr: out.stderr, exitCode: out.status)
         }
 

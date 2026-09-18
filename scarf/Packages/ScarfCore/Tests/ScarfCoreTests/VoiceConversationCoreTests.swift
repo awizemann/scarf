@@ -238,4 +238,19 @@ import Foundation
         #expect(VoiceTurnReply.latest(in: messages, forPrompt: "something else", isStreaming: false) == nil)
         #expect(VoiceTurnReply.latest(in: Array(messages.prefix(3)), forPrompt: "what is the weather", isStreaming: true) == nil)
     }
+
+    /// A superseding turn is stored as Hermes's rewrite
+    /// (`_attach_interrupted_prompt`, acp_adapter/server.py:201-202 @
+    /// v2026.9.14); a transcript reloaded from state.db must still match.
+    @Test func replyMatchesHermessInterruptRewriteOfTheRow() {
+        func message(_ id: Int, _ role: String, _ content: String) -> HermesMessage {
+            HermesMessage(id: id, sessionId: "s", role: role, content: content, toolCallId: nil, toolCalls: [],
+                          toolName: nil, timestamp: nil, tokenCount: nil, finishReason: nil, reasoning: nil)
+        }
+        let rewritten = "book the dentist friday\n\nUser correction/guidance after interrupt: no, thursday"
+        let messages = [message(9, "user", rewritten), message(10, "assistant", "Moved to Thursday.")]
+        #expect(VoiceTurnReply.latest(in: messages, forPrompt: "no, thursday", isStreaming: false)
+                == VoiceTurnReply(text: "Moved to Thursday.", isStreaming: false))
+        #expect(VoiceTurnReply.latest(in: messages, forPrompt: "thursday", isStreaming: false) == nil)
+    }
 }

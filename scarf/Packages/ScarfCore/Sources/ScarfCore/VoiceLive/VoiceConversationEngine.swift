@@ -72,18 +72,26 @@ public struct VoiceTurnRequest: Sendable, Equatable {
     /// The recent spoken exchange, `User:` / `Voice assistant:` lines.
     /// Model input only.
     public let context: String
+    /// True when the engine cancelled a running turn to make way for this
+    /// one. Such a turn is sent TEXT-ONLY (no context notes), so Hermes
+    /// consumes the cancelled request and frames this one as its correction
+    /// (`_rewrite_prompt_for_interrupt`, `acp_adapter/server.py:680-693` @
+    /// v2026.9.14) instead of leaking it into the next typed message.
+    public let supersedesCancelledTurn: Bool
 
-    public init(id: String, prompt: String, context: String) {
+    public init(id: String, prompt: String, context: String, supersedesCancelledTurn: Bool = false) {
         self.id = id
         self.prompt = prompt
         self.context = context
+        self.supersedesCancelledTurn = supersedesCancelledTurn
     }
 
     /// Pass these to `ACPClient.sendPrompt(sessionId:text:images:contextNotes:)`
     /// with `text: prompt`: Hermes's voice turn note plus `context`, as an
     /// embedded resource the model reads and the transcript never stores.
+    /// EMPTY for a superseding turn — see ``supersedesCancelledTurn``.
     public var contextNotes: [ACPContextNote] {
-        [VoiceLiveTurnNote.contextNote(context: context)]
+        supersedesCancelledTurn ? [] : [VoiceLiveTurnNote.contextNote(context: context)]
     }
 }
 
@@ -105,14 +113,20 @@ public struct VoiceTurnReply: Sendable, Equatable {
     /// turn's bubble exists and some assistant text has arrived. Matching is
     /// by text, so the host must append the bubble before its first `await`
     /// in `submitVoiceTurn` (see ``VoiceTurnHost``).
+    ///
+    /// A superseding turn's stored row is Hermes's rewrite, `"<cancelled>\n\n
+    /// User correction/guidance after interrupt: <prompt>"`
+    /// (`_attach_interrupted_prompt`, `acp_adapter/server.py:201-202` @
+    /// v2026.9.14), so a transcript reloaded from state.db also matches.
     public static func latest(
         in messages: [HermesMessage],
         forPrompt prompt: String,
         isStreaming: Bool
     ) -> VoiceTurnReply? {
-        guard let userIndex = messages.lastIndex(where: { $0.role == "user" }),
-              messages[userIndex].content.trimmingCharacters(in: .whitespacesAndNewlines)
-                == prompt.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let wanted = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let userIndex = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
+        let stored = messages[userIndex].content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stored == wanted || stored.hasSuffix(interruptGuidanceMarker + wanted) else { return nil }
         let text = messages[(userIndex + 1)...]
             .filter { $0.role == "assistant" }
             .map(\.content)
@@ -121,6 +135,10 @@ public struct VoiceTurnReply: Sendable, Equatable {
         return text.isEmpty ? nil : VoiceTurnReply(text: text, isStreaming: isStreaming)
     }
 }
+
+/// The separator Hermes puts between a cancelled request and its correction
+/// (`_attach_interrupted_prompt`, `acp_adapter/server.py:201-202` @ v2026.9.14).
+let interruptGuidanceMarker = "\n\nUser correction/guidance after interrupt: "
 
 /// The active chat, as the voice layer sees it. Each app's chat controller
 /// conforms (Mac: `ChatViewModel` over `RichChatViewModel`; ScarfGo:
@@ -136,6 +154,8 @@ public protocol VoiceTurnHost: AnyObject {
     /// Submit `request` as a normal chat turn: show `request.prompt` as the
     /// user bubble and send `ACPClient.sendPrompt(sessionId:text:
     /// request.prompt, images: [], contextNotes: request.contextNotes)`.
+    /// Always pass `request.contextNotes` as given: it is empty for a
+    /// superseding turn on purpose.
     ///
     /// Return once the prompt is HANDED TO ACP — do not await the turn's
     /// completion (that is `isVoiceTurnBusy` going false; per convention,
@@ -153,9 +173,15 @@ public protocol VoiceTurnHost: AnyObject {
     /// `sendPrompt` has RETURNED. Hermes queues a prompt that arrives while
     /// a turn runs as text only and drops the voice note
     /// (`acp_adapter/server.py:696-715` @ v2026.9.14), so a superseding
-    /// voice turn must wait for this. (Hermes also remembers the cancelled
-    /// text and attaches it to the chat's next TYPED prompt — see
-    /// `ACPClient.sendPrompt(sessionId:text:images:contextNotes:)`.)
+    /// voice turn must wait for this. Hermes also stores the cancelled text
+    /// (`server.py:617-619`); the engine's next submit is text-only
+    /// (``VoiceTurnRequest/supersedesCancelledTurn``) so Hermes consumes it
+    /// as "correction of the cancelled request" instead of attaching it to
+    /// the chat's next typed prompt. If the running turn was a typed one with
+    /// another typed prompt queued behind it, Hermes drains that queued
+    /// prompt as a text-only turn before the cancelled `prompt()` returns
+    /// (`_finish_turn`, `server.py:927-938`), so IT picks up the stored text;
+    /// the voice turn then just goes without its note.
     func cancelActiveVoiceTurn() async
 
     /// The reply to `requestID` so far, or `nil` before any assistant text

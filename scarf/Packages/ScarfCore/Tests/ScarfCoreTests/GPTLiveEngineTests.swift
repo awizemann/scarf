@@ -83,8 +83,17 @@ import Foundation
             submitted.append(request)
             isVoiceTurnBusy = true
         }
+        /// When set, cancelActiveVoiceTurn() suspends until the test resumes it.
+        var holdCancel = false
+        var cancelContinuation: CheckedContinuation<Void, Never>?
+        func releaseCancel() {
+            cancelContinuation?.resume()
+            cancelContinuation = nil
+        }
+
         func cancelActiveVoiceTurn() async {
             log.append("cancel begin")
+            if holdCancel { await withCheckedContinuation { cancelContinuation = $0 } }
             try? await Task.sleep(for: .milliseconds(20))   // the in-flight sendPrompt returning
             isVoiceTurnBusy = false
             log.append("cancel end")
@@ -339,10 +348,64 @@ import Foundation
         await settle { host.submitted.count == 2 }
         #expect(host.log == ["submit d1", "cancel begin", "cancel end", "submit d2"])
         #expect(host.submitted.last?.prompt == "book the dentist friday no, thursday")
+        // The first turn carries the voice note; the superseding one goes
+        // text-only so Hermes consumes the cancelled request (server.py:680-693).
+        #expect(host.submitted.first?.supersedesCancelledTurn == false)
+        #expect(host.submitted.first?.contextNotes.count == 1)
+        #expect(host.submitted.last?.supersedesCancelledTurn == true)
+        #expect(host.submitted.last?.contextNotes.isEmpty == true)
         // d1's late reply is never spoken for d2.
         host.replies["d1"] = VoiceTurnReply(text: "Booked Friday.", isStreaming: false)
         advance(0.2)
         #expect(bridge.spoken().isEmpty)
+    }
+
+    /// Review finding: a third delegation arriving while the cancel for the
+    /// second is still awaited must inherit the text-only debt — Hermes still
+    /// holds the cancelled prompt, and the busy flag is already false by the
+    /// time the third turn submits.
+    @Test func aDelegationThatArrivesDuringTheCancelStillGoesTextOnly() async {
+        await goLive()
+        user("book the dentist friday")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.holdCancel = true
+        user(" no, thursday", at: 3_000)
+        delegate("d2")
+        await settle { host.cancelContinuation != nil }
+        user(" at nine", at: 4_000)
+        delegate("d3")
+        host.releaseCancel()
+        await settle { host.submitted.count == 2 }
+        #expect(host.submitted.map(\.id) == ["d1", "d3"])          // d2 was superseded while waiting
+        #expect(host.submitted.last?.supersedesCancelledTurn == true)
+        #expect(host.submitted.last?.contextNotes.isEmpty == true)
+        // The debt is paid: the next turn after d3 settles carries its note.
+        host.isVoiceTurnBusy = false
+        host.replies["d3"] = VoiceTurnReply(text: "Booked.", isStreaming: false)
+        advance(0.2)
+        user(" thanks, and remind me", at: 9_000)
+        delegate("d4")
+        await settle { host.submitted.count == 3 }
+        #expect(host.submitted.last?.supersedesCancelledTurn == false)
+    }
+
+    /// Only a turn that CANCELLED another is text-only: a delegation after
+    /// the previous turn finished on its own keeps the note.
+    @Test func aTurnAfterAFinishedTurnKeepsTheNote() async {
+        await goLive()
+        user("first")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.isVoiceTurnBusy = false
+        host.replies["d1"] = VoiceTurnReply(text: "Done.", isStreaming: false)
+        advance(0.2)
+        user(" second", at: 5_000)
+        delegate("d2")
+        await settle { host.submitted.count == 2 }
+        #expect(!host.log.contains("cancel begin"))
+        #expect(host.submitted.last?.supersedesCancelledTurn == false)
+        #expect(host.submitted.last?.contextNotes.count == 1)
     }
 
     @Test func aSubmitFailureApologisesAndSettles() async {
