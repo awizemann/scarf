@@ -266,20 +266,20 @@ import Testing
 
     // MARK: - Shell quoting
 
-    @Test func shellQuotedPathKeepsOnlyALeadingHomeExpansion() {
-        #expect(HermesSpeechService.shellQuotedPath("~") == "\"$HOME\"")
-        #expect(HermesSpeechService.shellQuotedPath("~/.hermes") == "\"$HOME\"'/.hermes'")
-        #expect(HermesSpeechService.shellQuotedPath("$HOME/.hermes/profiles/w") == "\"$HOME\"'/.hermes/profiles/w'")
-        #expect(HermesSpeechService.shellQuotedPath("/opt/hermes/bin/hermes") == "'/opt/hermes/bin/hermes'")
-        // Mid-path `$HOME` and `~` are literal, not expansions.
-        #expect(HermesSpeechService.shellQuotedPath("/x/$HOME/~") == "'/x/$HOME/~'")
-        #expect(HermesSpeechService.shellQuotedPath("~user/x") == "'~user/x'")
+    /// Config paths go through Scarf's shared quoter.
+    @Test func scriptQuotesConfigPathsWithTheSharedQuoter() {
+        let script = HermesSpeechService.synthesisScript(
+            options: options(binary: "/srv/$(id)/hermes", home: "~/.hermes/profiles/w"),
+            cacheKey: "k", text: "hi"
+        )
+        #expect(script.contains("hb='/srv/$(id)/hermes'"))
+        #expect(script.contains("export HERMES_HOME=\"$HOME/.hermes/profiles/w\""))
     }
 
     /// Evaluate the quoted form in a real shell: command substitution,
     /// backticks, variables and embedded quotes must all come back
     /// literally, and nothing must execute.
-    @Test func shellQuotedPathDefeatsCommandSubstitutionInARealShell() throws {
+    @Test func sharedQuoterDefeatsCommandSubstitutionInARealShell() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-quote-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -293,7 +293,7 @@ import Testing
         for value in hostile {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = ["-c", "printf '%s' \(HermesSpeechService.shellQuotedPath(value))"]
+            proc.arguments = ["-c", "printf '%s' \(HermesProfileScope.shellQuotePath(value))"]
             let out = Pipe()
             proc.standardOutput = out
             try proc.run()
@@ -597,21 +597,52 @@ import Testing
 
     // MARK: - Failure paths
 
-    @Test func mp3MasqueradeThrowsProviderMismatchAndIsNotCached() async {
+    /// Hermes's default `edge` provider writes MP3 into the `.wav` path;
+    /// the bytes decide, and MP3 plays (and caches as `.mp3`).
+    @Test func mp3UnderWavNameIsAcceptedByMagicBytes() async throws {
         let transport = Self.succeeding(data: Self.mp3Bytes)
+        let cache = tempCache()
+        let svc = service(transport: transport, cache: cache)
+        let first = try await svc.synthesize(text: "hello", options: options())
+        #expect(first.format == .mp3)
+        #expect(first.chunks == [Self.mp3Bytes])
+        let again = try await svc.synthesize(text: "hello", options: options())
+        #expect(again.fromCache)
+        #expect(again.format == .mp3)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: cache.directory.path)) ?? []
+        #expect(names.contains { $0.hasSuffix("-00.mp3") })
+        #expect(!names.contains { $0.hasSuffix(".wav") })
+    }
+
+    @Test func oggThrowsProviderMismatchAndIsNotCached() async {
+        let ogg = Data([0x4F, 0x67, 0x67, 0x53]) + Data(repeating: 0, count: 12)
+        let transport = Self.succeeding(data: ogg)
         let cache = tempCache()
         let context = Self.remoteContext()
         let svc = service(transport: transport, cache: cache, context: context)
-        await #expect(throws: HermesSpeechService.SpeechError.providerMismatch(actualFormat: "mp3")) {
+        await #expect(throws: HermesSpeechService.SpeechError.providerMismatch(actualFormat: "ogg")) {
             _ = try await svc.synthesize(text: "hello", options: self.options())
         }
         // The temp file was still cleaned up server-side, and nothing
         // poisoned the cache.
-        #expect(transport.removes == [Self.base(for: (transport.scripts.first ?? ""))])
+        #expect(transport.removes == [Self.base(for: transport.scripts.first ?? "")])
         #expect(cache.cachedAudio(for: HermesTTSCache.cacheKey(
             server: HermesSpeechService.serverIdentity(context), provider: "openai",
             voiceFingerprint: options().voiceFingerprint, text: "hello"
         )) == nil)
+    }
+
+    /// One player connection serves the whole message, so chunks must agree.
+    @Test func mixedChunkFormatsAreAMismatch() async {
+        let transport = SpeechTransport { script in
+            let stem = String(Self.base(for: script).dropLast(".wav".count))
+            let a = "\(stem).part01.wav", b = "\(stem).part02.mp3"
+            return (ProcessResult(exitCode: 0, stdout: Data(Self.stdout(base: Self.base(for: script), paths: [a, b]).utf8), stderr: Data()),
+                    [a: Self.wavBytes, b: Self.mp3Bytes])
+        }
+        await #expect(throws: HermesSpeechService.SpeechError.providerMismatch(actualFormat: "mp3+wav")) {
+            _ = try await self.service(transport: transport).synthesize(text: "hello", options: self.options())
+        }
     }
 
     @Test func nonZeroExitThrowsSynthesisFailed() async {
@@ -723,6 +754,8 @@ import Testing
         let openaiB = HermesSpeechService.voiceFingerprint(provider: "openai", voice: voice)
         #expect(openaiA != openaiB)
         #expect(HermesSpeechService.voiceFingerprint(provider: "unknown-provider", voice: voice) == "unknown-provider")
+        // `nous` speaks with the OpenAI voice, so it keys on it too.
+        #expect(HermesSpeechService.voiceFingerprint(provider: "nous", voice: voice) == openaiB)
     }
 
     // MARK: - Capability gating + per-window routing

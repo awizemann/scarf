@@ -15,11 +15,11 @@ import ScarfCore
 ///    engine, unchanged.
 ///  - **hermes** — synthesis through the Hermes TTS stack of the server
 ///    the MESSAGE came from (`ScarfCore.HermesSpeechService` →
-///    `text_to_speech_tool`), with the fetched, magic-byte-verified WAV
-///    played through `AVAudioEngine`. Only honoured when that window's
-///    host has `hasHermesSpeechSynthesis`; otherwise the system voice
-///    plays exactly as before. Synthesis can take seconds, so the
-///    playback id flips on immediately — the stop button works while
+///    `text_to_speech_tool`), with the fetched, magic-byte-verified audio
+///    (WAV/MP3/FLAC/AIFF) played through `AVAudioEngine`. Only honoured
+///    when that window's host has `hasHermesSpeechSynthesis`; otherwise
+///    the system voice plays exactly as before. Synthesis can take
+///    seconds, so the playback id flips on immediately — the stop button works while
 ///    synthesis is in flight (stop cancels the task, which terminates the
 ///    server round trip) — and `loading` exposes the synth-pending state.
 ///    Any synthesis failure (transport, envelope, path validation,
@@ -70,12 +70,12 @@ final class MessageSpeechService: NSObject {
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var synthesisTask: Task<Void, Never>?
-    /// Temp WAV files backing the scheduled `AVAudioFile`s. The player
+    /// Temp audio files backing the scheduled `AVAudioFile`s. The player
     /// node reads them during playback, so deletion waits for the
     /// completion callbacks (or stop).
     private var pendingTempFiles: [URL] = []
     private var pendingSegments = 0
-    /// Bumped on every WAV start and stop. Segment callbacks carry the
+    /// Bumped on every audio-file start and stop. Segment callbacks carry the
     /// generation they were scheduled under and no-op when it's stale, so
     /// a flushed segment from a stopped playback can never decrement the
     /// next playback's counter.
@@ -115,7 +115,7 @@ final class MessageSpeechService: NSObject {
         }
     }
 
-    /// Stop any in-progress speech — synthesis, system voice, or WAV
+    /// Stop any in-progress speech — synthesis, system voice, or audio-file
     /// playback — and clear the observable state.
     func stop() {
         guard playing != nil || loading != nil else { return }
@@ -126,7 +126,7 @@ final class MessageSpeechService: NSObject {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        stopWAVPlayback()
+        stopFilePlayback()
         playing = nil
     }
 
@@ -157,12 +157,12 @@ final class MessageSpeechService: NSObject {
                 // server round trip, and file I/O all run off the main
                 // actor. Only the playback hand-off below comes back.
                 let audio = try await service.synthesize(text: text)
-                let files = try await Self.writeTempFiles(audio.chunks, id: id)
+                let files = try await Self.writeTempFiles(audio.chunks, format: audio.format, id: id)
                 guard let self, !Task.isCancelled, self.playing == id else {
                     files.forEach { try? FileManager.default.removeItem(at: $0) }
                     return
                 }
-                try self.playWAVFiles(files)
+                try self.playAudioFiles(files)
             } catch is CancellationError {
                 // stop() already reset the observable state.
             } catch {
@@ -176,17 +176,19 @@ final class MessageSpeechService: NSObject {
         }
     }
 
-    /// Write verified WAV chunks to local temp files, off the main actor.
+    /// Write verified audio chunks to local temp files, off the main actor.
+    /// The extension matches the sniffed container so Core Audio decodes
+    /// it with the right parser.
     /// Named `scarf-play-…`, apart from the synthesis script's own
     /// `scarf-tts-<uid>/` directory (which, for the local server, lives in
     /// this same `$TMPDIR` and is swept by the script).
-    private nonisolated static func writeTempFiles(_ chunks: [Data], id: PlaybackID) async throws -> [URL] {
+    private nonisolated static func writeTempFiles(_ chunks: [Data], format: HermesSpeechService.AudioFormat, id: PlaybackID) async throws -> [URL] {
         try await Task.detached(priority: .userInitiated) {
             var urls: [URL] = []
             do {
                 for (index, chunk) in chunks.enumerated() {
                     let url = FileManager.default.temporaryDirectory
-                        .appendingPathComponent("scarf-play-\(id.messageId)-\(index)-\(UUID().uuidString).wav")
+                        .appendingPathComponent("scarf-play-\(id.messageId)-\(index)-\(UUID().uuidString).\(format.rawValue)")
                     try chunk.write(to: url, options: .atomic)
                     urls.append(url)
                 }
@@ -198,10 +200,10 @@ final class MessageSpeechService: NSObject {
         }.value
     }
 
-    /// Schedule the temp WAV files back-to-back on the shared player
+    /// Schedule the temp audio files back-to-back on the shared player
     /// node. The completion callback of the final segment clears
     /// `playing`; stop() bumps the generation so flushed callbacks no-op.
-    private func playWAVFiles(_ urls: [URL]) throws {
+    private func playAudioFiles(_ urls: [URL]) throws {
         loading = nil
         guard !urls.isEmpty else {
             playing = nil
@@ -232,12 +234,12 @@ final class MessageSpeechService: NSObject {
             self.pendingTempFiles.removeAll { $0 == tempURL }
             self.pendingSegments -= 1
             if self.pendingSegments == 0 {
-                self.finishWAVPlayback()
+                self.finishFilePlayback()
             }
         }
     }
 
-    private func finishWAVPlayback() {
+    private func finishFilePlayback() {
         playerNode.stop()
         audioEngine.stop()
         pendingTempFiles.forEach { try? FileManager.default.removeItem(at: $0) }
@@ -247,7 +249,7 @@ final class MessageSpeechService: NSObject {
         }
     }
 
-    private func stopWAVPlayback() {
+    private func stopFilePlayback() {
         // Invalidate every scheduled segment's callback first, then flush.
         playbackGeneration += 1
         playerNode.stop()
