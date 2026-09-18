@@ -312,7 +312,7 @@ import ScarfCore
         #expect(engines.count == 1)
 
         vm.startNewSession()   // sidebar "New Chat"
-        #expect(engines[0].immediateEnds.first == .userEnded)
+        #expect(engines.first?.immediateEnds.first == .userEnded)
         #expect(!vm.voiceLive.isSessionActive)
     }
 
@@ -326,7 +326,7 @@ import ScarfCore
         _ = await Self.waitUntil { engines.first?.phase == .connecting }
 
         vm.stopACP()
-        #expect(engines[0].immediateEnds == [.userEnded])
+        #expect(engines.first?.immediateEnds == [.userEnded])
     }
 
     @Test @MainActor func controllerEndIsGracefulAndDismissClears() async {
