@@ -703,16 +703,25 @@ struct RichMessageBubble: View, Equatable {
 /// observation doesn't get short-circuited by `RichMessageBubble`'s
 /// `Equatable`. Only the button re-renders when playback flips —
 /// the bubble itself stays optimised.
+///
+/// The message's server comes from the environment the bubble renders
+/// in — the window's profile-scoped `\.serverContext`, or the bot's own
+/// context inside `BotConversationView` — and travels with every toggle,
+/// so Hermes Voice synthesizes on the server the message came from and
+/// nowhere else.
 private struct SpeakMessageButton: View {
     let messageId: Int
     let content: String
 
     @State private var speech = MessageSpeechService.shared
+    @Environment(\.serverContext) private var serverContext
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
-        let isPlaying = speech.playingMessageId == messageId
+        let id = MessageSpeechService.PlaybackID(server: serverContext, messageId: messageId)
+        let isPlaying = speech.isPlaying(id)
         Button {
-            speech.toggle(messageId: messageId, content: content)
+            speech.toggle(id, content: content, capabilities: capabilitiesStore?.capabilities ?? .empty)
         } label: {
             Image(systemName: isPlaying ? "stop.circle.fill" : "speaker.wave.2")
                 .font(.system(size: 11))

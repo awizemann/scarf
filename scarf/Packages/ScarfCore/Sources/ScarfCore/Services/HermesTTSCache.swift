@@ -2,13 +2,14 @@ import Foundation
 import CryptoKit
 
 /// Local disk cache for Hermes-synthesized speech audio, keyed by
-/// (provider, voice fingerprint, text). A cache hit skips the server
-/// entirely — kokoro synthesis loads torch on cold start (seconds), so
-/// replaying the same message twice must not pay the round trip again.
+/// (server identity, provider, voice fingerprint, text). A cache hit skips
+/// the server entirely — local providers load models on cold start
+/// (seconds) and cloud ones bill per character, so replaying the same
+/// message twice must not pay the round trip again.
 ///
-/// Entries live under `~/Library/Application Support/Scarf/TTSCache`
-/// (injectable for tests) as one JSON manifest per synthesis plus the
-/// chunk files it names:
+/// Entries live under `~/Library/Caches/scarf/tts` (injectable for tests)
+/// — regenerable data, so the system may purge it and backups skip it —
+/// as one JSON manifest per synthesis plus the chunk files it names:
 ///
 ///     <key>.json          {"format":"wav","chunks":["<key>-00.wav",…]}
 ///     <key>-00.wav        RIFF/WAVE bytes, magic-byte-verified before store
@@ -19,9 +20,12 @@ import CryptoKit
 /// (`maxBytes`); overflow evicts whole entries oldest-first by manifest
 /// mtime, which is bumped on every store so "oldest" tracks last use.
 ///
-/// Deliberately NOT `Sendable`-guarded with locks: the only production
-/// caller is `HermesSpeechService` (an actor), so access is serialized by
-/// the actor's executor. The struct itself is immutable beyond `directory`.
+/// Deliberately NOT guarded with locks: the struct is immutable, and every
+/// file operation is individually atomic (`.atomic` writes, manifest last).
+/// Two overlapping synthesis tasks (a stopped one still finishing beside a
+/// new one) can at worst evict or tear an entry, which reads as a plain
+/// miss and re-synthesizes — never as wrong audio, because keys are
+/// content hashes.
 public struct HermesTTSCache: Sendable {
 
     /// Soft cap on total cached bytes. WAV at 24 kHz PCM16 mono is ~48 KB
@@ -31,7 +35,8 @@ public struct HermesTTSCache: Sendable {
     public static let maxBytes: Int64 = 256 * 1024 * 1024
 
     /// Root directory for cached entries. Production default lives under
-    /// Application Support; tests inject a temp directory.
+    /// Caches (same `scarf/` root as the SSH snapshot cache); tests inject
+    /// a temp directory.
     public let directory: URL
 
     public init(directory: URL? = nil) {
@@ -39,20 +44,25 @@ public struct HermesTTSCache: Sendable {
             self.directory = directory
             return
         }
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        self.directory = support.appendingPathComponent("Scarf", isDirectory: true)
-            .appendingPathComponent("TTSCache", isDirectory: true)
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Caches")
+        self.directory = caches.appendingPathComponent("scarf", isDirectory: true)
+            .appendingPathComponent("tts", isDirectory: true)
     }
 
     // MARK: - Keys
 
     /// Stable cache key for one synthesis. Everything that changes the
-    /// produced audio participates: provider, the per-provider voice
-    /// fingerprint (voice id, language, speed, venv path for kokoro —
+    /// produced audio participates: the synthesizing server (+ profile
+    /// home — `HermesSpeechService.serverIdentity`), provider, the
+    /// per-provider voice fingerprint (voice id, model, language, speed —
     /// see `HermesSpeechService.voiceFingerprint`), and the exact text.
-    public static func cacheKey(provider: String, voiceFingerprint: String, text: String) -> String {
-        let digest = SHA256.hash(data: Data("\(provider)|\(voiceFingerprint)|\(text)".utf8))
+    /// Each field is length-prefixed so no two field splits collide.
+    public static func cacheKey(server: String, provider: String, voiceFingerprint: String, text: String) -> String {
+        let material = [server, provider, voiceFingerprint, text]
+            .map { "\($0.utf8.count):\($0)" }
+            .joined()
+        let digest = SHA256.hash(data: Data(material.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 

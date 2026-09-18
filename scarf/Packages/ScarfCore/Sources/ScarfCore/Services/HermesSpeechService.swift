@@ -1,51 +1,66 @@
 import Foundation
 import CryptoKit
 
-/// Synthesizes speech through the server's Hermes TTS stack and returns
+/// Synthesizes speech through ONE server's Hermes TTS stack and returns
 /// magic-byte-verified WAV audio for local playback — the engine behind
 /// Settings → Voice → "Hermes Voice" message playback (WS2).
 ///
-/// **Ladder.** Two rungs, chosen by the configured `tts.provider`:
+/// **One path, Hermes's own.** The script imports
+/// `tools.tts_tool.text_to_speech_tool` inside the interpreter that runs
+/// the server's `hermes` binary and calls it with an explicit
+/// `output_path`. Hermes resolves the provider from the server's own
+/// `tts.*` config (so `nous` → OpenAI, command providers under
+/// `tts.providers.*`, and plugin providers all dispatch exactly as they
+/// do for the agent), writes the audio, and returns its JSON envelope.
+/// Gated on `HermesCapabilities.hasHermesSpeechSynthesis` (v0.20.1+) by
+/// the caller — below that the tool has no `file_paths` envelope and the
+/// long-form chunk naming this service validates against doesn't exist.
 ///
-///  1. **kokoro** — a dedicated stdin-JSON script executed by the kokoro
-///     venv's own interpreter (`tts.kokoro.python` from config.yaml,
-///     defaulting to `<hermes home>/kokoro-venv/bin/python`), mirroring
-///     the hermes-s2s plugin's `_synthesize_external`: `KPipeline` →
-///     `soundfile` → RIFF WAV PCM16 mono 24 kHz. This deliberately
-///     bypasses the orchestrator, because standalone the kokoro PLUGIN
-///     provider fails to register and `text_to_speech_tool` dispatch
-///     silently falls through to edge-tts while the envelope still claims
-///     provider "kokoro" — and edge writes MP3 bytes whatever the file
-///     extension says (WS-research, verified against the live host).
-///  2. **any other provider** — `tools.tts_tool.text_to_speech_tool`
-///     inside the Hermes orchestrator's venv, with explicit `provider=`
-///     and `output_path`. This covers the cloud builtins AND the
-///     command-provider configs under `tts.providers.*` (e.g. a
-///     `kokoro-local` command wrapping the venv's `kokoro` CLI — those
-///     the orchestrator dispatches natively, honoring the provider's
-///     configured `output_format`). The venv interpreter is derived from
-///     the hermes binary (resolved through `readlink -f`): pipx, pinokio,
-///     and plain venv installs all place `python` beside the real binary.
+/// **Interpreter discovery** reuses Scarf's hermes resolution: the
+/// window's `paths.hermesBinary` under `HermesConfigReader.pathPrelude`.
+/// The interpreter is the binary's own shebang (pip/uv console scripts
+/// name their venv's python there), falling back to the `python` beside
+/// the symlink-resolved binary. Nothing else is guessed — a wrapper
+/// `hermes` (e.g. `docker compose exec`) fails cleanly into the caller's
+/// system-voice fallback.
 ///
-/// Both rungs synthesize into the SERVER's `$TMPDIR` (never inside
-/// `~/.hermes` state dirs), fetch the bytes with `readFile`, delete the
-/// server temp files, then verify locally. The envelope's provider label
-/// is NEVER trusted — audio routes on magic bytes, and anything that is
-/// not RIFF/WAVE (the edge-tts MP3 masquerade) surfaces as
-/// `providerMismatch` so the caller can fall back to the system voice.
+/// **Server temp files.** The script writes into a private per-user
+/// directory under the SERVER's `$TMPDIR` — `scarf-tts-<uid>/`, created
+/// `0700` and refused if it is a symlink or owned by anyone else (a shared
+/// `/tmp` must not let another user pre-plant it) — as
+/// `scarf-tts-<cacheKey>.wav`, and announces that base on a
+/// `SCARF_TTS_BASE:` line before Hermes runs. Leftovers from abandoned
+/// runs (a stop mid-synthesis kills the transport, not the remote tool)
+/// are swept from that directory after 30 minutes. Only paths Hermes
+/// derives from that base (`<stem>.<ext>`, `<stem>.chunkNNN.<ext>`,
+/// `<stem>.partNN.<ext>`, in the base's own directory) are read or
+/// deleted; anything else in the envelope aborts the synthesis untouched.
+/// The envelope's provider label is NEVER trusted — audio routes on magic
+/// bytes, and anything that is not RIFF/WAVE (e.g. an MP3 masquerading
+/// under a `.wav` name) surfaces as `providerMismatch` so the caller can
+/// fall back to the system voice.
 ///
 /// Every command travels through `streamScript` (one opaque shell script
-/// over the transport) so it works identically for local and SSH servers;
-/// user text crosses as a single-line JSON heredoc, never interpolated
-/// into the shell layer.
+/// over the transport) so it works identically for local and SSH servers.
+/// User text crosses as a single-line JSON heredoc with a quoted
+/// delimiter, and config-derived paths are single-quoted — nothing from
+/// either is ever evaluated by the shell.
 public actor HermesSpeechService {
 
     public let context: ServerContext
     private let transport: any ServerTransport
     private let cache: HermesTTSCache
 
+    /// Upper bound on one synthesis round trip. Matches Hermes's own
+    /// `DEFAULT_COMMAND_TTS_TIMEOUT_SECONDS` (120,
+    /// `tools/tts_command_provider.py:273` @ v2026.9.14): a slow local
+    /// command provider must be able to finish, and the caller's stop
+    /// control cancels (and kills) the round trip long before this.
+    static let synthesisTimeout: TimeInterval = 120
+
     /// - Parameters:
-    ///   - context: the server whose Hermes stack synthesizes.
+    ///   - context: the server whose Hermes stack synthesizes. Message text
+    ///     is only ever sent to THIS server.
     ///   - transport: injected transport; defaults to `context.makeTransport()`.
     ///     Tests pass a mock.
     ///   - cache: injected audio cache; defaults to the shared on-disk cache.
@@ -61,48 +76,34 @@ public actor HermesSpeechService {
 
     // MARK: - Public types
 
-    /// Distilled synthesis request — everything the scripts need, already
+    /// Distilled synthesis request — everything the script needs, already
     /// resolved from the server's `HermesConfig` by
     /// `options(config:paths:)`. Kept as one value so tests drive the
-    /// ladder without touching config I/O.
+    /// service without touching config I/O.
     public struct Options: Sendable, Equatable {
-        /// `tts.provider` (e.g. "kokoro", "openai", "edge"). Selects the ladder rung.
+        /// `tts.provider` (empty → Hermes's default "edge"). Cache keying
+        /// only: Hermes resolves the provider from its own config, so the
+        /// script never passes it.
         public var provider: String
         /// Per-provider fingerprint of every config key that changes the
-        /// audio (voice id / language / speed / venv path). Used for cache
-        /// keying only — rung 2's voice comes from the server's own config.
+        /// audio (voice id / model / language / speed). Cache keying only.
         public var voiceFingerprint: String
-        /// Kokoro rung: `tts.kokoro.voice`.
-        public var kokoroVoice: String
-        /// Kokoro rung: `tts.kokoro.speed`.
-        public var kokoroSpeed: Double
-        /// Kokoro rung: `tts.kokoro.lang_code`.
-        public var kokoroLangCode: String
-        /// Kokoro rung: `tts.kokoro.python`. Empty → `<hermes home>/kokoro-venv/bin/python`.
-        public var kokoroPython: String
-        /// Resolved `hermes` binary — rung 2 derives the orchestrator venv
-        /// python from it.
+        /// Resolved `hermes` binary — the script derives the interpreter
+        /// from it.
         public var hermesBinary: String
-        /// Hermes home (`~/.hermes` or an SSHConfig override; a leading `~`
-        /// is expanded to `$HOME` inside the script).
+        /// Hermes home (`~/.hermes`, a profile home, or an SSHConfig
+        /// override). Exported as `HERMES_HOME` so the tool reads this
+        /// window's profile config.
         public var hermesHome: String
 
         public init(
             provider: String,
             voiceFingerprint: String,
-            kokoroVoice: String,
-            kokoroSpeed: Double,
-            kokoroLangCode: String,
-            kokoroPython: String,
             hermesBinary: String,
             hermesHome: String
         ) {
             self.provider = provider
             self.voiceFingerprint = voiceFingerprint
-            self.kokoroVoice = kokoroVoice
-            self.kokoroSpeed = kokoroSpeed
-            self.kokoroLangCode = kokoroLangCode
-            self.kokoroPython = kokoroPython
             self.hermesBinary = hermesBinary
             self.hermesHome = hermesHome
         }
@@ -124,11 +125,15 @@ public actor HermesSpeechService {
         /// or a failure envelope). Carries a bounded diagnostic tail.
         case synthesisFailed(String)
         /// Fetched audio was not RIFF/WAVE — the provider-mismatch
-        /// masquerade (e.g. edge-tts MP3 under a .wav name). Callers fall
-        /// back to the system voice.
+        /// masquerade (e.g. MP3 under a .wav name). Callers fall back to
+        /// the system voice.
         case providerMismatch(actualFormat: String)
         /// Envelope reported success but named no files.
         case emptyAudio
+        /// The envelope named a path this synthesis was never told to
+        /// write (or the script never announced its output base). Nothing
+        /// named by the envelope is read or deleted.
+        case unexpectedOutputPath(String)
         /// The transport itself failed (host unreachable, timeout).
         case transportFailed(String)
     }
@@ -149,6 +154,7 @@ public actor HermesSpeechService {
         let yaml = await Task.detached(priority: .utility) {
             HermesConfigReader.readRawConfig(context: ctx)
         }.value
+        try Task.checkCancellation()
         let config = yaml.map { HermesConfig(yaml: $0) } ?? HermesConfig.empty
         return try await synthesize(text: text, options: Self.options(config: config, paths: context.paths))
     }
@@ -160,22 +166,17 @@ public actor HermesSpeechService {
         return Options(
             provider: provider,
             voiceFingerprint: voiceFingerprint(provider: provider, voice: voice),
-            kokoroVoice: voice.ttsKokoroVoice,
-            kokoroSpeed: voice.ttsKokoroSpeed,
-            kokoroLangCode: voice.ttsKokoroLangCode,
-            kokoroPython: voice.ttsKokoroPython,
             hermesBinary: paths.hermesBinary,
             hermesHome: paths.home
         )
     }
 
     /// Every per-provider config key that changes the synthesized audio —
-    /// the cache must not serve audio from before a voice/venv change.
-    /// Unknown providers key on the provider alone.
+    /// the cache must not serve audio from before a voice change.
+    /// Unknown providers (command/plugin providers) key on the provider
+    /// alone.
     public static func voiceFingerprint(provider: String, voice: VoiceSettings) -> String {
         switch provider {
-        case "kokoro":
-            return "\(voice.ttsKokoroVoice)|\(voice.ttsKokoroLangCode)|\(voice.ttsKokoroSpeed)|\(voice.ttsKokoroPython)"
         case "edge":
             return voice.ttsEdgeVoice
         case "elevenlabs":
@@ -193,10 +194,18 @@ public actor HermesSpeechService {
         }
     }
 
+    /// Identity of the server (and profile) that synthesizes — part of the
+    /// cache key, so two servers configured alike never share audio and a
+    /// profile switch never serves another profile's voice.
+    static func serverIdentity(_ context: ServerContext) -> String {
+        "\(context.id.uuidString)|\(context.paths.home)"
+    }
+
     // MARK: - Synthesis
 
-    /// Run the ladder for `options.provider`, fetch + verify the audio,
-    /// and cache it. Cancellation-aware at each phase boundary.
+    /// Run the tool on the server, fetch + verify the audio, and cache it.
+    /// Cancellation-aware at each phase boundary; cancelling the calling
+    /// task also terminates the in-flight script (`SSHScriptRunner`).
     public func synthesize(text: String, options: Options) async throws -> Audio {
         try Task.checkCancellation()
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -205,6 +214,7 @@ public actor HermesSpeechService {
         }
 
         let key = HermesTTSCache.cacheKey(
+            server: Self.serverIdentity(context),
             provider: options.provider,
             voiceFingerprint: options.voiceFingerprint,
             text: cleaned
@@ -214,11 +224,10 @@ public actor HermesSpeechService {
         }
         try Task.checkCancellation()
 
-        let timeout: TimeInterval = options.provider == "kokoro" ? 120 : 60
         let result: ProcessResult
         do {
-            let script = Self.buildScript(options: options, cacheKey: key, text: cleaned)
-            result = try await transport.streamScript(script, timeout: timeout)
+            let script = Self.synthesisScript(options: options, cacheKey: key, text: cleaned)
+            result = try await transport.streamScript(script, timeout: Self.synthesisTimeout)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -226,33 +235,46 @@ public actor HermesSpeechService {
         }
         try Task.checkCancellation()
 
+        let stdout = result.stdoutString
         guard result.exitCode == 0 else {
-            throw SpeechError.synthesisFailed(Self.diagnosticTail(stdout: result.stdoutString, stderr: result.stderrString))
+            throw SpeechError.synthesisFailed(Self.diagnosticTail(stdout: stdout, stderr: result.stderrString))
         }
-        guard let envelope = TTSEnvelope.parse(result.stdoutString) else {
-            throw SpeechError.synthesisFailed(Self.diagnosticTail(stdout: result.stdoutString, stderr: result.stderrString))
+        guard let envelope = TTSEnvelope.parse(stdout) else {
+            throw SpeechError.synthesisFailed(Self.diagnosticTail(stdout: stdout, stderr: result.stderrString))
         }
         guard envelope.success, envelope.error == nil else {
             throw SpeechError.synthesisFailed(envelope.error ?? "synthesis reported failure")
         }
-        let paths = envelope.filePaths.isEmpty ? [envelope.filePath].compactMap { $0 } : envelope.filePaths
-        guard !paths.isEmpty else { throw SpeechError.emptyAudio }
+        let named = envelope.filePaths.isEmpty ? [envelope.filePath].compactMap { $0 } : envelope.filePaths
+        guard !named.isEmpty else { throw SpeechError.emptyAudio }
+
+        // Path safety BEFORE any read or delete: every named file must be
+        // one Hermes derived from the base this script announced.
+        guard let base = OutputBase.parse(stdout, cacheKey: key) else {
+            throw SpeechError.unexpectedOutputPath("no output base announced")
+        }
+        let paths = try base.validate(named)
 
         var chunks: [Data] = []
         chunks.reserveCapacity(paths.count)
+        var readError: Error?
         for path in paths {
-            try Task.checkCancellation()
+            if Task.isCancelled { break }
             do {
                 chunks.append(try transport.readFile(path))
             } catch {
-                throw SpeechError.transportFailed("read \(path): \(error.localizedDescription)")
+                readError = SpeechError.transportFailed("read \(path): \(error.localizedDescription)")
+                break
             }
         }
-        // Server temp files are cleaned up regardless of verification
-        // outcome — they live in $TMPDIR, never in Hermes state.
+        // Server temp files are cleaned up regardless of read or
+        // verification outcome — they live in $TMPDIR, never in Hermes
+        // state, and every path here passed validation above.
         for path in paths {
             try? transport.removeFile(path)
         }
+        try Task.checkCancellation()
+        if let readError { throw readError }
 
         for chunk in chunks {
             let format = Self.audioFormat(of: chunk)
@@ -266,8 +288,9 @@ public actor HermesSpeechService {
 
     // MARK: - Envelope
 
-    /// Parsed `SCARF_TTS_ENV:` line from a synthesis script. Field names
-    /// mirror `tools/tts_tool.py`'s envelope and `tools/registry.tool_error`'s
+    /// Parsed `SCARF_TTS_ENV:` line from the synthesis script. Field names
+    /// mirror `text_to_speech_tool`'s envelope (`tools/tts_tool.py:445-454`
+    /// @ v2026.9.14) and `tools/registry.tool_error`'s
     /// `{"error": …, "success": false}` shape.
     public struct TTSEnvelope: Sendable, Equatable {
         public static let marker = "SCARF_TTS_ENV:"
@@ -309,11 +332,115 @@ public actor HermesSpeechService {
         }
     }
 
+    // MARK: - Output paths
+
+    /// The output base the script announced (`SCARF_TTS_BASE:` line,
+    /// printed by the shell BEFORE Hermes runs — the first such line wins,
+    /// so nothing the tool prints later can move it), and the file names
+    /// Hermes may derive from it.
+    ///
+    /// Derivations, verified at v2026.9.14 (and unchanged in shape since
+    /// the v2026.8.13 = 0.20.1 floor):
+    ///  - suffix swap: `_configured_command_tts_output_path` →
+    ///    `path.with_suffix(".<output_format>")`
+    ///    (`tools/tts_command_provider.py:304-306`), `_convert_to_opus` →
+    ///    `<stem>.ogg` and `_repair_ogg_container` → `<stem>.<container>`
+    ///    (`tools/tts_tool_delivery.py:289-292`, `:310-321`), and the
+    ///    delivery base `base_path.with_suffix(<encoded suffix>)`
+    ///    (`tools/tts_tool.py:440`);
+    ///  - long-form chunks: `<stem>.chunkNNN<suffix>` (`tools/tts_tool.py:381`);
+    ///  - delivery parts: `<stem>.partNN<suffix>`
+    ///    (`tools/tts_tool_delivery.py:413`).
+    /// All stay in the base's directory. Hermes's own dotted scratch files
+    /// (`.<stem>.delivery…`) are swept by the tool itself and never appear
+    /// in the envelope.
+    struct OutputBase: Equatable {
+        static let marker = "SCARF_TTS_BASE:"
+
+        /// Normalized absolute directory (no trailing slash, `//` collapsed),
+        /// always ending in `/scarf-tts-<uid>`.
+        let directory: String
+        /// `scarf-tts-<cacheKey>`.
+        let stem: String
+
+        /// First marker line, accepted only if it names
+        /// `<abs dir>/scarf-tts-<digits>/scarf-tts-<cacheKey>.wav` — the
+        /// exact shape the script builds for THIS request's key.
+        static func parse(_ stdout: String, cacheKey: String) -> OutputBase? {
+            guard let line = stdout.split(separator: "\n", omittingEmptySubsequences: true)
+                .first(where: { $0.hasPrefix(marker) }),
+                  let path = normalizedAbsolutePath(String(line.dropFirst(marker.count))),
+                  let slash = path.lastIndex(of: "/") else { return nil }
+            let name = String(path[path.index(after: slash)...])
+            let directory = slash == path.startIndex ? "" : String(path[..<slash])
+            let stem = "scarf-tts-\(cacheKey)"
+            guard name == stem + ".wav" else { return nil }
+            let dirName = directory.split(separator: "/").last ?? ""
+            let uid = dirName.dropFirst("scarf-tts-".count)
+            guard dirName.hasPrefix("scarf-tts-"), !uid.isEmpty,
+                  uid.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+            return OutputBase(directory: directory, stem: stem)
+        }
+
+        /// Normalized, de-duplicated paths in envelope order — or a throw
+        /// naming the first path that isn't a derivation of this base.
+        func validate(_ paths: [String]) throws -> [String] {
+            var out: [String] = []
+            for raw in paths {
+                guard let path = Self.normalizedAbsolutePath(raw), isDerived(path) else {
+                    throw SpeechError.unexpectedOutputPath(raw)
+                }
+                if !out.contains(path) { out.append(path) }
+            }
+            return out
+        }
+
+        func isDerived(_ path: String) -> Bool {
+            guard let slash = path.lastIndex(of: "/") else { return false }
+            let dir = slash == path.startIndex ? "" : String(path[..<slash])
+            guard dir == directory else { return false }
+            let name = String(path[path.index(after: slash)...])
+            guard name.hasPrefix(stem + ".") else { return false }
+            var rest = name.dropFirst(stem.count + 1)   // after "<stem>."
+            // Optional ".chunkNNN" / ".partNN" infix.
+            if let infix = Self.strip(&rest, tag: "chunk", digits: 3) ?? Self.strip(&rest, tag: "part", digits: 2) {
+                guard infix else { return false }
+            }
+            // Extension: 1–8 ASCII alphanumerics, nothing after it.
+            return (1...8).contains(rest.count) && rest.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        }
+
+        /// If `rest` starts with `<tag>`, consume `<tag><digits>.` and
+        /// return whether it was well-formed; `nil` when `tag` is absent.
+        private static func strip(_ rest: inout Substring, tag: String, digits: Int) -> Bool? {
+            guard rest.hasPrefix(tag) else { return nil }
+            let body = rest.dropFirst(tag.count)
+            let number = body.prefix(digits)
+            guard number.count == digits, number.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+            let after = body.dropFirst(digits)
+            guard after.hasPrefix(".") else { return false }
+            rest = after.dropFirst()
+            return true
+        }
+
+        /// Absolute path with `//` collapsed and any trailing slash
+        /// dropped; `nil` for relative paths, control characters, or any
+        /// `.` / `..` component (never resolved — refused).
+        static func normalizedAbsolutePath(_ raw: String) -> String? {
+            guard raw.hasPrefix("/"),
+                  !raw.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return nil }
+            let components = raw.split(separator: "/", omittingEmptySubsequences: true)
+            guard !components.isEmpty,
+                  !components.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+            return "/" + components.joined(separator: "/")
+        }
+    }
+
     // MARK: - Magic bytes
 
     /// Sniff the audio container from the first bytes. Only RIFF/WAVE is
     /// accepted for playback; the rest exist so mismatch diagnostics can
-    /// name what actually came back (e.g. `.mp3` for the edge masquerade).
+    /// name what actually came back (e.g. `.mp3` for an edge masquerade).
     /// RIFF/WAVE needs 12 bytes; every other signature needs at most 4
     /// (the MPEG frame sync just 2), so short prefixes still classify.
     public static func audioFormat(of data: Data) -> AudioFormat? {
@@ -337,101 +464,62 @@ public actor HermesSpeechService {
 
     // MARK: - Script construction
 
-    /// Pick the ladder rung and build its script.
-    static func buildScript(options: Options, cacheKey: String, text: String) -> String {
-        options.provider == "kokoro"
-            ? kokoroScript(options: options, cacheKey: cacheKey, text: text)
-            : orchestratorScript(options: options, cacheKey: cacheKey, text: text)
-    }
-
-    /// Rung 1 — direct kokoro-venv synthesis (see class doc). The inline
-    /// python mirrors the hermes-s2s plugin's `_synthesize_external`
-    /// (kokoro.py): KPipeline → pipeline(text, voice, speed) → soundfile
-    /// PCM16 24 kHz WAV, with the output path arriving via `SCARF_TTS_OUT`
-    /// so the shell can resolve `$TMPDIR` + uid.
-    ///
-    /// The interpreter is `tts.kokoro.python` verbatim when configured.
-    /// When that key is absent, the script probes `<home>/kokoro-venv`
-    /// first and then the ROOT home's — a profile-scoped home
-    /// (`~/.hermes/profiles/<name>`) shares the venv the hermes-s2s setup
-    /// created under the installation root, which is where the verified
-    /// layout puts it.
-    static func kokoroScript(options: Options, cacheKey: String, text: String) -> String {
-        let home = expandingTilde(options.hermesHome)
-        let json = payloadJSON(fields: [
-            "text": text,
-            "voice": options.kokoroVoice,
-            "lang_code": options.kokoroLangCode,
-            "speed": options.kokoroSpeed,
-        ])
-        let prologue: String
-        if options.kokoroPython.isEmpty {
-            var candidates = [home]
-            let root = HermesProfileScope.rootHome(forHome: options.hermesHome)
-            if root != options.hermesHome { candidates.append(root) }
-            let list = candidates
-                .map { expandingTilde($0) + "/kokoro-venv/bin/python" }
-                .map(shellDoubleQuoted)
-                .joined(separator: " ")
-            prologue = """
-            py=""
-            for c in \(list); do
-              if [ -x "$c" ]; then py="$c"; break; fi
-            done
-            if [ -z "$py" ]; then
-              echo "SCARF_TTS_ERROR: no kokoro venv python under \(shellDoubleQuoted(home)) (set tts.kokoro.python)" >&2
-              exit 3
-            fi
-            """
-        } else {
-            prologue = """
-            py=\(shellDoubleQuoted(expandingTilde(options.kokoroPython)))
-            if [ ! -x "$py" ]; then
-              echo "SCARF_TTS_ERROR: kokoro python not executable: $py" >&2
-              exit 3
-            fi
-            """
-        }
-        return """
-        \(prologue)
-        out="${TMPDIR:-/tmp}/scarf-tts-\(cacheKey)-$(id -u).wav"
-        export HERMES_HOME=\(shellDoubleQuoted(home))
-        SCARF_TTS_OUT="$out" "$py" -c '\(kokoroPythonScript)' <<'SCARF_JSON'
-        \(json)
-        SCARF_JSON
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-          echo "SCARF_TTS_ERROR: kokoro exited with status $rc" >&2
-          exit 4
-        fi
-        """
-    }
-
-    /// Rung 2 — `text_to_speech_tool` inside the orchestrator venv, with
-    /// an explicit provider + output path. The venv python is derived from
-    /// the resolved hermes binary (`readlink -f`, then the `python` that
-    /// sits beside it — the pipx/pinokio/venv layout); a bare `python3`
-    /// fallback fails cleanly into the system-voice fallback when the
-    /// import can't resolve.
-    static func orchestratorScript(options: Options, cacheKey: String, text: String) -> String {
-        let home = expandingTilde(options.hermesHome)
-        let json = payloadJSON(fields: [
-            "text": text,
-            "provider": options.provider,
-        ])
+    /// `text_to_speech_tool(text, output_path=…)` inside the hermes
+    /// binary's own interpreter (see class doc for discovery). The shell
+    /// layer only ever sees: the PATH prelude, single-quoted config paths
+    /// (a leading `~`/`$HOME` is the one deliberate expansion), the hex
+    /// cache key, and a quoted-delimiter heredoc carrying the JSON text.
+    static func synthesisScript(options: Options, cacheKey: String, text: String) -> String {
+        let json = payloadJSON(fields: ["text": text])
         return """
         export \(HermesConfigReader.pathPrelude)
-        hb=\(shellDoubleQuoted(expandingTilde(options.hermesBinary)))
+        hb=\(shellQuotedPath(options.hermesBinary))
         case "$hb" in
           */*) ;;
-          *) hb=$(command -v "$hb" 2>/dev/null || printf '%s' "$hb") ;;
+          *) hb=$(command -v -- "$hb" 2>/dev/null) || hb="" ;;
         esac
-        real=$(readlink -f "$hb" 2>/dev/null || printf '%s' "$hb")
-        pyd=$(dirname -- "$real")
-        if [ -x "$pyd/python" ]; then py="$pyd/python"; else py="python3"; fi
-        out="${TMPDIR:-/tmp}/scarf-tts-\(cacheKey)-$(id -u).wav"
-        export HERMES_HOME=\(shellDoubleQuoted(home))
-        SCARF_TTS_OUT="$out" "$py" -c '\(orchestratorPythonScript)' <<'SCARF_JSON'
+        if [ -z "$hb" ] || [ ! -f "$hb" ]; then
+          echo "SCARF_TTS_ERROR: hermes binary not found" >&2
+          exit 3
+        fi
+        real=$(readlink -f -- "$hb" 2>/dev/null) || real=""
+        [ -n "$real" ] || real="$hb"
+        py=""
+        first=""
+        IFS= read -r first < "$real" 2>/dev/null || true
+        case "$first" in
+          '#!'*)
+            cand=${first#??}
+            cand=${cand# }
+            cand=${cand%% *}
+            case "${cand##*/}" in
+              python*) if [ -x "$cand" ]; then py="$cand"; fi ;;
+            esac ;;
+        esac
+        if [ -z "$py" ]; then
+          pyd=$(dirname -- "$real")
+          for c in "$pyd/python" "$pyd/python3"; do
+            if [ -x "$c" ]; then py="$c"; break; fi
+          done
+        fi
+        if [ -z "$py" ]; then
+          echo "SCARF_TTS_ERROR: no Python interpreter found for $real" >&2
+          exit 3
+        fi
+        d=${TMPDIR:-/tmp}
+        d=${d%/}
+        u=$(id -u)
+        sd="$d/scarf-tts-$u"
+        mkdir -m 700 "$sd" 2>/dev/null
+        if [ -L "$sd" ] || [ ! -d "$sd" ] || [ ! -O "$sd" ]; then
+          echo "SCARF_TTS_ERROR: unsafe temp directory $sd" >&2
+          exit 3
+        fi
+        find "$sd" -type f -mmin +30 -exec rm -f {} + 2>/dev/null
+        out="$sd/scarf-tts-\(cacheKey).wav"
+        printf '\(OutputBase.marker)%s\\n' "$out"
+        export HERMES_HOME=\(shellQuotedPath(options.hermesHome))
+        SCARF_TTS_OUT="$out" "$py" -c '\(toolPythonScript)' <<'SCARF_JSON'
         \(json)
         SCARF_JSON
         rc=$?
@@ -442,50 +530,31 @@ public actor HermesSpeechService {
         """
     }
 
-    /// The kokoro synth body — double quotes only, so it can sit inside
-    /// single quotes in the shell layer unchanged.
-    static let kokoroPythonScript = #"""
-    import json, os, sys
-    import numpy as np
-    import soundfile as sf
-    from kokoro import KPipeline
-    payload = json.load(sys.stdin)
-    pipeline = KPipeline(lang_code=payload["lang_code"])
-    chunks = []
-    for _, audio in pipeline(payload["text"], voice=payload["voice"], speed=payload["speed"]):
-        if audio is None:
-            continue
-        if hasattr(audio, "detach"):
-            audio = audio.detach().cpu().numpy()
-        chunks.append(np.asarray(audio, dtype=np.float32))
-    if not chunks:
-        raise RuntimeError("Kokoro produced no audio")
-    out = os.environ["SCARF_TTS_OUT"]
-    sf.write(out, np.concatenate(chunks, axis=0), 24000)
-    print("SCARF_TTS_ENV:" + json.dumps({"success": True, "file_path": out, "file_paths": [out], "provider": "kokoro", "chunk_count": 1}))
-    """#
-
-    /// The orchestrator wrapper — prints the tool's own JSON envelope
-    /// behind the marker so stray CLI logging can't corrupt the parse.
-    static let orchestratorPythonScript = #"""
+    /// The tool wrapper — prints the tool's own JSON envelope behind the
+    /// marker so stray logging can't corrupt the parse. No single quotes:
+    /// it sits inside single quotes in the shell layer unchanged.
+    /// `provider=` is deliberately NOT passed: Hermes's `_get_provider`
+    /// (`tools/tts_tool.py:140-144` @ v2026.9.14) applies its own default
+    /// and the `nous` → `openai` mapping, which an explicit override
+    /// bypasses (`_apply_call_overrides`, `:256-261`).
+    static let toolPythonScript = #"""
     import json, os, sys
     from tools.tts_tool import text_to_speech_tool
     payload = json.load(sys.stdin)
-    env = text_to_speech_tool(payload["text"], output_path=os.environ["SCARF_TTS_OUT"], provider=payload["provider"])
+    env = text_to_speech_tool(payload["text"], output_path=os.environ["SCARF_TTS_OUT"])
     sys.stdout.write("SCARF_TTS_ENV:" + env + "\n")
     """#
 
     /// Single-line JSON for the script's heredoc. The body is literal
     /// (quoted delimiter), so no shell metacharacter in the text can
-    /// escape the JSON layer.
-    private static func payloadJSON(fields: [String: Any]) -> String {
-        guard JSONSerialization.isValidJSONObject(fields),
-              let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]),
+    /// escape the JSON layer; a line equal to the delimiter can't occur
+    /// because JSON escapes every newline.
+    private static func payloadJSON(fields: [String: String]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8) else {
-            // Only reachable if a config value were non-serializable —
-            // every value here is a String/Double. Degrade to an empty
-            // payload; the server rejects it with a clear envelope error
-            // instead of the client guessing.
+            // Unreachable for a [String: String]. Degrade to an empty
+            // payload; the server rejects it with a clear error instead of
+            // the client guessing.
             return "{}"
         }
         return json
@@ -493,25 +562,24 @@ public actor HermesSpeechService {
 
     // MARK: - Shell helpers
 
-    /// Expand a leading `~` to the literal `$HOME` for shell evaluation —
-    /// remote homes arrive unexpanded (`~/.hermes`) by convention.
-    static func expandingTilde(_ path: String) -> String {
-        if path == "~" { return "$HOME" }
-        if path.hasPrefix("~/") { return "$HOME" + path.dropFirst() }
-        return path
+    /// Quote a config-derived path for the shell. A leading `~` / `~/` /
+    /// `$HOME` / `$HOME/` is the ONE deliberate expansion (remote homes
+    /// arrive unexpanded by convention) and becomes `"$HOME"`; everything
+    /// else is single-quoted, so `$(…)`, backticks, `$VAR` and quotes in a
+    /// configured path stay literal.
+    static func shellQuotedPath(_ path: String) -> String {
+        for home in ["~", "$HOME"] {
+            if path == home { return "\"$HOME\"" }
+            if path.hasPrefix(home + "/") {
+                return "\"$HOME\"" + shellSingleQuoted(String(path.dropFirst(home.count)))
+            }
+        }
+        return shellSingleQuoted(path)
     }
 
-    /// Single-quote a value for the shell. Used for strings that must not
-    /// expand anything.
+    /// Single-quote a value for the shell — nothing inside expands.
     static func shellSingleQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    /// Double-quote a value that may deliberately contain `$HOME` (from
-    /// `expandingTilde`). Embedded double quotes are escaped; real-world
-    /// Hermes paths don't carry them.
-    static func shellDoubleQuoted(_ value: String) -> String {
-        "\"" + value.replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     /// Bounded diagnostic tail from a failed synthesis: the last meaningful
@@ -531,5 +599,47 @@ public actor HermesSpeechService {
         guard !lines.isEmpty else { return nil }
         let tail = lines.count > count ? Array(lines[(lines.count - count)...]) : lines
         return tail.map { String($0) }
+    }
+}
+
+// MARK: - Playback routing
+
+extension HermesSpeechService {
+
+    /// Which engine plays a message. The user's choice is a client-side
+    /// preference (UserDefaults, shared across windows); whether "hermes"
+    /// is honoured is decided PER WINDOW from that window's server
+    /// capabilities, so one window on a new host and another on an old
+    /// host each do the right thing.
+    public enum PlaybackEngine: String, Sendable, CaseIterable {
+        case system
+        case hermes
+
+        /// UserDefaults key shared with the Settings → Voice picker.
+        public static let defaultsKey = "scarf.speech.playbackEngine"
+
+        /// `.hermes` only when the user chose it AND this window's host
+        /// has `hasHermesSpeechSynthesis`; any other value (unset,
+        /// unknown, or an undetected/older host) is the system voice —
+        /// the pre-Hermes-Voice behaviour, unchanged.
+        public static func resolve(preference: String?, capabilities: HermesCapabilities) -> PlaybackEngine {
+            guard preference == PlaybackEngine.hermes.rawValue,
+                  capabilities.hasHermesSpeechSynthesis else { return .system }
+            return .hermes
+        }
+    }
+
+    /// Identity of one message's playback: the server (and profile) the
+    /// message came from plus its id. Message ids are per-`state.db`, so
+    /// two windows can both show a message 42 — keying on the id alone
+    /// would flip the other window's speaker button too.
+    public struct PlaybackID: Hashable, Sendable {
+        public let server: ServerContext
+        public let messageId: Int
+
+        public init(server: ServerContext, messageId: Int) {
+            self.server = server
+            self.messageId = messageId
+        }
     }
 }
