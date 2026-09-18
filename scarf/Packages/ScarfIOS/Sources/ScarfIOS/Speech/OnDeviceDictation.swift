@@ -135,12 +135,18 @@ private final class AVAudioMemoRecorder: AudioMemoRecording {
 }
 
 /// Error thrown when recognition can't run at all (no recognizer for
-/// the locale, or the recognizer is temporarily unavailable).
-public struct DictationError: Error, Sendable {
+/// the locale, or the recognizer is temporarily unavailable), or when
+/// it could only run by breaking the on-device privacy promise.
+public struct DictationError: Error, Sendable, Equatable {
     public let reason: Reason
 
-    public enum Reason: Sendable {
+    public enum Reason: Sendable, Equatable {
         case recognizerUnavailable
+        /// The recognizer exists but can't transcribe on-device for
+        /// this locale/device. `NSSpeechRecognitionUsageDescription`
+        /// promises on-device transcription, so this is a hard stop,
+        /// never a silent fall back to Apple's servers.
+        case onDeviceRecognitionUnsupported
     }
 
     public init(reason: Reason) {
@@ -148,8 +154,31 @@ public struct DictationError: Error, Sendable {
     }
 }
 
-/// SFSpeechRecognizer wrapper that transcribes a finished memo file,
-/// preferring the on-device model whenever the locale supports it.
+/// Whether on-device speech recognition can run right now, for the
+/// user's current locale, on this device. Checked before every hold —
+/// Apple ties on-device support to the installed language model, which
+/// can change (locale switch, language pack download/removal) without
+/// an app update, so this is never cached.
+public protocol OnDeviceDictationAvailabilityChecking: Sendable {
+    func isOnDeviceRecognitionAvailable() -> Bool
+}
+
+/// Production check backed by `SFSpeechRecognizer`.
+public struct OnDeviceDictationAvailabilityClient: OnDeviceDictationAvailabilityChecking {
+    public init() {}
+
+    public func isOnDeviceRecognitionAvailable() -> Bool {
+        guard let recognizer = SFSpeechRecognizer() else { return false }
+        return recognizer.isAvailable && recognizer.supportsOnDeviceRecognition
+    }
+}
+
+/// SFSpeechRecognizer wrapper that transcribes a finished memo file.
+/// Always requires on-device recognition — `PushToTalkController`
+/// checks `OnDeviceDictationAvailabilityChecking` before it ever
+/// starts recording, so reaching here with on-device support gone
+/// (a race between the pre-flight check and this call, however
+/// unlikely) throws rather than silently phoning home.
 public struct OnDeviceSpeechTranscriber: SpeechTranscribing {
     public init() {}
 
@@ -157,12 +186,16 @@ public struct OnDeviceSpeechTranscriber: SpeechTranscribing {
         guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
             throw DictationError(reason: .recognizerUnavailable)
         }
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw DictationError(reason: .onDeviceRecognitionUnsupported)
+        }
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
-        // On-device wherever the locale allows it; locales without an
-        // on-device model fall back to Apple's server-assisted path
-        // rather than failing the dictation outright.
-        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        // Privacy contract: NSSpeechRecognitionUsageDescription promises
+        // transcription "on this device". Never relax this — a locale
+        // without on-device support is refused above, not silently
+        // routed to Apple's servers.
+        request.requiresOnDeviceRecognition = true
 
         return try await withCheckedThrowingContinuation { continuation in
             let gate = RecognitionContinuationGate(continuation)

@@ -3,6 +3,9 @@ import Observation
 #if canImport(os)
 import os
 #endif
+#if os(iOS)
+import AVFoundation
+#endif
 
 /// Combined state of the two permissions push-to-talk dictation needs:
 /// microphone capture and speech recognition.
@@ -62,10 +65,32 @@ public enum PushToTalkNotice: Equatable, Sendable {
     case microphonePermissionDenied
     case speechPermissionDenied
     case permissionsRestricted
+    /// On-device transcription isn't available for the current
+    /// locale/device. Refused before recording started — never a
+    /// silent fall back to server-side recognition.
+    case onDeviceUnavailable
     case recorderFailed
     case transcriptionFailed
     case nothingHeard
     case cancelled
+    /// A phone call / Siri / another app claimed the audio session
+    /// mid-take. The partial recording is discarded, matching a
+    /// user-initiated cancel.
+    case interrupted
+
+    /// Whether the composer should offer a "Settings" deep link next
+    /// to this notice — only for denials the user can actually fix
+    /// from Settings (restricted-by-MDM and on-device-unsupported
+    /// have no Settings toggle to flip).
+    public var opensSystemSettings: Bool {
+        switch self {
+        case .microphonePermissionDenied, .speechPermissionDenied:
+            return true
+        case .permissionsRestricted, .onDeviceUnavailable, .recorderFailed,
+             .transcriptionFailed, .nothingHeard, .cancelled, .interrupted:
+            return false
+        }
+    }
 }
 
 /// State machine for the composer's hold-to-talk mic button: hold
@@ -97,12 +122,28 @@ public final class PushToTalkController {
     private let permissions: any PushToTalkPermissionChecking
     private let recorderFactory: any AudioMemoRecorderFactory
     private let transcriber: any SpeechTranscribing
+    private let dictationAvailability: any OnDeviceDictationAvailabilityChecking
     private let makeFileURL: @Sendable () -> URL
 
     private var activeRecorder: (any AudioMemoRecording)?
     private var activeFileURL: URL?
     private var transcriptionTask: Task<Void, Never>?
     private var nextTranscriptID = 0
+
+    #if os(iOS)
+    /// Listens for `AVAudioSession.interruptionNotification` (phone
+    /// call, Siri, another app grabbing the mic) for the lifetime of
+    /// the controller. Cancelled in `deinit` — `nonisolated(unsafe)`
+    /// because a class's `deinit` is always nonisolated (no `isolated
+    /// deinit` here) and plain `nonisolated` isn't legal on a mutable
+    /// stored property; `Task.cancel()` is documented thread-safe from
+    /// any context, so touching this property from `deinit` can't race
+    /// anything that matters despite the lack of compiler-enforced
+    /// synchronization. `@ObservationIgnored` since view bodies never
+    /// read this bookkeeping property.
+    @ObservationIgnored
+    private nonisolated(unsafe) var interruptionObserverTask: Task<Void, Never>?
+    #endif
 
     /// Auto-clear window for `notice` — mirrors `RichChatViewModel`'s
     /// transient-hint lifetime so both strips behave the same.
@@ -118,7 +159,9 @@ public final class PushToTalkController {
         self.permissions = PushToTalkPermissionClient()
         self.recorderFactory = AVAudioMemoRecorderFactory()
         self.transcriber = OnDeviceSpeechTranscriber()
+        self.dictationAvailability = OnDeviceDictationAvailabilityClient()
         self.makeFileURL = { Self.defaultMemoURL() }
+        self.startObservingAudioInterruptionsIfNeeded()
     }
 
     /// Test seam — every collaborator injected.
@@ -126,12 +169,49 @@ public final class PushToTalkController {
         permissions: any PushToTalkPermissionChecking,
         recorderFactory: any AudioMemoRecorderFactory,
         transcriber: any SpeechTranscribing,
+        dictationAvailability: any OnDeviceDictationAvailabilityChecking,
         makeFileURL: @escaping @Sendable () -> URL
     ) {
         self.permissions = permissions
         self.recorderFactory = recorderFactory
         self.transcriber = transcriber
+        self.dictationAvailability = dictationAvailability
         self.makeFileURL = makeFileURL
+        // Deliberately NOT observing real AVAudioSession notifications
+        // in tests — `handleAudioSessionInterruption(began:)` is called
+        // directly instead, so a test doesn't depend on posting a real
+        // system notification.
+    }
+
+    #if os(iOS)
+    deinit {
+        interruptionObserverTask?.cancel()
+    }
+    #endif
+
+    /// Production-only: route `AVAudioSession.interruptionNotification`
+    /// into `handleAudioSessionInterruption`. A phone call or Siri
+    /// request grabs the shared audio session out from under an
+    /// in-progress take; without this the controller would stay stuck
+    /// in `.recording` (the finger is usually still down) with a
+    /// recorder that's no longer capturing real audio.
+    private func startObservingAudioInterruptionsIfNeeded() {
+        #if os(iOS)
+        interruptionObserverTask = Task { [weak self] in
+            let notifications = NotificationCenter.default.notifications(
+                named: AVAudioSession.interruptionNotification
+            )
+            for await notification in notifications {
+                guard let self else { return }
+                guard
+                    let info = notification.userInfo,
+                    let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                    let type = AVAudioSession.InterruptionType(rawValue: rawType)
+                else { continue }
+                self.handleAudioSessionInterruption(began: type == .began)
+            }
+        }
+        #endif
     }
 
     /// Fresh memo URL in the app's tmp directory. Public static so
@@ -189,15 +269,36 @@ public final class PushToTalkController {
             // attachment ingestion uses).
             var text: String?
             var failureDetail: String?
+            var onDeviceUnavailable = false
             do {
                 text = try await transcriber.transcribe(fileAt: url)
+            } catch let error as DictationError where error.reason == .onDeviceRecognitionUnsupported {
+                // Distinct from a generic failure — the composer should
+                // say "not available on this device", not "try again"
+                // (retrying can't help; the locale still won't support
+                // on-device recognition).
+                onDeviceUnavailable = true
             } catch {
                 failureDetail = error.localizedDescription
             }
             // The memo is transient — drop it whether or not
             // recognition succeeded.
             try? FileManager.default.removeItem(at: url)
-            self?.transcriptionFinished(text: text, failureDetail: failureDetail)
+            // `handleViewDisappearing()` cancels this task when the
+            // composer goes away mid-transcription; honor that by
+            // dropping the result instead of surfacing a stale notice
+            // or draft text for a screen nobody's looking at, while
+            // still resetting phase so a later reappearance doesn't
+            // find the controller stuck in `.transcribing` forever.
+            guard !Task.isCancelled else {
+                self?.phase = .idle
+                return
+            }
+            self?.transcriptionFinished(
+                text: text,
+                failureDetail: failureDetail,
+                onDeviceUnavailable: onDeviceUnavailable
+            )
         }
     }
 
@@ -212,9 +313,54 @@ public final class PushToTalkController {
         showNotice(.cancelled)
     }
 
+    /// A live recording or in-flight transcription is about to be
+    /// orphaned — the owning view is disappearing (tab switch away
+    /// from Chat) or the app is backgrounding. Recording keeps the mic
+    /// hot with nobody watching the status strip, so treat it exactly
+    /// like a user-initiated cancel; an in-flight transcription can't
+    /// be stopped mid-flight (SFSpeechRecognizer has no cancel-and-
+    /// discard hook exposed through `SpeechTranscribing`) but marking
+    /// the task cancelled means its eventual result is dropped instead
+    /// of surfacing a notice or draft text nobody asked for anymore.
+    public func handleViewDisappearing() {
+        switch phase {
+        case .recording:
+            holdCancelled()
+        case .transcribing:
+            transcriptionTask?.cancel()
+        case .idle:
+            break
+        }
+    }
+
+    /// Audio-session interruption arriving mid-take (phone call, Siri,
+    /// another app). `began == true` discards the in-flight recording
+    /// the same way a drag-away cancel would; `began == false` (the
+    /// interruption ending) is deliberately a no-op — the hold gesture
+    /// that started the take is long gone, so auto-resuming would
+    /// record into a take nothing is driving anymore. Internal (not
+    /// private) so tests can drive it without a real AVAudioSession
+    /// notification.
+    func handleAudioSessionInterruption(began: Bool) {
+        guard began, phase == .recording, let recorder = activeRecorder else { return }
+        activeRecorder = nil
+        activeFileURL = nil
+        recorder.cancel()
+        phase = .idle
+        showNotice(.interrupted)
+    }
+
     // MARK: - Internals
 
     private func startRecording() {
+        // Privacy contract: never record audio this app can't transcribe
+        // on-device. Checked fresh on every hold — on-device language
+        // support can change (locale switch, model download/removal)
+        // without an app update.
+        guard dictationAvailability.isOnDeviceRecognitionAvailable() else {
+            showNotice(.onDeviceUnavailable)
+            return
+        }
         do {
             let url = makeFileURL()
             let recorder = try recorderFactory.makeRecorder(fileURL: url)
@@ -232,8 +378,12 @@ public final class PushToTalkController {
         }
     }
 
-    private func transcriptionFinished(text: String?, failureDetail: String?) {
+    private func transcriptionFinished(text: String?, failureDetail: String?, onDeviceUnavailable: Bool) {
         phase = .idle
+        if onDeviceUnavailable {
+            showNotice(.onDeviceUnavailable)
+            return
+        }
         if let failureDetail {
             Self.logFailure("transcription failed", detail: failureDetail)
             showNotice(.transcriptionFailed)

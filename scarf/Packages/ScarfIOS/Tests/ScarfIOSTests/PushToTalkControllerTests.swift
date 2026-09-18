@@ -89,6 +89,12 @@ private struct MockTranscriber: SpeechTranscribing {
         case text(String)
         case silent
         case failure
+        /// Mirrors `OnDeviceSpeechTranscriber`'s own defense-in-depth
+        /// check — exercised even though `startRecording()` should
+        /// already have refused to record in this state, so a bug in
+        /// that pre-flight check can't regress into a silent
+        /// server-side transcription going unnoticed.
+        case onDeviceUnsupported
     }
 
     let outcome: Outcome
@@ -100,8 +106,17 @@ private struct MockTranscriber: SpeechTranscribing {
         case .text(let value): return value
         case .silent: return "   \n"
         case .failure: throw DictationError(reason: .recognizerUnavailable)
+        case .onDeviceUnsupported: throw DictationError(reason: .onDeviceRecognitionUnsupported)
         }
     }
+}
+
+/// Stand-in for `OnDeviceDictationAvailabilityChecking` — defaults to
+/// available so every existing test keeps exercising the happy path
+/// without threading a new parameter through.
+private struct MockDictationAvailability: OnDeviceDictationAvailabilityChecking {
+    let available: Bool
+    func isOnDeviceRecognitionAvailable() -> Bool { available }
 }
 
 /// Lock-guarded int — `requestAuthorization` runs inside a MainActor
@@ -154,13 +169,15 @@ private final class URLSink: @unchecked Sendable {
     private func makeController(
         permissions: MockPermissions,
         factory: MockRecorderFactory = MockRecorderFactory(),
-        outcome: MockTranscriber.Outcome = .text("Hello from dictation")
+        outcome: MockTranscriber.Outcome = .text("Hello from dictation"),
+        dictationAvailable: Bool = true
     ) -> (controller: PushToTalkController, recorder: MockRecorder, transcriber: MockTranscriber) {
         let transcriber = MockTranscriber(outcome: outcome)
         let controller = PushToTalkController(
             permissions: permissions,
             recorderFactory: factory,
             transcriber: transcriber,
+            dictationAvailability: MockDictationAvailability(available: dictationAvailable),
             makeFileURL: Self.makeMemoFile
         )
         return (controller, factory.recorder, transcriber)
@@ -404,5 +421,154 @@ private final class URLSink: @unchecked Sendable {
         #expect(settings[AVLinearPCMBitDepthKey] as? Int == 16)
         #expect(settings[AVLinearPCMIsFloatKey] as? Bool == false)
         #expect(settings[AVLinearPCMIsBigEndianKey] as? Bool == false)
+    }
+
+    // MARK: - On-device privacy contract
+
+    /// The core P1 fix: when on-device recognition can't run for the
+    /// current locale/device, dictation must refuse to record at all —
+    /// never fall back to Apple's servers, which is what
+    /// `NSSpeechRecognitionUsageDescription` promises never happens.
+    @Test func onDeviceUnavailableRefusesToRecordAtAll() {
+        let (controller, recorder, transcriber) = makeController(
+            permissions: MockPermissions(status: .granted),
+            dictationAvailable: false
+        )
+
+        controller.holdBegan()
+
+        #expect(controller.phase == .idle)
+        #expect(recorder.recordCalls == 0)
+        #expect(transcriber.receivedURLs.values.isEmpty)
+        #expect(controller.notice == .onDeviceUnavailable)
+    }
+
+    /// Defense-in-depth: even if a future change lets recording start
+    /// while on-device support is unavailable, the transcriber's own
+    /// refusal must surface the same honest notice, not a generic
+    /// "try again" that implies the request silently succeeded.
+    @Test func transcriberOnDeviceRefusalSurfacesOnDeviceUnavailableNotice() async {
+        let (controller, recorder, _) = makeController(
+            permissions: MockPermissions(status: .granted),
+            outcome: .onDeviceUnsupported
+        )
+
+        controller.holdBegan()
+        controller.holdReleased()
+        await waitUntil { controller.phase == .idle }
+
+        #expect(controller.transcript == nil)
+        #expect(controller.notice == .onDeviceUnavailable)
+        #expect(recorder.stopCalls == 1)
+    }
+
+    // MARK: - Audio session interruption
+
+    @Test func interruptionBeganWhileRecordingDiscardsTakeAndSurfacesNotice() {
+        let (controller, recorder, transcriber) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.holdBegan()
+        #expect(controller.phase == .recording)
+
+        controller.handleAudioSessionInterruption(began: true)
+
+        #expect(controller.phase == .idle)
+        #expect(recorder.cancelCalls == 1)
+        #expect(recorder.stopCalls == 0)
+        #expect(transcriber.receivedURLs.values.isEmpty)
+        #expect(controller.notice == .interrupted)
+    }
+
+    /// The interruption *ending* must not auto-resume recording — the
+    /// hold gesture that started the take is long gone by the time a
+    /// phone call ends.
+    @Test func interruptionEndingDoesNotResumeRecording() {
+        let (controller, recorder, _) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.holdBegan()
+        controller.handleAudioSessionInterruption(began: false)
+
+        #expect(controller.phase == .recording)
+        #expect(recorder.cancelCalls == 0)
+    }
+
+    @Test func interruptionWhileIdleIsIgnored() {
+        let (controller, recorder, _) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.handleAudioSessionInterruption(began: true)
+
+        #expect(controller.phase == .idle)
+        #expect(recorder.cancelCalls == 0)
+        #expect(controller.notice == nil)
+    }
+
+    // MARK: - View / app lifecycle teardown
+
+    @Test func viewDisappearingWhileRecordingCancelsTakeLikeADragAway() {
+        let (controller, recorder, transcriber) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.holdBegan()
+        controller.handleViewDisappearing()
+
+        #expect(controller.phase == .idle)
+        #expect(recorder.cancelCalls == 1)
+        #expect(transcriber.receivedURLs.values.isEmpty)
+        #expect(controller.notice == .cancelled)
+    }
+
+    /// A transcription already in flight when the view disappears must
+    /// not deliver a transcript or notice afterwards — nobody is
+    /// watching the composer to review it — but phase must still
+    /// settle back to `.idle` so a later reappearance isn't stuck
+    /// showing "Transcribing…" forever.
+    @Test func viewDisappearingWhileTranscribingDropsResultSilently() async {
+        let (controller, _, _) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.holdBegan()
+        controller.holdReleased()
+        #expect(controller.phase == .transcribing)
+
+        controller.handleViewDisappearing()
+
+        await waitUntil { controller.phase == .idle }
+        #expect(controller.transcript == nil)
+        #expect(controller.notice == nil)
+    }
+
+    @Test func viewDisappearingWhileIdleIsANoOp() {
+        let (controller, recorder, _) = makeController(
+            permissions: MockPermissions(status: .granted)
+        )
+
+        controller.handleViewDisappearing()
+
+        #expect(controller.phase == .idle)
+        #expect(recorder.cancelCalls == 0)
+    }
+
+    // MARK: - Settings deep link contract
+
+    /// Only denials the user can actually fix from Settings should
+    /// offer the deep link — a restricted/MDM device or an
+    /// unsupported locale has no toggle to flip there.
+    @Test func settingsDeepLinkOnlyOffersFixableDenials() {
+        #expect(PushToTalkNotice.microphonePermissionDenied.opensSystemSettings)
+        #expect(PushToTalkNotice.speechPermissionDenied.opensSystemSettings)
+        for notice: PushToTalkNotice in [
+            .permissionsRestricted, .onDeviceUnavailable, .recorderFailed,
+            .transcriptionFailed, .nothingHeard, .cancelled, .interrupted,
+        ] {
+            #expect(!notice.opensSystemSettings)
+        }
     }
 }
