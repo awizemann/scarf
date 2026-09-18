@@ -3110,6 +3110,14 @@ extension ChatViewModel: VoiceTurnHost {
         voiceLive.start(context: context, host: self)
     }
 
+    /// Continue on the Live Voice consent sheet: remember the consent, then
+    /// start the session the user asked for.
+    func acceptVoiceLiveConsent() {
+        guard voiceLive.pendingConsent != nil else { return }
+        voiceLive.acceptConsent()
+        startVoiceLive()
+    }
+
     /// A voice turn Scarf started is still running and nothing typed is
     /// mixed into its run. The engine cancels whatever reads busy, and
     /// voice cancels only its own turns, so a typed request (running, or

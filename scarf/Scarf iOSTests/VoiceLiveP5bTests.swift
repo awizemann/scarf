@@ -170,7 +170,28 @@ private struct Harness {
         var phaseAfterStart: VoiceConversationPhase = .connecting
     }
 
-    init(mic: FakeMicrophone = FakeMicrophone(.granted), grace: Duration = .milliseconds(20)) {
+    let consent: VoiceDataConsentStore
+
+    /// A consent store over a throwaway defaults suite (never the real
+    /// one). `accepted` pre-records the OpenAI consent, so the lifecycle
+    /// tests start sessions without the sheet.
+    static func consentStore(accepted: Bool = true) -> VoiceDataConsentStore {
+        let suite = "scarf.tests.voiceLiveIOS.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = VoiceDataConsentStore(defaults: defaults)
+        if accepted { store.recordConsent(to: .openAI) }
+        return store
+    }
+
+    init(
+        mic: FakeMicrophone = FakeMicrophone(.granted),
+        grace: Duration = .milliseconds(20),
+        externalRecipient: VoiceDataRecipient? = .openAI,
+        consent: VoiceDataConsentStore? = nil
+    ) {
+        let consent = consent ?? Self.consentStore()
+        self.consent = consent
         let box = EngineBox()
         engines = box
         let audio = self.audio
@@ -182,9 +203,11 @@ private struct Harness {
                 box.made.append(engine)
                 return .init(engine: engine, bridge: nil)
             },
+            externalRecipient: externalRecipient,
             audioSession: audio,
             backgroundTasks: tasks,
             microphone: mic,
+            consent: consent,
             teardownGrace: grace
         )
     }
@@ -233,6 +256,81 @@ private func drainAudioRelease() async {
         await drainAudioRelease()
         #expect(h.audio.activations == 2)
         #expect(h.audio.deactivations == 0)
+    }
+
+    // MARK: F4: consent before the first session
+
+    @Test func theFirstBeginAsksForConsentAndTouchesNothing() async {
+        let mic = FakeMicrophone(.undetermined)
+        let h = Harness(mic: mic, consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == .openAI)
+        #expect(h.engines.made.isEmpty, "a session was built before consent")
+        #expect(mic.requests == 0, "the microphone prompt came before consent")
+        #expect(h.audio.activations == 0)
+        #expect(!h.model.isPresented)
+
+        // Continue, then the view begins again: the session starts.
+        h.model.acceptConsent()
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.consent.hasConsented(to: .openAI))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.engines.made.count == 1)
+        #expect(h.engine?.startCount == 1)
+    }
+
+    @Test func cancelOnTheConsentStartsNothingAndAsksAgain() async {
+        let h = Harness(consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.declineConsent()
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.engines.made.isEmpty)
+        #expect(h.audio.activations == 0)
+        #expect(!h.consent.hasConsented(to: .openAI))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == .openAI)
+        #expect(h.engines.made.isEmpty)
+    }
+
+    @Test func consentIsRememberedPerRecipientUntilReset() async {
+        let consent = Harness.consentStore(accepted: false)
+        let first = Harness(consent: consent)
+        await first.model.begin(host: NullTurnHost(), dictationIdle: true)
+        first.model.acceptConsent()
+
+        // A new model (a relaunch, another chat) over the same store: no sheet.
+        let second = Harness(consent: consent)
+        await second.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(second.model.pendingConsent == nil)
+        #expect(second.engines.made.count == 1)
+
+        // Another recipient still asks.
+        let acme = VoiceDataRecipient(id: "acme", displayName: "Acme", disclosureVersion: 1)
+        let other = Harness(externalRecipient: acme, consent: consent)
+        await other.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(other.model.pendingConsent == acme)
+        #expect(other.engines.made.isEmpty)
+
+        // Settings reset: asks again.
+        consent.resetConsent(for: .openAI)
+        let third = Harness(consent: consent)
+        await third.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(third.model.pendingConsent == .openAI)
+        #expect(third.engines.made.isEmpty)
+    }
+
+    @Test func anEngineWithNoExternalRecipientNeverAsks() async {
+        let h = Harness(externalRecipient: nil, consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.engines.made.count == 1)
+    }
+
+    @Test func leavingChatDropsAPendingConsent() async {
+        let h = Harness(consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.teardown(.viewDisappeared)
+        #expect(h.model.pendingConsent == nil)
     }
 
     @Test func beginStartsSessionWithAudioAndSheet() async {

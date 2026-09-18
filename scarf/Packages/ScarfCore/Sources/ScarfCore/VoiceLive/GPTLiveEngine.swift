@@ -102,6 +102,14 @@ public final class GPTLiveEngine: VoiceConversationEngine {
     @ObservationIgnored private let ledger: VoiceTextOnlyTurnLedger
     private static let logger = Logger(subsystem: "com.scarf", category: "LiveVoice")
 
+    /// Where this engine sends the user's data directly, bypassing the
+    /// Hermes host: the page streams microphone audio to OpenAI over WebRTC
+    /// (so OpenAI also sees this device's network address), and each session
+    /// is seeded with recent chat (``VoiceLiveText/liveHistory(from:maxMessages:maxChars:)``).
+    /// The host only runs the session exchange. Apps ask for consent before
+    /// the first session (``VoiceDataConsent``).
+    public nonisolated static let externalRecipient: VoiceDataRecipient? = .openAI
+
     // MARK: Session state
 
     private struct Delegation {
@@ -644,7 +652,10 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         if let endReason {
             complete(.ended(endReason), usageSeconds: usageSeconds)
         } else {
-            complete(.failed(Self.failure(forCloseReason: remoteReason, usageSeconds: usageSeconds)), usageSeconds: usageSeconds)
+            let failure = Self.failure(forCloseReason: remoteReason, usageSeconds: usageSeconds)
+            // The vendor's close reason is logged, never shown.
+            Self.logger.notice("Live Voice failed: \(VoiceLiveHostExchange.redact(failure.englishDescription), privacy: .public)")
+            complete(.failed(failure), usageSeconds: usageSeconds)
         }
     }
 

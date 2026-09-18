@@ -13,9 +13,9 @@ enum VoiceLivePresentation {
         let message: String
         /// What to do about it, when the fix is setup on the host or Mac.
         let guidance: String?
-        /// Vendor or system detail, shown verbatim in small type (already
-        /// redacted by the host exchange). Never localized: it is data.
-        let detail: String?
+        // No vendor or system detail: it is untranslated vendor wording
+        // that may echo request data. The engine logs it (redacted) under
+        // com.scarf / LiveVoice; the panel never shows it (F4).
         /// Offer the macOS microphone privacy pane.
         let offersMicrophoneSettings: Bool
     }
@@ -102,53 +102,53 @@ enum VoiceLivePresentation {
         switch failure {
         case .host(let error):
             return hostFailure(error)
-        case .mediaUnavailable(let detail):
+        case .mediaUnavailable:
             return FailureCopy(
                 message: String(localized: "Live Voice audio couldn't start on this Mac."),
-                guidance: nil, detail: detail, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         case .microphoneDenied:
             return FailureCopy(
                 message: String(localized: "Scarf can't use the microphone."),
                 guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Microphone, then try again."),
-                detail: nil, offersMicrophoneSettings: true
+                offersMicrophoneSettings: true
             )
         case .microphoneBusy:
             return FailureCopy(
                 message: String(localized: "Another app is using the microphone."),
                 guidance: String(localized: "Finish there, then try again."),
-                detail: nil, offersMicrophoneSettings: false
+                offersMicrophoneSettings: false
             )
         case .microphoneNotFound:
             return FailureCopy(
                 message: String(localized: "No microphone is available."),
                 guidance: String(localized: "Connect or select a microphone in System Settings › Sound, then try again."),
-                detail: nil, offersMicrophoneSettings: false
+                offersMicrophoneSettings: false
             )
-        case .audioConnectFailed(let detail):
+        case .audioConnectFailed:
             return FailureCopy(
                 message: String(localized: "Live Voice couldn't connect its audio."),
-                guidance: nil, detail: detail, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         case .connectTimedOut:
             return FailureCopy(
                 message: String(localized: "Live Voice took too long to connect."),
-                guidance: nil, detail: nil, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         case .connectionLost:
             return FailureCopy(
                 message: String(localized: "The Live Voice connection dropped."),
-                guidance: nil, detail: nil, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         case .mediaProcessTerminated:
             return FailureCopy(
                 message: String(localized: "Live Voice stopped unexpectedly."),
-                guidance: nil, detail: nil, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
-        case .closedByVendor(let reason, _):
+        case .closedByVendor:
             return FailureCopy(
                 message: String(localized: "OpenAI ended the Live Voice session."),
-                guidance: nil, detail: reason, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         }
     }
@@ -159,21 +159,21 @@ enum VoiceLivePresentation {
             return FailureCopy(
                 message: String(localized: "Live Voice needs an OpenAI API key on the Hermes host."),
                 guidance: String(localized: "Set OPENAI_API_KEY in the host's Hermes .env file, or voice.gpt_live.api_key in its config.yaml, then try again. Nothing was charged."),
-                detail: nil, offersMicrophoneSettings: false
+                offersMicrophoneSettings: false
             )
         case .unsupported:
             return FailureCopy(
                 message: String(localized: "This server's Hermes can't run Live Voice."),
                 guidance: String(localized: "Update Hermes on the host to 0.21.3 or newer, then try again."),
-                detail: nil, offersMicrophoneSettings: false
+                offersMicrophoneSettings: false
             )
-        case .interpreterNotFound(let detail):
+        case .interpreterNotFound:
             return FailureCopy(
                 message: String(localized: "Scarf couldn't find Hermes's Python on the host."),
                 guidance: String(localized: "Check the Hermes installation on the host, then try again."),
-                detail: detail, offersMicrophoneSettings: false
+                offersMicrophoneSettings: false
             )
-        case .vendor(let status, let detail):
+        case .vendor(let status, _):
             let message: String
             switch status {
             case 401?: message = String(localized: "OpenAI rejected the API key on the Hermes host.")
@@ -182,21 +182,21 @@ enum VoiceLivePresentation {
             case let code?: message = String(localized: "OpenAI refused the Live Voice session (HTTP \(code)).")
             case nil: message = String(localized: "OpenAI refused the Live Voice session.")
             }
-            return FailureCopy(message: message, guidance: nil, detail: detail.isEmpty ? nil : detail, offersMicrophoneSettings: false)
+            return FailureCopy(message: message, guidance: nil, offersMicrophoneSettings: false)
         case .network:
             return FailureCopy(
                 message: String(localized: "The Hermes host couldn't reach OpenAI."),
-                guidance: nil, detail: nil, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         case .transport:
             return FailureCopy(
                 message: String(localized: "Scarf couldn't reach the Hermes host."),
-                guidance: nil, detail: nil, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
-        case .badRequest(let detail), .hostInternal(let detail), .malformedOutput(let detail):
+        case .badRequest, .hostInternal, .malformedOutput:
             return FailureCopy(
                 message: String(localized: "Live Voice couldn't start on the Hermes host."),
-                guidance: nil, detail: detail.isEmpty ? nil : detail, offersMicrophoneSettings: false
+                guidance: nil, offersMicrophoneSettings: false
             )
         }
     }

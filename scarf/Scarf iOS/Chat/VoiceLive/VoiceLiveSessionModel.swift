@@ -118,6 +118,10 @@ final class VoiceLiveSessionModel {
     /// Drives the session sheet.
     var isPresented = false
     private(set) var composerNotice: VoiceLiveComposerNotice?
+    /// A start is waiting for the user to agree to send their data to this
+    /// recipient (drives the consent sheet). Nothing is asked of the
+    /// microphone, the audio session or the host until ``acceptConsent()``.
+    var pendingConsent: VoiceDataRecipient?
 
     /// A session exists and has not ended (connecting through ending).
     var isActive: Bool { session?.engine.phase.isActive ?? false }
@@ -126,6 +130,11 @@ final class VoiceLiveSessionModel {
     @ObservationIgnored private let audioSession: any VoiceLiveAudioSessionControlling
     @ObservationIgnored private let backgroundTasks: any VoiceLiveBackgroundTaskRunning
     @ObservationIgnored private let microphone: any VoiceLiveMicrophonePermissionChecking
+    @ObservationIgnored private let consent: VoiceDataConsentStore
+    /// Who the engine `makeSession` builds sends data to directly. Travels
+    /// with the factory (GPT-Live in production); `nil` for an engine that
+    /// keeps data local, which never asks.
+    @ObservationIgnored private let externalRecipient: VoiceDataRecipient?
     @ObservationIgnored private let teardownGrace: Duration
     @ObservationIgnored private var audioSessionActive = false
     @ObservationIgnored private var isBeginning = false
@@ -153,9 +162,11 @@ final class VoiceLiveSessionModel {
                 )
                 return Session(engine: engine, bridge: bridge)
             },
+            externalRecipient: GPTLiveEngine.externalRecipient,
             audioSession: VoiceLiveAVAudioSession(),
             backgroundTasks: UIKitBackgroundTaskRunner(),
-            microphone: AVMicrophonePermissionClient()
+            microphone: AVMicrophonePermissionClient(),
+            consent: .shared
         )
         observeAudioInterruptions()
     }
@@ -163,12 +174,16 @@ final class VoiceLiveSessionModel {
     /// Test seam: every collaborator injected; no system notifications.
     init(
         makeSession: @escaping SessionFactory,
+        externalRecipient: VoiceDataRecipient?,
         audioSession: any VoiceLiveAudioSessionControlling,
         backgroundTasks: any VoiceLiveBackgroundTaskRunning,
         microphone: any VoiceLiveMicrophonePermissionChecking,
+        consent: VoiceDataConsentStore,
         teardownGrace: Duration = .seconds(5)
     ) {
         self.makeSession = makeSession
+        self.externalRecipient = externalRecipient
+        self.consent = consent
         self.audioSession = audioSession
         self.backgroundTasks = backgroundTasks
         self.microphone = microphone
@@ -183,10 +198,18 @@ final class VoiceLiveSessionModel {
 
     /// Start a session for `host`. Refuses while dictation holds the
     /// microphone (`dictationIdle == false`) or a session is already
-    /// running. Asks for the microphone first — the same system prompt P1
-    /// dictation uses — so a denial costs nothing and opens no sheet.
+    /// running. The first start on this device for an engine that sends
+    /// data to a third party only raises ``pendingConsent`` (the consent
+    /// sheet); the view calls `begin` again after ``acceptConsent()``. Then
+    /// it asks for the microphone — the same system prompt P1 dictation
+    /// uses — so a denial costs nothing and opens no sheet.
     func begin(host: any VoiceTurnHost, dictationIdle: Bool) async {
         guard dictationIdle, !isActive, !isBeginning else { return }
+        if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient, store: consent) {
+            pendingConsent = recipient
+            return
+        }
+        pendingConsent = nil
         isBeginning = true
         defer { isBeginning = false }
         composerNotice = nil
@@ -217,6 +240,22 @@ final class VoiceLiveSessionModel {
         phaseDidChange()
     }
 
+    // MARK: Consent
+
+    /// Continue on the consent sheet: remember it on this device. The view
+    /// then calls `begin` for the session the user asked for.
+    func acceptConsent() {
+        guard let recipient = pendingConsent else { return }
+        pendingConsent = nil
+        consent.recordConsent(to: recipient)
+    }
+
+    /// Cancel on the consent sheet (or swiping it away): nothing starts,
+    /// nothing is billed, and the next start asks again.
+    func declineConsent() {
+        pendingConsent = nil
+    }
+
     // MARK: End
 
     /// The End button: graceful (GPT-Live waits up to 15 s for the vendor's
@@ -236,6 +275,10 @@ final class VoiceLiveSessionModel {
     /// vendor's own timeout.
     func teardown(_ trigger: VoiceLiveTeardownTrigger) {
         teardownGeneration += 1
+        // Leaving Chat takes an unanswered consent sheet with it.
+        if trigger == .viewDisappeared || trigger == .sessionChanged {
+            pendingConsent = nil
+        }
         if trigger == .sheetDismissed || trigger == .viewDisappeared || trigger == .backgrounded {
             isPresented = false
         }

@@ -190,13 +190,6 @@ struct VoiceLivePanel: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let detail = copy.detail {
-                Text(verbatim: detail)
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-            }
             HStack(spacing: ScarfSpace.s2) {
                 Spacer(minLength: 0)
                 if copy.offersMicrophoneSettings {
