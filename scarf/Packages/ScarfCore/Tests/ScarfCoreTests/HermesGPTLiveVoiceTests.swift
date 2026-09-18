@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import ScarfCore
 
 /// v0.21.3 (v2026.9.14): GPT-Live voice chat mode. `tools/voice_live.py`
@@ -98,5 +99,23 @@ import Testing
         #expect(VoiceLiveReadiness.availability(capabilities: caps, config: live) == .ready)
         #expect(VoiceLiveReadiness.availability(capabilities: caps, config: chained) == .hidden(.chainedMode))
         #expect(VoiceLiveReadiness.availability(capabilities: caps, config: nil) == .hidden(.chainedMode))
+    }
+
+    /// C1: below v0.21.3 the ScarfGo setter refuses without spawning a
+    /// process (the context points at a server that doesn't exist, so any
+    /// spawn would fail differently).
+    @MainActor
+    @Test func iOSSetterRefusesBelowTheFloorWithoutSpawning() async {
+        let vm = IOSSettingsViewModel(context: ServerContext(
+            id: UUID(), displayName: "nowhere",
+            kind: .ssh(SSHConfig(host: "invalid.invalid"))))
+        let old = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+        do {
+            try await vm.saveVoiceChatMode(.gptLive, capabilities: old)
+            Issue.record("expected a refusal")
+        } catch {
+            #expect(error.localizedDescription.contains("0.21.3"))
+        }
+        #expect(!vm.isSaving)
     }
 }
