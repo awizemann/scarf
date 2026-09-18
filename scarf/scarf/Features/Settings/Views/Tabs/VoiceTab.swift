@@ -49,15 +49,20 @@ struct VoiceTab: View {
         }
 
         SettingsSection(title: "Text-to-Speech", icon: "speaker.wave.3") {
-            PickerRow(
-                label: "Playback Engine",
-                selection: playbackEngine,
-                options: playbackEngineOptions.map(\.id),
-                optionLabel: { id in
-                    playbackEngineOptions.first { $0.id == id }?.label ?? id
-                }
-            ) { playbackEngine = $0 }
-                .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider and falls back to the system voice when the server can't synthesize.")
+            // C1: hidden below v0.20.1 (`hasHermesSpeechSynthesis`) so an
+            // older host renders this section exactly as before; the
+            // speaker button there always uses the system voice.
+            if capabilities.hasHermesSpeechSynthesis {
+                PickerRow(
+                    label: "Playback Engine",
+                    selection: playbackEngine,
+                    options: playbackEngineOptions.map(\.id),
+                    optionLabel: { id in
+                        playbackEngineOptions.first { $0.id == id }?.label ?? id
+                    }
+                ) { playbackEngine = $0 }
+                    .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider and falls back to the system voice when the server can't synthesize.")
+            }
             PickerRow(
                 label: "Provider",
                 selection: viewModel.config.voice.ttsProvider,
