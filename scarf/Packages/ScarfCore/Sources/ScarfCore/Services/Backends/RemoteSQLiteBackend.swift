@@ -77,8 +77,8 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     /// Resolved absolute remote `$HOME`, populated on `open()` via
     /// `context.resolvedUserHome()` so that `~/` paths can be expanded
     /// in Swift up front rather than relying on shell expansion across
-    /// the streamScript pipeline. The base64 + pipe path through
-    /// Citadel does not reliably propagate `$HOME` into the inner
+    /// the streamScript pipeline. The `head -c <n> | /bin/sh` stdin path
+    /// through Citadel does not reliably propagate `$HOME` into the inner
     /// `/bin/sh` on every host — keeping this client-side avoids the
     /// issue (and matches how `RemoteBackupService.expandTilde` already
     /// handles the same problem). `nil` only when the probe failed,

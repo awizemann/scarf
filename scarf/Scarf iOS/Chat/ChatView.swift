@@ -2989,11 +2989,6 @@ final class ChatController {
     }
 }
 
-/// `Identifiable` wrapper so SwiftUI's `.sheet(item:)` can key off
-/// the pending permission. Two permissions for the same request-id
-/// are treated as identical (rare — would only happen if the remote
-/// sends a duplicate).
-
 /// Presents the head of the chat's tool-permission queue. A modifier so the
 /// Live Voice sheet can present the same prompt over itself while it is up.
 struct ChatPermissionPresenter: ViewModifier {
@@ -3032,6 +3027,10 @@ struct ChatPermissionPresenter: ViewModifier {
     }
 }
 
+/// `Identifiable` wrapper so SwiftUI's `.sheet(item:)` can key off
+/// the pending permission. Two permissions for the same request-id
+/// are treated as identical (rare — would only happen if the remote
+/// sends a duplicate).
 private struct PermissionWrapper: Identifiable {
     let value: RichChatViewModel.PendingPermission
     var id: Int { value.requestId }
