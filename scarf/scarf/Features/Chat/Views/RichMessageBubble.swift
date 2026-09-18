@@ -714,21 +714,69 @@ private struct SpeakMessageButton: View {
     let content: String
 
     @State private var speech = MessageSpeechService.shared
+    @State private var liveVoice = VoiceLiveSessionRegistry.shared
     @Environment(\.serverContext) private var serverContext
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
         let id = MessageSpeechService.PlaybackID(server: serverContext, messageId: messageId)
-        let isPlaying = speech.isPlaying(id)
+        let state = SpeakMessageButtonState(
+            isPlaying: speech.isPlaying(id),
+            isLoading: speech.loading == id,
+            liveVoiceActive: liveVoice.isAnySessionActive
+        )
         Button {
             speech.toggle(id, content: content, capabilities: capabilitiesStore?.capabilities ?? .empty)
         } label: {
-            Image(systemName: isPlaying ? "stop.circle.fill" : "speaker.wave.2")
-                .font(.system(size: 11))
-                .foregroundStyle(isPlaying ? ScarfColor.accent : ScarfColor.foregroundFaint)
+            Group {
+                if state.isLoading {
+                    // Hermes Voice is synthesizing (can take seconds); the
+                    // button still stops it.
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: state.isPlaying ? "stop.circle.fill" : "speaker.wave.2")
+                        .font(.system(size: 11))
+                        .foregroundStyle(state.isPlaying ? ScarfColor.accent : ScarfColor.foregroundFaint)
+                }
+            }
+            .frame(width: 14, height: 14)
         }
         .buttonStyle(.plain)
-        .help(isPlaying ? "Stop speaking" : "Read this reply aloud")
+        .disabled(!state.isEnabled)
+        .help(state.help)
+        .accessibilityLabel(state.accessibilityLabel)
+        .accessibilityValue(state.accessibilityValue)
+    }
+}
+
+/// What the message speaker button shows. Pure so the rules are tested:
+/// it stands down while Live Voice holds the speaker (starting a session
+/// already stops any reading), and it reports Hermes Voice's synthesis wait.
+struct SpeakMessageButtonState: Equatable {
+    let isPlaying: Bool
+    let isLoading: Bool
+    let liveVoiceActive: Bool
+
+    /// Off while Live Voice runs, unless something is still playing (so it
+    /// can always be stopped).
+    var isEnabled: Bool { isPlaying || !liveVoiceActive }
+
+    var help: String {
+        if isLoading { return String(localized: "Preparing Hermes Voice… (click to stop)") }
+        if isPlaying { return String(localized: "Stop speaking") }
+        if liveVoiceActive { return String(localized: "Unavailable during Live Voice") }
+        return String(localized: "Read this reply aloud")
+    }
+
+    var accessibilityLabel: String {
+        isPlaying ? String(localized: "Stop reading aloud") : String(localized: "Read reply aloud")
+    }
+
+    var accessibilityValue: String {
+        if isLoading { return String(localized: "Preparing audio") }
+        if isPlaying { return String(localized: "Playing") }
+        if liveVoiceActive { return String(localized: "Unavailable during Live Voice") }
+        return ""
     }
 }
 

@@ -9,6 +9,8 @@ struct VoiceLiveComposerEntry {
     let isActive: Bool
     /// A session can start: the chat has a live ACP session to hand turns to.
     let canStart: Bool
+    /// Another window holds the app's one Live Voice session.
+    var blockedByAnotherWindow = false
     let onToggle: () -> Void
 }
 
@@ -16,7 +18,7 @@ struct VoiceLiveComposerEntry {
 struct VoiceLiveComposerButton: View {
     let entry: VoiceLiveComposerEntry
 
-    private var enabled: Bool { entry.isActive || entry.canStart }
+    private var enabled: Bool { entry.isActive || (entry.canStart && !entry.blockedByAnotherWindow) }
 
     var body: some View {
         Button(action: entry.onToggle) {
@@ -36,12 +38,19 @@ struct VoiceLiveComposerButton: View {
         .disabled(!enabled)
         .help(helpText)
         .accessibilityLabel(entry.isActive ? Text("End Live Voice") : Text("Start Live Voice"))
-        .accessibilityHint(entry.isActive ? Text(verbatim: "") : Text("Talk with Hermes. GPT-Live bills about $0.05 per minute to the OpenAI key on the Hermes host."))
+        .accessibilityHint(accessibilityHint)
         .accessibilityIdentifier("chat.composer.voiceLive")
+    }
+
+    private var accessibilityHint: Text {
+        if entry.isActive { return Text(verbatim: "") }
+        if entry.blockedByAnotherWindow { return Text("Live Voice is running in another Scarf window. End it there first.") }
+        return Text("Talk with Hermes. GPT-Live bills about $0.05 per minute to the OpenAI key on the Hermes host.")
     }
 
     private var helpText: Text {
         if entry.isActive { return Text("End Live Voice (⌘.)") }
+        if entry.blockedByAnotherWindow { return Text("Live Voice is running in another Scarf window. End it there first.") }
         if entry.canStart { return Text("Start Live Voice: talk with Hermes (about $0.05 per minute)") }
         return Text("Open a chat session to talk with Hermes.")
     }

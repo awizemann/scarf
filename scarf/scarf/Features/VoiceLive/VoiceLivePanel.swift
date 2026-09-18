@@ -34,6 +34,13 @@ struct VoiceLivePanel: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(Text("Live Voice"))
                 .accessibilityIdentifier("chat.voiceLive.panel")
+                // VoiceOver hears the session's progress without having to
+                // find the panel: connecting, live, ended, failed.
+                .onChange(of: engine.phase) { old, new in
+                    if let line = VoiceLivePresentation.announcement(from: old, to: new, endNote: controller.endNote) {
+                        AccessibilityNotification.Announcement(line).post()
+                    }
+                }
         }
     }
 
@@ -157,7 +164,7 @@ struct VoiceLivePanel: View {
 
     private func endedFooter(_ engine: any VoiceConversationEngine, reason: VoiceSessionEndReason) -> some View {
         HStack(spacing: ScarfSpace.s2) {
-            if let message = VoiceLivePresentation.endedMessage(reason) {
+            if let message = VoiceLivePresentation.endedMessage(reason, endNote: controller.endNote) {
                 Text(verbatim: message)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
@@ -205,10 +212,18 @@ struct VoiceLivePanel: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var restartHelp: Text {
+        if canRestart { return Text("Start a new voice session in this chat") }
+        if controller.isBlockedByAnotherWindow {
+            return Text("Live Voice is running in another Scarf window. End it there first.")
+        }
+        return Text("Open a chat session to talk with Hermes.")
+    }
+
     private func restartButton(title: Text) -> some View {
         Button(action: onRestart) { title }
             .disabled(!canRestart)
-            .help(canRestart ? Text("Start a new voice session in this chat") : Text("Open a chat session to talk with Hermes."))
+            .help(restartHelp)
             .accessibilityIdentifier("chat.voiceLive.restart")
     }
 }
