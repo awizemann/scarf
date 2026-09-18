@@ -62,15 +62,15 @@ import Foundation
     }
 
     @Test func terminalOutcomesClearFlags() {
-        let s = R.reduce(live(.speaking, speaking: true, delegation: true), .failed("dropped"))
-        #expect(s == VoiceConversationState(phase: .failed("dropped")))
+        let s = R.reduce(live(.speaking, speaking: true, delegation: true), .failed(.connectionLost))
+        #expect(s == VoiceConversationState(phase: .failed(.connectionLost)))
     }
 
     @Test func terminalPhasesIgnoreEverythingButANewStart() {
-        for terminal in [VoiceConversationPhase.ended(.idleTimeout), .failed("x")] {
+        for terminal in [VoiceConversationPhase.ended(.idleTimeout), .failed(.connectTimedOut)] {
             let s = VoiceConversationState(phase: terminal)
             for event: VoiceConversationEvent in [.sessionLive, .assistantSpeaking(true), .delegationStarted,
-                                                  .endRequested, .ended(.userEnded), .failed("y")] {
+                                                  .endRequested, .ended(.userEnded), .failed(.connectionLost)] {
                 #expect(R.reduce(s, event).phase == terminal)
             }
             #expect(R.reduce(s, .startRequested).phase == .connecting)
@@ -81,6 +81,16 @@ import Foundation
 
     @Test func startWhileActiveIsANoOp() {
         #expect(R.reduce(live(), .startRequested) == live())
+    }
+
+    @Test func onlyHostConfigurationFailuresAreSetupHints() {
+        #expect(VoiceSessionFailure.host(.noKey).setupHint)
+        #expect(VoiceSessionFailure.host(.unsupported).setupHint)
+        #expect(VoiceSessionFailure.host(.interpreterNotFound(detail: "x")).setupHint)
+        #expect(!VoiceSessionFailure.host(.vendor(status: 401, detail: "bad key")).setupHint)
+        #expect(!VoiceSessionFailure.connectionLost.setupHint)
+        #expect(VoiceSessionFailure.closedByVendor(reason: "max_duration", usageSeconds: 1799.6).englishDescription
+                == "Live Voice ended: max_duration (1800 s).")
     }
 
     // MARK: server events — shapes from voice-live.ts:38-50, :373-441 @ v2026.9.14

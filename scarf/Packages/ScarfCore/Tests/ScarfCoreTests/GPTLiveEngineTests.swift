@@ -155,8 +155,10 @@ import Foundation
         await engine.start()
         bridge.emit(.offer(sdp: "v=0"))
         await settle { engine.phase.isTerminal }
-        guard case .failed(let message) = engine.phase else { Issue.record("\(engine.phase)"); return }
-        #expect(message.contains("OPENAI_API_KEY"))
+        #expect(engine.phase == .failed(.host(.noKey)))
+        guard case .failed(let failure) = engine.phase else { return }
+        #expect(failure.setupHint)
+        #expect(failure.englishDescription.contains("OPENAI_API_KEY"))
         #expect(bridge.answers.isEmpty)
         #expect(bridge.teardowns == 1)
         #expect(engine.approximateCostUSD == 0)
@@ -165,24 +167,28 @@ import Foundation
     @Test func microphoneFailureFailsTheStart() async {
         bridge.startError = Boom()
         await engine.start()
-        guard case .failed(let message) = engine.phase else { Issue.record("\(engine.phase)"); return }
-        #expect(message.contains("boom"))
+        #expect(engine.phase == .failed(.mediaUnavailable(detail: "boom")))
         #expect(bridge.teardowns == 1)
     }
 
     @Test func transportClosedWhileConnectingNamesTheReason() async {
         await engine.start()
         bridge.emit(.transportClosed(reason: "microphone_denied"))
-        guard case .failed(let message) = engine.phase else { Issue.record("\(engine.phase)"); return }
-        #expect(message.contains("microphone"))
+        #expect(engine.phase == .failed(.microphoneDenied))
     }
 
-    @Test func startTimesOut() async {
+    /// The connect clock starts at the offer: a slow first-run microphone
+    /// prompt (before any offer) never times out.
+    @Test func connectTimesOutFromTheOfferNotFromStart() async {
         await engine.start()
+        advance(600)                       // the user is still deciding on the mic prompt
+        #expect(engine.phase == .connecting)
+        bridge.emit(.offer(sdp: "v=0"))
+        await settle { bridge.answers.count == 1 }
         advance(74)
         #expect(engine.phase == .connecting)
         advance(2)
-        guard case .failed = engine.phase else { Issue.record("\(engine.phase)"); return }
+        #expect(engine.phase == .failed(.connectTimedOut))
         #expect(bridge.teardowns == 1)
     }
 
@@ -393,8 +399,7 @@ import Foundation
     @Test func anUnrequestedCloseIsAFailureWithTheReason() async {
         await goLive()
         bridge.server(#"{"type":"session.closed","reason":"max_duration","usage":{"seconds":1800}}"#)
-        guard case .failed(let message) = engine.phase else { Issue.record("\(engine.phase)"); return }
-        #expect(message.contains("max_duration"))
+        #expect(engine.phase == .failed(.closedByVendor(reason: "max_duration", usageSeconds: 1800)))
         #expect(engine.elapsedSeconds == 1800)
         #expect(abs(engine.approximateCostUSD - 1.5) < 1e-9)
     }
@@ -402,7 +407,7 @@ import Foundation
     @Test func connectionLossFails() async {
         await goLive()
         bridge.emit(.transportClosed(reason: "connection_lost"))
-        #expect(engine.phase == .failed(GPTLiveEngine.message(forCloseReason: "connection_lost", usageSeconds: nil)))
+        #expect(engine.phase == .failed(.connectionLost))
     }
 
     // MARK: captions, notices, mute, restart

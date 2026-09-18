@@ -20,9 +20,10 @@ public protocol VoiceLiveSessionExchanging: Sendable {
     func createSession(offerSDP: String, history: [VoiceLiveHistoryMessage]) async throws -> VoiceLiveSessionAnswer
 }
 
-/// Why a session exchange failed. Every case carries user-presentable copy
-/// (``errorDescription``); no case ever carries a key, and vendor detail is
-/// redacted twice (in the host script and again here).
+/// Why a session exchange failed. No case ever carries a key, and vendor
+/// detail is redacted twice (in the host script and again here).
+/// ``errorDescription`` is an English token (ScarfCore has no string
+/// catalog): the apps localize one sentence per case.
 public enum VoiceLiveHostError: Error, Equatable, Sendable, LocalizedError {
     /// `import tools.voice_live` failed on the host: Hermes older than
     /// 0.21.3 or the wrong interpreter.
@@ -51,25 +52,25 @@ public enum VoiceLiveHostError: Error, Equatable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupported:
-            return String(localized: "Live Voice needs Hermes 0.21.3 or newer on this server.")
+            return "Live Voice needs Hermes 0.21.3 or newer on this server."
         case .noKey:
-            return String(localized: "Live Voice needs an OpenAI API key on the Hermes host. Set OPENAI_API_KEY (or voice.gpt_live.api_key) there, then try again. Nothing was charged.")
+            return "Live Voice needs an OpenAI API key on the Hermes host. Set OPENAI_API_KEY (or voice.gpt_live.api_key) there, then try again. Nothing was charged."
         case .vendor(let status?, let detail):
-            return String(localized: "OpenAI refused the Live Voice session (\(status)): \(detail)")
+            return "OpenAI refused the Live Voice session (\(status)): \(detail)"
         case .vendor(nil, let detail):
-            return String(localized: "OpenAI refused the Live Voice session: \(detail)")
+            return "OpenAI refused the Live Voice session: \(detail)"
         case .network:
-            return String(localized: "The Hermes host couldn't reach OpenAI to start Live Voice.")
+            return "The Hermes host couldn't reach OpenAI to start Live Voice."
         case .badRequest(let detail):
-            return String(localized: "Scarf sent Live Voice a request the host couldn't read: \(detail)")
+            return "Scarf sent Live Voice a request the host couldn't read: \(detail)"
         case .hostInternal(let detail):
-            return String(localized: "Hermes failed while starting Live Voice: \(detail)")
+            return "Hermes failed while starting Live Voice: \(detail)"
         case .interpreterNotFound(let detail):
-            return String(localized: "Couldn't find Hermes's Python on the server: \(detail)")
+            return "Couldn't find Hermes's Python on the server: \(detail)"
         case .transport:
-            return String(localized: "Couldn't reach the Hermes host to start Live Voice.")
+            return "Couldn't reach the Hermes host to start Live Voice."
         case .malformedOutput:
-            return String(localized: "The Hermes host returned an unexpected answer while starting Live Voice.")
+            return "The Hermes host returned an unexpected answer while starting Live Voice."
         }
     }
 }

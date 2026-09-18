@@ -25,7 +25,7 @@ import Observation
 ///   carries the billed seconds) before teardown (`voice-live.ts:495-507`).
 ///
 /// Scarf additions: elapsed time + approximate cost, an idle auto-end (no
-/// speech either side for 3 minutes by default), and a start timeout.
+/// speech either side for 3 minutes by default), and a connect timeout.
 ///
 /// Timing is driven by ``tick()`` (a 200 ms loop in production, called
 /// directly by tests with an injected clock), so every timer in the loop is
@@ -43,9 +43,11 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         public var utteranceSettle: TimeInterval = 1.5
         /// `CLOSE_TIMEOUT_MS` (`voice-live.ts:73`).
         public var closeTimeout: TimeInterval = 15
-        /// From start to `session.started`: mic prompt + ICE gathering (10 s)
-        /// + the host exchange (45 s) + connect.
-        public var startTimeout: TimeInterval = 75
+        /// From the offer to `session.started`: the host exchange (45 s) plus
+        /// the WebRTC connect. The clock starts at the offer, not at start(),
+        /// so a first-run microphone prompt the user takes time over never
+        /// times out (nothing is billed before the exchange).
+        public var connectTimeout: TimeInterval = 75
         /// The reply-drive cadence (`:428`). `nil` = no internal loop (tests
         /// call `tick()`).
         public var tickInterval: Duration? = .milliseconds(200)
@@ -98,7 +100,7 @@ public final class GPTLiveEngine: VoiceConversationEngine {
     @ObservationIgnored private var lastUserFragmentAt: Date?
     @ObservationIgnored private var channelOpen = false
     @ObservationIgnored private var answerApplied = false
-    @ObservationIgnored private var startedAt = Date.distantPast
+    @ObservationIgnored private var offerAt: Date?
     @ObservationIgnored private var closeDeadline: Date?
     @ObservationIgnored private var endReason: VoiceSessionEndReason?
     @ObservationIgnored private var meter = VoiceSessionMeter()
@@ -128,14 +130,13 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         let myEpoch = epoch
         resetSession()
         apply(.startRequested)
-        startedAt = clock()
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         startTickLoop()
         do {
             try await bridge.startMedia()
         } catch {
             guard myEpoch == epoch, state.phase == .connecting else { return }
-            finish(failure: String(localized: "Couldn't open the microphone for Live Voice: \(error.localizedDescription)"))
+            finish(failure: .mediaUnavailable(detail: error.localizedDescription))
         }
     }
 
@@ -222,6 +223,7 @@ public final class GPTLiveEngine: VoiceConversationEngine {
 
     private func exchangeOffer(_ sdp: String) {
         guard state.phase == .connecting, exchangeTask == nil, !answerApplied else { return }
+        offerAt = clock()
         let myEpoch = epoch
         let history = VoiceLiveText.liveHistory(from: turnHost?.voiceSeedTurns() ?? [])
         let exchange = self.exchange
@@ -244,10 +246,10 @@ public final class GPTLiveEngine: VoiceConversationEngine {
                     try await self.bridge.applyAnswer(sdp: answer.sdp)
                 } catch {
                     guard myEpoch == self.epoch, self.state.phase.isActive else { return }
-                    self.finish(failure: String(localized: "Live Voice couldn't connect its audio: \(error.localizedDescription)"))
+                    self.finish(failure: .audioConnectFailed(detail: error.localizedDescription))
                 }
             case .failure(let error):
-                self.finish(failure: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                self.finish(failure: .host(error as? VoiceLiveHostError ?? .transport(detail: VoiceLiveHostExchange.redact(error.localizedDescription))))
             }
         }
     }
@@ -396,8 +398,8 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         let now = clock()
         guard state.phase.isActive else { return }
 
-        if state.phase == .connecting, now.timeIntervalSince(startedAt) >= configuration.startTimeout {
-            finish(failure: String(localized: "Live Voice took too long to connect."))
+        if state.phase == .connecting, let offerAt, now.timeIntervalSince(offerAt) >= configuration.connectTimeout {
+            finish(failure: .connectTimedOut)
             return
         }
         if let deadline = closeDeadline, now >= deadline {
@@ -451,13 +453,13 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         if let endReason {
             complete(.ended(endReason), usageSeconds: usageSeconds)
         } else {
-            complete(.failed(Self.message(forCloseReason: remoteReason, usageSeconds: usageSeconds)), usageSeconds: usageSeconds)
+            complete(.failed(Self.failure(forCloseReason: remoteReason, usageSeconds: usageSeconds)), usageSeconds: usageSeconds)
         }
     }
 
-    private func finish(failure message: String) {
+    private func finish(failure: VoiceSessionFailure) {
         guard state.phase.isActive else { return }
-        complete(.failed(message), usageSeconds: nil)
+        complete(.failed(failure), usageSeconds: nil)
     }
 
     private func complete(_ event: VoiceConversationEvent, usageSeconds: Double?) {
@@ -481,20 +483,15 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         apply(event)
     }
 
-    /// User-facing copy for a close the user didn't ask for.
-    static func message(forCloseReason reason: String, usageSeconds: Double?) -> String {
+    /// A close the user didn't ask for: a page transport reason
+    /// (`connection_lost`, `microphone_denied`, `web_process_terminated`) or
+    /// the vendor's `session.closed` reason.
+    static func failure(forCloseReason reason: String, usageSeconds: Double?) -> VoiceSessionFailure {
         switch reason {
-        case "connection_lost":
-            return String(localized: "The Live Voice connection dropped.")
-        case "microphone_denied":
-            return String(localized: "Scarf can't use the microphone. Allow microphone access in System Settings, then try again.")
-        case "web_process_terminated":
-            return String(localized: "Live Voice stopped unexpectedly.")
-        default:
-            if let usageSeconds {
-                return String(localized: "Live Voice ended: \(reason) (\(Int(usageSeconds.rounded())) s).")
-            }
-            return String(localized: "Live Voice ended: \(reason).")
+        case "connection_lost": return .connectionLost
+        case "microphone_denied": return .microphoneDenied
+        case "web_process_terminated": return .mediaProcessTerminated
+        default: return .closedByVendor(reason: reason, usageSeconds: usageSeconds)
         }
     }
 
@@ -521,6 +518,7 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         lastUserFragmentAt = nil
         channelOpen = false
         answerApplied = false
+        offerAt = nil
         closeDeadline = nil
         endReason = nil
         meter = VoiceSessionMeter()

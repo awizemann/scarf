@@ -18,6 +18,54 @@ public enum VoiceSessionEndReason: Sendable, Equatable {
     case idleTimeout
 }
 
+/// Why a voice session failed. Structured so each app can localize one
+/// sentence per case and special-case the actionable ones (``setupHint``).
+/// ScarfCore has no string catalog, so ``englishDescription`` is an English
+/// fallback/diagnostic token, not UI copy.
+public enum VoiceSessionFailure: Sendable, Equatable {
+    /// The host-side session exchange failed — including `.noKey`, the
+    /// "add an OpenAI key on the host" setup case (nothing was billed).
+    case host(VoiceLiveHostError)
+    /// The media layer couldn't start (page, WebKit, microphone API).
+    case mediaUnavailable(detail: String)
+    /// The user (or the OS) denied the microphone.
+    case microphoneDenied
+    /// The vendor's answer couldn't be applied to the peer connection.
+    case audioConnectFailed(detail: String)
+    /// No live session within the connect timeout after the offer.
+    case connectTimedOut
+    /// The WebRTC connection or data channel dropped.
+    case connectionLost
+    /// The web content process died.
+    case mediaProcessTerminated
+    /// The vendor closed the session without being asked (e.g. its session
+    /// length cap). `usageSeconds` is what it billed, when reported.
+    case closedByVendor(reason: String, usageSeconds: Double?)
+
+    /// True when the fix is configuration on the Hermes host (no key, old
+    /// Hermes, no interpreter): show setup guidance rather than "try again".
+    public var setupHint: Bool {
+        switch self {
+        case .host(.noKey), .host(.unsupported), .host(.interpreterNotFound): return true
+        default: return false
+        }
+    }
+
+    public var englishDescription: String {
+        switch self {
+        case .host(let error): return error.errorDescription ?? "Live Voice couldn't start."
+        case .mediaUnavailable(let detail): return "Couldn't start Live Voice audio: \(detail)"
+        case .microphoneDenied: return "Scarf can't use the microphone. Allow microphone access for Scarf, then try again."
+        case .audioConnectFailed(let detail): return "Live Voice couldn't connect its audio: \(detail)"
+        case .connectTimedOut: return "Live Voice took too long to connect."
+        case .connectionLost: return "The Live Voice connection dropped."
+        case .mediaProcessTerminated: return "Live Voice stopped unexpectedly."
+        case .closedByVendor(let reason, let seconds?): return "Live Voice ended: \(reason) (\(Int(seconds.rounded())) s)."
+        case .closedByVendor(let reason, nil): return "Live Voice ended: \(reason)."
+        }
+    }
+}
+
 /// The UI-facing phase of a voice conversation. Engine-agnostic: GPT-Live
 /// and a future chained engine report the same phases.
 public enum VoiceConversationPhase: Sendable, Equatable {
@@ -35,8 +83,8 @@ public enum VoiceConversationPhase: Sendable, Equatable {
     case ending
     /// Closed normally.
     case ended(VoiceSessionEndReason)
-    /// Closed on an error; the message is user-presentable.
-    case failed(String)
+    /// Closed on an error.
+    case failed(VoiceSessionFailure)
 
     public var isTerminal: Bool {
         switch self {
@@ -76,7 +124,7 @@ public enum VoiceConversationEvent: Sendable, Equatable {
     case endRequested
     /// Terminal outcomes.
     case ended(VoiceSessionEndReason)
-    case failed(String)
+    case failed(VoiceSessionFailure)
 }
 
 /// Phase plus the two flags the live phase is derived from.
@@ -128,9 +176,9 @@ public enum VoiceConversationReducer {
             guard state.phase.isActive else { return state }
             return VoiceConversationState(phase: .ended(reason))
 
-        case .failed(let message):
+        case .failed(let failure):
             guard state.phase.isActive else { return state }
-            return VoiceConversationState(phase: .failed(message))
+            return VoiceConversationState(phase: .failed(failure))
         }
         return next
     }
