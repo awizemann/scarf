@@ -884,7 +884,7 @@ struct ChatView: View {
             // Omitted while disabled so VoiceOver correctly reports no
             // action is available, rather than one that silently no-ops.
             .accessibilityActions {
-                if !dictationDisabled {
+                if !dictationDisabled, pushToTalk.phase != .transcribing {
                     Button(pushToTalk.phase == .recording ? "Stop dictating" : "Start dictating") {
                         switch pushToTalk.phase {
                         case .idle:
