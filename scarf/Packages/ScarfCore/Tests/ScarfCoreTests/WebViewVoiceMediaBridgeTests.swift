@@ -99,5 +99,165 @@ import WebKit
             #expect(message.contains("not running"))
         }
     }
+
+    // MARK: the page's own JavaScript, executed (F3)
+    //
+    // The runner has no microphone and no network, so the page runs against
+    // JS stand-ins for getUserMedia, RTCPeerConnection, the data channel and
+    // AudioContext, installed after load. Everything under test (teardown,
+    // mic release, the flush, error mapping, disconnect grace) is the
+    // shipped page's code.
+
+    static let harness = """
+    window.__log = []
+    class FakeTrack { constructor () { this.enabled = true; this.readyState = 'live' }
+      stop () { this.readyState = 'ended'; __log.push('track.stop') } }
+    class FakeStream { constructor () { this.tracks = [new FakeTrack()] }
+      getTracks () { return this.tracks } getAudioTracks () { return this.tracks } }
+    class FakeChannel extends EventTarget {
+      constructor () { super(); this.readyState = 'connecting'; this.bufferedAmount = 0 }
+      send (d) { __log.push('send ' + JSON.parse(d).type) }
+      close () { if (this.readyState !== 'closed') { this.readyState = 'closed'; __log.push('channel.close') } }
+      open () { this.readyState = 'open'; this.dispatchEvent(new Event('open')) } }
+    class FakePC extends EventTarget {
+      constructor () { super(); window.__pc = this; this.connectionState = 'new'; this.iceGatheringState = 'complete'; this.localDescription = null }
+      addTrack () {}
+      createDataChannel () { window.__channel = new FakeChannel(); return window.__channel }
+      async createOffer () { return { type: 'offer', sdp: 'v=0 fake\\r\\n' } }
+      async setLocalDescription (d) { this.localDescription = d }
+      async setRemoteDescription () {}
+      close () { this.connectionState = 'closed'; __log.push('pc.close') }
+      setState (s) { this.connectionState = s; this.dispatchEvent(new Event('connectionstatechange')) } }
+    window.RTCPeerConnection = FakePC
+    window.AudioContext = class {
+      createAnalyser () { return { fftSize: 512, frequencyBinCount: 8, getByteTimeDomainData () {} } }
+      createMediaStreamSource () { return { connect () {} } }
+      close () { __log.push('context.close'); return Promise.resolve() } }
+    window.__gum = async () => new FakeStream()
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: c => window.__gum(c) } })
+    return true
+    """
+
+    /// A bridge with the page loaded and the stand-ins installed.
+    private func harnessedBridge() async throws -> (WebViewVoiceMediaBridge, EventLog) {
+        let bridge = WebViewVoiceMediaBridge()
+        let log = EventLog()
+        bridge.onEvent = { log.events.append($0) }
+        #expect(await bridge.loadPage() == true)
+        _ = try await js(bridge, Self.harness)
+        return (bridge, log)
+    }
+
+    @MainActor final class EventLog { var events: [VoiceMediaEvent] = [] }
+
+    @discardableResult
+    private func js(_ bridge: WebViewVoiceMediaBridge, _ body: String) async throws -> Any? {
+        try await bridge.webView.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page)
+    }
+
+    private func pageLog(_ bridge: WebViewVoiceMediaBridge) async throws -> [String] {
+        try await js(bridge, "return window.__log.slice()") as? [String] ?? []
+    }
+
+    private func waitFor(_ condition: @MainActor () async throws -> Bool) async rethrows {
+        for _ in 0..<200 {
+            if try await condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// Start a session on the stand-ins and open its data channel.
+    private func startLive(_ bridge: WebViewVoiceMediaBridge, _ log: EventLog) async throws {
+        try await bridge.startMedia()
+        await waitFor { log.events.contains { if case .offer = $0 { return true } else { return false } } }
+        _ = try await js(bridge, "window.__channel.open(); return true")
+        await waitFor { log.events.contains(.channelOpen) }
+    }
+
+    /// F3 #4 + #8: teardown releases the microphone AT ONCE, but closes the
+    /// peer only after the data channel had a moment to deliver the
+    /// `session.close` sent just before, and reports release only then.
+    @Test func teardownReleasesTheMicAtOnceAndFlushesTheCloseBeforeClosingThePeer() async throws {
+        let (bridge, log) = try await harnessedBridge()
+        try await startLive(bridge, log)
+        bridge.send(#"{"type":"session.close"}"#)
+        let released = EventLog()
+        bridge.teardown { released.events.append(.channelOpen) }
+        let atOnce = try await pageLog(bridge)       // runs after teardown's synchronous part
+        #expect(atOnce.contains("track.stop"))
+        #expect(!atOnce.contains("pc.close"))         // the close is still being flushed
+        #expect(released.events.isEmpty)
+        await waitFor { !released.events.isEmpty }
+        let after = try await pageLog(bridge)
+        #expect(!released.events.isEmpty)
+        let order = after.filter { ["send session.close", "track.stop", "channel.close", "pc.close"].contains($0) }
+        #expect(order == ["send session.close", "track.stop", "channel.close", "pc.close"])
+        // A torn-down page can start again.
+        let restarted = try await js(bridge, "return window.__pc.connectionState") as? String
+        #expect(restarted == "closed")
+    }
+
+    @Test func teardownWithNoPageReportsReleasedAtOnce() {
+        let bridge = WebViewVoiceMediaBridge()
+        var released = false
+        bridge.teardown { released = true }
+        #expect(released)
+    }
+
+    /// F3 #5: a navigation failure after the page is up (e.g. one the policy
+    /// cancelled) must not cost the bridge its ability to tear the live
+    /// session down: the microphone would stay open.
+    @Test func aLaterNavigationFailureStillLetsTeardownReleaseTheMic() async throws {
+        let (bridge, log) = try await harnessedBridge()
+        try await startLive(bridge, log)
+        bridge.webView(bridge.webView, didFail: nil, withError: URLError(.cancelled))
+        bridge.webView(bridge.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        #expect(bridge.secureContext == true)
+        let released = EventLog()
+        bridge.teardown { released.events.append(.channelOpen) }
+        await waitFor { !released.events.isEmpty }
+        #expect(try await pageLog(bridge).contains("track.stop"))
+    }
+
+    /// F3 #6: getUserMedia's exception name decides the reason Swift gets.
+    @Test(arguments: [("NotAllowedError", "microphone_denied"), ("NotReadableError", "microphone_busy"),
+                      ("NotFoundError", "microphone_not_found"), ("TypeError", "microphone_failed")])
+    func microphoneErrorsAreReportedByName(_ name: String, _ reason: String) async throws {
+        let (bridge, log) = try await harnessedBridge()
+        _ = try await js(bridge, "window.__gum = async () => { throw new DOMException('no', '\(name)') }; return true")
+        var thrown: Error?
+        do { try await bridge.startMedia() } catch { thrown = error }
+        await waitFor { log.events.contains(.transportClosed(reason: reason)) }
+        #expect(log.events.contains(.transportClosed(reason: reason)))
+        // The start's throw, which can reach the engine first, maps the same.
+        let error = try #require(thrown)
+        let mapped = GPTLiveEngine.failure(forMediaStartError: error)
+        if case .mediaUnavailable = GPTLiveEngine.failure(forCloseReason: reason, usageSeconds: nil) {
+            guard case .mediaUnavailable = mapped else { Issue.record("\(mapped)"); return }
+        } else {
+            #expect(mapped == GPTLiveEngine.failure(forCloseReason: reason, usageSeconds: nil))
+        }
+    }
+
+    /// F3 #7: 'disconnected' is recoverable within the grace; only a
+    /// disconnection that outlasts it (or 'failed') loses the connection.
+    @Test func aDisconnectIsLostOnlyAfterTheGrace() async throws {
+        let (bridge, log) = try await harnessedBridge()
+        _ = try await js(bridge, "scarfVoiceLive.config.disconnectGraceMs = 150; return true")
+        try await startLive(bridge, log)
+        let lost = VoiceMediaEvent.transportClosed(reason: "connection_lost")
+        _ = try await js(bridge, "window.__pc.setState('disconnected'); return true")
+        try? await Task.sleep(for: .milliseconds(60))
+        _ = try await js(bridge, "window.__pc.setState('connected'); return true")
+        try? await Task.sleep(for: .milliseconds(250))
+        #expect(!log.events.contains(lost))           // it came back in time
+        #expect(!(try await pageLog(bridge)).contains("track.stop"))
+        _ = try await js(bridge, "window.__pc.setState('disconnected'); return true")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(!log.events.contains(lost))
+        await waitFor { log.events.contains(lost) }
+        #expect(log.events.contains(lost))
+        #expect(try await pageLog(bridge).contains("track.stop"))
+    }
 }
 #endif

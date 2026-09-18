@@ -28,8 +28,10 @@ public protocol VoiceConversationEngine: AnyObject, Observable {
     /// Approximate spend for this session, in US dollars (``VoiceSessionCost``).
     /// `0` for engines that cost nothing.
     var approximateCostUSD: Double { get }
-    /// A non-fatal notice from the engine or vendor, for a transient banner.
-    var notice: String? { get }
+    /// A non-fatal notice for a transient banner (a vendor error, or the
+    /// session about to end on its own). Structured: apps localize one
+    /// sentence per case; vendor wording is logged, never shown.
+    var notice: VoiceSessionNotice? { get }
 
     /// Start a session. No-op while one is active.
     func start() async
@@ -45,6 +47,16 @@ public protocol VoiceConversationEngine: AnyObject, Observable {
     /// vendor keeps billing until its own timeout (not device-verified).
     func endImmediately(reason: VoiceSessionEndReason)
     func toggleMute()
+    /// Returns once the media layer has released the microphone and stopped
+    /// playback after the session ended (immediately when nothing is held).
+    /// Bounded. iOS awaits it before deactivating its `AVAudioSession`,
+    /// so other apps' audio resumes instead of meeting a busy session.
+    func waitForMediaRelease() async
+}
+
+extension VoiceConversationEngine {
+    /// Engines with no media of their own release nothing.
+    public func waitForMediaRelease() async {}
 }
 
 /// One caption line.
@@ -190,6 +202,44 @@ public protocol VoiceTurnHost: AnyObject {
 
     /// Recent text turns of this chat, oldest first, to seed a new session.
     func voiceSeedTurns() -> [VoiceLiveText.SeedTurn]
+
+    /// The chat's identity for state that must outlive one voice session:
+    /// the ACP session id. `nil` (the default) keeps that state inside the
+    /// engine, so it is lost when the host builds a new engine per session.
+    /// See ``VoiceTextOnlyTurnLedger``.
+    var voiceChatID: String? { get }
+}
+
+extension VoiceTurnHost {
+    public var voiceChatID: String? { nil }
+}
+
+/// Which chats owe Hermes a TEXT-ONLY next voice turn.
+///
+/// When the engine cancels a running Hermes turn, Hermes stores the
+/// cancelled request (`interrupted_prompt_text`, `acp_adapter/server.py:617-619`
+/// @ v2026.9.14) in its per-session state, and only a text-only, non-slash
+/// prompt consumes it (`_rewrite_prompt_for_interrupt`, `:680-693`). That
+/// debt belongs to the CHAT, not to one voice session: a voice session that
+/// ends before paying it must hand it to the next one in the same chat, even
+/// though the apps build a new engine per session. Hence this store, keyed by
+/// ``VoiceTurnHost/voiceChatID``. Hermes has no verb to clear the stored
+/// prompt; if the user types first, Hermes attaches it to that message and
+/// the next voice turn merely goes without its note once.
+@MainActor
+public final class VoiceTextOnlyTurnLedger {
+    /// The process-wide ledger the apps use (ACP session ids are unique).
+    public static let shared = VoiceTextOnlyTurnLedger()
+
+    private var pending: Set<String> = []
+
+    public init() {}
+
+    public func isPending(chatID: String) -> Bool { pending.contains(chatID) }
+
+    public func markPending(chatID: String) { pending.insert(chatID) }
+
+    public func clear(chatID: String) { pending.remove(chatID) }
 }
 
 // MARK: - Cost and time
@@ -256,6 +306,13 @@ public struct VoiceIdleMonitor: Sendable, Equatable {
 
     public mutating func noteActivity(at date: Date) {
         if date > lastActivity { lastActivity = date }
+    }
+
+    /// Seconds until this monitor would report idle, or `nil` when it is
+    /// disabled. Never negative.
+    public func remaining(at now: Date) -> TimeInterval? {
+        guard timeout > 0 else { return nil }
+        return max(0, timeout - now.timeIntervalSince(lastActivity))
     }
 
     public func isIdle(at now: Date, busy: Bool) -> Bool {

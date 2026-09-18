@@ -226,6 +226,67 @@ public enum VoiceLiveText {
         return collapseWhitespace(s)
     }
 
+    /// Streaming speech: the end (exclusive, in `Character`s) of the longest
+    /// prefix of a still-streaming `raw` reply that is safe to sanitize and
+    /// speak on its own, or `0`. The prefix ends just after a sentence end
+    /// (`.`, `!` or `?` followed by whitespace) that is outside a code fence,
+    /// inline code and an unclosed link label, on a line with no `|` (a
+    /// possible table row, which ``sanitizeForSpeech(_:)`` drops only once
+    /// its delimiter row arrives). Sanitizing such prefixes piecewise gives
+    /// the same words as sanitizing the whole reply, so a stable raw offset
+    /// can track what has been spoken. One linear scan; no regex.
+    public static func speakableBoundary(in raw: [Character]) -> Int {
+        var inFence = false
+        var inCode = false
+        var inLinkLabel = false
+        var best = 0                 // from completed lines
+        var lineCandidate: Int?      // on the current line, void if it has a pipe
+        var linePipe = false
+        var index = 0
+        while index < raw.count {
+            let character = raw[index]
+            if character == "`" {
+                if index + 2 < raw.count, raw[index + 1] == "`", raw[index + 2] == "`" {
+                    inFence.toggle()
+                    inCode = false
+                    index += 3
+                    continue
+                }
+                if !inFence { inCode.toggle() }
+            } else if character == "\n" {
+                if let lineCandidate { best = lineCandidate }
+                lineCandidate = nil
+                linePipe = false
+            } else if !inFence {
+                switch character {
+                case "|":
+                    linePipe = true
+                    lineCandidate = nil
+                case "[":
+                    inLinkLabel = true
+                case "]":
+                    inLinkLabel = false
+                case ".", "!", "?":
+                    if !inCode, !inLinkLabel, !linePipe, index + 1 < raw.count, raw[index + 1].isWhitespace {
+                        lineCandidate = index + 1
+                    }
+                default:
+                    break
+                }
+            }
+            index += 1
+        }
+        return lineCandidate ?? best
+    }
+
+    /// The speech for `raw[range]`, one piece of a reply cut at
+    /// ``speakableBoundary(in:)``. Leading whitespace is dropped first: a
+    /// piece that starts with a paragraph break would otherwise sanitize to
+    /// a stray ". " (the break before it already ended a sentence).
+    public static func speechSegment(_ raw: [Character], _ range: Range<Int>) -> String {
+        sanitizeForSpeech(String(raw[range].drop(while: \.isWhitespace)))
+    }
+
     /// `normalizeLineBreaks` — `speech-text.ts:145-152`.
     private static func normalizeLineBreaks(_ text: String) -> String {
         var s = replace(text, #"\r\n?"#, "\n")

@@ -25,18 +25,34 @@
 //   {type:'event', data}               one raw data-channel message
 //   {type:'speaking', value}           remote (assistant) audio on/off
 //   {type:'level', value}              microphone level 0..1
-//   {type:'closed', reason}            the transport ended on its own
+//   {type:'closed', reason}            the transport ended on its own: connection_lost,
+//                                      microphone_denied / _busy / _not_found / _failed
 // Swift -> JS  (callAsyncJavaScript with arguments, never string-built)
 //   start(token) / applyAnswer(sdp) / send(json) / setMicrophoneEnabled(on) / teardown()
+//   teardown() releases the microphone at once and resolves once the peer is
+//   closed too (after a short flush of an open data channel).
 // Every message sent during a session carries `token` (the generation Swift
 // started it with) so a torn-down session's late messages are dropped.
 'use strict'
 
 const ICE_GATHER_TIMEOUT_MS = 10000
 
+// Tunables (tests shorten them through scarfVoiceLive.config).
+const CONFIG = {
+  // 'disconnected' is often transient (a Wi-Fi handoff, a sleep blip): only
+  // a disconnection that outlasts this is a lost connection.
+  disconnectGraceMs: 8000,
+  // teardown with an open data channel: wait for its buffer to drain, then
+  // this long, so a just-sent session.close leaves the machine before the
+  // peer closes; never longer than closeFlushMaxMs in all.
+  closeFlushGraceMs: 300,
+  closeFlushMaxMs: 1500
+}
+
 const S = {
   peer: null, channel: null, mic: null, audio: null, token: null, micEnabled: true,
-  timers: [], contexts: [], lastSpeaking: false, lastLevel: -1, live: false
+  timers: [], contexts: [], lastSpeaking: false, lastLevel: -1, live: false,
+  disconnectTimer: null
 }
 
 // Session messages carry the token Swift started the session with, so a
@@ -102,23 +118,60 @@ function armMicLevel (stream) {
   } catch (_) { /* no meter */ }
 }
 
-function cleanup () {
+// Resolves once `channel` has drained (plus the grace), or at the cap.
+function flush (channel) {
+  return new Promise(resolve => {
+    let drainedAt = null
+    const done = () => { clearTimeout(cap); clearInterval(poll); resolve() }
+    const cap = setTimeout(done, CONFIG.closeFlushMaxMs)
+    const poll = setInterval(() => {
+      if (channel.readyState !== 'open') return done()
+      if (channel.bufferedAmount > 0) { drainedAt = null; return }
+      if (drainedAt === null) drainedAt = Date.now()
+      if (Date.now() - drainedAt >= CONFIG.closeFlushGraceMs) done()
+    }, 25)
+  })
+}
+
+function closeTransport (channel, peer) {
+  try { if (channel) channel.close() } catch (_) {}
+  try { if (peer) peer.close() } catch (_) {}
+}
+
+// Detach the session at once: the microphone, meters and playback stop NOW
+// and a new start() may begin; the old peer closes after an optional flush.
+// Resolves when everything is released.
+function cleanup (flushChannel) {
+  const { peer, channel, contexts } = S
   for (const t of S.timers) clearInterval(t)
-  for (const c of S.contexts) c.close().catch(() => {})
+  if (S.disconnectTimer) clearTimeout(S.disconnectTimer)
   if (S.mic) S.mic.getTracks().forEach(t => t.stop())
-  try { if (S.channel) S.channel.close() } catch (_) {}
-  try { if (S.peer) S.peer.close() } catch (_) {}
   if (S.audio) { S.audio.srcObject = null; S.audio.pause() }
   S.peer = null; S.channel = null; S.mic = null; S.audio = null; S.micEnabled = true
-  S.timers = []; S.contexts = []; S.lastSpeaking = false; S.lastLevel = -1
+  S.timers = []; S.contexts = []; S.lastSpeaking = false; S.lastLevel = -1; S.disconnectTimer = null
+  const contextsClosed = Promise.all(contexts.map(c => Promise.resolve().then(() => c.close()).catch(() => {})))
+  const transportClosed = (flushChannel && channel && channel.readyState === 'open')
+    ? flush(channel).then(() => closeTransport(channel, peer))
+    : Promise.resolve(closeTransport(channel, peer))
+  return Promise.all([contextsClosed, transportClosed]).then(() => true)
 }
 
 // The transport died on its own: tell Swift once, then clean up.
 function finish (reason) {
   if (!S.live) return
   S.live = false
-  cleanup()
+  cleanup(false)
   post({ type: 'closed', reason })
+}
+
+// getUserMedia's DOMException name -> the reason Swift maps to a failure.
+function microphoneFailureReason (error) {
+  switch (error && error.name) {
+    case 'NotAllowedError': case 'SecurityError': return 'microphone_denied'
+    case 'NotReadableError': case 'AbortError': return 'microphone_busy'
+    case 'NotFoundError': case 'OverconstrainedError': return 'microphone_not_found'
+    default: return 'microphone_failed'
+  }
 }
 
 window.scarfVoiceLive = {
@@ -141,7 +194,22 @@ window.scarfVoiceLive = {
     })
     pc.addEventListener('connectionstatechange', () => {
       if (S.peer !== pc) return
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') finish('connection_lost')
+      const state = pc.connectionState
+      if (state === 'failed' || state === 'closed') {
+        finish('connection_lost')
+      } else if (state === 'disconnected') {
+        // Recoverable: ICE often reconnects on its own. Fail only if it
+        // stays down past the grace.
+        if (!S.disconnectTimer) {
+          S.disconnectTimer = setTimeout(() => {
+            S.disconnectTimer = null
+            if (S.peer === pc) finish('connection_lost')
+          }, CONFIG.disconnectGraceMs)
+        }
+      } else if (S.disconnectTimer) {
+        clearTimeout(S.disconnectTimer)
+        S.disconnectTimer = null
+      }
     })
     let mic
     try {
@@ -149,7 +217,7 @@ window.scarfVoiceLive = {
         audio: { autoGainControl: true, echoCancellation: true, noiseSuppression: true }
       })
     } catch (error) {
-      finish('microphone_denied')
+      finish(microphoneFailureReason(error))
       throw error
     }
     if (S.peer !== pc) {  // torn down while the permission prompt was up
@@ -177,7 +245,7 @@ window.scarfVoiceLive = {
       post({ type: 'offer', sdp })  // byte-exact: the vendor rejects a trimmed offer
     } catch (error) {
       // Anything after the mic opened: release it and the peer before failing.
-      if (S.peer === pc) { S.live = false; cleanup() }
+      if (S.peer === pc) { S.live = false; cleanup(false) }
       throw error
     }
   },
@@ -198,11 +266,15 @@ window.scarfVoiceLive = {
     if (S.mic) for (const track of S.mic.getAudioTracks()) track.enabled = S.micEnabled
   },
 
-  // Swift-initiated: no 'closed' message (Swift already knows).
+  // Swift-initiated: no 'closed' message (Swift already knows). The mic is
+  // released before this returns its promise; the promise resolves once the
+  // peer is closed too.
   teardown () {
     S.live = false
-    cleanup()
-  }
+    return cleanup(true)
+  },
+
+  config: CONFIG
 }
 
 post({ type: 'ready', secure: window.isSecureContext === true })

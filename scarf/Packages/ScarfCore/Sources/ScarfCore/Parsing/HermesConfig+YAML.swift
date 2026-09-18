@@ -374,10 +374,12 @@ public extension HermesConfig {
             wakeWordCapture: strEnum("wake_word.capture", default: "auto"),
             // Default = Hermes's seed (`hermes_cli/config_defaults.py:1132`
             // @ v2026.9.14); see `VoiceSettings.voiceChatMode`.
-            voiceChatMode: str("voice.voice_chat_mode", default: "chained"),
-            gptLiveModel: str("voice.gpt_live.model", default: "gpt-live-1"),
-            gptLiveVoice: str("voice.gpt_live.voice", default: "marin"),
-            gptLiveInstructions: str("voice.gpt_live.instructions")
+            // `voice.gpt_live.*` is NOT read: the host script's
+            // `create_webrtc_session` builds model, voice and instructions from
+            // the host's own config (`build_session_config`,
+            // `tools/voice_live.py:147` @ v2026.9.14), and no Scarf surface
+            // shows them.
+            voiceChatMode: str("voice.voice_chat_mode", default: "chained")
         )
 
         func aux(_ name: String) -> AuxiliaryModel {

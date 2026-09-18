@@ -21,6 +21,11 @@ import Foundation
         var sent: [String] = []
         var micEnabled: [Bool] = []
         var teardowns = 0
+        /// When set, teardown() keeps the media "held" until releaseMedia().
+        var holdRelease = false
+        var pendingReleases: [@MainActor @Sendable () -> Void] = []
+        /// The order of close sends and teardowns, to prove the close leaves first.
+        var order: [String] = []
 
         func startMedia() async throws {
             if holdStart { await withCheckedContinuation { startContinuation = $0 } }
@@ -31,9 +36,22 @@ import Foundation
             startContinuation = nil
         }
         func applyAnswer(sdp: String) async throws { answers.append(sdp) }
-        func send(_ json: String) { sent.append(json) }
+        func send(_ json: String) {
+            sent.append(json)
+            if json.contains("session.close") { order.append("close") }
+        }
         func setMicrophoneEnabled(_ enabled: Bool) { micEnabled.append(enabled) }
-        func teardown() { teardowns += 1 }
+        func teardown(onReleased: (@MainActor @Sendable () -> Void)?) {
+            teardowns += 1
+            order.append("teardown")
+            guard let onReleased else { return }
+            if holdRelease { pendingReleases.append(onReleased) } else { onReleased() }
+        }
+        func releaseMedia() {
+            let releases = pendingReleases
+            pendingReleases = []
+            for release in releases { release() }
+        }
 
         func emit(_ event: VoiceMediaEvent) { onEvent?(event) }
         func server(_ json: String) { emit(.serverMessage(json)) }
@@ -76,6 +94,9 @@ import Foundation
         var replies: [String: VoiceTurnReply] = [:]
         var submitError: Error?
         var seed: [VoiceLiveText.SeedTurn] = []
+        var voiceChatID: String?
+        /// A slow cancel: the host's bounded wait ends with the turn still running.
+        var stillBusyAfterCancel = false
 
         func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {
             log.append("submit \(request.id)")
@@ -95,7 +116,7 @@ import Foundation
             log.append("cancel begin")
             if holdCancel { await withCheckedContinuation { cancelContinuation = $0 } }
             try? await Task.sleep(for: .milliseconds(20))   // the in-flight sendPrompt returning
-            isVoiceTurnBusy = false
+            if !stillBusyAfterCancel { isVoiceTurnBusy = false }
             log.append("cancel end")
         }
         func voiceTurnReply(for requestID: String) -> VoiceTurnReply? { replies[requestID] }
@@ -103,6 +124,8 @@ import Foundation
     }
 
     struct Boom: LocalizedError { var errorDescription: String? { "boom" } }
+    /// What the bridge throws for a JS exception: its message.
+    struct ScriptError: LocalizedError { let errorDescription: String? }
 
     final class Clock { var now = Date(timeIntervalSince1970: 1_000_000) }
 
@@ -112,13 +135,19 @@ import Foundation
     let exchange = FakeExchange()
     let host = FakeHost()
     let clock = Clock()
+    let ledger = VoiceTextOnlyTurnLedger()
     let engine: GPTLiveEngine
 
     init() {
+        engine = Self.makeEngine(bridge: bridge, exchange: exchange, host: host, clock: clock, ledger: ledger)
+    }
+
+    static func makeEngine(bridge: FakeBridge, exchange: FakeExchange, host: FakeHost, clock: Clock,
+                           ledger: VoiceTextOnlyTurnLedger) -> GPTLiveEngine {
         var config = GPTLiveEngine.Configuration()
         config.tickInterval = nil
-        let clock = self.clock
-        engine = GPTLiveEngine(bridge: bridge, exchange: exchange, turnHost: host, configuration: config, clock: { clock.now })
+        return GPTLiveEngine(bridge: bridge, exchange: exchange, turnHost: host, configuration: config,
+                             textOnlyTurns: ledger, clock: { clock.now })
     }
 
     private func advance(_ seconds: TimeInterval) {
@@ -179,6 +208,22 @@ import Foundation
         #expect(bridge.answers.isEmpty)
         #expect(bridge.teardowns == 1)
         #expect(engine.approximateCostUSD == 0)
+    }
+
+    /// F3 #6: getUserMedia's exception name picks the failure, whichever of
+    /// the page's `closed` message and the start's throw arrives first.
+    @Test func microphoneErrorsMapByTheirDOMExceptionName() async {
+        let map = { (message: String) in GPTLiveEngine.failure(forMediaStartError: ScriptError(errorDescription: message)) }
+        #expect(map("NotAllowedError: The request is not allowed by the user agent") == .microphoneDenied)
+        #expect(map("NotReadableError: Could not start audio source") == .microphoneBusy)
+        #expect(map("NotFoundError: Requested device not found") == .microphoneNotFound)
+        #expect(map("TypeError: undefined is not an object") == .mediaUnavailable(detail: "TypeError: undefined is not an object"))
+        #expect(GPTLiveEngine.failure(forCloseReason: "microphone_busy", usageSeconds: nil) == .microphoneBusy)
+        #expect(GPTLiveEngine.failure(forCloseReason: "microphone_not_found", usageSeconds: nil) == .microphoneNotFound)
+
+        await engine.start()
+        bridge.emit(.transportClosed(reason: "microphone_busy"))
+        #expect(engine.phase == .failed(.microphoneBusy))
     }
 
     @Test func microphoneFailureFailsTheStart() async {
@@ -541,7 +586,8 @@ import Foundation
         bridge.server(#"{"type":"error","error":{"code":"context_injection_incomplete","message":"late"}}"#)
         #expect(engine.notice == nil)
         bridge.server(#"{"type":"error","error":{"code":"rate_limited","message":"Slow down"}}"#)
-        #expect(engine.notice == "Slow down")
+        // Structured: the apps localize it; the vendor's wording is logged only.
+        #expect(engine.notice == .vendorError(code: "rate_limited"))
         #expect(engine.phase == .listening)
     }
 
@@ -571,5 +617,199 @@ import Foundation
         #expect(engine.phase == .listening)
         #expect(engine.captions.isEmpty)
         #expect(exchange.offers.count == 2)
+    }
+
+    // MARK: F3 fixes
+
+    /// F3 #1: the host's bounded cancel ran out and the cancelled turn still
+    /// runs. The new request must NOT be submitted into it (Hermes would
+    /// queue it text-only and the reply lookup would speak the old answer):
+    /// the voice says so, and the request goes once Hermes is idle.
+    @Test func aSlowCancelHoldsTheRequestUntilHermesIsIdle() async {
+        await goLive()
+        user("book the dentist friday")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.stillBusyAfterCancel = true
+        user(" no, thursday", at: 3_000)
+        delegate("d2")
+        await settle { bridge.spoken().contains(GPTLiveEngine.stillBusyReply) }
+        #expect(host.submitted.map(\.id) == ["d1"])
+        #expect(bridge.spoken() == [GPTLiveEngine.stillBusyReply])
+        advance(5)
+        #expect(host.submitted.count == 1)                  // still busy: still held
+        #expect(engine.phase == .thinking)
+        host.isVoiceTurnBusy = false                         // the old turn finally returned
+        advance(0.2)
+        await settle { host.submitted.count == 2 }
+        #expect(host.submitted.last?.id == "d2")
+        #expect(host.submitted.last?.supersedesCancelledTurn == true)
+    }
+
+    @Test func aSlowCancelThatNeverEndsGivesUpAloud() async {
+        await goLive()
+        user("book the dentist friday")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.stillBusyAfterCancel = true
+        user(" no, thursday", at: 3_000)
+        delegate("d2")
+        await settle { bridge.spoken().contains(GPTLiveEngine.stillBusyReply) }
+        advance(29)
+        #expect(engine.phase == .thinking)
+        advance(2)
+        #expect(bridge.spoken().last == GPTLiveEngine.stillBusyGaveUpReply)
+        #expect(engine.phase == .listening)
+        await settle()
+        #expect(host.submitted.map(\.id) == ["d1"])
+    }
+
+    /// F3 #2: a delegation stuck on something (a tool approval nobody
+    /// answers) no longer keeps the session billing forever: after 10
+    /// minutes with no user speech and no Hermes progress it ends, with a
+    /// notice first.
+    @Test func aStalledTurnEndsTheSessionAfterTheCapWithANoticeFirst() async {
+        await goLive()
+        user("deploy it")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.activeVoiceToolName = "terminal"                // waiting on an approval
+        advance(0.2)
+        advance(530)
+        #expect(engine.notice == nil)
+        #expect(engine.phase == .thinking)
+        advance(20)
+        #expect(engine.notice == .endingSoon(reason: .turnStalled, secondsLeft: 50))
+        advance(50)
+        #expect(engine.phase == .ending)
+        bridge.server(#"{"type":"session.closed","reason":"client_requested","usage":{"seconds":601}}"#)
+        #expect(engine.phase == .ended(.turnStalled))
+    }
+
+    @Test func userSpeechOrHermesProgressResetsTheStallClock() async {
+        await goLive()
+        user("deploy it")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        advance(550)
+        #expect(engine.notice == .endingSoon(reason: .turnStalled, secondsLeft: 50))
+        user(" are you there?", at: 600_000)
+        advance(0.2)
+        #expect(engine.notice == nil)                        // the warning clears
+        advance(500)
+        host.replies["d1"] = VoiceTurnReply(text: "Deploying now. Step one", isStreaming: true)
+        advance(0.2)                                         // progress: the clock restarts
+        advance(590)
+        #expect(engine.phase == .thinking)
+        advance(20)
+        #expect(engine.phase == .ending)
+    }
+
+    @Test func theIdleAutoEndWarnsAMinuteAhead() async {
+        await goLive()
+        advance(119)
+        #expect(engine.notice == nil)
+        advance(2)
+        #expect(engine.notice == .endingSoon(reason: .idleTimeout, secondsLeft: 59))
+        user("still here")
+        advance(0.2)
+        #expect(engine.notice == nil)
+        #expect(engine.phase == .listening)
+    }
+
+    /// F3 #3: progress is tracked on the raw reply. A table whose delimiter
+    /// row arrives later used to be spoken as text ("| Mr.") and then, once
+    /// the table sanitized away, the spoken count skipped into the next
+    /// sentence ("e rest is here.").
+    @Test func streamingSpeechNeitherRepeatsNorSkipsWhenMarkdownCompletes() async {
+        await goLive()
+        user("who is on the list?")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.replies["d1"] = VoiceTurnReply(text: "Here it is.\n| Mr. A | 3 |\n", isStreaming: true)
+        advance(0.2)
+        #expect(bridge.spoken() == ["Here it is."])
+        host.replies["d1"] = VoiceTurnReply(
+            text: "Here it is.\n| Mr. A | 3 |\n|---|---|\n| Mr. B | 4 |\nThe rest is here. More", isStreaming: true)
+        advance(0.2)
+        #expect(bridge.spoken() == ["Here it is.", "The rest is here."])
+        host.replies["d1"] = VoiceTurnReply(
+            text: "Here it is.\n| Mr. A | 3 |\n|---|---|\n| Mr. B | 4 |\nThe rest is here. More to come.", isStreaming: false)
+        host.isVoiceTurnBusy = false
+        advance(0.2)
+        #expect(bridge.spoken() == ["Here it is.", "The rest is here.", "More to come."])
+    }
+
+    @Test func streamingSpeechWaitsForACodeFenceToClose() async {
+        await goLive()
+        user("show me")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.replies["d1"] = VoiceTurnReply(text: "Run this. ```\nmake all. then\n", isStreaming: true)
+        advance(0.2)
+        #expect(bridge.spoken() == ["Run this."])
+        host.replies["d1"] = VoiceTurnReply(text: "Run this. ```\nmake all. then\n```\nIt builds. Then", isStreaming: true)
+        advance(0.2)
+        #expect(bridge.spoken() == ["Run this.", "code block omitted It builds."])
+    }
+
+    /// Extra (F3): the text-only debt belongs to the chat, not to one engine.
+    /// The apps build a new engine per voice session, so a cancel whose
+    /// correction never reached Hermes must still make the next session's
+    /// first turn text-only.
+    @Test func theTextOnlyDebtOutlivesTheEngine() async {
+        host.voiceChatID = "chat-1"
+        await goLive()
+        user("book the dentist friday")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.holdCancel = true
+        user(" no, thursday", at: 3_000)
+        delegate("d2")
+        await settle { host.cancelContinuation != nil }
+        engine.endImmediately(reason: .userEnded)            // the user closes the panel mid-cancel
+        host.releaseCancel()
+        await settle()
+        #expect(host.submitted.count == 1)
+        #expect(ledger.isPending(chatID: "chat-1"))
+
+        let second = Self.makeEngine(bridge: bridge, exchange: exchange, host: host, clock: clock, ledger: ledger)
+        await second.start()
+        bridge.emit(.offer(sdp: "v=0 offer\r\n"))
+        await settle { bridge.answers.count == 2 }
+        bridge.emit(.channelOpen)
+        bridge.server(#"{"type":"session.input_transcript.delta","delta":"what's on today","start_ms":1000,"end_ms":1500}"#)
+        bridge.server(#"{"type":"session.delegation.created","delegation":{"id":"e1"}}"#)
+        await settle { host.submitted.count == 2 }
+        #expect(host.submitted.last?.id == "e1")
+        #expect(host.submitted.last?.supersedesCancelledTurn == true)
+        #expect(!ledger.isPending(chatID: "chat-1"))          // paid
+        #expect(!ledger.isPending(chatID: "chat-2"))
+        second.endImmediately(reason: .userEnded)
+    }
+
+    /// F3 #4 (engine half): `endImmediately` sends `session.close` BEFORE the
+    /// teardown, so the page's flush can deliver it.
+    @Test func endImmediatelySendsTheCloseBeforeTearingDown() async {
+        await goLive()
+        engine.endImmediately(reason: .userEnded)
+        #expect(bridge.order == ["close", "teardown"])
+    }
+
+    /// F3 #8 (engine half): iOS deactivates its audio session only once the
+    /// media is released.
+    @Test func waitForMediaReleaseReturnsOnlyAfterTheBridgeReleases() async {
+        await engine.waitForMediaRelease()                   // nothing held: at once
+        bridge.holdRelease = true
+        await goLive()
+        engine.endImmediately(reason: .userEnded)
+        let released = Clock()                               // any reference box will do
+        let engine = self.engine
+        let waiter = Task { await engine.waitForMediaRelease(); released.now = .distantFuture }
+        await settle()
+        #expect(released.now != .distantFuture)
+        bridge.releaseMedia()
+        await waiter.value
+        #expect(released.now == .distantFuture)
     }
 }
