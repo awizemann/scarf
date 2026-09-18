@@ -11,6 +11,9 @@ struct ChatTranscriptPane: View {
     @Bindable var chatViewModel: ChatViewModel
     var onSend: (String, [ChatImageAttachment], ChatViewModel.ChatInputMode) -> Void
     var isEnabled: Bool
+    /// Bot Chat reuses this pane but routes its sends through the bot's
+    /// own pipeline, which voice turns would bypass: it opts out.
+    var allowsVoiceLive = true
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
 
@@ -19,6 +22,27 @@ struct ChatTranscriptPane: View {
     /// stack pollers.
     @State private var kanbanBadgeViewModel: KanbanChatBadgeViewModel?
     @State private var resolvedTenantForChat: String?
+
+    /// The composer's Live Voice button, or `nil` (no button) unless this
+    /// host passes the readiness gate — Hermes ≥ 0.21.3 and
+    /// `voice.voice_chat_mode: gpt-live`.
+    private var voiceLiveEntry: VoiceLiveComposerEntry? {
+        guard allowsVoiceLive else { return nil }
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
+        guard chatViewModel.voiceLiveAvailability(capabilities: capabilities).isReady else { return nil }
+        let isActive = chatViewModel.voiceLive.isSessionActive
+        return VoiceLiveComposerEntry(
+            isActive: isActive,
+            canStart: chatViewModel.canHostVoiceTurns,
+            onToggle: {
+                if isActive {
+                    chatViewModel.voiceLive.end()
+                } else {
+                    chatViewModel.startVoiceLive()
+                }
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,6 +102,13 @@ struct ChatTranscriptPane: View {
             if let hint = richChat.transientHint {
                 steeringToast(hint)
             }
+            // Live Voice session strip (also hosts the media web view for
+            // the whole session). Absent unless a session was started.
+            VoiceLivePanel(
+                controller: chatViewModel.voiceLive,
+                onRestart: { chatViewModel.startVoiceLive() },
+                canRestart: chatViewModel.canHostVoiceTurns
+            )
             // Issue #62: bind composer identity to the active session
             // ID so SwiftUI rebuilds `RichChatInputBar` (and its
             // `@State` `text`/`attachments`) when the user switches
@@ -95,10 +126,15 @@ struct ChatTranscriptPane: View {
                 showCompressButton: richChat.supportsCompress && !richChat.hasBroaderCommandMenu,
                 isAgentWorking: richChat.isAgentWorking,
                 hasActiveSession: richChat.sessionId != nil,
-                activeModelPreset: chatViewModel.currentModelPreset
+                activeModelPreset: chatViewModel.currentModelPreset,
+                voiceLive: voiceLiveEntry
             )
             .id(richChat.sessionId ?? "scarf.chat.no-session")
         }
+        // Leaving the chat (another sidebar section, terminal mode, window
+        // close) takes the panel — and the web view WebKit needs for audio
+        // — with it, so the session ends here rather than billing unseen.
+        .onDisappear { chatViewModel.voiceLive.endImmediately() }
         .background(ScarfColor.backgroundPrimary)
         .task(id: chatViewModel.currentProjectPath ?? "") {
             // Resolve the project's tenant once per project change.

@@ -33,6 +33,10 @@ struct RichChatInputBar: View {
     /// means the global `config.yaml` default is active. Feeds the
     /// non-vision image heads-up (t-31img / gh#113).
     var activeModelPreset: ModelPreset? = nil
+    /// Live Voice entry point. `nil` renders no button at all, so a host
+    /// that isn't `VoiceLiveReadiness`-ready (older Hermes, chained mode)
+    /// sees the composer exactly as before (charter C1).
+    var voiceLive: VoiceLiveComposerEntry? = nil
 
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(\.serverContext) private var serverContext
@@ -251,6 +255,10 @@ struct RichChatInputBar: View {
                         send()
                         return .handled
                     }
+
+                if let voiceLive {
+                    VoiceLiveComposerButton(entry: voiceLive)
+                }
 
                 Button {
                     send()
