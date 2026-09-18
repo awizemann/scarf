@@ -7,29 +7,37 @@ import ScarfCore
 /// Per-message text-to-speech for assistant chat replies (issue #66).
 ///
 /// Two playback engines, selected in Settings → Voice ("Playback
-/// Engine", `scarf.speech.playbackEngine`):
+/// Engine", `HermesSpeechService.PlaybackEngine.defaultsKey`):
 ///
 ///  - **system** (default) — `AVSpeechSynthesizer` with the macOS system
 ///    voice: no Hermes dependency, works offline, picks up the user's
 ///    Spoken Content voice selection automatically. This is the original
 ///    engine, unchanged.
-///  - **hermes** — synthesis through the connected server's Hermes TTS
-///    stack (`ScarfCore.HermesSpeechService`: the kokoro venv directly
-///    for `tts.provider: kokoro`, `text_to_speech_tool` for the other
-///    providers), with the fetched, magic-byte-verified WAV played
-///    through `AVAudioEngine`. Kokoro cold start is seconds (torch
-///    load), so `playingMessageId` flips on immediately — the stop
-///    button works while synthesis is in flight — and `loadingMessageId`
-///    exposes the synth-pending state for the bubble UI. Any synthesis
-///    failure (transport, envelope, provider mismatch) falls back to the
-///    system voice rather than going silent.
+///  - **hermes** — synthesis through the Hermes TTS stack of the server
+///    the MESSAGE came from (`ScarfCore.HermesSpeechService` →
+///    `text_to_speech_tool`), with the fetched, magic-byte-verified audio
+///    (WAV/MP3/FLAC/AIFF) played through `AVAudioEngine`. Only honoured
+///    when that window's host has `hasHermesSpeechSynthesis`; otherwise
+///    the system voice plays exactly as before. Synthesis can take
+///    seconds, so the playback id flips on immediately — the stop button works while
+///    synthesis is in flight (stop cancels the task, which terminates the
+///    server round trip) — and `loading` exposes the synth-pending state.
+///    Any synthesis failure (transport, envelope, path validation,
+///    provider mismatch) falls back to the system voice rather than going
+///    silent.
 ///
+/// There is NO app-wide "current server": every `toggle` carries the
+/// `ServerContext` of the window (or bot conversation) that rendered the
+/// message, so one server's message text is never sent to another.
 /// One service is shared across the app so starting a second message's
-/// playback automatically interrupts the first. The per-message speaker
-/// button reads `playingMessageId` to render play vs. stop state.
+/// playback — in any window — interrupts the first. The per-message
+/// speaker button asks `isPlaying(_:)` with its own `PlaybackID`.
 @MainActor
 @Observable
 final class MessageSpeechService: NSObject {
+    typealias PlaybackID = HermesSpeechService.PlaybackID
+    typealias Engine = HermesSpeechService.PlaybackEngine
+
     /// COMPILED ONCE — this was rebuilt from its pattern on every spoken
     /// message. `NSRegularExpression` is thread-safe once constructed.
     /// Link syntax: `[text](url)` → `text`.
@@ -41,34 +49,37 @@ final class MessageSpeechService: NSObject {
 
     /// UserDefaults key shared with the Settings → Voice picker.
     /// "system" (and any unset value) keeps the original behavior.
-    static let engineKey = "scarf.speech.playbackEngine"
+    static let engineKey = Engine.defaultsKey
 
-    /// The message id currently being spoken or synthesized, or `nil`
-    /// when idle. Bubbles read this to flip their speaker icon to a
-    /// stop glyph — including while Hermes synthesis is still loading.
-    private(set) var playingMessageId: Int?
+    /// The message currently being spoken or synthesized, or `nil` when
+    /// idle. Bubbles compare against their own `PlaybackID` to flip the
+    /// speaker icon to a stop glyph — including while Hermes synthesis is
+    /// still loading.
+    private(set) var playing: PlaybackID?
 
-    /// The message id with Hermes synthesis in flight (loading state for
-    /// the bubble UI; `nil` on the system engine, which starts speaking
-    /// synchronously). Cleared when audio starts or playback is stopped.
-    private(set) var loadingMessageId: Int?
-
-    /// The server whose Hermes stack synthesizes (engine "hermes" only).
-    /// Pushed by the per-window root as windows appear; multi-window
-    /// setups resolve to the most recently appeared window — the last
-    /// writer wins. `nil` synthesizes against the local install.
-    var serverContext: ServerContext?
+    /// The message with Hermes synthesis in flight (loading state; `nil`
+    /// on the system engine, which starts speaking synchronously).
+    /// Cleared when audio starts or playback is stopped.
+    private(set) var loading: PlaybackID?
 
     private let synthesizer = AVSpeechSynthesizer()
+    /// The utterance the synthesizer is speaking for `playing`. Delegate
+    /// callbacks for any OTHER utterance (a stopped predecessor whose
+    /// cancel arrives after the next message started) are ignored.
+    private var currentUtterance: AVSpeechUtterance?
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var synthesisTask: Task<Void, Never>?
-    /// Temp WAV files backing the scheduled `AVAudioFile`s. The player
+    /// Temp audio files backing the scheduled `AVAudioFile`s. The player
     /// node reads them during playback, so deletion waits for the
-    /// completion callbacks.
+    /// completion callbacks (or stop).
     private var pendingTempFiles: [URL] = []
     private var pendingSegments = 0
-    private var isStoppingPlayback = false
+    /// Bumped on every audio-file start and stop. Segment callbacks carry the
+    /// generation they were scheduled under and no-op when it's stale, so
+    /// a flushed segment from a stopped playback can never decrement the
+    /// next playback's counter.
+    private var playbackGeneration = 0
     private let logger = Logger(subsystem: "com.scarf", category: "MessageSpeech")
 
     private override init() {
@@ -77,114 +88,136 @@ final class MessageSpeechService: NSObject {
         audioEngine.attach(playerNode)
     }
 
-    /// Currently selected playback engine, from the shared default.
-    var engine: Engine {
-        UserDefaults.standard.string(forKey: Self.engineKey).flatMap(Engine.init(rawValue:)) ?? .system
-    }
+    /// Whether `id` is playing or synthesizing.
+    func isPlaying(_ id: PlaybackID) -> Bool { playing == id }
 
-    enum Engine: String {
-        case system
-        case hermes
-    }
-
-    /// Speak `content`. If a different message is currently playing,
-    /// interrupt it. If the same message is currently playing or loading,
-    /// this stops playback (toggle behavior).
-    func toggle(messageId: Int, content: String) {
-        if playingMessageId == messageId {
+    /// Speak `content` from the message `id` identifies. If a different
+    /// message is currently playing, interrupt it. If the same message is
+    /// currently playing or loading, this stops playback (toggle).
+    ///
+    /// - Parameter capabilities: the capability snapshot of the window
+    ///   that rendered the message — decides whether the "hermes"
+    ///   preference is honoured for THIS server.
+    func toggle(_ id: PlaybackID, content: String, capabilities: HermesCapabilities) {
+        if playing == id {
             stop()
             return
         }
         stop()
         let cleaned = Self.strippedForSpeech(content)
         guard !cleaned.isEmpty else { return }
-        switch engine {
+        let preference = UserDefaults.standard.string(forKey: Self.engineKey)
+        switch Engine.resolve(preference: preference, capabilities: capabilities) {
         case .system:
-            speakWithSystemVoice(cleaned, messageId: messageId)
+            speakWithSystemVoice(cleaned, id: id)
         case .hermes:
-            speakWithHermes(cleaned, messageId: messageId)
+            speakWithHermes(cleaned, id: id)
         }
     }
 
-    /// Stop any in-progress speech — synthesis, system voice, or WAV
+    /// Stop any in-progress speech — synthesis, system voice, or audio-file
     /// playback — and clear the observable state.
     func stop() {
-        guard playingMessageId != nil || loadingMessageId != nil else { return }
+        guard playing != nil || loading != nil else { return }
         synthesisTask?.cancel()
         synthesisTask = nil
-        loadingMessageId = nil
+        loading = nil
+        currentUtterance = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        stopWAVPlayback()
-        playingMessageId = nil
+        stopFilePlayback()
+        playing = nil
     }
 
-    private func speakWithSystemVoice(_ text: String, messageId: Int) {
-        playingMessageId = messageId
+    private func speakWithSystemVoice(_ text: String, id: PlaybackID) {
+        playing = id
         let utterance = AVSpeechUtterance(string: text)
         // AVSpeechUtterance honors the user's Spoken Content default
         // voice when `voice` is `nil`, which is the right behavior:
         // users who configured a specific macOS voice get it
         // automatically.
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        currentUtterance = utterance
         synthesizer.speak(utterance)
     }
 
     // MARK: - Hermes engine
 
-    private func speakWithHermes(_ text: String, messageId: Int) {
+    private func speakWithHermes(_ text: String, id: PlaybackID) {
         // The id flips before synthesis starts: the stop control is live
-        // during the (potentially seconds-long) kokoro cold start.
-        playingMessageId = messageId
-        loadingMessageId = messageId
-        let context = serverContext ?? .local
+        // during the (potentially seconds-long) synthesis.
+        playing = id
+        loading = id
+        // The message's own server — never any other.
+        let service = HermesSpeechService(context: id.server)
         synthesisTask = Task { [weak self] in
-            let service = HermesSpeechService(context: context)
             do {
+                // `HermesSpeechService` is an actor: config read, the
+                // server round trip, and file I/O all run off the main
+                // actor. Only the playback hand-off below comes back.
                 let audio = try await service.synthesize(text: text)
-                guard let self, !Task.isCancelled else { return }
-                try self.playWAVChunks(audio.chunks, messageId: messageId)
+                let files = try await Self.writeTempFiles(audio.chunks, format: audio.format, id: id)
+                guard let self, !Task.isCancelled, self.playing == id else {
+                    files.forEach { try? FileManager.default.removeItem(at: $0) }
+                    return
+                }
+                try self.playAudioFiles(files)
             } catch is CancellationError {
                 // stop() already reset the observable state.
             } catch {
-                guard let self else { return }
+                guard let self, !Task.isCancelled, self.playing == id else { return }
                 self.logger.warning(
                     "Hermes TTS failed (\(String(describing: error), privacy: .public)) — falling back to system voice"
                 )
-                guard self.playingMessageId == messageId else { return }
-                self.loadingMessageId = nil
-                self.speakWithSystemVoice(text, messageId: messageId)
+                self.loading = nil
+                self.speakWithSystemVoice(text, id: id)
             }
         }
     }
 
-    /// Write the fetched WAV chunks to temp files and schedule them
-    /// back-to-back on the shared player node. The completion callback
-    /// of the final segment clears `playingMessageId`; stop() flushes
-    /// pending segments through the same callbacks with the stop flag
-    /// set, so both endings converge on the same cleanup.
-    private func playWAVChunks(_ chunks: [Data], messageId: Int) throws {
-        guard !chunks.isEmpty else {
-            playingMessageId = nil
+    /// Write verified audio chunks to local temp files, off the main actor.
+    /// The extension matches the sniffed container so Core Audio decodes
+    /// it with the right parser.
+    /// Named `scarf-play-…`, apart from the synthesis script's own
+    /// `scarf-tts-<uid>/` directory (which, for the local server, lives in
+    /// this same `$TMPDIR` and is swept by the script).
+    private nonisolated static func writeTempFiles(_ chunks: [Data], format: HermesSpeechService.AudioFormat, id: PlaybackID) async throws -> [URL] {
+        try await Task.detached(priority: .userInitiated) {
+            var urls: [URL] = []
+            do {
+                for (index, chunk) in chunks.enumerated() {
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("scarf-play-\(id.messageId)-\(index)-\(UUID().uuidString).\(format.rawValue)")
+                    try chunk.write(to: url, options: .atomic)
+                    urls.append(url)
+                }
+            } catch {
+                urls.forEach { try? FileManager.default.removeItem(at: $0) }
+                throw error
+            }
+            return urls
+        }.value
+    }
+
+    /// Schedule the temp audio files back-to-back on the shared player
+    /// node. The completion callback of the final segment clears
+    /// `playing`; stop() bumps the generation so flushed callbacks no-op.
+    private func playAudioFiles(_ urls: [URL]) throws {
+        loading = nil
+        guard !urls.isEmpty else {
+            playing = nil
             return
         }
-        var files: [AVAudioFile] = []
-        var tempURLs: [URL] = []
-        for (index, chunk) in chunks.enumerated() {
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("scarf-tts-\(messageId)-\(index)-\(UUID().uuidString).wav")
-            try chunk.write(to: url, options: .atomic)
-            tempURLs.append(url)
-            files.append(try AVAudioFile(forReading: url))
-        }
-        pendingTempFiles.append(contentsOf: tempURLs)
+        pendingTempFiles.append(contentsOf: urls)
+        let files = try urls.map { try AVAudioFile(forReading: $0) }
+        playbackGeneration += 1
+        let generation = playbackGeneration
         pendingSegments = files.count
-        isStoppingPlayback = false
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: files[0].processingFormat)
-        for (file, url) in zip(files, tempURLs) {
+        for (file, url) in zip(files, urls) {
             playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                self?.segmentFinished(tempURL: url)
+                self?.segmentFinished(tempURL: url, generation: generation)
             }
         }
         audioEngine.prepare()
@@ -194,37 +227,44 @@ final class MessageSpeechService: NSObject {
 
     /// Per-segment completion (any thread): delete the temp file, then
     /// hop to the main actor for the shared counter.
-    nonisolated private func segmentFinished(tempURL: URL) {
+    nonisolated private func segmentFinished(tempURL: URL, generation: Int) {
         try? FileManager.default.removeItem(at: tempURL)
         Task { @MainActor [weak self] in
-            guard let self, !self.isStoppingPlayback else { return }
+            guard let self, generation == self.playbackGeneration else { return }
             self.pendingTempFiles.removeAll { $0 == tempURL }
             self.pendingSegments -= 1
             if self.pendingSegments == 0 {
-                self.finishWAVPlayback()
+                self.finishFilePlayback()
             }
         }
     }
 
-    private func finishWAVPlayback() {
+    private func finishFilePlayback() {
         playerNode.stop()
         audioEngine.stop()
         pendingTempFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         pendingTempFiles = []
-        if playingMessageId != nil {
-            playingMessageId = nil
+        if playing != nil {
+            playing = nil
         }
     }
 
-    private func stopWAVPlayback() {
-        // Flushes every scheduled segment: their completion callbacks run
-        // with the stop flag set and no-op past temp-file deletion.
-        isStoppingPlayback = true
+    private func stopFilePlayback() {
+        // Invalidate every scheduled segment's callback first, then flush.
+        playbackGeneration += 1
         playerNode.stop()
         audioEngine.stop()
         pendingTempFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         pendingTempFiles = []
         pendingSegments = 0
+    }
+
+    /// A system-voice utterance ended (finished or cancelled). Only the
+    /// CURRENT utterance clears the playing state.
+    private func utteranceEnded(_ utterance: ObjectIdentifier) {
+        guard let current = currentUtterance, ObjectIdentifier(current) == utterance else { return }
+        currentUtterance = nil
+        playing = nil
     }
 
     // MARK: - Text cleanup
@@ -258,14 +298,16 @@ final class MessageSpeechService: NSObject {
 
 extension MessageSpeechService: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        let token = ObjectIdentifier(utterance)
         Task { @MainActor in
-            self.playingMessageId = nil
+            self.utteranceEnded(token)
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        let token = ObjectIdentifier(utterance)
         Task { @MainActor in
-            self.playingMessageId = nil
+            self.utteranceEnded(token)
         }
     }
 }

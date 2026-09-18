@@ -291,20 +291,6 @@ public struct VoiceSettings: Sendable, Equatable {
     /// `tts.deepinfra.voice` (default "default").
     public var ttsDeepInfraModel: String
     public var ttsDeepInfraVoice: String
-    /// Kokoro TTS (`tts.kokoro.*`, hermes-s2s plugin). `python` is the
-    /// venv interpreter carrying kokoro + soundfile — the plugin's
-    /// external-synth path runs it as a subprocess when the orchestrator
-    /// venv itself can't import kokoro. Empty means
-    /// `<hermes home>/kokoro-venv/bin/python` (HermesSpeechService's
-    /// default, matching the layout the hermes-s2s setup creates).
-    /// Scarf's Hermes playback engine synthesizes through this venv
-    /// directly (see `HermesSpeechService`) rather than through
-    /// `text_to_speech_tool`, whose standalone kokoro dispatch silently
-    /// falls through to edge-tts.
-    public var ttsKokoroVoice: String
-    public var ttsKokoroSpeed: Double
-    public var ttsKokoroLangCode: String
-    public var ttsKokoroPython: String
 
     // STT
     public var sttEnabled: Bool
@@ -362,12 +348,16 @@ public struct VoiceSettings: Sendable, Equatable {
     /// on the backend).
     public var wakeWordCapture: String
 
-    /// `voice.voice_chat_mode` selects Hermes' interactive voice transport.
-    /// `gpt-live` is available on Hermes v0.21.3+; an empty value preserves
-    /// the host default on older installations.
+    /// `voice.voice_chat_mode` selects Hermes' interactive voice transport:
+    /// `chained` (STT → turn → TTS) or `gpt-live`. Hermes seeds it as
+    /// `"chained"` at `hermes_cli/config_defaults.py:1132` @ v2026.9.14
+    /// (0.21.3); the key does not exist at v2026.9.11 (0.21.2), where an
+    /// absent key parses to the same `"chained"` the host behaves as.
     public var voiceChatMode: String
     /// `voice.gpt_live.*` are read-only client hints used by Scarf's native
     /// Live Voice surface. Hermes remains the source of truth for the session.
+    /// Defaults mirror `hermes_cli/config_defaults.py:1133-1138` @ v2026.9.14
+    /// (`model: "gpt-live-1"`, `voice: "marin"`, `instructions: ""`).
     public var gptLiveModel: String
     public var gptLiveVoice: String
     public var gptLiveInstructions: String
@@ -399,10 +389,6 @@ public struct VoiceSettings: Sendable, Equatable {
         ttsXAIBitRate: Int = 128000,
         ttsDeepInfraModel: String = "",
         ttsDeepInfraVoice: String = "default",
-        ttsKokoroVoice: String = "af_heart",
-        ttsKokoroSpeed: Double = 1.0,
-        ttsKokoroLangCode: String = "a",
-        ttsKokoroPython: String = "",
         sttOpenAILanguage: String = "",
         sttLanguage: String = "en",
         sttGroqModel: String = "whisper-large-v3-turbo",
@@ -416,7 +402,7 @@ public struct VoiceSettings: Sendable, Equatable {
         sttCloudTrimThresholdDB: Double = -40,
         sttCloudTrimKeepMS: Int = 300,
         wakeWordCapture: String = "auto",
-        voiceChatMode: String = "",
+        voiceChatMode: String = "chained",
         gptLiveModel: String = "gpt-live-1",
         gptLiveVoice: String = "marin",
         gptLiveInstructions: String = ""
@@ -441,10 +427,6 @@ public struct VoiceSettings: Sendable, Equatable {
         self.ttsXAIBitRate = ttsXAIBitRate
         self.ttsDeepInfraModel = ttsDeepInfraModel
         self.ttsDeepInfraVoice = ttsDeepInfraVoice
-        self.ttsKokoroVoice = ttsKokoroVoice
-        self.ttsKokoroSpeed = ttsKokoroSpeed
-        self.ttsKokoroLangCode = ttsKokoroLangCode
-        self.ttsKokoroPython = ttsKokoroPython
         self.sttEnabled = sttEnabled
         self.sttProvider = sttProvider
         self.sttLocalModel = sttLocalModel
@@ -491,7 +473,7 @@ public struct VoiceSettings: Sendable, Equatable {
         sttMistralModel: "voxtral-mini-latest",
         ttsXAIVoiceID: "",
         ttsXAIAutoSpeechTags: false,
-        voiceChatMode: "",
+        voiceChatMode: "chained",
         gptLiveModel: "gpt-live-1",
         gptLiveVoice: "marin",
         gptLiveInstructions: ""

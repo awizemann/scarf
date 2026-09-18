@@ -1457,6 +1457,25 @@ import Foundation
         #expect(!HermesCapabilities.empty.hasSkillsUpdateForce)
     }
 
+    /// `hasHermesSpeechSynthesis` — four-way. Floor v0.20.1 (v2026.8.13):
+    /// `text_to_speech_tool`'s `file_paths` envelope (`tools/tts_tool.py:3669-3670`)
+    /// and `.chunkNNN`/`.partNN` naming (`:3612-3613`, `:1691-1692`) first
+    /// appear there; v2026.8.3 (0.20.0) has neither, and v2026.7.30 (0.19.1)
+    /// has the `provider` kwarg (`:2786`) but not the envelope.
+    @Test func hermesSpeechSynthesisFloorIsV0201() {
+        // Parse + degradation.
+        let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+        #expect(v0200.detected)
+        #expect(!v0200.hasHermesSpeechSynthesis)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasHermesSpeechSynthesis)
+        // At the floor, all-on at the target, and later patches stay on.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)").hasHermesSpeechSynthesis)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)").hasHermesSpeechSynthesis)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)").hasHermesSpeechSynthesis)
+        // Undetected host behaves as the older one.
+        #expect(!HermesCapabilities.empty.hasHermesSpeechSynthesis)
+    }
+
     @Test func isV0201OrLater_boundaries() {
         #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").isV0201OrLater)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)").isV0201OrLater)

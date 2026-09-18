@@ -353,14 +353,6 @@ public extension HermesConfig {
             // v0.19 round-trip (hasDeepInfraTTS).
             ttsDeepInfraModel: str("tts.deepinfra.model"),
             ttsDeepInfraVoice: str("tts.deepinfra.voice", default: "default"),
-            // Kokoro (hermes-s2s plugin): defaults mirror the plugin's own
-            // `make_kokoro` factory (voice af_heart, lang_code "a", speed
-            // 1.0). `python` empty = key absent → Scarf derives
-            // `<hermes home>/kokoro-venv/bin/python` at synth time.
-            ttsKokoroVoice: str("tts.kokoro.voice", default: "af_heart"),
-            ttsKokoroSpeed: double("tts.kokoro.speed", default: 1.0),
-            ttsKokoroLangCode: str("tts.kokoro.lang_code", default: "a"),
-            ttsKokoroPython: str("tts.kokoro.python"),
             // Predates version tracking, like sttOpenAIModel; ungated.
             sttOpenAILanguage: str("stt.openai.language"),
             // v0.19.1 round-trip (hasSTTUnifiedLanguage).
@@ -380,7 +372,9 @@ public extension HermesConfig {
             sttCloudTrimThresholdDB: double("stt.cloud_trim_threshold_db", default: -40),
             sttCloudTrimKeepMS: int("stt.cloud_trim_keep_ms", default: 300),
             wakeWordCapture: strEnum("wake_word.capture", default: "auto"),
-            voiceChatMode: str("voice.voice_chat_mode"),
+            // Default = Hermes's seed (`hermes_cli/config_defaults.py:1132`
+            // @ v2026.9.14); see `VoiceSettings.voiceChatMode`.
+            voiceChatMode: str("voice.voice_chat_mode", default: "chained"),
             gptLiveModel: str("voice.gpt_live.model", default: "gpt-live-1"),
             gptLiveVoice: str("voice.gpt_live.voice", default: "marin"),
             gptLiveInstructions: str("voice.gpt_live.instructions")
