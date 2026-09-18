@@ -116,8 +116,12 @@ private struct MockTranscriber: SpeechTranscribing {
         case .failure: throw DictationError(reason: .recognizerUnavailable)
         case .onDeviceUnsupported: throw DictationError(reason: .onDeviceRecognitionUnsupported)
         case .hangs:
-            try await Task.sleep(for: .seconds(3_600))
-            return "unreachable"
+            // Parks until cancelled — no duration to pick (house rule:
+            // no fixed sleeps in tests; see HermesP38SourceSweepTests).
+            let (stream, continuation) = AsyncStream<Never>.makeStream()
+            for await _ in stream {}
+            withExtendedLifetime(continuation) {}
+            throw CancellationError()
         }
     }
 }
