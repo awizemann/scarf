@@ -530,7 +530,15 @@ public actor HermesSpeechService {
     /// (`tools/tts_tool.py:140-144` @ v2026.9.14) applies its own default
     /// and the `nous` → `openai` mapping, which an explicit override
     /// bypasses (`_apply_call_overrides`, `:256-261`).
+    ///
+    /// The first line drops the working directory from `sys.path`: `python
+    /// -c` puts it first, and over SSH that is `$HOME`, where a `~/tools/`
+    /// (or `~/json.py`) would shadow Hermes's `tools` package or the stdlib.
+    /// It runs before any other import. The working directory itself is
+    /// left alone (unlike Live Voice's `cd /`), because a configured TTS
+    /// command provider may rely on it.
     static let toolPythonScript = #"""
+    import sys; sys.path[:] = [p for p in sys.path if p not in ("", ".")]
     import json, os, sys
     from tools.tts_tool import text_to_speech_tool
     payload = json.load(sys.stdin)

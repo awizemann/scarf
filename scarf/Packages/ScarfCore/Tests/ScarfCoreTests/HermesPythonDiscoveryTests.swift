@@ -59,6 +59,82 @@ import Foundation
         #expect(HermesPythonDiscovery.shellLines(hermesBinary: "~/.local/bin/hermes", errorMarker: "SCARF_TTS_ERROR:") == golden)
     }
 
+    /// The whole Hermes Voice script for a fixed input, pinned: the P2
+    /// script captured before this branch touched it, plus exactly ONE new
+    /// line — the sys.path guard that stops a `~/tools/` on the host from
+    /// shadowing Hermes's `tools` package. Any other drift fails here.
+    @Test func speechScriptIsTheP2ScriptPlusOnlyTheShadowingGuard() {
+        let options = HermesSpeechService.Options(
+            provider: "edge", voiceFingerprint: "v", hermesBinary: "~/.local/bin/hermes", hermesHome: "/Users/x/.hermes")
+        let script = HermesSpeechService.synthesisScript(options: options, cacheKey: "abc", text: "hi 'there'")
+        let golden = #"""
+            export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH"
+            hb="$HOME/.local/bin/hermes"
+            case "$hb" in
+              */*) ;;
+              *) hb=$(command -v -- "$hb" 2>/dev/null) || hb="" ;;
+            esac
+            if [ -z "$hb" ] || [ ! -f "$hb" ]; then
+              echo "SCARF_TTS_ERROR: hermes binary not found" >&2
+              exit 3
+            fi
+            real=$(readlink -f -- "$hb" 2>/dev/null) || real=""
+            [ -n "$real" ] || real="$hb"
+            py=""
+            first=""
+            IFS= read -r first < "$real" 2>/dev/null || true
+            case "$first" in
+              '#!'*)
+                cand=${first#??}
+                cand=${cand# }
+                cand=${cand%% *}
+                case "${cand##*/}" in
+                  python*) if [ -x "$cand" ]; then py="$cand"; fi ;;
+                esac ;;
+            esac
+            if [ -z "$py" ]; then
+              pyd=$(dirname -- "$real")
+              for c in "$pyd/python" "$pyd/python3"; do
+                if [ -x "$c" ]; then py="$c"; break; fi
+              done
+            fi
+            if [ -z "$py" ]; then
+              echo "SCARF_TTS_ERROR: no Python interpreter found for $real" >&2
+              exit 3
+            fi
+            d=${TMPDIR:-/tmp}
+            d=${d%/}
+            u=$(id -u)
+            sd="$d/scarf-tts-$u"
+            mkdir -m 700 "$sd" 2>/dev/null
+            if [ -L "$sd" ] || [ ! -d "$sd" ] || [ ! -O "$sd" ]; then
+              echo "SCARF_TTS_ERROR: unsafe temp directory $sd" >&2
+              exit 3
+            fi
+            find "$sd" -type f -mmin +30 -exec rm -f {} + 2>/dev/null
+            out="$sd/scarf-tts-abc.wav"
+            printf 'SCARF_TTS_BASE:%s\n' "$out"
+            export HERMES_HOME='/Users/x/.hermes'
+            SCARF_TTS_OUT="$out" "$py" -c 'import sys; sys.path[:] = [p for p in sys.path if p not in ("", ".")]
+            import json, os, sys
+            from tools.tts_tool import text_to_speech_tool
+            payload = json.load(sys.stdin)
+            env = text_to_speech_tool(payload["text"], output_path=os.environ["SCARF_TTS_OUT"])
+            sys.stdout.write("SCARF_TTS_ENV:" + env + "\n")' <<'SCARF_JSON'
+            {"text":"hi 'there'"}
+            SCARF_JSON
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "SCARF_TTS_ERROR: tts_tool exited with status $rc" >&2
+              exit 4
+            fi
+            """#
+        #expect(script == golden)
+        #expect(HermesSpeechService.toolPythonScript.hasPrefix(
+            #"import sys; sys.path[:] = [p for p in sys.path if p not in ("", ".")]"# + "\n"))
+        #expect(!HermesSpeechService.toolPythonScript.contains("'"))
+    }
+
     @Test func liveExchangeScriptEmbedsTheSameFragment() {
         let script = VoiceLiveHostExchange.script(
             hermesBinary: "/opt/hermes/bin/hermes", hermesHome: "/srv/h", requestJSON: "{}")
@@ -92,6 +168,32 @@ import Foundation
         try write(hermes, "#!\(py.path)\nimport sys\n", executable: true)
         let out = try runDiscovery(binary: hermes.path)
         #expect(out.stdout == py.path)
+    }
+
+    /// The Hermes Voice wrapper's first line drops the working directory
+    /// from `sys.path`: run from a directory holding a decoy
+    /// `tools/tts_tool.py`, it must still import the real one (here, the
+    /// one on PYTHONPATH).
+    @Test func speechWrapperIgnoresAToolsPackageInTheWorkingDirectory() throws {
+        let dir = try TempDir()
+        func fakeTools(in root: URL, marker: String) throws {
+            let tools = root.appendingPathComponent("tools")
+            try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+            try Data().write(to: tools.appendingPathComponent("__init__.py"))
+            try Data("def text_to_speech_tool(text, output_path=None):\n    return \"\(marker)\"\n".utf8)
+                .write(to: tools.appendingPathComponent("tts_tool.py"))
+        }
+        let cwd = dir.url.appendingPathComponent("home")
+        let legit = dir.url.appendingPathComponent("site")
+        try fakeTools(in: cwd, marker: "SHADOW")
+        try fakeTools(in: legit, marker: "REAL")
+        var environment = ProcessInfo.processInfo.environment
+        environment["PYTHONPATH"] = legit.path
+        environment["SCARF_TTS_OUT"] = dir.url.appendingPathComponent("out.wav").path
+        let out = try ShellTestRunner.run(
+            "/usr/bin/env", arguments: ["python3", "-c", HermesSpeechService.toolPythonScript],
+            stdin: Data(#"{"text":"hi"}"#.utf8), environment: environment, currentDirectory: cwd)
+        #expect(out.stdout == "SCARF_TTS_ENV:REAL\n", "\(out.stderr)")
     }
 
     @Test func missingBinaryFailsWithTheCallersMarker() throws {
