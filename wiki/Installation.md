@@ -8,7 +8,7 @@ updated: 2026-05-29
 
 # Installation
 
-> **Looking for the iPhone?** This page covers the macOS desktop app. ScarfGo, the iOS companion, ships via TestFlight — see [ScarfGo](ScarfGo) and [ScarfGo Onboarding](ScarfGo-Onboarding) for that flow.
+> **Looking for the iPhone?** This page covers the macOS desktop app. ScarfGo, the iOS companion, is free on the [App Store](https://apps.apple.com/us/app/scarfgo/id6763763341) (with a TestFlight beta track) — see [ScarfGo](ScarfGo) and [ScarfGo Onboarding](ScarfGo-Onboarding) for that flow.
 
 ## System requirements
 

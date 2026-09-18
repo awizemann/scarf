@@ -21,7 +21,7 @@ Scarf and ScarfGo are companion clients for the open-source [Hermes AI agent](ht
 ## Apps covered
 
 - **Scarf** — macOS desktop client. Distributed via direct download (Sparkle) and built-in auto-update.
-- **ScarfGo** — iOS companion. Distributed via TestFlight (and, in future, the App Store).
+- **ScarfGo** — iOS companion. Distributed free on the App Store (with a public TestFlight beta track).
 
 ## What data the apps access
 

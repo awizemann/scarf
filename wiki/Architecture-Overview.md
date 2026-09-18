@@ -182,7 +182,7 @@ Both `scarf` (macOS) and `scarf mobile` (iOS) are targets in `scarf/scarf.xcodep
 | **SSH keys** | Assumed in `~/.ssh/` | Generated on-device, iOS Keychain |
 | **Layout** | Split-view sidebar + detail | Tabs + sidebar (adaptive on iPad) |
 | **Localization** | 7 languages | English only (v1) |
-| **Push notifications** | Sparkle (manual check) | TestFlight / App Store (future) |
+| **Push notifications** | Sparkle (manual check) | App Store / TestFlight |
 
 **Reference:** [[ScarfGo iOS Companion App]], [Platform Differences](Platform-Differences)
 

@@ -12,7 +12,7 @@ created: 2026-05-29
 
 **Latest release:** [v3.2.0](https://github.com/awizemann/scarf/releases/tag/v3.2.0) — **Hermes v0.21.2** and the largest correctness pass yet: every v0.21.1 surface a Mac client can use (paused cron create, failure delivery, Kanban Review exits and completion contracts, MCP device-code OAuth, credential-pool reorder, fast-mode tiers, new web backends), all capability-gated; six rounds of adversarial audit fixed **settings that showed the wrong value** (the YAML reader oracled against PyYAML), **buttons that reported success over a refusal** (every shelled verb judged on its output, Restore works again), **twelve wrong capability floors**, and **blocking work on the cooperative pool and main actor**; a real UI release gate (Smoke/Full/Live XCUITest plans) is green on Hermes v0.21.1 and v0.21.2; Backup Now passes `--keep 0` so Hermes v0.21.2's new prune never deletes a backup you kept. Previous: [v3.1.0](https://github.com/awizemann/scarf/releases/tag/v3.1.0) — projects grow up: the whole projects surface went through four rounds of adversarial security/data-integrity/performance/accessibility auditing and everything found was fixed — **atomic writes on every transport** (iOS SFTP included), quarantine-and-refuse instead of destructive overwrites, a cross-process registry lock, a Project Doctor, time-of-use trust checks, and signed mini-app grants (each mini-app re-asks once after upgrading). Plus a **redesigned sidebar** with projects first, **per-project auto-accept edits** so project chats stop prompting on every file change, a mini-app **`open_url`** permission with per-host consent, and an unchanged watcher tick dropping from ~55–70 SSH round-trips to ~4. Earlier: [v3.0.1](https://github.com/awizemann/scarf/releases/tag/v3.0.1) — bot creation works for every profile, plus a parser hunt against Hermes's real serializer output. All earlier versions: [Release Notes Index](Release-Notes-Index).
 
-**Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
+**Mobile:** [Download ScarfGo on the App Store](https://apps.apple.com/us/app/scarfgo/id6763763341) — free. Prefer beta builds? [Join the public TestFlight](https://testflight.apple.com/join/qCrRpcTz). See [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
 **Targets Hermes:** v0.21.2 (v2026.9.11). Everything newer than a host's version is capability-gated or schema-detected — Hermes v0.6.0 through v0.21.1 hosts keep working exactly as before, with newer-only surfaces hidden gracefully. History: [Hermes Version Compatibility](Hermes-Version-Compatibility).
 
@@ -21,7 +21,7 @@ created: 2026-05-29
 ## Quick links
 
 - [Installation](Installation) — download, first launch, system requirements (Mac)
-- **[ScarfGo](ScarfGo)** — the iPhone companion (public TestFlight)
+- **[ScarfGo](ScarfGo)** — the iPhone companion (free on the App Store; TestFlight for betas)
 - **[ScarfGo Onboarding](ScarfGo-Onboarding)** — SSH keys, paste-public-key, connection test
 - [Platform Differences](Platform-Differences) — Mac vs iOS feature matrix
 - [First Run](First-Run) — what Scarf expects in `~/.hermes/`

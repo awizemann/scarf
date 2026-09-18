@@ -40,7 +40,7 @@ Both clients talk to the same Hermes host with the same paths and the same data.
 | **Localization** | 7 languages (en, de, es, fr, ja, pt-BR, zh-Hans — verified in `Localizable.xcstrings`) | English only | iOS strings are extracted but no translations contributed in v1. |
 | **Multi-server** | Yes (one window per server) | Yes (sidebar-adaptable Tab root) | — |
 | **Push notifications** | n/a (Mac uses local notifications + the menu bar) | Skeleton present, gated `apnsEnabled = false` | Push sender doesn't exist on Hermes side yet. Capability disabled in target. Flips on simultaneously when both lights are green. |
-| **Sparkle auto-update** | Yes | n/a | iOS uses TestFlight / App Store. |
+| **Sparkle auto-update** | Yes | n/a | iOS uses the App Store (TestFlight for betas). |
 | **iPad support** | n/a | Wired (`.tabViewStyle(.sidebarAdaptable)`) but not smoke-tested | iPad target flag is off; layout probably free, but verify before flipping. |
 
 ## Why the iOS surface is intentionally smaller
@@ -82,7 +82,7 @@ These are gaps without a fundamental reason; they just need engineering time:
 |---|---|
 | Project sidebar | Replaced by Sessions filter — same outcome, different navigation idiom. |
 | Window-per-server | Tabs replace it. iPhone has one focus at a time anyway. |
-| Sparkle | TestFlight / App Store does the same job. |
+| Sparkle | The App Store (TestFlight for betas) does the same job. |
 | Menu bar / Dock | iOS has neither. |
 | AppleScript / URL scheme `scarf://` | iOS apps don't get the same routing surface; can be added if needed. |
 

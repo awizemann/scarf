@@ -10,7 +10,7 @@ created: 2026-05-29
 
 ScarfGo is the iPhone companion to [Scarf](Home), the macOS GUI for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent). It connects from your phone to a Hermes server you operate (your Mac, a home Linux box, a cloud VM — anywhere reachable over SSH), and lets you run sessions, review memory, manage cron jobs, and resume conversations on the go.
 
-> **Status:** Public beta in TestFlight. See **[Installation](#installation)** below.
+> **Status:** Released on the **[App Store](https://apps.apple.com/us/app/scarfgo/id6763763341)** — free. A public TestFlight beta runs alongside it for early builds. See **[Installation](#installation)** below.
 
 ## What ScarfGo is, in one paragraph
 
@@ -25,12 +25,20 @@ ScarfGo is a fully native iOS app — not a web view, not a remote desktop. It s
 
 ## Installation
 
-ScarfGo is in **public TestFlight**. Apple-provided test environment, free to join, no payment, no Apple ID needed for beta installs.
+ScarfGo is **free on the App Store**. A public TestFlight beta runs alongside it for anyone who wants early builds.
+
+### From the App Store (recommended)
+
+1. **Open the App Store listing** — **<https://apps.apple.com/us/app/scarfgo/id6763763341>** — and tap **Get**. Free, no in-app purchases.
+2. **Open ScarfGo** — onboarding walks you through host details, generates a new SSH keypair, and gives you the public-key snippet to paste into your Hermes host's `~/.ssh/authorized_keys`. Step-by-step walkthrough: [ScarfGo Onboarding](ScarfGo-Onboarding).
+
+### Beta builds (TestFlight)
+
+Want features before they ship to the App Store? Join the public TestFlight — Apple-provided test environment, free to join, no payment needed.
 
 1. **Get the TestFlight app** — install from the App Store if you don't have it.
 2. **Open the public TestFlight invite link** — **<https://testflight.apple.com/join/qCrRpcTz>**. The beta is open and accepting new testers.
-3. **Tap "Accept" and "Install"** — TestFlight installs ScarfGo alongside your other apps.
-4. **Open ScarfGo** — onboarding walks you through host details, generates a new SSH keypair, and gives you the public-key snippet to paste into your Hermes host's `~/.ssh/authorized_keys`. Step-by-step walkthrough: [ScarfGo Onboarding](ScarfGo-Onboarding).
+3. **Tap "Accept" and "Install"** — TestFlight installs the ScarfGo beta alongside your other apps. Onboarding is identical to the App Store build.
 
 Onboarding details:
 
@@ -124,4 +132,4 @@ A: [ScarfGo Roadmap](ScarfGo-Roadmap) tracks shipped milestones (M6 / M7 / M8 / 
 
 ---
 
-_Last updated: 2026-08-13 — Scarf v2.19.0 (removed the stale "Beta Review queue" TestFlight caveat — the public beta has long been open to new testers). Previously 2026-07-14: Auto-reconnect row updated, ladder is load-only, `session/resume` removed; reattach reconciles from `state.db`._
+_Last updated: 2026-09-18 — ScarfGo released free on the App Store (id 6763763341); Installation now leads with the App Store and keeps TestFlight as the beta track. Previously 2026-08-13 (v2.19.0): removed the stale "Beta Review queue" TestFlight caveat. 2026-07-14: Auto-reconnect row updated, ladder is load-only, `session/resume` removed; reattach reconciles from `state.db`._
