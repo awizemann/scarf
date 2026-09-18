@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scarf Live Voice</title>
+</head>
+<body>
+<script>
+// Scarf Live Voice media page. Served by WebViewVoiceMediaBridge from
+// scarf-voice://live/index.html (a secure context with a stable origin; the
+// bridge grants microphone capture to this origin only).
+//
+// This page is a THIN media transport: microphone, RTCPeerConnection, the
+// `oai-events` data channel, remote-audio playback and two level probes.
+// Every protocol decision (event decoding, delegation, commentary, close)
+// lives in Swift (GPTLiveEngine / VoiceLiveProtocol), where it is tested.
+// Media setup is a port of the Hermes desktop's VoiceLiveSession
+// (apps/desktop/src/lib/voice-live.ts @ v2026.9.14): start :271-337, ICE
+// :182-212, speaking probe :339-371, teardown :509-534.
+//
+// JS -> Swift  window.webkit.messageHandlers.scarfVoiceLive.postMessage(...)
+//   {type:'ready', secure}             page loaded
+//   {type:'offer', sdp}                full offer after ICE gathering (never trimmed)
+//   {type:'channelOpen'}               oai-events is open
+//   {type:'event', data}               one raw data-channel message
+//   {type:'speaking', value}           remote (assistant) audio on/off
+//   {type:'level', value}              microphone level 0..1
+//   {type:'closed', reason}            the transport ended on its own
+// Swift -> JS  (callAsyncJavaScript with arguments, never string-built)
+//   start() / applyAnswer(sdp) / send(json) / setMicrophoneEnabled(on) / teardown()
+'use strict'
+
+const ICE_GATHER_TIMEOUT_MS = 10000
+
+function post (message) {
+  try { window.webkit.messageHandlers.scarfVoiceLive.postMessage(message) } catch (_) {}
+}
+
+const S = {
+  peer: null, channel: null, mic: null, audio: null,
+  timers: [], contexts: [], lastSpeaking: false, lastLevel: -1, live: false
+}
+
+function waitForIceGathering (pc) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ICE_GATHER_TIMEOUT_MS)  // trickle-less: the vendor answers with what it has
+    pc.addEventListener('icegatheringstatechange', () => {
+      if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve() }
+    })
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState === 'failed') { clearTimeout(timer); reject(new Error('WebRTC connection failed')) }
+    })
+  })
+}
+
+function analyser (stream) {
+  const context = new AudioContext()
+  const node = context.createAnalyser()
+  node.fftSize = 512
+  context.createMediaStreamSource(stream).connect(node)
+  S.contexts.push(context)
+  return node
+}
+
+// Remote track: speaking on/off, the desktop's thresholds (voice-live.ts:351-367).
+function armSpeakingProbe (stream) {
+  try {
+    const node = analyser(stream)
+    const buffer = new Uint8Array(node.frequencyBinCount)
+    let quiet = 0
+    S.timers.push(setInterval(() => {
+      node.getByteTimeDomainData(buffer)
+      let peak = 0
+      for (const v of buffer) peak = Math.max(peak, Math.abs(v - 128))
+      const loud = peak > 6
+      quiet = loud ? 0 : quiet + 1
+      const speaking = loud || quiet < 4
+      if (speaking !== S.lastSpeaking) { S.lastSpeaking = speaking; post({ type: 'speaking', value: speaking }) }
+    }, 100))
+  } catch (_) { /* no indicator; the conversation still works */ }
+}
+
+// Microphone: RMS level for the UI meter, ~10 Hz, only when it moves.
+function armMicLevel (stream) {
+  try {
+    const node = analyser(stream)
+    const buffer = new Uint8Array(node.fftSize)
+    S.timers.push(setInterval(() => {
+      node.getByteTimeDomainData(buffer)
+      let sum = 0
+      for (const v of buffer) { const x = (v - 128) / 128; sum += x * x }
+      const level = Math.min(1, Math.sqrt(sum / buffer.length) * 4)
+      const rounded = Math.round(level * 50) / 50
+      if (rounded !== S.lastLevel) { S.lastLevel = rounded; post({ type: 'level', value: rounded }) }
+    }, 100))
+  } catch (_) { /* no meter */ }
+}
+
+function cleanup () {
+  for (const t of S.timers) clearInterval(t)
+  for (const c of S.contexts) c.close().catch(() => {})
+  if (S.mic) S.mic.getTracks().forEach(t => t.stop())
+  try { if (S.channel) S.channel.close() } catch (_) {}
+  try { if (S.peer) S.peer.close() } catch (_) {}
+  if (S.audio) { S.audio.srcObject = null; S.audio.pause() }
+  S.peer = null; S.channel = null; S.mic = null; S.audio = null
+  S.timers = []; S.contexts = []; S.lastSpeaking = false; S.lastLevel = -1
+}
+
+// The transport died on its own: tell Swift once, then clean up.
+function finish (reason) {
+  if (!S.live) return
+  S.live = false
+  cleanup()
+  post({ type: 'closed', reason })
+}
+
+window.scarfVoiceLive = {
+  async start () {
+    if (S.peer) throw new Error('Live Voice already started')
+    S.live = true
+    const pc = new RTCPeerConnection()
+    S.peer = pc
+    S.audio = new Audio()
+    S.audio.autoplay = true
+    // Every handler checks it still belongs to the CURRENT session: a torn-down
+    // peer's late events must never end a newer one.
+    pc.addEventListener('track', event => {
+      if (S.peer !== pc) return
+      const stream = new MediaStream([event.track])
+      S.audio.srcObject = stream
+      S.audio.play().catch(() => {})
+      armSpeakingProbe(stream)
+    })
+    pc.addEventListener('connectionstatechange', () => {
+      if (S.peer !== pc) return
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') finish('connection_lost')
+    })
+    let mic
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({
+        audio: { autoGainControl: true, echoCancellation: true, noiseSuppression: true }
+      })
+    } catch (error) {
+      finish('microphone_denied')
+      throw error
+    }
+    if (S.peer !== pc) {  // torn down while the permission prompt was up
+      mic.getTracks().forEach(t => t.stop())
+      throw new Error('Live Voice stopped')
+    }
+    S.mic = mic
+    for (const track of S.mic.getAudioTracks()) pc.addTrack(track, S.mic)
+    armMicLevel(S.mic)
+    // Register the data channel before the offer so its m-line is negotiated.
+    const channel = pc.createDataChannel('oai-events')
+    S.channel = channel
+    channel.addEventListener('open', () => { if (S.channel === channel) post({ type: 'channelOpen' }) })
+    channel.addEventListener('message', ({ data }) => { if (S.channel === channel) post({ type: 'event', data: String(data) }) })
+    channel.addEventListener('close', () => { if (S.channel === channel) finish('connection_lost') })
+    await pc.setLocalDescription(await pc.createOffer())
+    await waitForIceGathering(pc)
+    if (S.peer !== pc) throw new Error('Live Voice stopped')
+    const sdp = pc.localDescription && pc.localDescription.sdp
+    if (!sdp) throw new Error('Missing local SDP offer')
+    post({ type: 'offer', sdp })  // byte-exact: the vendor rejects a trimmed offer
+  },
+
+  async applyAnswer (sdp) {
+    if (!S.peer) throw new Error('Live Voice is not running')
+    await S.peer.setRemoteDescription({ type: 'answer', sdp })
+  },
+
+  send (json) {
+    if (!S.channel || S.channel.readyState !== 'open') return false
+    S.channel.send(json)
+    return true
+  },
+
+  setMicrophoneEnabled (enabled) {
+    if (S.mic) for (const track of S.mic.getAudioTracks()) track.enabled = !!enabled
+  },
+
+  // Swift-initiated: no 'closed' message (Swift already knows).
+  teardown () {
+    S.live = false
+    cleanup()
+  }
+}
+
+post({ type: 'ready', secure: window.isSecureContext === true })
+</script>
+</body>
+</html>
