@@ -8,6 +8,18 @@ struct VoiceTab: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
+    /// Client-side preference (NOT a Hermes config key): which engine the
+    /// per-message speaker button uses. Shared with `MessageSpeechService`
+    /// via the same defaults key.
+    @AppStorage(MessageSpeechService.engineKey) private var playbackEngine = "system"
+
+    private var playbackEngineOptions: [(id: String, label: String)] {
+        [
+            ("system", "System Voice"),
+            ("hermes", "Hermes Voice"),
+        ]
+    }
+
     /// STT providers, with the "Auto (unset)" row dropped on hosts without
     /// `hermes config unset` (pre-v0.19) — same shape as BrowserTab's
     /// cloud-provider picker: an unwritable option is hidden rather than
@@ -38,6 +50,15 @@ struct VoiceTab: View {
 
         SettingsSection(title: "Text-to-Speech", icon: "speaker.wave.3") {
             PickerRow(
+                label: "Playback Engine",
+                selection: playbackEngine,
+                options: playbackEngineOptions.map(\.id),
+                optionLabel: { id in
+                    playbackEngineOptions.first { $0.id == id }?.label ?? id
+                }
+            ) { playbackEngine = $0 }
+                .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider (kokoro loads for a few seconds on first use) and falls back to the system voice when the server can't synthesize.")
+            PickerRow(
                 label: "Provider",
                 selection: viewModel.config.voice.ttsProvider,
                 options: SettingsViewModel.ttsProviders(
@@ -54,6 +75,17 @@ struct VoiceTab: View {
             case "openai":
                 EditableTextField(label: "Model", value: viewModel.config.voice.ttsOpenAIModel) { viewModel.setTTSOpenAIModel($0) }
                 PickerRow(label: "Voice", selection: viewModel.config.voice.ttsOpenAIVoice, options: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]) { viewModel.setTTSOpenAIVoice($0) }
+            case "kokoro":
+                // Local Kokoro via the hermes-s2s plugin. Hermes Voice
+                // synthesizes through the venv named by `tts.kokoro.python`
+                // (below) rather than the orchestrator — see
+                // HermesSpeechService for why. Voice/lang/speed mirror the
+                // plugin's own `make_kokoro` defaults.
+                EditableTextField(label: "Voice", value: viewModel.config.voice.ttsKokoroVoice) { viewModel.setTTSKokoroVoice($0) }
+                DoubleStepperRow(label: "Speed", value: viewModel.config.voice.ttsKokoroSpeed, range: 0.5...2.0, step: 0.05) { viewModel.setTTSKokoroSpeed($0) }
+                EditableTextField(label: "Lang Code", value: viewModel.config.voice.ttsKokoroLangCode) { viewModel.setTTSKokoroLangCode($0) }
+                EditableTextField(label: "Python", value: viewModel.config.voice.ttsKokoroPython) { viewModel.setTTSKokoroPython($0) }
+                    .help("Path to the venv python with kokoro + soundfile installed (hermes-s2s external synthesis). Empty uses <hermes home>/kokoro-venv/bin/python.")
             case "neutts":
                 EditableTextField(label: "Model", value: viewModel.config.voice.ttsNeuTTSModel) { viewModel.setTTSNeuTTSModel($0) }
                 PickerRow(label: "Device", selection: viewModel.config.voice.ttsNeuTTSDevice, options: ["cpu", "cuda"]) { viewModel.setTTSNeuTTSDevice($0) }
