@@ -11,8 +11,9 @@ import CryptoKit
 /// — regenerable data, so the system may purge it and backups skip it —
 /// as one JSON manifest per synthesis plus the chunk files it names:
 ///
-///     <key>.json          {"format":"wav","chunks":["<key>-00.wav",…]}
-///     <key>-00.wav        RIFF/WAVE bytes, magic-byte-verified before store
+///     <key>.json          {"format":"mp3","chunks":["<key>-00.mp3",…]}
+///     <key>-00.mp3        audio bytes, magic-byte-verified before store
+///                         (`format` is one of `playableFormats`)
 ///
 /// The manifest is written LAST — its presence is the entry's validity
 /// signal, so a crash mid-store leaves orphan chunks that eviction sweeps
@@ -33,6 +34,11 @@ public struct HermesTTSCache: Sendable {
     /// audio — far beyond a session's worth of replayed messages, small
     /// enough to be a rounding error on any Mac that runs Hermes.
     public static let maxBytes: Int64 = 256 * 1024 * 1024
+
+    /// Container extensions an entry may carry — the formats
+    /// `HermesSpeechService` accepts for playback. Anything else in a
+    /// manifest reads as a miss.
+    public static let playableFormats: Set<String> = ["wav", "mp3", "flac", "aiff"]
 
     /// Root directory for cached entries. Production default lives under
     /// Caches (same `scarf/` root as the SSH snapshot cache); tests inject
@@ -87,7 +93,7 @@ public struct HermesTTSCache: Sendable {
         let manifestURL = self.manifestURL(for: key)
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
-              manifest.format == "wav",
+              Self.playableFormats.contains(manifest.format),
               !manifest.chunks.isEmpty else { return nil }
         var chunks: [Data] = []
         for name in manifest.chunks {
@@ -105,16 +111,17 @@ public struct HermesTTSCache: Sendable {
 
     // MARK: - Write
 
-    /// Persist verified WAV chunks under `key` and evict overflow.
+    /// Persist verified audio chunks of container `format` (one of
+    /// `playableFormats`) under `key` and evict overflow.
     /// Best-effort: a write failure leaves the cache merely cold, never
     /// corrupt, so all errors are swallowed by design.
-    public func store(chunks: [Data], key: String) {
-        guard !chunks.isEmpty else { return }
+    public func store(chunks: [Data], key: String, format: String = "wav") {
+        guard !chunks.isEmpty, Self.playableFormats.contains(format) else { return }
         let fm = FileManager.default
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
         var names: [String] = []
         for (index, chunk) in chunks.enumerated() {
-            let name = "\(key)-\(String(format: "%02d", index)).wav"
+            let name = "\(key)-\(String(format: "%02d", index)).\(format)"
             let url = directory.appendingPathComponent(name, isDirectory: false)
             do {
                 try chunk.write(to: url, options: .atomic)
@@ -125,7 +132,7 @@ public struct HermesTTSCache: Sendable {
                 return
             }
         }
-        let manifest = Manifest(format: "wav", chunks: names)
+        let manifest = Manifest(format: format, chunks: names)
         if let data = try? JSONEncoder().encode(manifest) {
             // .atomic makes manifest presence binary: either the previous
             // entry or the complete new one, never a torn manifest.
@@ -194,10 +201,10 @@ public struct HermesTTSCache: Sendable {
         }
     }
 
-    /// `…/<key>-NN.wav` → `<key>`, or nil for unexpected shapes.
+    /// `…/<key>-NN.<ext>` → `<key>`, or nil for unexpected shapes.
     private func chunkOwnerKey(path: String) -> String? {
         let name = (path as NSString).lastPathComponent
-        guard let range = name.range(of: "-\\d{2}\\.wav$", options: .regularExpression) else { return nil }
+        guard let range = name.range(of: "-\\d{2}\\.(wav|mp3|flac|aiff)$", options: .regularExpression) else { return nil }
         return String(name[name.startIndex..<range.lowerBound])
     }
 }

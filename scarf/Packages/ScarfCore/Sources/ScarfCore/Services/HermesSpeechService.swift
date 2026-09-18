@@ -35,10 +35,15 @@ import CryptoKit
 /// derives from that base (`<stem>.<ext>`, `<stem>.chunkNNN.<ext>`,
 /// `<stem>.partNN.<ext>`, in the base's own directory) are read or
 /// deleted; anything else in the envelope aborts the synthesis untouched.
-/// The envelope's provider label is NEVER trusted — audio routes on magic
-/// bytes, and anything that is not RIFF/WAVE (e.g. an MP3 masquerading
-/// under a `.wav` name) surfaces as `providerMismatch` so the caller can
-/// fall back to the system voice.
+/// Neither the envelope's provider label nor any file extension is
+/// trusted — audio routes on magic bytes. Hermes's default `edge` provider
+/// writes MP3 whatever the requested extension
+/// (`_generate_edge_tts` → `Communicate.save`,
+/// `tools/tts_tool_providers.py:196-204` @ v2026.9.14), and OpenAI-style
+/// providers pick their format from it (`_tts_response_format_from_path`,
+/// `:72-75`), so WAV, MP3, FLAC and AIFF — everything `AVAudioFile` decodes
+/// on macOS — are accepted; anything else (Ogg/Opus, unknown) surfaces as
+/// `providerMismatch` so the caller can fall back to the system voice.
 ///
 /// Every command travels through `streamScript` (one opaque shell script
 /// over the transport) so it works identically for local and SSH servers.
@@ -109,13 +114,16 @@ public actor HermesSpeechService {
         }
     }
 
-    /// Verified WAV audio, one element per delivery chunk, in order.
+    /// Verified audio, one element per delivery chunk, in order, all of
+    /// one playable container `format`.
     public struct Audio: Sendable, Equatable {
         public let chunks: [Data]
+        public let format: AudioFormat
         public let fromCache: Bool
 
-        public init(chunks: [Data], fromCache: Bool) {
+        public init(chunks: [Data], format: AudioFormat, fromCache: Bool) {
             self.chunks = chunks
+            self.format = format
             self.fromCache = fromCache
         }
     }
@@ -124,8 +132,8 @@ public actor HermesSpeechService {
         /// The server command failed (non-zero exit, missing marker line,
         /// or a failure envelope). Carries a bounded diagnostic tail.
         case synthesisFailed(String)
-        /// Fetched audio was not RIFF/WAVE — the provider-mismatch
-        /// masquerade (e.g. MP3 under a .wav name). Callers fall back to
+        /// Fetched audio is not a container Scarf can play (Ogg/Opus,
+        /// unrecognized bytes) or the chunks disagree. Callers fall back to
         /// the system voice.
         case providerMismatch(actualFormat: String)
         /// Envelope reported success but named no files.
@@ -141,6 +149,10 @@ public actor HermesSpeechService {
     /// Audio container sniffed from magic bytes. `nil` means unrecognized.
     public enum AudioFormat: String, Sendable {
         case wav, mp3, ogg, flac, aiff
+
+        /// Decodable by `AVAudioFile` on macOS. Ogg/Opus is left out: the
+        /// fallback to the system voice is preferable to a decode failure.
+        public var isPlayable: Bool { self != .ogg }
     }
 
     // MARK: - Convenience entry point
@@ -174,14 +186,18 @@ public actor HermesSpeechService {
     /// Every per-provider config key that changes the synthesized audio —
     /// the cache must not serve audio from before a voice change.
     /// Unknown providers (command/plugin providers) key on the provider
-    /// alone.
+    /// alone — Scarf doesn't model `tts.providers.<name>`, so editing a
+    /// command provider's command keeps serving the older cached audio
+    /// for already-spoken text until the cache evicts it.
     public static func voiceFingerprint(provider: String, voice: VoiceSettings) -> String {
         switch provider {
         case "edge":
             return voice.ttsEdgeVoice
         case "elevenlabs":
             return "\(voice.ttsElevenLabsVoiceID)|\(voice.ttsElevenLabsModelID)"
-        case "openai":
+        case "openai", "nous":
+            // `nous` is served by the OpenAI path with the `tts.openai.*`
+            // voice (`_get_provider`, `tools/tts_tool.py:140-144`).
             return "\(voice.ttsOpenAIVoice)|\(voice.ttsOpenAIModel)"
         case "neutts":
             return "\(voice.ttsNeuTTSModel)|\(voice.ttsNeuTTSDevice)"
@@ -219,8 +235,9 @@ public actor HermesSpeechService {
             voiceFingerprint: options.voiceFingerprint,
             text: cleaned
         )
-        if let cached = cache.cachedAudio(for: key) {
-            return Audio(chunks: cached, fromCache: true)
+        if let cached = cache.cachedAudio(for: key),
+           let format = Self.commonPlayableFormat(of: cached) {
+            return Audio(chunks: cached, format: format, fromCache: true)
         }
         try Task.checkCancellation()
 
@@ -276,14 +293,12 @@ public actor HermesSpeechService {
         try Task.checkCancellation()
         if let readError { throw readError }
 
-        for chunk in chunks {
-            let format = Self.audioFormat(of: chunk)
-            guard format == .wav else {
-                throw SpeechError.providerMismatch(actualFormat: format?.rawValue ?? "unknown")
-            }
+        guard let format = Self.commonPlayableFormat(of: chunks) else {
+            let sniffed = chunks.map { Self.audioFormat(of: $0)?.rawValue ?? "unknown" }
+            throw SpeechError.providerMismatch(actualFormat: Array(Set(sniffed)).sorted().joined(separator: "+"))
         }
-        cache.store(chunks: chunks, key: key)
-        return Audio(chunks: chunks, fromCache: false)
+        cache.store(chunks: chunks, key: key, format: format.rawValue)
+        return Audio(chunks: chunks, format: format, fromCache: false)
     }
 
     // MARK: - Envelope
@@ -438,9 +453,17 @@ public actor HermesSpeechService {
 
     // MARK: - Magic bytes
 
-    /// Sniff the audio container from the first bytes. Only RIFF/WAVE is
-    /// accepted for playback; the rest exist so mismatch diagnostics can
-    /// name what actually came back (e.g. `.mp3` for an edge masquerade).
+    /// The one playable container every chunk shares, or `nil` when any
+    /// chunk is unplayable/unrecognized or they disagree (one player-node
+    /// connection format serves the whole message).
+    static func commonPlayableFormat(of chunks: [Data]) -> AudioFormat? {
+        let formats = Set(chunks.map { audioFormat(of: $0) })
+        guard formats.count == 1, let only = formats.first, let format = only, format.isPlayable else { return nil }
+        return format
+    }
+
+    /// Sniff the audio container from the first bytes. `ogg` is recognized
+    /// only so mismatch diagnostics can name it.
     /// RIFF/WAVE needs 12 bytes; every other signature needs at most 4
     /// (the MPEG frame sync just 2), so short prefixes still classify.
     public static func audioFormat(of data: Data) -> AudioFormat? {
@@ -466,14 +489,16 @@ public actor HermesSpeechService {
 
     /// `text_to_speech_tool(text, output_path=…)` inside the hermes
     /// binary's own interpreter (see class doc for discovery). The shell
-    /// layer only ever sees: the PATH prelude, single-quoted config paths
-    /// (a leading `~`/`$HOME` is the one deliberate expansion), the hex
-    /// cache key, and a quoted-delimiter heredoc carrying the JSON text.
+    /// layer only ever sees: the PATH prelude, config paths quoted by
+    /// `HermesProfileScope.shellQuotePath` (Scarf's shared quoter — a
+    /// leading `~` is the one deliberate `$HOME` expansion; `$(…)`,
+    /// backticks, `$VAR` and quotes stay literal), the hex cache key, and
+    /// a quoted-delimiter heredoc carrying the JSON text.
     static func synthesisScript(options: Options, cacheKey: String, text: String) -> String {
         let json = payloadJSON(fields: ["text": text])
         return """
         export \(HermesConfigReader.pathPrelude)
-        hb=\(shellQuotedPath(options.hermesBinary))
+        hb=\(HermesProfileScope.shellQuotePath(options.hermesBinary))
         case "$hb" in
           */*) ;;
           *) hb=$(command -v -- "$hb" 2>/dev/null) || hb="" ;;
@@ -518,7 +543,7 @@ public actor HermesSpeechService {
         find "$sd" -type f -mmin +30 -exec rm -f {} + 2>/dev/null
         out="$sd/scarf-tts-\(cacheKey).wav"
         printf '\(OutputBase.marker)%s\\n' "$out"
-        export HERMES_HOME=\(shellQuotedPath(options.hermesHome))
+        export HERMES_HOME=\(HermesProfileScope.shellQuotePath(options.hermesHome))
         SCARF_TTS_OUT="$out" "$py" -c '\(toolPythonScript)' <<'SCARF_JSON'
         \(json)
         SCARF_JSON
@@ -561,26 +586,6 @@ public actor HermesSpeechService {
     }
 
     // MARK: - Shell helpers
-
-    /// Quote a config-derived path for the shell. A leading `~` / `~/` /
-    /// `$HOME` / `$HOME/` is the ONE deliberate expansion (remote homes
-    /// arrive unexpanded by convention) and becomes `"$HOME"`; everything
-    /// else is single-quoted, so `$(…)`, backticks, `$VAR` and quotes in a
-    /// configured path stay literal.
-    static func shellQuotedPath(_ path: String) -> String {
-        for home in ["~", "$HOME"] {
-            if path == home { return "\"$HOME\"" }
-            if path.hasPrefix(home + "/") {
-                return "\"$HOME\"" + shellSingleQuoted(String(path.dropFirst(home.count)))
-            }
-        }
-        return shellSingleQuoted(path)
-    }
-
-    /// Single-quote a value for the shell — nothing inside expands.
-    static func shellSingleQuoted(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
 
     /// Bounded diagnostic tail from a failed synthesis: the last meaningful
     /// stderr lines (Python tracebacks put the real error last), falling
