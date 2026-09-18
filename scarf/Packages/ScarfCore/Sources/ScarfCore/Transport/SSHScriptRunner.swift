@@ -45,6 +45,59 @@ public enum SSHScriptRunner {
         func cancel() { lock.withLock { $0 = true } }
     }
 
+    #if !os(iOS)
+    /// Feeds the script to the child's stdin without ever blocking the run.
+    ///
+    /// `/bin/sh -s` reads its script as it executes, so it stops reading
+    /// while a command runs. A plain blocking `write` of a script bigger than
+    /// the pipe buffer (16–64 KB) whose early command stalls would park the
+    /// run before it reaches its own timeout loop — the P43b tarball-push bug
+    /// (charter C10). So the write end is `O_NONBLOCK` + `F_SETNOSIGPIPE`,
+    /// `pump()` writes what the pipe takes NOW, and the run loop calls it on
+    /// every tick, where the timeout and cancellation checks already live.
+    /// Only ever touched from the one detached task that owns the run.
+    private final class ScriptFeeder {
+        private let handle: FileHandle
+        private let data: Data
+        private var offset = 0
+        private(set) var isDone = false
+
+        init(handle: FileHandle, script: String) {
+            self.handle = handle
+            self.data = Data(script.utf8)
+            let fd = handle.fileDescriptor
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            // A child that exits before reading everything is EPIPE, not a
+            // SIGPIPE that would take Scarf down.
+            _ = fcntl(fd, F_SETNOSIGPIPE, 1)
+        }
+
+        /// Writes as much as the pipe accepts without blocking. Closes the
+        /// write end (the child's EOF) once every byte is in, or once the
+        /// reader is gone.
+        func pump() {
+            guard !isDone else { return }
+            let fd = handle.fileDescriptor
+            while offset < data.count {
+                let n = data.withUnsafeBytes { buf in
+                    Darwin.write(fd, buf.baseAddress! + offset, data.count - offset)
+                }
+                if n > 0 { offset += n; continue }
+                if n < 0 && errno == EINTR { continue }
+                if n < 0 && errno == EAGAIN { return }
+                break  // EPIPE or another error: nobody is reading.
+            }
+            finish()
+        }
+
+        func finish() {
+            guard !isDone else { return }
+            isDone = true
+            try? handle.close()
+        }
+    }
+    #endif
+
     /// Lock-protected `Data` accumulator used by the stdout/stderr
     /// readability handlers below. Two of these per script run, one per
     /// stream. `@unchecked Sendable` because mutation goes through the
@@ -226,13 +279,13 @@ public enum SSHScriptRunner {
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
 
-            if let data = script.data(using: .utf8) {
-                try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
-            }
-            try? stdinPipe.fileHandleForWriting.close()
+            let feeder = ScriptFeeder(handle: stdinPipe.fileHandleForWriting, script: script)
+            defer { feeder.finish() }
+            feeder.pump()
 
             let deadline = Date().addingTimeInterval(timeout)
             while proc.isRunning && Date() < deadline {
+                feeder.pump()
                 // Honor BOTH the detached-task's own cancellation flag
                 // (set by the parent's `withTaskCancellationHandler`)
                 // and the legacy `Task.isCancelled` check in case the
@@ -274,10 +327,17 @@ public enum SSHScriptRunner {
         return await Task.detached { () -> Outcome in
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = ["-c", script]
+            // The script travels on stdin, never in argv: argv is readable in
+            // `ps` by every user on the Mac for as long as the script runs,
+            // and scripts carry things like Live Voice's SDP offer (ICE
+            // credentials) and the text sent to TTS. Same shape as the SSH
+            // path's `-- /bin/sh -s`.
+            proc.arguments = ["-s"]
 
+            let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
+            proc.standardInput = stdinPipe
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
 
@@ -295,20 +355,34 @@ public enum SSHScriptRunner {
             // failing script prints immediately before exiting is exactly the
             // one at risk. That is the P40 OAuthFlowController class of bug,
             // third site (round-5 P48).
+            //
+            // The drain is installed BEFORE the stdin feed below (the P43b
+            // rule: the reader must be in place before the parent's LAST write
+            // to the child, not merely before its first read).
             let drain = Process.startDraining(pipes: [stdoutPipe, stderrPipe])
 
             do {
                 try proc.run()
             } catch {
+                try? stdinPipe.fileHandleForReading.close()
+                try? stdinPipe.fileHandleForWriting.close()
                 try? stdoutPipe.fileHandleForWriting.close()
                 try? stderrPipe.fileHandleForWriting.close()
                 _ = drain.collect()
                 return .connectFailure("Failed to launch /bin/sh: \(error.localizedDescription)")
             }
+            // Parent's copies of the ends the child owns, so EOF lands.
+            try? stdinPipe.fileHandleForReading.close()
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
+
+            let feeder = ScriptFeeder(handle: stdinPipe.fileHandleForWriting, script: script)
+            defer { feeder.finish() }
+            feeder.pump()
+
             let deadline = Date().addingTimeInterval(timeout)
             while proc.isRunning && Date() < deadline {
+                feeder.pump()
                 if cancelFlag.isCancelled || Task.isCancelled {
                     // Bounded escalation, and the drain owns the read ends —
                     // closing them here would raise while a reader is still
