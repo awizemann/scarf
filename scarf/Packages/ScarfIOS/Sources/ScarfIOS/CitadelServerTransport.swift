@@ -255,8 +255,12 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// `Citadel/TTY/Client/TTY.swift:75-94`), so a shell reading the channel
     /// directly would wait for more script forever. `head -c N` reads exactly
     /// the script, exits, and so hands `/bin/sh` the EOF the channel can't.
-    /// Commands in the script see an already-drained pipe on stdin, as they
-    /// did before. `head -c` is in GNU coreutils, BSD/macOS and BusyBox.
+    /// Commands in the script share `sh`'s stdin — the script pipe — exactly
+    /// as they did with the old base64 pipe, so a command that reads stdin
+    /// would eat the rest of the script; every caller feeds its input by
+    /// heredoc instead. `head -c` is in GNU coreutils, BSD/macOS and BusyBox;
+    /// where it were missing, `sh` would see an empty script and exit 0 —
+    /// the same failure shape as a missing `base64` before.
     public func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
         try await ScarfMon.measureAsync(.transport, "ssh.streamScript") {
             try await _streamScriptImpl(script, timeout: timeout)
@@ -350,18 +354,31 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
                 let partial = PartialStdout()
                 collected = try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
                     group.addTask {
-                        // stdin goes first, inside the budget: a remote that
-                        // never reads can't hang the call past `timeout`.
+                        // stdin first, then the drain. Scripts are a few KB,
+                        // far inside the SSH channel window (~2 MB for
+                        // OpenSSH), so the write completes at once. It is not
+                        // cancellable (NIO's writeAndFlush), so a script that
+                        // outgrew the window on a remote that never reads
+                        // could hold the group past `timeout`.
+                        var writeFailure: Error?
                         if let stdin, !stdin.isEmpty {
                             do {
                                 try await writer.value.write(ByteBuffer(bytes: stdin))
                             } catch {
-                                throw TransportError.other(
-                                    message: "Failed to send the script over SSH: \(error.localizedDescription)")
+                                writeFailure = error
                             }
                         }
-                        return try await Self.drain(
+                        // A failed write usually means the remote already
+                        // exited (a login shell that rejected the command):
+                        // its exit status and stderr are the real diagnosis,
+                        // so drain them rather than reporting the write.
+                        let result = try await Self.drain(
                             boxed, timeout: timeout, midStream: midStream, partial: partial)
+                        if let writeFailure, result.exitCode == 0, result.stdout.isEmpty, result.stderr.isEmpty {
+                            throw TransportError.other(
+                                message: "Failed to send the script over SSH: \(writeFailure.localizedDescription)")
+                        }
+                        return result
                     }
                     group.addTask {
                         try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))

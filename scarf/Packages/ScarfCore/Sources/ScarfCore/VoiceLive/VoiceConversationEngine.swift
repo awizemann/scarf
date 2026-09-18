@@ -173,9 +173,15 @@ public protocol VoiceTurnHost: AnyObject {
     /// `sendPrompt` has RETURNED. Hermes queues a prompt that arrives while
     /// a turn runs as text only and drops the voice note
     /// (`acp_adapter/server.py:696-715` @ v2026.9.14), so a superseding
-    /// voice turn must wait for this. (Hermes also remembers the cancelled
-    /// text and attaches it to the chat's next TYPED prompt — see
-    /// `ACPClient.sendPrompt(sessionId:text:images:contextNotes:)`.)
+    /// voice turn must wait for this. Hermes also stores the cancelled text
+    /// (`server.py:617-619`); the engine's next submit is text-only
+    /// (``VoiceTurnRequest/supersedesCancelledTurn``) so Hermes consumes it
+    /// as "correction of the cancelled request" instead of attaching it to
+    /// the chat's next typed prompt. If the running turn was a typed one with
+    /// another typed prompt queued behind it, Hermes drains that queued
+    /// prompt as a text-only turn before the cancelled `prompt()` returns
+    /// (`_finish_turn`, `server.py:927-938`), so IT picks up the stored text;
+    /// the voice turn then just goes without its note.
     func cancelActiveVoiceTurn() async
 
     /// The reply to `requestID` so far, or `nil` before any assistant text

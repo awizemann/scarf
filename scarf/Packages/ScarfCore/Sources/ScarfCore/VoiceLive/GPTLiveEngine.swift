@@ -93,6 +93,14 @@ public final class GPTLiveEngine: VoiceConversationEngine {
     @ObservationIgnored private var captionCounter = 0
     @ObservationIgnored private var delegation: Delegation?
     @ObservationIgnored private var submitTask: Task<Void, Never>?
+    /// This engine cancelled a Hermes turn and no text-only turn has consumed
+    /// the prompt Hermes stored for it yet. Deliberately NOT reset between
+    /// sessions: the stored prompt lives in Hermes's session state, so the
+    /// next voice turn in this chat (even in a new voice session) goes
+    /// text-only to consume it. (If the user types first, Hermes attaches it
+    /// to that message instead and the next voice turn merely skips its note
+    /// once.) Hermes has no verb to clear it.
+    @ObservationIgnored private var cancelledTurnPending = false
     @ObservationIgnored private var exchangeTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var utterance = ""
@@ -315,17 +323,23 @@ public final class GPTLiveEngine: VoiceConversationEngine {
             // "<cancelled>\n\nUser correction/guidance after interrupt: …"
             // (`:680-693`). With the note it would leak into the next typed
             // message instead. That one turn loses the voice note.
-            var supersedes = false
+            //
+            // The flag outlives THIS task: if a newer delegation supersedes
+            // this one while the cancel is awaited, it inherits the debt
+            // (the stored prompt is still in Hermes), and it is paid only by
+            // a text-only submit that reached Hermes.
             if host.isVoiceTurnBusy {
+                self.cancelledTurnPending = true
                 await host.cancelActiveVoiceTurn()
-                supersedes = true
                 guard self.isCurrent(id, epoch: myEpoch) else { return }
             }
+            let supersedes = self.cancelledTurnPending
             let request = VoiceTurnRequest(
                 id: id, prompt: built.prompt, context: built.context, supersedesCancelledTurn: supersedes)
             self.delegation?.submittedAt = self.clock()
             do {
                 try await host.submitVoiceTurn(request)
+                if supersedes { self.cancelledTurnPending = false }
             } catch {
                 guard self.isCurrent(id, epoch: myEpoch) else { return }
                 self.send(.commentary(delegationID: id, content: Self.unreachableReply))

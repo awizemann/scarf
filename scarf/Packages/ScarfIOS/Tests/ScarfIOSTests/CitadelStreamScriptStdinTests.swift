@@ -32,6 +32,26 @@ struct CitadelStreamScriptStdinTests {
         #expect(!code.contains("base64 -d"))
     }
 
+    /// A failed stdin write (the remote already exited — e.g. a login shell
+    /// that rejected the command) must not hide the remote's exit status and
+    /// stderr: the drain still runs, and the write error is reported only
+    /// when the drain has nothing. Code scan (no fake SSH channel exists).
+    @Test func aFailedWriteStillDrainsTheRemotesAnswer() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/ScarfIOS/CitadelServerTransport.swift")
+        let code = try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        let write = try #require(code.range(of: "writer.value.write(ByteBuffer(bytes: stdin))"))
+        let caught = try #require(code.range(of: "writeFailure = error", range: write.upperBound..<code.endIndex))
+        let drain = try #require(code.range(of: "Self.drain(", range: caught.upperBound..<code.endIndex))
+        let report = try #require(code.range(of: "Failed to send the script over SSH", range: write.upperBound..<code.endIndex))
+        #expect(drain.lowerBound < report.lowerBound, "the drain must run before the write error is reported")
+        #expect(code.contains("if let writeFailure, result.exitCode == 0, result.stdout.isEmpty, result.stderr.isEmpty"))
+    }
+
     #if os(macOS)
     /// The remote half, run locally: Citadel can't send EOF on the channel,
     /// so the command must finish WITHOUT stdin ever closing. `head -c`

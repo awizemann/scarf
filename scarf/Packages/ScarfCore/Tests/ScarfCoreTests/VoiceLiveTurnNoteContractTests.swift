@@ -190,8 +190,10 @@ enum HermesTagCheckout {
         #if os(macOS)
         var env = ProcessInfo.processInfo.environment
         env["HERMES_HOME"] = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-hermes-contract-\(UUID().uuidString)").path
+        // A hang guard, not an assertion: importing Hermes's ACP adapter takes
+        // ~0.3 s idle but blew a 30 s bound under a load average of ~90.
         let out = try ShellTestRunner.run(python.path, arguments: ["-c", script], stdin: stdin, environment: env,
-                                          currentDirectory: FileManager.default.temporaryDirectory)
+                                          currentDirectory: FileManager.default.temporaryDirectory, timeout: 180)
         return out.stdout.split(separator: "\n").last.map(String.init) ?? ""
         #else
         return ""
