@@ -11,8 +11,12 @@ final class ChatViewModel {
     private let dataService: HermesDataService
     private let fileService: HermesFileService
 
-    init(context: ServerContext = .local) {
+    init(
+        context: ServerContext = .local,
+        voiceLive: VoiceLiveController? = nil
+    ) {
         self.context = context
+        self.voiceLive = voiceLive ?? VoiceLiveController()
         self.dataService = HermesDataService(context: context)
         self.fileService = HermesFileService(context: context)
         self.richChatViewModel = RichChatViewModel(context: context)
@@ -144,6 +148,20 @@ final class ChatViewModel {
     var isRecording = false
     var displayMode: ChatDisplayMode = .richChat
     let richChatViewModel: RichChatViewModel
+
+    /// This window's Live Voice session (GPT-Live). This VM is its
+    /// `VoiceTurnHost`: spoken requests become ordinary ACP turns in the
+    /// attached chat. Ended on every session change and ACP teardown.
+    let voiceLive: VoiceLiveController
+
+    /// Raw `voice.voice_chat_mode` from config.yaml, read with the other
+    /// config diagnostics (off-main). `nil` until the first read, which
+    /// the readiness gate treats as chained (entry point hidden).
+    var voiceChatModeRaw: String?
+
+    /// Recent voice turns (id, spoken prompt), newest last, so the engine's
+    /// reply lookup by request id can find its prompt in the transcript.
+    @ObservationIgnored private var voiceTurnPrompts: [(id: String, prompt: String)] = []
     private var coordinator: Coordinator?
 
     /// Capability store the chat surface reads from. Set by `ChatView`
@@ -617,10 +635,12 @@ final class ChatViewModel {
                 }
             }
             let mode = config.approvalMode
+            let voiceChatMode = config.voice.voiceChatMode
             let resolvedMismatch = mismatch
             await MainActor.run { [weak self] in
                 self?.modelProviderMismatch = resolvedMismatch
                 self?.approvalMode = mode
+                self?.voiceChatModeRaw = voiceChatMode
             }
         }
     }
@@ -858,6 +878,8 @@ final class ChatViewModel {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        // A voice session belongs to the chat it was started in.
+        voiceLive.endImmediately()
         richChatViewModel.reset()
 
         if displayMode == .richChat {
@@ -909,6 +931,8 @@ final class ChatViewModel {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        // A voice session belongs to the chat it was started in.
+        voiceLive.endImmediately()
         richChatViewModel.reset()
 
         if displayMode == .richChat {
@@ -948,6 +972,8 @@ final class ChatViewModel {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        // A voice session belongs to the chat it was started in.
+        voiceLive.endImmediately()
         richChatViewModel.reset()
 
         if displayMode == .richChat {
@@ -996,10 +1022,9 @@ final class ChatViewModel {
     // MARK: - Send Message
 
     /// How the user produced the prompt that's being sent. Analytics-only —
-    /// nothing about the send behaves differently per case. `voice` exists
-    /// for parity with the taxonomy and iOS; the Mac's voice mode drives the
-    /// *terminal* pane (`sendToTerminal`), which never reaches `sendText`,
-    /// so no macOS path emits it today.
+    /// nothing about the send behaves differently per case. `voice` is
+    /// emitted by Live Voice turns (`submitVoiceTurn`); the Mac's older
+    /// terminal voice mode (`sendToTerminal`) never reaches `sendText`.
     enum ChatInputMode: String {
         case typed
         case voice
@@ -1383,6 +1408,28 @@ final class ChatViewModel {
             }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
+        launchPromptTask(
+            client: client,
+            sessionId: sessionId,
+            wireText: wireText,
+            images: images,
+            contextNotes: [],
+            isNonInterruptive: isNonInterruptive
+        )
+    }
+
+    /// Run one `session/prompt` and fold its return into the transcript
+    /// (`promptComplete`), status and notifications. Shared by typed turns
+    /// (`sendViaACP`) and Live Voice turns (`submitVoiceTurn`), which differ
+    /// only in their wire payload.
+    private func launchPromptTask(
+        client: ACPClient,
+        sessionId: String,
+        wireText: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote],
+        isNonInterruptive: Bool
+    ) {
         // Record the in-flight interruptive turn (ChatViewModel-owned;
         // see `inFlightPromptSessionId`) so `stopACP` can cancel it
         // even after a session-switch already reset the transcript VM.
@@ -1405,7 +1452,7 @@ final class ChatViewModel {
             }
             do {
                 let result = try await ScarfMon.measureAsync(.chatStream, "mac.sendPrompt") {
-                    try await client.sendPrompt(sessionId: sessionId, text: wireText, images: images)
+                    try await client.sendPrompt(sessionId: sessionId, text: wireText, images: images, contextNotes: contextNotes)
                 }
                 // A turn resuming after its client was superseded
                 // (session switch / watchdog teardown mid-turn) must
@@ -2163,6 +2210,9 @@ final class ChatViewModel {
     }
 
     func stopACP() {
+        // Every ACP teardown (session switch, delete, terminal mode, the
+        // start watchdog) removes the voice session's turn host.
+        voiceLive.endImmediately()
         disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -2932,6 +2982,154 @@ final class ChatViewModel {
             let terminal = source.getTerminal()
             terminal.feed(text: "\r\n[Process exited with code \(exitCode ?? -1). Use the toolbar to start or resume a session.]\r\n")
             DispatchQueue.main.async { self.onTerminated() }
+        }
+    }
+}
+
+// MARK: - Live Voice (VoiceTurnHost)
+//
+// In this file, not its own, because it drives the private ACP turn state
+// (`acpClient`, `acpPromptTask`, `inFlightPromptSessionId`) that typed turns
+// use; widening that state for an extension elsewhere would let any file
+// write it. ScarfGo's twin is `ChatController+VoiceTurnHost.swift` (P5b);
+// both follow the same rules: the bubble before any await, the turn marked
+// in flight before hand-off, one prompt path for typed and voice turns,
+// and a bounded wait (10 s) for a cancelled turn Scarf itself started.
+
+extension ChatViewModel: VoiceTurnHost {
+
+    /// Why a voice turn couldn't be handed to Hermes. The engine speaks its
+    /// "could not reach Hermes" line for any of them.
+    enum VoiceTurnSubmitError: Error, Equatable {
+        /// No rich-chat ACP session is attached (or this chat routes its
+        /// sends elsewhere, like Bot Chat).
+        case noSession
+    }
+
+    /// Whether this chat can take voice turns right now: rich chat, a live
+    /// ACP client, an attached session, and no alternate send route.
+    var canHostVoiceTurns: Bool {
+        displayMode == .richChat
+            && sendRouter == nil
+            && acpClient != nil
+            && hasActiveProcess
+            && richChatViewModel.sessionId != nil
+    }
+
+    /// The Live Voice gate for this chat (Alan's rule, t-a4665c6e): Hermes
+    /// ≥ 0.21.3 AND `voice.voice_chat_mode` is gpt-live. Anything but
+    /// `.ready` hides the composer entry entirely.
+    func voiceLiveAvailability(capabilities: HermesCapabilities) -> VoiceLiveAvailability {
+        VoiceLiveReadiness.availability(capabilities: capabilities, voiceChatMode: voiceChatModeRaw)
+    }
+
+    /// Start a Live Voice session in this chat. No-op unless the chat can
+    /// host voice turns and no session is running.
+    func startVoiceLive() {
+        guard canHostVoiceTurns else { return }
+        voiceLive.start(context: context, host: self)
+    }
+
+    /// A Scarf-started turn is in flight, or the transcript shows one
+    /// running (`isAgentWorking` holds until `promptComplete`).
+    var isVoiceTurnBusy: Bool {
+        inFlightPromptSessionId != nil || richChatViewModel.isAgentWorking
+    }
+
+    var activeVoiceToolName: String? {
+        if case .runningTool(let name) = richChatViewModel.liveActivityStatus { return name }
+        return nil
+    }
+
+    /// Show the spoken words as the user's bubble, then send them with the
+    /// voice turn note as an embedded resource (model input only, never
+    /// the stored row). Everything before the prompt task is synchronous,
+    /// so the bubble exists before this returns — the reply lookup matches
+    /// by the bubble's text.
+    func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {
+        guard canHostVoiceTurns, let client = acpClient,
+              let sessionId = richChatViewModel.sessionId else {
+            throw VoiceTurnSubmitError.noSession
+        }
+        Analytics.record(.messageSent(hasAttachment: false, inputMode: .voice))
+        richChatViewModel.addUserMessage(text: request.prompt)
+        voiceTurnPrompts.append((id: request.id, prompt: request.prompt))
+        if voiceTurnPrompts.count > 8 { voiceTurnPrompts.removeFirst(voiceTurnPrompts.count - 8) }
+        richChatViewModel.markPromptSent()
+        acpStatus = ACPPhase.agentWorking
+        // The spoken prompt goes on the wire verbatim: no client-side slash
+        // handling or project-command expansion for words said aloud.
+        // `launchPromptTask` marks the turn in flight before it returns, so
+        // a cancel racing this hand-off still waits for it.
+        launchPromptTask(
+            client: client,
+            sessionId: sessionId,
+            wireText: request.prompt,
+            images: [],
+            contextNotes: request.contextNotes,
+            isNonInterruptive: false
+        )
+    }
+
+    /// `session/cancel`, then wait for the running turn's `sendPrompt` to
+    /// return — Hermes drops the voice note of a prompt queued behind a
+    /// running turn. Only a turn Scarf started (the in-flight marker, which
+    /// clears when its prompt task finishes) is cancelled and waited for.
+    /// The wait is bounded (charter C10): a wedged host must not freeze the
+    /// voice session; the engine then submits anyway.
+    func cancelActiveVoiceTurn() async {
+        guard let client = acpClient, let task = acpPromptTask,
+              let sessionId = inFlightPromptSessionId else { return }
+        // The turn is over when its `sendPrompt` returns, not when the
+        // cancel is acknowledged, so the cancel RPC isn't awaited
+        // (ACPClient bounds it with its own RPC watchdog).
+        Task { try? await client.cancel(sessionId: sessionId) }
+        await Self.boundedWait(for: task, seconds: Self.voiceCancelWaitSeconds)
+    }
+
+    func voiceTurnReply(for requestID: String) -> VoiceTurnReply? {
+        guard let prompt = voiceTurnPrompts.last(where: { $0.id == requestID })?.prompt else { return nil }
+        return VoiceTurnReply.latest(in: richChatViewModel.messages, forPrompt: prompt, isStreaming: isVoiceTurnBusy)
+    }
+
+    /// The chat's user and assistant text turns, oldest first; tool rows,
+    /// system notices and empty tool-call carriers are left out.
+    func voiceSeedTurns() -> [VoiceLiveText.SeedTurn] {
+        richChatViewModel.messages.compactMap { message in
+            let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            if message.isUser { return VoiceLiveText.SeedTurn(role: .user, text: text) }
+            if message.isAssistant { return VoiceLiveText.SeedTurn(role: .assistant, text: text) }
+            return nil
+        }
+    }
+
+    /// How long a superseding voice turn waits for the cancelled turn to
+    /// return. Hermes answers a cancel within a tool step; a turn stuck in a
+    /// long tool call shouldn't hold the conversation longer than this.
+    static let voiceCancelWaitSeconds: Double = 10
+
+    /// Wait for `task` to finish, or `seconds`, whichever comes first. The
+    /// task itself is never cancelled.
+    nonisolated static func boundedWait(for task: Task<Void, Never>, seconds: Double) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func resumeOnce() {
+                let isFirst = resumed.withLock { done -> Bool in
+                    if done { return false }
+                    done = true
+                    return true
+                }
+                if isFirst { cont.resume() }
+            }
+            Task {
+                await task.value
+                resumeOnce()
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                resumeOnce()
+            }
         }
     }
 }
