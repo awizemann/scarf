@@ -379,7 +379,7 @@ struct SettingsView: View {
 
     /// `voice.voice_chat_mode`: chained (Hermes's default) or gpt-live, which
     /// turns on the Live Voice button in Chat. Written through the verified
-    /// `hermes config set` argv (`VoiceChatMode.configSetArgv`, charter C5).
+    /// `hermes config set` argv (see `VoiceChatMode`, charter C5).
     @ViewBuilder
     private var liveVoiceSection: some View {
         Section {
