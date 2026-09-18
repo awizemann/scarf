@@ -201,6 +201,24 @@ struct VoiceTab: View {
             }
         }
 
+        // v0.21.3+ — Live Voice (GPT-Live). Hidden below the floor so an
+        // older host renders this tab exactly as before (C1).
+        if capabilities.hasGPTLiveVoice {
+            SettingsSection(title: "Live Voice", icon: "waveform.circle") {
+                PickerRow(
+                    label: "Voice Chat Mode",
+                    selection: VoiceChatMode.parse(viewModel.config.voice.voiceChatMode).rawValue,
+                    options: VoiceChatMode.allCases.map(\.rawValue),
+                    optionLabel: { Self.voiceChatModeLabel($0) }
+                ) { raw in
+                    guard let mode = VoiceChatMode(rawValue: raw) else { return }
+                    viewModel.setVoiceChatMode(mode, capabilities: capabilities)
+                }
+                .help("Hermes's voice.voice_chat_mode. GPT-Live turns on the Live Voice button in the chat composer.")
+                liveVoiceNote
+            }
+        }
+
         // v0.20.4+ — "Hey Hermes" hands-free wake word capture placement.
         if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
             SettingsSection(title: "Wake Word", icon: "waveform.badge.mic") {
@@ -208,6 +226,30 @@ struct VoiceTab: View {
                     .help("auto: backend PortAudio mic when one exists, else a remote desktop on a mic-less (headless/VPS) backend streams its own mic via the wake.feed RPC. local: always the backend mic. client: always desktop-streamed PCM (detection stays on the backend).")
             }
         }
+    }
+
+    /// Picker labels for `voice.voice_chat_mode`. The stored value is
+    /// Hermes's own (`chained` / `gpt-live`).
+    static func voiceChatModeLabel(_ raw: String) -> String {
+        switch VoiceChatMode(rawValue: raw) {
+        case .gptLive: return String(localized: "GPT-Live")
+        case .chained, nil: return String(localized: "Chained (default)")
+        }
+    }
+
+    /// What GPT-Live needs and costs, under the mode picker.
+    private var liveVoiceNote: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Chained, Hermes's default, turns speech into text, runs a normal turn, and reads the reply aloud. GPT-Live lets you talk with Hermes from the chat composer: an OpenAI voice model listens and speaks, and hands each request to Hermes as a normal chat turn.")
+            Text("It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY in its .env, or voice.gpt_live.api_key) and bills that key about $0.05 per minute of session time. Sessions end on their own after \(Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())) minutes without speech.")
+        }
+        .scarfStyle(.caption)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 
     /// Inline hint chip+caption shown below xAI's Voice ID + Model fields
