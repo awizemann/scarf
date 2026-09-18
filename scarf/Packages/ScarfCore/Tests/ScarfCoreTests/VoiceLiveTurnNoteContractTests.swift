@@ -21,7 +21,7 @@ import CryptoKit
         let context = "User: the dentist one\nVoice assistant: which day?"
         let note = VoiceLiveTurnNote.contextNote(context: context)
         let blocks = ACPClient.promptBlocks(text: "thursday not friday", images: [], contextNotes: [note])
-        #expect(blocks.count == 2)
+        try #require(blocks.count == 2)
         #expect(Set(blocks[0].keys) == ["type", "resource"])
         #expect(blocks[0]["type"] as? String == "resource")
         #expect(blocks[0]["resource"] as? [String: String] == [
@@ -32,10 +32,10 @@ import CryptoKit
         #expect(blocks[1] as? [String: String] == ["type": "text", "text": "thursday not friday"])
     }
 
-    @Test func withoutNotesThePayloadIsTheImagesShape() {
+    @Test func withoutNotesThePayloadIsTheImagesShape() throws {
         let image = ChatImageAttachment(mimeType: "image/png", base64Data: "AAAA", thumbnailBase64: nil, filename: nil, approximateByteCount: 3)
         let blocks = ACPClient.promptBlocks(text: "hi", images: [image], contextNotes: [])
-        #expect(blocks.count == 2)
+        try #require(blocks.count == 2)
         #expect(blocks[0]["type"] as? String == "text")
         #expect(blocks[0]["text"] as? String == "hi")
         #expect(blocks[1]["type"] as? String == "image")
@@ -65,12 +65,12 @@ import CryptoKit
         #expect(request.contextNotes == [VoiceLiveTurnNote.contextNote(context: "Voice assistant: shall I?\nUser: yes")])
     }
 
-    @Test func aSupersedingTurnIsTextOnlyOnTheWire() {
+    @Test func aSupersedingTurnIsTextOnlyOnTheWire() throws {
         let request = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday",
                                        supersedesCancelledTurn: true)
         #expect(request.contextNotes.isEmpty)
         let blocks = ACPClient.promptBlocks(text: request.prompt, images: [], contextNotes: request.contextNotes)
-        #expect(blocks.count == 1)
+        try #require(blocks.count == 1)
         #expect(blocks[0] as? [String: String] == ["type": "text", "text": "no, thursday"])
     }
 
