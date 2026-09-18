@@ -54,6 +54,19 @@ import ScarfCore
         private(set) var sentMethods: [String] = []
         private(set) var promptPayloads: [[[String: Any]]] = []
         private var heldPromptIds: [Int] = []
+        /// When set, a `session/cancel` doesn't answer the held prompts
+        /// until `releaseHeld()` (a Hermes turn slow to wind down).
+        var holdPromptsAfterCancel = false
+
+        func setHoldPromptsAfterCancel(_ hold: Bool) { holdPromptsAfterCancel = hold }
+
+        /// Answer every held prompt with `stopReason: cancelled`.
+        func releaseHeld() {
+            for held in heldPromptIds {
+                reply(["jsonrpc": "2.0", "id": held, "result": ["stopReason": "cancelled"]])
+            }
+            heldPromptIds = []
+        }
 
         var diagnosticID: String? { "voice-scripted-channel" }
 
@@ -80,12 +93,22 @@ import ScarfCore
             case "session/prompt":
                 let params = obj["params"] as? [String: Any]
                 promptPayloads.append(params?["prompt"] as? [[String: Any]] ?? [])
-                heldPromptIds.append(id)
-            case "session/cancel":
-                for held in heldPromptIds {
-                    reply(["jsonrpc": "2.0", "id": held, "result": ["stopReason": "cancelled"]])
+                if heldPromptIds.isEmpty {
+                    heldPromptIds.append(id)
+                } else {
+                    // As Hermes does (`_claim_turn_or_queue`,
+                    // acp_adapter/server.py:696-715): a prompt that arrives
+                    // while a turn runs is queued and answered AT ONCE; the
+                    // running prompt returns later.
+                    reply(["jsonrpc": "2.0", "method": "session/update", "params": [
+                        "sessionId": sessionId,
+                        "update": ["sessionUpdate": "agent_message_chunk",
+                                   "content": ["type": "text", "text": "Queued for the next turn. (1 queued)"]],
+                    ]])
+                    reply(["jsonrpc": "2.0", "id": id, "result": ["stopReason": "end_turn"]])
                 }
-                heldPromptIds = []
+            case "session/cancel":
+                if !holdPromptsAfterCancel { releaseHeld() }
                 reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
             default:
                 reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
@@ -124,15 +147,33 @@ import ScarfCore
         return home
     }
 
-    /// A chat VM whose Live Voice controller builds `FakeEngine`s.
+    /// A chat VM whose Live Voice controller builds `FakeEngine`s. Each test
+    /// gets its own session registry, so no test sees another's session.
     @MainActor
-    static func chat(context: ServerContext, engines: @escaping (FakeEngine) -> Void = { _ in }) -> ChatViewModel {
-        let controller = VoiceLiveController { _, _ in
+    static func chat(
+        context: ServerContext,
+        registry: VoiceLiveSessionRegistry? = nil,
+        engines: @escaping (FakeEngine) -> Void = { _ in }
+    ) -> ChatViewModel {
+        let registry = registry ?? VoiceLiveSessionRegistry()
+        let controller = VoiceLiveController(makeSession: { _, _ in
             let engine = FakeEngine()
             engines(engine)
             return VoiceLiveController.Session(engine: engine, bridge: nil)
-        }
+        }, registry: registry)
         return ChatViewModel(context: context, voiceLive: controller)
+    }
+
+    /// A controller over one fake engine.
+    @MainActor
+    static func controller(
+        _ engine: FakeEngine,
+        registry: VoiceLiveSessionRegistry? = nil
+    ) -> VoiceLiveController {
+        VoiceLiveController(
+            makeSession: { _, _ in .init(engine: engine, bridge: nil) },
+            registry: registry ?? VoiceLiveSessionRegistry()
+        )
     }
 
     /// A chat attached to a live scripted ACP session.
@@ -248,7 +289,7 @@ import ScarfCore
         let channel = VoiceScriptedChannel(sessionId: "sess-c")
         let vm = await Self.connectedChat(home: home, channel: channel)
 
-        vm.sendText("a long typed turn")
+        try await vm.submitVoiceTurn(VoiceTurnRequest(id: "d1", prompt: "a long spoken request", context: ""))
         let inFlight = await Self.waitUntil { await channel.sentMethods.contains("session/prompt") }
         #expect(inFlight)
         #expect(vm.isVoiceTurnBusy)
@@ -331,7 +372,7 @@ import ScarfCore
 
     @Test @MainActor func controllerEndIsGracefulAndDismissClears() async {
         let engine = FakeEngine()
-        let controller = VoiceLiveController { _, _ in .init(engine: engine, bridge: nil) }
+        let controller = Self.controller(engine)
         let host = ChatViewModel(context: .local)
         controller.start(context: .local, host: host)
         _ = await Self.waitUntil { engine.starts == 1 }
@@ -346,6 +387,239 @@ import ScarfCore
         #expect(controller.bridge == nil)
         // Nothing running: teardown calls are harmless.
         controller.endImmediately()
+    }
+
+    // MARK: - F2a (t-dd450d3a): one session app-wide
+
+    @Test @MainActor func aSecondWindowCantStartWhileOneHoldsTheSession() async {
+        let registry = VoiceLiveSessionRegistry()
+        let engineA = FakeEngine()
+        let engineB = FakeEngine()
+        let windowA = Self.controller(engineA, registry: registry)
+        let windowB = Self.controller(engineB, registry: registry)
+        let host = ChatViewModel(context: .local)
+
+        windowA.start(context: .local, host: host)
+        // Even before A's start task ran (engine still idle), B is refused.
+        #expect(windowB.isBlockedByAnotherWindow)
+        windowB.start(context: .local, host: host)
+        #expect(windowB.engine == nil)
+
+        _ = await Self.waitUntil { engineA.starts == 1 }
+        #expect(registry.isAnySessionActive)
+        windowB.start(context: .local, host: host)
+        #expect(windowB.engine == nil)
+        #expect(engineB.starts == 0)
+        // A keeps its session: refusing never cuts off the other window.
+        #expect(windowA.isSessionActive)
+        #expect(!windowA.isBlockedByAnotherWindow)
+
+        // Once A's session ends, B can start.
+        windowA.endImmediately()
+        #expect(!windowB.isBlockedByAnotherWindow)
+        #expect(!registry.isAnySessionActive)
+        windowB.start(context: .local, host: host)
+        let started = await Self.waitUntil { engineB.starts == 1 }
+        #expect(started)
+        #expect(windowA.isBlockedByAnotherWindow)
+    }
+
+    // MARK: - F2a: an end right after start
+
+    @Test @MainActor func endBeforeTheStartTaskRanCancelsTheStart() async {
+        let engine = FakeEngine()
+        let controller = Self.controller(engine)
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(controller.holdsSession)
+        controller.endImmediately()
+        #expect(!controller.holdsSession)
+        #expect(controller.engine == nil)
+        // Give a leaked start task every chance to run.
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(engine.starts == 0)
+    }
+
+    @Test @MainActor func gracefulEndBeforeTheStartTaskRanCancelsTheStart() async {
+        let engine = FakeEngine()
+        let controller = Self.controller(engine)
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        controller.end()
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(engine.starts == 0)
+        #expect(!controller.holdsSession)
+    }
+
+    // MARK: - F2a: the ACP connection dies
+
+    @Test @MainActor func aDeadACPConnectionEndsTheVoiceSession() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-d")
+        var engines: [FakeEngine] = []
+        let vm = await Self.connectedChat(home: home, channel: channel) { engines.append($0) }
+        defer { vm.stopACP() }
+        vm.startVoiceLive()
+        _ = await Self.waitUntil { engines.first?.phase == .connecting }
+
+        // The event stream ends → handleConnectionDied (not stopACP).
+        await channel.close()
+        let ended = await Self.waitUntil { engines.first?.immediateEnds == [.userEnded] }
+        #expect(ended)
+        #expect(vm.voiceLive.endNote == .hermesConnectionLost)
+        #expect(VoiceLivePresentation.endedMessage(.userEnded, endNote: vm.voiceLive.endNote) != nil)
+    }
+
+    // MARK: - F2a: turn identity
+
+    /// Hermes answers a prompt sent mid-turn at once and runs it inside the
+    /// running turn, whose `sendPrompt` returns last. The newer return
+    /// must not end the older turn: it is still in flight for `stopACP`.
+    @Test @MainActor func aQueuedTurnsReturnDoesNotEndTheRunningTurn() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-q")
+        let vm = await Self.connectedChat(home: home, channel: channel)
+
+        vm.sendText("first, a long typed turn")
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 1 }
+        vm.sendText("second, typed while it runs")
+        let both = await Self.waitUntil { await channel.promptPayloads.count == 2 }
+        #expect(both)
+        // The queued turn has returned by now; the chat is still working.
+        let clearedEarly = await Self.waitUntil(timeoutSeconds: 1) { vm.acpStatus == ChatViewModel.ACPPhase.ready }
+        #expect(!clearedEarly, "the queued turn's return marked the chat ready while the first turn still ran")
+        #expect(vm.richChatViewModel.isAgentWorking)
+
+        // Tearing down still cancels the running turn on Hermes (S4).
+        vm.stopACP()
+        let cancelled = await Self.waitUntil { await channel.sentMethods.contains("session/cancel") }
+        #expect(cancelled, "stopACP lost the running turn and sent no session/cancel")
+    }
+
+    /// A voice cancel waits for the turn Hermes is actually running, not the
+    /// last prompt Scarf launched (which Hermes answered at once).
+    @Test @MainActor func voiceCancelWaitsForTheRunningTurnNotTheLastLaunched() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-w")
+        let vm = await Self.connectedChat(home: home, channel: channel)
+
+        try await vm.submitVoiceTurn(VoiceTurnRequest(id: "d1", prompt: "first spoken request", context: ""))
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 1 }
+        try await vm.submitVoiceTurn(VoiceTurnRequest(id: "d2", prompt: "second spoken request", context: ""))
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 2 }
+        await channel.setHoldPromptsAfterCancel(true)
+
+        var cancelReturned = false
+        let cancel = Task { @MainActor in
+            await vm.cancelActiveVoiceTurn()
+            cancelReturned = true
+        }
+        let sentCancel = await Self.waitUntil { await channel.sentMethods.contains("session/cancel") }
+        #expect(sentCancel)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(!cancelReturned, "cancel returned while the first voice turn was still running")
+
+        await channel.releaseHeld()
+        await cancel.value
+        #expect(cancelReturned)
+        #expect(!vm.isVoiceTurnBusy)
+    }
+
+    // MARK: - F2a: voice never cancels a typed turn
+
+    @Test @MainActor func aTypedTurnIsNeverCancelledByVoice() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-b")
+        let vm = await Self.connectedChat(home: home, channel: channel)
+
+        vm.sendText("a long typed turn")
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 1 }
+        // The engine cancels whatever reads busy: a typed turn must not.
+        #expect(!vm.isVoiceTurnBusy)
+        #expect(vm.isBusyWithNonVoiceTurn)
+
+        await vm.cancelActiveVoiceTurn()
+        let request = VoiceTurnRequest(id: "d9", prompt: "what's on thursday", context: "")
+        try await vm.submitVoiceTurn(request)
+
+        #expect(await !channel.sentMethods.contains("session/cancel"))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(await channel.promptPayloads.count == 1, "the spoken request was sent while the typed turn ran")
+        #expect(!vm.richChatViewModel.messages.contains { $0.isUser && $0.content == request.prompt })
+        // The voice says so instead, in full, and the composer shows why.
+        #expect(vm.voiceTurnReply(for: "d9") == VoiceTurnReply(text: ChatViewModel.voiceBusyReply, isStreaming: false))
+        #expect(vm.richChatViewModel.transientHint != nil)
+    }
+
+    /// A typed prompt queued inside a running VOICE turn makes Hermes busy
+    /// with a typed request too: the voice doesn't cancel that run.
+    @Test @MainActor func aTypedPromptQueuedBehindAVoiceTurnIsNotCancelled() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-m")
+        let vm = await Self.connectedChat(home: home, channel: channel)
+
+        try await vm.submitVoiceTurn(VoiceTurnRequest(id: "d1", prompt: "a spoken request", context: ""))
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 1 }
+        #expect(vm.isVoiceTurnBusy)
+        vm.sendText("typed while the voice turn runs")
+        _ = await Self.waitUntil { await channel.promptPayloads.count == 2 }
+        try? await Task.sleep(nanoseconds: 100_000_000)   // the queued prompt returns
+
+        #expect(!vm.isVoiceTurnBusy)
+        #expect(vm.isBusyWithNonVoiceTurn)
+        await vm.cancelActiveVoiceTurn()
+        #expect(await !channel.sentMethods.contains("session/cancel"))
+        vm.stopACP()
+    }
+
+    // MARK: - F2a: the message speaker button
+
+    @Test func speakerButtonStandsDownDuringLiveVoice() {
+        let idle = SpeakMessageButtonState(isPlaying: false, isLoading: false, liveVoiceActive: false)
+        #expect(idle.isEnabled)
+        let duringVoice = SpeakMessageButtonState(isPlaying: false, isLoading: false, liveVoiceActive: true)
+        #expect(!duringVoice.isEnabled)
+        #expect(!duringVoice.accessibilityValue.isEmpty)
+        // Whatever is playing can always be stopped.
+        #expect(SpeakMessageButtonState(isPlaying: true, isLoading: false, liveVoiceActive: true).isEnabled)
+    }
+
+    @Test func speakerButtonReportsHermesVoiceSynthesis() {
+        let loading = SpeakMessageButtonState(isPlaying: true, isLoading: true, liveVoiceActive: false)
+        #expect(loading.isEnabled)
+        #expect(loading.accessibilityValue != SpeakMessageButtonState(isPlaying: true, isLoading: false, liveVoiceActive: false).accessibilityValue)
+        #expect(loading.help != SpeakMessageButtonState(isPlaying: true, isLoading: false, liveVoiceActive: false).help)
+    }
+
+    @Test @MainActor func registryReportsASessionForTheSpeakerButtons() async {
+        let registry = VoiceLiveSessionRegistry()
+        let engine = FakeEngine()
+        let controller = Self.controller(engine, registry: registry)
+        #expect(!registry.isAnySessionActive)
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(registry.isAnySessionActive)
+        controller.dismiss()
+        #expect(!registry.isAnySessionActive)
+    }
+
+    // MARK: - F2a: VoiceOver announcements
+
+    @Test func phaseChangesAreAnnouncedButNotEverySpeakingFlip() {
+        #expect(VoiceLivePresentation.announcement(from: .idle, to: .connecting) != nil)
+        #expect(VoiceLivePresentation.announcement(from: .connecting, to: .listening) != nil)
+        #expect(VoiceLivePresentation.announcement(from: .listening, to: .speaking) == nil)
+        #expect(VoiceLivePresentation.announcement(from: .speaking, to: .listening) == nil)
+        #expect(VoiceLivePresentation.announcement(from: .listening, to: .thinking) != nil)
+        let failed = VoiceLivePresentation.announcement(from: .connecting, to: .failed(.microphoneDenied))
+        #expect(failed == VoiceLivePresentation.failure(.microphoneDenied).message)
+        let lost = VoiceLivePresentation.announcement(from: .listening, to: .ended(.userEnded), endNote: .hermesConnectionLost)
+        #expect(lost?.contains(VoiceLivePresentation.endedMessage(.userEnded, endNote: .hermesConnectionLost) ?? "∅") == true)
+        #expect(VoiceLivePresentation.announcement(from: .listening, to: .listening) == nil)
     }
 
     // MARK: - Panel copy
