@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ScarfCore
 import ScarfIOS
 import ScarfDesign
@@ -228,6 +229,22 @@ struct ChatView: View {
         .onChange(of: coordinator?.scenePhaseTick) { _, _ in
             guard let phase = coordinator?.scenePhase else { return }
             Task { await controller.handleScenePhase(phase) }
+            // Unlike the ACP session (kept alive across backgrounding,
+            // see below), a live dictation recording must NOT keep the
+            // mic hot while the app isn't in front of the user.
+            if phase == .background {
+                pushToTalk.handleViewDisappearing()
+            }
+        }
+        // Unlike the ACP session below, push-to-talk dictation DOES tear
+        // down on `.onDisappear` — a `TabView` switch away from Chat
+        // must not leave the microphone recording into a status strip
+        // nobody can see. `pushToTalk` is `@State` (survives the tab
+        // switch like `controller` does), so the in-flight take is
+        // simply discarded and the controller is ready for a fresh hold
+        // next time Chat reappears.
+        .onDisappear {
+            pushToTalk.handleViewDisappearing()
         }
         // Deliberately NOT tearing down the ACP session on .onDisappear.
         // `TabView` unmounts tab content when the user switches tabs
@@ -850,8 +867,36 @@ struct ChatView: View {
             .symbolEffect(.pulse, isActive: pushToTalk.phase == .recording)
             .gesture(dictationGesture)
             .animation(ScarfAnimation.fast, value: pushToTalk.phase)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Dictate message")
-            .accessibilityHint("Hold to record; release to transcribe. Slide away to cancel.")
+            .accessibilityHint(dictationDisabled
+                ? "Unavailable until the chat is connected."
+                : "Hold to record; release to transcribe. Slide away to cancel.")
+            // VoiceOver can't perform the hold-then-drag-to-cancel
+            // gesture above (a double-tap-and-hold either passes
+            // straight through as a single activation or is consumed
+            // for element exploration, depending on OS version) — this
+            // custom action is the accessible equivalent: one activation
+            // starts the take, the next stops it, mirroring the
+            // press/release the sighted gesture already drives through
+            // the same `pushToTalk.holdBegan()` / `holdReleased()` pair.
+            // Omitted while disabled so VoiceOver correctly reports no
+            // action is available, rather than one that silently no-ops.
+            .accessibilityActions {
+                if !dictationDisabled, pushToTalk.phase != .transcribing {
+                    Button(pushToTalk.phase == .recording ? "Stop dictating" : "Start dictating") {
+                        switch pushToTalk.phase {
+                        case .idle:
+                            pushToTalk.holdBegan()
+                        case .recording:
+                            pushToTalk.holdReleased()
+                        case .transcribing:
+                            break
+                        }
+                    }
+                }
+            }
     }
 
     private var dictationMicTint: Color {
@@ -927,7 +972,8 @@ struct ChatView: View {
                 dictationStrip(
                     icon: "exclamationmark.circle",
                     text: Self.dictationNoticeText(notice),
-                    tint: ScarfColor.warning
+                    tint: ScarfColor.warning,
+                    showsSettingsLink: notice.opensSystemSettings
                 )
             }
         }
@@ -937,7 +983,8 @@ struct ChatView: View {
         icon: String?,
         text: Text,
         tint: Color,
-        showsSpinner: Bool = false
+        showsSpinner: Bool = false,
+        showsSettingsLink: Bool = false
     ) -> some View {
         HStack(spacing: 8) {
             if showsSpinner {
@@ -953,11 +1000,29 @@ struct ChatView: View {
                 .font(.caption)
                 .foregroundStyle(.primary)
             Spacer(minLength: 0)
+            if showsSettingsLink {
+                Button("Settings") {
+                    openSystemSettings()
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(0.16))
+    }
+
+    /// Deep-links to the app's Settings page so a denied microphone or
+    /// speech-recognition permission can be flipped without hunting
+    /// through Settings by hand. Only offered for notices where
+    /// `opensSystemSettings` is true — a restricted device or an
+    /// unsupported locale has nothing there to fix.
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// Maps each controller notice to a Text literal so the copy stays
@@ -971,6 +1036,8 @@ struct ChatView: View {
             Text("Speech recognition is off. Enable it in Settings to dictate.")
         case .permissionsRestricted:
             Text("Dictation isn't available — speech recognition is restricted on this device.")
+        case .onDeviceUnavailable:
+            Text("Dictation isn't available in your language on this device.")
         case .recorderFailed:
             Text("Couldn't start recording. Try again.")
         case .transcriptionFailed:
@@ -979,6 +1046,8 @@ struct ChatView: View {
             Text("Nothing was heard. Hold the microphone button while you speak.")
         case .cancelled:
             Text("Dictation cancelled.")
+        case .interrupted:
+            Text("Dictation was interrupted. Try again.")
         }
     }
 
