@@ -57,7 +57,7 @@ Available in English, 简体中文, Deutsch, Français, Español, 日本語, and
   <a href="assets/screenshots/scarfgo-system.png"><img src="assets/screenshots/scarfgo-system.png" alt="ScarfGo — System tab" width="140"></a>
 </p>
 
-**ScarfGo** is the native iPhone companion — the same Hermes servers you run from your Mac, reachable from your phone. Multi-server, project-scoped chat with session resume, project dashboards, skills browsing + Hub install, memory editor, cron, and per-server Hermes profile switching. Pure-Swift SSH (Citadel) — the Ed25519 private key is generated on-device, lives in the iOS Keychain, and never leaves the phone.
+**ScarfGo** is the native iPhone companion — the same Hermes servers you run from your Mac, reachable from your phone. Multi-server, project-scoped chat with session resume, project dashboards, skills browsing + Hub install, memory editor, cron, and per-server Hermes profile switching. Hold the composer's mic button to dictate — on-device speech-to-text only, never a server fallback (thanks to [@danmarauda](https://github.com/danmarauda)) — or start a Live Voice conversation with Hermes when your host supports it. Pure-Swift SSH (Citadel) — the Ed25519 private key is generated on-device, lives in the iOS Keychain, and never leaves the phone.
 
 <p align="center">
   <a href="https://apps.apple.com/us/app/scarfgo/id6763763341"><img src="site/landing/assets/download-on-the-app-store.svg" alt="Download ScarfGo on the App Store" height="48"></a>
@@ -119,6 +119,7 @@ Projects sit first in the sidebar because that's how you actually work. Selectin
 ### Interact
 
 - **Chat** — two modes: **Rich Chat** streams over the Agent Client Protocol (ACP) with markdown, tool-call visualization, thinking display, permission prompts, and per-session edit-approval modes; **Terminal** runs `hermes chat` in a real terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)). Both persist sessions, resume, and auto-reconnect.
+- **Voice** — talk to Hermes instead of typing it. **Hermes Voice playback** ⚙ speaks assistant replies through the connected server's own configured text-to-speech provider, falling back to the system voice (Settings → Voice → Playback Engine, Hermes v0.20.1+; thanks to [@danmarauda](https://github.com/danmarauda)). **Live Voice** ⚙ is a full two-way spoken conversation on Mac and ScarfGo — an OpenAI voice model listens and talks while every real request still goes to Hermes, which answers with your model and full toolset (Hermes v0.21.3+, about $0.05/min on the host's own OpenAI key). See the [wiki](https://github.com/awizemann/scarf/wiki/Chat#live-voice-mac-and-scarfgo) for setup and privacy details.
 - **Memory** — view/edit MEMORY.md and USER.md with live refresh and profile-scoped memory.
 - **Curator** ⚙ — Hermes's skill curator: status, archive idle skills, consolidation controls.
 - **Skills** — browse installed skills, search the Skills Hub across registries, install/update/uninstall from the app.
