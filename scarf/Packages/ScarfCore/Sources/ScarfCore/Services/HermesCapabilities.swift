@@ -2145,6 +2145,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// difference from the CLI is that nothing is pruned.
     public var hasBackupKeep: Bool { isV0212OrLater }
 
+    // MARK: v0.21.3 (v2026.9.14) flags
+
+    /// GPT-Live voice chat mode — Hermes's full-duplex voice frontend that
+    /// delegates every real request to the agent. `tools/voice_live.py`
+    /// first ships at tag **v2026.9.14** (commit `f923faa0b8`, whose
+    /// `pyproject.toml:5` reads `version = "0.21.3"`); `git ls-tree
+    /// v2026.9.11 -- tools/voice_live.py` is empty. Scarf's Live Voice
+    /// imports that module on the host (`create_webrtc_session`,
+    /// `voice_live.py:162-186`) for the SDP exchange, and the
+    /// `voice.voice_chat_mode` key it reads is seeded at
+    /// `hermes_cli/config_defaults.py:1132` from the same tag.
+    ///
+    /// This is only HALF of the Live Voice gate: the entry point also needs
+    /// the host's parsed `voice.voice_chat_mode` to be gpt-live — see
+    /// ``VoiceLiveReadiness``. There is deliberately no host status probe:
+    /// a missing OpenAI key surfaces at session start as a setup message,
+    /// before anything is billed.
+    public var hasGPTLiveVoice: Bool { isV0213OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -2297,6 +2316,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV0211OrLater`: a v0.21.1 host satisfies every minor-level check
     /// and lacks the flag.
     public var isV0212OrLater: Bool { atLeastSemver(0, 21, 2) }
+
+    /// Whether the connected host is on v0.21.3 or newer. Patch-level floor
+    /// for the v0.21.3 group (GPT-Live voice), same rationale as
+    /// `isV0212OrLater`.
+    public var isV0213OrLater: Bool { atLeastSemver(0, 21, 3) }
 
     /// Public form of the private floor test, for tables that carry their
     /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than
