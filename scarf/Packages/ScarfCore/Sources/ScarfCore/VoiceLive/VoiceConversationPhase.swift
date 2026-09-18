@@ -16,6 +16,35 @@ public enum VoiceSessionEndReason: Sendable, Equatable {
     case stopPhrase
     /// Nobody spoke for the idle timeout (cost guard).
     case idleTimeout
+    /// Hermes worked on a spoken request for the stalled-turn cap (10
+    /// minutes by default) with no speech from the user and no progress
+    /// from Hermes, e.g. while it waited on a tool approval (cost guard).
+    case turnStalled
+}
+
+/// A non-fatal, transient message about a running session, for a banner.
+/// Structured (not text) so each app shows one localized sentence per case;
+/// vendor wording never reaches the UI (it goes to the log only).
+public enum VoiceSessionNotice: Sendable, Equatable {
+    /// The vendor reported a non-fatal error. `code` is the vendor's error
+    /// code, a diagnostic token only (e.g. `rate_limited`), never UI copy.
+    case vendorError(code: String?)
+    /// The session is about to end on its own (`reason` is ``VoiceSessionEndReason/idleTimeout``
+    /// or ``VoiceSessionEndReason/turnStalled``) unless someone speaks.
+    /// `secondsLeft` is rounded up, for "about a minute" style copy.
+    case endingSoon(reason: VoiceSessionEndReason, secondsLeft: Int)
+
+    /// English diagnostic text (ScarfCore has no string catalog).
+    public var englishDescription: String {
+        switch self {
+        case .vendorError(let code?): return "Live Voice reported a problem (\(code))."
+        case .vendorError(nil): return "Live Voice reported a problem."
+        case .endingSoon(.turnStalled, let seconds):
+            return "Hermes is still waiting. Live Voice ends in \(seconds) s unless you speak."
+        case .endingSoon(_, let seconds):
+            return "No one has spoken for a while. Live Voice ends in \(seconds) s unless you speak."
+        }
+    }
 }
 
 /// Why a voice session failed. Structured so each app can localize one
@@ -28,8 +57,12 @@ public enum VoiceSessionFailure: Sendable, Equatable {
     case host(VoiceLiveHostError)
     /// The media layer couldn't start (page, WebKit, microphone API).
     case mediaUnavailable(detail: String)
-    /// The user (or the OS) denied the microphone.
+    /// The user (or the OS) denied the microphone (`NotAllowedError`).
     case microphoneDenied
+    /// Another app or process holds the microphone (`NotReadableError`).
+    case microphoneBusy
+    /// There is no microphone (`NotFoundError` / `OverconstrainedError`).
+    case microphoneNotFound
     /// The vendor's answer couldn't be applied to the peer connection.
     case audioConnectFailed(detail: String)
     /// No live session within the connect timeout after the offer.
@@ -56,6 +89,8 @@ public enum VoiceSessionFailure: Sendable, Equatable {
         case .host(let error): return error.errorDescription ?? "Live Voice couldn't start."
         case .mediaUnavailable(let detail): return "Couldn't start Live Voice audio: \(detail)"
         case .microphoneDenied: return "Scarf can't use the microphone. Allow microphone access for Scarf, then try again."
+        case .microphoneBusy: return "Another app is using the microphone."
+        case .microphoneNotFound: return "No microphone was found."
         case .audioConnectFailed(let detail): return "Live Voice couldn't connect its audio: \(detail)"
         case .connectTimedOut: return "Live Voice took too long to connect."
         case .connectionLost: return "The Live Voice connection dropped."

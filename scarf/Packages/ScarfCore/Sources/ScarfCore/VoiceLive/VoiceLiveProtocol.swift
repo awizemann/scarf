@@ -151,7 +151,8 @@ public enum VoiceMediaEvent: Sendable, Equatable {
     /// The microphone input level, 0…1.
     case micLevel(Double)
     /// The media transport ended on its own: `connection_lost`,
-    /// `microphone_denied`, `web_process_terminated`, …
+    /// `microphone_denied`, `microphone_busy`, `microphone_not_found`,
+    /// `microphone_failed`, `web_process_terminated`, …
     case transportClosed(reason: String)
 
     /// Decode a `WKScriptMessage.body` from the page. Unknown or malformed
@@ -201,6 +202,14 @@ public protocol VoiceMediaBridge: AnyObject {
     func send(_ json: String)
     func setMicrophoneEnabled(_ enabled: Bool)
     /// Stop the microphone, close the peer connection, forget the session.
-    /// Idempotent; the bridge can start again afterwards.
-    func teardown()
+    /// Idempotent; the bridge can start again afterwards. The microphone is
+    /// released at once; an open data channel first gets a short, bounded
+    /// flush so a just-sent `session.close` reaches the vendor. `onReleased`
+    /// runs (on the main actor, exactly once) when all of it has finished,
+    /// or at once if there was nothing to release.
+    func teardown(onReleased: (@MainActor @Sendable () -> Void)?)
+}
+
+extension VoiceMediaBridge {
+    public func teardown() { teardown(onReleased: nil) }
 }

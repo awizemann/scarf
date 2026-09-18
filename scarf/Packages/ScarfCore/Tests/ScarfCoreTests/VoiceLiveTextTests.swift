@@ -159,4 +159,43 @@ import Foundation
         #expect(VoiceLiveText.sanitizeForSpeech("Heading | Detail\n--- | --- | ---\nKeep this prose.").contains("Heading | Detail"))
         #expect(VoiceLiveText.sanitizeForSpeech("    Item | Value\n    --- | ---\n    Example A | 10").contains("Item | Value"))
     }
+
+    // MARK: speakableBoundary (Scarf: streaming speech on the raw reply)
+
+    private func speakable(_ raw: String) -> String {
+        let chars = Array(raw)
+        return String(chars[..<VoiceLiveText.speakableBoundary(in: chars)])
+    }
+
+    @Test func theSpeakablePrefixEndsAtTheLastCompletedSentence() {
+        #expect(speakable("It is sunny today. The high is") == "It is sunny today.")
+        #expect(speakable("Really? Yes! And") == "Really? Yes!")
+        #expect(speakable("Version 3.5 is out") == "")
+        #expect(speakable("Done.") == "")                    // no whitespace after it yet
+        #expect(speakable("Line one.\nLine two") == "Line one.")
+    }
+
+    @Test func theSpeakablePrefixNeverEndsInsideCodeLinksOrTables() {
+        #expect(speakable("Run this. ```\nmake all. then\n") == "Run this.")
+        #expect(speakable("Use `a. b` now") == "")
+        #expect(speakable("See [the docs. More](http://x") == "")
+        #expect(speakable("Intro.\n| Mr. A | 3 |\n") == "Intro.")
+        #expect(speakable("Row. | a | b |") == "")           // a pipe voids the whole line
+    }
+
+    /// Piecewise sanitizing at these boundaries says the same words as
+    /// sanitizing the whole reply once.
+    @Test func piecewiseSpeechMatchesWholeSpeech() {
+        let reply = "## Plan\nFirst, **build** it. Then run `make test`.\n\n| a | b |\n|---|---|\n| 1 | 2 |\nSee [docs](https://x.y/z). ```\nlet x = 1. y\n```\nDone! Bye."
+        let chars = Array(reply)
+        var spoken: [String] = []
+        var offset = 0
+        for length in 1...chars.count {
+            let end = length == chars.count ? length : VoiceLiveText.speakableBoundary(in: Array(chars[..<length]))
+            guard end > offset else { continue }
+            spoken.append(VoiceLiveText.speechSegment(chars, offset..<end))
+            offset = end
+        }
+        #expect(spoken.joined(separator: " ") == VoiceLiveText.sanitizeForSpeech(reply))
+    }
 }

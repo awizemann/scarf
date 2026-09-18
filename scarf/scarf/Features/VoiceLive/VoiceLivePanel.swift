@@ -46,7 +46,7 @@ struct VoiceLivePanel: View {
             }
             if let notice = engine.notice, engine.phase.isActive {
                 Label {
-                    Text(verbatim: notice)
+                    Text(verbatim: VoiceLivePresentation.notice(notice))
                 } icon: {
                     Image(systemName: "exclamationmark.bubble")
                 }

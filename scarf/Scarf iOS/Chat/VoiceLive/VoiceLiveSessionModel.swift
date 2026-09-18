@@ -269,10 +269,22 @@ final class VoiceLiveSessionModel {
 
     // MARK: Internals
 
+    /// Hand the audio session back to other apps, but only once WebKit has
+    /// actually stopped the microphone and playback
+    /// (`VoiceConversationEngine.waitForMediaRelease`, bounded): deactivating
+    /// while its capture unit still runs fails as "session busy" and the
+    /// other app's audio never resumes. A session started in the meantime
+    /// keeps the audio session.
     private func releaseAudioSession() {
         guard audioSessionActive else { return }
         audioSessionActive = false
-        audioSession.deactivate()
+        let engine = session?.engine
+        let audioSession = audioSession
+        Task { @MainActor [weak self] in
+            await engine?.waitForMediaRelease()
+            guard self?.audioSessionActive != true else { return }
+            audioSession.deactivate()
+        }
     }
 
     private func showComposerNotice(_ notice: VoiceLiveComposerNotice) {

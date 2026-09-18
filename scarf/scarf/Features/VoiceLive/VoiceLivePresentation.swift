@@ -41,6 +41,21 @@ enum VoiceLivePresentation {
         case .idleTimeout:
             let minutes = Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())
             return String(localized: "Ended after \(minutes) minutes without speech, to save cost.")
+        case .turnStalled:
+            return String(localized: "Ended after Hermes waited 10 minutes with no speech, to save cost. The request is still in the chat.")
+        }
+    }
+
+    /// A running session's notice. Vendor wording never shows (the engine
+    /// logs it).
+    static func notice(_ notice: VoiceSessionNotice) -> String {
+        switch notice {
+        case .vendorError:
+            return String(localized: "OpenAI reported a problem with Live Voice. The session is still running.")
+        case .endingSoon(.turnStalled, _):
+            return String(localized: "Hermes has been waiting a long time. Live Voice ends in about a minute unless you speak, to save cost.")
+        case .endingSoon:
+            return String(localized: "No one has spoken for a while. Live Voice ends in about a minute unless you speak, to save cost.")
         }
     }
 
@@ -58,6 +73,18 @@ enum VoiceLivePresentation {
                 message: String(localized: "Scarf can't use the microphone."),
                 guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Microphone, then try again."),
                 detail: nil, offersMicrophoneSettings: true
+            )
+        case .microphoneBusy:
+            return FailureCopy(
+                message: String(localized: "Another app is using the microphone."),
+                guidance: String(localized: "Finish there, then try again."),
+                detail: nil, offersMicrophoneSettings: false
+            )
+        case .microphoneNotFound:
+            return FailureCopy(
+                message: String(localized: "No microphone is available."),
+                guidance: String(localized: "Connect or select a microphone in System Settings › Sound, then try again."),
+                detail: nil, offersMicrophoneSettings: false
             )
         case .audioConnectFailed(let detail):
             return FailureCopy(

@@ -3041,6 +3041,11 @@ extension ChatViewModel: VoiceTurnHost {
         return nil
     }
 
+    /// The ACP session: Hermes keeps a cancelled turn's text per session,
+    /// so the engine's "next voice turn goes text-only" debt is keyed by it
+    /// and survives into the next voice session (`VoiceTextOnlyTurnLedger`).
+    var voiceChatID: String? { richChatViewModel.sessionId }
+
     /// Show the spoken words as the user's bubble, then send them with the
     /// voice turn note as an embedded resource (model input only, never
     /// the stored row). Everything before the prompt task is synchronous,

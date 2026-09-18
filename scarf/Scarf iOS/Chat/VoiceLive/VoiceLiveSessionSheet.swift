@@ -214,9 +214,9 @@ struct VoiceLiveSessionSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func noticeRow(_ notice: String) -> some View {
+    private func noticeRow(_ notice: VoiceSessionNotice) -> some View {
         Label {
-            Text(verbatim: notice)
+            Self.noticeText(notice)
         } icon: {
             Image(systemName: "info.circle")
         }
@@ -250,6 +250,19 @@ struct VoiceLiveSessionSheet: View {
         )
     }
 
+    /// One localized sentence per notice. Vendor wording never shows; the
+    /// engine logs it.
+    static func noticeText(_ notice: VoiceSessionNotice) -> Text {
+        switch notice {
+        case .vendorError:
+            Text("OpenAI reported a problem with Live Voice. The session is still running.")
+        case .endingSoon(.turnStalled, _):
+            Text("Hermes has been waiting a long time. Live Voice ends in about a minute unless you speak, to save cost.")
+        case .endingSoon:
+            Text("No one has spoken for a while. Live Voice ends in about a minute unless you speak, to save cost.")
+        }
+    }
+
     /// One localized sentence per outcome. `VoiceSessionFailure.englishDescription`
     /// is a diagnostic token only (ScarfCore has no string catalog).
     private var outcomeText: Text {
@@ -258,6 +271,8 @@ struct VoiceLiveSessionSheet: View {
             Text("Live Voice ended on its own after \(Int(VoiceIdleMonitor.defaultTimeout / 60)) minutes with no speech, so it stopped billing.")
         case .ended(.stopPhrase):
             Text("You said stop, so Live Voice ended.")
+        case .ended(.turnStalled):
+            Text("Live Voice ended on its own after Hermes waited 10 minutes with no speech, so it stopped billing. The request is still in the chat.")
         case .ended:
             Text("Live Voice ended. Your spoken turns and Hermes's replies are in the chat.")
         case .failed(let failure):
@@ -289,6 +304,10 @@ struct VoiceLiveSessionSheet: View {
             Text("Couldn't start Live Voice audio on this device.")
         case .microphoneDenied:
             Text("ScarfGo can't use the microphone. Allow microphone access in Settings, then try again.")
+        case .microphoneBusy:
+            Text("Another app is using the microphone. Finish there, then try again.")
+        case .microphoneNotFound:
+            Text("No microphone is available.")
         case .audioConnectFailed:
             Text("Live Voice couldn't connect its audio.")
         case .connectTimedOut:

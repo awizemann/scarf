@@ -753,9 +753,6 @@ import Testing
         // `hermes_cli/config_defaults.py:1132-1137` @ v2026.9.14.
         let absent = HermesConfig(yaml: "model:\n  default: m\n").voice
         #expect(absent.voiceChatMode == "chained")
-        #expect(absent.gptLiveModel == "gpt-live-1")
-        #expect(absent.gptLiveVoice == "marin")
-        #expect(absent.gptLiveInstructions.isEmpty)
         #expect(VoiceSettings.empty.voiceChatMode == "chained")
         let set = HermesConfig(yaml: "voice:\n  voice_chat_mode: gpt-live\n").voice
         #expect(set.voiceChatMode == "gpt-live")

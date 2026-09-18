@@ -354,13 +354,6 @@ public struct VoiceSettings: Sendable, Equatable {
     /// (0.21.3); the key does not exist at v2026.9.11 (0.21.2), where an
     /// absent key parses to the same `"chained"` the host behaves as.
     public var voiceChatMode: String
-    /// `voice.gpt_live.*` are read-only client hints used by Scarf's native
-    /// Live Voice surface. Hermes remains the source of truth for the session.
-    /// Defaults mirror `hermes_cli/config_defaults.py:1133-1138` @ v2026.9.14
-    /// (`model: "gpt-live-1"`, `voice: "marin"`, `instructions: ""`).
-    public var gptLiveModel: String
-    public var gptLiveVoice: String
-    public var gptLiveInstructions: String
 
     public init(
         recordKey: String,
@@ -402,10 +395,7 @@ public struct VoiceSettings: Sendable, Equatable {
         sttCloudTrimThresholdDB: Double = -40,
         sttCloudTrimKeepMS: Int = 300,
         wakeWordCapture: String = "auto",
-        voiceChatMode: String = "chained",
-        gptLiveModel: String = "gpt-live-1",
-        gptLiveVoice: String = "marin",
-        gptLiveInstructions: String = ""
+        voiceChatMode: String = "chained"
     ) {
         self.recordKey = recordKey
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -447,9 +437,6 @@ public struct VoiceSettings: Sendable, Equatable {
         self.sttCloudTrimKeepMS = sttCloudTrimKeepMS
         self.wakeWordCapture = wakeWordCapture
         self.voiceChatMode = voiceChatMode
-        self.gptLiveModel = gptLiveModel
-        self.gptLiveVoice = gptLiveVoice
-        self.gptLiveInstructions = gptLiveInstructions
     }
     public nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",
@@ -473,10 +460,7 @@ public struct VoiceSettings: Sendable, Equatable {
         sttMistralModel: "voxtral-mini-latest",
         ttsXAIVoiceID: "",
         ttsXAIAutoSpeechTags: false,
-        voiceChatMode: "chained",
-        gptLiveModel: "gpt-live-1",
-        gptLiveVoice: "marin",
-        gptLiveInstructions: ""
+        voiceChatMode: "chained"
     )
 }
 

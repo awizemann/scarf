@@ -58,7 +58,11 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
     public let webView: WKWebView
 
     private var loadRequested = false
-    private var secureContext: Bool?
+    /// The page's navigation, while it loads. Only ITS failure means the
+    /// page is gone; a later navigation that fails (or that the policy
+    /// cancels) leaves the loaded page, and any live session, running.
+    private var pageNavigation: WKNavigation?
+    private(set) var secureContext: Bool?
     /// Bumped by every `startMedia()` and `teardown()`. The page stamps each
     /// message with the generation that started it, so a message from a
     /// torn-down session can never reach a newer one, and a start that was
@@ -106,9 +110,24 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
         fire("scarfVoiceLive.setMicrophoneEnabled(enabled); return true", arguments: ["enabled": enabled])
     }
 
-    public func teardown() {
+    public func teardown(onReleased: (@MainActor @Sendable () -> Void)?) {
         generation += 1
-        fire("scarfVoiceLive.teardown(); return true")
+        // Never gated on the page's ready state: a page that loaded may
+        // still hold the microphone whatever the navigation delegate saw
+        // since. With no page at all the call just fails, which counts as
+        // released.
+        guard loadRequested || secureContext != nil else {
+            onReleased?()
+            return
+        }
+        // The completion holds the bridge (and so the web view and its page)
+        // until the page has flushed and closed the peer: a host that drops
+        // the bridge right after ending must not cut the flush short.
+        webView.callAsyncJavaScript(
+            "return await scarfVoiceLive.teardown()", arguments: [:], in: nil, in: .page
+        ) { [self] _ in
+            withExtendedLifetime(self) { onReleased?() }
+        }
     }
 
     // MARK: - Page
@@ -119,7 +138,7 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
         if let secureContext { return secureContext }
         if !loadRequested {
             loadRequested = true
-            webView.load(URLRequest(url: Self.pageURL))
+            pageNavigation = webView.load(URLRequest(url: Self.pageURL))
         }
         let id = UUID()
         return await withCheckedContinuation { continuation in
@@ -138,6 +157,7 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
         if secureContext == nil {
             webView.stopLoading()
             loadRequested = false
+            pageNavigation = nil
         }
         continuation.resume(returning: secureContext)
     }
@@ -148,12 +168,22 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
         for continuation in waiters.values { continuation.resume(returning: value) }
     }
 
-    /// The page is gone (web content process died, or a load failed):
-    /// forget it so the next start loads it again.
+    /// The page is gone (web content process died, or its load failed
+    /// before it was ready): forget it so the next start loads it again.
     private func pageLost() {
         loadRequested = false
+        pageNavigation = nil
         secureContext = nil
         resolveAllWaiters(nil)
+    }
+
+    /// A navigation failed. Only the page's own load failing before `ready`
+    /// loses the page; anything else (a navigation the policy cancelled, a
+    /// failure after the page was up) leaves it, and its microphone, alive,
+    /// so teardown must still reach it.
+    func navigationFailed(_ navigation: WKNavigation?) {
+        guard secureContext == nil, navigation == nil || navigation === pageNavigation else { return }
+        pageLost()
     }
 
     // MARK: - JavaScript
@@ -170,7 +200,7 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
     }
 
     private func fire(_ body: String, arguments: [String: Any] = [:]) {
-        guard secureContext != nil else { return }   // no page, nothing to tell
+        guard secureContext != nil else { return }   // no page ready, nothing to tell
         webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page, completionHandler: nil)
     }
 
@@ -192,6 +222,7 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
               let event = VoiceMediaEvent.decode(messageBody: message.body) else { return }
         if case .pageReady(let secure) = event {
             secureContext = secure
+            pageNavigation = nil
             resolveAllWaiters(secure)
         }
         onEvent?(event)
@@ -244,11 +275,11 @@ extension WebViewVoiceMediaBridge: WKNavigationDelegate {
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        pageLost()
+        navigationFailed(navigation)
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        pageLost()
+        navigationFailed(navigation)
     }
 
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
