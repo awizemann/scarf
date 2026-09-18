@@ -15,8 +15,8 @@ struct VoiceTab: View {
 
     private var playbackEngineOptions: [(id: String, label: String)] {
         [
-            ("system", "System Voice"),
-            ("hermes", "Hermes Voice"),
+            ("system", String(localized: "System Voice")),
+            ("hermes", String(localized: "Hermes Voice")),
         ]
     }
 

@@ -30,10 +30,12 @@ struct ChatTranscriptPane: View {
         guard allowsVoiceLive else { return nil }
         let capabilities = capabilitiesStore?.capabilities ?? .empty
         guard chatViewModel.voiceLiveAvailability(capabilities: capabilities).isReady else { return nil }
-        let isActive = chatViewModel.voiceLive.isSessionActive
+        // Starting counts: an end in that gap cancels the start.
+        let isActive = chatViewModel.voiceLive.holdsSession
         return VoiceLiveComposerEntry(
             isActive: isActive,
             canStart: chatViewModel.canHostVoiceTurns,
+            blockedByAnotherWindow: chatViewModel.voiceLive.isBlockedByAnotherWindow,
             onToggle: {
                 if isActive {
                     chatViewModel.voiceLive.end()
@@ -108,6 +110,7 @@ struct ChatTranscriptPane: View {
                 controller: chatViewModel.voiceLive,
                 onRestart: { chatViewModel.startVoiceLive() },
                 canRestart: chatViewModel.canHostVoiceTurns
+                    && !chatViewModel.voiceLive.isBlockedByAnotherWindow
             )
             // Issue #62: bind composer identity to the active session
             // ID so SwiftUI rebuilds `RichChatInputBar` (and its

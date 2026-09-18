@@ -32,7 +32,18 @@ enum VoiceLivePresentation {
         }
     }
 
-    static func endedMessage(_ reason: VoiceSessionEndReason) -> String? {
+    /// The ended footer's line. A host end note (the Hermes connection
+    /// died) wins over the engine's reason, which reads `.userEnded` then.
+    static func endedMessage(
+        _ reason: VoiceSessionEndReason,
+        endNote: VoiceLiveController.EndNote? = nil
+    ) -> String? {
+        switch endNote {
+        case .hermesConnectionLost?:
+            return String(localized: "Ended because the connection to Hermes was lost.")
+        case nil:
+            break
+        }
         switch reason {
         case .userEnded:
             return nil
@@ -41,6 +52,34 @@ enum VoiceLivePresentation {
         case .idleTimeout:
             let minutes = Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())
             return String(localized: "Ended after \(minutes) minutes without speech, to save cost.")
+        }
+    }
+
+    /// What VoiceOver announces when the phase changes, or `nil` for a
+    /// change not worth interrupting for (speaking ↔ listening flips many
+    /// times a minute, and the voice itself is audible).
+    static func announcement(
+        from old: VoiceConversationPhase,
+        to new: VoiceConversationPhase,
+        endNote: VoiceLiveController.EndNote? = nil
+    ) -> String? {
+        guard old != new else { return nil }
+        switch new {
+        case .connecting:
+            return String(localized: "Live Voice connecting")
+        case .listening where !old.isLive:
+            return String(localized: "Live Voice is listening")
+        case .thinking:
+            return String(localized: "Hermes is working on your request")
+        case .ended(let reason):
+            guard let detail = endedMessage(reason, endNote: endNote) else {
+                return String(localized: "Voice session ended")
+            }
+            return String(localized: "Voice session ended. \(detail)")
+        case .failed(let failure):
+            return self.failure(failure).message
+        case .idle, .listening, .speaking, .ending:
+            return nil
         }
     }
 
