@@ -130,6 +130,16 @@ public final class PushToTalkController {
     private var transcriptionTask: Task<Void, Never>?
     private var nextTranscriptID = 0
 
+    /// Upper bound on how long a single take may sit in `.transcribing`.
+    /// `OnDeviceSpeechTranscriber`'s `SFSpeechRecognizer` completion
+    /// handler can simply never fire (an OS-level hiccup, not something
+    /// this app controls) — without this, a hung callback parks the
+    /// composer in `.transcribing` forever, which disables both
+    /// dictation and Live Voice (`VoiceLiveComposerGate.dictationAllowed`
+    /// requires `dictationIdle`) until the app relaunches. See
+    /// `transcribe(with:url:timeout:)`.
+    private let transcriptionTimeout: Duration
+
     #if os(iOS)
     /// Listens for `AVAudioSession.interruptionNotification` (phone
     /// call, Siri, another app grabbing the mic) for the lifetime of
@@ -161,22 +171,28 @@ public final class PushToTalkController {
         self.transcriber = OnDeviceSpeechTranscriber()
         self.dictationAvailability = OnDeviceDictationAvailabilityClient()
         self.makeFileURL = { Self.defaultMemoURL() }
+        self.transcriptionTimeout = .seconds(20)
         self.startObservingAudioInterruptionsIfNeeded()
     }
 
-    /// Test seam — every collaborator injected.
+    /// Test seam — every collaborator injected. `transcriptionTimeout`
+    /// defaults generously (never hit by the fast-resolving mocks most
+    /// tests use) but is overridable so a test can prove the bounded
+    /// timeout actually fires without waiting out the production value.
     public init(
         permissions: any PushToTalkPermissionChecking,
         recorderFactory: any AudioMemoRecorderFactory,
         transcriber: any SpeechTranscribing,
         dictationAvailability: any OnDeviceDictationAvailabilityChecking,
-        makeFileURL: @escaping @Sendable () -> URL
+        makeFileURL: @escaping @Sendable () -> URL,
+        transcriptionTimeout: Duration = .seconds(20)
     ) {
         self.permissions = permissions
         self.recorderFactory = recorderFactory
         self.transcriber = transcriber
         self.dictationAvailability = dictationAvailability
         self.makeFileURL = makeFileURL
+        self.transcriptionTimeout = transcriptionTimeout
         // Deliberately NOT observing real AVAudioSession notifications
         // in tests — `handleAudioSessionInterruption(began:)` is called
         // directly instead, so a test doesn't depend on posting a real
@@ -263,7 +279,8 @@ public final class PushToTalkController {
         }
         phase = .transcribing
         let transcriber = self.transcriber
-        transcriptionTask = Task { [weak self, transcriber] in
+        let timeout = self.transcriptionTimeout
+        transcriptionTask = Task { [weak self, transcriber, timeout] in
             // `any Error` isn't Sendable under strict concurrency — carry
             // the detail back as a String instead (same pattern the iOS
             // attachment ingestion uses).
@@ -271,7 +288,7 @@ public final class PushToTalkController {
             var failureDetail: String?
             var onDeviceUnavailable = false
             do {
-                text = try await transcriber.transcribe(fileAt: url)
+                text = try await Self.transcribe(with: transcriber, url: url, timeout: timeout)
             } catch let error as DictationError where error.reason == .onDeviceRecognitionUnsupported {
                 // Distinct from a generic failure — the composer should
                 // say "not available on this device", not "try again"
@@ -351,6 +368,39 @@ public final class PushToTalkController {
     }
 
     // MARK: - Internals
+
+    /// Races `transcriber.transcribe(fileAt:)` against `timeout`. The
+    /// timeout side winning cancels the transcription child task — for
+    /// `OnDeviceSpeechTranscriber` that resolves its own
+    /// `withTaskCancellationHandler` and unblocks immediately instead
+    /// of leaving the take (and `phase`) stuck forever — and this then
+    /// throws, so `holdReleased()`'s existing generic `catch` surfaces
+    /// `.transcriptionFailed` and phase still settles back to `.idle`.
+    /// A mock whose `transcribe` doesn't itself react to cancellation
+    /// (e.g. one that never returns at all) would still hang this race
+    /// — the timeout only protects against a *cancellable* operation
+    /// that's simply slow or stuck waiting on a callback, which is
+    /// exactly `OnDeviceSpeechTranscriber`'s failure mode.
+    private static func transcribe(
+        with transcriber: any SpeechTranscribing,
+        url: URL,
+        timeout: Duration
+    ) async throws -> String {
+        try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await transcriber.transcribe(fileAt: url)
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw DictationError(reason: .transcriptionTimedOut)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw DictationError(reason: .transcriptionTimedOut)
+            }
+            return result
+        }
+    }
 
     private func startRecording() {
         // Privacy contract: never record audio this app can't transcribe

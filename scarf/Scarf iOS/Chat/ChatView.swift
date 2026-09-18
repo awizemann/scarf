@@ -965,37 +965,65 @@ struct ChatView: View {
     /// 0.2 s hold starts the take; dragging > 60 pt away cancels it
     /// (the finger never has to return to the button); lifting
     /// anywhere short of that ends the take and kicks transcription.
-    /// Guards on `dictationHoldStarted` because the sequenced gesture
-    /// can emit `.first` events for touches that later fail before
-    /// the drag phase engages.
+    ///
+    /// The decision logic lives in `DictationGestureReducer` (below) — a pure
+    /// function, unit tested without simulating a real touch — because
+    /// `SequenceGesture<LongPressGesture, DragGesture>.Value`'s
+    /// `.first` case fires (with `false`) at touch-down, before the
+    /// long press has succeeded, and the *success* transition is
+    /// reported as `.second(true, _)` (there is no separate
+    /// `.first(true)` callback to key off). Starting a take on `.first`
+    /// began recording on every touch-down, including a quick tap or a
+    /// VoiceOver double-tap that fails the long press outright — and
+    /// SwiftUI never calls `.onEnded` for a gesture that failed to
+    /// recognize, so that recording never stopped. Gating on
+    /// `.second(true, _)` fixes this by construction: a failed press
+    /// never reaches that case, so it never starts a take — nothing is
+    /// left running for a missing `.onEnded` to fail to stop.
     private var dictationGesture: some Gesture {
         LongPressGesture(minimumDuration: Self.dictationHoldStart)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
             .onChanged { value in
                 guard !dictationDisabled else { return }
+                let longPressSucceeded: Bool?
+                let dragTranslation: CGSize?
                 switch value {
                 case .first:
-                    guard !dictationHoldStarted else { return }
-                    dictationHoldStarted = true
-                    pushToTalk.holdBegan()
-                case .second(true, let drag?):
-                    guard dictationHoldStarted, !dictationCancelledByDrag else { return }
-                    let distance = hypot(drag.translation.width, drag.translation.height)
-                    if distance > Self.dictationCancelDistance {
-                        dictationCancelledByDrag = true
-                        pushToTalk.holdCancelled()
-                    }
-                default:
-                    break
+                    longPressSucceeded = nil
+                    dragTranslation = nil
+                case .second(let succeeded, let drag):
+                    longPressSucceeded = succeeded
+                    dragTranslation = drag?.translation
+                }
+                let (newState, action) = DictationGestureReducer.onChanged(
+                    state: DictationGestureReducer.State(
+                        holdStarted: dictationHoldStarted,
+                        cancelledByDrag: dictationCancelledByDrag
+                    ),
+                    longPressSucceeded: longPressSucceeded,
+                    dragTranslation: dragTranslation,
+                    cancelDistance: Self.dictationCancelDistance
+                )
+                dictationHoldStarted = newState.holdStarted
+                dictationCancelledByDrag = newState.cancelledByDrag
+                switch action {
+                case .none: break
+                case .begin: pushToTalk.holdBegan()
+                case .cancel: pushToTalk.holdCancelled()
                 }
             }
             .onEnded { _ in
-                let started = dictationHoldStarted
-                let cancelled = dictationCancelledByDrag
-                dictationHoldStarted = false
-                dictationCancelledByDrag = false
-                guard started, !cancelled else { return }
-                pushToTalk.holdReleased()
+                let (newState, shouldRelease) = DictationGestureReducer.onEnded(
+                    state: DictationGestureReducer.State(
+                        holdStarted: dictationHoldStarted,
+                        cancelledByDrag: dictationCancelledByDrag
+                    )
+                )
+                dictationHoldStarted = newState.holdStarted
+                dictationCancelledByDrag = newState.cancelledByDrag
+                if shouldRelease {
+                    pushToTalk.holdReleased()
+                }
             }
     }
 
@@ -3620,6 +3648,91 @@ private struct IOSModelPreflightSheet: View {
         let suffix = "Scarf will save these to `config.yaml` on \(serverDisplayName) and start the chat."
         guard !reason.isEmpty else { return suffix }
         return "\(reason) \(suffix)"
+    }
+}
+
+// MARK: - Dictation hold-gesture decision logic
+
+/// Pure state machine behind `ChatView.dictationGesture`, factored out
+/// of the SwiftUI `Gesture` closures so it's unit testable without
+/// simulating a real touch (`@testable import` from `Scarf iOSTests`).
+///
+/// Mirrors `SequenceGesture<LongPressGesture, DragGesture>.Value`:
+/// `.first` fires with `false` at touch-down, while the press is still
+/// tracking, and — the load-bearing fact behind the P1 fix this type
+/// exists for — the transition to *success* is reported as
+/// `.second(true, _)`, not as a distinct `.first(true)` callback.
+/// `onChanged` below only ever starts a take on that `.second(true, _)`
+/// case; a quick tap or a VoiceOver double-tap that releases before the
+/// long-press threshold never reaches it, so it never starts a take —
+/// and therefore never needs `.onEnded` (which SwiftUI does not call
+/// for a gesture that failed to recognize) to stop one.
+enum DictationGestureReducer: Equatable {
+    /// Gesture bookkeeping carried between `.onChanged` calls and reset
+    /// by `.onEnded`.
+    struct State: Equatable {
+        var holdStarted = false
+        var cancelledByDrag = false
+
+        init(holdStarted: Bool = false, cancelledByDrag: Bool = false) {
+            self.holdStarted = holdStarted
+            self.cancelledByDrag = cancelledByDrag
+        }
+    }
+
+    /// What the caller should do in response to one `.onChanged` event.
+    enum Action: Equatable {
+        case none
+        case begin
+        case cancel
+    }
+
+    /// Reduces one `.onChanged` event.
+    ///
+    /// - Parameters:
+    ///   - longPressSucceeded: `nil` while the sequence is still in its
+    ///     `.first` phase (before or during the long-press hold) —
+    ///     those events never start or affect a take. Once the
+    ///     sequence has moved to `.second`, this is that case's leading
+    ///     `Bool` (SwiftUI has only ever been observed to report `true`
+    ///     here, since `.second` isn't reached at all when the long
+    ///     press fails, but the state machine still treats `false`
+    ///     inertly rather than assuming it can't happen).
+    ///   - dragTranslation: the `.second` case's drag value's
+    ///     translation, or `nil` before the finger has moved.
+    ///   - cancelDistance: finger travel (pt) from the button that
+    ///     cancels the take.
+    static func onChanged(
+        state: State,
+        longPressSucceeded: Bool?,
+        dragTranslation: CGSize?,
+        cancelDistance: CGFloat
+    ) -> (state: State, action: Action) {
+        var state = state
+        guard let longPressSucceeded, longPressSucceeded else {
+            return (state, .none)
+        }
+        if !state.holdStarted {
+            state.holdStarted = true
+            return (state, .begin)
+        }
+        guard !state.cancelledByDrag, let dragTranslation else {
+            return (state, .none)
+        }
+        let distance = hypot(dragTranslation.width, dragTranslation.height)
+        guard distance > cancelDistance else {
+            return (state, .none)
+        }
+        state.cancelledByDrag = true
+        return (state, .cancel)
+    }
+
+    /// Reduces `.onEnded`. Always resets to a fresh `State` for the
+    /// gesture's next cycle; `shouldRelease` tells the caller whether a
+    /// take that actually started (and wasn't already cancelled by a
+    /// drag) should be released and transcribed.
+    static func onEnded(state: State) -> (state: State, shouldRelease: Bool) {
+        (State(), state.holdStarted && !state.cancelledByDrag)
     }
 }
 
