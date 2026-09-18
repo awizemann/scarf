@@ -65,6 +65,15 @@ import CryptoKit
         #expect(request.contextNotes == [VoiceLiveTurnNote.contextNote(context: "Voice assistant: shall I?\nUser: yes")])
     }
 
+    @Test func aSupersedingTurnIsTextOnlyOnTheWire() {
+        let request = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday",
+                                       supersedesCancelledTurn: true)
+        #expect(request.contextNotes.isEmpty)
+        let blocks = ACPClient.promptBlocks(text: request.prompt, images: [], contextNotes: request.contextNotes)
+        #expect(blocks.count == 1)
+        #expect(blocks[0] as? [String: String] == ["type": "text", "text": "no, thursday"])
+    }
+
     // MARK: Hermes's own parser (runs only where a tag-identical Hermes checkout exists)
 
     /// Feeds Scarf's exact blocks through Hermes's ACP schema and content
@@ -100,6 +109,55 @@ import CryptoKit
         #expect(model.contains(VoiceLiveTurnNote.note))
         #expect(model.hasSuffix("\nthursday not friday"))
         #expect(result["note"] as? String == VoiceLiveTurnNote.text(context: context))
+    }
+}
+
+extension VoiceLiveTurnNoteContractTests {
+    /// Why superseding turns go text-only, run against Hermes's own code:
+    /// after `cancel` stores `interrupted_prompt_text`
+    /// (`acp_adapter/server.py:617-619` @ v2026.9.14),
+    /// `_rewrite_prompt_for_interrupt` (`:672-694`) consumes it for Scarf's
+    /// text-only superseding blocks (framing the new words as a correction)
+    /// and leaves it in place for note-bearing blocks, where it would attach
+    /// to the chat's next typed prompt. Runs only against a tag-identical
+    /// checkout.
+    @Test(.enabled(if: HermesTagCheckout.available(files: ["acp_adapter/server.py", "acp_adapter/content.py"])))
+    func hermesConsumesTheCancelledPromptOnlyForTextOnlyTurns() throws {
+        let superseding = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday",
+                                           supersedesCancelledTurn: true)
+        let first = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday")
+        func blocksJSON(_ request: VoiceTurnRequest) throws -> String {
+            let blocks = ACPClient.promptBlocks(text: request.prompt, images: [], contextNotes: request.contextNotes)
+            return String(decoding: try JSONSerialization.data(withJSONObject: blocks), as: UTF8.self)
+        }
+        let script = """
+        import json, sys, threading
+        from types import SimpleNamespace
+        from acp.schema import PromptRequest, TextContentBlock
+        from acp_adapter.content import _extract_text, _content_blocks_to_openai_user_content
+        from acp_adapter.server import HermesACPAgent
+        out = {}
+        data = json.loads(sys.stdin.read())
+        for name in ("superseding", "first"):
+            prompt = PromptRequest.model_validate({"sessionId": "s", "prompt": json.loads(data[name])}).prompt
+            state = SimpleNamespace(runtime_lock=threading.Lock(), is_running=False,
+                                    interrupted_prompt_text="book the dentist friday")
+            text, content = HermesACPAgent._rewrite_prompt_for_interrupt(
+                None, state, _extract_text(prompt).strip(), _content_blocks_to_openai_user_content(prompt),
+                all(isinstance(b, TextContentBlock) for b in prompt))
+            out[name] = {"persisted": text, "left": state.interrupted_prompt_text}
+        print(json.dumps(out))
+        """
+        let input = try JSONSerialization.data(withJSONObject: [
+            "superseding": try blocksJSON(superseding), "first": try blocksJSON(first),
+        ])
+        let output = try HermesTagCheckout.runPython(script, stdin: input)
+        let result = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: [String: String]])
+        #expect(result["superseding"]?["persisted"]
+                == "book the dentist friday\n\nUser correction/guidance after interrupt: no, thursday")
+        #expect(result["superseding"]?["left"] == "")
+        #expect(result["first"]?["persisted"] == "no, thursday")
+        #expect(result["first"]?["left"] == "book the dentist friday")   // would leak into the next typed prompt
     }
 }
 
