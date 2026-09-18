@@ -408,15 +408,14 @@ section {
 .hero-dl-btn {
   margin-top: auto;
   width: 144px;
-  height: 48px;
   min-height: 48px;
-  padding: 0 var(--s3);
+  padding: var(--s2) var(--s3);
   flex-direction: row;
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-size: 14px;
-  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.2;
 }
 .hero-dl-card .appstore-badge { margin-top: auto; }
 .hero-dl-card .appstore-badge img { height: 48px; width: auto; }
