@@ -12,7 +12,7 @@ Both apps are free, MIT licensed, and built from a single open repository. Scarf
 - **Author:** Alan Wizemann
 - **Hermes prerequisite:** https://github.com/hermes-ai/hermes-agent installed at `~/.hermes/`
 - **Mac download:** https://github.com/awizemann/scarf/releases/latest
-- **iOS download:** https://testflight.apple.com/join/qCrRpcTz (public TestFlight)
+- **iOS download:** https://apps.apple.com/us/app/scarfgo/id6763763341 (App Store, free) — beta builds: https://testflight.apple.com/join/qCrRpcTz (public TestFlight)
 - **Auto-updates (Mac):** Sparkle, with EdDSA signature verification
 - **Telemetry:** none
 

@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://awizemann.github.io/scarf/">Website</a> ·
   <a href="https://github.com/awizemann/scarf/releases/latest">Download for Mac</a> ·
-  <a href="https://testflight.apple.com/join/qCrRpcTz">iPhone TestFlight</a> ·
+  <a href="https://apps.apple.com/us/app/scarfgo/id6763763341">ScarfGo on the App Store</a> ·
   <a href="https://github.com/awizemann/scarf/wiki">Wiki</a> ·
   <a href="https://awizemann.github.io/scarf/#faq">FAQ</a>
 </p>
@@ -59,7 +59,11 @@ Available in English, 简体中文, Deutsch, Français, Español, 日本語, and
 
 **ScarfGo** is the native iPhone companion — the same Hermes servers you run from your Mac, reachable from your phone. Multi-server, project-scoped chat with session resume, project dashboards, skills browsing + Hub install, memory editor, cron, and per-server Hermes profile switching. Pure-Swift SSH (Citadel) — the Ed25519 private key is generated on-device, lives in the iOS Keychain, and never leaves the phone.
 
-**[Join the public TestFlight →](https://testflight.apple.com/join/qCrRpcTz)**
+<p align="center">
+  <a href="https://apps.apple.com/us/app/scarfgo/id6763763341"><img src="site/landing/assets/download-on-the-app-store.svg" alt="Download ScarfGo on the App Store" height="48"></a>
+</p>
+
+**ScarfGo is now on the App Store — free.** Want beta builds on the edge? [Join the public TestFlight →](https://testflight.apple.com/join/qCrRpcTz)
 
 Connecting takes about a minute: add a server (same details as `ssh user@host`), tap **Generate Key**, paste the public key into the host's `~/.ssh/authorized_keys`, tap **Test connection**. Full walkthrough: [ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding) · feature tour: [ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo) · Mac-vs-iOS matrix: [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences).
 
