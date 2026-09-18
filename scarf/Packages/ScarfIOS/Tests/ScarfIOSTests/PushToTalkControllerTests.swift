@@ -95,6 +95,14 @@ private struct MockTranscriber: SpeechTranscribing {
         /// that pre-flight check can't regress into a silent
         /// server-side transcription going unnoticed.
         case onDeviceUnsupported
+        /// Simulates a recognizer completion handler that never fires.
+        /// `Task.sleep` still honors cancellation the way a correctly
+        /// fixed `OnDeviceSpeechTranscriber` must — this is what proves
+        /// `PushToTalkController`'s bounded-timeout race actually
+        /// unblocks: the timeout side wins, cancels this task, and
+        /// `Task.sleep` throws `CancellationError` promptly instead of
+        /// hanging for the full (unrealistically long) duration below.
+        case hangs
     }
 
     let outcome: Outcome
@@ -107,6 +115,9 @@ private struct MockTranscriber: SpeechTranscribing {
         case .silent: return "   \n"
         case .failure: throw DictationError(reason: .recognizerUnavailable)
         case .onDeviceUnsupported: throw DictationError(reason: .onDeviceRecognitionUnsupported)
+        case .hangs:
+            try await Task.sleep(for: .seconds(3_600))
+            return "unreachable"
         }
     }
 }
@@ -170,7 +181,8 @@ private final class URLSink: @unchecked Sendable {
         permissions: MockPermissions,
         factory: MockRecorderFactory = MockRecorderFactory(),
         outcome: MockTranscriber.Outcome = .text("Hello from dictation"),
-        dictationAvailable: Bool = true
+        dictationAvailable: Bool = true,
+        transcriptionTimeout: Duration = .seconds(5)
     ) -> (controller: PushToTalkController, recorder: MockRecorder, transcriber: MockTranscriber) {
         let transcriber = MockTranscriber(outcome: outcome)
         let controller = PushToTalkController(
@@ -178,7 +190,8 @@ private final class URLSink: @unchecked Sendable {
             recorderFactory: factory,
             transcriber: transcriber,
             dictationAvailability: MockDictationAvailability(available: dictationAvailable),
-            makeFileURL: Self.makeMemoFile
+            makeFileURL: Self.makeMemoFile,
+            transcriptionTimeout: transcriptionTimeout
         )
         return (controller, factory.recorder, transcriber)
     }
@@ -331,6 +344,30 @@ private final class URLSink: @unchecked Sendable {
         #expect(controller.transcript == nil)
         #expect(controller.notice == .transcriptionFailed)
         #expect(recorder.stopCalls == 1)
+    }
+
+    /// P1 fix (t-0fbb1c3c): a recognizer whose completion handler never
+    /// fires must not park the composer in `.transcribing` forever —
+    /// that disables both dictation and Live Voice until the app
+    /// relaunches. The bounded timeout must win within its window even
+    /// though the mock's own "recognition" never completes on its own.
+    @Test func hungTranscriptionResetsToIdleWithNoticeAfterTimeout() async {
+        let (controller, recorder, transcriber) = makeController(
+            permissions: MockPermissions(status: .granted),
+            outcome: .hangs,
+            transcriptionTimeout: .milliseconds(50)
+        )
+
+        controller.holdBegan()
+        controller.holdReleased()
+        #expect(controller.phase == .transcribing)
+
+        await waitUntil { controller.phase == .idle }
+
+        #expect(controller.transcript == nil)
+        #expect(controller.notice == .transcriptionFailed)
+        #expect(recorder.stopCalls == 1)
+        #expect(transcriber.receivedURLs.values.count == 1)
     }
 
     @Test func recorderFailingToStartSurfacesNoticeWithoutTranscribing() {

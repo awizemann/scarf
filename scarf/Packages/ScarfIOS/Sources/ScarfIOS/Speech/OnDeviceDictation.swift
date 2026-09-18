@@ -147,6 +147,10 @@ public struct DictationError: Error, Sendable, Equatable {
         /// promises on-device transcription, so this is a hard stop,
         /// never a silent fall back to Apple's servers.
         case onDeviceRecognitionUnsupported
+        /// `PushToTalkController` gave up waiting — the recognizer's
+        /// completion handler never fired within the bounded window.
+        /// See `PushToTalkController.transcribe(with:url:timeout:)`.
+        case transcriptionTimedOut
     }
 
     public init(reason: Reason) {
@@ -197,25 +201,92 @@ public struct OnDeviceSpeechTranscriber: SpeechTranscribing {
         // routed to Apple's servers.
         request.requiresOnDeviceRecognition = true
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let gate = RecognitionContinuationGate(continuation)
-            recognizer.recognitionTask(with: request) { result, error in
-                if let error {
-                    gate.resume(throwing: error)
-                    return
+        // `recognizer` used to be a bare local and the
+        // `SFSpeechRecognitionTask` `recognitionTask(with:)` returns
+        // was dropped outright — nothing kept either alive once this
+        // function suspended on the continuation below, and there was
+        // no handle left to cancel a take whose completion handler
+        // never fires. The holder retains both explicitly for the
+        // call's duration and gives `withTaskCancellationHandler` a
+        // live handle to actually stop the take when the surrounding
+        // `Task` is cancelled (e.g. `PushToTalkController
+        // .handleViewDisappearing()`, or the bounded-timeout race in
+        // `PushToTalkController.transcribe`) — and, since
+        // `SFSpeechRecognitionTask.cancel()` is not documented to
+        // guarantee its completion handler still fires, `onCancel`
+        // also force-resumes the continuation directly so a cancelled
+        // take can never hang forever waiting on a callback that may
+        // never arrive.
+        let holder = RecognitionTaskHolder(recognizer: recognizer)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let gate = RecognitionContinuationGate(continuation)
+                let task = recognizer.recognitionTask(with: request) { result, error in
+                    if let error {
+                        gate.resume(throwing: error)
+                        return
+                    }
+                    guard let result else { return }
+                    if result.isFinal {
+                        gate.resume(returning: result.bestTranscription.formattedString)
+                    }
                 }
-                guard let result else { return }
-                if result.isFinal {
-                    gate.resume(returning: result.bestTranscription.formattedString)
-                }
+                holder.attach(task: task, gate: gate)
             }
+        } onCancel: {
+            holder.cancelAndResume()
         }
+    }
+}
+
+/// Retains the `SFSpeechRecognizer` and its in-flight
+/// `SFSpeechRecognitionTask` for the duration of one
+/// `transcribe(fileAt:)` call, and gives `withTaskCancellationHandler`'s
+/// `onCancel` a way to both stop the task and force-resume the
+/// continuation. `attach` and `cancelAndResume` can race (`onCancel`
+/// can fire before `recognitionTask(with:)` even returns its handle) —
+/// the lock plus the "already cancelled" check make either ordering
+/// safe.
+private final class RecognitionTaskHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let recognizer: SFSpeechRecognizer
+    private var task: SFSpeechRecognitionTask?
+    private var gate: RecognitionContinuationGate?
+    private var isCancelled = false
+
+    init(recognizer: SFSpeechRecognizer) {
+        self.recognizer = recognizer
+    }
+
+    func attach(task: SFSpeechRecognitionTask, gate: RecognitionContinuationGate) {
+        lock.lock()
+        let alreadyCancelled = isCancelled
+        if !alreadyCancelled {
+            self.task = task
+            self.gate = gate
+        }
+        lock.unlock()
+        if alreadyCancelled {
+            task.cancel()
+            gate.resume(throwing: CancellationError())
+        }
+    }
+
+    func cancelAndResume() {
+        lock.lock()
+        let task = self.task
+        let gate = self.gate
+        isCancelled = true
+        lock.unlock()
+        task?.cancel()
+        gate?.resume(throwing: CancellationError())
     }
 }
 
 /// Resumes a throwing continuation exactly once — the recognizer's
 /// result handler can fire again after `isFinal`/error on some OS
-/// versions, and a double resume traps.
+/// versions, cancellation can race a late result, and a double resume
+/// traps.
 private final class RecognitionContinuationGate: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<String, Error>?
