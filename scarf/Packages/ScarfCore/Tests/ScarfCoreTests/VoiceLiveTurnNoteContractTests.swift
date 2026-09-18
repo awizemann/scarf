@@ -1,0 +1,142 @@
+import Testing
+import Foundation
+@testable import ScarfCore
+
+/// Contract: a Live Voice turn is sent over ACP as
+/// `[resource(turn note + spoken context), text(spoken words)]`.
+///
+/// Hermes @ v2026.9.14 persists only `.text` blocks (`_extract_text`,
+/// `acp_adapter/content.py:224-226` → `persist_user_message`,
+/// `acp_adapter/server.py:773-776`) and inlines embedded-resource text into
+/// the model input (`_content_blocks_to_openai_user_content`,
+/// `content.py:249-275` via `_embedded_resource_to_parts`, `:185-194`).
+/// The note is `VOICE_LIVE_TURN_NOTE` / `voice_live_turn_note(context)`,
+/// `tools/voice_live.py:73-90`.
+@Suite struct VoiceLiveTurnNoteContractTests {
+
+    // MARK: wire shape
+
+    @Test func notesPrecedeTheTextBlock() throws {
+        let context = "User: the dentist one\nVoice assistant: which day?"
+        let note = VoiceLiveTurnNote.contextNote(context: context)
+        let blocks = ACPClient.promptBlocks(text: "thursday not friday", images: [], contextNotes: [note])
+        #expect(blocks.count == 2)
+        #expect(Set(blocks[0].keys) == ["type", "resource"])
+        #expect(blocks[0]["type"] as? String == "resource")
+        #expect(blocks[0]["resource"] as? [String: String] == [
+            "uri": "scarf://voice-live/voice-live-turn-note",
+            "mimeType": "text/plain",
+            "text": VoiceLiveTurnNote.note + "\n[Recent spoken conversation, newest last:\n" + context + "]",
+        ])
+        #expect(blocks[1] as? [String: String] == ["type": "text", "text": "thursday not friday"])
+    }
+
+    @Test func withoutNotesThePayloadIsTheImagesShape() {
+        let image = ChatImageAttachment(mimeType: "image/png", base64Data: "AAAA", thumbnailBase64: nil, filename: nil, approximateByteCount: 3)
+        let blocks = ACPClient.promptBlocks(text: "hi", images: [image], contextNotes: [])
+        #expect(blocks.count == 2)
+        #expect(blocks[0]["type"] as? String == "text")
+        #expect(blocks[0]["text"] as? String == "hi")
+        #expect(blocks[1]["type"] as? String == "image")
+        #expect(blocks[1]["data"] as? String == "AAAA")
+        #expect(blocks[1]["mimeType"] as? String == "image/png")
+    }
+
+    @Test func emptyContextIsTheBareNote() {
+        #expect(VoiceLiveTurnNote.text(context: "  \n ") == VoiceLiveTurnNote.note)
+        #expect(VoiceLiveTurnNote.note.hasPrefix("[Note: this message is a delegation from a live spoken conversation."))
+        #expect(VoiceLiveTurnNote.note.hasSuffix("Do not claim an action succeeded before it actually did.]"))
+    }
+
+    @Test func requestCarriesTheNoteForItsContext() {
+        let request = VoiceTurnRequest(id: "d1", prompt: "yes", context: "Voice assistant: shall I?\nUser: yes")
+        #expect(request.contextNotes == [VoiceLiveTurnNote.contextNote(context: "Voice assistant: shall I?\nUser: yes")])
+    }
+
+    // MARK: Hermes's own parser (runs only where a tag-identical Hermes checkout exists)
+
+    /// Feeds Scarf's exact blocks through Hermes's ACP schema and content
+    /// parser, and compares the vendored note with Hermes's function. Runs
+    /// only when `~/.hermes/hermes-agent` has a venv AND its
+    /// `acp_adapter/content.py` + `tools/voice_live.py` are identical to tag
+    /// v2026.9.14 — so it tests the tagged behaviour, never a drifted tree.
+    @Test(.enabled(if: HermesTagCheckout.available(files: ["acp_adapter/content.py", "tools/voice_live.py"])))
+    func hermesParserPersistsOnlyTheSpokenWords() throws {
+        let context = "User: the dentist one\nVoice assistant: which day?"
+        let blocks = ACPClient.promptBlocks(
+            text: "thursday not friday", images: [], contextNotes: [VoiceLiveTurnNote.contextNote(context: context)])
+        let blocksJSON = String(decoding: try JSONSerialization.data(withJSONObject: blocks), as: UTF8.self)
+        let script = """
+        import json, sys
+        from acp.schema import PromptRequest
+        from acp_adapter.content import _extract_text, _content_blocks_to_openai_user_content
+        import tools.voice_live as vl
+        data = json.loads(sys.stdin.read())
+        req = PromptRequest.model_validate({"sessionId": "s", "prompt": json.loads(data["blocks"])})
+        print(json.dumps({
+            "persisted": _extract_text(req.prompt).strip(),
+            "model": _content_blocks_to_openai_user_content(req.prompt),
+            "note": vl.voice_live_turn_note(data["context"]),
+        }))
+        """
+        let input = try JSONSerialization.data(withJSONObject: ["blocks": blocksJSON, "context": context])
+        let output = try HermesTagCheckout.runPython(script, stdin: input)
+        let result = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
+        #expect(result["persisted"] as? String == "thursday not friday")
+        let model = try #require(result["model"] as? String)
+        #expect(model.hasPrefix("[Attached file: voice-live-turn-note]"))
+        #expect(model.contains(VoiceLiveTurnNote.note))
+        #expect(model.hasSuffix("\nthursday not friday"))
+        #expect(result["note"] as? String == VoiceLiveTurnNote.text(context: context))
+    }
+}
+
+/// Locates a local Hermes checkout whose named files are byte-identical to
+/// the tag Scarf's Live Voice was verified against.
+enum HermesTagCheckout {
+    static let tag = "v2026.9.14"
+    static var root: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/hermes-agent")
+    }
+    static var python: URL { root.appendingPathComponent("venv/bin/python") }
+
+    static func available(files: [String]) -> Bool {
+        #if os(macOS)
+        guard FileManager.default.isExecutableFile(atPath: python.path) else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root.path, "diff", "--quiet", tag, "--"] + files
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+        #else
+        return false
+        #endif
+    }
+
+    static func runPython(_ script: String, stdin: Data) throws -> String {
+        #if os(macOS)
+        let process = Process()
+        process.executableURL = python
+        process.arguments = ["-c", script]
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
+        var env = ProcessInfo.processInfo.environment
+        env["HERMES_HOME"] = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-hermes-contract-\(UUID().uuidString)").path
+        process.environment = env
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        input.fileHandleForWriting.write(stdin)
+        try input.fileHandleForWriting.close()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
+        #else
+        return ""
+        #endif
+    }
+}

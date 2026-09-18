@@ -507,22 +507,30 @@ public actor ACPClient {
         text: String,
         images: [ChatImageAttachment]
     ) async throws -> ACPPromptResult {
+        try await sendPrompt(sessionId: sessionId, text: text, images: images, contextNotes: [])
+    }
+
+    /// Live Voice overload: `contextNotes` become ACP `EmbeddedResource`
+    /// text blocks sent BEFORE the text block. Hermes inlines their text
+    /// into the MODEL input only; the persisted user row stays `text`. See
+    /// ``ACPContextNote`` for the tag-cited contract. With no notes the
+    /// payload is byte-identical to the images overload (charter C1).
+    ///
+    /// A prompt carrying a note is not text-only, so if it arrives while a
+    /// turn is running Hermes queues `text` alone and DROPS the note
+    /// (`_claim_turn_or_queue`, `acp_adapter/server.py:696-715` @
+    /// v2026.9.14). Callers must cancel the running turn and await its
+    /// `sendPrompt` return before submitting.
+    public func sendPrompt(
+        sessionId: String,
+        text: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote]
+    ) async throws -> ACPPromptResult {
         statusMessage = "Sending prompt..."
         let messageId = UUID().uuidString
 
-        // Always include the text block, even when empty — keeps the
-        // server-side text-extraction path stable regardless of whether
-        // the user sent text alongside the image(s).
-        var promptBlocks: [[String: Any]] = [
-            ["type": "text", "text": text] as [String: Any],
-        ]
-        for image in images {
-            promptBlocks.append([
-                "type": "image",
-                "data": image.base64Data,
-                "mimeType": image.mimeType,
-            ] as [String: Any])
-        }
+        let promptBlocks = Self.promptBlocks(text: text, images: images, contextNotes: contextNotes)
 
         let params: [String: AnyCodable] = [
             "sessionId": AnyCodable(sessionId),
@@ -555,6 +563,28 @@ public actor ACPClient {
             cachedReadTokens: usage["cachedReadTokens"] as? Int ?? 0,
             compressionCount: compression
         )
+    }
+
+    /// The `session/prompt` content array: context notes (embedded
+    /// resources), then the text block — always present, even when empty,
+    /// which keeps the server-side text extraction stable — then images
+    /// (text first, then image blocks, the shape `acp_adapter/server.py`
+    /// expects).
+    nonisolated static func promptBlocks(
+        text: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote]
+    ) -> [[String: Any]] {
+        var blocks: [[String: Any]] = contextNotes.map { $0.contentBlock }
+        blocks.append(["type": "text", "text": text] as [String: Any])
+        for image in images {
+            blocks.append([
+                "type": "image",
+                "data": image.base64Data,
+                "mimeType": image.mimeType,
+            ] as [String: Any])
+        }
+        return blocks
     }
 
     public func cancel(sessionId: String) async throws {
