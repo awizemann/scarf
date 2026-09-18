@@ -446,16 +446,27 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
                 try Task.checkCancellation()
                 switch chunk {
                 case .stdout(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        let bytes = Data(s.utf8)
-                        stdout.append(bytes)
+                    // Read RAW bytes, never decode per chunk. Citadel hands
+                    // back one `ExecCommandOutput` per SSH data packet, and a
+                    // multi-byte UTF-8 character routinely lands split across
+                    // two of them — decoding each packet on its own (the old
+                    // `readString(length:)`) turns the split character into
+                    // two U+FFFD replacement characters, silently, since
+                    // `ByteBuffer.readString` never throws on invalid UTF-8.
+                    // `ProcessResult.stdout`/`stderr` are `Data`, not `String`
+                    // — there is no decode step this needs to wait for, only
+                    // one to stop doing early. Any caller that wants text
+                    // decodes the fully-accumulated `Data` once, at the end.
+                    if let bytes = buf.readBytes(length: buf.readableBytes) {
+                        let data = Data(bytes)
+                        stdout.append(data)
                         // Mirrored into the shared accumulator as it arrives,
                         // so the sibling timeout arm can report it.
-                        partial.append(bytes)
+                        partial.append(data)
                     }
                 case .stderr(var buf):
-                    if let s = buf.readString(length: buf.readableBytes) {
-                        stderr.append(Data(s.utf8))
+                    if let bytes = buf.readBytes(length: buf.readableBytes) {
+                        stderr.append(Data(bytes))
                     }
                 }
             }
