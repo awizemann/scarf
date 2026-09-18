@@ -503,10 +503,14 @@ import Testing
 
     /// Stop while synthesis is in flight: the round trip is abandoned with
     /// `CancellationError`, and nothing is read, deleted, or cached.
-    @Test func cancellingDuringSynthesisThrowsAndTouchesNothing() async {
+    ///
+    /// The fake host parks until the synthesis task is cancelled, with no
+    /// clock involved; the time limit turns a cancellation that never
+    /// arrives into a failure instead of a hang.
+    @Test(.timeLimit(.minutes(1)))
+    func cancellingDuringSynthesisThrowsAndTouchesNothing() async {
         let transport = SpeechTransport { _ in
-            try await Task.sleep(for: .seconds(30))
-            return (ProcessResult(exitCode: 0, stdout: Data(), stderr: Data()), [:])
+            try await Self.parkUntilCancelled()
         }
         let cache = tempCache()
         let svc = service(transport: transport, cache: cache)
@@ -518,6 +522,17 @@ import Testing
         #expect(throws: CancellationError.self) { try result.get() }
         #expect(transport.reads.isEmpty)
         #expect(transport.removes.isEmpty)
+    }
+
+    /// Suspends until the calling task is cancelled, then throws
+    /// `CancellationError` — what `Task.sleep` does when cancelled, without
+    /// a duration to pick. `AsyncStream`'s iterator ends on cancellation;
+    /// the continuation is held so the stream cannot finish on its own.
+    static func parkUntilCancelled() async throws -> Never {
+        let (stream, continuation) = AsyncStream<Never>.makeStream()
+        for await _ in stream {}
+        withExtendedLifetime(continuation) {}
+        throw CancellationError()
     }
 
     // MARK: - Cache

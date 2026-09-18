@@ -9,15 +9,23 @@ import Foundation
 /// value (including an absent or empty key) is chained. Scarf must accept the
 /// same spellings Hermes does, or a host Hermes treats as gpt-live would hide
 /// the entry point (or the reverse).
+///
+/// Both settings writers spell the key as a LITERAL at the call site
+/// (`setSetting("voice.voice_chat_mode", …)` on the Mac,
+/// `saveValue(key: "voice.voice_chat_mode", …)` on iOS), so the config-writer
+/// parity gate (`AllConfigWritersParityTests`) can read it off the source.
+/// The argv is the shared `hermes config set -- <key> <value>`
+/// (``HermesConfigSet``), verified at v2026.9.14 for this key (charter C5):
+/// `config set` takes two `nargs="?"` positionals
+/// (`hermes_cli/subcommands/config.py:24-27`), and because the key's default
+/// is a `str` (`config_defaults.py:1132`), `_coerce_config_set_value` stores
+/// the value verbatim (`hermes_cli/config.py:3279-3280`).
 public enum VoiceChatMode: String, Sendable, CaseIterable, Equatable {
     /// STT → Hermes turn → TTS. Hermes's default
     /// (`hermes_cli/config_defaults.py:1132` @ v2026.9.14).
     case chained
     /// One full-duplex OpenAI voice model that delegates to Hermes.
     case gptLive = "gpt-live"
-
-    /// The dotted config key (`hermes_cli/config_defaults.py:1132`).
-    public static let configKey = "voice.voice_chat_mode"
 
     /// The canonical value Scarf writes — Hermes's own `GPT_LIVE_MODE` /
     /// `CHAINED_MODE` constants (`tools/voice_live.py:33-34`).
@@ -30,18 +38,6 @@ public enum VoiceChatMode: String, Sendable, CaseIterable, Equatable {
             .lowercased()
             .replacingOccurrences(of: "_", with: "-")
         return ["gpt-live", "gptlive", "live"].contains(normalized) ? .gptLive : .chained
-    }
-
-    /// `hermes config set -- voice.voice_chat_mode <value>` — the argv both
-    /// platforms' settings writers issue (charter C5). Verified at
-    /// v2026.9.14: `config set` takes two `nargs="?"` positionals
-    /// (`hermes_cli/subcommands/config.py:24-27`), and because the key's
-    /// default is a `str` (`config_defaults.py:1132`),
-    /// `_coerce_config_set_value` stores the value verbatim
-    /// (`hermes_cli/config.py:3279-3280`). Judge the result with
-    /// ``HermesConfigSet/judge(output:exitCode:)`` — never by exit code.
-    public func configSetArgv() -> [String] {
-        HermesConfigSet.argv(key: Self.configKey, value: configValue)
     }
 }
 

@@ -205,7 +205,7 @@ private final class URLSink: @unchecked Sendable {
 
     // MARK: - Happy path
 
-    @Test func holdRecordsThenReleaseDeliversTranscript() async {
+    @Test func holdRecordsThenReleaseDeliversTranscript() async throws {
         let (controller, recorder, transcriber) = makeController(
             permissions: MockPermissions(status: .granted)
         )
@@ -224,8 +224,10 @@ private final class URLSink: @unchecked Sendable {
 
         // The memo URL was handed to the transcriber and the file was
         // deleted afterwards — dictation audio never lingers.
-        #expect(transcriber.receivedURLs.values.count == 1)
-        #expect(FileManager.default.fileExists(atPath: transcriber.receivedURLs.values[0].path) == false)
+        let received = transcriber.receivedURLs.values
+        try #require(received.count == 1)
+        let memo = try #require(received.first)
+        #expect(FileManager.default.fileExists(atPath: memo.path) == false)
     }
 
     @Test func consecutiveTakesDeliverDistinctTranscriptValues() async {

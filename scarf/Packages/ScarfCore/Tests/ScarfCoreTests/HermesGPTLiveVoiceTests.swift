@@ -65,9 +65,14 @@ import Foundation
         #expect(VoiceChatMode.parse(nil) == .chained)
     }
 
+    /// The argv both settings writers issue (their keys are literals so the
+    /// config-writer parity gate can read them): the shared builder with the
+    /// canonical values Hermes's own constants spell.
     @Test func configSetArgvIsTheVerifiedShape() {
-        #expect(VoiceChatMode.gptLive.configSetArgv() == ["config", "set", "--", "voice.voice_chat_mode", "gpt-live"])
-        #expect(VoiceChatMode.chained.configSetArgv() == ["config", "set", "--", "voice.voice_chat_mode", "chained"])
+        #expect(HermesConfigSet.argv(key: "voice.voice_chat_mode", value: VoiceChatMode.gptLive.configValue)
+                == ["config", "set", "--", "voice.voice_chat_mode", "gpt-live"])
+        #expect(HermesConfigSet.argv(key: "voice.voice_chat_mode", value: VoiceChatMode.chained.configValue)
+                == ["config", "set", "--", "voice.voice_chat_mode", "chained"])
     }
 
     // MARK: the gating matrix
