@@ -56,6 +56,11 @@ struct ChatView: View {
     @State private var dictationHoldStarted = false
     @State private var dictationCancelledByDrag = false
 
+    /// Live Voice (GPT-Live) session lifecycle: composer gate, microphone,
+    /// audio session and every teardown path. The entry is rendered only
+    /// when `VoiceLiveReadiness` says `.ready` (charter C1).
+    @State private var voiceLive: VoiceLiveSessionModel
+
     private static let maxAttachments = 5
 
     /// Hold duration before a mic-button press starts the take. Short
@@ -73,6 +78,24 @@ struct ChatView: View {
     /// no-op in v2.8.0 (no popover); previews live on the Mac app.
     private var supportsACPQueue: Bool {
         capabilitiesStore?.capabilities.hasACPQueue ?? false
+    }
+
+    /// v0.21.3+ host. Gates even the config read the Live Voice gate needs,
+    /// so older hosts behave exactly as before (charter C1).
+    private var supportsLiveVoice: Bool {
+        capabilitiesStore?.capabilities.hasGPTLiveVoice ?? false
+    }
+
+    private var liveVoiceEntry: VoiceLiveComposerGate.Entry {
+        VoiceLiveComposerGate.entry(
+            availability: VoiceLiveReadiness.availability(
+                capabilities: capabilitiesStore?.capabilities ?? .empty,
+                voiceChatMode: controller.voiceChatModeRaw
+            ),
+            chatReady: controller.state == .ready,
+            dictationIdle: pushToTalk.phase == .idle,
+            liveVoiceActive: voiceLive.isActive
+        )
     }
 
     /// Prefix-filtered slash command list driven by the current draft.
@@ -117,6 +140,7 @@ struct ChatView: View {
         self.key = key
         let ctx = config.toServerContext(id: Self.sharedContextID)
         _controller = State(initialValue: ChatController(context: ctx))
+        _voiceLive = State(initialValue: VoiceLiveSessionModel(context: ctx))
     }
 
     /// Same UUID DashboardView uses, so the transport's cached SSH
@@ -181,6 +205,13 @@ struct ChatView: View {
         .task(id: capabilitiesStore?.capabilities.versionLine ?? "") {
             controller.vm.publishCapabilities(capabilitiesStore?.capabilities ?? .empty)
         }
+        // Live Voice gate: re-read `voice.voice_chat_mode` each time Chat
+        // appears (a `.task` re-runs on every appearance), so a mode flipped
+        // in Settings shows up on return. Skipped entirely below v0.21.3.
+        .task(id: supportsLiveVoice) {
+            guard supportsLiveVoice else { return }
+            await controller.refreshVoiceChatMode()
+        }
         .task {
             // Dashboard row taps set `pendingResumeSessionID`, Project
             // Detail's "New Chat" sets `pendingProjectChat`. Both fire
@@ -203,6 +234,11 @@ struct ChatView: View {
         // a project detail, taps "New Chat" — coordinator flips the
         // tab AND sets pendingProjectChat. The `.task` above only
         // fires on first appear; these are the mid-session hooks.)
+        // A new or resumed chat session under a live voice session would
+        // send its turns into the wrong chat: end it.
+        .onChange(of: controller.vm.sessionId) { _, _ in
+            if voiceLive.isActive { voiceLive.teardown(.sessionChanged) }
+        }
         .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
             guard let sessionID = new else { return }
             coordinator?.pendingResumeSessionID = nil
@@ -234,6 +270,11 @@ struct ChatView: View {
             // mic hot while the app isn't in front of the user.
             if phase == .background {
                 pushToTalk.handleViewDisappearing()
+                // An open Live Voice session bills $0.05/min and ScarfGo
+                // has no background-audio mode: end it (inside a background
+                // task, so the vendor hears the close before suspension).
+                // `.inactive` (Control Center, app switcher peek) keeps it.
+                voiceLive.teardown(.backgrounded)
             }
         }
         // Unlike the ACP session below, push-to-talk dictation DOES tear
@@ -245,6 +286,10 @@ struct ChatView: View {
         // next time Chat reappears.
         .onDisappear {
             pushToTalk.handleViewDisappearing()
+            // Same for Live Voice: a tab switch, server switch or profile
+            // switch unmounts Chat, and a session nobody can see must not
+            // keep billing. (Presenting the voice sheet does not fire this.)
+            voiceLive.teardown(.viewDisappeared)
         }
         // Deliberately NOT tearing down the ACP session on .onDisappear.
         // `TabView` unmounts tab content when the user switches tabs
@@ -284,32 +329,23 @@ struct ChatView: View {
                 onCancel: { controller.cancelModelPreflight() }
             )
         }
-        // Presents the HEAD of the permission queue. The setter is
-        // deliberately inert: a request is resolved only by answering
-        // it (`respondToPermission` pops it by id). Popping on
-        // SwiftUI's dismissal write instead would let the write that
-        // follows `onRespond` — which already popped the answered
-        // request — silently swallow the NEXT queued request without
-        // ever showing it. `interactiveDismissDisabled` keeps a swipe
-        // from looking like it dropped the prompt when the agent is in
-        // fact still blocked on an answer.
-        .sheet(item: Binding(
-            get: { controller.vm.pendingPermission.map(PermissionWrapper.init) },
-            set: { _ in }
-        )) { wrapper in
-            PermissionSheet(permission: wrapper.value) { optionId in
-                await controller.respondToPermission(
-                    requestId: wrapper.value.requestId,
-                    optionId: optionId
+        // Tool-permission prompts. While the Live Voice sheet is up it
+        // presents them itself (a view can't present a second sheet over
+        // its own), so this presenter stands down.
+        .modifier(ChatPermissionPresenter(controller: controller, isEnabled: !voiceLive.isPresented))
+        .sheet(isPresented: $voiceLive.isPresented, onDismiss: {
+            voiceLive.teardown(.sheetDismissed)
+        }) {
+            if let session = voiceLive.session {
+                VoiceLiveSessionSheet(
+                    model: voiceLive,
+                    session: session,
+                    onTryAgain: { startLiveVoice() }
                 )
+                .modifier(ChatPermissionPresenter(controller: controller, isEnabled: true))
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
-            // Custom detents — `.medium` is either too tall (empty
-            // space above) or too short (options clipped). A 220pt
-            // peek shows the prompt + first ~3 options; users can
-            // drag to large for long option lists.
-            .presentationDetents([.height(220), .large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled()
         }
     }
 
@@ -638,6 +674,10 @@ struct ChatView: View {
                 dictationStatusStrip
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            if let notice = voiceLive.composerNotice {
+                liveVoiceNoticeStrip(notice)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             composerRow
         }
         .padding(.horizontal, ScarfSpace.s3)
@@ -820,6 +860,12 @@ struct ChatView: View {
             // drag gesture below owns the interaction entirely.
             dictationMicButton
 
+            // Live Voice entry, next to the dictation mic. Not rendered at
+            // all unless the host is ready (v0.21.3+ and gpt-live mode).
+            if liveVoiceEntry != .hidden {
+                liveVoiceButton
+            }
+
             // Big circular send button. Filled with the brand accent when
             // ready, swapped to a flat gray when disabled — opacity dims
             // alone read as "not quite tappable" (issue #69), the explicit
@@ -871,7 +917,9 @@ struct ChatView: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Dictate message")
             .accessibilityHint(dictationDisabled
-                ? "Unavailable until the chat is connected."
+                ? (voiceLive.isActive
+                    ? "Unavailable during a Live Voice session."
+                    : "Unavailable until the chat is connected.")
                 : "Hold to record; release to transcribe. Slide away to cancel.")
             // VoiceOver can't perform the hold-then-drag-to-cancel
             // gesture above (a double-tap-and-hold either passes
@@ -908,7 +956,10 @@ struct ChatView: View {
     /// dictation drafts locally but stays consistent with the
     /// composer's connection gating.
     private var dictationDisabled: Bool {
-        controller.state != .ready
+        !VoiceLiveComposerGate.dictationAllowed(
+            chatReady: controller.state == .ready,
+            liveVoiceActive: voiceLive.isActive
+        )
     }
 
     /// 0.2 s hold starts the take; dragging > 60 pt away cancels it
@@ -1048,6 +1099,58 @@ struct ChatView: View {
             Text("Dictation cancelled.")
         case .interrupted:
             Text("Dictation was interrupted. Try again.")
+        }
+    }
+
+    // MARK: - Live Voice
+
+    /// Starts a Live Voice session. Disabled while dictation runs (the two
+    /// never hold the microphone at once) or the chat isn't connected.
+    private var liveVoiceButton: some View {
+        Button {
+            startLiveVoice()
+        } label: {
+            Image(systemName: "waveform.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(liveVoiceEntry == .enabled
+                                 ? ScarfColor.accent
+                                 : ScarfColor.foregroundFaint)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(liveVoiceEntry != .enabled)
+        .accessibilityLabel("Live Voice")
+        .accessibilityHint(liveVoiceEntry == .enabled
+            ? "Starts a spoken conversation with Hermes. Billed at 5 cents a minute on the host's OpenAI key."
+            : (pushToTalk.phase != .idle
+                ? "Unavailable while dictating."
+                : "Unavailable until the chat is connected."))
+    }
+
+    private func startLiveVoice() {
+        composerFocused = false
+        Task {
+            await voiceLive.begin(host: controller, dictationIdle: pushToTalk.phase == .idle)
+        }
+    }
+
+    @ViewBuilder
+    private func liveVoiceNoticeStrip(_ notice: VoiceLiveComposerNotice) -> some View {
+        switch notice {
+        case .microphoneDenied:
+            dictationStrip(
+                icon: "mic.slash",
+                text: Text("Microphone access is off. Enable it in Settings to use Live Voice."),
+                tint: ScarfColor.warning,
+                showsSettingsLink: true
+            )
+        case .interrupted:
+            dictationStrip(
+                icon: "phone.down",
+                text: Text("Live Voice ended because another app or a call took the audio."),
+                tint: ScarfColor.warning
+            )
         }
     }
 
@@ -1424,6 +1527,9 @@ final class ChatController {
     /// `let` — set once at init, never mutated after.
     let context: ServerContext
     private var client: ACPClient?
+    /// Read-only view of the live ACP client for the Live Voice turn host
+    /// (ChatController+VoiceTurnHost.swift, a separate file).
+    var activeClient: ACPClient? { client }
     private var eventTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
@@ -1998,11 +2104,97 @@ final class ChatController {
         // command sources (ACP, quick_commands) keep going to Hermes
         // literally. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
+        await startPrompt(
+            client: client,
+            sessionId: sessionId,
+            wireText: wireText,
+            images: images,
+            contextNotes: [],
+            restoreDraftText: text
+        ).value
+    }
+
+    /// Number of `session/prompt` requests this controller has sent that
+    /// have not RETURNED yet (typed and Live Voice turns alike). A turn is
+    /// over when its `sendPrompt` returns — Hermes has no completion event —
+    /// so this, not `vm.isAgentWorking`, is what a superseding voice turn
+    /// waits on (`cancelActiveVoiceTurn`, ChatController+VoiceTurnHost).
+    private(set) var promptsInFlight = 0
+
+    /// Live Voice bookkeeping (ChatController+VoiceTurnHost.swift): the
+    /// spoken prompt of each voice request, by request id, so its reply can
+    /// be matched in `vm.messages`. Trimmed to the last few.
+    @ObservationIgnored var voiceTurnPrompts: [(id: String, prompt: String)] = []
+    /// How long a superseding voice turn waits for the cancelled turn's
+    /// `sendPrompt` to return before submitting anyway. Bounded (charter
+    /// C10): a wedged host must not freeze the voice loop. Tests shorten it.
+    @ObservationIgnored var voiceCancelTimeout: Duration = .seconds(10)
+
+    /// The host's raw `voice.voice_chat_mode`, for the Live Voice composer
+    /// gate (`VoiceLiveReadiness`). `nil` until read, or when config.yaml is
+    /// unreadable — both read as Hermes's default (chained), so the entry
+    /// stays hidden until the host is known to be in gpt-live mode.
+    private(set) var voiceChatModeRaw: String?
+
+    /// Re-read `voice.voice_chat_mode` off the MainActor (charter C10). The
+    /// chat view calls this on every appearance, and only on hosts with
+    /// `hasGPTLiveVoice` — older hosts never pay the read (charter C1) — so
+    /// a mode flipped in Settings is picked up when the user returns to Chat.
+    func refreshVoiceChatMode() async {
+        let ctx = context
+        let raw: String? = await Task.detached {
+            HermesConfigReader.readRawConfig(context: ctx).map { HermesConfig(yaml: $0).voice.voiceChatMode }
+        }.value
+        guard !Task.isCancelled else { return }
+        voiceChatModeRaw = raw
+    }
+
+    /// Send one prompt and finalize the turn from its result. Shared by the
+    /// typed composer (awaits the returned task inline) and Live Voice
+    /// (doesn't, so `submitVoiceTurn` returns once the prompt is handed off).
+    /// `promptsInFlight` is counted synchronously HERE, before the task can
+    /// start, so a cancel that races the hand-off still waits for it.
+    ///
+    /// `restoreDraftText`: on the gh#108 background-cancel path, the typed
+    /// text is put back in the draft so the user can re-send it. Voice
+    /// turns pass `nil` — a spoken turn has no draft to restore.
+    @discardableResult
+    func startPrompt(
+        client: ACPClient,
+        sessionId: String,
+        wireText: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote],
+        restoreDraftText: String?
+    ) -> Task<Void, Never> {
+        promptsInFlight += 1
+        return Task { @MainActor [self] in
+            defer { promptsInFlight -= 1 }
+            await runPrompt(
+                client: client,
+                sessionId: sessionId,
+                wireText: wireText,
+                images: images,
+                contextNotes: contextNotes,
+                restoreDraftText: restoreDraftText
+            )
+        }
+    }
+
+    private func runPrompt(
+        client: ACPClient,
+        sessionId: String,
+        wireText: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote],
+        restoreDraftText: String?
+    ) async {
         do {
             let result = try await client.sendPrompt(
                 sessionId: sessionId,
                 text: wireText,
-                images: images
+                images: images,
+                contextNotes: contextNotes
             )
             // `promptComplete` is a Scarf-local lifecycle event, not a
             // `session/update` notification emitted by ACP. Mirror the
@@ -2022,7 +2214,7 @@ final class ChatController {
             // visible as an orphan, but the agent never saw it so
             // letting the user re-send is the only correct recovery.
             if case .reconnecting = state {
-                if !text.isEmpty, draft.isEmpty {
+                if let text = restoreDraftText, !text.isEmpty, draft.isEmpty {
                     draft = text
                     scheduleDraftSave()
                 }
@@ -2801,6 +2993,45 @@ final class ChatController {
 /// the pending permission. Two permissions for the same request-id
 /// are treated as identical (rare — would only happen if the remote
 /// sends a duplicate).
+
+/// Presents the head of the chat's tool-permission queue. A modifier so the
+/// Live Voice sheet can present the same prompt over itself while it is up.
+struct ChatPermissionPresenter: ViewModifier {
+    let controller: ChatController
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            // Presents the HEAD of the permission queue. The setter is
+            // deliberately inert: a request is resolved only by answering
+            // it (`respondToPermission` pops it by id). Popping on
+            // SwiftUI's dismissal write instead would let the write that
+            // follows `onRespond` — which already popped the answered
+            // request — silently swallow the NEXT queued request without
+            // ever showing it. `interactiveDismissDisabled` keeps a swipe
+            // from looking like it dropped the prompt when the agent is in
+            // fact still blocked on an answer.
+            .sheet(item: Binding(
+                get: { isEnabled ? controller.vm.pendingPermission.map(PermissionWrapper.init) : nil },
+                set: { _ in }
+            )) { wrapper in
+                PermissionSheet(permission: wrapper.value) { optionId in
+                    await controller.respondToPermission(
+                        requestId: wrapper.value.requestId,
+                        optionId: optionId
+                    )
+                }
+                // Custom detents — `.medium` is either too tall (empty
+                // space above) or too short (options clipped). A 220pt
+                // peek shows the prompt + first ~3 options; users can
+                // drag to large for long option lists.
+                .presentationDetents([.height(220), .large])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled()
+            }
+    }
+}
+
 private struct PermissionWrapper: Identifiable {
     let value: RichChatViewModel.PendingPermission
     var id: Int { value.requestId }
