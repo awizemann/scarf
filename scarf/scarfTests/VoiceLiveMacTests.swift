@@ -21,7 +21,7 @@ import ScarfCore
         var isMuted = false
         var elapsedSeconds: TimeInterval = 0
         var approximateCostUSD: Double = 0
-        var notice: String?
+        var notice: VoiceSessionNotice?
 
         var starts = 0
         var ends: [VoiceSessionEndReason] = []

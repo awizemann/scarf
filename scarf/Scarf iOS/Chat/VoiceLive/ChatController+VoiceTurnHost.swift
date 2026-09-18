@@ -35,6 +35,14 @@ extension ChatController: VoiceTurnHost {
         return nil
     }
 
+    /// The ACP session: Hermes keeps a cancelled turn's text per session,
+    /// so the engine's "next voice turn goes text-only" debt is keyed by it
+    /// and survives into the next voice session (`VoiceTextOnlyTurnLedger`).
+    var voiceChatID: String? {
+        guard let sessionId = vm.sessionId, !sessionId.isEmpty else { return nil }
+        return sessionId
+    }
+
     func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {
         guard state == .ready, let client = activeClient,
               let sessionId = vm.sessionId, !sessionId.isEmpty else {

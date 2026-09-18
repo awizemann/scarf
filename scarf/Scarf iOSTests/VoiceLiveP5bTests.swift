@@ -65,9 +65,24 @@ final class FakeVoiceEngine: VoiceConversationEngine {
     var isMuted = false
     var elapsedSeconds: TimeInterval = 0
     var approximateCostUSD: Double = 0
-    var notice: String?
+    var notice: VoiceSessionNotice?
 
     var startCount = 0
+    /// When set, `waitForMediaRelease()` suspends until `releaseMedia()`.
+    var holdMediaRelease = false
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func waitForMediaRelease() async {
+        guard holdMediaRelease else { return }
+        await withCheckedContinuation { releaseWaiters.append($0) }
+    }
+
+    func releaseMedia() {
+        holdMediaRelease = false
+        let waiters = releaseWaiters
+        releaseWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
     var endReasons: [VoiceSessionEndReason] = []
     var immediateEndReasons: [VoiceSessionEndReason] = []
     /// What `start()` leaves the phase at.
@@ -179,7 +194,46 @@ private struct Harness {
 
 // MARK: - Session model
 
+/// The audio session is released on a task that first awaits the engine's
+/// media release; let it run.
+@MainActor
+private func drainAudioRelease() async {
+    for _ in 0..<10 { await Task.yield() }
+    try? await Task.sleep(for: .milliseconds(20))
+}
+
 @Suite(.serialized) @MainActor struct VoiceLiveSessionModelTests {
+
+    /// F3 #8: the audio session is deactivated only after WebKit released
+    /// the microphone and playback, so other apps' audio can resume.
+    @Test func theAudioSessionIsReleasedOnlyAfterTheMediaIs() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.engine?.holdMediaRelease = true
+        h.model.teardown(.sheetDismissed)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 0)   // WebKit still holds the mic
+        h.engine?.releaseMedia()
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+    }
+
+    /// A new session that started while the old media was still releasing
+    /// keeps the audio session.
+    @Test func aNewSessionKeepsTheAudioSessionALateReleaseWouldDrop() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        let first = h.engine
+        first?.holdMediaRelease = true
+        h.model.teardown(.sessionChanged)
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        first?.releaseMedia()
+        await drainAudioRelease()
+        #expect(h.audio.activations == 2)
+        #expect(h.audio.deactivations == 0)
+    }
 
     @Test func beginStartsSessionWithAudioAndSheet() async {
         let h = Harness()
@@ -252,10 +306,11 @@ private struct Harness {
         h.model.teardown(trigger)
         #expect(h.engine?.immediateEndReasons == [.userEnded])
         #expect(!h.model.isActive)
-        #expect(h.audio.deactivations == 1)
         #expect(h.tasks.begun.count == 1)
         // The background task is held for the grace period, then released.
         #expect(h.tasks.openCount == 1)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
         try? await Task.sleep(for: .milliseconds(120))
         #expect(h.tasks.openCount == 0)
     }
@@ -285,6 +340,7 @@ private struct Harness {
         h.model.teardown(.sheetDismissed)
         #expect(h.tasks.begun.isEmpty)
         #expect(h.engine?.immediateEndReasons.isEmpty == true)
+        await drainAudioRelease()
         #expect(h.audio.deactivations == 1)
     }
 
@@ -298,6 +354,7 @@ private struct Harness {
         #expect(h.audio.deactivations == 0)   // still ending
         h.engine?.phase = .ended(.userEnded)
         h.model.phaseDidChange()
+        await drainAudioRelease()
         #expect(h.audio.deactivations == 1)
         h.model.phaseDidChange()
         #expect(h.audio.deactivations == 1)   // released once
@@ -308,6 +365,7 @@ private struct Harness {
         h.engines.phaseAfterStart = .failed(.host(.noKey))
         await h.model.begin(host: NullTurnHost(), dictationIdle: true)
         #expect(h.audio.activations == 1)
+        await drainAudioRelease()
         #expect(h.audio.deactivations == 1)
         // The sheet stays up to show the setup guidance.
         #expect(h.model.isPresented)
