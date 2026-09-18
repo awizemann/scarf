@@ -59,6 +59,11 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
 
     private var loadRequested = false
     private var secureContext: Bool?
+    /// Bumped by every `startMedia()` and `teardown()`. The page stamps each
+    /// message with the generation that started it, so a message from a
+    /// torn-down session can never reach a newer one, and a start that was
+    /// torn down while the page loaded never opens the microphone.
+    private var generation = 0
     private var readyWaiters: [UUID: CheckedContinuation<Bool?, Never>] = [:]
 
     public override init() {
@@ -81,9 +86,12 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
     // MARK: - VoiceMediaBridge
 
     public func startMedia() async throws {
+        generation += 1
+        let mine = generation
         guard let secure = await loadPage() else { throw BridgeError.pageUnavailable }
         guard secure else { throw BridgeError.insecureContext }
-        try await call("await scarfVoiceLive.start(); return true")
+        guard mine == generation else { throw CancellationError() }   // torn down while loading
+        try await call("await scarfVoiceLive.start(token); return true", arguments: ["token": mine])
     }
 
     public func applyAnswer(sdp: String) async throws {
@@ -99,6 +107,7 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
     }
 
     public func teardown() {
+        generation += 1
         fire("scarfVoiceLive.teardown(); return true")
     }
 
@@ -117,13 +126,20 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
             readyWaiters[id] = continuation
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: Self.pageLoadTimeout)
-                self?.resolveWaiter(id, nil)
+                self?.loadTimedOut(id)
             }
         }
     }
 
-    private func resolveWaiter(_ id: UUID, _ value: Bool?) {
-        readyWaiters.removeValue(forKey: id)?.resume(returning: value)
+    /// A load that never answered: give up on it so the next start loads
+    /// afresh instead of waiting on the same dead navigation.
+    private func loadTimedOut(_ id: UUID) {
+        guard let continuation = readyWaiters.removeValue(forKey: id) else { return }
+        if secureContext == nil {
+            webView.stopLoading()
+            loadRequested = false
+        }
+        continuation.resume(returning: secureContext)
     }
 
     private func resolveAllWaiters(_ value: Bool?) {
@@ -172,12 +188,20 @@ public final class WebViewVoiceMediaBridge: NSObject, VoiceMediaBridge {
         let origin = message.frameInfo.securityOrigin
         guard Self.acceptsMessage(isMainFrame: message.frameInfo.isMainFrame,
                                   originProtocol: origin.protocol, originHost: origin.host),
+              Self.isCurrent(messageBody: message.body, generation: generation),
               let event = VoiceMediaEvent.decode(messageBody: message.body) else { return }
         if case .pageReady(let secure) = event {
             secureContext = secure
             resolveAllWaiters(secure)
         }
         onEvent?(event)
+    }
+
+    /// Session messages carry the generation that started them; `ready`
+    /// (and anything else sent outside a session) carries none.
+    static func isCurrent(messageBody body: Any, generation: Int) -> Bool {
+        guard let token = (body as? [String: Any])?["token"] else { return true }
+        return (token as? NSNumber)?.intValue == generation
     }
 
     static func acceptsMessage(isMainFrame: Bool, originProtocol: String, originHost: String) -> Bool {

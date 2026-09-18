@@ -29,6 +29,14 @@ import WebKit
         #expect(!accepts(true, "https", "example.com"))
     }
 
+    @Test func staleSessionMessagesAreDropped() {
+        let current = WebViewVoiceMediaBridge.isCurrent
+        #expect(current(["type": "ready", "secure": true], 7))          // no token: page-level
+        #expect(current(["type": "event", "data": "{}", "token": 7], 7))
+        #expect(!current(["type": "closed", "reason": "connection_lost", "token": 6], 7))
+        #expect(!current(["type": "event", "token": "7"], 7))
+    }
+
     @Test func theSchemeHandlerServesOnlyThePage() throws {
         #expect(VoiceLivePageSchemeHandler.serves(try #require(URL(string: "scarf-voice://live/index.html"))))
         #expect(VoiceLivePageSchemeHandler.serves(try #require(URL(string: "scarf-voice://live/"))))
@@ -42,7 +50,7 @@ import WebKit
     @Test func thePageIsBundledAndSelfContained() throws {
         let html = String(decoding: try #require(VoiceLivePage.html), as: UTF8.self)
         #expect(html.contains("messageHandlers.scarfVoiceLive"))
-        for api in ["start ()", "applyAnswer (sdp)", "send (json)", "setMicrophoneEnabled (enabled)", "teardown ()"] {
+        for api in ["start (token)", "applyAnswer (sdp)", "send (json)", "setMicrophoneEnabled (enabled)", "teardown ()"] {
             #expect(html.contains(api), "\(api)")
         }
         #expect(html.contains("createDataChannel('oai-events')"))

@@ -134,6 +134,9 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         startTickLoop()
         do {
             try await bridge.startMedia()
+            // Ended (or restarted) while the page loaded or the mic prompt
+            // was up: the media that just opened belongs to no session.
+            if myEpoch != epoch { bridge.teardown() }
         } catch {
             guard myEpoch == epoch, state.phase == .connecting else { return }
             finish(failure: .mediaUnavailable(detail: error.localizedDescription))
@@ -164,8 +167,8 @@ public final class GPTLiveEngine: VoiceConversationEngine {
     public func toggleMute() {
         guard state.phase.isActive else { return }
         isMuted.toggle()
-        bridge.setMicrophoneEnabled(!isMuted)
-        send(isMuted ? .mute : .unmute)
+        bridge.setMicrophoneEnabled(!isMuted)   // the page remembers it for a track not open yet
+        if channelOpen { send(isMuted ? .mute : .unmute) }
     }
 
     /// Full duplex has no turn boundary; this nudges the voice to answer now
@@ -185,7 +188,15 @@ public final class GPTLiveEngine: VoiceConversationEngine {
         case .offer(let sdp):
             exchangeOffer(sdp)
         case .channelOpen:
+            // The data channel only opens once the answer is applied and
+            // DTLS/SCTP connect, so the session is live now — the desktop
+            // treats it as live from here too (voice-live.ts:319-336 →
+            // use-voice-live-conversation.ts:312-321), not from
+            // `session.started`, which may lag or never come.
             channelOpen = true
+            if isMuted { send(.mute) }   // a mute pressed while connecting
+            idle.noteActivity(at: clock())
+            apply(.sessionLive)
         case .serverMessage(let raw):
             if let serverEvent = VoiceLiveServerEvent.decode(raw) { handle(serverEvent) }
         case .assistantSpeaking(let speaking):

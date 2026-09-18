@@ -14,13 +14,21 @@ import Foundation
     final class FakeBridge: VoiceMediaBridge {
         var onEvent: (@MainActor @Sendable (VoiceMediaEvent) -> Void)?
         var startError: Error?
+        /// When set, startMedia() suspends until the test resumes it.
+        var holdStart = false
+        var startContinuation: CheckedContinuation<Void, Never>?
         var answers: [String] = []
         var sent: [String] = []
         var micEnabled: [Bool] = []
         var teardowns = 0
 
         func startMedia() async throws {
+            if holdStart { await withCheckedContinuation { startContinuation = $0 } }
             if let startError { throw startError }
+        }
+        func releaseStart() {
+            startContinuation?.resume()
+            startContinuation = nil
         }
         func applyAnswer(sdp: String) async throws { answers.append(sdp) }
         func send(_ json: String) { sent.append(json) }
@@ -201,6 +209,50 @@ import Foundation
         try? await Task.sleep(for: .milliseconds(120))
         #expect(bridge.answers.isEmpty)
         #expect(bridge.sent.isEmpty)
+    }
+
+    /// Review finding: ending while the page loads / the mic prompt is up
+    /// must not leave the media running once startMedia() finally returns.
+    @Test func endingDuringStartMediaTearsTheLateMediaDown() async {
+        bridge.holdStart = true
+        let starting = Task { await engine.start() }
+        await settle { bridge.startContinuation != nil }
+        engine.end(reason: .userEnded)
+        #expect(engine.phase == .ended(.userEnded))
+        let before = bridge.teardowns
+        bridge.releaseStart()
+        await starting.value
+        #expect(bridge.teardowns == before + 1)
+        #expect(engine.phase == .ended(.userEnded))
+    }
+
+    /// The desktop is live once the answer is applied; the data channel
+    /// opening proves it even if `session.started` never arrives.
+    @Test func theOpenChannelMakesTheSessionLiveWithoutSessionStarted() async {
+        await engine.start()
+        bridge.emit(.offer(sdp: "v=0"))
+        await settle { bridge.answers.count == 1 }
+        bridge.emit(.channelOpen)
+        #expect(engine.phase == .listening)
+        user("hello")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        #expect(host.submitted.first?.prompt == "hello")
+        advance(80)                         // no connect timeout once live
+        #expect(engine.phase.isLive)
+    }
+
+    /// Review finding: a mute pressed before the microphone opens must hold.
+    @Test func muteWhileConnectingHoldsAndTellsTheVendorOnceOpen() async {
+        await engine.start()
+        engine.toggleMute()
+        #expect(bridge.micEnabled == [false])
+        #expect(bridge.sent.isEmpty)        // channel not open: nothing sent yet
+        bridge.emit(.offer(sdp: "v=0"))
+        await settle { bridge.answers.count == 1 }
+        bridge.emit(.channelOpen)
+        #expect(bridge.sent(type: "session.input_audio.mute").count == 1)
+        #expect(engine.isMuted)
     }
 
     // MARK: delegation → Hermes turn

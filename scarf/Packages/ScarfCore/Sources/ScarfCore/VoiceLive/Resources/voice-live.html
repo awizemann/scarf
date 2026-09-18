@@ -27,18 +27,23 @@
 //   {type:'level', value}              microphone level 0..1
 //   {type:'closed', reason}            the transport ended on its own
 // Swift -> JS  (callAsyncJavaScript with arguments, never string-built)
-//   start() / applyAnswer(sdp) / send(json) / setMicrophoneEnabled(on) / teardown()
+//   start(token) / applyAnswer(sdp) / send(json) / setMicrophoneEnabled(on) / teardown()
+// Every message sent during a session carries `token` (the generation Swift
+// started it with) so a torn-down session's late messages are dropped.
 'use strict'
 
 const ICE_GATHER_TIMEOUT_MS = 10000
 
-function post (message) {
-  try { window.webkit.messageHandlers.scarfVoiceLive.postMessage(message) } catch (_) {}
+const S = {
+  peer: null, channel: null, mic: null, audio: null, token: null, micEnabled: true,
+  timers: [], contexts: [], lastSpeaking: false, lastLevel: -1, live: false
 }
 
-const S = {
-  peer: null, channel: null, mic: null, audio: null,
-  timers: [], contexts: [], lastSpeaking: false, lastLevel: -1, live: false
+// Session messages carry the token Swift started the session with, so a
+// late message from a torn-down session is dropped on the Swift side.
+function post (message) {
+  if (S.token !== null && message.type !== 'ready') message.token = S.token
+  try { window.webkit.messageHandlers.scarfVoiceLive.postMessage(message) } catch (_) {}
 }
 
 function waitForIceGathering (pc) {
@@ -104,7 +109,7 @@ function cleanup () {
   try { if (S.channel) S.channel.close() } catch (_) {}
   try { if (S.peer) S.peer.close() } catch (_) {}
   if (S.audio) { S.audio.srcObject = null; S.audio.pause() }
-  S.peer = null; S.channel = null; S.mic = null; S.audio = null
+  S.peer = null; S.channel = null; S.mic = null; S.audio = null; S.micEnabled = true
   S.timers = []; S.contexts = []; S.lastSpeaking = false; S.lastLevel = -1
 }
 
@@ -117,9 +122,10 @@ function finish (reason) {
 }
 
 window.scarfVoiceLive = {
-  async start () {
+  async start (token) {
     if (S.peer) throw new Error('Live Voice already started')
     S.live = true
+    S.token = token
     const pc = new RTCPeerConnection()
     S.peer = pc
     S.audio = new Audio()
@@ -150,21 +156,30 @@ window.scarfVoiceLive = {
       mic.getTracks().forEach(t => t.stop())
       throw new Error('Live Voice stopped')
     }
-    S.mic = mic
-    for (const track of S.mic.getAudioTracks()) pc.addTrack(track, S.mic)
-    armMicLevel(S.mic)
-    // Register the data channel before the offer so its m-line is negotiated.
-    const channel = pc.createDataChannel('oai-events')
-    S.channel = channel
-    channel.addEventListener('open', () => { if (S.channel === channel) post({ type: 'channelOpen' }) })
-    channel.addEventListener('message', ({ data }) => { if (S.channel === channel) post({ type: 'event', data: String(data) }) })
-    channel.addEventListener('close', () => { if (S.channel === channel) finish('connection_lost') })
-    await pc.setLocalDescription(await pc.createOffer())
-    await waitForIceGathering(pc)
-    if (S.peer !== pc) throw new Error('Live Voice stopped')
-    const sdp = pc.localDescription && pc.localDescription.sdp
-    if (!sdp) throw new Error('Missing local SDP offer')
-    post({ type: 'offer', sdp })  // byte-exact: the vendor rejects a trimmed offer
+    try {
+      S.mic = mic
+      for (const track of S.mic.getAudioTracks()) {
+        track.enabled = S.micEnabled  // a mute pressed while the prompt was up
+        pc.addTrack(track, S.mic)
+      }
+      armMicLevel(S.mic)
+      // Register the data channel before the offer so its m-line is negotiated.
+      const channel = pc.createDataChannel('oai-events')
+      S.channel = channel
+      channel.addEventListener('open', () => { if (S.channel === channel) post({ type: 'channelOpen' }) })
+      channel.addEventListener('message', ({ data }) => { if (S.channel === channel) post({ type: 'event', data: String(data) }) })
+      channel.addEventListener('close', () => { if (S.channel === channel) finish('connection_lost') })
+      await pc.setLocalDescription(await pc.createOffer())
+      await waitForIceGathering(pc)
+      if (S.peer !== pc) throw new Error('Live Voice stopped')
+      const sdp = pc.localDescription && pc.localDescription.sdp
+      if (!sdp) throw new Error('Missing local SDP offer')
+      post({ type: 'offer', sdp })  // byte-exact: the vendor rejects a trimmed offer
+    } catch (error) {
+      // Anything after the mic opened: release it and the peer before failing.
+      if (S.peer === pc) { S.live = false; cleanup() }
+      throw error
+    }
   },
 
   async applyAnswer (sdp) {
@@ -179,7 +194,8 @@ window.scarfVoiceLive = {
   },
 
   setMicrophoneEnabled (enabled) {
-    if (S.mic) for (const track of S.mic.getAudioTracks()) track.enabled = !!enabled
+    S.micEnabled = !!enabled
+    if (S.mic) for (const track of S.mic.getAudioTracks()) track.enabled = S.micEnabled
   },
 
   // Swift-initiated: no 'closed' message (Swift already knows).

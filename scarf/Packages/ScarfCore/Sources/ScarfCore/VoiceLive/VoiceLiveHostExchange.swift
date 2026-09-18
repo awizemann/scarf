@@ -91,6 +91,14 @@ public enum VoiceLiveHostError: Error, Equatable, Sendable, LocalizedError {
 ///   (`audio.py:189-191`).
 /// - The script prints one `SCARF_VOICE_LIVE:{json}` line; the LAST such
 ///   line is parsed, so stray import-time prints can't corrupt it.
+/// - ValueError means "no key" only when its message says so: the no-key
+///   raise (`voice_live.py:171-172`) is the only one before the vendor call,
+///   but a 2xx with an unreadable body raises `JSONDecodeError` /
+///   `UnicodeDecodeError` (both ValueErrors) from `:182` AFTER the session
+///   may exist — that is a vendor error, never "nothing was charged".
+/// - `python -c` puts the working directory first on `sys.path`, so the
+///   script `cd /`s first: a `~/tools/` over SSH must not shadow Hermes's
+///   `tools` package.
 /// - Hermes logs the vendor body at WARNING (`voice_live.py:185`) and that
 ///   body can echo a masked key, so the script disables logging and redacts
 ///   `sk-…` / `Bearer …` / `ek_…` before printing; ``redact(_:)`` repeats it
@@ -160,6 +168,7 @@ public struct VoiceLiveHostExchange: VoiceLiveSessionExchanging {
         export \(HermesConfigReader.pathPrelude)
         \(HermesPythonDiscovery.shellLines(hermesBinary: hermesBinary, errorMarker: errorMarker))
         export HERMES_HOME=\(HermesProfileScope.shellQuotePath(hermesHome))
+        cd / || exit 3
         "$py" -c '\(pythonBody)' <<'SCARF_JSON'
         \(requestJSON)
         SCARF_JSON
@@ -200,7 +209,11 @@ public struct VoiceLiveHostExchange: VoiceLiveSessionExchanging {
         try:
             res = vl.create_webrtc_session(sdp, history)
         except ValueError as exc:
-            return fail("no_key", exc)
+            if isinstance(exc, (json.JSONDecodeError, UnicodeError)):
+                return fail("vendor", "unreadable response")
+            if "API key" in str(exc):
+                return fail("no_key", exc)
+            return fail("internal", exc)
         except RuntimeError as exc:
             m = re.search(r"\((\d{3})\)", str(exc))
             return fail("vendor", exc, int(m.group(1)) if m else None)

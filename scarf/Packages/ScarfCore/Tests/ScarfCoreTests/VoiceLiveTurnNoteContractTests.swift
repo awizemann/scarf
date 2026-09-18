@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CryptoKit
 @testable import ScarfCore
 
 /// Contract: a Live Voice turn is sent over ACP as
@@ -40,6 +41,17 @@ import Foundation
         #expect(blocks[1]["type"] as? String == "image")
         #expect(blocks[1]["data"] as? String == "AAAA")
         #expect(blocks[1]["mimeType"] as? String == "image/png")
+    }
+
+    /// Pins the vendored note byte-for-byte even where no tag checkout
+    /// exists (CI): the SHA-256 of `VOICE_LIVE_TURN_NOTE` at
+    /// `tools/voice_live.py:73-81` @ v2026.9.14, computed from the tagged
+    /// file (`git show "v2026.9.14:tools/voice_live.py"`, literal parsed with
+    /// Python's `ast`). A Hermes release audit that refreshes the note
+    /// updates this.
+    @Test func vendoredNoteHashMatchesTheTag() {
+        let digest = SHA256.hash(data: Data(VoiceLiveTurnNote.note.utf8)).map { String(format: "%02x", $0) }.joined()
+        #expect(digest == "4daa3902ecfe6c7d3531b1f19887eafa6d7b06d5e78c208506b2448e0a9899c5")
     }
 
     @Test func emptyContextIsTheBareNote() {
@@ -118,23 +130,11 @@ enum HermesTagCheckout {
 
     static func runPython(_ script: String, stdin: Data) throws -> String {
         #if os(macOS)
-        let process = Process()
-        process.executableURL = python
-        process.arguments = ["-c", script]
-        process.currentDirectoryURL = FileManager.default.temporaryDirectory
         var env = ProcessInfo.processInfo.environment
         env["HERMES_HOME"] = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-hermes-contract-\(UUID().uuidString)").path
-        process.environment = env
-        let input = Pipe(), output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        input.fileHandleForWriting.write(stdin)
-        try input.fileHandleForWriting.close()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
+        let out = try ShellTestRunner.run(python.path, arguments: ["-c", script], stdin: stdin, environment: env,
+                                          currentDirectory: FileManager.default.temporaryDirectory)
+        return out.stdout.split(separator: "\n").last.map(String.init) ?? ""
         #else
         return ""
         #endif

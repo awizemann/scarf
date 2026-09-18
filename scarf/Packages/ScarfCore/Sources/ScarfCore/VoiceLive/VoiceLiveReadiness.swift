@@ -68,7 +68,7 @@ public enum VoiceLiveAvailability: Sendable, Equatable {
 /// `hasGPTLiveVoice` (Hermes ≥ 0.21.3) AND the parsed
 /// `voice.voice_chat_mode` is gpt-live. No host status probe: whether an
 /// OpenAI key resolves on the host is discovered when a session starts, and
-/// the no-key answer (``VoiceLiveHostError/noKey(_:)``) happens before the
+/// the no-key answer (``VoiceLiveHostError/noKey``) happens before the
 /// vendor is ever called, so it costs nothing.
 public enum VoiceLiveReadiness {
     public static func availability(

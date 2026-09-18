@@ -38,6 +38,11 @@ public protocol VoiceConversationEngine: AnyObject, Observable {
     func end(reason: VoiceSessionEndReason)
     /// End NOW, without waiting: window close, session/server switch, app
     /// quit or backgrounding. Tries to tell the vendor, then tears down.
+    /// Hosts MUST call this on every teardown path (the engine can't clean
+    /// up in `deinit`). On iOS, call it inside a `beginBackgroundTask` when
+    /// the scene leaves `.active`: the close and teardown are asynchronous
+    /// WebKit calls and must run before the web process is suspended, or the
+    /// vendor keeps billing until its own timeout (not device-verified).
     func endImmediately(reason: VoiceSessionEndReason)
     func toggleMute()
 }
@@ -97,7 +102,9 @@ public struct VoiceTurnReply: Sendable, Equatable {
     /// Helper for hosts backed by `RichChatViewModel`: the assistant text
     /// after the LAST user message in `messages`, provided that message is
     /// the voice turn's (its content equals `prompt`). `nil` until the voice
-    /// turn's bubble exists and some assistant text has arrived.
+    /// turn's bubble exists and some assistant text has arrived. Matching is
+    /// by text, so the host must append the bubble before its first `await`
+    /// in `submitVoiceTurn` (see ``VoiceTurnHost``).
     public static func latest(
         in messages: [HermesMessage],
         forPrompt prompt: String,
@@ -136,13 +143,19 @@ public protocol VoiceTurnHost: AnyObject {
     /// synthesize into `.promptComplete` as for typed turns). Throw only if
     /// the turn could not be sent (no session, not connected). The engine
     /// never submits while `isVoiceTurnBusy`; it cancels first.
+    ///
+    /// Append the user bubble BEFORE the first `await`: until it exists,
+    /// ``VoiceTurnReply/latest(in:forPrompt:isStreaming:)`` would match a
+    /// previous turn with the same words and speak its old answer.
     func submitVoiceTurn(_ request: VoiceTurnRequest) async throws
 
     /// Cancel the running turn (`ACPClient.cancel`) and return only once its
     /// `sendPrompt` has RETURNED. Hermes queues a prompt that arrives while
     /// a turn runs as text only and drops the voice note
     /// (`acp_adapter/server.py:696-715` @ v2026.9.14), so a superseding
-    /// voice turn must wait for this.
+    /// voice turn must wait for this. (Hermes also remembers the cancelled
+    /// text and attaches it to the chat's next TYPED prompt — see
+    /// `ACPClient.sendPrompt(sessionId:text:images:contextNotes:)`.)
     func cancelActiveVoiceTurn() async
 
     /// The reply to `requestID` so far, or `nil` before any assistant text

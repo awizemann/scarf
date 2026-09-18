@@ -158,6 +158,24 @@ import Foundation
         }
     }
 
+    /// A 2xx whose body isn't JSON raises JSONDecodeError — a ValueError —
+    /// from `voice_live.py:182`, AFTER the vendor may have created the
+    /// session: it must never read as "no key, nothing charged".
+    @Test func realScriptMapsAnUnreadableVendorBodyToVendorNotNoKey() throws {
+        #expect(throws: VoiceLiveHostError.vendor(status: nil, detail: "unreadable response")) {
+            try FakeHermes(mode: "unreadable").run(offer: Self.offer)
+        }
+    }
+
+    @Test func realScriptMapsOtherValueErrorsToInternal() throws {
+        do {
+            _ = try FakeHermes(mode: "badurl").run(offer: Self.offer)
+            Issue.record("expected a throw")
+        } catch VoiceLiveHostError.hostInternal(let detail) {
+            #expect(detail.contains("unknown url type"))
+        }
+    }
+
     @Test func realScriptReportsUnsupportedWhenTheModuleIsMissing() throws {
         #expect(throws: VoiceLiveHostError.unsupported) { try FakeHermes(mode: "missing").run(offer: Self.offer) }
     }
@@ -190,7 +208,7 @@ import Foundation
                 try fm.createDirectory(at: pkg, withIntermediateDirectories: true)
                 try Self.write(pkg.appendingPathComponent("__init__.py"), "")
                 try Self.write(pkg.appendingPathComponent("voice_live.py"), """
-                import os, urllib.error
+                import json, os, urllib.error
                 def create_webrtc_session(sdp_offer, history=None):
                     open(\(pyString(seenOffer.path)), "w", newline="").write(sdp_offer)
                     open(\(pyString(seenHome.path)), "w").write(os.environ.get("HERMES_HOME", ""))
@@ -201,6 +219,10 @@ import Foundation
                         raise RuntimeError("GPT-Live session creation failed (401): Incorrect API key provided: sk-proj-abcd****wxyz")
                     if mode == "network":
                         raise urllib.error.URLError("timed out")
+                    if mode == "unreadable":
+                        return json.loads("<html>gateway</html>")
+                    if mode == "badurl":
+                        raise ValueError("unknown url type: 'htps://api.openai.com/v1/live/sessions'")
                     return {"session": {"id": "sess_fake"}, "transport": {"type": "webrtc", "sdp": "v=0\\r\\nanswer\\r\\n"}}
                 """)
             }
@@ -213,20 +235,8 @@ import Foundation
                 hermesBinary: root.appendingPathComponent("venv/bin/hermes").path,
                 hermesHome: home.path,
                 requestJSON: VoiceLiveHostExchange.requestJSON(offerSDP: offer, history: [VoiceLiveHistoryMessage(role: .user, text: "hi")]))
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", script]
-            let out = Pipe(), err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            try process.run()
-            let stdout = out.fileHandleForReading.readDataToEndOfFile()
-            let stderr = err.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return try VoiceLiveHostExchange.parse(
-                stdout: String(decoding: stdout, as: UTF8.self),
-                stderr: String(decoding: stderr, as: UTF8.self),
-                exitCode: process.terminationStatus)
+            let out = try ShellTestRunner.run(arguments: ["-c", script])
+            return try VoiceLiveHostExchange.parse(stdout: out.stdout, stderr: out.stderr, exitCode: out.status)
         }
 
         private func pyString(_ s: String) -> String {
