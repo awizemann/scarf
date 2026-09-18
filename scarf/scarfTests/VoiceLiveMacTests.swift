@@ -224,6 +224,24 @@ import ScarfCore
         #expect(vm.voiceTurnReply(for: "d1")?.isStreaming == true)
     }
 
+    /// P4 follow-up (464c8ca2): a turn that superseded a cancelled one goes
+    /// text-only, so Hermes consumes the interrupted prompt.
+    @Test @MainActor func supersedingTurnIsSentTextOnly() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-x")
+        let vm = await Self.connectedChat(home: home, channel: channel)
+        try await vm.submitVoiceTurn(VoiceTurnRequest(
+            id: "d2", prompt: "no, friday", context: "User: no, friday", supersedesCancelledTurn: true
+        ))
+        let sent = await Self.waitUntil { await !channel.promptPayloads.isEmpty }
+        #expect(sent)
+        let blocks = await channel.promptPayloads.first ?? []
+        #expect(blocks.count == 1)
+        #expect(blocks.first?["type"] as? String == "text")
+        #expect(blocks.first?["text"] as? String == "no, friday")
+    }
+
     @Test @MainActor func cancelReturnsOnlyAfterTheRunningTurnReturned() async throws {
         let home = try Self.configuredHome()
         defer { home.cleanup() }
