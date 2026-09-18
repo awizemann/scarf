@@ -38,6 +38,9 @@ let package = Package(
         .target(
             name: "ScarfCore",
             path: "Sources/ScarfCore",
+            // Live Voice's media page, served to a WKWebView from the
+            // `scarf-voice://` scheme (WebViewVoiceMediaBridge).
+            resources: [.copy("VoiceLive/Resources/voice-live.html")],
             swiftSettings: [
                 // Swift 5 language mode mirrors the Mac app target's
                 // `SWIFT_VERSION = 5.0` build setting. Moving to strict
