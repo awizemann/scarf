@@ -96,6 +96,11 @@ public struct MiniAppGrantSigner: Sendable {
         self.keyUnavailableForTesting = keyUnavailableForTesting
     }
 
+    /// Test-only introspection, forwarded from `ProjectConfigKeychain`: did
+    /// this signer's key store resolve to the in-memory seam rather than
+    /// the real Keychain? See the guard test in `KeychainTestSeamGuardTests`.
+    var isBackedByInMemoryStoreForTesting: Bool { keychain.isBackedByInMemoryStoreForTesting }
+
     /// The tag for a grant, or `nil` when it cannot be produced.
     ///
     /// `nil` collapses two very different situations, which is why every
