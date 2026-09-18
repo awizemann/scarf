@@ -13,6 +13,10 @@ struct VoiceTab: View {
     /// via the same defaults key.
     @AppStorage(MessageSpeechService.engineKey) private var playbackEngine = "system"
 
+    /// This Mac's Live Voice consents (F4). Device-local, not a Hermes key.
+    private let consent = VoiceDataConsentStore.shared
+    @State private var reviewingConsent: VoiceDataRecipient?
+
     private var playbackEngineOptions: [(id: String, label: String)] {
         [
             ("system", String(localized: "System Voice")),
@@ -214,8 +218,14 @@ struct VoiceTab: View {
                     guard let mode = VoiceChatMode(rawValue: raw) else { return }
                     viewModel.setVoiceChatMode(mode, capabilities: capabilities)
                 }
-                .help("Hermes's voice.voice_chat_mode. GPT-Live turns on the Live Voice button in the chat composer.")
+                .help("Hermes's voice.voice_chat_mode, for the whole Hermes profile. GPT-Live turns on the Live Voice button in the chat composer, and also switches voice in Hermes's own apps.")
                 liveVoiceNote
+                if let recipient = VoiceChatMode.gptLive.externalRecipient {
+                    consentRow(recipient)
+                }
+            }
+            .sheet(item: $reviewingConsent) { recipient in
+                VoiceLiveConsentSheet(recipient: recipient, mode: .review)
             }
         }
 
@@ -237,11 +247,36 @@ struct VoiceTab: View {
         }
     }
 
-    /// What GPT-Live needs and costs, under the mode picker.
+    /// This Mac's consent to send Live Voice data to `recipient`: review
+    /// the wording, or reset it so the next session asks again.
+    private func consentRow(_ recipient: VoiceDataRecipient) -> some View {
+        LabeledSettingsRow(label: "Privacy Consent") {
+            Group {
+                if let date = consent.consentDate(for: recipient) {
+                    Text("Accepted on this Mac, \(date.formatted(date: .abbreviated, time: .omitted))")
+                } else {
+                    Text("Not accepted on this Mac. Scarf asks before the first session.")
+                }
+            }
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            Spacer()
+            Button("Review…") { reviewingConsent = recipient }
+                .buttonStyle(ScarfGhostButton())
+            Button("Reset") { consent.resetConsent(for: recipient) }
+                .buttonStyle(ScarfGhostButton())
+                .disabled(!consent.hasConsented(to: recipient))
+                .help("Forget this Mac's consent. Scarf asks again before the next Live Voice session.")
+        }
+    }
+
+    /// What GPT-Live needs, sends and costs, under the mode picker.
     private var liveVoiceNote: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Chained, Hermes's default, turns speech into text, runs a normal turn, and reads the reply aloud. GPT-Live lets you talk with Hermes from the chat composer: an OpenAI voice model listens and speaks, and hands each request to Hermes as a normal chat turn.")
+            Text("With GPT-Live, your voice streams directly from this Mac to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this Mac's network address. Each session also shares recent messages from the chat with OpenAI for context.")
             Text("It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY in its .env, or voice.gpt_live.api_key) and bills that key about $0.05 per minute of session time. Sessions end on their own after \(Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())) minutes without speech.")
+            Text("This mode is a Hermes setting for the whole profile, not just Scarf: it also switches voice in Hermes's own apps.")
         }
         .scarfStyle(.caption)
         .foregroundStyle(ScarfColor.foregroundMuted)

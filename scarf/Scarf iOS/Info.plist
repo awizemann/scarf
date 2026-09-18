@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>ScarfGo uses the microphone while you hold the dictate button, to record a short memo it transcribes on this device, and during a Live Voice session you start, when your voice is streamed to OpenAI through your Hermes server.</string>
+	<string>ScarfGo uses the microphone for dictation, which it transcribes on this device, and for Live Voice sessions you start, which stream your voice directly from this device to OpenAI.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>ScarfGo transcribes your dictation on this device so you can review and edit it before sending.</string>
 	<key>UILaunchScreen</key>

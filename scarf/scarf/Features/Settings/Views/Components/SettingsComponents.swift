@@ -353,6 +353,26 @@ struct ReadOnlyRow: View {
     }
 }
 
+/// The standard label and row chrome around custom content (status text
+/// plus buttons, say) that no typed row covers.
+struct LabeledSettingsRow<Content: View>: View {
+    private let rowLabel: SettingsRowLabel
+    private let content: Content
+
+    init(label: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.rowLabel = SettingsRowLabel(label: label)
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: ScarfSpace.s2) {
+            rowLabel
+            content
+        }
+        .settingsRowChrome()
+    }
+}
+
 struct PathRow: View {
     let label: LocalizedStringKey
     let path: String

@@ -63,14 +63,31 @@ final class VoiceLiveController {
     /// second window can't slip a start into that gap, and an end in it
     /// cancels the start instead of being lost on an idle engine.
     private(set) var isStartPending = false
+    /// A start is waiting for the user to agree to send their data to this
+    /// recipient (the consent sheet is up). Nothing is built or billed until
+    /// ``acceptConsent()``; ``declineConsent()`` drops the start.
+    private(set) var pendingConsent: VoiceDataRecipient?
 
     @ObservationIgnored private let makeSession: SessionFactory
     @ObservationIgnored private let registry: VoiceLiveSessionRegistry
+    @ObservationIgnored private let consent: VoiceDataConsentStore
+    /// Who the engine `makeSession` builds sends data to directly — the
+    /// consent rule's input (``VoiceDataConsent``). Travels with the
+    /// factory: the production factory is GPT-Live, so the default is its
+    /// recipient, and an engine that keeps data local passes `nil`.
+    @ObservationIgnored private let externalRecipient: VoiceDataRecipient?
     @ObservationIgnored private var startTask: Task<Void, Never>?
 
-    init(makeSession: SessionFactory? = nil, registry: VoiceLiveSessionRegistry? = nil) {
+    init(
+        makeSession: SessionFactory? = nil,
+        externalRecipient: VoiceDataRecipient? = GPTLiveEngine.externalRecipient,
+        registry: VoiceLiveSessionRegistry? = nil,
+        consent: VoiceDataConsentStore? = nil
+    ) {
         self.makeSession = makeSession ?? Self.gptLive
+        self.externalRecipient = externalRecipient
         self.registry = registry ?? .shared
+        self.consent = consent ?? .shared
     }
 
     /// A session exists and hasn't finished (connecting through ending).
@@ -87,8 +104,17 @@ final class VoiceLiveController {
     /// Start a new session in `context`'s chat. No-op while this window's
     /// session is starting or running, or while another window holds one.
     /// A finished session still on screen is replaced.
+    ///
+    /// The first start on this Mac for an engine that sends data to a third
+    /// party only raises ``pendingConsent`` (the consent sheet); the caller
+    /// starts again after ``acceptConsent()``.
     func start(context: ServerContext, host: any VoiceTurnHost) {
         guard !holdsSession, !isBlockedByAnotherWindow else { return }
+        if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient, store: consent) {
+            pendingConsent = recipient
+            return
+        }
+        pendingConsent = nil
         // GPT-Live owns the speaker: silence any message being read aloud.
         // (The Mac has no auto-speak, so there is nothing else to mute.)
         MessageSpeechService.shared.stop()
@@ -110,6 +136,20 @@ final class VoiceLiveController {
         }
     }
 
+    /// Continue on the consent sheet: remember the consent on this Mac.
+    /// The caller then starts the session (`ChatViewModel.acceptVoiceLiveConsent`).
+    func acceptConsent() {
+        guard let recipient = pendingConsent else { return }
+        pendingConsent = nil
+        consent.recordConsent(to: recipient)
+    }
+
+    /// Cancel on the consent sheet: nothing starts, nothing is billed, and
+    /// the next start asks again.
+    func declineConsent() {
+        pendingConsent = nil
+    }
+
     /// End gracefully: GPT-Live closes the vendor session and waits for its
     /// billed seconds. The panel stays up to show the result.
     func end() {
@@ -120,6 +160,8 @@ final class VoiceLiveController {
     /// End now, without waiting: window close, session/server/profile
     /// switch, leaving the chat, app quit. Safe to call at any time.
     func endImmediately() {
+        // Leaving the chat takes an unanswered consent sheet with it.
+        pendingConsent = nil
         if cancelPendingStart() { return }
         engine?.endImmediately(reason: .userEnded)
     }

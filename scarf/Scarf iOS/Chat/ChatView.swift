@@ -60,6 +60,10 @@ struct ChatView: View {
     /// audio session and every teardown path. The entry is rendered only
     /// when `VoiceLiveReadiness` says `.ready` (charter C1).
     @State private var voiceLive: VoiceLiveSessionModel
+    /// Continue was tapped on the Live Voice consent: start once the
+    /// consent sheet has gone (iOS can't present the session sheet while
+    /// another is still dismissing).
+    @State private var startLiveVoiceAfterConsent = false
 
     private static let maxAttachments = 5
 
@@ -346,6 +350,24 @@ struct ChatView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        // The one-time Live Voice consent (F4). Cancel or a swipe down
+        // starts nothing and bills nothing.
+        .sheet(item: $voiceLive.pendingConsent, onDismiss: {
+            guard startLiveVoiceAfterConsent else { return }
+            startLiveVoiceAfterConsent = false
+            startLiveVoice()
+        }) { recipient in
+            VoiceLiveConsentSheet(
+                recipient: recipient,
+                mode: .ask(
+                    onContinue: {
+                        voiceLive.acceptConsent()
+                        startLiveVoiceAfterConsent = true
+                    },
+                    onCancel: { voiceLive.declineConsent() }
+                )
+            )
         }
     }
 

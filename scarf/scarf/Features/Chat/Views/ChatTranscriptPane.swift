@@ -138,6 +138,20 @@ struct ChatTranscriptPane: View {
         // close) takes the panel — and the web view WebKit needs for audio
         // — with it, so the session ends here rather than billing unseen.
         .onDisappear { chatViewModel.voiceLive.endImmediately() }
+        // The one-time Live Voice consent (F4): raised by the first start
+        // on this Mac; Cancel starts nothing and bills nothing.
+        .sheet(item: Binding(
+            get: { chatViewModel.voiceLive.pendingConsent },
+            set: { if $0 == nil { chatViewModel.voiceLive.declineConsent() } }
+        )) { recipient in
+            VoiceLiveConsentSheet(
+                recipient: recipient,
+                mode: .ask(
+                    onContinue: { chatViewModel.acceptVoiceLiveConsent() },
+                    onCancel: { chatViewModel.voiceLive.declineConsent() }
+                )
+            )
+        }
         .background(ScarfColor.backgroundPrimary)
         .task(id: chatViewModel.currentProjectPath ?? "") {
             // Resolve the project's tenant once per project change.

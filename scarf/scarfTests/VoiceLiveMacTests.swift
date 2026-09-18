@@ -147,12 +147,26 @@ import ScarfCore
         return home
     }
 
+    /// A consent store over a throwaway defaults suite (never the real
+    /// one). `accepted` pre-records the OpenAI consent, so the lifecycle
+    /// tests start sessions without the sheet.
+    @MainActor
+    static func consentStore(accepted: Bool = true) -> VoiceDataConsentStore {
+        let suite = "scarf.tests.voiceLiveMac.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = VoiceDataConsentStore(defaults: defaults)
+        if accepted { store.recordConsent(to: .openAI) }
+        return store
+    }
+
     /// A chat VM whose Live Voice controller builds `FakeEngine`s. Each test
     /// gets its own session registry, so no test sees another's session.
     @MainActor
     static func chat(
         context: ServerContext,
         registry: VoiceLiveSessionRegistry? = nil,
+        consent: VoiceDataConsentStore? = nil,
         engines: @escaping (FakeEngine) -> Void = { _ in }
     ) -> ChatViewModel {
         let registry = registry ?? VoiceLiveSessionRegistry()
@@ -160,7 +174,7 @@ import ScarfCore
             let engine = FakeEngine()
             engines(engine)
             return VoiceLiveController.Session(engine: engine, bridge: nil)
-        }, registry: registry)
+        }, registry: registry, consent: consent ?? consentStore())
         return ChatViewModel(context: context, voiceLive: controller)
     }
 
@@ -168,11 +182,15 @@ import ScarfCore
     @MainActor
     static func controller(
         _ engine: FakeEngine,
-        registry: VoiceLiveSessionRegistry? = nil
+        registry: VoiceLiveSessionRegistry? = nil,
+        externalRecipient: VoiceDataRecipient? = .openAI,
+        consent: VoiceDataConsentStore? = nil
     ) -> VoiceLiveController {
         VoiceLiveController(
             makeSession: { _, _ in .init(engine: engine, bridge: nil) },
-            registry: registry ?? VoiceLiveSessionRegistry()
+            externalRecipient: externalRecipient,
+            registry: registry ?? VoiceLiveSessionRegistry(),
+            consent: consent ?? consentStore()
         )
     }
 
@@ -181,9 +199,10 @@ import ScarfCore
     static func connectedChat(
         home: TempHermesHome,
         channel: VoiceScriptedChannel,
+        consent: VoiceDataConsentStore? = nil,
         engines: @escaping (FakeEngine) -> Void = { _ in }
     ) async -> ChatViewModel {
-        let vm = chat(context: home.context, engines: engines)
+        let vm = chat(context: home.context, consent: consent, engines: engines)
         vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in channel } }
         vm.startNewSession()
         _ = await waitUntil { vm.acpStatus == ChatViewModel.ACPPhase.ready }
@@ -642,8 +661,137 @@ import ScarfCore
         #expect(!VoiceLivePresentation.failure(.connectionLost).offersMicrophoneSettings)
         let vendor = VoiceLivePresentation.failure(.host(.vendor(status: 500, detail: "upstream")))
         #expect(vendor.message.contains("500"))
-        #expect(vendor.detail == "upstream")
-        #expect(VoiceLivePresentation.failure(.host(.vendor(status: 401, detail: ""))).detail == nil)
+    }
+
+    /// F4: the vendor's (or host's) raw detail is logged, never shown. No
+    /// field of the copy the panel renders may carry it.
+    @Test func failureCopyNeverCarriesTheRawDetail() {
+        let marker = "RAW-VENDOR-DETAIL"
+        let failures: [VoiceSessionFailure] = [
+            .host(.vendor(status: 500, detail: marker)), .host(.vendor(status: nil, detail: marker)),
+            .host(.interpreterNotFound(detail: marker)), .host(.badRequest(detail: marker)),
+            .host(.hostInternal(detail: marker)), .host(.malformedOutput(detail: marker)),
+            .mediaUnavailable(detail: marker), .audioConnectFailed(detail: marker),
+            .closedByVendor(reason: marker, usageSeconds: 12),
+        ]
+        for failure in failures {
+            let copy = VoiceLivePresentation.failure(failure)
+            let shown = Mirror(reflecting: copy).children.compactMap { child -> String? in
+                if let text = child.value as? String { return text }
+                if let text = child.value as? String? { return text }
+                return nil
+            }
+            #expect(!shown.isEmpty)
+            #expect(!shown.contains { $0.contains(marker) }, "\(failure) shows its raw detail")
+        }
+    }
+
+    // MARK: - F4: consent before the first session
+
+    @Test @MainActor func theFirstStartAsksForConsentAndStartsNothing() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let channel = VoiceScriptedChannel(sessionId: "sess-c1")
+        var engines: [FakeEngine] = []
+        let consent = Self.consentStore(accepted: false)
+        let vm = await Self.connectedChat(home: home, channel: channel, consent: consent) { engines.append($0) }
+        defer { vm.stopACP() }
+
+        vm.startVoiceLive()
+        #expect(vm.voiceLive.pendingConsent == .openAI)
+        #expect(engines.isEmpty, "a session was built before consent")
+        #expect(vm.voiceLive.engine == nil)
+        #expect(!vm.voiceLive.holdsSession)
+
+        // Continue: remembered, and the session starts.
+        vm.acceptVoiceLiveConsent()
+        #expect(vm.voiceLive.pendingConsent == nil)
+        #expect(consent.hasConsented(to: .openAI))
+        let started = await Self.waitUntil { engines.first?.starts == 1 }
+        #expect(started)
+    }
+
+    @Test @MainActor func cancelOnTheConsentStartsNothingAndAsksAgain() async {
+        let engine = FakeEngine()
+        let consent = Self.consentStore(accepted: false)
+        let controller = Self.controller(engine, consent: consent)
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(controller.pendingConsent == .openAI)
+
+        controller.declineConsent()
+        #expect(controller.pendingConsent == nil)
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(engine.starts == 0)
+        #expect(controller.engine == nil)
+        #expect(!consent.hasConsented(to: .openAI))
+        // Not remembered: the next start asks again.
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(controller.pendingConsent == .openAI)
+        #expect(controller.engine == nil)
+    }
+
+    @Test @MainActor func consentIsRememberedUntilReset() async {
+        let consent = Self.consentStore(accepted: false)
+        let first = FakeEngine()
+        let window = Self.controller(first, consent: consent)
+        window.start(context: .local, host: ChatViewModel(context: .local))
+        window.acceptConsent()
+
+        // Another window (or a relaunch) over the same store: no sheet.
+        let second = FakeEngine()
+        let other = Self.controller(second, consent: consent)
+        other.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(other.pendingConsent == nil)
+        let started = await Self.waitUntil { second.starts == 1 }
+        #expect(started)
+        other.dismiss()
+
+        // Settings › Reset: the next start asks again.
+        consent.resetConsent(for: .openAI)
+        let third = FakeEngine()
+        let again = Self.controller(third, consent: consent)
+        again.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(again.pendingConsent == .openAI)
+        #expect(again.engine == nil)
+    }
+
+    /// Consent is per recipient: agreeing to OpenAI doesn't cover another.
+    @Test @MainActor func consentIsPerRecipient() {
+        let consent = Self.consentStore(accepted: true)
+        let acme = VoiceDataRecipient(id: "acme", displayName: "Acme", disclosureVersion: 1)
+        let controller = Self.controller(FakeEngine(), externalRecipient: acme, consent: consent)
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(controller.pendingConsent == acme)
+        #expect(controller.engine == nil)
+    }
+
+    /// An engine that sends nothing to a third party starts without asking.
+    @Test @MainActor func anEngineWithNoExternalRecipientNeverAsks() async {
+        let engine = FakeEngine()
+        let controller = Self.controller(engine, externalRecipient: nil, consent: Self.consentStore(accepted: false))
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        #expect(controller.pendingConsent == nil)
+        let started = await Self.waitUntil { engine.starts == 1 }
+        #expect(started)
+    }
+
+    /// Leaving the chat takes an unanswered consent sheet with it.
+    @Test @MainActor func leavingTheChatDropsAPendingConsent() {
+        let controller = Self.controller(FakeEngine(), consent: Self.consentStore(accepted: false))
+        controller.start(context: .local, host: ChatViewModel(context: .local))
+        controller.endImmediately()
+        #expect(controller.pendingConsent == nil)
+    }
+
+    @Test func theConsentSaysWhatLeavesTheMac() {
+        let points = VoiceLiveConsentCopy.points(.openAI).joined(separator: " ")
+        #expect(points.contains("directly"))
+        #expect(points.contains("network address"))
+        #expect(points.contains("24"))
+        #expect(points.contains("0.05"))
+        #expect(points.contains("whole profile"))
+        #expect(!points.contains("through the host"))
     }
 
     @Test func endedCopyExplainsTheAutomaticEnds() {
