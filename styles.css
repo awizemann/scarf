@@ -568,6 +568,23 @@ section {
   background: var(--accent);
 }
 
+.ios-cta { margin: 0 0 var(--s3) 0; }
+.appstore-badge {
+  display: inline-block;
+  line-height: 0;
+  border-radius: 8px;
+  transition: opacity .15s ease;
+}
+.appstore-badge:hover { opacity: .85; }
+.appstore-badge img { height: 48px; width: auto; }
+.ios-beta {
+  margin: 0 0 var(--s7) 0;
+  color: var(--fg-muted);
+  font-size: 15px;
+}
+.download-card .ios-cta { margin-top: var(--s5); }
+.download-card .ios-beta { margin-bottom: 0; }
+
 .ios-gallery {
   display: flex;
   gap: var(--s3);
