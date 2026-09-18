@@ -57,7 +57,7 @@ struct VoiceTab: View {
                     playbackEngineOptions.first { $0.id == id }?.label ?? id
                 }
             ) { playbackEngine = $0 }
-                .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider (kokoro loads for a few seconds on first use) and falls back to the system voice when the server can't synthesize.")
+                .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider and falls back to the system voice when the server can't synthesize.")
             PickerRow(
                 label: "Provider",
                 selection: viewModel.config.voice.ttsProvider,
@@ -75,17 +75,6 @@ struct VoiceTab: View {
             case "openai":
                 EditableTextField(label: "Model", value: viewModel.config.voice.ttsOpenAIModel) { viewModel.setTTSOpenAIModel($0) }
                 PickerRow(label: "Voice", selection: viewModel.config.voice.ttsOpenAIVoice, options: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]) { viewModel.setTTSOpenAIVoice($0) }
-            case "kokoro":
-                // Local Kokoro via the hermes-s2s plugin. Hermes Voice
-                // synthesizes through the venv named by `tts.kokoro.python`
-                // (below) rather than the orchestrator — see
-                // HermesSpeechService for why. Voice/lang/speed mirror the
-                // plugin's own `make_kokoro` defaults.
-                EditableTextField(label: "Voice", value: viewModel.config.voice.ttsKokoroVoice) { viewModel.setTTSKokoroVoice($0) }
-                DoubleStepperRow(label: "Speed", value: viewModel.config.voice.ttsKokoroSpeed, range: 0.5...2.0, step: 0.05) { viewModel.setTTSKokoroSpeed($0) }
-                EditableTextField(label: "Lang Code", value: viewModel.config.voice.ttsKokoroLangCode) { viewModel.setTTSKokoroLangCode($0) }
-                EditableTextField(label: "Python", value: viewModel.config.voice.ttsKokoroPython) { viewModel.setTTSKokoroPython($0) }
-                    .help("Path to the venv python with kokoro + soundfile installed (hermes-s2s external synthesis). Empty uses <hermes home>/kokoro-venv/bin/python.")
             case "neutts":
                 EditableTextField(label: "Model", value: viewModel.config.voice.ttsNeuTTSModel) { viewModel.setTTSNeuTTSModel($0) }
                 PickerRow(label: "Device", selection: viewModel.config.voice.ttsNeuTTSDevice, options: ["cpu", "cuda"]) { viewModel.setTTSNeuTTSDevice($0) }
