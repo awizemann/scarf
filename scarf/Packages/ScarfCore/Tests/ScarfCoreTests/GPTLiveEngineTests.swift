@@ -339,10 +339,34 @@ import Foundation
         await settle { host.submitted.count == 2 }
         #expect(host.log == ["submit d1", "cancel begin", "cancel end", "submit d2"])
         #expect(host.submitted.last?.prompt == "book the dentist friday no, thursday")
+        // The first turn carries the voice note; the superseding one goes
+        // text-only so Hermes consumes the cancelled request (server.py:680-693).
+        #expect(host.submitted.first?.supersedesCancelledTurn == false)
+        #expect(host.submitted.first?.contextNotes.count == 1)
+        #expect(host.submitted.last?.supersedesCancelledTurn == true)
+        #expect(host.submitted.last?.contextNotes.isEmpty == true)
         // d1's late reply is never spoken for d2.
         host.replies["d1"] = VoiceTurnReply(text: "Booked Friday.", isStreaming: false)
         advance(0.2)
         #expect(bridge.spoken().isEmpty)
+    }
+
+    /// Only a turn that CANCELLED another is text-only: a delegation after
+    /// the previous turn finished on its own keeps the note.
+    @Test func aTurnAfterAFinishedTurnKeepsTheNote() async {
+        await goLive()
+        user("first")
+        delegate("d1")
+        await settle { host.submitted.count == 1 }
+        host.isVoiceTurnBusy = false
+        host.replies["d1"] = VoiceTurnReply(text: "Done.", isStreaming: false)
+        advance(0.2)
+        user(" second", at: 5_000)
+        delegate("d2")
+        await settle { host.submitted.count == 2 }
+        #expect(!host.log.contains("cancel begin"))
+        #expect(host.submitted.last?.supersedesCancelledTurn == false)
+        #expect(host.submitted.last?.contextNotes.count == 1)
     }
 
     @Test func aSubmitFailureApologisesAndSettles() async {

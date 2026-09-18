@@ -237,20 +237,26 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     // MARK: - ServerTransport: script streaming
 
-    /// Pipe `script` to `/bin/sh -s` over Citadel's exec channel.
+    /// Run `script` on the remote by writing it to the exec channel's STDIN.
     ///
-    /// **Why base64.** Citadel's `executeCommandStream` doesn't expose
-    /// stdin in the version we're on, so we can't just open `sh -s` and
-    /// write the script. Instead we encode the script as base64, decode
-    /// it on the remote inline, and pipe the result into `sh`:
+    /// The command line is only
     ///
-    ///     printf '%s' '<b64>' | base64 -d | /bin/sh
+    ///     PATH=… head -c <byte count> | /bin/sh
     ///
-    /// `base64 -d` is universally available on Linux/macOS. The base64
-    /// blob travels as a single shell-safe argv token, so multi-line
-    /// scripts with `"$VAR"` references and nested quotes survive
-    /// untouched — same correctness guarantee as `SSHScriptRunner`'s
-    /// stdin-pipe approach.
+    /// and the script bytes follow on stdin. Nothing of the script is in any
+    /// remote process's argv, so nothing in it (a Live Voice SDP offer with
+    /// its ICE credentials, the text of a message being spoken) is visible
+    /// in the host's `ps` while it runs. This replaced
+    /// `printf '%s' '<base64 script>' | base64 -d | /bin/sh`, which put the
+    /// whole script in the login shell's argv for the script's lifetime.
+    ///
+    /// **Why `head -c`, not `sh -s`.** Citadel 0.12's `TTYStdinWriter` can
+    /// write but cannot send EOF (it has only `write` and `changeSize`,
+    /// `Citadel/TTY/Client/TTY.swift:75-94`), so a shell reading the channel
+    /// directly would wait for more script forever. `head -c N` reads exactly
+    /// the script, exits, and so hands `/bin/sh` the EOF the channel can't.
+    /// Commands in the script see an already-drained pipe on stdin, as they
+    /// did before. `head -c` is in GNU coreutils, BSD/macOS and BusyBox.
     public func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
         try await ScarfMon.measureAsync(.transport, "ssh.streamScript") {
             try await _streamScriptImpl(script, timeout: timeout)
@@ -259,20 +265,21 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func _streamScriptImpl(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
         let scriptBytes = Data(script.utf8)
-        let b64 = scriptBytes.base64EncodedString()
-        // Prepend the same PATH guard that `asyncRunProcess` uses so
-        // base64 + sh resolve on hosts where they live in non-default
-        // prefixes. Most distros have base64 in /usr/bin but
-        // homebrew-installed coreutils in /opt/homebrew/bin would
-        // otherwise be invisible from a stripped-PATH exec channel.
-        let cmd = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
-            + "printf '%s' '\(b64)' | base64 -d | /bin/sh"
-        return try await runScript(cmd, timeout: timeout)
+        let cmd = Self.streamScriptCommand(byteCount: scriptBytes.count)
+        return try await runScript(cmd, stdin: scriptBytes, timeout: timeout)
     }
 
-    private func runScript(_ cmd: String, timeout: TimeInterval) async throws -> ProcessResult {
+    /// The exec command for a script of `byteCount` bytes sent on stdin.
+    /// Same PATH guard `asyncRunProcess` uses, so `head` and `sh` resolve on
+    /// hosts with a stripped exec PATH.
+    nonisolated static func streamScriptCommand(byteCount: Int) -> String {
+        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+            + "head -c \(byteCount) | /bin/sh"
+    }
+
+    private func runScript(_ cmd: String, stdin: Data? = nil, timeout: TimeInterval) async throws -> ProcessResult {
         do {
-            return try await runExec(cmd, timeout: timeout, midStream: .typedError)
+            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .typedError)
         } catch let start as ExecStartFailure {
             throw TransportError.other(
                 message: "Failed to start exec stream: \(start.underlying.localizedDescription)")
@@ -318,6 +325,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// Citadel's own docs use, and the one `SSHExecACPChannel` already drives.
     private func runExec(
         _ cmd: String,
+        stdin: Data? = nil,
         timeout: TimeInterval,
         midStream: MidStreamFailure
     ) async throws -> ProcessResult {
@@ -325,9 +333,10 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         var started = false
         var collected: ProcessResult?
         do {
-            try await client.withExecTolerantClose(cmd) { inbound, _ in
+            try await client.withExecTolerantClose(cmd) { inbound, outbound in
                 started = true
                 let boxed = UncheckedBox(value: inbound)
+                let writer = UncheckedBox(value: outbound)
                 // The bytes the drain has accumulated SO FAR, readable from
                 // the timeout arm. Without it the two arms each built a
                 // different error: the drain's `CancellationError` catch
@@ -341,7 +350,17 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
                 let partial = PartialStdout()
                 collected = try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
                     group.addTask {
-                        try await Self.drain(
+                        // stdin goes first, inside the budget: a remote that
+                        // never reads can't hang the call past `timeout`.
+                        if let stdin, !stdin.isEmpty {
+                            do {
+                                try await writer.value.write(ByteBuffer(bytes: stdin))
+                            } catch {
+                                throw TransportError.other(
+                                    message: "Failed to send the script over SSH: \(error.localizedDescription)")
+                            }
+                        }
+                        return try await Self.drain(
                             boxed, timeout: timeout, midStream: midStream, partial: partial)
                     }
                     group.addTask {

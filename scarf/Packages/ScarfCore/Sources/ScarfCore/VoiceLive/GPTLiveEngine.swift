@@ -81,7 +81,6 @@ public final class GPTLiveEngine: VoiceConversationEngine {
 
     private struct Delegation {
         let id: String
-        let request: VoiceTurnRequest
         var submittedAt: Date?
         var observed = false
         var spokenLength = 0
@@ -294,8 +293,7 @@ public final class GPTLiveEngine: VoiceConversationEngine {
             end(reason: .stopPhrase)
             return
         }
-        let request = VoiceTurnRequest(id: id, prompt: built.prompt, context: built.context)
-        delegation = Delegation(id: id, request: request)
+        delegation = Delegation(id: id)
         apply(.delegationStarted)
 
         // Serialize cancel+submit: a delegation that is superseded while it
@@ -311,10 +309,20 @@ public final class GPTLiveEngine: VoiceConversationEngine {
                 self.settleDelegation()
                 return
             }
+            // A superseding turn goes TEXT-ONLY (Alan, 2026-09-18): Hermes's
+            // `cancel` stored the cancelled request (`server.py:617-619`)
+            // and only a text-only prompt consumes it, attaching it as
+            // "<cancelled>\n\nUser correction/guidance after interrupt: …"
+            // (`:680-693`). With the note it would leak into the next typed
+            // message instead. That one turn loses the voice note.
+            var supersedes = false
             if host.isVoiceTurnBusy {
                 await host.cancelActiveVoiceTurn()
+                supersedes = true
                 guard self.isCurrent(id, epoch: myEpoch) else { return }
             }
+            let request = VoiceTurnRequest(
+                id: id, prompt: built.prompt, context: built.context, supersedesCancelledTurn: supersedes)
             self.delegation?.submittedAt = self.clock()
             do {
                 try await host.submitVoiceTurn(request)

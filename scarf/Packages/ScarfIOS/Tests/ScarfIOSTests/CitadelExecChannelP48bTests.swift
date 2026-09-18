@@ -86,7 +86,7 @@ struct CitadelExecChannelP48bTests {
     @Test("both execs go through the single drain")
     func bothExecsShareTheDrain() throws {
         let code = Self.codeOnly(try Self.transportSource())
-        #expect(code.contains("runExec(cmd, timeout: timeout, midStream: .typedError)"))
+        #expect(code.contains("runExec(cmd, stdin: stdin, timeout: timeout, midStream: .typedError)"))
         #expect(code.contains("runExec(cmd, timeout: timeout, midStream: .exitMinusOne)"))
     }
 }

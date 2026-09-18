@@ -522,15 +522,14 @@ public actor ACPClient {
     /// v2026.9.14). Callers must cancel the running turn and await its
     /// `sendPrompt` return before submitting.
     ///
-    /// Known Hermes interaction: `cancel` stores the cancelled turn's text
-    /// as `interrupted_prompt_text` (`server.py:617-619`), and only a
-    /// TEXT-ONLY prompt consumes it (`_rewrite_prompt_for_interrupt`,
-    /// `:680-693`). A prompt with a note never does, so after a voice turn
-    /// supersedes a cancelled one, the chat's next TYPED prompt is rewritten
-    /// as "<cancelled prompt>\n\nUser correction/guidance after interrupt:
-    /// <typed text>" — in the model input and the stored row. There is no
-    /// clean client-side fix; it is raised in the upstream ACP voice-surface
-    /// request (documents/plans/2026-09-18-hermes-acp-voice-surface-request.md).
+    /// A caller that CANCELLED a turn must send its superseding prompt
+    /// WITHOUT notes: `cancel` stores the cancelled turn's text as
+    /// `interrupted_prompt_text` (`server.py:617-619`) and only a TEXT-ONLY
+    /// prompt consumes it (`_rewrite_prompt_for_interrupt`, `:680-693`),
+    /// attaching it as "<cancelled>\n\nUser correction/guidance after
+    /// interrupt: <text>". A prompt carrying a note leaves it behind for the
+    /// chat's next typed prompt. Live Voice does this via
+    /// `VoiceTurnRequest.supersedesCancelledTurn`.
     public func sendPrompt(
         sessionId: String,
         text: String,
