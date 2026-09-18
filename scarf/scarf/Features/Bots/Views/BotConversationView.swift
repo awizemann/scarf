@@ -123,7 +123,8 @@ struct BotConversationView: View {
             richChat: viewModel.chat.richChatViewModel,
             chatViewModel: viewModel.chat,
             onSend: { text, _, _ in viewModel.send(text) },
-            isEnabled: true
+            isEnabled: true,
+            allowsVoiceLive: false
         )
         // Both overrides matter. `ChatViewModel` re-points every child
         // (`MessageGroupView`, `RichMessageBubble`, the composer) at the

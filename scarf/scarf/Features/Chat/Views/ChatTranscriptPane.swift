@@ -11,6 +11,9 @@ struct ChatTranscriptPane: View {
     @Bindable var chatViewModel: ChatViewModel
     var onSend: (String, [ChatImageAttachment], ChatViewModel.ChatInputMode) -> Void
     var isEnabled: Bool
+    /// Bot Chat reuses this pane but routes its sends through the bot's
+    /// own pipeline, which voice turns would bypass: it opts out.
+    var allowsVoiceLive = true
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
 
@@ -24,6 +27,7 @@ struct ChatTranscriptPane: View {
     /// host passes the readiness gate — Hermes ≥ 0.21.3 and
     /// `voice.voice_chat_mode: gpt-live`.
     private var voiceLiveEntry: VoiceLiveComposerEntry? {
+        guard allowsVoiceLive else { return nil }
         let capabilities = capabilitiesStore?.capabilities ?? .empty
         guard chatViewModel.voiceLiveAvailability(capabilities: capabilities).isReady else { return nil }
         let isActive = chatViewModel.voiceLive.isSessionActive
