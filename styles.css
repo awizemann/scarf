@@ -377,7 +377,53 @@ section {
 .cta-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--s3);
+}
+
+/* Hero download cards — compact versions of the Download section cards */
+.hero-dl-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+}
+@media (min-width: 520px) { .hero-dl-grid { grid-template-columns: 1fr 1fr; } }
+.hero-dl-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s5);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+.hero-dl-card h3 { font-size: 18px; margin: 0; }
+.hero-dl-meta {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin: 0;
+}
+.hero-dl-btn {
+  margin-top: auto;
+  width: 144px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 var(--s3);
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.hero-dl-card .appstore-badge { margin-top: auto; }
+.hero-dl-card .appstore-badge img { height: 48px; width: auto; }
+.hero-dl-beta {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin: 0;
 }
 
 /* Hero visual — Mac window with overlapping iPhone */
