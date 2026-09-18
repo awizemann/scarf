@@ -71,6 +71,49 @@ import Foundation
         #expect(signer.isAuthentic(signed))
     }
 
+    @Test func concurrentFirstUseSignersConvergeOnOneKeyUnderRace() async throws {
+        // A fresh-eyes review of this fix flagged a real gap: unsuffixed
+        // signers (the shape `ProjectLifecycleService.cleanUpAfterRemoval`
+        // and several scarfTests actually construct) all share ONE
+        // dictionary entry in the in-memory seam, and Swift Testing runs
+        // suites in-process and in parallel by default. Before
+        // `setIfAbsent`, two signers racing `signingKey()`'s "absent ->
+        // mint -> store" on first use could each mint a DIFFERENT 32
+        // bytes and have the second `set()` silently overwrite the
+        // first — leaving the first signer's own tag unverifiable, since
+        // `isAuthentic` re-derives the key from whatever is stored NOW.
+        // This test uses a unique suffix (so it doesn't collide with
+        // other tests' use of the real default service/account) but
+        // otherwise reproduces the exact race: many freshly-constructed
+        // signers, all racing their FIRST call to `signingKey()`.
+        let suffix = "guard-race-\(UUID().uuidString)"
+        let grant = MiniAppGrant(
+            projectId: "race-project",
+            miniAppId: "race-app",
+            permissions: ["file:read"],
+            decidedAt: "2026-09-18T00:00:00Z"
+        )
+        let tags = try await withThrowingTaskGroup(of: String.self) { group in
+            for _ in 0..<64 {
+                group.addTask {
+                    let signer = MiniAppGrantSigner(testServiceSuffix: suffix)
+                    return try signer.signedTag(for: grant)
+                }
+            }
+            var collected: [String] = []
+            for try await tag in group { collected.append(tag) }
+            return collected
+        }
+        // Every racer must have signed with the SAME winning key — if the
+        // race were open, this would flakily see more than one distinct
+        // tag among the 64.
+        #expect(Set(tags).count == 1)
+        let verifier = MiniAppGrantSigner(testServiceSuffix: suffix)
+        var signed = grant
+        signed.signature = tags[0]
+        #expect(verifier.isAuthentic(signed))
+    }
+
     @Test func inMemoryStoreRoundTripsAndDeletesLikeTheRealKeychainWould() throws {
         let suffix = "guard-roundtrip-\(UUID().uuidString)"
         let keychain = ProjectConfigKeychain(testServiceSuffix: suffix)

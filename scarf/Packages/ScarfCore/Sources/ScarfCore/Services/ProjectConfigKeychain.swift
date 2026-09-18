@@ -48,6 +48,26 @@ final class InMemoryKeychainStore: @unchecked Sendable {
         defer { lock.unlock() }
         storage.removeValue(forKey: Self.key(service: service, account: account))
     }
+
+    /// Store `secret` only if nothing is stored yet for (service, account);
+    /// either way, return whatever ends up there. One lock acquisition, so
+    /// two callers racing to mint a "first use" value (e.g.
+    /// `MiniAppGrantSigner.signingKey()` under Swift Testing's in-process
+    /// parallelism, where many suites construct a signer with no
+    /// `testServiceSuffix` and so share one dictionary entry) can't both
+    /// see "absent", mint DIFFERENT defaults, and have the second `set()`
+    /// silently stomp the first — which would leave the first signer
+    /// unable to verify its own tag on a later `isAuthentic()` call, since
+    /// that re-derives the key from whatever is stored NOW rather than
+    /// reusing what it signed with.
+    func setIfAbsent(service: String, account: String, secret: Data) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        let k = Self.key(service: service, account: account)
+        if let existing = storage[k] { return existing }
+        storage[k] = secret
+        return secret
+    }
 }
 
 /// Thin wrapper around the macOS Keychain for template-config secrets.
@@ -178,6 +198,25 @@ public struct ProjectConfigKeychain: Sendable {
         if addStatus != errSecSuccess {
             throw Self.error(status: addStatus, op: "add")
         }
+    }
+
+    /// `set`, but only if nothing is stored yet — either way, returns
+    /// whatever ends up stored. For the in-memory (test) backing this is
+    /// ONE atomic operation, closing the "two concurrent first-time
+    /// callers each mint a different default and the second `set()`
+    /// silently wins" race described on `InMemoryKeychainStore.setIfAbsent`.
+    /// Against the real Keychain this is unchanged from a plain
+    /// `set(service:account:secret:)` — sequential get-then-set, exactly
+    /// as every caller already used — because production is a single
+    /// process minting a machine key once; it never had, and doesn't need,
+    /// the same in-process-parallel-test race this exists to close.
+    public nonisolated func setIfAbsent(service: String, account: String, secret: Data) throws -> Data {
+        let svc = resolved(service: service)
+        if useInMemoryStore {
+            return InMemoryKeychainStore.shared.setIfAbsent(service: svc, account: account, secret: secret)
+        }
+        try set(service: service, account: account, secret: secret)
+        return secret
     }
 
     /// Retrieve the secret for (service, account). Returns `nil` when
