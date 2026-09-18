@@ -48,8 +48,10 @@ import Foundation
         #expect(script.contains(#"export HERMES_HOME="$HOME/.hermes""#) || script.contains(#"export HERMES_HOME="$HOME"'/.hermes'"#))
     }
 
-    /// Citadel sends the script base64-encoded as one argv token; stay far
-    /// below Linux MAX_ARG_STRLEN (128 KiB) with a worst-case history.
+    /// Keep the worst-case script small: it crosses SSH on the exec
+    /// channel's stdin (iOS, `CitadelServerTransport.streamScript`) or ssh's
+    /// stdin (Mac), and the old iOS path — one base64 argv token — was bound
+    /// by Linux MAX_ARG_STRLEN (128 KiB). A generous ceiling either way.
     @Test func worstCaseScriptStaysSmall() {
         let offer = String(repeating: "a=candidate:1 1 udp 2122260223 192.168.1.10 51234 typ host\r\n", count: 40)
         let turns = (0..<60).map { VoiceLiveText.SeedTurn(role: $0 % 2 == 0 ? .user : .assistant, text: String(repeating: "x", count: 1_500)) }

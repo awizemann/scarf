@@ -77,7 +77,9 @@ struct CitadelTransportColumnsP54Tests {
     @Test func theScriptStreamingTwinIsDeliberatelyWithoutColumns() throws {
         let code = Self.codeOnly(try Self.source("Sources/ScarfIOS/CitadelServerTransport.swift"))
         let start = try #require(code.range(of: "private func _streamScriptImpl("))
-        let end = try #require(code.range(of: "return try await runScript(cmd, timeout: timeout)",
+        // The body runs through `streamScriptCommand(byteCount:)`, which now
+        // builds the command (the script itself travels on stdin).
+        let end = try #require(code.range(of: #"+ "head -c \(byteCount) | /bin/sh""#,
                                           range: start.upperBound..<code.endIndex))
         let body = String(code[start.lowerBound..<end.upperBound])
         #expect(body.contains("PATH=\\\"$HOME/.local/bin"), "the twin still exists and still guards PATH")
