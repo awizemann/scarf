@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ScarfCore
 import ScarfIOS
 import ScarfDesign
@@ -44,7 +45,34 @@ struct ChatView: View {
     @State private var isEncodingAttachment = false
     @State private var attachmentError: String?
 
+    /// Push-to-talk dictation state machine (ScarfIOS). Phase drives
+    /// the mic button + status strip; finished transcripts arrive via
+    /// `.onChange(of: pushToTalk.transcript)` and land in the draft as
+    /// EDITABLE text — dictation never sends.
+    @State private var pushToTalk = PushToTalkController()
+    /// Gesture bookkeeping for the hold-to-talk mic button: true once
+    /// the long-press threshold completes (recording started), and set
+    /// when the finger drags far enough away to cancel the take.
+    @State private var dictationHoldStarted = false
+    @State private var dictationCancelledByDrag = false
+
+    /// Live Voice (GPT-Live) session lifecycle: composer gate, microphone,
+    /// audio session and every teardown path. The entry is rendered only
+    /// when `VoiceLiveReadiness` says `.ready` (charter C1).
+    @State private var voiceLive: VoiceLiveSessionModel
+    /// Continue was tapped on the Live Voice consent: start once the
+    /// consent sheet has gone (iOS can't present the session sheet while
+    /// another is still dismissing).
+    @State private var startLiveVoiceAfterConsent = false
+
     private static let maxAttachments = 5
+
+    /// Hold duration before a mic-button press starts the take. Short
+    /// enough to feel instant, long enough that a stray tap doesn't
+    /// clip a fraction of a second of audio.
+    private static let dictationHoldStart: TimeInterval = 0.2
+    /// Finger travel (pt) from the mic button that cancels the take.
+    private static let dictationCancelDistance: CGFloat = 60
 
     private var supportsImagePrompts: Bool {
         capabilitiesStore?.capabilities.hasACPImagePrompts ?? false
@@ -54,6 +82,24 @@ struct ChatView: View {
     /// no-op in v2.8.0 (no popover); previews live on the Mac app.
     private var supportsACPQueue: Bool {
         capabilitiesStore?.capabilities.hasACPQueue ?? false
+    }
+
+    /// v0.21.3+ host. Gates even the config read the Live Voice gate needs,
+    /// so older hosts behave exactly as before (charter C1).
+    private var supportsLiveVoice: Bool {
+        capabilitiesStore?.capabilities.hasGPTLiveVoice ?? false
+    }
+
+    private var liveVoiceEntry: VoiceLiveComposerGate.Entry {
+        VoiceLiveComposerGate.entry(
+            availability: VoiceLiveReadiness.availability(
+                capabilities: capabilitiesStore?.capabilities ?? .empty,
+                voiceChatMode: controller.voiceChatModeRaw
+            ),
+            chatReady: controller.state == .ready,
+            dictationIdle: pushToTalk.phase == .idle,
+            liveVoiceActive: voiceLive.isActive
+        )
     }
 
     /// Prefix-filtered slash command list driven by the current draft.
@@ -98,6 +144,7 @@ struct ChatView: View {
         self.key = key
         let ctx = config.toServerContext(id: Self.sharedContextID)
         _controller = State(initialValue: ChatController(context: ctx))
+        _voiceLive = State(initialValue: VoiceLiveSessionModel(context: ctx))
     }
 
     /// Same UUID DashboardView uses, so the transport's cached SSH
@@ -162,6 +209,13 @@ struct ChatView: View {
         .task(id: capabilitiesStore?.capabilities.versionLine ?? "") {
             controller.vm.publishCapabilities(capabilitiesStore?.capabilities ?? .empty)
         }
+        // Live Voice gate: re-read `voice.voice_chat_mode` each time Chat
+        // appears (a `.task` re-runs on every appearance), so a mode flipped
+        // in Settings shows up on return. Skipped entirely below v0.21.3.
+        .task(id: supportsLiveVoice) {
+            guard supportsLiveVoice else { return }
+            await controller.refreshVoiceChatMode()
+        }
         .task {
             // Dashboard row taps set `pendingResumeSessionID`, Project
             // Detail's "New Chat" sets `pendingProjectChat`. Both fire
@@ -184,6 +238,11 @@ struct ChatView: View {
         // a project detail, taps "New Chat" — coordinator flips the
         // tab AND sets pendingProjectChat. The `.task` above only
         // fires on first appear; these are the mid-session hooks.)
+        // A new or resumed chat session under a live voice session would
+        // send its turns into the wrong chat: end it.
+        .onChange(of: controller.vm.sessionId) { _, _ in
+            if voiceLive.isActive { voiceLive.teardown(.sessionChanged) }
+        }
         .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
             guard let sessionID = new else { return }
             coordinator?.pendingResumeSessionID = nil
@@ -210,6 +269,31 @@ struct ChatView: View {
         .onChange(of: coordinator?.scenePhaseTick) { _, _ in
             guard let phase = coordinator?.scenePhase else { return }
             Task { await controller.handleScenePhase(phase) }
+            // Unlike the ACP session (kept alive across backgrounding,
+            // see below), a live dictation recording must NOT keep the
+            // mic hot while the app isn't in front of the user.
+            if phase == .background {
+                pushToTalk.handleViewDisappearing()
+                // An open Live Voice session bills $0.05/min and ScarfGo
+                // has no background-audio mode: end it (inside a background
+                // task, so the vendor hears the close before suspension).
+                // `.inactive` (Control Center, app switcher peek) keeps it.
+                voiceLive.teardown(.backgrounded)
+            }
+        }
+        // Unlike the ACP session below, push-to-talk dictation DOES tear
+        // down on `.onDisappear` — a `TabView` switch away from Chat
+        // must not leave the microphone recording into a status strip
+        // nobody can see. `pushToTalk` is `@State` (survives the tab
+        // switch like `controller` does), so the in-flight take is
+        // simply discarded and the controller is ready for a fresh hold
+        // next time Chat reappears.
+        .onDisappear {
+            pushToTalk.handleViewDisappearing()
+            // Same for Live Voice: a tab switch, server switch or profile
+            // switch unmounts Chat, and a session nobody can see must not
+            // keep billing. (Presenting the voice sheet does not fire this.)
+            voiceLive.teardown(.viewDisappeared)
         }
         // Deliberately NOT tearing down the ACP session on .onDisappear.
         // `TabView` unmounts tab content when the user switches tabs
@@ -249,32 +333,41 @@ struct ChatView: View {
                 onCancel: { controller.cancelModelPreflight() }
             )
         }
-        // Presents the HEAD of the permission queue. The setter is
-        // deliberately inert: a request is resolved only by answering
-        // it (`respondToPermission` pops it by id). Popping on
-        // SwiftUI's dismissal write instead would let the write that
-        // follows `onRespond` — which already popped the answered
-        // request — silently swallow the NEXT queued request without
-        // ever showing it. `interactiveDismissDisabled` keeps a swipe
-        // from looking like it dropped the prompt when the agent is in
-        // fact still blocked on an answer.
-        .sheet(item: Binding(
-            get: { controller.vm.pendingPermission.map(PermissionWrapper.init) },
-            set: { _ in }
-        )) { wrapper in
-            PermissionSheet(permission: wrapper.value) { optionId in
-                await controller.respondToPermission(
-                    requestId: wrapper.value.requestId,
-                    optionId: optionId
+        // Tool-permission prompts. While the Live Voice sheet is up it
+        // presents them itself (a view can't present a second sheet over
+        // its own), so this presenter stands down.
+        .modifier(ChatPermissionPresenter(controller: controller, isEnabled: !voiceLive.isPresented))
+        .sheet(isPresented: $voiceLive.isPresented, onDismiss: {
+            voiceLive.teardown(.sheetDismissed)
+        }) {
+            if let session = voiceLive.session {
+                VoiceLiveSessionSheet(
+                    model: voiceLive,
+                    session: session,
+                    onTryAgain: { startLiveVoice() }
                 )
+                .modifier(ChatPermissionPresenter(controller: controller, isEnabled: true))
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
-            // Custom detents — `.medium` is either too tall (empty
-            // space above) or too short (options clipped). A 220pt
-            // peek shows the prompt + first ~3 options; users can
-            // drag to large for long option lists.
-            .presentationDetents([.height(220), .large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled()
+        }
+        // The one-time Live Voice consent (F4). Cancel or a swipe down
+        // starts nothing and bills nothing.
+        .sheet(item: $voiceLive.pendingConsent, onDismiss: {
+            guard startLiveVoiceAfterConsent else { return }
+            startLiveVoiceAfterConsent = false
+            startLiveVoice()
+        }) { recipient in
+            VoiceLiveConsentSheet(
+                recipient: recipient,
+                mode: .ask(
+                    onContinue: {
+                        voiceLive.acceptConsent()
+                        startLiveVoiceAfterConsent = true
+                    },
+                    onCancel: { voiceLive.declineConsent() }
+                )
+            )
         }
     }
 
@@ -599,6 +692,14 @@ struct ChatView: View {
             if !controller.attachments.isEmpty || isEncodingAttachment || attachmentError != nil {
                 attachmentStrip
             }
+            if pushToTalk.phase != .idle || pushToTalk.notice != nil {
+                dictationStatusStrip
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            if let notice = voiceLive.composerNotice {
+                liveVoiceNoticeStrip(notice)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             composerRow
         }
         .padding(.horizontal, ScarfSpace.s3)
@@ -611,6 +712,15 @@ struct ChatView: View {
                 showSlashMenu = next
             }
         }
+        // A finished dictation lands in the draft as plain editable
+        // text (review-before-send contract), then the caret hops into
+        // the field so the transcript is immediately revisable.
+        .onChange(of: pushToTalk.transcript) { _, delivery in
+            guard let delivery else { return }
+            controller.insertDictatedText(delivery.text)
+            composerFocused = true
+        }
+        .animation(ScarfAnimation.fast, value: pushToTalk.phase)
         #if canImport(PhotosUI)
         .photosPicker(
             isPresented: $showPhotoPicker,
@@ -767,6 +877,17 @@ struct ChatView: View {
                 controller.scheduleDraftSave()
             }
 
+            // Hold-to-talk dictation mic. NOT a Button — a tap action
+            // would race the hold gesture; the sequenced long-press +
+            // drag gesture below owns the interaction entirely.
+            dictationMicButton
+
+            // Live Voice entry, next to the dictation mic. Not rendered at
+            // all unless the host is ready (v0.21.3+ and gpt-live mode).
+            if liveVoiceEntry != .hidden {
+                liveVoiceButton
+            }
+
             // Big circular send button. Filled with the brand accent when
             // ready, swapped to a flat gray when disabled — opacity dims
             // alone read as "not quite tappable" (issue #69), the explicit
@@ -798,6 +919,289 @@ struct ChatView: View {
         // TextField's width shift rides the keyboard slide instead of
         // popping.
         .animation(ScarfAnimation.fast, value: composerFocused)
+    }
+
+    // MARK: - Push-to-talk dictation
+
+    /// Hold-to-talk mic affordance. Sizing/tint mirror the paperclip
+    /// and keyboard-dismiss siblings (44 pt target, size-20 symbol);
+    /// fills with the danger tint + pulses while a take is running.
+    private var dictationMicButton: some View {
+        Image(systemName: pushToTalk.phase == .recording ? "mic.fill" : "mic")
+            .font(.system(size: 20, weight: .regular))
+            .foregroundStyle(dictationMicTint)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .symbolEffect(.pulse, isActive: pushToTalk.phase == .recording)
+            .gesture(dictationGesture)
+            .animation(ScarfAnimation.fast, value: pushToTalk.phase)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Dictate message")
+            .accessibilityHint(dictationDisabled
+                ? (voiceLive.isActive
+                    ? "Unavailable during a Live Voice session."
+                    : "Unavailable until the chat is connected.")
+                : "Hold to record; release to transcribe. Slide away to cancel.")
+            // VoiceOver can't perform the hold-then-drag-to-cancel
+            // gesture above (a double-tap-and-hold either passes
+            // straight through as a single activation or is consumed
+            // for element exploration, depending on OS version) — this
+            // custom action is the accessible equivalent: one activation
+            // starts the take, the next stops it, mirroring the
+            // press/release the sighted gesture already drives through
+            // the same `pushToTalk.holdBegan()` / `holdReleased()` pair.
+            // Omitted while disabled so VoiceOver correctly reports no
+            // action is available, rather than one that silently no-ops.
+            .accessibilityActions {
+                if !dictationDisabled, pushToTalk.phase != .transcribing {
+                    Button(pushToTalk.phase == .recording ? "Stop dictating" : "Start dictating") {
+                        switch pushToTalk.phase {
+                        case .idle:
+                            pushToTalk.holdBegan()
+                        case .recording:
+                            pushToTalk.holdReleased()
+                        case .transcribing:
+                            break
+                        }
+                    }
+                }
+            }
+    }
+
+    private var dictationMicTint: Color {
+        if dictationDisabled { return ScarfColor.foregroundFaint }
+        return pushToTalk.phase == .recording ? ScarfColor.danger : ScarfColor.foregroundMuted
+    }
+
+    /// Mirror of the TextField/paperclip `.disabled` predicates —
+    /// dictation drafts locally but stays consistent with the
+    /// composer's connection gating.
+    private var dictationDisabled: Bool {
+        !VoiceLiveComposerGate.dictationAllowed(
+            chatReady: controller.state == .ready,
+            liveVoiceActive: voiceLive.isActive
+        )
+    }
+
+    /// 0.2 s hold starts the take; dragging > 60 pt away cancels it
+    /// (the finger never has to return to the button); lifting
+    /// anywhere short of that ends the take and kicks transcription.
+    ///
+    /// The decision logic lives in `DictationGestureReducer` (below) — a pure
+    /// function, unit tested without simulating a real touch — because
+    /// `SequenceGesture<LongPressGesture, DragGesture>.Value`'s
+    /// `.first` case fires (with `false`) at touch-down, before the
+    /// long press has succeeded, and the *success* transition is
+    /// reported as `.second(true, _)` (there is no separate
+    /// `.first(true)` callback to key off). Starting a take on `.first`
+    /// began recording on every touch-down, including a quick tap or a
+    /// VoiceOver double-tap that fails the long press outright — and
+    /// SwiftUI never calls `.onEnded` for a gesture that failed to
+    /// recognize, so that recording never stopped. Gating on
+    /// `.second(true, _)` fixes this by construction: a failed press
+    /// never reaches that case, so it never starts a take — nothing is
+    /// left running for a missing `.onEnded` to fail to stop.
+    private var dictationGesture: some Gesture {
+        LongPressGesture(minimumDuration: Self.dictationHoldStart)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard !dictationDisabled else { return }
+                let longPressSucceeded: Bool?
+                let dragTranslation: CGSize?
+                switch value {
+                case .first:
+                    longPressSucceeded = nil
+                    dragTranslation = nil
+                case .second(let succeeded, let drag):
+                    longPressSucceeded = succeeded
+                    dragTranslation = drag?.translation
+                }
+                let (newState, action) = DictationGestureReducer.onChanged(
+                    state: DictationGestureReducer.State(
+                        holdStarted: dictationHoldStarted,
+                        cancelledByDrag: dictationCancelledByDrag
+                    ),
+                    longPressSucceeded: longPressSucceeded,
+                    dragTranslation: dragTranslation,
+                    cancelDistance: Self.dictationCancelDistance
+                )
+                dictationHoldStarted = newState.holdStarted
+                dictationCancelledByDrag = newState.cancelledByDrag
+                switch action {
+                case .none: break
+                case .begin: pushToTalk.holdBegan()
+                case .cancel: pushToTalk.holdCancelled()
+                }
+            }
+            .onEnded { _ in
+                let (newState, shouldRelease) = DictationGestureReducer.onEnded(
+                    state: DictationGestureReducer.State(
+                        holdStarted: dictationHoldStarted,
+                        cancelledByDrag: dictationCancelledByDrag
+                    )
+                )
+                dictationHoldStarted = newState.holdStarted
+                dictationCancelledByDrag = newState.cancelledByDrag
+                if shouldRelease {
+                    pushToTalk.holdReleased()
+                }
+            }
+    }
+
+    /// One-line status above the composer while dictation is running
+    /// or has something to say. Same shape as the connection banner
+    /// strips: tinted background, caption copy, no chrome.
+    @ViewBuilder
+    private var dictationStatusStrip: some View {
+        switch pushToTalk.phase {
+        case .recording:
+            dictationStrip(
+                icon: "waveform",
+                text: Text("Recording… slide away to cancel"),
+                tint: ScarfColor.danger
+            )
+        case .transcribing:
+            dictationStrip(
+                icon: nil,
+                text: Text("Transcribing…"),
+                tint: ScarfColor.info,
+                showsSpinner: true
+            )
+        case .idle:
+            if let notice = pushToTalk.notice {
+                dictationStrip(
+                    icon: "exclamationmark.circle",
+                    text: Self.dictationNoticeText(notice),
+                    tint: ScarfColor.warning,
+                    showsSettingsLink: notice.opensSystemSettings
+                )
+            }
+        }
+    }
+
+    private func dictationStrip(
+        icon: String?,
+        text: Text,
+        tint: Color,
+        showsSpinner: Bool = false,
+        showsSettingsLink: Bool = false
+    ) -> some View {
+        HStack(spacing: 8) {
+            if showsSpinner {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(tint)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+            }
+            text
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+            if showsSettingsLink {
+                Button("Settings") {
+                    openSystemSettings()
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.16))
+    }
+
+    /// Deep-links to the app's Settings page so a denied microphone or
+    /// speech-recognition permission can be flipped without hunting
+    /// through Settings by hand. Only offered for notices where
+    /// `opensSystemSettings` is true — a restricted device or an
+    /// unsupported locale has nothing there to fix.
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    /// Maps each controller notice to a Text literal so the copy stays
+    /// extractable into the string catalog — a computed String would
+    /// silently leak English (see docs/I18N.md guardrails).
+    private static func dictationNoticeText(_ notice: PushToTalkNotice) -> Text {
+        switch notice {
+        case .microphonePermissionDenied:
+            Text("Microphone access is off. Enable it in Settings to dictate.")
+        case .speechPermissionDenied:
+            Text("Speech recognition is off. Enable it in Settings to dictate.")
+        case .permissionsRestricted:
+            Text("Dictation isn't available — speech recognition is restricted on this device.")
+        case .onDeviceUnavailable:
+            Text("Dictation isn't available in your language on this device.")
+        case .recorderFailed:
+            Text("Couldn't start recording. Try again.")
+        case .transcriptionFailed:
+            Text("Transcription failed. Try again.")
+        case .nothingHeard:
+            Text("Nothing was heard. Hold the microphone button while you speak.")
+        case .cancelled:
+            Text("Dictation cancelled.")
+        case .interrupted:
+            Text("Dictation was interrupted. Try again.")
+        }
+    }
+
+    // MARK: - Live Voice
+
+    /// Starts a Live Voice session. Disabled while dictation runs (the two
+    /// never hold the microphone at once) or the chat isn't connected.
+    private var liveVoiceButton: some View {
+        Button {
+            startLiveVoice()
+        } label: {
+            Image(systemName: "waveform.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(liveVoiceEntry == .enabled
+                                 ? ScarfColor.accent
+                                 : ScarfColor.foregroundFaint)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(liveVoiceEntry != .enabled)
+        .accessibilityLabel("Live Voice")
+        .accessibilityHint(liveVoiceEntry == .enabled
+            ? "Starts a spoken conversation with Hermes. Billed at 5 cents a minute on the host's OpenAI key."
+            : (pushToTalk.phase != .idle
+                ? "Unavailable while dictating."
+                : "Unavailable until the chat is connected."))
+    }
+
+    private func startLiveVoice() {
+        composerFocused = false
+        Task {
+            await voiceLive.begin(host: controller, dictationIdle: pushToTalk.phase == .idle)
+        }
+    }
+
+    @ViewBuilder
+    private func liveVoiceNoticeStrip(_ notice: VoiceLiveComposerNotice) -> some View {
+        switch notice {
+        case .microphoneDenied:
+            dictationStrip(
+                icon: "mic.slash",
+                text: Text("Microphone access is off. Enable it in Settings to use Live Voice."),
+                tint: ScarfColor.warning,
+                showsSettingsLink: true
+            )
+        case .interrupted:
+            dictationStrip(
+                icon: "phone.down",
+                text: Text("Live Voice ended because another app or a call took the audio."),
+                tint: ScarfColor.warning
+            )
+        }
     }
 
     /// Send is enabled when ready AND we have either text or at least
@@ -1173,6 +1577,9 @@ final class ChatController {
     /// `let` — set once at init, never mutated after.
     let context: ServerContext
     private var client: ACPClient?
+    /// Read-only view of the live ACP client for the Live Voice turn host
+    /// (ChatController+VoiceTurnHost.swift, a separate file).
+    var activeClient: ACPClient? { client }
     private var eventTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
@@ -1578,6 +1985,18 @@ final class ChatController {
         scheduleDraftSave()
     }
 
+    /// Append a finished dictation transcript to the draft as plain,
+    /// editable text — never auto-sent. A space separates it from
+    /// text already in the composer so consecutive takes read as one
+    /// message the user can review and send.
+    func insertDictatedText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let base = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = base.isEmpty ? trimmed : base + " " + trimmed
+        scheduleDraftSave()
+    }
+
     /// Send the current draft as a prompt. Fire-and-forget — the
     /// assistant reply streams back as ACP notifications handled by
     /// the event task.
@@ -1735,11 +2154,97 @@ final class ChatController {
         // command sources (ACP, quick_commands) keep going to Hermes
         // literally. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
+        await startPrompt(
+            client: client,
+            sessionId: sessionId,
+            wireText: wireText,
+            images: images,
+            contextNotes: [],
+            restoreDraftText: text
+        ).value
+    }
+
+    /// Number of `session/prompt` requests this controller has sent that
+    /// have not RETURNED yet (typed and Live Voice turns alike). A turn is
+    /// over when its `sendPrompt` returns — Hermes has no completion event —
+    /// so this, not `vm.isAgentWorking`, is what a superseding voice turn
+    /// waits on (`cancelActiveVoiceTurn`, ChatController+VoiceTurnHost).
+    private(set) var promptsInFlight = 0
+
+    /// Live Voice bookkeeping (ChatController+VoiceTurnHost.swift): the
+    /// spoken prompt of each voice request, by request id, so its reply can
+    /// be matched in `vm.messages`. Trimmed to the last few.
+    @ObservationIgnored var voiceTurnPrompts: [(id: String, prompt: String)] = []
+    /// How long a superseding voice turn waits for the cancelled turn's
+    /// `sendPrompt` to return before submitting anyway. Bounded (charter
+    /// C10): a wedged host must not freeze the voice loop. Tests shorten it.
+    @ObservationIgnored var voiceCancelTimeout: Duration = .seconds(10)
+
+    /// The host's raw `voice.voice_chat_mode`, for the Live Voice composer
+    /// gate (`VoiceLiveReadiness`). `nil` until read, or when config.yaml is
+    /// unreadable — both read as Hermes's default (chained), so the entry
+    /// stays hidden until the host is known to be in gpt-live mode.
+    private(set) var voiceChatModeRaw: String?
+
+    /// Re-read `voice.voice_chat_mode` off the MainActor (charter C10). The
+    /// chat view calls this on every appearance, and only on hosts with
+    /// `hasGPTLiveVoice` — older hosts never pay the read (charter C1) — so
+    /// a mode flipped in Settings is picked up when the user returns to Chat.
+    func refreshVoiceChatMode() async {
+        let ctx = context
+        let raw: String? = await Task.detached {
+            HermesConfigReader.readRawConfig(context: ctx).map { HermesConfig(yaml: $0).voice.voiceChatMode }
+        }.value
+        guard !Task.isCancelled else { return }
+        voiceChatModeRaw = raw
+    }
+
+    /// Send one prompt and finalize the turn from its result. Shared by the
+    /// typed composer (awaits the returned task inline) and Live Voice
+    /// (doesn't, so `submitVoiceTurn` returns once the prompt is handed off).
+    /// `promptsInFlight` is counted synchronously HERE, before the task can
+    /// start, so a cancel that races the hand-off still waits for it.
+    ///
+    /// `restoreDraftText`: on the gh#108 background-cancel path, the typed
+    /// text is put back in the draft so the user can re-send it. Voice
+    /// turns pass `nil` — a spoken turn has no draft to restore.
+    @discardableResult
+    func startPrompt(
+        client: ACPClient,
+        sessionId: String,
+        wireText: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote],
+        restoreDraftText: String?
+    ) -> Task<Void, Never> {
+        promptsInFlight += 1
+        return Task { @MainActor [self] in
+            defer { promptsInFlight -= 1 }
+            await runPrompt(
+                client: client,
+                sessionId: sessionId,
+                wireText: wireText,
+                images: images,
+                contextNotes: contextNotes,
+                restoreDraftText: restoreDraftText
+            )
+        }
+    }
+
+    private func runPrompt(
+        client: ACPClient,
+        sessionId: String,
+        wireText: String,
+        images: [ChatImageAttachment],
+        contextNotes: [ACPContextNote],
+        restoreDraftText: String?
+    ) async {
         do {
             let result = try await client.sendPrompt(
                 sessionId: sessionId,
                 text: wireText,
-                images: images
+                images: images,
+                contextNotes: contextNotes
             )
             // `promptComplete` is a Scarf-local lifecycle event, not a
             // `session/update` notification emitted by ACP. Mirror the
@@ -1759,7 +2264,7 @@ final class ChatController {
             // visible as an orphan, but the agent never saw it so
             // letting the user re-send is the only correct recovery.
             if case .reconnecting = state {
-                if !text.isEmpty, draft.isEmpty {
+                if let text = restoreDraftText, !text.isEmpty, draft.isEmpty {
                     draft = text
                     scheduleDraftSave()
                 }
@@ -2534,6 +3039,44 @@ final class ChatController {
     }
 }
 
+/// Presents the head of the chat's tool-permission queue. A modifier so the
+/// Live Voice sheet can present the same prompt over itself while it is up.
+struct ChatPermissionPresenter: ViewModifier {
+    let controller: ChatController
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            // Presents the HEAD of the permission queue. The setter is
+            // deliberately inert: a request is resolved only by answering
+            // it (`respondToPermission` pops it by id). Popping on
+            // SwiftUI's dismissal write instead would let the write that
+            // follows `onRespond` — which already popped the answered
+            // request — silently swallow the NEXT queued request without
+            // ever showing it. `interactiveDismissDisabled` keeps a swipe
+            // from looking like it dropped the prompt when the agent is in
+            // fact still blocked on an answer.
+            .sheet(item: Binding(
+                get: { isEnabled ? controller.vm.pendingPermission.map(PermissionWrapper.init) : nil },
+                set: { _ in }
+            )) { wrapper in
+                PermissionSheet(permission: wrapper.value) { optionId in
+                    await controller.respondToPermission(
+                        requestId: wrapper.value.requestId,
+                        optionId: optionId
+                    )
+                }
+                // Custom detents — `.medium` is either too tall (empty
+                // space above) or too short (options clipped). A 220pt
+                // peek shows the prompt + first ~3 options; users can
+                // drag to large for long option lists.
+                .presentationDetents([.height(220), .large])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled()
+            }
+    }
+}
+
 /// `Identifiable` wrapper so SwiftUI's `.sheet(item:)` can key off
 /// the pending permission. Two permissions for the same request-id
 /// are treated as identical (rare — would only happen if the remote
@@ -3127,6 +3670,91 @@ private struct IOSModelPreflightSheet: View {
         let suffix = "Scarf will save these to `config.yaml` on \(serverDisplayName) and start the chat."
         guard !reason.isEmpty else { return suffix }
         return "\(reason) \(suffix)"
+    }
+}
+
+// MARK: - Dictation hold-gesture decision logic
+
+/// Pure state machine behind `ChatView.dictationGesture`, factored out
+/// of the SwiftUI `Gesture` closures so it's unit testable without
+/// simulating a real touch (`@testable import` from `Scarf iOSTests`).
+///
+/// Mirrors `SequenceGesture<LongPressGesture, DragGesture>.Value`:
+/// `.first` fires with `false` at touch-down, while the press is still
+/// tracking, and — the load-bearing fact behind the P1 fix this type
+/// exists for — the transition to *success* is reported as
+/// `.second(true, _)`, not as a distinct `.first(true)` callback.
+/// `onChanged` below only ever starts a take on that `.second(true, _)`
+/// case; a quick tap or a VoiceOver double-tap that releases before the
+/// long-press threshold never reaches it, so it never starts a take —
+/// and therefore never needs `.onEnded` (which SwiftUI does not call
+/// for a gesture that failed to recognize) to stop one.
+enum DictationGestureReducer: Equatable {
+    /// Gesture bookkeeping carried between `.onChanged` calls and reset
+    /// by `.onEnded`.
+    struct State: Equatable {
+        var holdStarted = false
+        var cancelledByDrag = false
+
+        init(holdStarted: Bool = false, cancelledByDrag: Bool = false) {
+            self.holdStarted = holdStarted
+            self.cancelledByDrag = cancelledByDrag
+        }
+    }
+
+    /// What the caller should do in response to one `.onChanged` event.
+    enum Action: Equatable {
+        case none
+        case begin
+        case cancel
+    }
+
+    /// Reduces one `.onChanged` event.
+    ///
+    /// - Parameters:
+    ///   - longPressSucceeded: `nil` while the sequence is still in its
+    ///     `.first` phase (before or during the long-press hold) —
+    ///     those events never start or affect a take. Once the
+    ///     sequence has moved to `.second`, this is that case's leading
+    ///     `Bool` (SwiftUI has only ever been observed to report `true`
+    ///     here, since `.second` isn't reached at all when the long
+    ///     press fails, but the state machine still treats `false`
+    ///     inertly rather than assuming it can't happen).
+    ///   - dragTranslation: the `.second` case's drag value's
+    ///     translation, or `nil` before the finger has moved.
+    ///   - cancelDistance: finger travel (pt) from the button that
+    ///     cancels the take.
+    static func onChanged(
+        state: State,
+        longPressSucceeded: Bool?,
+        dragTranslation: CGSize?,
+        cancelDistance: CGFloat
+    ) -> (state: State, action: Action) {
+        var state = state
+        guard let longPressSucceeded, longPressSucceeded else {
+            return (state, .none)
+        }
+        if !state.holdStarted {
+            state.holdStarted = true
+            return (state, .begin)
+        }
+        guard !state.cancelledByDrag, let dragTranslation else {
+            return (state, .none)
+        }
+        let distance = hypot(dragTranslation.width, dragTranslation.height)
+        guard distance > cancelDistance else {
+            return (state, .none)
+        }
+        state.cancelledByDrag = true
+        return (state, .cancel)
+    }
+
+    /// Reduces `.onEnded`. Always resets to a fresh `State` for the
+    /// gesture's next cycle; `shouldRelease` tells the caller whether a
+    /// take that actually started (and wasn't already cancelled by a
+    /// drag) should be released and transcribed.
+    static func onEnded(state: State) -> (state: State, shouldRelease: Bool) {
+        (State(), state.holdStarted && !state.cancelledByDrag)
     }
 }
 

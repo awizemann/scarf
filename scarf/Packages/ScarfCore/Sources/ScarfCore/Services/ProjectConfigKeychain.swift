@@ -3,6 +3,73 @@ import Foundation
 import Security
 import os
 
+/// A process-wide fake Keychain: the same `(service, account) -> Data`
+/// mapping the login Keychain provides — including being visible across
+/// separate `ProjectConfigKeychain` instances within one process, the way
+/// real Keychain items are — but backed by a plain dictionary, so it never
+/// calls into `Security.framework`.
+///
+/// **Why this has to be a real substitute, not just a differently-named
+/// real item.** The original test seam (`testServiceSuffix`) routed test
+/// items into a `com.scarf.miniapp-grants.<suffix>`-shaped service name,
+/// which avoided COLLIDING with the user's real items but still went
+/// through `SecItemAdd`/`SecItemCopyMatching` — i.e. still asked
+/// Security.framework to check the calling process's code signature. Every
+/// fresh `xcodebuild test` DerivedData is a new ad-hoc code identity, so
+/// even a brand-new item's implicit ACL (or macOS's own first-use Keychain
+/// consent flow) can produce a SecurityAgent prompt that blocks an
+/// unattended test run on a mutex until a human answers — see the
+/// `mac-scarftests-run-green-only-serially` memory note. Only NEVER
+/// calling `Security.framework` closes that off completely.
+final class InMemoryKeychainStore: @unchecked Sendable {
+    static let shared = InMemoryKeychainStore()
+
+    private let lock = NSLock()
+    private var storage: [String: Data] = [:]
+
+    private nonisolated static func key(service: String, account: String) -> String {
+        "\(service)\u{0}\(account)"
+    }
+
+    func get(service: String, account: String) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[Self.key(service: service, account: account)]
+    }
+
+    func set(service: String, account: String, secret: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[Self.key(service: service, account: account)] = secret
+    }
+
+    func delete(service: String, account: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeValue(forKey: Self.key(service: service, account: account))
+    }
+
+    /// Store `secret` only if nothing is stored yet for (service, account);
+    /// either way, return whatever ends up there. One lock acquisition, so
+    /// two callers racing to mint a "first use" value (e.g.
+    /// `MiniAppGrantSigner.signingKey()` under Swift Testing's in-process
+    /// parallelism, where many suites construct a signer with no
+    /// `testServiceSuffix` and so share one dictionary entry) can't both
+    /// see "absent", mint DIFFERENT defaults, and have the second `set()`
+    /// silently stomp the first — which would leave the first signer
+    /// unable to verify its own tag on a later `isAuthentic()` call, since
+    /// that re-derives the key from whatever is stored NOW rather than
+    /// reusing what it signed with.
+    func setIfAbsent(service: String, account: String, secret: Data) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        let k = Self.key(service: service, account: account)
+        if let existing = storage[k] { return existing }
+        storage[k] = secret
+        return secret
+    }
+}
+
 /// Thin wrapper around the macOS Keychain for template-config secrets.
 ///
 /// **Lifted into ScarfCore** (originally lived only in the Mac app
@@ -30,19 +97,82 @@ public struct ProjectConfigKeychain: Sendable {
     /// Which Keychain to target. The default is the login Keychain
     /// (`nil` uses the user's default chain). Tests pass an explicit
     /// namespace suffix so integration tests can roundtrip without
-    /// polluting real user state.
+    /// polluting real user state — and, together with `useInMemoryStore`
+    /// below, keep concurrent tests' items from colliding with each other.
     public let testServiceSuffix: String?
+
+    /// True when this instance must never reach `Security.framework` and
+    /// instead reads/writes `InMemoryKeychainStore.shared`.
+    ///
+    /// **Set automatically under XCTest — no call site has to opt in.**
+    /// `isRunningUnderXCTest` is true for every unit/UI test bundle Xcode
+    /// launches (it sets `XCTestConfigurationFilePath` for all of them) and
+    /// false for a shipped, notarized Scarf.app, which never links XCTest.
+    /// That means every existing call site — including the many that
+    /// construct a bare `ProjectConfigKeychain()` with no test parameters
+    /// at all, e.g. `ProjectLifecycleService.cleanUpAfterRemoval`'s
+    /// `MiniAppGrantStore(context:)` — becomes hermetic the moment it's
+    /// linked into a test target, with production behavior (the real app
+    /// always uses the real Keychain item) completely unchanged.
+    private let useInMemoryStore: Bool
 
     public nonisolated init(testServiceSuffix: String? = nil) {
         self.testServiceSuffix = testServiceSuffix
+        self.useInMemoryStore = Self.isRunningUnderXCTest
     }
+
+    /// Whether this process is an XCTest host. Checked two ways, because
+    /// the two ways Scarf's tests actually run set up the process
+    /// differently:
+    ///
+    /// - **`xcodebuild test` / Xcode's Test navigator** (how `scarfTests`
+    ///   runs — see the `mac-scarftests-run-green-only-serially` memory
+    ///   note) launches the test bundle inside a host process with
+    ///   `XCTestConfigurationFilePath` set in its environment. This is the
+    ///   check that matters for the bug this type exists to fix.
+    /// - **`swift test`** (how `ScarfCoreTests` is usually iterated on —
+    ///   see the `fast-test-iteration-commands` memory note) runs its own
+    ///   executable, which does not set that variable, but does link
+    ///   `XCTest` into the process to host the test bundle.
+    ///
+    /// Neither is set for a normally-launched, notarized Scarf.app, which
+    /// links neither the test runner nor the XCTest framework. Computed
+    /// once per process.
+    static let isRunningUnderXCTest: Bool = {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        return NSClassFromString("XCTestCase") != nil
+    }()
+
+    /// Test-only introspection: did THIS instance resolve to the in-memory
+    /// seam? Used by the guard test that proves the automatic detection
+    /// above actually fires, rather than trusting it silently.
+    var isBackedByInMemoryStoreForTesting: Bool { useInMemoryStore }
 
     /// Write or overwrite the secret for (service, account). Tests
     /// route their items through a distinct service prefix via
-    /// `testServiceSuffix` so they can't leak into the user's real
-    /// Keychain.
+    /// `testServiceSuffix` so they can't collide with each other, and
+    /// under XCTest never reach `Security.framework` at all — see
+    /// `useInMemoryStore`.
     public nonisolated func set(service: String, account: String, secret: Data) throws {
         let svc = resolved(service: service)
+        if useInMemoryStore {
+            InMemoryKeychainStore.shared.set(service: svc, account: account, secret: secret)
+            return
+        }
+        #if DEBUG
+        // Defense in depth: if `isRunningUnderXCTest` and `useInMemoryStore`
+        // ever disagree — e.g. a future refactor adds a way to construct
+        // this type with the in-memory branch bypassed — fail loudly in a
+        // debug build rather than silently prompting for the user's real
+        // Keychain. Stripped from release builds, which is the only place
+        // this assertion could ever be a behavior change.
+        assert(
+            !Self.isRunningUnderXCTest,
+            "ProjectConfigKeychain.set reached Security.framework while running under XCTest (service: \(svc)). This would prompt for the user's real login Keychain; route this call through the default init (which auto-detects XCTest) instead of forcing a real backing."
+        )
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: svc,
@@ -70,6 +200,25 @@ public struct ProjectConfigKeychain: Sendable {
         }
     }
 
+    /// `set`, but only if nothing is stored yet — either way, returns
+    /// whatever ends up stored. For the in-memory (test) backing this is
+    /// ONE atomic operation, closing the "two concurrent first-time
+    /// callers each mint a different default and the second `set()`
+    /// silently wins" race described on `InMemoryKeychainStore.setIfAbsent`.
+    /// Against the real Keychain this is unchanged from a plain
+    /// `set(service:account:secret:)` — sequential get-then-set, exactly
+    /// as every caller already used — because production is a single
+    /// process minting a machine key once; it never had, and doesn't need,
+    /// the same in-process-parallel-test race this exists to close.
+    public nonisolated func setIfAbsent(service: String, account: String, secret: Data) throws -> Data {
+        let svc = resolved(service: service)
+        if useInMemoryStore {
+            return InMemoryKeychainStore.shared.setIfAbsent(service: svc, account: account, secret: secret)
+        }
+        try set(service: service, account: account, secret: secret)
+        return secret
+    }
+
     /// Retrieve the secret for (service, account). Returns `nil` when
     /// the item simply doesn't exist (user never set it, or an
     /// uninstall already removed it). Throws on every other Keychain
@@ -77,6 +226,15 @@ public struct ProjectConfigKeychain: Sendable {
     /// "corrupt keychain" as "no value."
     public nonisolated func get(service: String, account: String) throws -> Data? {
         let svc = resolved(service: service)
+        if useInMemoryStore {
+            return InMemoryKeychainStore.shared.get(service: svc, account: account)
+        }
+        #if DEBUG
+        assert(
+            !Self.isRunningUnderXCTest,
+            "ProjectConfigKeychain.get reached Security.framework while running under XCTest (service: \(svc)). This would prompt for the user's real login Keychain; route this call through the default init (which auto-detects XCTest) instead of forcing a real backing."
+        )
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: svc,
@@ -97,6 +255,16 @@ public struct ProjectConfigKeychain: Sendable {
     /// no-op; any other failure throws.
     public nonisolated func delete(service: String, account: String) throws {
         let svc = resolved(service: service)
+        if useInMemoryStore {
+            InMemoryKeychainStore.shared.delete(service: svc, account: account)
+            return
+        }
+        #if DEBUG
+        assert(
+            !Self.isRunningUnderXCTest,
+            "ProjectConfigKeychain.delete reached Security.framework while running under XCTest (service: \(svc)). This would prompt for the user's real login Keychain; route this call through the default init (which auto-detects XCTest) instead of forcing a real backing."
+        )
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: svc,

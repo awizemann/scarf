@@ -348,6 +348,13 @@ public struct VoiceSettings: Sendable, Equatable {
     /// on the backend).
     public var wakeWordCapture: String
 
+    /// `voice.voice_chat_mode` selects Hermes' interactive voice transport:
+    /// `chained` (STT → turn → TTS) or `gpt-live`. Hermes seeds it as
+    /// `"chained"` at `hermes_cli/config_defaults.py:1132` @ v2026.9.14
+    /// (0.21.3); the key does not exist at v2026.9.11 (0.21.2), where an
+    /// absent key parses to the same `"chained"` the host behaves as.
+    public var voiceChatMode: String
+
     public init(
         recordKey: String,
         maxRecordingSeconds: Int,
@@ -387,7 +394,8 @@ public struct VoiceSettings: Sendable, Equatable {
         sttCloudTrimSilence: Bool = true,
         sttCloudTrimThresholdDB: Double = -40,
         sttCloudTrimKeepMS: Int = 300,
-        wakeWordCapture: String = "auto"
+        wakeWordCapture: String = "auto",
+        voiceChatMode: String = "chained"
     ) {
         self.recordKey = recordKey
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -428,6 +436,7 @@ public struct VoiceSettings: Sendable, Equatable {
         self.sttCloudTrimThresholdDB = sttCloudTrimThresholdDB
         self.sttCloudTrimKeepMS = sttCloudTrimKeepMS
         self.wakeWordCapture = wakeWordCapture
+        self.voiceChatMode = voiceChatMode
     }
     public nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",
@@ -450,7 +459,8 @@ public struct VoiceSettings: Sendable, Equatable {
         sttOpenAIModel: "whisper-1",
         sttMistralModel: "voxtral-mini-latest",
         ttsXAIVoiceID: "",
-        ttsXAIAutoSpeechTags: false
+        ttsXAIAutoSpeechTags: false,
+        voiceChatMode: "chained"
     )
 }
 

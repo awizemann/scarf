@@ -203,6 +203,20 @@ public final class IOSSettingsViewModel {
         await load()
     }
 
+    /// Write `voice.voice_chat_mode` (chained | gpt-live), which makes Live
+    /// Voice available on a v0.21.3+ host (`hasGPTLiveVoice`). Same verified
+    /// `config set` argv and output verdict as ``saveValue(key:value:)``
+    /// (see ``VoiceChatMode``). Below the floor Hermes has no such
+    /// mode, so this refuses without spawning anything (charter C1).
+    public func saveVoiceChatMode(_ mode: VoiceChatMode, capabilities: HermesCapabilities) async throws {
+        guard capabilities.hasGPTLiveVoice else {
+            throw SettingsSaveError.commandFailed(
+                exitCode: 0,
+                message: String(localized: "Live Voice needs Hermes 0.21.3 or newer on this server."))
+        }
+        try await saveValue(key: "voice.voice_chat_mode", value: mode.configValue)
+    }
+
     /// Remove a dotted config key on the remote via `hermes config unset`.
     ///
     /// Not `saveValue(key:value:"")`: `hermes config set <key> ''` writes an

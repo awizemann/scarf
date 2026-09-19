@@ -96,6 +96,11 @@ public struct MiniAppGrantSigner: Sendable {
         self.keyUnavailableForTesting = keyUnavailableForTesting
     }
 
+    /// Test-only introspection, forwarded from `ProjectConfigKeychain`: did
+    /// this signer's key store resolve to the in-memory seam rather than
+    /// the real Keychain? See the guard test in `KeychainTestSeamGuardTests`.
+    var isBackedByInMemoryStoreForTesting: Bool { keychain.isBackedByInMemoryStoreForTesting }
+
     /// The tag for a grant, or `nil` when it cannot be produced.
     ///
     /// `nil` collapses two very different situations, which is why every
@@ -278,6 +283,20 @@ public struct MiniAppGrantSigner: Sendable {
     /// verify path unable to tell "no key yet" from "key gone". A fresh key
     /// invalidates any grant signed with a previous one, which is the same
     /// safe direction as every other failure here.
+    ///
+    /// **The mint-then-store step goes through `setIfAbsent`, not `set`.**
+    /// Under Swift Testing's in-process parallelism, many suites construct a
+    /// signer with no `testServiceSuffix` and so share one dictionary entry
+    /// in the test seam's `InMemoryKeychainStore`; two of them racing their
+    /// first call here would otherwise each see "absent", mint a DIFFERENT
+    /// 32 bytes, and have the second `set()` silently overwrite the first —
+    /// leaving the first signer holding a key that no longer matches what's
+    /// stored, so its own `isAuthentic()` check (which re-derives the key
+    /// fresh rather than reusing what it signed with) would flakily fail.
+    /// `setIfAbsent` makes the read-or-claim a single atomic step against
+    /// the in-memory backing; against the real Keychain it's unchanged
+    /// (sequential get-then-set), since production never has two processes
+    /// racing to mint the same machine key this way.
     private nonisolated func signingKey() -> Data? {
         if keyUnavailableForTesting { return nil }
         do {
@@ -301,9 +320,11 @@ public struct MiniAppGrantSigner: Sendable {
         }
         guard ok else { return nil }
         do {
-            try keychain.set(
+            let stored = try keychain.setIfAbsent(
                 service: Self.keychainService, account: Self.keychainAccount, secret: fresh
             )
+            guard stored.count == 32 else { return nil }
+            return stored
         } catch {
             #if canImport(os)
             Self.logger.warning(
@@ -312,6 +333,5 @@ public struct MiniAppGrantSigner: Sendable {
             #endif
             return nil
         }
-        return fresh
     }
 }

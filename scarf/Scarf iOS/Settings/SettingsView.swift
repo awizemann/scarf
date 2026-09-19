@@ -14,6 +14,12 @@ struct SettingsView: View {
     @State private var showRawYAML = false
     @State private var editingSpec: SettingSpec?
     @State private var showV013FeaturesSheet = false
+    /// Live Voice mode write in flight / its failure, for the Voice section.
+    @State private var voiceModeSaving = false
+    @State private var voiceModeError: String?
+    /// This device's Live Voice consents (F4). Device-local, not a Hermes key.
+    private let voiceConsent = VoiceDataConsentStore.shared
+    @State private var reviewingVoiceConsent: VoiceDataRecipient?
     /// v2.7 — Scarf-local opt-in to bulk-fetch tool result CONTENT
     /// when resuming past chats. Default off; the shared
     /// `RichChatViewModel` reads this same UserDefaults key on
@@ -88,6 +94,9 @@ struct SettingsView: View {
                 // config its package manager pinned.
                 .disabled(vm.isManagedHost)
 
+                // Outside the managed-host lock: the consent is this
+                // device's, not a Hermes setting.
+                liveVoicePrivacySection
                 diagnosticsSection
                 rawYAMLToggleSection
             }
@@ -366,6 +375,96 @@ struct SettingsView: View {
                 "STT provider",
                 value: vm.config.voice.sttProvider.isEmpty ? "Auto (unset)" : vm.config.voice.sttProvider
             )
+        }
+        // Hermes v0.21.3+ only (charter C1): older hosts have no such mode,
+        // and this section renders exactly as before.
+        if caps.hasGPTLiveVoice {
+            liveVoiceSection
+        }
+    }
+
+    /// `voice.voice_chat_mode`: chained (Hermes's default) or gpt-live, which
+    /// turns on the Live Voice button in Chat. Written through the verified
+    /// `hermes config set` argv (see `VoiceChatMode`, charter C5).
+    @ViewBuilder
+    private var liveVoiceSection: some View {
+        Section {
+            Picker(selection: Binding(
+                get: { VoiceChatMode.parse(vm.config.voice.voiceChatMode) },
+                set: { newMode in saveVoiceChatMode(newMode) }
+            )) {
+                Text("Chained (default)").tag(VoiceChatMode.chained)
+                Text("Live Voice (GPT-Live)").tag(VoiceChatMode.gptLive)
+            } label: {
+                HStack(spacing: ScarfSpace.s2) {
+                    Text("Voice chat mode")
+                    if voiceModeSaving {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(voiceModeSaving)
+            if let voiceModeError {
+                Label {
+                    Text(verbatim: voiceModeError)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(ScarfColor.warning)
+            }
+        } header: {
+            Text("Live Voice")
+        } footer: {
+            Text("Live Voice is a spoken, back-and-forth conversation with Hermes from the Chat tab. Your voice streams directly from this device to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this device's network address, and each session shares recent chat messages for context. It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY, or voice.gpt_live.api_key) and bills that key about $0.05 per minute while a session is open. This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.")
+                .font(.caption)
+        }
+    }
+
+    /// Review or reset this device's consent to send Live Voice data to
+    /// OpenAI. Hermes v0.21.3+ only, like the mode picker (charter C1).
+    @ViewBuilder
+    private var liveVoicePrivacySection: some View {
+        if caps.hasGPTLiveVoice, let recipient = VoiceChatMode.gptLive.externalRecipient {
+            Section {
+                LabeledContent("Consent") {
+                    if let date = voiceConsent.consentDate(for: recipient) {
+                        Text("Accepted \(date.formatted(date: .abbreviated, time: .omitted))")
+                    } else {
+                        Text("Not accepted")
+                    }
+                }
+                Button("Review what Live Voice shares") {
+                    reviewingVoiceConsent = recipient
+                }
+                Button("Reset consent", role: .destructive) {
+                    voiceConsent.resetConsent(for: recipient)
+                }
+                .disabled(!voiceConsent.hasConsented(to: recipient))
+            } header: {
+                Text("Live Voice Privacy")
+            } footer: {
+                Text("ScarfGo asks before the first Live Voice session on this device. After a reset it asks again.")
+                    .font(.caption)
+            }
+            .sheet(item: $reviewingVoiceConsent) { recipient in
+                VoiceLiveConsentSheet(recipient: recipient, mode: .review)
+            }
+        }
+    }
+
+    private func saveVoiceChatMode(_ mode: VoiceChatMode) {
+        guard mode != VoiceChatMode.parse(vm.config.voice.voiceChatMode) else { return }
+        voiceModeSaving = true
+        voiceModeError = nil
+        let capabilities = caps
+        Task {
+            defer { voiceModeSaving = false }
+            do {
+                try await vm.saveVoiceChatMode(mode, capabilities: capabilities)
+            } catch {
+                voiceModeError = error.localizedDescription
+            }
         }
     }
 

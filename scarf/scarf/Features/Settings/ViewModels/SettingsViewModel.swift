@@ -824,6 +824,16 @@ final class SettingsViewModel {
     func setRecordKey(_ value: String) { setSetting("voice.record_key", value: value) }
     func setMaxRecordingSeconds(_ value: Int) { setSetting("voice.max_recording_seconds", value: String(value)) }
     func setSilenceDuration(_ value: Double) { setSetting("voice.silence_duration", value: String(value)) }
+    /// `voice.voice_chat_mode` (chained | gpt-live) — the switch that makes
+    /// Live Voice available (v0.21.3+, `hasGPTLiveVoice`), through the
+    /// shared C5-verified `config set` argv (see `VoiceChatMode`). The key is
+    /// a literal so the config-writer parity gate reads it. Below the floor
+    /// Hermes has no such mode, so nothing is written (charter C1). GPT-Live
+    /// also needs an OpenAI key on the host — say so next to the control.
+    func setVoiceChatMode(_ mode: VoiceChatMode, capabilities: HermesCapabilities) {
+        guard capabilities.hasGPTLiveVoice else { return }
+        setSetting("voice.voice_chat_mode", value: mode.configValue)
+    }
     func setTTSProvider(_ value: String) { setSetting("tts.provider", value: value) }
     func setTTSEdgeVoice(_ value: String) { setSetting("tts.edge.voice", value: value) }
     func setTTSElevenLabsVoiceID(_ value: String) { setSetting("tts.elevenlabs.voice_id", value: value) }

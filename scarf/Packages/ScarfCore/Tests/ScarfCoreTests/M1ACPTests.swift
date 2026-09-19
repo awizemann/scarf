@@ -834,8 +834,16 @@ import Foundation
     /// the condition never becomes true. Used to bridge between
     /// ACPClient's detached tasks (send loops, read loop, etc.) and
     /// the synchronous test assertions without leaning on Thread.sleep.
+    /// The 30 s bound is a CEILING only a failing test pays: every caller
+    /// waits for something that should happen, and the loop returns the
+    /// moment it does. It was 2 s, which the green path could spend: each
+    /// poll is a few actor hops (and, in `@MainActor` tests, a hop back to
+    /// the main actor), and in the full parallel `swift test` those queue
+    /// behind ~3,500 other tests. On a loaded machine that queue alone ran
+    /// past 2 s (2026-09-18: trivial argv tests took 10 s to finish in the
+    /// same run), so the budget measured the run, not ACPClient.
     private func waitFor(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 30.0,
         _ predicate: @escaping @Sendable () async -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)

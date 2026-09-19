@@ -508,7 +508,18 @@ private struct ContextBoundRoot: View {
             // until first resize.
             .windowFrameAutosave("Scarf.Window.\(context.id)")
             .onAppear { fileWatcher.startWatching() }
-            .onDisappear { fileWatcher.stopWatching() }
+            .onDisappear {
+                fileWatcher.stopWatching()
+                // Window close, or a server/profile switch rebuilding this
+                // root: a Live Voice session bills until it is closed.
+                chatViewModel.voiceLive.endImmediately()
+            }
+            // App quit: best effort — the vendor close is sent, teardown
+            // may not finish before the process exits (the peer connection
+            // dies with the web content process either way).
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                chatViewModel.voiceLive.endImmediately()
+            }
             // Re-detect Hermes capabilities when the app comes back to
             // the foreground. The user may have run `hermes update` in
             // a Terminal while Scarf was backgrounded — without this,

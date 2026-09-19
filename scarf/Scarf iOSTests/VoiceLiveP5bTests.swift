@@ -1,0 +1,765 @@
+import Testing
+import Foundation
+import Observation
+import ScarfCore
+@testable import scarf_mobile
+
+// P5b (Live Voice on ScarfGo): the composer gate, dictation/live-voice
+// exclusivity, the session model's permission/audio/teardown rules, and the
+// chat's VoiceTurnHost conformance against a scripted ACP channel.
+
+// MARK: - Composer gate
+
+@Suite struct VoiceLiveComposerGateTests {
+
+    private static let v0213 = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
+    private static let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+
+    @Test func hiddenUnlessReadyWhateverElseHolds() {
+        for availability in [VoiceLiveAvailability.hidden(.hermesTooOld), .hidden(.chainedMode)] {
+            for chatReady in [true, false] {
+                for dictationIdle in [true, false] {
+                    #expect(VoiceLiveComposerGate.entry(
+                        availability: availability, chatReady: chatReady,
+                        dictationIdle: dictationIdle, liveVoiceActive: false) == .hidden)
+                }
+            }
+        }
+    }
+
+    @Test func readinessFromCapabilitiesAndMode() {
+        // Old host: hidden even in gpt-live mode (C1).
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0212, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
+        // Capable host, chained (or config not read yet): hidden.
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: nil) == .hidden(.chainedMode))
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: "chained") == .hidden(.chainedMode))
+        // Capable host in gpt-live mode (any Hermes spelling): ready.
+        for raw in ["gpt-live", "gpt_live", "live"] {
+            #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: raw) == .ready)
+        }
+        #expect(VoiceLiveReadiness.availability(capabilities: .empty, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
+    }
+
+    @Test func disabledWhileDictatingOrDisconnectedOrAlreadyLive() {
+        #expect(VoiceLiveComposerGate.entry(availability: .ready, chatReady: true, dictationIdle: true, liveVoiceActive: false) == .enabled)
+        #expect(VoiceLiveComposerGate.entry(availability: .ready, chatReady: true, dictationIdle: false, liveVoiceActive: false) == .disabled)
+        #expect(VoiceLiveComposerGate.entry(availability: .ready, chatReady: false, dictationIdle: true, liveVoiceActive: false) == .disabled)
+        #expect(VoiceLiveComposerGate.entry(availability: .ready, chatReady: true, dictationIdle: true, liveVoiceActive: true) == .disabled)
+    }
+
+    @Test func dictationOffWhileLiveVoiceHoldsTheMic() {
+        #expect(VoiceLiveComposerGate.dictationAllowed(chatReady: true, liveVoiceActive: false))
+        #expect(!VoiceLiveComposerGate.dictationAllowed(chatReady: true, liveVoiceActive: true))
+        #expect(!VoiceLiveComposerGate.dictationAllowed(chatReady: false, liveVoiceActive: false))
+    }
+}
+
+// MARK: - Session model fakes
+
+@MainActor
+@Observable
+final class FakeVoiceEngine: VoiceConversationEngine {
+    var phase: VoiceConversationPhase = .idle
+    var captions: [VoiceCaption] = []
+    var micLevel: Double = 0
+    var isMuted = false
+    var elapsedSeconds: TimeInterval = 0
+    var approximateCostUSD: Double = 0
+    var notice: VoiceSessionNotice?
+
+    var startCount = 0
+    /// When set, `waitForMediaRelease()` suspends until `releaseMedia()`.
+    var holdMediaRelease = false
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func waitForMediaRelease() async {
+        guard holdMediaRelease else { return }
+        await withCheckedContinuation { releaseWaiters.append($0) }
+    }
+
+    func releaseMedia() {
+        holdMediaRelease = false
+        let waiters = releaseWaiters
+        releaseWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+    var endReasons: [VoiceSessionEndReason] = []
+    var immediateEndReasons: [VoiceSessionEndReason] = []
+    /// What `start()` leaves the phase at.
+    var phaseAfterStart: VoiceConversationPhase = .connecting
+
+    func start() async {
+        startCount += 1
+        phase = phaseAfterStart
+    }
+
+    func end(reason: VoiceSessionEndReason) {
+        endReasons.append(reason)
+        if phase.isActive { phase = .ending }
+    }
+
+    func endImmediately(reason: VoiceSessionEndReason) {
+        immediateEndReasons.append(reason)
+        if phase.isActive { phase = .ended(reason) }
+    }
+
+    func toggleMute() { isMuted.toggle() }
+}
+
+@MainActor
+final class FakeAudioSession: VoiceLiveAudioSessionControlling {
+    var activations = 0
+    var deactivations = 0
+    func activate() { activations += 1 }
+    func deactivate() { deactivations += 1 }
+}
+
+@MainActor
+final class FakeBackgroundTasks: VoiceLiveBackgroundTaskRunning {
+    var begun: [Int] = []
+    var ended: [Int] = []
+    private var next = 0
+    func begin() -> Int { next += 1; begun.append(next); return next }
+    func end(_ token: Int) { ended.append(token) }
+    var openCount: Int { begun.count - ended.count }
+}
+
+final class FakeMicrophone: VoiceLiveMicrophonePermissionChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _status: VoiceLiveMicrophonePermission
+    private let grantOnRequest: Bool
+    private let requestDelay: Duration
+    private var _requests = 0
+
+    init(_ status: VoiceLiveMicrophonePermission, grantOnRequest: Bool = true, requestDelay: Duration = .zero) {
+        _status = status
+        self.grantOnRequest = grantOnRequest
+        self.requestDelay = requestDelay
+    }
+
+    var requests: Int { lock.withLock { _requests } }
+
+    func status() -> VoiceLiveMicrophonePermission { lock.withLock { _status } }
+
+    func request() async -> Bool {
+        lock.withLock { _requests += 1 }
+        if requestDelay > .zero { try? await Task.sleep(for: requestDelay) }
+        return grantOnRequest
+    }
+}
+
+@MainActor
+final class NullTurnHost: VoiceTurnHost {
+    var isVoiceTurnBusy: Bool { false }
+    var activeVoiceToolName: String? { nil }
+    func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {}
+    func cancelActiveVoiceTurn() async {}
+    func voiceTurnReply(for requestID: String) -> VoiceTurnReply? { nil }
+    func voiceSeedTurns() -> [VoiceLiveText.SeedTurn] { [] }
+}
+
+@MainActor
+private struct Harness {
+    let model: VoiceLiveSessionModel
+    let audio = FakeAudioSession()
+    let tasks = FakeBackgroundTasks()
+    let engines: EngineBox
+
+    final class EngineBox {
+        var made: [FakeVoiceEngine] = []
+        var phaseAfterStart: VoiceConversationPhase = .connecting
+    }
+
+    let consent: VoiceDataConsentStore
+
+    /// A consent store over a throwaway defaults suite (never the real
+    /// one). `accepted` pre-records the OpenAI consent, so the lifecycle
+    /// tests start sessions without the sheet.
+    static func consentStore(accepted: Bool = true) -> VoiceDataConsentStore {
+        let suite = "scarf.tests.voiceLiveIOS.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = VoiceDataConsentStore(defaults: defaults)
+        if accepted { store.recordConsent(to: .openAI) }
+        return store
+    }
+
+    init(
+        mic: FakeMicrophone = FakeMicrophone(.granted),
+        grace: Duration = .milliseconds(20),
+        externalRecipient: VoiceDataRecipient? = .openAI,
+        consent: VoiceDataConsentStore? = nil
+    ) {
+        let consent = consent ?? Self.consentStore()
+        self.consent = consent
+        let box = EngineBox()
+        engines = box
+        let audio = self.audio
+        let tasks = self.tasks
+        model = VoiceLiveSessionModel(
+            makeSession: { _ in
+                let engine = FakeVoiceEngine()
+                engine.phaseAfterStart = box.phaseAfterStart
+                box.made.append(engine)
+                return .init(engine: engine, bridge: nil)
+            },
+            externalRecipient: externalRecipient,
+            audioSession: audio,
+            backgroundTasks: tasks,
+            microphone: mic,
+            consent: consent,
+            teardownGrace: grace
+        )
+    }
+
+    var engine: FakeVoiceEngine? { engines.made.last }
+}
+
+// MARK: - Session model
+
+/// The audio session is released on a task that first awaits the engine's
+/// media release; let it run.
+@MainActor
+private func drainAudioRelease() async {
+    for _ in 0..<10 { await Task.yield() }
+    try? await Task.sleep(for: .milliseconds(20))
+}
+
+@Suite(.serialized) @MainActor struct VoiceLiveSessionModelTests {
+
+    /// F3 #8: the audio session is deactivated only after WebKit released
+    /// the microphone and playback, so other apps' audio can resume.
+    @Test func theAudioSessionIsReleasedOnlyAfterTheMediaIs() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.engine?.holdMediaRelease = true
+        h.model.teardown(.sheetDismissed)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 0)   // WebKit still holds the mic
+        h.engine?.releaseMedia()
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+    }
+
+    /// A new session that started while the old media was still releasing
+    /// keeps the audio session.
+    @Test func aNewSessionKeepsTheAudioSessionALateReleaseWouldDrop() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        let first = h.engine
+        first?.holdMediaRelease = true
+        h.model.teardown(.sessionChanged)
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        first?.releaseMedia()
+        await drainAudioRelease()
+        #expect(h.audio.activations == 2)
+        #expect(h.audio.deactivations == 0)
+    }
+
+    // MARK: F4: consent before the first session
+
+    @Test func theFirstBeginAsksForConsentAndTouchesNothing() async {
+        let mic = FakeMicrophone(.undetermined)
+        let h = Harness(mic: mic, consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == .openAI)
+        #expect(h.engines.made.isEmpty, "a session was built before consent")
+        #expect(mic.requests == 0, "the microphone prompt came before consent")
+        #expect(h.audio.activations == 0)
+        #expect(!h.model.isPresented)
+
+        // Continue, then the view begins again: the session starts.
+        h.model.acceptConsent()
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.consent.hasConsented(to: .openAI))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.engines.made.count == 1)
+        #expect(h.engine?.startCount == 1)
+    }
+
+    @Test func cancelOnTheConsentStartsNothingAndAsksAgain() async {
+        let h = Harness(consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.declineConsent()
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.engines.made.isEmpty)
+        #expect(h.audio.activations == 0)
+        #expect(!h.consent.hasConsented(to: .openAI))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == .openAI)
+        #expect(h.engines.made.isEmpty)
+    }
+
+    @Test func consentIsRememberedPerRecipientUntilReset() async {
+        let consent = Harness.consentStore(accepted: false)
+        let first = Harness(consent: consent)
+        await first.model.begin(host: NullTurnHost(), dictationIdle: true)
+        first.model.acceptConsent()
+
+        // A new model (a relaunch, another chat) over the same store: no sheet.
+        let second = Harness(consent: consent)
+        await second.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(second.model.pendingConsent == nil)
+        #expect(second.engines.made.count == 1)
+
+        // Another recipient still asks.
+        let acme = VoiceDataRecipient(id: "acme", displayName: "Acme", disclosureVersion: 1)
+        let other = Harness(externalRecipient: acme, consent: consent)
+        await other.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(other.model.pendingConsent == acme)
+        #expect(other.engines.made.isEmpty)
+
+        // Settings reset: asks again.
+        consent.resetConsent(for: .openAI)
+        let third = Harness(consent: consent)
+        await third.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(third.model.pendingConsent == .openAI)
+        #expect(third.engines.made.isEmpty)
+    }
+
+    @Test func anEngineWithNoExternalRecipientNeverAsks() async {
+        let h = Harness(externalRecipient: nil, consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.pendingConsent == nil)
+        #expect(h.engines.made.count == 1)
+    }
+
+    @Test func leavingChatDropsAPendingConsent() async {
+        let h = Harness(consent: Harness.consentStore(accepted: false))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.teardown(.viewDisappeared)
+        #expect(h.model.pendingConsent == nil)
+    }
+
+    @Test func beginStartsSessionWithAudioAndSheet() async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.engines.made.count == 1)
+        #expect(h.engine?.startCount == 1)
+        #expect(h.audio.activations == 1)
+        #expect(h.model.isPresented)
+        #expect(h.model.isActive)
+    }
+
+    @Test func beginRefusedWhileDictating() async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: false)
+        #expect(h.engines.made.isEmpty)
+        #expect(h.audio.activations == 0)
+        #expect(!h.model.isPresented)
+    }
+
+    @Test func beginRefusedWhileAlreadyLive() async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.engines.made.count == 1)
+    }
+
+    @Test func deniedMicrophoneShowsNoticeAndOpensNothing() async {
+        let h = Harness(mic: FakeMicrophone(.denied))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.composerNotice == .microphoneDenied)
+        #expect(h.engines.made.isEmpty)
+        #expect(h.audio.activations == 0)
+        #expect(!h.model.isPresented)
+    }
+
+    @Test func undeterminedMicrophoneAsksFirst() async {
+        let granted = FakeMicrophone(.undetermined, grantOnRequest: true)
+        let h1 = Harness(mic: granted)
+        await h1.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(granted.requests == 1)
+        #expect(h1.engines.made.count == 1)
+
+        let refused = FakeMicrophone(.undetermined, grantOnRequest: false)
+        let h2 = Harness(mic: refused)
+        await h2.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(refused.requests == 1)
+        #expect(h2.engines.made.isEmpty)
+        #expect(h2.model.composerNotice == .microphoneDenied)
+    }
+
+    /// Leaving Chat while the system microphone prompt is up must not open
+    /// a (billed) session behind the user's back once they answer it.
+    @Test func teardownDuringMicrophonePromptCancelsTheStart() async {
+        let mic = FakeMicrophone(.undetermined, grantOnRequest: true, requestDelay: .milliseconds(100))
+        let h = Harness(mic: mic)
+        let begin = Task { await h.model.begin(host: NullTurnHost(), dictationIdle: true) }
+        try? await Task.sleep(for: .milliseconds(20))
+        h.model.teardown(.viewDisappeared)
+        await begin.value
+        #expect(h.engines.made.isEmpty)
+        #expect(h.audio.activations == 0)
+    }
+
+    @Test(arguments: [
+        VoiceLiveTeardownTrigger.backgrounded, .viewDisappeared, .sessionChanged, .sheetDismissed, .audioInterrupted,
+    ])
+    func everyTeardownTriggerEndsImmediatelyInsideABackgroundTask(_ trigger: VoiceLiveTeardownTrigger) async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.teardown(trigger)
+        #expect(h.engine?.immediateEndReasons == [.userEnded])
+        #expect(!h.model.isActive)
+        #expect(h.tasks.begun.count == 1)
+        // The background task is held for the grace period, then released.
+        #expect(h.tasks.openCount == 1)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+        try? await Task.sleep(for: .milliseconds(120))
+        #expect(h.tasks.openCount == 0)
+    }
+
+    @Test func teardownHidesTheSheetForLeaveTriggers() async {
+        for trigger in [VoiceLiveTeardownTrigger.backgrounded, .viewDisappeared, .sheetDismissed] {
+            let h = Harness()
+            await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+            h.model.teardown(trigger)
+            #expect(!h.model.isPresented, "\(trigger)")
+        }
+    }
+
+    @Test func teardownWithNoSessionIsANoOp() {
+        let h = Harness()
+        h.model.teardown(.backgrounded)
+        h.model.teardown(.viewDisappeared)
+        #expect(h.tasks.begun.isEmpty)
+        #expect(h.audio.deactivations == 0)
+    }
+
+    @Test func teardownAfterTheSessionEndedDoesNotBeginAnotherTask() async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.engine?.phase = .ended(.idleTimeout)
+        h.model.phaseDidChange()
+        h.model.teardown(.sheetDismissed)
+        #expect(h.tasks.begun.isEmpty)
+        #expect(h.engine?.immediateEndReasons.isEmpty == true)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+    }
+
+    @Test func endButtonIsGracefulNotImmediate() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.endFromUser()
+        #expect(h.engine?.endReasons == [.userEnded])
+        #expect(h.engine?.immediateEndReasons.isEmpty == true)
+        #expect(h.audio.deactivations == 0)   // still ending
+        h.engine?.phase = .ended(.userEnded)
+        h.model.phaseDidChange()
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+        h.model.phaseDidChange()
+        #expect(h.audio.deactivations == 1)   // released once
+    }
+
+    @Test func failedStartReleasesTheAudioSession() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .failed(.host(.noKey))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.audio.activations == 1)
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+        // The sheet stays up to show the setup guidance.
+        #expect(h.model.isPresented)
+        if case .failed(let failure)? = h.engine?.phase {
+            #expect(failure.setupHint)
+        } else {
+            Issue.record("expected a failed phase")
+        }
+    }
+
+    @Test func interruptionEndsTheSessionWithANotice() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.handleAudioSessionInterruption(began: false)
+        #expect(h.model.isActive)
+        h.model.handleAudioSessionInterruption(began: true)
+        #expect(!h.model.isActive)
+        #expect(h.model.composerNotice == .interrupted)
+        #expect(h.engine?.immediateEndReasons == [.userEnded])
+    }
+
+    @Test func interruptionWithNoSessionDoesNothing() {
+        let h = Harness()
+        h.model.handleAudioSessionInterruption(began: true)
+        #expect(h.model.composerNotice == nil)
+        #expect(h.tasks.begun.isEmpty)
+    }
+
+    @Test func tryAgainAfterAnEndStartsAFreshEngine() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .failed(.host(.noKey))
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.engines.phaseAfterStart = .connecting
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.engines.made.count == 2)
+        #expect(h.model.isActive)
+    }
+}
+
+// MARK: - ChatController as VoiceTurnHost
+
+@Suite(.serialized) @MainActor struct ChatControllerVoiceTurnHostTests {
+
+    /// Scripted ACP peer. Records every request. `session/prompt` either
+    /// replies at once (one chunk, then the result) or, when `holdPrompts`
+    /// is set, waits until a `session/cancel` arrives and then returns
+    /// `stopReason: cancelled`. `neverAnswer` leaves prompts hanging.
+    actor ScriptedChannel: ACPChannel {
+        static let sessionId = "voice-p5b"
+        static let replyText = "Thursday at 3 works."
+
+        nonisolated let incoming: AsyncThrowingStream<String, Error>
+        nonisolated let stderr: AsyncThrowingStream<String, Error>
+        private let incomingCont: AsyncThrowingStream<String, Error>.Continuation
+        private let stderrCont: AsyncThrowingStream<String, Error>.Continuation
+        private(set) var closed = false
+        private(set) var requests: [[String: Any]] = []
+        private var heldPromptIDs: [Int] = []
+        var holdPrompts = false
+        var neverAnswer = false
+
+        var diagnosticID: String? { "fake-voice-p5b-channel" }
+        var isClosed: Bool { closed }
+
+        init() {
+            let (inStream, inCont) = AsyncThrowingStream<String, Error>.makeStream()
+            let (errStream, errCont) = AsyncThrowingStream<String, Error>.makeStream()
+            incoming = inStream
+            incomingCont = inCont
+            stderr = errStream
+            stderrCont = errCont
+        }
+
+        func configure(hold: Bool = false, never: Bool = false) {
+            holdPrompts = hold
+            neverAnswer = never
+        }
+
+        func methods() -> [String] { requests.compactMap { $0["method"] as? String } }
+
+        func promptBlocks() -> [[[String: Any]]] {
+            requests.filter { ($0["method"] as? String) == "session/prompt" }
+                .compactMap { ($0["params"] as? [String: Any])?["prompt"] as? [[String: Any]] }
+        }
+
+        func send(_ line: String) async throws {
+            guard !closed, let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let method = obj["method"] as? String else { return }
+            requests.append(obj)
+            let id = obj["id"] as? Int
+            switch method {
+            case "initialize":
+                if let id { yield(["jsonrpc": "2.0", "id": id, "result": [:] as [String: Any]]) }
+            case "session/new":
+                if let id { yield(["jsonrpc": "2.0", "id": id, "result": ["sessionId": Self.sessionId]]) }
+            case "session/prompt":
+                guard let id else { return }
+                if neverAnswer { return }
+                if holdPrompts { heldPromptIDs.append(id); return }
+                yield(chunk(Self.replyText))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                yield(result(id: id, stopReason: "end_turn"))
+            case "session/cancel":
+                if let id { yield(["jsonrpc": "2.0", "id": id, "result": [:] as [String: Any]]) }
+                for held in heldPromptIDs { yield(result(id: held, stopReason: "cancelled")) }
+                heldPromptIDs = []
+            default:
+                break
+            }
+        }
+
+        func close() async {
+            closed = true
+            incomingCont.finish()
+            stderrCont.finish()
+        }
+
+        private func chunk(_ text: String) -> [String: Any] {
+            ["jsonrpc": "2.0", "method": "session/update", "params": [
+                "sessionId": Self.sessionId,
+                "update": ["sessionUpdate": "agent_message_chunk", "content": ["text": text]] as [String: Any],
+            ] as [String: Any]]
+        }
+
+        private func result(id: Int, stopReason: String) -> [String: Any] {
+            ["jsonrpc": "2.0", "id": id, "result": ["stopReason": stopReason, "usage": [:] as [String: Any]] as [String: Any]]
+        }
+
+        private func yield(_ obj: [String: Any]) {
+            guard let data = try? JSONSerialization.data(withJSONObject: obj),
+                  let line = String(data: data, encoding: .utf8) else { return }
+            incomingCont.yield(line)
+        }
+    }
+
+    /// A connected controller over `channel`, with a hermetic config.yaml
+    /// (model set, gpt-live mode) served by LocalTransport.
+    private func connectedController(_ channel: ScriptedChannel) async throws -> (ChatController, () -> Void) {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-p5b-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        try """
+        model:
+          default: test-model
+          provider: test-provider
+        voice:
+          voice_chat_mode: gpt_live
+        """.write(to: tmp.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        let config = SSHConfig(host: "fake.invalid", remoteHome: tmp.path, hermesBinaryHint: "/nonexistent/scarf-test-hermes")
+        let ctx = ServerContext(id: UUID(), displayName: "fake", kind: .ssh(config))
+        let prior = ServerContext.sshTransportFactory
+        ServerContext.sshTransportFactory = { id, _, _ in LocalTransport(contextID: id) }
+        let controller = ChatController(context: ctx)
+        controller.clientFactory = { _ in ACPClient(context: ctx) { _ in channel } }
+        await controller.start()
+        let cleanup = {
+            ServerContext.sshTransportFactory = prior
+            try? FileManager.default.removeItem(at: tmp)
+        }
+        return (controller, cleanup)
+    }
+
+    private static func request(_ prompt: String, id: String = "del_1") -> VoiceTurnRequest {
+        VoiceTurnRequest(id: id, prompt: prompt, context: "User: \(prompt)")
+    }
+
+    private func waitUntil(timeout: Duration = .seconds(3), _ condition: () -> Bool) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !condition(), clock.now < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    @Test func submitThrowsWhenTheChatIsNotReady() async {
+        let ctx = ServerContext(id: UUID(), displayName: "x", kind: .ssh(SSHConfig(host: "fake.invalid")))
+        let controller = ChatController(context: ctx)
+        await #expect(throws: VoiceTurnSubmitError.chatNotReady) {
+            try await controller.submitVoiceTurn(Self.request("hello"))
+        }
+        #expect(controller.vm.messages.isEmpty)
+    }
+
+    @Test func submitAddsTheBubbleFirstSendsTheNoteAndSynthesizesCompletion() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready: \(controller.state)"); return }
+
+        let request = Self.request("the dentist one, thursday not friday")
+        try await controller.submitVoiceTurn(request)
+        // Rule 1: the bubble is there by the time submit returns, and the
+        // turn counts as busy before its Task has even started.
+        #expect(controller.vm.messages.last?.role == "user")
+        #expect(controller.vm.messages.last?.content == request.prompt)
+        #expect(controller.isVoiceTurnBusy)
+        #expect(controller.voiceTurnReply(for: request.id) == nil)
+
+        await waitUntil { !controller.isVoiceTurnBusy }
+        #expect(controller.promptsInFlight == 0)
+        #expect(controller.vm.isAgentWorking == false)
+
+        // The wire: the voice note as an embedded resource BEFORE the text.
+        let blocks = await channel.promptBlocks()
+        #expect(blocks.count == 1)
+        #expect(blocks.first?.first?["type"] as? String == "resource")
+        #expect(blocks.first?.last?["type"] as? String == "text")
+        #expect(blocks.first?.last?["text"] as? String == request.prompt)
+
+        let reply = controller.voiceTurnReply(for: request.id)
+        #expect(reply?.text.contains(ScriptedChannel.replyText) == true)
+        #expect(reply?.isStreaming == false)
+        #expect(controller.voiceTurnReply(for: "unknown") == nil)
+    }
+
+    @Test func cancelWaitsForTheCancelledPromptToReturn() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(hold: true)
+
+        try await controller.submitVoiceTurn(Self.request("first"))
+        try? await Task.sleep(for: .milliseconds(200))   // let the prompt reach the channel
+        #expect(controller.promptsInFlight == 1)
+
+        await controller.cancelActiveVoiceTurn()
+        // Returned only once the held sendPrompt came back (cancelled).
+        #expect(controller.promptsInFlight == 0)
+        #expect(await channel.methods().contains("session/cancel"))
+    }
+
+    @Test func cancelIsBoundedWhenTheHostNeverAnswers() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(never: true)
+        controller.voiceCancelTimeout = .milliseconds(300)
+
+        try await controller.submitVoiceTurn(Self.request("stuck"))
+        let clock = ContinuousClock()
+        let start = clock.now
+        await controller.cancelActiveVoiceTurn()
+        let waited = clock.now - start
+        #expect(waited >= .milliseconds(250))
+        #expect(waited < .seconds(3))
+        #expect(controller.promptsInFlight == 1)   // still hung; the engine moves on
+    }
+
+    @Test func cancelWithNothingRunningReturnsAtOnce() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        await controller.cancelActiveVoiceTurn()
+        #expect(await channel.methods().contains("session/cancel") == false)
+    }
+
+    @Test func typedTurnsCountAsBusyToo() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(hold: true)
+        controller.draft = "typed"
+        let send = Task { await controller.send() }
+        await waitUntil { controller.promptsInFlight == 1 }
+        #expect(controller.isVoiceTurnBusy)
+        await controller.cancelActiveVoiceTurn()
+        await send.value
+        #expect(controller.promptsInFlight == 0)
+        // A typed prompt carries no voice note.
+        let blocks = await channel.promptBlocks()
+        #expect(blocks.first?.map { $0["type"] as? String } == ["text"])
+    }
+
+    @Test func seedTurnsKeepOnlyUserAndAssistantText() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        try await controller.submitVoiceTurn(Self.request("hi there"))
+        await waitUntil { !controller.isVoiceTurnBusy }
+        let seeds = controller.voiceSeedTurns()
+        #expect(seeds.first == VoiceLiveText.SeedTurn(role: .user, text: "hi there"))
+        #expect(seeds.contains { $0.role == .assistant && $0.text.contains(ScriptedChannel.replyText) })
+        #expect(seeds.allSatisfy { !$0.text.isEmpty })
+    }
+
+    @Test func voiceChatModeIsReadFromTheHostConfig() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        #expect(controller.voiceChatModeRaw == nil)
+        await controller.refreshVoiceChatMode()
+        #expect(VoiceChatMode.parse(controller.voiceChatModeRaw) == .gptLive)
+    }
+}
+

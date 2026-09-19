@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ScarfGo uses the microphone for dictation, which it transcribes on this device, and for Live Voice sessions you start, which stream your voice directly from this device to OpenAI.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>ScarfGo transcribes your dictation on this device so you can review and edit it before sending.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIImageName</key>

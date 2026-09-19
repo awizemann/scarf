@@ -8,6 +8,22 @@ struct VoiceTab: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
+    /// Client-side preference (NOT a Hermes config key): which engine the
+    /// per-message speaker button uses. Shared with `MessageSpeechService`
+    /// via the same defaults key.
+    @AppStorage(MessageSpeechService.engineKey) private var playbackEngine = "system"
+
+    /// This Mac's Live Voice consents (F4). Device-local, not a Hermes key.
+    private let consent = VoiceDataConsentStore.shared
+    @State private var reviewingConsent: VoiceDataRecipient?
+
+    private var playbackEngineOptions: [(id: String, label: String)] {
+        [
+            ("system", String(localized: "System Voice")),
+            ("hermes", String(localized: "Hermes Voice")),
+        ]
+    }
+
     /// STT providers, with the "Auto (unset)" row dropped on hosts without
     /// `hermes config unset` (pre-v0.19) — same shape as BrowserTab's
     /// cloud-provider picker: an unwritable option is hidden rather than
@@ -37,6 +53,20 @@ struct VoiceTab: View {
         }
 
         SettingsSection(title: "Text-to-Speech", icon: "speaker.wave.3") {
+            // C1: hidden below v0.20.1 (`hasHermesSpeechSynthesis`) so an
+            // older host renders this section exactly as before; the
+            // speaker button there always uses the system voice.
+            if capabilities.hasHermesSpeechSynthesis {
+                PickerRow(
+                    label: "Playback Engine",
+                    selection: playbackEngine,
+                    options: playbackEngineOptions.map(\.id),
+                    optionLabel: { id in
+                        playbackEngineOptions.first { $0.id == id }?.label ?? id
+                    }
+                ) { playbackEngine = $0 }
+                    .help("System Voice synthesizes on this Mac with the macOS Spoken Content voice. Hermes Voice synthesizes through the connected server's configured TTS provider and falls back to the system voice when the server can't synthesize.")
+            }
             PickerRow(
                 label: "Provider",
                 selection: viewModel.config.voice.ttsProvider,
@@ -175,6 +205,30 @@ struct VoiceTab: View {
             }
         }
 
+        // v0.21.3+ — Live Voice (GPT-Live). Hidden below the floor so an
+        // older host renders this tab exactly as before (C1).
+        if capabilities.hasGPTLiveVoice {
+            SettingsSection(title: "Live Voice", icon: "waveform.circle") {
+                PickerRow(
+                    label: "Voice Chat Mode",
+                    selection: VoiceChatMode.parse(viewModel.config.voice.voiceChatMode).rawValue,
+                    options: VoiceChatMode.allCases.map(\.rawValue),
+                    optionLabel: { Self.voiceChatModeLabel($0) }
+                ) { raw in
+                    guard let mode = VoiceChatMode(rawValue: raw) else { return }
+                    viewModel.setVoiceChatMode(mode, capabilities: capabilities)
+                }
+                .help("Hermes's voice.voice_chat_mode, for the whole Hermes profile. GPT-Live turns on the Live Voice button in the chat composer, and also switches voice in Hermes's own apps.")
+                liveVoiceNote
+                if let recipient = VoiceChatMode.gptLive.externalRecipient {
+                    consentRow(recipient)
+                }
+            }
+            .sheet(item: $reviewingConsent) { recipient in
+                VoiceLiveConsentSheet(recipient: recipient, mode: .review)
+            }
+        }
+
         // v0.20.4+ — "Hey Hermes" hands-free wake word capture placement.
         if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
             SettingsSection(title: "Wake Word", icon: "waveform.badge.mic") {
@@ -182,6 +236,55 @@ struct VoiceTab: View {
                     .help("auto: backend PortAudio mic when one exists, else a remote desktop on a mic-less (headless/VPS) backend streams its own mic via the wake.feed RPC. local: always the backend mic. client: always desktop-streamed PCM (detection stays on the backend).")
             }
         }
+    }
+
+    /// Picker labels for `voice.voice_chat_mode`. The stored value is
+    /// Hermes's own (`chained` / `gpt-live`).
+    static func voiceChatModeLabel(_ raw: String) -> String {
+        switch VoiceChatMode(rawValue: raw) {
+        case .gptLive: return String(localized: "GPT-Live")
+        case .chained, nil: return String(localized: "Chained (default)")
+        }
+    }
+
+    /// This Mac's consent to send Live Voice data to `recipient`: review
+    /// the wording, or reset it so the next session asks again.
+    private func consentRow(_ recipient: VoiceDataRecipient) -> some View {
+        LabeledSettingsRow(label: "Privacy Consent") {
+            Group {
+                if let date = consent.consentDate(for: recipient) {
+                    Text("Accepted on this Mac, \(date.formatted(date: .abbreviated, time: .omitted))")
+                } else {
+                    Text("Not accepted on this Mac. Scarf asks before the first session.")
+                }
+            }
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            Spacer()
+            Button("Review…") { reviewingConsent = recipient }
+                .buttonStyle(ScarfGhostButton())
+            Button("Reset") { consent.resetConsent(for: recipient) }
+                .buttonStyle(ScarfGhostButton())
+                .disabled(!consent.hasConsented(to: recipient))
+                .help("Forget this Mac's consent. Scarf asks again before the next Live Voice session.")
+        }
+    }
+
+    /// What GPT-Live needs, sends and costs, under the mode picker.
+    private var liveVoiceNote: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Chained, Hermes's default, turns speech into text, runs a normal turn, and reads the reply aloud. GPT-Live lets you talk with Hermes from the chat composer: an OpenAI voice model listens and speaks, and hands each request to Hermes as a normal chat turn.")
+            Text("With GPT-Live, your voice streams directly from this Mac to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this Mac's network address. Each session also shares recent messages from the chat with OpenAI for context.")
+            Text("It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY in its .env, or voice.gpt_live.api_key) and bills that key about $0.05 per minute of session time. Sessions end on their own after \(Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())) minutes without speech.")
+            Text("This mode is a Hermes setting for the whole profile, not just Scarf: it also switches voice in Hermes's own apps.")
+        }
+        .scarfStyle(.caption)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 
     /// Inline hint chip+caption shown below xAI's Voice ID + Model fields

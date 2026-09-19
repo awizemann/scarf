@@ -1071,6 +1071,35 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hasXAITTSAutoSpeechTags`.
     public var hasXAITTSAdvancedParams: Bool { atLeastSemver(0, 19, 0) }
 
+    /// Scarf's "Hermes Voice" playback engine: `HermesSpeechService` calls
+    /// `tools.tts_tool.text_to_speech_tool(text, output_path=…)` on the
+    /// server and reads back the files its envelope names. Gates the
+    /// Settings → Voice "Playback Engine" picker and the synthesis path;
+    /// below the floor the picker is hidden and the speaker button uses the
+    /// system voice exactly as before.
+    ///
+    /// **Floor v0.20.1 (v2026.8.13)** — the first tag where all three
+    /// things the service depends on hold (walked across every `v2026.*`
+    /// tag from v2026.3.30 = 0.6.0):
+    ///  - `output_path` kwarg: present at every tag
+    ///    (`tools/tts_tool.py:347-349` @ v2026.3.30 through `:400-402` @
+    ///    v2026.9.14);
+    ///  - `provider` kwarg: first at **v2026.7.30 (0.19.1)**
+    ///    (`tools/tts_tool.py:2781-2786`), absent at v2026.7.20 (0.19.0)
+    ///    whose signature is `(text, output_path)` only (`:2284-2286`).
+    ///    The service does not pass it (see
+    ///    `HermesSpeechService.toolPythonScript`), but it is part of the
+    ///    tool contract the floor was asked to cover;
+    ///  - the `file_path` + `file_paths` long-form envelope and its
+    ///    `<stem>.chunkNNN` / `<stem>.partNN` naming: first at **v2026.8.13
+    ///    (0.20.1)** (`tools/tts_tool.py:3612-3613` chunk names, `:3669-3670`
+    ///    envelope, part names `:1691-1692`); at v2026.8.3 (0.20.0) the
+    ///    string `"file_paths"` does not occur in the file and the envelope
+    ///    is the single-file `"file_path": file_str` (`:3137`).
+    /// Unchanged in shape through v2026.9.14 (`tools/tts_tool.py:381`
+    /// chunks, `:446` envelope; `tools/tts_tool_delivery.py:413` parts).
+    public var hasHermesSpeechSynthesis: Bool { isV0201OrLater }
+
     // MARK: v0.20 (v2026.8.3) flags
     //
     // `hasCompressCommand` used to live here, claiming ACP's `/compact` was
@@ -2116,6 +2145,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// difference from the CLI is that nothing is pruned.
     public var hasBackupKeep: Bool { isV0212OrLater }
 
+    // MARK: v0.21.3 (v2026.9.14) flags
+
+    /// GPT-Live voice chat mode — Hermes's full-duplex voice frontend that
+    /// delegates every real request to the agent. `tools/voice_live.py`
+    /// first ships at tag **v2026.9.14** (commit `f923faa0b8`, whose
+    /// `pyproject.toml:5` reads `version = "0.21.3"`); `git ls-tree
+    /// v2026.9.11 -- tools/voice_live.py` is empty. Scarf's Live Voice
+    /// imports that module on the host (`create_webrtc_session`,
+    /// `voice_live.py:162-186`) for the SDP exchange, and the
+    /// `voice.voice_chat_mode` key it reads is seeded at
+    /// `hermes_cli/config_defaults.py:1132` from the same tag.
+    ///
+    /// This is only HALF of the Live Voice gate: the entry point also needs
+    /// the host's parsed `voice.voice_chat_mode` to be gpt-live — see
+    /// ``VoiceLiveReadiness``. There is deliberately no host status probe:
+    /// a missing OpenAI key surfaces at session start as a setup message,
+    /// before anything is billed.
+    public var hasGPTLiveVoice: Bool { isV0213OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -2268,6 +2316,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV0211OrLater`: a v0.21.1 host satisfies every minor-level check
     /// and lacks the flag.
     public var isV0212OrLater: Bool { atLeastSemver(0, 21, 2) }
+
+    /// Whether the connected host is on v0.21.3 or newer. Patch-level floor
+    /// for the v0.21.3 group (GPT-Live voice), same rationale as
+    /// `isV0212OrLater`.
+    public var isV0213OrLater: Bool { atLeastSemver(0, 21, 3) }
 
     /// Public form of the private floor test, for tables that carry their
     /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than
