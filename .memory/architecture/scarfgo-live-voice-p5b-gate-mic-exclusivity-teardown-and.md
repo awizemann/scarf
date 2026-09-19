@@ -1,0 +1,31 @@
+---
+title: ScarfGo Live Voice (P5b): gate, mic exclusivity, teardown and the shared prompt path
+type: note
+permalink: scarf/architecture/scarfgo-live-voice-p5b-gate-mic-exclusivity-teardown-and
+tags: [voice, gpt-live, ios, scarfgo]
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/Settings/SettingsView.swift]
+source_paths_inferred: false
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+created: 2026-09-18
+updated: 2026-09-18
+---
+
+ScarfGo's binding of the P4 Live Voice core (task t-50cf07c5, branch feat/voice-p5b). Composer entry sits beside the P1 dictation mic; the session is a sheet over Chat. The Mac twin (P5a) must follow the same VoiceTurnHost rules.
+
+## Observations
+- [convention] ChatController's typed send and Live Voice share startPrompt/runPrompt: startPrompt bumps promptsInFlight synchronously before spawning the Task (so a cancel racing the hand-off still waits), runPrompt synthesizes .promptComplete from sendPrompt's return; cancelActiveVoiceTurn fires ACPClient.cancel un-awaited and polls promptsInFlight to 0, bounded by voiceCancelTimeout (10 s, C10) #voice #ios
+- [decision] The composer entry renders only when VoiceLiveReadiness is .ready; ChatController.refreshVoiceChatMode re-reads voice.voice_chat_mode off-main on every Chat appearance, and only on hasGPTLiveVoice hosts, so a mode flipped in Settings shows up on return and pre-0.21.3 hosts do no extra IO (C1) #voice #capabilities
+- [invariant] VoiceLiveSessionModel.teardown(trigger) calls endImmediately inside a UIApplication background task (released after a 5 s grace) on background, Chat onDisappear (tab/server/profile switch), vm.sessionId change, sheet dismiss and AVAudioSession interruption; .inactive deliberately keeps the session (Control Center route changes) #voice #cost
+- [gotcha] A view can't present a second sheet over its own, so Hermes tool-permission prompts would silently never show during a voice turn; ChatPermissionPresenter is a modifier applied to ChatView (disabled while the voice sheet is up) and inside the voice sheet #voice #ios
+- [gotcha] ImageRenderer draws a placeholder for NavigationStack/ScrollView content, so it cannot snapshot the voice sheet in a unit test; visual checks need a connected simulator or device #testing #ios
+
+## F4 consent and copy (t-ba3ccc85)
+
+- [convention] `VoiceLiveSessionModel.begin` checks consent BEFORE the microphone prompt; `pendingConsent` drives `.sheet(item:)` in ChatView, and Continue starts the session in that sheet's onDismiss (`startLiveVoiceAfterConsent`). `teardown(.viewDisappeared)` drops a pending consent; backgrounding keeps it. Settings has a "Live Voice Privacy" section (Review / Reset) placed OUTSIDE the managed-host `.disabled` group, because the consent is device-local, not a Hermes key #voice #privacy
+- [fact] NSMicrophoneUsageDescription now says dictation is transcribed on this device and Live Voice streams directly to OpenAI (not "through your Hermes server") #voice #privacy
+
+
+
+## Relations
+- relates_to [[Live Voice core (ScarfCore/VoiceLive): the engine-agnostic surface both apps bind to]]
+- relates_to [[Push-to-talk dictation (ScarfIOS): on-device-only privacy contract + lifecycle teardown pattern]]

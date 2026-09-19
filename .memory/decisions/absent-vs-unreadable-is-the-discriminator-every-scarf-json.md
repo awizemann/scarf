@@ -5,10 +5,10 @@ permalink: scarf/decisions/absent-vs-unreadable-is-the-discriminator-every-scarf
 tags: [projects, transport, resilience, dataloss, restore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 94c88e7f1322110b4bfd71534d632d453bdc177e
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-12
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 

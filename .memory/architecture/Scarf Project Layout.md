@@ -5,10 +5,10 @@ permalink: scarf/architecture/scarf-project-layout
 tags: [layout, paths]
 source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Package.swift, scarf/Packages/ScarfIOS/Package.swift]
 source_paths_inferred: false
-source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-09-14
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -17,7 +17,7 @@ reviewed_by: audit:claude-code (background)
 - [path] Main app source: scarf/scarf/ with subdirs Core/Services, Core/Models, Features/<Name>, Navigation/ #source
 - [path] Core/Services (Mac-specific): ACPClient+Mac, HermesFileService, HermesFileWatcher, HermesProxyService, ProjectTemplateService, ProjectAgentContextService, NousSubscriptionService, SkillBootstrapService, and others #services
 - [path] ScarfCore services (cross-platform): HermesDataService, HermesLogService, HermesCapabilities, KanbanService, ModelCatalogService, ModelPresetService, SessionAttributionService, CuratorService, and others #services
-- [path] Feature modules under Features/: Activity, Chat, Common, CredentialPools, Cron, Curator, Dashboard, Gateway, Health, Insights, Kanban, Logs, MCPServers, Memory, Models, Personalities, Platforms, Plugins, Profiles, Projects, Proxy, QuickCommands, Servers, Sessions, Settings, Skills, Templates, Tools, Webhooks #features
+- [path] Feature modules under Features/: Activity, Bots, Chat, Common, CredentialPools, Cron, Curator, Dashboard, Gateway, Health, Insights, Kanban, Logs, MCPServers, Memory, Models, Peers, Personalities, Platforms, Plugins, Profiles, Projects, Proxy, QuickCommands, Servers, Sessions, Settings, Skills, Templates, Tools, Webhooks #features
 - [path] ScarfDesign Swift package: scarf/Packages/ScarfDesign/ — shared design tokens for both macOS and iOS targets #design
 - [path] ScarfCore Swift package: scarf/Packages/ScarfCore/ — shared services including HermesCapabilities #core
 - [path] ScarfIOS Swift package: scarf/Packages/ScarfIOS/ — iOS-specific services including CitadelServerTransport and IOSDashboardViewModel #ios

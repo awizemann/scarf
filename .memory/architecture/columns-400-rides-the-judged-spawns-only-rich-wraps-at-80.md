@@ -5,7 +5,7 @@ permalink: scarf/architecture/columns-400-rides-the-judged-spawns-only-rich-wrap
 tags: [transport, hermes-cli, verification, round-4]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/LocalTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: 834467ab2ab1d5523097d023b965211259223f3d
 created: 2026-09-11
 updated: 2026-09-13
 reviewed: 2026-09-13

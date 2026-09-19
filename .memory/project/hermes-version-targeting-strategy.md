@@ -5,11 +5,11 @@ permalink: scarf/project/hermes-version-targeting-strategy
 tags: [hermes, versioning, capability-gating]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-05-29
 updated: 2026-09-14
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

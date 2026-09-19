@@ -2,12 +2,12 @@
 title: Hermes v0.20 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-20-compatibility-decisions
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift]
 source_paths_inferred: false
-source_sha: d53d3cbe85a799e9262db55d8b0c0d041b990ce4
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-08-03
 updated: 2026-09-11
-reviewed: 2026-09-12
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 

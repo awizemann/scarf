@@ -5,11 +5,11 @@ permalink: scarf/features/model-presets-feature
 tags: [models, presets, acp]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 96089feb0abaf78cf728e1ead67c4aa47f21cd11
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-05-29
 updated: 2026-09-12
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

@@ -4,7 +4,7 @@ type: note
 permalink: scarf/conventions/acp-turn-completion-is-sendprompt-s-return-not-a-stream-promptcomplete-event
 tags: [acp, miniapps, bug, fix, testing, concurrency, security]
 created: 2026-06-16
-updated: 2026-09-04
+updated: 2026-09-18
 ---
 
 Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the event stream does not carry it. Missing this shipped a hung happy-path in the M2 mini-app agent channel. Branch `feat/projects`.
@@ -37,3 +37,9 @@ Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the e
 - [gotcha-tests] The suite owns no file, no port and no subprocess — it is a `FakeACPChannel` actor and a real `ACPClient`, entirely in memory. What it contends on is CPU and the scheduler, shared with sibling suites that spawn real `Process`es (the same contention behind the flaky `RemoteSQLiteBackend` subprocess race, t-aud32). Nine tests each spinning a 10-15 ms polling loop against a 2 s deadline is a deadline tuned to an idle machine. Look for the contention before padding: "flaky under parallel load" is not automatically a shared-resource bug. #testing
 - [decision] Two fixes for the two halves. `.serialized` removes the contention the suite creates FOR ITSELF (nine concurrent polling loops become one); it cannot touch the sibling suites, because `.serialized` covers a suite and its subgroups, never the rest of the run — the same limit `TestRegistryLock` ran into. The deadlines then moved into a `Deadline` enum scaled by `activeProcessorCount` (1x at 8+ cores, up to 4x on one core), because a timeout in this suite is a HANG GUARD, not an assertion: its only job is to stop a genuinely leaked continuation from hanging CI, so headroom costs nothing on a green run.
 - [fact] Verified across four consecutive full `scarfTests` runs (723 tests, 93 suites) — green every time, where the suite previously failed about one run in three.
+
+
+
+## A prompt sent mid-turn returns FIRST (t-dd450d3a, 2026-09-18)
+
+- [gotcha] Hermes answers a session/prompt that arrives while a turn runs at once ("Queued for the next turn. (N queued)" chunk + end_turn, `_claim_turn_or_queue`, acp_adapter/server.py:696-715) and runs the queued text inside the RUNNING prompt's `_finish_turn` drain (:927-938). So with two Scarf prompts in flight the NEWER sendPrompt returns first and the older one last. Any "latest turn wins" bookkeeping (one task slot, a generation counter that clears the in-flight marker on the newest return) marks the chat idle while Hermes still works. Mac ChatViewModel keys each prompt by its own token (`promptTurns`) and ends the busy period only when no other interruptive prompt is in flight #acp #concurrency

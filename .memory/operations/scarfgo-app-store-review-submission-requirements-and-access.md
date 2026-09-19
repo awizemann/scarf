@@ -4,10 +4,10 @@ type: note
 permalink: scarf/operations/scarfgo-app-store-review-submission-requirements-and-access
 source_paths: [scarf/Scarf iOS/Info.plist, scarf/Scarf iOS/Scarf_iOS.entitlements, scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Scarf iOS/Onboarding/OnboardingRootView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: 6fd25f3061fd0b2dda55594c4f138b5d5f8c73dd
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-08-14
 updated: 2026-08-19
-reviewed: 2026-09-14
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-05-29
-updated: 2026-09-13
+updated: 2026-09-18
 reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
@@ -51,3 +51,6 @@ reviewed_by: claude-opus-5
 
 - [gotcha] **A product decision that NAMES a capability flag is a hypothesis, not a citation — walk it like any other floor.** Round-6 decision 6 said the Kanban Review exits sit behind `hasKanbanV015`; the source says **v0.20.1**, five releases later, and the gap is exactly the range where the UI would have offered a gesture the host refuses. `complete_task`'s UPDATE admits `review` only from `v2026.8.13` (0.20.1) and `reopen-review` lands at the same tag, so the gate is the new `hasKanbanReviewExits = isV0201OrLater` (`HermesCapabilities.swift:1448`, `e4e25ccb`). C2 binds the phase agent even when Alan's decision already named a flag: open the file at the floor tag AND the tag before, then gate #capability-gating #verification
 - [convention] **A flag's `// MARK:` group is a floor claim too, and every group-enumerating test is a membership contract.** `hasKanbanReviewExits` was filed under `// MARK: v0.20.4` at a 0.20.1 floor — the right home (that header already says the MARK is a LOCATION, never evidence, and since P55 no member carries a v0.20.4 floor), but the five group-enumerating tests in `HermesCapabilitiesTests.swift` never named the new member, leaving its floor unproven at every boundary the group already guards. P56b (`6a641ee8`) added it to all five with 0.20.1 polarity: ON at 0.20.3/0.20.4/0.20.5/0.21.0, OFF at 0.20.0. Either the header states the group is a location and each member carries its own verified tag (the shape here), or the header names a floor every member honours — either way the enumerating tests must list EVERY member #capability-gating #testing
+
+
+- [gotcha] **In zsh, a tag-walk loop must brace the tag: `git show "${t}:tools/tts_tool.py"`, never `$t:tools/…`.** zsh parses `$t:t` as the `:t` (tail) history modifier, so the unbraced form silently asks for the wrong object, `2>/dev/null` hides the error, and EVERY tag reads as "symbol absent" — a floor that would land above the newest tag. Seen in the P2 voice walk (2026-09-18); the agent shell here is zsh. Sanity-check a walk by confirming the symbol IS found at the newest tag #hermes #capabilities #verification

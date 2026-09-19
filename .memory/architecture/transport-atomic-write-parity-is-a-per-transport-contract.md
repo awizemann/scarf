@@ -5,11 +5,11 @@ permalink: scarf/architecture/transport-atomic-write-parity-is-a-per-transport-c
 tags: [transport, atomicity, projects, ios, dataloss]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/LocalTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: 834467ab2ab1d5523097d023b965211259223f3d
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

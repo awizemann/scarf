@@ -5,10 +5,10 @@ permalink: scarf/architecture/the-transport-writefile-grep-is-not-the-write-surf
 tags: [transport, dataloss, guarded-write, projects]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Core/Persistence/ServerRegistry.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift]
 source_paths_inferred: false
-source_sha: b1cb58d71a4ab02b4f38d35110c492f058147bc7
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-12
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 

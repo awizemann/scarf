@@ -4,11 +4,11 @@ type: note
 permalink: scarf/decisions/aggregator-providers-must-skip-the-model-provider-mismatch
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: ca6ae1e8832242f31b5c6ccdd3b390186b1af8cb
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-07-03
 updated: 2026-09-11
-reviewed: 2026-09-10
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

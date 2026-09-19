@@ -4,9 +4,11 @@ type: note
 permalink: scarf/operations/privacy-policy-page-on-gh-pages-is-hand-generated
 source_paths: [scarf/docs/PRIVACY_POLICY.md, wiki/Privacy-Policy.md]
 source_paths_inferred: false
-source_sha: 5e9a1798e99e68774ab81f48bac62dd2368a9448
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-08-20
 updated: 2026-08-20
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 The public privacy page https://awizemann.github.io/scarf/privacy/ (linked from iOS Info.plist, App Store Connect, README, and the policy docs themselves) is a static page at gh-pages `privacy/index.html`, first published 2026-08-20 (gh-pages 525392e) — before that the "canonical" URL had 404'd since April 2026.

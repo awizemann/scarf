@@ -5,16 +5,16 @@ permalink: scarf/architecture/macos-must-mirror-ios-scene-phase-pause-and-resume
 tags: [lifecycle, performance, macos, architecture, audit-2026-06-13]
 source_paths: [scarf/scarf/scarfApp.swift, scarf/Scarf iOS/App/ScarfGoCoordinator.swift, scarf/Scarf iOS/App/ScarfGoTabRoot.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: 834467ab2ab1d5523097d023b965211259223f3d
 created: 2026-06-13
 updated: 2026-06-13
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
 - [rule] 🚨 Any recurring/background task (polling loops, live-status refreshers, SSH log tails) must be gated on app foreground state on macOS just as iOS gates them on scene phase — otherwise they keep running (and timing out against unreachable remotes, once per open window) when the app is backgrounded or all windows are minimized. #rule
-- [pattern] macOS already listens for `NSApplication.didBecomeActiveNotification`; pair it with `didResignActiveNotification` and route both to a central pause/resume (IMPLEMENTED 2026-06-13, t-aud05, as SLOW-DOWN not full-suspend: floor the poll cadence at 60s while backgrounded rather than stopping entirely — the macOS MenuBarExtra status is always visible so a hard stop would freeze it; 60s still kills the idle 10s SSH-poll storm; fire an immediate refresh on foreground return via `ServerLiveStatus.pollNow()`). iOS reference: `ScarfGoCoordinator.setScenePhase` (defined at `ScarfGoCoordinator.swift:86`, called from `ScarfGoTabRoot.swift:108`) + `ChatView` uses `scenePhaseTick` observer (`ChatView.swift:217`).
+- [pattern] macOS already listens for `NSApplication.didBecomeActiveNotification`; pair it with `didResignActiveNotification` and route both to a central pause/resume (IMPLEMENTED 2026-06-13, t-aud05, as SLOW-DOWN not full-suspend: floor the poll cadence at 60s while backgrounded rather than stopping entirely — the macOS MenuBarExtra status is always visible so a hard stop would freeze it; 60s still kills the idle 10s SSH-poll storm; fire an immediate refresh on foreground return via `ServerLiveStatus.pollNow()`). iOS reference: `ScarfGoCoordinator.setScenePhase` (defined at `ScarfGoCoordinator.swift:86`, called from `ScarfGoTabRoot.swift:108`) + `ChatView` uses `scenePhaseTick` observer (`ChatView.swift:210`).
 - [check] `grep -rn 'didResignActive\|scenePhase\|startPolling' --include="*.swift" scarf`
 - [history] 2026-06-13 Cycle 3: `scarfApp.swift:506-535` — `ServerLiveStatus.startPolling` 10s loop pauses at 60s in lowPowerMode; static fingerprint of gh#102 "100% CPU on idle connection". #history
 

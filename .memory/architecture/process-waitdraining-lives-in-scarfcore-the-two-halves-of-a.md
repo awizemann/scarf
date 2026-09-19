@@ -5,11 +5,11 @@ permalink: scarf/architecture/process-waitdraining-lives-in-scarfcore-the-two-ha
 tags: [c10, process, spawn-discipline, scarfcore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProcessTimeout.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteBackupService.swift, scarf/scarf/Core/Services/ProjectTemplateService.swift, scarf/scarfTests/MainActorSpawnDisciplineP22Tests.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-11
-updated: 2026-09-13
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+updated: 2026-09-18
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
@@ -30,6 +30,7 @@ reviewed_by: claude-opus-5
 
 ## Relations
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]
+- relates_to [[A ScarfCore test that blocks the main thread or a pool thread fails unrelated suites in the full run]]
 
 
 ## Round-5 P48 — one drain in the app, and the async escalation
@@ -155,3 +156,17 @@ reviewed_by: claude-opus-5
 - [gotcha] **`guard proc.isRunning` is a CHECK, not a hold.** `ProcessACPChannel`'s close watchdog then called `terminate()`, which on a process reaped in the gap raises an ObjC exception — uncatchable in Swift. `kill(pid, SIGTERM)` cannot trap: a stale pid returns ESRCH. The residual window is pid recycling, which nothing short of a pidfd closes and which `terminate()` did not close either; it is one STATED sentence now instead of an unexamined one (`720dbdc2`) #c10
 - [fact] **`runSync` has EIGHT callers on iOS, not seven** — `ServerContext.UserHomeCache.probe` (`ServerContext.swift:343`) is unguarded ScarfCore compiled for iOS and still reaches the SYNCHRONOUS `runProcess` through `ServerContext.sshTransportFactory`. The Mac half of decision 11 stays on `t-02f830f4` #c10 #ios
 - [gotcha] **A test timeout is a CEILING when only the failure path pays it, and a BET when the green path spends it.** The park test's four probes took 6.5 s of a 10 s bound under full-suite load; under the regression they never arrive at all — so the bound measured the grader's machine, not the defect. Raised to 60 s, with `EventInbox`'s waits and `OffPoolP52Tests`' 32-thread `allArrived` rendezvous (2 of 6 full parallel runs red on the reviewer's machine, not P58-induced) #testing
+
+
+
+## Test-side runners (P4 Live Voice, 2026-09-18)
+
+- [gotcha] Test helpers that run real shell or Python and read `Pipe`s to EOF hit this file's grandchild problem from the side. On 2026-09-18, under the full parallel `swift test`, a runner reading `/bin/sh` output through pipes stalled for 5 s and returned empty, while `--filter` passed. The likely cause is a sibling suite's concurrently spawned child holding the write end. `ShellTestRunner` in ScarfCoreTests writes the child's stdout and stderr to temp FILES and bounds the run with a timeout. Use it rather than pipes for tests that spawn processes. Since t-f1593849 it is `async`: it suspends on `terminationHandler` and never parks a pool thread. See [[A ScarfCore test that blocks the main thread or a pool thread fails unrelated suites in the full run]] #testing #c10
+
+
+
+## SSHScriptRunner feeds scripts on stdin, non-blocking (2026-09-18)
+
+- [invariant] **Both `SSHScriptRunner` paths run `/bin/sh -s` with the script on stdin, never in argv.** The local path used `/bin/sh -c <script>`, which let any user on the Mac read the script in `ps` while it ran. That exposed Live Voice's SDP offer (ICE credentials) and TTS text. `LocalScriptStdinTests` checks this with a real `ps` of the running shell and with a source pin #security
+- [invariant] **The stdin feed is `ScriptFeeder`, a non-blocking pump called on each run-loop tick, not one blocking write.** `sh -s` reads its script as it executes. So a script larger than the pipe buffer whose early command stalls would block a plain `write` before the timeout loop even started. That is the P43b tarball bug in a new place. The write end is `O_NONBLOCK` + `F_SETNOSIGPIPE`. The SSH path had the same blocking write and was fixed at the same time #c10
+- [gotcha] **A `ps -p $$` probe at the END of a `sh -c` script sees `ps`, not `sh`.** sh runs the last simple command with `exec`, which replaces the shell, so `$$` then names `ps`. Wrap it (`echo "$(ps -o args= -p $$)"`) or the test passes for the wrong reason #testing

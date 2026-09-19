@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-yaml-reader-is-opted-in-per-key-and-only-for-wha
 tags: [yaml, config-parsing, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/YAMLScalar.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPlatformSharedKeys.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesApprovalMode.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-11
 updated: 2026-09-13
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 P41 of the round-4 whole-surface audit (commits 2fb7cc08, d4a3ab4d, 402442a1, 151cdd3e on `fix/whole-surface-audit-r4`). Scarf emits every config.yaml scalar through ONE rule (`YAMLScalar.quoteIfNeeded`) but reads config.yaml through TWO decoders on purpose — and which one a key gets is now an explicit list rather than an accident.

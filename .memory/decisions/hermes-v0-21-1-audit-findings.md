@@ -5,11 +5,11 @@ permalink: scarf/decisions/hermes-v0-21-1-audit-findings
 tags: [hermes, audit, compatibility, v0.21.1, hermes-v0-21-1]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesSearchIndex.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/WebToolsBackendRoster.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py, documents/hermes-v0.21.1-audit-report.md]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

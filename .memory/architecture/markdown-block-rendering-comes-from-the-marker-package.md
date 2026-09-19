@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/markdown-block-rendering-comes-from-the-marker-package
 source_paths: [scarf/scarf/Core/Utilities/MarkdownContentView.swift, scarf/scarf.xcodeproj/project.pbxproj, scarf/scarfTests/MarkdownContentViewParseTests.swift]
 source_paths_inferred: false
-source_sha: 96089feb0abaf78cf728e1ead67c4aa47f21cd11
+source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-07-22
 updated: 2026-08-20
-reviewed: 2026-09-12
+reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
 

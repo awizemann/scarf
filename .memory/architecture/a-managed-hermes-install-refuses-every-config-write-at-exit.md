@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-managed-hermes-install-refuses-every-config-writ
 tags: [hermes-cli, verification, capability-gating]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesManagedInstall.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
+source_sha: 05eabf021b7b7ec9739248f139e2a0f54619eeb7
 created: 2026-09-11
 updated: 2026-09-12
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-18
+reviewed_by: audit:claude-code (background)
 ---
 
 Shipped by P39 of the round-4 whole-surface remediation (`t-ba727c07`), implementing round-4 decisions 1 and 11.
