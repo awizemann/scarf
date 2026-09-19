@@ -35,7 +35,13 @@ import Foundation
             startContinuation?.resume()
             startContinuation = nil
         }
-        func applyAnswer(sdp: String) async throws { answers.append(sdp) }
+        /// When set, applyAnswer() throws it — WebKit's raw
+        /// setRemoteDescription exception, which quotes the SDP back.
+        var answerError: Error?
+        func applyAnswer(sdp: String) async throws {
+            answers.append(sdp)
+            if let answerError { throw answerError }
+        }
         func send(_ json: String) {
             sent.append(json)
             if json.contains("session.close") { order.append("close") }
@@ -224,6 +230,25 @@ import Foundation
         await engine.start()
         bridge.emit(.transportClosed(reason: "microphone_busy"))
         #expect(engine.phase == .failed(.microphoneBusy))
+    }
+
+    /// F6 #2: the applyAnswer throw is a raw WebKit exception whose text
+    /// quotes the offending SDP line — ICE credentials and DTLS
+    /// fingerprints. `finish` logs the failure at `privacy: .public`, so
+    /// the detail must be fixed copy, never the error's own message.
+    @Test func answerApplyFailureNeverQuotesTheSDP() async {
+        bridge.answerError = ScriptError(
+            errorDescription: "InvalidAccessError: Failed to set remote answer sdp: a=ice-pwd:SECRET is invalid")
+        await engine.start()
+        bridge.emit(.offer(sdp: "v=0 offer\r\n"))
+        await settle { engine.phase.isTerminal }
+        guard case .failed(let failure) = engine.phase else {
+            Issue.record("expected a failure, got \(engine.phase)")
+            return
+        }
+        #expect(!failure.englishDescription.contains("SECRET"))
+        #expect(!failure.englishDescription.contains("ice-pwd"))
+        #expect(failure == .audioConnectFailed(detail: "the audio answer could not be applied"))
     }
 
     @Test func microphoneFailureFailsTheStart() async {

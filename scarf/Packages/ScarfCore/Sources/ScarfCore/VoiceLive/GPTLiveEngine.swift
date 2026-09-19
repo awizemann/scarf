@@ -359,7 +359,13 @@ public final class GPTLiveEngine: VoiceConversationEngine {
                     try await self.bridge.applyAnswer(sdp: answer.sdp)
                 } catch {
                     guard myEpoch == self.epoch, self.state.phase.isActive else { return }
-                    self.finish(failure: .audioConnectFailed(detail: error.localizedDescription))
+                    // The detail is FIXED, never the error's own text: this
+                    // throw is a raw WebKit `setRemoteDescription` exception,
+                    // and WebKit quotes the offending SDP line back — which
+                    // is where the ICE credentials and DTLS fingerprint live.
+                    // `finish` logs the failure's description at .public, so
+                    // the error text would land in the system log verbatim.
+                    self.finish(failure: .audioConnectFailed(detail: "the audio answer could not be applied"))
                 }
             case .failure(let error):
                 self.finish(failure: .host(error as? VoiceLiveHostError ?? .transport(detail: VoiceLiveHostExchange.redact(error.localizedDescription))))

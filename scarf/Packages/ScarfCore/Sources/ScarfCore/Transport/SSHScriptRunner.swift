@@ -56,11 +56,20 @@ public enum SSHScriptRunner {
     /// `pump()` writes what the pipe takes NOW, and the run loop calls it on
     /// every tick, where the timeout and cancellation checks already live.
     /// Only ever touched from the one detached task that owns the run.
-    private final class ScriptFeeder {
+    final class ScriptFeeder {
         private let handle: FileHandle
         private let data: Data
         private var offset = 0
         private(set) var isDone = false
+
+        /// The `errno` of a write that lost bytes of the script, if one
+        /// happened. Anything other than EPIPE here means the child is still
+        /// there and would otherwise run the TRUNCATED prefix as if it were
+        /// the whole script — a `cd /tmp && rm -rf "$d"` cut mid-line is its
+        /// own command. The run reports it as a connect failure instead of
+        /// handing the caller that run's output. EPIPE is exempt: the reader
+        /// is gone, so nothing runs and the child's own exit reports.
+        private(set) var failure: Int32?
 
         init(handle: FileHandle, script: String) {
             self.handle = handle
@@ -85,7 +94,12 @@ public enum SSHScriptRunner {
                 if n > 0 { offset += n; continue }
                 if n < 0 && errno == EINTR { continue }
                 if n < 0 && errno == EAGAIN { return }
-                break  // EPIPE or another error: nobody is reading.
+                // EPIPE: nobody is reading, nothing ran. Anything else lost
+                // bytes with the child still alive — record it so the run
+                // fails loudly rather than reporting the truncated script's
+                // output as the script's own.
+                if n < 0 && errno != EPIPE { failure = errno }
+                break
             }
             finish()
         }
@@ -126,6 +140,15 @@ public enum SSHScriptRunner {
         /// are reported as captured.
         case completed(stdout: String, stderr: String, exitCode: Int32)
     }
+
+    #if !os(iOS)
+    /// The outcome for a script that could not be fed to the shell in full.
+    /// Never `.completed`: the child saw a prefix, so whatever it printed
+    /// answers a different script than the caller asked for.
+    static func feedFailure(errno code: Int32) -> Outcome {
+        .connectFailure("failed to feed the script: \(String(cString: strerror(code)))")
+    }
+    #endif
 
     /// Run `script` against the given context. Times out after
     /// `timeout` seconds, killing the subprocess if it overruns.
@@ -286,6 +309,14 @@ public enum SSHScriptRunner {
             let deadline = Date().addingTimeInterval(timeout)
             while proc.isRunning && Date() < deadline {
                 feeder.pump()
+                // A short write with the child still alive left it holding a
+                // truncated script; kill it rather than let the shell run the
+                // prefix and report its output as the script's result.
+                if let code = feeder.failure {
+                    proc.terminate()
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
+                    return feedFailure(errno: code)
+                }
                 // Honor BOTH the detached-task's own cancellation flag
                 // (set by the parent's `withTaskCancellationHandler`)
                 // and the legacy `Task.isCancelled` check in case the
@@ -383,6 +414,14 @@ public enum SSHScriptRunner {
             let deadline = Date().addingTimeInterval(timeout)
             while proc.isRunning && Date() < deadline {
                 feeder.pump()
+                // A short write with the child still alive left it holding a
+                // truncated script; kill it rather than let the shell run the
+                // prefix and report its output as the script's result.
+                if let code = feeder.failure {
+                    proc.terminate()
+                    _ = await proc.waitDrainingAsync(timeout: 0, drain: drain)
+                    return feedFailure(errno: code)
+                }
                 if cancelFlag.isCancelled || Task.isCancelled {
                     // Bounded escalation, and the drain owns the read ends —
                     // closing them here would raise while a reader is still

@@ -136,6 +136,14 @@ public struct VoiceLiveHostExchange: VoiceLiveSessionExchanging {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // The transports don't propagate CancellationError: cancelling
+            // mid-script surfaces as a plain transport error whose message is
+            // "Script cancelled" (`SSHScriptRunner`), so the `catch is
+            // CancellationError` above never fires and the caller would show
+            // a connection failure for a session the user themself ended.
+            // Our own cancellation is authoritative, whatever the transport
+            // called it.
+            if Task.isCancelled { throw CancellationError() }
             throw VoiceLiveHostError.transport(detail: Self.redact(error.localizedDescription))
         }
         try Task.checkCancellation()
@@ -277,7 +285,30 @@ public struct VoiceLiveHostExchange: VoiceLiveSessionExchanging {
     /// Strip anything key-shaped: OpenAI secret keys (`sk-…`, including the
     /// masked `sk-proj-****` echo), bearer tokens and ephemeral keys
     /// (`ek_…`). Bounded to 600 characters, like the host side.
+    ///
+    /// Also strips the SDP attributes that ARE credentials — `a=ice-ufrag:`,
+    /// `a=ice-pwd:`, `a=fingerprint:` and `a=crypto:`. Offers and answers are
+    /// never logged deliberately, but WebKit and the vendor quote the
+    /// offending SDP line back inside an error message, and every caller of
+    /// this function feeds its result to a `privacy: .public` log line. The
+    /// attribute name survives (so a diagnosis is still possible); its value
+    /// does not.
     public static func redact(_ text: String) -> String {
+        let sdpPattern = #"(?im)^(a=(?:ice-ufrag|ice-pwd|fingerprint|crypto):).*$"#
+        var text = text
+        if let sdp = try? NSRegularExpression(pattern: sdpPattern) {
+            text = sdp.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1<redacted>"
+            )
+        }
+        // WebKit's exception text is one line: the attribute is quoted inline
+        // rather than at the start of a line, so match it there too.
+        let inlinePattern = #"(a=(?:ice-ufrag|ice-pwd|fingerprint|crypto):)[^\s"']+"#
+        if let inline = try? NSRegularExpression(pattern: inlinePattern) {
+            text = inline.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1<redacted>"
+            )
+        }
         let pattern = #"(sk-[A-Za-z0-9_\-\*\.]+|Bearer\s+\S+|ek_[A-Za-z0-9_\-]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return "" }
         let range = NSRange(text.startIndex..., in: text)
