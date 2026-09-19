@@ -27,7 +27,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Scarf uses the microphone for Hermes voice chat.</string>
+	<string>Scarf uses the microphone for the voice features you start: Hermes voice chat, and Live Voice sessions, which stream your voice directly from this Mac to OpenAI.</string>
 	<key>SwiftStatsWriteKey</key>
 	<string>$(SWIFT_STATS_WRITE_KEY)</string>
 	<key>SUFeedURL</key>

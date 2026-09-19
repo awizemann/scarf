@@ -44,43 +44,43 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf verwendet das Mikrofon für den Hermes-Sprach-Chat."
+            "value" : "Scarf verwendet das Mikrofon für die Sprachfunktionen, die du startest: den Hermes-Sprach-Chat und Live-Voice-Sitzungen, die deine Stimme direkt von diesem Mac an OpenAI übertragen."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf uses the microphone for Hermes voice chat."
+            "value" : "Scarf uses the microphone for the voice features you start: Hermes voice chat, and Live Voice sessions, which stream your voice directly from this Mac to OpenAI."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf usa el micrófono para el chat de voz de Hermes."
+            "value" : "Scarf usa el micrófono para las funciones de voz que inicies: el chat de voz de Hermes y las sesiones de Live Voice, que transmiten tu voz directamente desde este Mac a OpenAI."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf utilise le microphone pour le chat vocal de Hermes."
+            "value" : "Scarf utilise le microphone pour les fonctions vocales que vous lancez : le chat vocal de Hermes et les sessions Live Voice, qui transmettent votre voix directement de ce Mac à OpenAI."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf は Hermes の音声チャットのためにマイクを使用します。"
+            "value" : "Scarf は、あなたが開始する音声機能（Hermes の音声チャット、およびこの Mac から OpenAI へ音声を直接ストリーミングする Live Voice セッション）のためにマイクを使用します。"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O Scarf usa o microfone para o chat de voz do Hermes."
+            "value" : "O Scarf usa o microfone para os recursos de voz que você inicia: o chat de voz do Hermes e as sessões de Live Voice, que transmitem sua voz diretamente deste Mac para a OpenAI."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scarf 使用麦克风进行 Hermes 语音聊天。"
+            "value" : "Scarf 使用麦克风来支持你启动的语音功能：Hermes 语音聊天，以及会将你的语音直接从这台 Mac 传输到 OpenAI 的 Live Voice 会话。"
           }
         }
       }
