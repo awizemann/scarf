@@ -142,6 +142,12 @@ import ScarfCore
             n += 1
             return n
         }
+        /// Invocations so far, without bumping — for "nothing respawned"
+        /// assertions.
+        var count: Int {
+            lock.lock(); defer { lock.unlock() }
+            return n
+        }
     }
 
     // MARK: - Helpers

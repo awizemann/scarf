@@ -46,11 +46,11 @@ struct RichChatInputBar: View {
     @State private var compressFocus = ""
     @State private var showMenu = false
     @State private var selectedIndex = 0
-    @State private var attachments: [ChatImageAttachment] = []
-    /// True while ImageEncoder is decoding/encoding pasted/dropped bytes.
-    /// Renders a small spinner in the preview strip so the user knows
-    /// their drop landed.
-    @State private var isEncodingAttachment = false
+    /// Attachments plus the cap they're held against. Slots are reserved
+    /// synchronously on accept and released when the encode lands, so a
+    /// burst of drops can't overshoot the cap through the async gap
+    /// (`ComposerAttachmentSlots`).
+    @State private var slots = ComposerAttachmentSlots(capacity: RichChatInputBar.maxAttachments)
     /// User-visible failure (decode failed, format unsupported). Auto-clears.
     @State private var attachmentError: String?
     /// Vision capability of the session's effective model, resolved
@@ -65,7 +65,7 @@ struct RichChatInputBar: View {
 
     /// Hard cap matches what Hermes' vision aux model swallows comfortably
     /// in one prompt. Going higher costs tokens without a quality gain.
-    private static let maxAttachments = 5
+    static let maxAttachments = ComposerAttachmentSlots.defaultCapacity
 
     private static let logger = Logger(subsystem: "com.scarf", category: "ChatComposer")
 
@@ -99,7 +99,7 @@ struct RichChatInputBar: View {
                 .padding(.top, 8)
             }
 
-            if !attachments.isEmpty || isEncodingAttachment || attachmentError != nil {
+            if !slots.attachments.isEmpty || slots.isEncoding || attachmentError != nil {
                 attachmentStrip
             }
 
@@ -108,7 +108,7 @@ struct RichChatInputBar: View {
             // because Hermes may still describe the image via its
             // auxiliary vision fallback.
             if RichChatViewModel.shouldShowNonVisionImageHint(
-                attachmentCount: attachments.count,
+                attachmentCount: slots.attachments.count,
                 capability: visionCapability
             ) {
                 nonVisionHintRow
@@ -144,6 +144,14 @@ struct RichChatInputBar: View {
                     // back off it, and an identifier further down the
                     // chain would name the composed group instead.
                     .accessibilityIdentifier("chat.composer.input")
+                    // The composer's only visible name is the placeholder
+                    // overlay, which is `.allowsHitTesting(false)` and
+                    // disappears the moment the field has content — so
+                    // VoiceOver lands on an unnamed text area and Voice
+                    // Control has nothing sayable to target it by. A
+                    // literal here (not a String variable) so it extracts
+                    // into the catalogue.
+                    .accessibilityLabel(Text("Message Hermes"))
                     .font(ScarfFont.body)
                     .scrollContentBackground(.hidden)
                     .focused($isFocused)
@@ -245,9 +253,10 @@ struct RichChatInputBar: View {
                         return .handled
                     }
                     .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.shift) {
-                            return .ignored
-                        }
+                        guard Self.shouldSendOnReturn(
+                            hasMarkedText: Self.composerHasMarkedText(),
+                            modifiers: press.modifiers
+                        ) else { return .ignored }
                         if showMenu, let command = filteredCommands[safe: selectedIndex] {
                             insertCommand(command)
                             return .handled
@@ -320,7 +329,7 @@ struct RichChatInputBar: View {
     /// re-probe, and a rename alone must not.
     private var visionLookupKey: String {
         let modelKey = activeModelPreset.map { "\($0.providerID)|\($0.modelID)" } ?? "global-default"
-        return "\(attachments.isEmpty ? "0" : "1")|\(modelKey)"
+        return "\(slots.attachments.isEmpty ? "0" : "1")|\(modelKey)"
     }
 
     /// Resolve the effective model (preset override, else config.yaml
@@ -331,7 +340,7 @@ struct RichChatInputBar: View {
         // Hide the hint while (re)resolving — a preset switch must never
         // leave the previous model's warning on screen.
         visionCapability = .unknown
-        guard !attachments.isEmpty else { return }
+        guard !slots.attachments.isEmpty else { return }
         let preset = activeModelPreset
         let context = serverContext
         let (capability, name) = await Task.detached(
@@ -420,14 +429,14 @@ struct RichChatInputBar: View {
     @ViewBuilder
     private var attachmentStrip: some View {
         HStack(alignment: .center, spacing: ScarfSpace.s2) {
-            if isEncodingAttachment {
+            if slots.isEncoding {
                 ProgressView()
                     .controlSize(.small)
                 Text("Encoding…")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
-            ForEach(attachments) { attachment in
+            ForEach(slots.attachments) { attachment in
                 attachmentChip(attachment)
             }
             if let err = attachmentError {
@@ -436,8 +445,8 @@ struct RichChatInputBar: View {
                     .foregroundStyle(ScarfColor.danger)
             }
             Spacer(minLength: 0)
-            if !attachments.isEmpty {
-                Text("\(attachments.count)/\(Self.maxAttachments)")
+            if !slots.attachments.isEmpty {
+                Text("\(slots.attachments.count)/\(Self.maxAttachments)")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundFaint)
             }
@@ -454,7 +463,7 @@ struct RichChatInputBar: View {
                 .frame(width: 32, height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             Button {
-                attachments.removeAll { $0.id == attachment.id }
+                slots.remove(id: attachment.id)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
@@ -501,8 +510,8 @@ struct RichChatInputBar: View {
                 .padding(6)
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled || attachments.count >= Self.maxAttachments)
-        .help("Attach image (\(attachments.count)/\(Self.maxAttachments))")
+        .disabled(!isEnabled || slots.isFull)
+        .help("Attach image (\(slots.attachments.count)/\(Self.maxAttachments))")
         .accessibilityLabel(Text("Attach image"))
     }
 
@@ -542,7 +551,7 @@ struct RichChatInputBar: View {
         guard isEnabled else { return false }
         // Allow sending image-only messages once at least one attachment
         // exists — vision models accept "describe this" with no text.
-        if !attachments.isEmpty { return true }
+        if !slots.attachments.isEmpty { return true }
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -579,6 +588,38 @@ struct RichChatInputBar: View {
             hasActiveSession: hasActiveSession,
             capabilities: capabilitiesStore?.capabilities ?? .empty
         )
+    }
+
+    /// Should a Return keypress send (or accept a slash command), or be
+    /// handed back to the text system?
+    ///
+    /// Two cases hand it back. Shift-Return is the user asking for a
+    /// newline (unchanged). And Return while the input method has MARKED
+    /// TEXT — the underlined, not-yet-committed run a Japanese, Chinese or
+    /// Korean IME shows while the user picks among candidates — is the
+    /// user COMMITTING that candidate, not sending a message. Swallowing
+    /// it sent a half-composed sentence and left the IME's state stranded;
+    /// letting it through is what every other macOS composer does.
+    ///
+    /// Pure so the rule is testable without an NSTextView or a live IME.
+    static func shouldSendOnReturn(hasMarkedText: Bool, modifiers: EventModifiers) -> Bool {
+        if hasMarkedText { return false }
+        if modifiers.contains(.shift) { return false }
+        return true
+    }
+
+    /// Whether the focused text view is mid-IME-composition. SwiftUI's
+    /// `onKeyPress` hands us no view, so we ask the key window's first
+    /// responder — which, for a focused `TextEditor`, is its backing
+    /// `NSTextView`. Anything else (no key window, a non-text responder)
+    /// answers `false`, i.e. "behave exactly as before".
+    static func composerHasMarkedText() -> Bool {
+        #if canImport(AppKit)
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        return textView.hasMarkedText()
+        #else
+        return false
+        #endif
     }
 
     private func updateMenuState() {
@@ -631,9 +672,8 @@ struct RichChatInputBar: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        onSend(trimmed, attachments, .typed)
+        onSend(trimmed, slots.drain(), .typed)
         text = ""
-        attachments.removeAll()
         showMenu = false
         selectedIndex = 0
     }
@@ -645,54 +685,64 @@ struct RichChatInputBar: View {
     /// we try both. Caps at `maxAttachments`; surplus drops are
     /// dropped silently with a status message.
     private func ingestProviders(_ providers: [NSItemProvider]) {
-        let remainingSlots = Self.maxAttachments - attachments.count
-        guard remainingSlots > 0 else {
+        // Reserve SYNCHRONOUSLY, before any of the asynchronous
+        // provider-load / encode work starts. Checking `attachments.count`
+        // here and appending after the encode let two quick drops both
+        // pass the same pre-encode check and overshoot the cap.
+        let granted = slots.reserve(upTo: providers.count)
+        guard granted > 0 else {
             attachmentError = "Limit of \(Self.maxAttachments) images reached"
             scheduleAttachmentErrorClear()
             return
         }
-        let toIngest = providers.prefix(remainingSlots)
-        for provider in toIngest {
+        for provider in providers.prefix(granted) {
             ingestProvider(provider)
         }
     }
 
+    /// Consumes exactly ONE reservation taken by `ingestProviders`: either
+    /// it reaches `encode` (which commits or releases it) or it releases
+    /// the slot itself on the way out.
     private func ingestProvider(_ provider: NSItemProvider) {
         // Prefer file URL when available — gives us the original filename
         // for the attachment chip's tooltip.
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            isEncodingAttachment = true
             // Fire-and-forget drag-load; the returned NSProgress is unused.
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url, let data = try? Data(contentsOf: url) else {
                     Task { @MainActor in
-                        isEncodingAttachment = false
+                        slots.release()
                         attachmentError = "Couldn't read dropped file"
                         scheduleAttachmentErrorClear()
                     }
                     return
                 }
-                encode(data: data, filename: url.lastPathComponent)
+                Task { @MainActor in
+                    encode(data: data, filename: url.lastPathComponent)
+                }
             }
             return
         }
         for typeId in [UTType.image.identifier, UTType.png.identifier, UTType.jpeg.identifier, UTType.tiff.identifier, UTType.heic.identifier] {
             if provider.hasItemConformingToTypeIdentifier(typeId) {
-                isEncodingAttachment = true
                 provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, _ in
                     guard let data else {
                         Task { @MainActor in
-                            isEncodingAttachment = false
+                            slots.release()
                             attachmentError = "Couldn't decode pasted image"
                             scheduleAttachmentErrorClear()
                         }
                         return
                     }
-                    encode(data: data, filename: nil)
+                    Task { @MainActor in
+                        encode(data: data, filename: nil)
+                    }
                 }
                 return
             }
         }
+        // Nothing in this provider we can read — hand its slot back.
+        slots.release()
     }
 
     private func encode(data: Data, filename: String?) {
@@ -707,10 +757,9 @@ struct RichChatInputBar: View {
                 let attachment = try await Task.detached(priority: .userInitiated) {
                     try ImageEncoder().encode(rawBytes: data, sourceFilename: filename)
                 }.value
-                isEncodingAttachment = false
-                attachments.append(attachment)
+                slots.commit(attachment)
             } catch {
-                isEncodingAttachment = false
+                slots.release()
                 attachmentError = (error as? LocalizedError)?.errorDescription ?? "Couldn't encode image"
                 Self.logger.warning("ImageEncoder failed: \(error.localizedDescription, privacy: .public)")
                 scheduleAttachmentErrorClear()
@@ -736,9 +785,10 @@ struct RichChatInputBar: View {
         panel.prompt = String(localized: "Attach")
         let response = panel.runModal()
         guard response == .OK else { return }
-        let urls = Array(panel.urls.prefix(Self.maxAttachments - attachments.count))
+        // Same synchronous reservation as the drop/paste path.
+        let granted = slots.reserve(upTo: panel.urls.count)
+        let urls = Array(panel.urls.prefix(granted))
         guard !urls.isEmpty else { return }
-        isEncodingAttachment = true
         // Read each picked file off-main (disk I/O), then hand to `encode`
         // on main (it dispatches the CPU-bound encode itself). `Task {}`
         // inherits @MainActor; the inner detached read captures only the
@@ -748,7 +798,10 @@ struct RichChatInputBar: View {
                 let data = await Task.detached(priority: .userInitiated) {
                     try? Data(contentsOf: url)
                 }.value
-                guard let data else { continue }
+                guard let data else {
+                    slots.release()
+                    continue
+                }
                 encode(data: data, filename: url.lastPathComponent)
             }
         }

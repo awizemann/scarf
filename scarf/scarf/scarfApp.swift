@@ -511,9 +511,12 @@ private struct ContextBoundRoot: View {
             .onDisappear {
                 fileWatcher.stopWatching()
                 // Window close, or a server/profile switch rebuilding this
-                // root: a Live Voice session bills until it is closed, and
-                // its engine and web view go with it.
-                chatViewModel.leaveChatVoiceLive()
+                // root: the `hermes acp` process belongs to this root and
+                // nothing can reach it afterwards, so it is stopped here —
+                // and a Live Voice session bills until it is closed, with
+                // its engine and web view going with it. `leaveChat` does
+                // both, in that order.
+                chatViewModel.leaveChat()
             }
             // App quit: best effort — the vendor close is sent, teardown
             // may not finish before the process exits (the peer connection
