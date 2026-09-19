@@ -128,22 +128,22 @@ import Foundation
     // MARK: the real script, run by /bin/sh against a fake tools.voice_live
 
     #if os(macOS)
-    @Test func realScriptDeliversTheOfferByteExactAndReturnsTheAnswer() throws {
-        let env = try FakeHermes(mode: "ok")
-        let answer = try env.run(offer: Self.offer)
+    @Test func realScriptDeliversTheOfferByteExactAndReturnsTheAnswer() async throws {
+        let env = try await FakeHermes(mode: "ok")
+        let answer = try await env.run(offer: Self.offer)
         #expect(answer.sdp == "v=0\r\nanswer\r\n")
         #expect(answer.sessionID == "sess_fake")
         #expect(try String(contentsOf: env.seenOffer, encoding: .utf8) == Self.offer)
         #expect(try String(contentsOf: env.seenHome, encoding: .utf8) == env.home.path)
     }
 
-    @Test func realScriptMapsNoKey() throws {
-        #expect(throws: VoiceLiveHostError.noKey) { try FakeHermes(mode: "no_key").run(offer: Self.offer) }
+    @Test func realScriptMapsNoKey() async throws {
+        await #expect(throws: VoiceLiveHostError.noKey) { try await FakeHermes(mode: "no_key").run(offer: Self.offer) }
     }
 
-    @Test func realScriptMapsVendorRejectionAndRedactsTheEcho() throws {
+    @Test func realScriptMapsVendorRejectionAndRedactsTheEcho() async throws {
         do {
-            _ = try FakeHermes(mode: "vendor").run(offer: Self.offer)
+            _ = try await FakeHermes(mode: "vendor").run(offer: Self.offer)
             Issue.record("expected a throw")
         } catch VoiceLiveHostError.vendor(let status, let detail) {
             #expect(status == 401)
@@ -151,9 +151,9 @@ import Foundation
         }
     }
 
-    @Test func realScriptMapsNetworkErrors() throws {
+    @Test func realScriptMapsNetworkErrors() async throws {
         do {
-            _ = try FakeHermes(mode: "network").run(offer: Self.offer)
+            _ = try await FakeHermes(mode: "network").run(offer: Self.offer)
             Issue.record("expected a throw")
         } catch VoiceLiveHostError.network(let detail) {
             #expect(detail.contains("URLError"))
@@ -163,15 +163,15 @@ import Foundation
     /// A 2xx whose body isn't JSON raises JSONDecodeError — a ValueError —
     /// from `voice_live.py:182`, AFTER the vendor may have created the
     /// session: it must never read as "no key, nothing charged".
-    @Test func realScriptMapsAnUnreadableVendorBodyToVendorNotNoKey() throws {
-        #expect(throws: VoiceLiveHostError.vendor(status: nil, detail: "unreadable response")) {
-            try FakeHermes(mode: "unreadable").run(offer: Self.offer)
+    @Test func realScriptMapsAnUnreadableVendorBodyToVendorNotNoKey() async throws {
+        await #expect(throws: VoiceLiveHostError.vendor(status: nil, detail: "unreadable response")) {
+            try await FakeHermes(mode: "unreadable").run(offer: Self.offer)
         }
     }
 
-    @Test func realScriptMapsOtherValueErrorsToInternal() throws {
+    @Test func realScriptMapsOtherValueErrorsToInternal() async throws {
         do {
-            _ = try FakeHermes(mode: "badurl").run(offer: Self.offer)
+            _ = try await FakeHermes(mode: "badurl").run(offer: Self.offer)
             Issue.record("expected a throw")
         } catch VoiceLiveHostError.hostInternal(let detail) {
             #expect(detail.contains("unknown url type"))
@@ -181,8 +181,8 @@ import Foundation
     /// Over SSH the script starts in `$HOME`, and `python -c` puts the
     /// working directory first on `sys.path`: a `~/tools/voice_live.py`
     /// must not shadow Hermes's. The script `cd /`s first.
-    @Test func aToolsPackageInTheWorkingDirectoryCannotShadowHermes() throws {
-        let env = try FakeHermes(mode: "ok")
+    @Test func aToolsPackageInTheWorkingDirectoryCannotShadowHermes() async throws {
+        let env = try await FakeHermes(mode: "ok")
         let cwd = env.root.appendingPathComponent("home-with-tools")
         let tools = cwd.appendingPathComponent("tools")
         try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
@@ -191,12 +191,12 @@ import Foundation
         def create_webrtc_session(sdp_offer, history=None):
             return {"session": {"id": "SHADOW"}, "transport": {"type": "webrtc", "sdp": "shadow"}}
         """.utf8).write(to: tools.appendingPathComponent("voice_live.py"))
-        let answer = try env.run(offer: Self.offer, from: cwd)
+        let answer = try await env.run(offer: Self.offer, from: cwd)
         #expect(answer.sessionID == "sess_fake")
     }
 
-    @Test func realScriptReportsUnsupportedWhenTheModuleIsMissing() throws {
-        #expect(throws: VoiceLiveHostError.unsupported) { try FakeHermes(mode: "missing").run(offer: Self.offer) }
+    @Test func realScriptReportsUnsupportedWhenTheModuleIsMissing() async throws {
+        await #expect(throws: VoiceLiveHostError.unsupported) { try await FakeHermes(mode: "missing").run(offer: Self.offer) }
     }
 
     /// A fake Hermes install: `venv/bin/hermes` (`#!/bin/sh`), a sibling
@@ -249,12 +249,12 @@ import Foundation
 
         deinit { try? FileManager.default.removeItem(at: root) }
 
-        func run(offer: String, from directory: URL? = nil) throws -> VoiceLiveSessionAnswer {
+        func run(offer: String, from directory: URL? = nil) async throws -> VoiceLiveSessionAnswer {
             let script = VoiceLiveHostExchange.script(
                 hermesBinary: root.appendingPathComponent("venv/bin/hermes").path,
                 hermesHome: home.path,
                 requestJSON: VoiceLiveHostExchange.requestJSON(offerSDP: offer, history: [VoiceLiveHistoryMessage(role: .user, text: "hi")]))
-            let out = try ShellTestRunner.run(arguments: ["-c", script], currentDirectory: directory)
+            let out = try await ShellTestRunner.run(arguments: ["-c", script], currentDirectory: directory)
             return try VoiceLiveHostExchange.parse(stdout: out.stdout, stderr: out.stderr, exitCode: out.status)
         }
 

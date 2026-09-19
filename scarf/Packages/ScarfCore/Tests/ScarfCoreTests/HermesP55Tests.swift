@@ -270,7 +270,17 @@ struct HermesP55GoalMirrorTests {
 
     /// The pill/toast state itself is gone — not merely unset. An API that
     /// still exists is an API a later phase re-wires.
-    @MainActor
+    ///
+    /// NOT `@MainActor`, and ONE compiled pattern per run. The first version
+    /// was both: seventeen `range(of:options: .regularExpression)` calls per
+    /// file (each compiling a pattern and bridging the whole file to UTF-16)
+    /// over ~600 files took 26 s alone and 30-97 s in the full parallel run —
+    /// all of it on the MAIN thread. Every `@MainActor` test that was
+    /// mid-flight at that moment (M1ACPTests' `waitFor`, whose 2 s budget
+    /// only covers the green path) could not get the main actor back and
+    /// timed out. The hazard is the synchronous main-actor hold, not the
+    /// scan itself: a sweep that needs no main-actor state must not ask for
+    /// it (see `mirrorSweepNeedsNoMainActor`).
     @Test("no goal or subgoal mirror state survives anywhere in the tree")
     func mirrorStateIsGoneFromEveryTarget() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
@@ -278,18 +288,7 @@ struct HermesP55GoalMirrorTests {
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let ownPath = URL(fileURLWithPath: #filePath).standardizedFileURL.path
-        // Matched on WORD BOUNDARIES, not by substring: `hasGoal` is a
-        // retired iOS strand while `hasGoals` is the live capability flag,
-        // and a `contains` sweep cannot tell them apart (P55b).
-        let retired = [
-            "recordActiveGoal", "recordSubgoalAdded", "recordSubgoalRemoved",
-            "recordSubgoalsCleared", "activeGoal", "activeSubgoals", "parseGoalArgument",
-            "parseSubgoalArgument", "truncatedToastGoal", "HermesActiveGoal",
-            "onClearGoal", "goalTooltip",
-            // P55b: the write-up claims these went too, so the sweep says so.
-            "truncatedGoal", "goalChip", "supportsActiveGoal", "hasGoal",
-            "Goal locked"
-        ]
+        let matcher = try Self.retiredSymbolMatcher()
         var scanned = 0
         var hits: [String] = []
         for root in [
@@ -313,11 +312,7 @@ struct HermesP55GoalMirrorTests {
                     .split(separator: "\n", omittingEmptySubsequences: false)
                     .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                     .joined(separator: "\n")
-                for symbol in retired
-                where body.range(
-                    of: "\\b\(NSRegularExpression.escapedPattern(for: symbol))\\b",
-                    options: .regularExpression
-                ) != nil {
+                for symbol in Self.survivors(of: matcher, in: body).sorted() {
                     hits.append("\(url.lastPathComponent): \(symbol)")
                 }
             }
@@ -328,19 +323,65 @@ struct HermesP55GoalMirrorTests {
         }
         #expect(scanned > 300, "scanned only \(scanned) files")
         #expect(hits.isEmpty, "retired goal-mirror API survives: \(hits)")
+    }
 
-        // Calibration (round-6 lesson 7): the word-boundary matcher must
-        // FIND a planted needle, and must NOT confuse `hasGoal` with the
-        // live `hasGoals` flag it is a prefix of.
-        func matches(_ symbol: String, in body: String) -> Bool {
-            body.range(
-                of: "\\b\(NSRegularExpression.escapedPattern(for: symbol))\\b",
-                options: .regularExpression
-            ) != nil
+    // Matched on WORD BOUNDARIES, not by substring: `hasGoal` is a retired
+    // iOS strand while `hasGoals` is the live capability flag, and a
+    // `contains` sweep cannot tell them apart (P55b).
+    static let retiredSymbols = [
+        "recordActiveGoal", "recordSubgoalAdded", "recordSubgoalRemoved",
+        "recordSubgoalsCleared", "activeGoal", "activeSubgoals", "parseGoalArgument",
+        "parseSubgoalArgument", "truncatedToastGoal", "HermesActiveGoal",
+        "onClearGoal", "goalTooltip",
+        // P55b: the write-up claims these went too, so the sweep says so.
+        "truncatedGoal", "goalChip", "supportsActiveGoal", "hasGoal",
+        "Goal locked"
+    ]
+
+    /// Every retired symbol as ONE word-bounded alternation, compiled once.
+    static func retiredSymbolMatcher(_ symbols: [String] = retiredSymbols) throws -> NSRegularExpression {
+        let alternation = symbols.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        return try NSRegularExpression(pattern: "\\b(?:\(alternation))\\b")
+    }
+
+    /// The retired symbols `body` still spells, in one pass over it.
+    static func survivors(of matcher: NSRegularExpression, in body: String) -> Set<String> {
+        let ns = body as NSString
+        return Set(matcher.matches(in: body, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range) })
+    }
+
+    /// Calibration (round-6 lesson 7): the SAME matcher the sweep uses must
+    /// FIND a planted needle — every one of them, several to a body — and
+    /// must NOT confuse `hasGoal` with the live `hasGoals` flag it is a
+    /// prefix of.
+    @Test("the sweep's matcher finds every planted needle and no near-miss")
+    func mirrorSweepMatcherIsCalibrated() throws {
+        let matcher = try Self.retiredSymbolMatcher()
+        for symbol in Self.retiredSymbols {
+            #expect(Self.survivors(of: matcher, in: "x = \(symbol)(y)") == [symbol], "\(symbol)")
         }
-        #expect(matches("hasGoal", in: "let x = hasGoal ?? false"))
-        #expect(!matches("hasGoal", in: "public var hasGoals: Bool { true }"))
-        #expect(matches("Goal locked", in: "toast(\"Goal locked: x\")"))
-        #expect(!matches("goalChip", in: "goalChipper"))
+        #expect(Self.survivors(of: matcher, in: "let x = hasGoal ?? false") == ["hasGoal"])
+        #expect(Self.survivors(of: matcher, in: "public var hasGoals: Bool { true }").isEmpty)
+        #expect(Self.survivors(of: matcher, in: "toast(\"Goal locked: x\")") == ["Goal locked"])
+        #expect(Self.survivors(of: matcher, in: "goalChipper").isEmpty)
+        #expect(Self.survivors(of: matcher, in: "a.activeGoal; b.goalTooltip; hasGoals")
+                == ["activeGoal", "goalTooltip"])
+    }
+
+    /// The sweep must not hold the main actor. Its body is synchronous, so
+    /// `@MainActor` would pin the MAIN THREAD for the whole scan and starve
+    /// every other main-actor test in the parallel run. Pinned in source,
+    /// because the symptom lands in whichever unrelated suite was mid-flight.
+    @Test("the tree sweep is not a main-actor test")
+    func mirrorSweepNeedsNoMainActor() throws {
+        let source = try String(contentsOfFile: #filePath, encoding: .utf8)
+        let marker = "@Test(\"no goal or subgoal mirror state survives anywhere in the tree\")"
+        let head = try #require(source.range(of: marker))
+        // The attribute lines directly above the marker, comments skipped.
+        let preceding = source[..<head.lowerBound].split(separator: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .suffix(2)
+        #expect(!preceding.contains { $0.contains("@MainActor") }, "\(preceding)")
     }
 }
