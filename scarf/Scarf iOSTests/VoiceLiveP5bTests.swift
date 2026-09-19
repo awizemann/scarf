@@ -107,6 +107,13 @@ final class FakeVoiceEngine: VoiceConversationEngine {
     func toggleMute() { isMuted.toggle() }
 }
 
+/// Collects the composer hints `submitVoiceTurn` raises (t-2140ec98).
+@MainActor
+final class FakeComposerNotices: VoiceLiveComposerNoticing {
+    var notices: [VoiceLiveComposerNotice] = []
+    func showComposerNotice(_ notice: VoiceLiveComposerNotice) { notices.append(notice) }
+}
+
 @MainActor
 final class FakeAudioSession: VoiceLiveAudioSessionControlling {
     var activations = 0
@@ -527,6 +534,12 @@ private func drainAudioRelease() async {
         private var heldPromptIDs: [Int] = []
         var holdPrompts = false
         var neverAnswer = false
+        /// How many prompts `holdPrompts` actually holds. Prompts beyond it
+        /// are answered at once — how Hermes treats a prompt that arrives
+        /// mid-turn ("Queued for the next turn": it returns immediately and
+        /// runs inside the FIRST prompt's turn).
+        var holdLimit: Int?
+        private var heldCount = 0
 
         var diagnosticID: String? { "fake-voice-p5b-channel" }
         var isClosed: Bool { closed }
@@ -540,9 +553,17 @@ private func drainAudioRelease() async {
             stderrCont = errCont
         }
 
-        func configure(hold: Bool = false, never: Bool = false) {
+        func configure(hold: Bool = false, never: Bool = false, holdLimit: Int? = nil) {
             holdPrompts = hold
             neverAnswer = never
+            self.holdLimit = holdLimit
+        }
+
+        /// Answer every held prompt without a `session/cancel` — so a test
+        /// can let a turn finish normally after asserting nothing cancelled it.
+        func releaseHeld(stopReason: String = "end_turn") {
+            for held in heldPromptIDs { yield(result(id: held, stopReason: stopReason)) }
+            heldPromptIDs = []
         }
 
         func methods() -> [String] { requests.compactMap { $0["method"] as? String } }
@@ -566,7 +587,11 @@ private func drainAudioRelease() async {
             case "session/prompt":
                 guard let id else { return }
                 if neverAnswer { return }
-                if holdPrompts { heldPromptIDs.append(id); return }
+                if holdPrompts, holdLimit.map({ heldCount < $0 }) ?? true {
+                    heldCount += 1
+                    heldPromptIDs.append(id)
+                    return
+                }
                 yield(chunk(Self.replyText))
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 yield(result(id: id, stopReason: "end_turn"))
@@ -724,7 +749,11 @@ private func drainAudioRelease() async {
         #expect(await channel.methods().contains("session/cancel") == false)
     }
 
-    @Test func typedTurnsCountAsBusyToo() async throws {
+    // MARK: - t-2140ec98: voice never cancels a typed turn (Mac parity)
+
+    /// A typed turn does NOT read as a voice turn: the engine cancels
+    /// whatever reads busy, so counting it would silently kill typed work.
+    @Test func aTypedTurnIsNotAVoiceTurn() async throws {
         let channel = ScriptedChannel()
         let (controller, cleanup) = try await connectedController(channel)
         defer { cleanup() }
@@ -733,13 +762,127 @@ private func drainAudioRelease() async {
         controller.draft = "typed"
         let send = Task { await controller.send() }
         await waitUntil { controller.promptsInFlight == 1 }
-        #expect(controller.isVoiceTurnBusy)
-        await controller.cancelActiveVoiceTurn()
+
+        #expect(!controller.isVoiceTurnBusy)
+        #expect(controller.isBusyWithNonVoiceTurn)
+
+        await channel.releaseHeld()
         await send.value
         #expect(controller.promptsInFlight == 0)
         // A typed prompt carries no voice note.
         let blocks = await channel.promptBlocks()
         #expect(blocks.first?.map { $0["type"] as? String } == ["text"])
+    }
+
+    /// The whole rule end to end: while a typed turn runs, a voice cancel
+    /// sends no `session/cancel`, the spoken request is not sent, the voice
+    /// is told why, and the composer explains it.
+    @Test func voiceNeitherCancelsNorInterruptsATypedTurn() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        let notices = FakeComposerNotices()
+        controller.voiceComposerNotices = notices
+        await channel.configure(hold: true)
+        controller.draft = "a long typed request"
+        let send = Task { await controller.send() }
+        await waitUntil { controller.promptsInFlight == 1 }
+
+        await controller.cancelActiveVoiceTurn()
+        #expect(await channel.methods().contains("session/cancel") == false,
+                "a voice cancel killed the running typed turn")
+
+        let request = Self.request("what's on thursday", id: "busy_1")
+        try await controller.submitVoiceTurn(request)   // returns, never throws
+        #expect(await channel.promptBlocks().count == 1,
+                "the spoken request was sent while the typed turn ran")
+        #expect(!controller.vm.messages.contains { $0.role == "user" && $0.content == request.prompt })
+        // The voice says so instead, in full, and the composer shows why.
+        #expect(controller.voiceTurnReply(for: request.id)
+                == VoiceTurnReply(text: ChatController.voiceBusyReply, isStreaming: false))
+        #expect(notices.notices == [.busyWithTypedTurn])
+
+        await channel.releaseHeld()
+        await send.value
+    }
+
+    /// A typed prompt queued inside a running VOICE turn makes Hermes busy
+    /// with a typed request too: the voice must not cancel that run.
+    @Test func aTypedPromptQueuedBehindAVoiceTurnIsNotCancelled() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(hold: true, holdLimit: 1)
+
+        try await controller.submitVoiceTurn(Self.request("a spoken request", id: "v1"))
+        await waitUntil { controller.promptsInFlight == 1 }
+        #expect(controller.isVoiceTurnBusy)
+
+        // Hermes answers the queued typed prompt at once and runs it inside
+        // the voice turn's run.
+        controller.draft = "typed while the voice turn runs"
+        await controller.send()
+        await waitUntil { controller.promptsInFlight == 1 }
+
+        #expect(!controller.isVoiceTurnBusy, "the voice would cancel a run carrying typed work")
+        #expect(controller.isBusyWithNonVoiceTurn)
+        await controller.cancelActiveVoiceTurn()
+        #expect(await channel.methods().contains("session/cancel") == false)
+
+        await channel.releaseHeld()
+        await waitUntil { controller.promptsInFlight == 0 }
+    }
+
+    /// Per-turn tokens: the queued turn's return settles only its own turn.
+    /// It must not finalize the transcript while the first turn still runs.
+    @Test func aQueuedTurnsReturnDoesNotEndTheRunningTurn() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(hold: true, holdLimit: 1)
+
+        controller.draft = "first, a long typed turn"
+        let first = Task { await controller.send() }
+        await waitUntil { controller.promptsInFlight == 1 }
+        controller.draft = "second, typed while it runs"
+        await controller.send()   // answered at once by Hermes
+        await waitUntil { controller.promptsInFlight == 1 }
+
+        // The queued turn has returned; the chat is still working.
+        #expect(controller.promptsInFlight == 1)
+        #expect(controller.vm.isAgentWorking,
+                "the queued turn's return cleared the working state while the first turn ran")
+        #expect(controller.state == .ready)
+
+        await channel.releaseHeld()
+        await first.value
+        await waitUntil { !controller.vm.isAgentWorking }
+        #expect(controller.promptsInFlight == 0)
+        #expect(!controller.vm.isAgentWorking)
+    }
+
+    /// A voice cancel still cancels VOICE turns, and waits for every one of
+    /// them to return (the older turn returns last).
+    @Test func voiceStillCancelsItsOwnTurnsAndWaitsForThemAll() async throws {
+        let channel = ScriptedChannel()
+        let (controller, cleanup) = try await connectedController(channel)
+        defer { cleanup() }
+        guard controller.state == .ready else { Issue.record("not ready"); return }
+        await channel.configure(hold: true)
+
+        try await controller.submitVoiceTurn(Self.request("first spoken", id: "v1"))
+        await waitUntil { controller.promptsInFlight == 1 }
+        try await controller.submitVoiceTurn(Self.request("second spoken", id: "v2"))
+        await waitUntil { controller.promptsInFlight == 2 }
+        #expect(controller.isVoiceTurnBusy)
+
+        await controller.cancelActiveVoiceTurn()
+        #expect(await channel.methods().contains("session/cancel"))
+        #expect(controller.promptsInFlight == 0, "the cancel returned before every voice turn did")
+        #expect(!controller.isVoiceTurnBusy)
     }
 
     @Test func seedTurnsKeepOnlyUserAndAssistantText() async throws {

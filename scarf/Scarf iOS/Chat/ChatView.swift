@@ -1193,6 +1193,8 @@ struct ChatView: View {
 
     private func startLiveVoice() {
         composerFocused = false
+        // So `submitVoiceTurn` can explain a spoken request it didn't send.
+        controller.voiceComposerNotices = voiceLive
         Task {
             await voiceLive.begin(host: controller, dictationIdle: pushToTalk.phase == .idle)
         }
@@ -1218,6 +1220,12 @@ struct ChatView: View {
             dictationStrip(
                 icon: "bolt.horizontal.circle",
                 text: Text("Live Voice ended because the connection to Hermes was lost."),
+                tint: ScarfColor.warning
+            )
+        case .busyWithTypedTurn:
+            dictationStrip(
+                icon: "keyboard",
+                text: Text("Hermes is busy with a typed request, so Live Voice didn't interrupt it. Ask again when it's finished."),
                 tint: ScarfColor.warning
             )
         }
@@ -2190,6 +2198,51 @@ final class ChatController {
     /// waits on (`cancelActiveVoiceTurn`, ChatController+VoiceTurnHost).
     private(set) var promptsInFlight = 0
 
+    /// Where a Scarf-started prompt came from. Live Voice cancels only
+    /// turns it started itself (`cancelActiveVoiceTurn`) — the Mac twin is
+    /// `ChatViewModel.PromptTurnOrigin` (t-2140ec98).
+    enum PromptTurnOrigin: Equatable {
+        case typed
+        case voice
+    }
+
+    /// One `session/prompt` this controller started and hasn't seen return.
+    struct PromptTurn {
+        let origin: PromptTurnOrigin
+        var task: Task<Void, Never>?
+    }
+
+    /// Every prompt started on the live client whose `sendPrompt` hasn't
+    /// returned, keyed by the turn's token (`startPrompt`). Each turn
+    /// settles only its OWN entry, because Hermes answers a prompt that
+    /// arrives mid-turn at once ("Queued for the next turn") and runs it
+    /// inside the FIRST prompt's turn: the queued turn's `sendPrompt`
+    /// returns while Hermes is still working, and must not clear the
+    /// transcript's working state for the turn that is still running.
+    ///
+    /// Internal, not private, because `ChatController+VoiceTurnHost` reads
+    /// it (the Mac keeps its twin in one file for the same reason).
+    @ObservationIgnored var promptTurns: [Int: PromptTurn] = [:]
+
+    /// Last token handed out by `startPrompt`.
+    @ObservationIgnored private var promptTurnCounter = 0
+
+    /// Origins of the turns started since the chat was last idle. Kept
+    /// until EVERY turn has returned, because a typed prompt Hermes queued
+    /// behind a voice turn returns at once but runs later inside that
+    /// voice turn: until the whole run returns, Hermes is still busy with
+    /// the typed request.
+    @ObservationIgnored var busyTurnOrigins: Set<PromptTurnOrigin> = []
+
+    /// Voice request ids that arrived while Hermes was busy with a typed
+    /// turn and were therefore NOT sent. `voiceTurnReply` answers them with
+    /// `voiceBusyReply` so the voice says so out loud. Trimmed to the last few.
+    @ObservationIgnored var busyVoiceRequestIDs: [String] = []
+
+    /// Where the composer's Live Voice hint is shown (the chat view wires
+    /// its `VoiceLiveSessionModel`). Weak: the view owns it.
+    @ObservationIgnored weak var voiceComposerNotices: (any VoiceLiveComposerNoticing)?
+
     /// Live Voice bookkeeping (ChatController+VoiceTurnHost.swift): the
     /// spoken prompt of each voice request, by request id, so its reply can
     /// be matched in `vm.messages`. Trimmed to the last few.
@@ -2234,20 +2287,40 @@ final class ChatController {
         wireText: String,
         images: [ChatImageAttachment],
         contextNotes: [ACPContextNote],
-        restoreDraftText: String?
+        restoreDraftText: String?,
+        origin: PromptTurnOrigin = .typed
     ) -> Task<Void, Never> {
+        // Record the turn BEFORE the task exists, so a voice cancel racing
+        // this hand-off already sees it.
+        promptTurnCounter &+= 1
+        let token = promptTurnCounter
+        promptTurns[token] = PromptTurn(origin: origin, task: nil)
+        busyTurnOrigins.insert(origin)
         promptsInFlight += 1
-        return Task { @MainActor [self] in
-            defer { promptsInFlight -= 1 }
+        let task = Task { @MainActor [self] in
+            defer { settlePromptTurn(token) }
             await runPrompt(
                 client: client,
                 sessionId: sessionId,
                 wireText: wireText,
                 images: images,
                 contextNotes: contextNotes,
-                restoreDraftText: restoreDraftText
+                restoreDraftText: restoreDraftText,
+                token: token
             )
         }
+        // The task can't have run yet (same actor, no suspension since it
+        // was created), so its entry is still there.
+        promptTurns[token]?.task = task
+        return task
+    }
+
+    /// A turn's `sendPrompt` returned (or threw): drop its entry, and end
+    /// the chat's busy period when it was the last turn in flight.
+    private func settlePromptTurn(_ token: Int) {
+        guard promptTurns.removeValue(forKey: token) != nil else { return }
+        promptsInFlight -= 1
+        if promptTurns.isEmpty { busyTurnOrigins = [] }
     }
 
     private func runPrompt(
@@ -2256,8 +2329,15 @@ final class ChatController {
         wireText: String,
         images: [ChatImageAttachment],
         contextNotes: [ACPContextNote],
-        restoreDraftText: String?
+        restoreDraftText: String?,
+        token: Int
     ) async {
+        // Whether another turn is still in flight — then this return does
+        // not end the chat's busy period, and must not move the shared
+        // working state, status or draft.
+        func othersStillRunning() -> Bool {
+            promptTurns.contains { $0.key != token }
+        }
         do {
             let result = try await client.sendPrompt(
                 sessionId: sessionId,
@@ -2270,6 +2350,7 @@ final class ChatController {
             // macOS controller by synthesizing it from the resolved
             // `session/prompt` result so the shared VM finalizes the
             // streaming message and clears its working state.
+            guard !othersStillRunning() else { return }
             vm.handleACPEvent(
                 .promptComplete(sessionId: sessionId, response: result)
             )
@@ -2296,10 +2377,12 @@ final class ChatController {
             // state didn't already fail. Always populate the error
             // banner so the user sees actionable detail regardless
             // of which path raised first (M7 #2).
+            let endsBusyPeriod = !othersStillRunning()
             await vm.recordACPFailure(error, client: client)
-            if case .ready = state {
+            if endsBusyPeriod, case .ready = state {
                 state = .failed("Prompt failed: \(error.localizedDescription)")
             }
+            guard endsBusyPeriod else { return }
             // Exit the working state on failure too. The `.reconnecting`
             // early-return above deliberately skips this — its teardown
             // path already ran `finalizeOnDisconnect()`.
