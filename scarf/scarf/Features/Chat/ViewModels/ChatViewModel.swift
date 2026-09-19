@@ -9,7 +9,10 @@ final class ChatViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "ChatViewModel")
     let context: ServerContext
     private let dataService: HermesDataService
-    private let fileService: HermesFileService
+    /// Internal (not private) so tests can swap in a service built on a
+    /// recording transport — the only honest way to prove WHERE a config
+    /// read ran (charter C10). Never reassigned in app code.
+    var fileService: HermesFileService
 
     init(
         context: ServerContext = .local,
@@ -1590,32 +1593,40 @@ final class ChatViewModel {
         // Optimistic update — badge flips immediately.
         currentModelPreset = preset
 
-        let targetModelID: String
-        let targetProviderID: String?
-        if let preset {
-            targetModelID = preset.modelID
-            // Pass the preset's provider so Hermes routes through the
-            // colon-prefixed model_id wire format — without it, less-
-            // obvious model IDs (e.g. `inclusionai/ring-2.6-1t`) fall
-            // into Hermes's `detect_provider_for_model` heuristic which
-            // picks the wrong provider. See issue #97.
-            targetProviderID = preset.providerID.isEmpty ? nil : preset.providerID
-        } else {
-            // Resolve the config.yaml default. Empty fallback keeps
-            // the RPC from blowing up — Hermes treats an empty model
-            // as "leave alone", which is the safe no-op.
-            let config = fileService.loadConfig()
-            targetModelID = config.model
-            // Pair the default model with its configured provider so
-            // the "Use global default" mid-chat switch lands on the
-            // same provider the CLI default would. Empty / "unknown"
-            // (the YAML parser's sentinel) → nil, falling back to the
-            // bare-model wire shape.
-            let rawProvider = config.provider.trimmingCharacters(in: .whitespaces)
-            targetProviderID = (rawProvider.isEmpty || rawProvider == "unknown") ? nil : rawProvider
-        }
-
+        let svc = fileService
         Task { @MainActor [weak self] in
+            let targetModelID: String
+            let targetProviderID: String?
+            if let preset {
+                targetModelID = preset.modelID
+                // Pass the preset's provider so Hermes routes through the
+                // colon-prefixed model_id wire format — without it, less-
+                // obvious model IDs (e.g. `inclusionai/ring-2.6-1t`) fall
+                // into Hermes's `detect_provider_for_model` heuristic which
+                // picks the wrong provider. See issue #97.
+                targetProviderID = preset.providerID.isEmpty ? nil : preset.providerID
+            } else {
+                // Resolve the config.yaml default. Empty fallback keeps
+                // the RPC from blowing up — Hermes treats an empty model
+                // as "leave alone", which is the safe no-op.
+                //
+                // C10: `loadConfig()` is a synchronous file read — an SSH
+                // round-trip on a remote host — so it runs on a thread of
+                // its own (`OffPool.run`, not the cooperative pool a
+                // blocking read would park a core of). The badge already
+                // flipped optimistically above, so the hop costs the user
+                // nothing visually.
+                let config = await OffPool.run { svc.loadConfig() }
+                targetModelID = config.model
+                // Pair the default model with its configured provider so
+                // the "Use global default" mid-chat switch lands on the
+                // same provider the CLI default would. Empty / "unknown"
+                // (the YAML parser's sentinel) → nil, falling back to the
+                // bare-model wire shape.
+                let rawProvider = config.provider.trimmingCharacters(in: .whitespaces)
+                targetProviderID = (rawProvider.isEmpty || rawProvider == "unknown") ? nil : rawProvider
+            }
+
             do {
                 try await client.setSessionModel(
                     sessionId: sessionId,
@@ -1800,6 +1811,42 @@ final class ChatViewModel {
         // no entry-point bump) supersede whatever came before it.
         let intent = beginStartIntent()
 
+        // C10: the preflight's `loadConfig()` is a synchronous file read —
+        // an SSH round-trip on a remote host — and it sat on the main
+        // actor at the head of EVERY session start and resume. It now runs
+        // on a thread of its own (`OffPool.run`; a blocking read on the
+        // cooperative pool would park one of its fixed threads). Bound the
+        // stage the way `resumeSession` / `continueLastSession` bound
+        // theirs — the spawn stage below re-arms — and re-check the start
+        // generation after the hop, since a newer start may have landed.
+        armStartWatchdog(intent: intent)
+        let svc = fileService
+        Task { @MainActor [weak self] in
+            let config = await OffPool.run { svc.loadConfig() }
+            guard let self, self.startStillCurrent(intent, client: nil) else { return }
+            self.continueStartACPSession(
+                intent: intent,
+                config: config,
+                resume: sessionId,
+                projectPath: projectPath,
+                initialPrompt: initialPrompt
+            )
+        }
+    }
+
+    /// The rest of `startACPSession`, resumed on the main actor once the
+    /// off-main `config.yaml` read has landed. Split out only for that
+    /// hop: `intent` is the start intent begun by the caller (NOT a fresh
+    /// one — a new generation here would supersede the caller's own
+    /// bail-out checks), and `config` is what the preflight is checked
+    /// against.
+    private func continueStartACPSession(
+        intent: Int,
+        config: HermesConfig,
+        resume sessionId: String?,
+        projectPath: String?,
+        initialPrompt: String?
+    ) {
         // Pre-flight: bail before opening any ACP plumbing if the
         // active server's `config.yaml` has no primary model or
         // provider. Hermes would otherwise let `session/new` succeed
@@ -1807,7 +1854,7 @@ final class ChatViewModel {
         // "Model parameter is required" 400. Stashing the start
         // arguments here lets `confirmModelPreflight` replay them
         // unchanged after the user picks a model.
-        let preflight = ModelPreflight.check(fileService.loadConfig())
+        let preflight = ModelPreflight.check(config)
         // `passed` is emitted here rather than inside `ModelPreflight` so it
         // fires once per session start (the user-visible gate), not once per
         // background config-diagnostics refresh. The failing branch stays
@@ -2937,7 +2984,17 @@ final class ChatViewModel {
         } else {
             sendToTerminal(tv, text: "/voice on\r")
             voiceEnabled = true
-            ttsEnabled = fileService.loadConfig().autoTTS
+            // C10: `loadConfig()` is a synchronous file read (an SSH
+            // round-trip on a remote host) and blocked the click. Read it
+            // off-main and settle the TTS chip when it lands — re-checking
+            // `voiceEnabled`, since the user may have toggled voice back
+            // off while the read was in flight.
+            let svc = fileService
+            Task { @MainActor [weak self] in
+                let autoTTS = await OffPool.run { svc.loadConfig().autoTTS }
+                guard let self, self.voiceEnabled else { return }
+                self.ttsEnabled = autoTTS
+            }
         }
     }
 
@@ -3129,6 +3186,23 @@ extension ChatViewModel: VoiceTurnHost {
     /// the outcome.
     func leaveChatVoiceLive() {
         voiceLive.dismiss()
+    }
+
+    /// The chat's root went away: the window closed, or a server/profile
+    /// switch is rebuilding it. The `hermes acp` process belongs to this
+    /// root — nothing can reach it once the root is gone — so it has to be
+    /// torn down here or it survives as an orphan holding an SSH channel
+    /// (and, on a wedged host, a reconnect ladder that retries into
+    /// nothing). `stopACP` is the deliberate-teardown path: it disarms the
+    /// start watchdog, cancels the reconnect ladder, sends the bounded
+    /// mid-turn `session/cancel`, and ends the Live Voice session
+    /// (`endImmediately`). `leaveChatVoiceLive` then DROPS the voice
+    /// engine and its web view, which `endImmediately` alone leaves
+    /// attached. Idempotent: a second call finds `acpClient` nil and does
+    /// nothing.
+    func leaveChat() {
+        stopACP()
+        leaveChatVoiceLive()
     }
 
     /// Continue on the Live Voice consent sheet: remember the consent, then
