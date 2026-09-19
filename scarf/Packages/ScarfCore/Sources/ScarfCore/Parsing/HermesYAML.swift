@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Parsed YAML result bundle. Flat dotted-path keys point at the
 /// three value shapes we care about (scalars, bullet lists, maps).
@@ -1335,5 +1336,48 @@ public enum HermesYAML {
             return String(s.dropFirst().dropLast())
         }
         return s
+    }
+
+    /// Stable hash of every parsed key under `tts` — global `tts.speed`,
+    /// every named `tts.providers.<name>.*` (command/plugin providers Scarf
+    /// has no typed field for), and everything the typed ``VoiceSettings``
+    /// TTS fields already read — so a cache keyed off it invalidates on ANY
+    /// `tts.*` edit, not just the handful of keys
+    /// `HermesSpeechService.voiceFingerprint(provider:voice:)` models.
+    ///
+    /// **Deterministic, not `hashValue`.** Swift's `Hashable.hashValue` is
+    /// randomized per process (`Hasher` seeds from a random value at
+    /// launch) — the SAME config would fingerprint differently between two
+    /// runs of the app, which would invalidate the on-disk TTS cache on
+    /// every relaunch. This walks the three `ParsedYAML` dictionaries,
+    /// keeps only `tts` and `tts.*` keys, serializes each into a
+    /// single deterministic line, SORTS the lines (so key encounter order —
+    /// which varies with the file's own layout — can't change the digest),
+    /// and hashes the joined result with SHA-256. Sorting also makes the
+    /// hash independent of which of `values`/`lists`/`maps` a given leaf
+    /// happened to land in.
+    public static func ttsSectionFingerprint(
+        values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
+    ) -> String {
+        func isTTSKey(_ key: String) -> Bool {
+            key == "tts" || key.hasPrefix("tts.")
+        }
+        var lines: [String] = []
+        for (key, value) in values where isTTSKey(key) {
+            lines.append("v:\(key)=\(value)")
+        }
+        for (key, list) in lists where isTTSKey(key) {
+            lines.append("l:\(key)=\(list.joined(separator: ","))")
+        }
+        for (key, map) in maps where isTTSKey(key) {
+            let sortedPairs = map.sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value)" }
+                .joined(separator: ",")
+            lines.append("m:\(key)={\(sortedPairs)}")
+        }
+        lines.sort()
+        let material = lines.joined(separator: "\n")
+        let digest = SHA256.hash(data: Data(material.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -737,10 +737,20 @@ import Testing
 
     @Test func kokoroConfigKeysAreNoLongerParsed() {
         // `tts.kokoro.*` belonged to a third-party plugin; Scarf no longer
-        // models it. The block parses without error and changes nothing.
+        // models it in any TYPED field. The block still parses without
+        // error and changes none of the typed fields.
         let withBlock = HermesConfig(yaml: "tts:\n  provider: openai\n  kokoro:\n    python: /venv/bin/python\n")
         let without = HermesConfig(yaml: "tts:\n  provider: openai\n")
-        #expect(withBlock.voice == without.voice)
+        var withBlockVoice = withBlock.voice
+        var withoutVoice = without.voice
+        withBlockVoice.ttsSectionFingerprint = ""
+        withoutVoice.ttsSectionFingerprint = ""
+        #expect(withBlockVoice == withoutVoice)
+        // t-eb402e82: unlike the typed fields, `ttsSectionFingerprint` DOES
+        // see `tts.kokoro.*` — it hashes the whole parsed `tts:` section, so
+        // a config-only-Scarf-can't-model edit still invalidates the TTS
+        // cache instead of silently replaying stale audio.
+        #expect(withBlock.voice.ttsSectionFingerprint != without.voice.ttsSectionFingerprint)
     }
 
     @Test func voiceChatModeDefaultsMatchHermes() {
@@ -759,7 +769,11 @@ import Testing
         voice.ttsOpenAIVoice = "echo"
         let openaiB = HermesSpeechService.voiceFingerprint(provider: "openai", voice: voice)
         #expect(openaiA != openaiB)
-        #expect(HermesSpeechService.voiceFingerprint(provider: "unknown-provider", voice: voice) == "unknown-provider")
+        // t-eb402e82: every fingerprint carries the whole-`tts:`-section hash
+        // as a `|tts:<hash>` suffix, so an unknown provider's fingerprint is
+        // the provider name plus that suffix, not the bare name.
+        #expect(HermesSpeechService.voiceFingerprint(provider: "unknown-provider", voice: voice)
+            == "unknown-provider|tts:\(voice.ttsSectionFingerprint)")
         // `nous` speaks with the OpenAI voice, so it keys on it too.
         #expect(HermesSpeechService.voiceFingerprint(provider: "nous", voice: voice) == openaiB)
     }
