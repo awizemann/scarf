@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Privacy Policy — Scarf &amp; ScarfGo</title>
-  <meta name="description" content="Privacy policy for Scarf (macOS) and ScarfGo (iOS): your content never leaves your devices or your Hermes hosts; macOS sends anonymous opt-out usage statistics; iOS sends nothing.">
+  <meta name="description" content="Privacy policy for Scarf (macOS) and ScarfGo (iOS): your content never leaves your devices or your Hermes hosts; macOS sends anonymous usage statistics you can switch off; Live Voice streams your voice to OpenAI only after you agree.">
   <link rel="canonical" href="https://awizemann.github.io/scarf/privacy/">
   <meta name="theme-color" content="#C2563D" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1A1818" media="(prefers-color-scheme: dark)">
@@ -34,9 +34,9 @@
 <main>
   <a class="home" href="../">&larr; Scarf</a>
 <h1>ScarfGo &amp; Scarf — Privacy Policy</h1>
-<p><em>Last updated: 2026-08-20.</em></p>
+<p><em>Last updated: 2026-09-19.</em></p>
 <h2>Plain summary</h2>
-<p>Scarf and ScarfGo are companion clients for the open-source <a href="https://github.com/awizemann/hermes-agent">Hermes AI agent</a>. Both apps connect from your device to a Hermes host you (or your team) operate. <strong>Your content — chats, sessions, files, credentials — never leaves your device or your Hermes hosts.</strong> The macOS app additionally sends <strong>anonymous usage statistics</strong> to the developer to guide development; this is described below and can be switched off in Settings. <strong>ScarfGo on iOS sends nothing.</strong></p>
+<p>Scarf and ScarfGo are companion clients for the open-source <a href="https://github.com/awizemann/hermes-agent">Hermes AI agent</a>. Both apps connect from your device to a Hermes host you (or your team) operate. <strong>Your content — chats, sessions, files, credentials — never leaves your device or your Hermes hosts.</strong> The macOS app additionally sends <strong>anonymous usage statistics</strong> to the developer to guide development; this is described below and can be switched off in Settings. <strong>ScarfGo on iOS sends nothing to the developer.</strong> One optional feature, <strong>Live Voice</strong>, sends your voice and recent chat messages directly from your device to OpenAI, and only after you start a session and agree once; see "Voice features" below.</p>
 <h2>Apps covered</h2>
 <ul>
 <li><strong>Scarf</strong> — macOS desktop client. Distributed via direct download (Sparkle) and built-in auto-update.</li>
@@ -50,19 +50,36 @@
 <li><strong>Hermes state cache.</strong> When you tap a session or open the Dashboard, the app downloads a snapshot of <code>~/.hermes/state.db</code> from your Hermes host over SFTP and reads it locally. Cached on-device temporarily for performance; cleared when the app is force-quit or the OS reclaims storage.</li>
 <li><strong>Project registry + session attribution sidecar.</strong> Scarf and ScarfGo read (and write, when you opt in) two JSON sidecar files on the Hermes host: <code>~/.hermes/scarf/projects.json</code> and <code>~/.hermes/scarf/session_project_map.json</code>. These describe the projects you've registered and which Hermes sessions belong to which project. Owned by you on your Hermes host.</li>
 </ul>
+<h3>Voice features</h3>
+<p>Voice is off until you use it. Hermes Voice and Live Voice also appear only when your Hermes host's version supports them. Each feature keeps to a different boundary:</p>
+<ul>
+<li><strong>Dictation (ScarfGo).</strong> Holding the composer's microphone button transcribes speech to text <strong>on your iPhone only</strong>, with Apple's on-device speech recognizer. Audio never leaves the phone and is never sent to a server. The transcript is inserted into the composer like typed text; nothing is sent until you tap send.</li>
+<li><strong>Hermes Voice playback (Scarf for macOS).</strong> When you choose the Hermes playback engine (Settings → Voice), the app asks <strong>your Hermes host</strong> to turn an assistant reply into speech using the text-to-speech provider configured in that host's own <code>tts</code> settings, then downloads the audio and plays it. The reply text goes to whichever provider your host is configured to use (a local engine, or a third-party service such as OpenAI or ElevenLabs if you set one up in Hermes); Scarf does not choose the provider and never contacts it directly. Audio is cached on your Mac under <code>~/Library/Caches/scarf/tts</code> (capped, oldest first) and can be deleted at any time. Off by default; the alternative engine is the built-in macOS system voice, which stays on-device.</li>
+<li><strong>Live Voice (Scarf and ScarfGo).</strong> A two-way spoken conversation built on Hermes's GPT-Live voice mode, which uses an OpenAI voice model. It appears only when your Hermes host is version 0.21.3 or later <strong>and</strong> you have set <code>voice.voice_chat_mode: gpt-live</code> on that host. When you start a session:
+<ul>
+<li>Your Hermes host creates the session with <strong>your own OpenAI API key</strong> (the one configured on the host). The key never leaves the host and is never shown to, stored by, or sent through the apps.</li>
+<li><strong>Your microphone audio streams directly from your device to OpenAI</strong> over an encrypted WebRTC connection, and OpenAI's spoken replies stream back the same way. Because the connection is direct, OpenAI also sees your device's network address. The audio does not pass through your Hermes host or any server operated by the developer.</li>
+<li>Each session shares <strong>recent messages from the current chat</strong> with OpenAI as context: up to 24 messages, about 6,000 characters. Every request you make by voice is still answered by Hermes, with your usual model and tools; the voice model only relays it. The spoken request is saved in the Hermes session transcript like a typed message; the live audio and captions are not stored by the apps.</li>
+<li>OpenAI bills the host's key while a session is open (roughly $0.05 per minute at the time of writing). Sessions end when you stop them, close the chat, switch servers or profiles, leave the app (ScarfGo), lose the Hermes connection, or after a period of silence.</li>
+<li><strong>Consent.</strong> Before the first session on a device, the app shows what is shared and with whom; nothing starts until you agree, and Cancel sends nothing. Your choice is stored on that device only (never on the host or in iCloud) and can be reviewed or reset in Settings → Voice (Scarf) or Settings → Live Voice Privacy (ScarfGo). If what is shared ever changes, the app asks again.</li>
+<li>OpenAI's handling of the audio and context is governed by <a href="https://openai.com/policies/privacy-policy">OpenAI's privacy policy</a> and the terms of the API account whose key the host uses.</li>
+</ul></li>
+</ul>
+<p>Both apps request microphone permission the first time a voice feature needs it, and the permission text states which feature is asking. Microphone access is never used outside a dictation hold or a Live Voice session you started.</p>
 <h3>On Hermes hosts you configure</h3>
 <p>Same as the <a href="https://hermes-agent.nousresearch.com/">Hermes agent privacy policy</a> (or whoever operates your Hermes deployment). The apps do not introduce any new server-side data collection.</p>
 <h2>Usage analytics (Scarf for macOS only)</h2>
 <p>Starting with v2.20, Scarf for macOS records anonymous product-usage events — for example "a chat session was started", "a settings field was changed", "the app reconnected after wake" — and sends them to the developer's analytics service (ScarfMon, at <code>api.swiftstats.co</code>, built on the open-source <a href="https://github.com/awizemann/swift-stats">swift-stats</a> package).</p>
 <p><strong>What an event contains.</strong> An event name plus a small set of fixed-vocabulary properties (e.g. <code>mode: resume</code>, <code>source: menu_bar</code>) and bucketed counts or durations. Properties are drawn from closed lists in the app's source — they can never contain chat content, prompts, file paths, hostnames, server names, profile names, SSH keys, or any other free-form text from your environment.</p>
-<p><strong>What identifies an event.</strong> A random per-install identifier that Scarf stores on your Mac and sends only as a SHA-256 hash, so the developer can count active installs and retention without identifying you. It is one install, not a person: there is no user ID, no device ID, no account, and no cross-device or cross-app identity. Turning analytics off stops every event; the identifier stays only on your Mac and is never sent again.</p>
+<p><strong>What identifies an event.</strong> A random install identifier that the analytics library generates on your Mac and keeps in its own preferences. It is never sent as-is: each event carries only a salted SHA-256 hash of it, which lets the developer count active installs and see how many sessions an install has, but not who or which machine it is. There is no user ID, no hardware identifier, no account, and nothing that ties the identifier to your Hermes hosts or content. Turning analytics off stops sending it; deleting the app's preferences removes it.</p>
 <p><strong>Opting out.</strong> Settings → Advanced → Usage Analytics. Turning it off stops all collection immediately and persists across updates. Analytics is enabled by default; the toggle is one click.</p>
 <p><strong>What it is not.</strong> No third-party ad or analytics SDKs, no ad identifiers, no crash-content upload (crash logs stay on-device unless you share them with Apple through the standard macOS flow), no reading of any Hermes data for analytics purposes.</p>
-<p><strong>ScarfGo (iOS) collects nothing.</strong> The iOS app contains no analytics recorder and makes no analytics network calls. Its App Store privacy label ("Data Not Collected") reflects this.</p>
+<p><strong>ScarfGo (iOS) sends nothing to the developer.</strong> The iOS app contains no analytics recorder and makes no analytics network calls. Live Voice (above) is the one iOS feature that sends data to a third party, and only to OpenAI, only while a session you started is open.</p>
 <h2>What data the apps DO NOT collect</h2>
 <ul>
-<li><strong>No content collection.</strong> Nothing you type, read, or store in Hermes — chats, files, prompts, configs, credentials — is ever transmitted to the developer. The macOS usage analytics described above carry event names and fixed-vocabulary properties only.</li>
+<li><strong>No content collection.</strong> Nothing you type, say, read, or store in Hermes — chats, files, prompts, configs, credentials — is ever transmitted to the developer. The macOS usage analytics described above carry event names and fixed-vocabulary properties only. Live Voice audio and context go from your device to OpenAI, never to the developer.</li>
 <li><strong>No analytics on iOS.</strong> ScarfGo sends no events of any kind. On macOS, analytics is anonymous, content-free, and can be disabled in Settings → Advanced.</li>
+<li><strong>No voice data at rest beyond your device.</strong> Dictation audio is processed on-device and discarded. Live Voice audio is streamed, not recorded, by the apps. Hermes Voice audio is cached only on your Mac.</li>
 <li><strong>No crash-content upload.</strong> Crash logs stay on-device unless you choose to share them with Apple via the standard iOS / macOS reporting flows.</li>
 <li><strong>No ads or ad identifiers.</strong> The <code>IDFA</code> / <code>IDFV</code> are not read or transmitted.</li>
 <li><strong>No cloud accounts.</strong> There's no "Sign in with Scarf" — the apps only know about Hermes hosts you give them SSH access to.</li>
@@ -74,8 +91,9 @@
 <li><strong>HTTPS to GitHub</strong> for Sparkle's update check (Scarf only) and to fetch the public template catalog (<code>https://awizemann.github.io/scarf/templates/</code>). No personally identifying headers; cacheable.</li>
 <li><strong>HTTPS to models.dev</strong> when Hermes refreshes its model catalog cache. Initiated by Hermes, not the apps directly.</li>
 <li><strong>HTTPS to <code>api.swiftstats.co</code></strong> (Scarf for macOS only, when usage analytics is enabled) carrying the anonymous usage events described above.</li>
+<li><strong>WebRTC to OpenAI</strong> (both apps, only while a Live Voice session you started is open): microphone audio out, spoken replies in, plus the recent-chat context described above. The session is created by your Hermes host over its own HTTPS connection to OpenAI, with the host's key.</li>
 </ul>
-<p>That's the complete list. ScarfGo makes no other network requests; Scarf makes no other network requests beyond the optional analytics endpoint above.</p>
+<p>That's the complete list. Neither app makes any other network request.</p>
 <h2>Push notifications</h2>
 <p>ScarfGo includes a push-notification skeleton for future use — pending permissions on a remote agent run. <strong>The Push Notifications capability is disabled in shipping builds</strong> (gated by an internal <code>apnsEnabled = false</code> flag) until Apple Developer Program enrollment + a Hermes-side push sender land. No device tokens are registered with Apple's APNs servers in current builds.</p>
 <p>When push lands, only the device token will be transmitted, and only to the Hermes host you authorize (so it can address pushes back to your phone). Apple's APNs infrastructure will route the actual push payload, but the developer never sees it.</p>
@@ -86,15 +104,16 @@
 <li>iOS Keychain storage uses <code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code> so credentials are unreachable while the device is locked and never synced to iCloud.</li>
 <li>SSH connections use the same protocol stack as <code>ssh(1)</code> — strict host-key verification on first connect, key-based auth (no passwords are sent over the wire), and Citadel's pure-Swift implementation on iOS.</li>
 <li>The macOS app is notarized via Apple's standard Developer ID flow (signed + stapled by <code>xcrun notarytool</code> on every release). It is not App-Sandboxed — Scarf needs direct read access to <code>~/.hermes/</code> and the ability to spawn the <code>hermes</code> CLI, both of which the App Sandbox forbids. That's why Scarf is distributed via GitHub Releases + Sparkle rather than the Mac App Store.</li>
-<li>ScarfGo on iOS runs inside the standard iOS app sandbox — no special entitlements beyond Keychain access for the SSH key.</li>
+<li>ScarfGo on iOS runs inside the standard iOS app sandbox — no special entitlements beyond Keychain access for the SSH key and microphone access for the voice features you invoke.</li>
+<li>Live Voice runs its media connection inside an isolated, non-persistent web view that only ever loads the app's own bundled page and only grants the microphone to that page; no cookies or site data persist between sessions.</li>
 </ul>
 <h2>Children's privacy</h2>
 <p>Neither app is directed at children under 13 and we do not knowingly collect any data from them.</p>
 <h2>Your rights</h2>
-<p>The only data that reaches a developer-controlled server is the anonymous macOS usage events described above. You can stop them at any time (Settings → Advanced → Usage Analytics). Because the install identifier is a hash of a random value that only your Mac holds, the developer cannot tie events to you — there is nothing linkable to request deletion of or export. To remove all app-stored data from your device:</p>
+<p>The only data that reaches a developer-controlled server is the anonymous macOS usage events described above. You can stop them at any time (Settings → Advanced → Usage Analytics). Because events carry no persistent identifier, the developer cannot isolate "your" events afterward — there is nothing linkable to request deletion of or export. To remove all app-stored data from your device:</p>
 <ul>
 <li><strong>ScarfGo</strong>: delete the app. iOS purges the Keychain group + app container.</li>
-<li><strong>Scarf</strong>: delete <code>Scarf.app</code> from <code>/Applications</code>, then optionally remove <code>~/Library/Caches/scarf/</code> (remote SQLite snapshots), <code>~/Library/Preferences/com.scarf.app.plist</code> (server registry + preferences), and <code>~/Library/Application Support/com.scarf/</code> (skill snapshots).</li>
+<li><strong>Scarf</strong>: delete <code>Scarf.app</code> from <code>/Applications</code>, then optionally remove <code>~/Library/Caches/scarf/</code> (remote SQLite snapshots and cached Hermes Voice audio), <code>~/Library/Preferences/com.scarf.app.plist</code> (server registry + preferences), and <code>~/Library/Application Support/com.scarf/</code> (skill snapshots).</li>
 </ul>
 <p>Your Hermes host's data (<code>~/.hermes/</code>) stays untouched — that's yours to manage.</p>
 <h2>Contact</h2>
