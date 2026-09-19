@@ -29,6 +29,7 @@ One line each, oldest to newest — see the [Release Notes Index](Release-Notes-
 - **2.17.x** — Local model support + session-layer work (see Release Notes Index for detail).
 - **2.18** — Hermes v0.19 "Quicksilver" + v0.20 "Herald" parity: pinned sessions, per-model costs, richer session export, approval suggestions, cron run history.
 - **2.19** — Hermes v0.20 settings backlog closed (profile routing, title generation, reasoning effort, secrets sources, voice tuning, telemetry); browser provider picker bug fixed; cached version detection.
+- **Voice** *(built, landing in the next release)* — ScarfGo push-to-talk dictation (on-device only, never a server fallback), Hermes Voice playback on Mac (assistant replies spoken through the connected server's own Hermes text-to-speech provider, Hermes v0.20.1+), and Live Voice on Mac + ScarfGo (a full spoken conversation with Hermes over its own GPT-Live mode, Hermes v0.21.3+). See [Chat](Chat) and [ScarfGo](ScarfGo#voice).
 
 Also shipped along the way: [ScarfGo](ScarfGo) public TestFlight (iOS companion), full i18n for 7 languages, [Project Templates](Project-Templates), and the multi-server / remote-SSH architecture.
 
@@ -41,6 +42,7 @@ Grounded in the open items on the task board (`TASKS.md`) as of 2026-08-13:
 - **Audit follow-ups** — a sweep of pickers with present-but-empty `""` rows that incorrectly claim to unset a value (`t-9634ae74`), and profile_routes edge cases + Bitwarden default drift from the 2026-08-12 fresh-eyes audit (`t-6a6d692c`).
 - **Marketing site + README FAQ refresh** for the v2.15 Projects model (`t-83c4c692`), superseding an older open PR.
 - A long tail of smaller verification/fix items tagged `[todo/*]` and `[followup/*]` in `TASKS.md` — mostly CLI-wire-shape verifications against live Hermes hosts and targeted bug fixes (image-attachment routing diagnosis, remote server connection editing, large-`state.db` performance).
+- **A free voice path** — Hermes's *chained* voice mode (speech-to-text → a normal turn → text-to-speech, with free/local providers instead of OpenAI) behind the same Live Voice button, as a no-cost alternative to GPT-Live for hosts that don't want to spend on an OpenAI key. Still being evaluated, not yet scoped.
 
 No larger initiative has been scoped and committed yet beyond this list — check back once the next planning pass lands, or watch [TASKS.md](https://github.com/awizemann/scarf/blob/main/TASKS.md) directly for the live board.
 
@@ -57,4 +59,4 @@ No larger initiative has been scoped and committed yet beyond this list — chec
 Open an issue at <https://github.com/awizemann/scarf/issues> with what you want and why. Star the repo if you'd use it (signal helps prioritization).
 
 ---
-_Last updated: 2026-08-13 — Scarf v2.19.0. Rewritten after a long freeze (previously stuck at "Now (2.5)" since 2026-04-25): added a shipped-since compressed history and narrowed Now/Near-term to what's actually grounded in the open task board — the roadmap is being re-planned, not reconstructed._
+_Last updated: 2026-09-18 — Added Voice (dictation, Hermes Voice playback, Live Voice) to the shipped-since list as built and landing in the next release, and a free/chained voice path to Now/Near-term as the planned follow-up. Previously 2026-08-13: Scarf v2.19.0. Rewritten after a long freeze (previously stuck at "Now (2.5)" since 2026-04-25): added a shipped-since compressed history and narrowed Now/Near-term to what's actually grounded in the open task board — the roadmap is being re-planned, not reconstructed._

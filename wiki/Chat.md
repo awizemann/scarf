@@ -43,7 +43,7 @@ Streams tokens, thoughts, and tool calls live via the [ACP subprocess](ACP-Subpr
 
 **Offline-tolerant snapshots** _(v2.5.2+)_. When a fresh remote `state.db` snapshot pull fails, Scarf falls back to the last cached copy at `~/Library/Caches/scarf/snapshots/<server-id>/state.db` so Dashboard and Sessions stay viewable. The chat history reload path explicitly opts out of this fallback (`forceFresh: true`) — falling back there would silently hide messages the agent streamed during the outage.
 
-**Voice mode controls:** PTT (push-to-talk), TTS playback, STT transcription preferences live in **Settings → Voice**. The chat toolbar exposes the basic toggles.
+**Voice mode controls:** PTT (push-to-talk), TTS playback (including [Hermes Voice playback](#hermes-voice-playback-mac)), STT transcription, and [Live Voice](#live-voice-mac-and-scarfgo) preferences live in **Settings → Voice**. The chat toolbar exposes the basic toggles.
 
 ## Project context — your AGENTS.md in project chats _(v2.15+, Mac)_
 
@@ -81,7 +81,39 @@ The chat header surfaces a Kanban chip that opens a board filtered to **just the
 
 ## Per-message TTS playback _(v2.6+, Mac)_
 
-Small speaker glyph in each settled assistant bubble's metadata footer. Tap to read the reply aloud through `AVSpeechSynthesizer` with the user's macOS Spoken Content default voice — works offline. Tap again (or any other bubble's button) to stop. Markdown control characters (`**`, ` ` ` `, `[text](url)`) are stripped before speech so the user doesn't hear "asterisk asterisk bold". The deeper Settings → Voice provider integration (Edge / ElevenLabs / OpenAI / NeuTTS / Piper) is queued as a v2.7 follow-up. Issue [#66](https://github.com/awizemann/scarf/issues/66).
+Small speaker glyph in each settled assistant bubble's metadata footer. Tap to read the reply aloud, tap again (or any other bubble's button) to stop. Markdown control characters (`**`, ` ` ` `, `[text](url)`) are stripped before speech so the user doesn't hear "asterisk asterisk bold". Issue [#66](https://github.com/awizemann/scarf/issues/66) — original ask.
+
+Which voice speaks is set in **Settings → Voice → Playback Engine**: **System Voice** (the default — `AVSpeechSynthesizer` with the Mac's Spoken Content voice, works fully offline) or **Hermes Voice**, described next.
+
+## Hermes Voice playback _(Mac)_
+
+**Settings → Voice → Playback Engine → Hermes Voice** speaks assistant replies through the *connected server's* own configured Hermes text-to-speech provider — whatever Settings → Voice → Text-to-Speech has set (Edge, ElevenLabs, OpenAI, NeuTTS, xAI, DeepInfra, …) — instead of the Mac's built-in voice. If the server can't synthesize (provider misconfigured, request fails), playback falls back to System Voice automatically rather than staying silent.
+
+Needs **Hermes v0.20.1 or later** — the Hermes Voice option is hidden below that floor, so an older host's Playback Engine picker doesn't render at all and the speaker button always plays System Voice. Each message speaks on the server it actually came from, tracked per window, so with two windows open on two different Hermes hosts, one window's reply is never spoken by the other's provider.
+
+Contributed by [@danmarauda](https://github.com/danmarauda) ([PR #143](https://github.com/awizemann/scarf/pull/143)); hardened afterward for the multi-server routing and version gate above.
+
+## Live Voice _(Mac and ScarfGo)_
+
+A full, two-way **spoken conversation** with Hermes — not dictation, and not one-off playback. Click the waveform button next to Send (or its [ScarfGo](ScarfGo#voice) composer twin) and talk; Hermes talks back. Under the hood it's Hermes's own **GPT-Live** mode: an OpenAI voice model listens and speaks in real time, and hands every real request to Hermes as a normal chat turn, so replies come from your selected model with your full toolset — the same as if you'd typed the prompt.
+
+**Setup**, once per Hermes host:
+
+1. **Hermes v0.21.3 or later.**
+2. **Settings → Voice → Voice Chat Mode → GPT-Live.** Hermes's default is *Chained*; switching to GPT-Live is what turns on the composer button. Scarf writes it with `hermes config set`. This is a Hermes setting for the **whole profile**, not just Scarf: it also switches voice to GPT-Live in Hermes's own apps (the Hermes desktop app, for example).
+3. **An OpenAI API key on the Hermes host** — `OPENAI_API_KEY` in its `.env`, or `voice.gpt_live.api_key`. The key never leaves the host; Scarf doesn't read it or transmit it anywhere.
+
+**Privacy: what leaves your device.** The Hermes host only sets up each session. After that, your voice streams **directly from your Mac or phone to OpenAI** over WebRTC, not through the host, so OpenAI also sees your device's network address. Each session also sends OpenAI recent messages from the chat as context (up to 24 messages, about 6,000 characters). Hermes still runs every real request itself. Before the first session on each device, Scarf and ScarfGo show a one-time consent that says this; **Cancel** starts nothing and bills nothing. Review or reset it any time in Settings → Voice (Mac) or Settings → Live Voice Privacy (ScarfGo); after a reset the next session asks again. Scarf never picks the voice model or provider: it uses the voice setup you chose in Hermes, and asks only when that setup sends your data to a third party.
+
+**Cost.** About **$0.05 per minute** of open session time, billed to the key on the host. The Live Voice panel shows elapsed time and an approximate running cost as you go. A session with no speech for about three minutes ends itself. Closing the chat window, switching sessions or servers, or quitting Scarf ends any open session immediately too, so nothing keeps billing after you've moved on.
+
+**Troubleshooting:**
+
+- **No waveform button in the composer.** Live Voice needs both a capable Hermes (v0.21.3+) *and* Voice Chat Mode set to GPT-Live — either one missing hides the button entirely, same as any other version-gated Scarf surface. Check Settings → Voice.
+- **Button's there, but starting a session fails right away.** The host doesn't have an OpenAI key configured yet (see step 3 above) — nothing is billed when this happens.
+- **Session ended on its own.** Either it sat silent for a few minutes, or something closed the window / switched servers / quit the app — all of those end a session on purpose so it never keeps billing unattended.
+
+A free, local alternative — Hermes's *chained* voice mode (speech-to-text → a normal turn → text-to-speech, with no OpenAI key required) behind the same button — is being evaluated for a future release; see [Roadmap](Roadmap).
 
 ## Background completion notifications _(v2.6+, Mac)_
 
@@ -188,4 +220,4 @@ Each Mac window is bound to one server, so chat in window A talks to local Herme
 - [Settings — Voice tab](Gateway-Cron-Health-Logs) for TTS/STT configuration (Settings is documented there).
 
 ---
-_Last updated: 2026-07-14 — Scarf main (reconnect is load-only: `session/resume` dropped from the ladder, reattach reconciles from `state.db`, non-restorable loads fall back to a fresh session. Previously 2026-06-28 / v2.15.0: project chats spawn hermes acp with cwd=project so AGENTS.md / CLAUDE.md / .cursorrules load automatically; trust note added)_
+_Last updated: 2026-09-18 — Live Voice privacy corrected: audio streams directly from the device to OpenAI (the host only sets up the session), recent chat is sent as context, GPT-Live mode applies to the whole Hermes profile, and both apps ask once before the first session. Earlier the same day — Voice: Hermes Voice playback (Settings → Voice → Playback Engine, Hermes v0.20.1+) and Live Voice (GPT-Live spoken conversation, Hermes v0.21.3+) documented; the v2.6 TTS section's "queued as a v2.7 follow-up" note removed now that the provider integration has shipped. Previously 2026-07-14: reconnect is load-only (`session/resume` dropped from the ladder, reattach reconciles from `state.db`, non-restorable loads fall back to a fresh session). Previously 2026-06-28 / v2.15.0: project chats spawn hermes acp with cwd=project so AGENTS.md / CLAUDE.md / .cursorrules load automatically; trust note added)_

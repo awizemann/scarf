@@ -62,6 +62,26 @@ Onboarding details:
 | **Auto-reconnect** _(v2.5.2)_ | Lock the phone, switch from WiFi to cellular, or just lose signal mid-prompt — when the SSH socket dies, ScarfGo reattaches via `session/load` on a 5-attempt 1→2→4→8→16 s exponential backoff (load-only — `session/resume` was removed because resuming an unknown id silently created orphan server-side sessions). Hermes keeps writing to `state.db` on the remote during the outage; on success ScarfGo reconciles the transcript from `state.db` and a "Resynced N new messages" toast surfaces what the agent did while you were offline. A yellow **Reconnecting (n/5)…** banner shows the recovery in progress; a red **No network** banner shows when reachability is unsatisfied. See [Chat](Chat) for the full resilience model. |
 | **Draft persistence** _(v2.5.2)_ | A half-typed message survives force-quit — drafts are persisted to `UserDefaults` keyed by `(serverID, sessionID)` and restored when the session resumes. A 7-day janitor at app launch prunes stale slots. |
 | **Load earlier messages** _(v2.5.2)_ | Long sessions (200+ messages) page chronologically — the initial fetch loads the most recent 200, with a "Load earlier messages" button at the top of the transcript for the rest. Pagination is keyed by message id (monotonic) so streaming-chunk timestamps that collide on the same millisecond never split a page. |
+| **Push-to-talk dictation** | Hold the mic button next to the composer to record; ScarfGo transcribes on-device and drops the text into your draft to review and edit before sending. Strictly on-device — if your phone or language can't transcribe locally, ScarfGo says so and records nothing rather than quietly using Apple's servers. Contributed by [@danmarauda](https://github.com/danmarauda). See [Voice](#voice). |
+| **Live Voice** | A two-way spoken conversation with Hermes, next to the dictation mic. See [Voice](#voice). |
+
+## Voice
+
+Two ways to talk to Hermes from your phone, both next to the message composer.
+
+**Push-to-talk dictation.** Hold the mic button, speak, release — ScarfGo transcribes on-device (Apple's Speech framework, with on-device recognition forced on) and drops editable text into your draft; it never sends anything until you tap Send. If your phone or your language can't transcribe on-device, ScarfGo tells you ("Dictation isn't available in your language on this device") and records nothing, rather than quietly falling back to Apple's servers. Contributed by [@danmarauda](https://github.com/danmarauda) ([PR #143](https://github.com/awizemann/scarf/pull/143)).
+
+**Live Voice.** A full spoken back-and-forth with Hermes, started next to the dictation mic. It uses Hermes's own **GPT-Live** mode: an OpenAI voice model listens and talks, and hands every real request to Hermes as a normal turn, so replies come from your selected model with your full toolset. Needs:
+
+1. **Hermes v0.21.3+** on the host.
+2. **Voice Chat Mode set to GPT-Live** — Settings tab → Voice on your phone, or Settings → Voice in the Mac app pointed at the same host (Hermes's default is Chained). It's a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.
+3. **An OpenAI API key on the Hermes host** (`OPENAI_API_KEY` or `voice.gpt_live.api_key`) — the key stays on the host; ScarfGo never sees it.
+
+**What leaves your phone.** The Hermes host only sets up the session; your voice then streams **directly from your phone to OpenAI**, so OpenAI also sees your phone's network address. Each session also sends OpenAI recent messages from the chat as context (up to 24 messages, about 6,000 characters). Before the first session, ScarfGo shows a one-time consent that says this — **Cancel** starts nothing and bills nothing. Review or reset it in Settings → Live Voice Privacy.
+
+Costs about **$0.05 per minute** of session time on that key. A session ends itself after a few minutes of silence, and ScarfGo also ends it if you background the app, switch chats or servers, or dismiss the sheet — nothing keeps billing once you've stepped away. Dictation and Live Voice never hold the microphone at the same time; starting one stops the other.
+
+**Not showing up?** The composer entry is hidden unless the host is on Hermes v0.21.3+ *and* Voice Chat Mode is GPT-Live — check Settings → Voice on the host. If it's showing but a session won't start, the host is most likely missing its OpenAI key.
 
 ## Project-scoped chat
 
@@ -118,7 +138,7 @@ A: Yes — anywhere reachable over SSH. Tailscale, port forwarding, a VPS, anyth
 A: Two reasons that need to land together: (1) the Push Notifications capability requires Apple Developer Program enrollment + an APNs auth key, (2) Hermes needs a server-side push sender to actually emit pushes. The iOS skeleton ships ready; flipping it on is one app update + one Hermes update.
 
 **Q: Is my data sent to anyone?**
-A: No. See the [privacy policy](https://awizemann.github.io/scarf/privacy/). The apps make exactly three kinds of network connections: (1) SSH to your Hermes hosts, (2) Sparkle update checks (Mac only), (3) HTTPS to GitHub Pages for the public template catalog. Zero analytics.
+A: Only what you choose to send. See the [privacy policy](https://awizemann.github.io/scarf/privacy/). Normally the apps make exactly three kinds of network connections: (1) SSH to your Hermes hosts, (2) Sparkle update checks (Mac only), (3) HTTPS to GitHub Pages for the public template catalog. Zero analytics on ScarfGo. The one deliberate exception is a [Live Voice](#voice) session, which you start yourself after a one-time consent: while it's open, your voice streams directly from your phone to OpenAI (your Hermes server only sets up the session and its OpenAI key pays for it), and recent chat messages go along as context. Push-to-talk dictation never leaves the device — it's transcribed on-device or not at all.
 
 **Q: Where can I see what's planned next?**
 A: [ScarfGo Roadmap](ScarfGo-Roadmap) tracks shipped milestones (M6 / M7 / M8 / M9) and remaining work. The [main Roadmap](Roadmap) covers cross-platform plans.
@@ -132,4 +152,4 @@ A: [ScarfGo Roadmap](ScarfGo-Roadmap) tracks shipped milestones (M6 / M7 / M8 / 
 
 ---
 
-_Last updated: 2026-09-18 — ScarfGo released free on the App Store (id 6763763341); Installation now leads with the App Store and keeps TestFlight as the beta track. Previously 2026-08-13 (v2.19.0): removed the stale "Beta Review queue" TestFlight caveat. 2026-07-14: Auto-reconnect row updated, ladder is load-only, `session/resume` removed; reattach reconciles from `state.db`._
+_Last updated: 2026-09-18 — Live Voice privacy corrected: audio goes directly from the phone to OpenAI (not through the host), recent chat is sent as context, the mode is profile-wide, and ScarfGo asks once before the first session. Earlier the same day — Voice: push-to-talk dictation (on-device only) and Live Voice (GPT-Live spoken conversation, Hermes v0.21.3+) documented; privacy FAQ updated for Live Voice's one deliberate exception to the three-connections rule. Previously (same day): ScarfGo released free on the App Store (id 6763763341); Installation now leads with the App Store and keeps TestFlight as the beta track. Previously 2026-08-13 (v2.19.0): removed the stale "Beta Review queue" TestFlight caveat. 2026-07-14: Auto-reconnect row updated, ladder is load-only, `session/resume` removed; reattach reconciles from `state.db`._
