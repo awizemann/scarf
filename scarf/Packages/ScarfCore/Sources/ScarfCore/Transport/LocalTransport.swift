@@ -570,7 +570,8 @@ public struct LocalTransport: ServerTransport {
 
     // MARK: - Script streaming
 
-    /// Run `script` through `/bin/sh -c` locally. Local data path
+    /// Run `script` locally through `/bin/sh -s`, script on stdin (never in
+    /// argv, where `ps` would show it to other users). Local data path
     /// doesn't actually call this in production (the data service
     /// hands `LocalSQLiteBackend` the libsqlite3-direct path) — kept
     /// for protocol parity and for tooling that wants a uniform
