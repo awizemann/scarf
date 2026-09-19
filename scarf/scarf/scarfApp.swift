@@ -511,8 +511,9 @@ private struct ContextBoundRoot: View {
             .onDisappear {
                 fileWatcher.stopWatching()
                 // Window close, or a server/profile switch rebuilding this
-                // root: a Live Voice session bills until it is closed.
-                chatViewModel.voiceLive.endImmediately()
+                // root: a Live Voice session bills until it is closed, and
+                // its engine and web view go with it.
+                chatViewModel.leaveChatVoiceLive()
             }
             // App quit: best effort — the vendor close is sent, teardown
             // may not finish before the process exits (the peer connection

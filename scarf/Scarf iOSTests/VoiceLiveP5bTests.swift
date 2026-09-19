@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 import Observation
 import ScarfCore
 @testable import scarf_mobile
@@ -396,7 +397,8 @@ private func drainAudioRelease() async {
     }
 
     @Test(arguments: [
-        VoiceLiveTeardownTrigger.backgrounded, .viewDisappeared, .sessionChanged, .sheetDismissed, .audioInterrupted,
+        VoiceLiveTeardownTrigger.backgrounded, .viewDisappeared, .sessionChanged, .sheetDismissed,
+        .audioInterrupted, .hermesConnectionLost,
     ])
     func everyTeardownTriggerEndsImmediatelyInsideABackgroundTask(_ trigger: VoiceLiveTeardownTrigger) async {
         let h = Harness()
@@ -763,3 +765,165 @@ private func drainAudioRelease() async {
     }
 }
 
+
+// MARK: - F6: a dead Hermes connection ends the session
+
+@Suite(.serialized) @MainActor struct VoiceLiveConnectionLostTests {
+
+    /// An open GPT-Live session bills $0.05/min and every spoken turn
+    /// throws `.chatNotReady` once the ACP connection is gone: the chat
+    /// state leaving `.ready` must end it, exactly as the Mac's
+    /// `ChatViewModel.handleConnectionDied` does.
+    @Test func chatStatesOtherThanReadyEndLiveVoice() {
+        #expect(!ChatController.State.ready.endsLiveVoice)
+        for state: ChatController.State in [
+            .failed("ssh closed"),
+            .offline(reason: "no route"),
+            .reconnecting(attempt: 1, of: 5),
+            .connecting,
+            .idle,
+        ] {
+            #expect(state.endsLiveVoice, "\(state) left Live Voice running")
+        }
+    }
+
+    /// Teardown for a lost connection ends the session immediately, keeps
+    /// the sheet up, and says why — both on the sheet (the end note) and on
+    /// the composer, for a user who had already swiped the sheet away.
+    @Test func teardownForALostConnectionEndsTheSessionWithItsNote() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.isActive)
+
+        h.model.teardown(.hermesConnectionLost)
+
+        #expect(h.engine?.immediateEndReasons == [.userEnded])
+        #expect(!h.model.isActive)
+        #expect(h.model.endNote == .hermesConnectionLost)
+        #expect(h.model.composerNotice == .hermesConnectionLost)
+        // The sheet stays up so the user can read how it ended.
+        #expect(h.model.isPresented)
+        #expect(h.tasks.begun.count == 1, "the close must run inside a background task")
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1)
+    }
+
+    /// The note belongs to ONE session: the next start clears it.
+    @Test func theNextSessionStartsWithoutTheNote() async {
+        let h = Harness()
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        h.model.teardown(.hermesConnectionLost)
+        #expect(h.model.endNote == .hermesConnectionLost)
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.endNote == nil)
+        #expect(h.model.composerNotice == nil)
+    }
+}
+
+// MARK: - F6: the audio session is restored, and released once
+
+@Suite(.serialized) @MainActor struct VoiceLiveAudioSessionRestoreTests {
+
+    /// Stands in for `AVAudioSession`: remembers what it was configured
+    /// with, so the save/restore can be asserted.
+    final class FakeSystemSession: VoiceLiveAVAudioSession.System {
+        var category: AVAudioSession.Category = .ambient
+        var mode: AVAudioSession.Mode = .default
+        var categoryOptions: AVAudioSession.CategoryOptions = []
+        var actives: [Bool] = []
+
+        func setCategory(
+            _ category: AVAudioSession.Category,
+            mode: AVAudioSession.Mode,
+            options: AVAudioSession.CategoryOptions
+        ) throws {
+            self.category = category
+            self.mode = mode
+            self.categoryOptions = options
+        }
+
+        func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {
+            actives.append(active)
+        }
+    }
+
+    /// Live Voice puts the app on `.playAndRecord` / `.voiceChat` /
+    /// speaker for the length of a call. It never put it back, so every
+    /// later sound in the app — and every other app's — ran on a call
+    /// session until ScarfGo was relaunched.
+    @Test func deactivateRestoresThePreSessionConfiguration() {
+        let system = FakeSystemSession()
+        system.category = .playback
+        system.mode = .spokenAudio
+        system.categoryOptions = [.duckOthers]
+        let audio = VoiceLiveAVAudioSession(session: system)
+
+        audio.activate()
+        #expect(system.category == .playAndRecord)
+        #expect(system.mode == .voiceChat)
+
+        audio.deactivate()
+        #expect(system.category == .playback, "the app stayed on the call category")
+        #expect(system.mode == .spokenAudio)
+        #expect(system.categoryOptions == [.duckOthers])
+        #expect(system.actives == [true, false])
+    }
+
+    /// A second call captures the configuration the app is actually on,
+    /// not Live Voice's own leftovers.
+    @Test func aSecondSessionRestoresTheSameConfiguration() {
+        let system = FakeSystemSession()
+        system.category = .playback
+        let audio = VoiceLiveAVAudioSession(session: system)
+        audio.activate()
+        audio.deactivate()
+        audio.activate()
+        audio.deactivate()
+        #expect(system.category == .playback)
+    }
+
+    /// Two teardowns in a row each schedule a deferred `deactivate()`
+    /// behind `waitForMediaRelease()`. Only the last one may fire:
+    /// otherwise a stale release hands the audio session back under a
+    /// push-to-talk take the user started in the meantime.
+    @Test func aStaleDeferredDeactivateIsSkipped() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        let first = h.engine
+        first?.holdMediaRelease = true
+        h.model.teardown(.sheetDismissed)
+
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        let second = h.engine
+        second?.holdMediaRelease = true
+        h.model.teardown(.sheetDismissed)
+
+        first?.releaseMedia()
+        second?.releaseMedia()
+        await drainAudioRelease()
+        #expect(h.audio.deactivations == 1, "a stale deferred deactivate fired")
+    }
+
+    /// Dictation stays off until the audio session is actually back: the
+    /// composer used to re-enable it the instant `isActive` flipped, so a
+    /// hold started in that window was cut by the late `setActive(false)`.
+    @Test func dictationStaysBlockedUntilTheAudioSessionIsReleased() async {
+        let h = Harness()
+        h.engines.phaseAfterStart = .listening
+        await h.model.begin(host: NullTurnHost(), dictationIdle: true)
+        #expect(h.model.holdsAudioSession)
+        h.engine?.holdMediaRelease = true
+        h.model.teardown(.sheetDismissed)
+
+        #expect(!h.model.isActive)
+        #expect(h.model.holdsAudioSession, "the audio session is still ours")
+        #expect(h.model.blocksDictation, "dictation was re-enabled before the release")
+
+        h.engine?.releaseMedia()
+        await drainAudioRelease()
+        #expect(!h.model.holdsAudioSession)
+        #expect(!h.model.blocksDictation)
+    }
+}

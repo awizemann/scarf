@@ -58,6 +58,16 @@ enum VoiceLiveTeardownTrigger: Equatable, Sendable {
     case sheetDismissed
     /// A phone call, Siri or another app took the audio session.
     case audioInterrupted
+    /// The chat's ACP connection to Hermes died (or is reconnecting), so
+    /// no spoken request could reach Hermes any more.
+    case hermesConnectionLost
+}
+
+/// Why the HOST (not the engine) ended the session, when the sheet should
+/// say so. The engine reports these as a plain `.userEnded`. Mirrors the
+/// Mac's `VoiceLiveController.EndNote`.
+enum VoiceLiveEndNote: Equatable, Sendable {
+    case hermesConnectionLost
 }
 
 /// Microphone permission, the same system permission P1 dictation uses
@@ -94,6 +104,8 @@ enum VoiceLiveComposerNotice: Equatable, Sendable {
     case microphoneDenied
     /// A call or Siri took the audio and the session ended.
     case interrupted
+    /// The chat lost its connection to Hermes and the session ended.
+    case hermesConnectionLost
 }
 
 // MARK: - Session model
@@ -118,6 +130,14 @@ final class VoiceLiveSessionModel {
     /// Drives the session sheet.
     var isPresented = false
     private(set) var composerNotice: VoiceLiveComposerNotice?
+    /// Set when the host ended the session for a reason the sheet shows.
+    /// Cleared by the next `begin`.
+    private(set) var endNote: VoiceLiveEndNote?
+    /// The app's `AVAudioSession` is still configured for this session.
+    /// Stays true from ``begin(host:dictationIdle:)`` until the deferred
+    /// release has actually run — which is AFTER ``isActive`` goes false,
+    /// because the release waits for WebKit to let the microphone go.
+    private(set) var holdsAudioSession = false
     /// A start is waiting for the user to agree to send their data to this
     /// recipient (drives the consent sheet). Nothing is asked of the
     /// microphone, the audio session or the host until ``acceptConsent()``.
@@ -125,6 +145,11 @@ final class VoiceLiveSessionModel {
 
     /// A session exists and has not ended (connecting through ending).
     var isActive: Bool { session?.engine.phase.isActive ?? false }
+
+    /// Push-to-talk dictation must stand down for this whole window, not
+    /// just while the session is active: a hold started between the end of
+    /// the session and the deferred `setActive(false)` was cut off by it.
+    var blocksDictation: Bool { isActive || holdsAudioSession }
 
     @ObservationIgnored private let makeSession: SessionFactory
     @ObservationIgnored private let audioSession: any VoiceLiveAudioSessionControlling
@@ -137,6 +162,10 @@ final class VoiceLiveSessionModel {
     @ObservationIgnored private let externalRecipient: VoiceDataRecipient?
     @ObservationIgnored private let teardownGrace: Duration
     @ObservationIgnored private var audioSessionActive = false
+    /// Bumped by every ``releaseAudioSession()``, so a deferred deactivate
+    /// that lost its race — another release, or a new session — is skipped
+    /// instead of handing the audio session back under whoever holds it now.
+    @ObservationIgnored private var audioSessionGeneration = 0
     @ObservationIgnored private var isBeginning = false
     /// Bumped by every teardown, so a `begin` suspended on the microphone
     /// prompt doesn't open a session after the user already left Chat.
@@ -213,6 +242,7 @@ final class VoiceLiveSessionModel {
         isBeginning = true
         defer { isBeginning = false }
         composerNotice = nil
+        endNote = nil
         let generation = teardownGeneration
 
         switch microphone.status() {
@@ -231,6 +261,8 @@ final class VoiceLiveSessionModel {
 
         audioSession.activate()
         audioSessionActive = true
+        holdsAudioSession = true
+        audioSessionGeneration += 1
         let next = makeSession(host)
         session = next
         isPresented = true
@@ -275,6 +307,10 @@ final class VoiceLiveSessionModel {
     /// vendor's own timeout.
     func teardown(_ trigger: VoiceLiveTeardownTrigger) {
         teardownGeneration += 1
+        // The engine reports every host-driven end as a plain `.userEnded`,
+        // so the reason the user needs is carried here (the Mac does the
+        // same through `VoiceLiveController.endNote`).
+        if trigger == .hermesConnectionLost, isActive { endNote = .hermesConnectionLost }
         // Leaving Chat takes an unanswered consent sheet with it.
         if trigger == .viewDisappeared || trigger == .sessionChanged {
             pendingConsent = nil
@@ -290,6 +326,9 @@ final class VoiceLiveSessionModel {
         engine.endImmediately(reason: .userEnded)
         releaseAudioSession()
         if trigger == .audioInterrupted { showComposerNotice(.interrupted) }
+        // The sheet may already have been swiped away, so the composer says
+        // it too — this end is not something the user asked for.
+        if trigger == .hermesConnectionLost { showComposerNotice(.hermesConnectionLost) }
         let grace = teardownGrace
         let tasks = backgroundTasks
         Task { @MainActor in
@@ -321,12 +360,15 @@ final class VoiceLiveSessionModel {
     private func releaseAudioSession() {
         guard audioSessionActive else { return }
         audioSessionActive = false
+        audioSessionGeneration += 1
+        let mine = audioSessionGeneration
         let engine = session?.engine
         let audioSession = audioSession
         Task { @MainActor [weak self] in
             await engine?.waitForMediaRelease()
-            guard self?.audioSessionActive != true else { return }
+            guard let self, self.audioSessionGeneration == mine, !self.audioSessionActive else { return }
             audioSession.deactivate()
+            self.holdsAudioSession = false
         }
     }
 
@@ -376,16 +418,57 @@ final class VoiceLiveSessionModel {
 /// (`notifyOthersOnDeactivation`); the composer never runs both at once.
 @MainActor
 final class VoiceLiveAVAudioSession: VoiceLiveAudioSessionControlling {
-    func activate() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try? session.setActive(true)
+    /// The `AVAudioSession` members Live Voice touches, behind a seam so
+    /// the save/restore is testable without a real audio session.
+    /// `AVAudioSession` satisfies it as it stands.
+    protocol System: AnyObject {
+        var category: AVAudioSession.Category { get }
+        var mode: AVAudioSession.Mode { get }
+        var categoryOptions: AVAudioSession.CategoryOptions { get }
+        func setCategory(
+            _ category: AVAudioSession.Category,
+            mode: AVAudioSession.Mode,
+            options: AVAudioSession.CategoryOptions
+        ) throws
+        func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws
     }
 
+    /// What the app was configured for before Live Voice took the session.
+    private struct Configuration {
+        let category: AVAudioSession.Category
+        let mode: AVAudioSession.Mode
+        let options: AVAudioSession.CategoryOptions
+    }
+
+    private let session: any System
+    private var previous: Configuration?
+
+    init(session: (any System)? = nil) {
+        self.session = session ?? AVAudioSession.sharedInstance()
+    }
+
+    func activate() {
+        previous = Configuration(
+            category: session.category, mode: session.mode, options: session.categoryOptions)
+        try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try? session.setActive(true, options: [])
+    }
+
+    /// Hand the session back AND put the app on the category it had before.
+    /// Without the restore the app stayed on `.playAndRecord` / `.voiceChat`
+    /// / speaker for the rest of its life: every later sound — a
+    /// notification, a spoken message — played through the call route, at
+    /// call quality, with the microphone still claimed.
     func deactivate() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        if let previous {
+            try? session.setCategory(previous.category, mode: previous.mode, options: previous.options)
+            self.previous = nil
+        }
     }
 }
+
+extension AVAudioSession: VoiceLiveAVAudioSession.System {}
 
 @MainActor
 final class UIKitBackgroundTaskRunner: VoiceLiveBackgroundTaskRunning {

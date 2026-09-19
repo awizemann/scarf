@@ -137,7 +137,7 @@ struct ChatTranscriptPane: View {
         // Leaving the chat (another sidebar section, terminal mode, window
         // close) takes the panel — and the web view WebKit needs for audio
         // — with it, so the session ends here rather than billing unseen.
-        .onDisappear { chatViewModel.voiceLive.endImmediately() }
+        .onDisappear { chatViewModel.leaveChatVoiceLive() }
         // The one-time Live Voice consent (F4): raised by the first start
         // on this Mac; Cancel starts nothing and bills nothing.
         .sheet(item: Binding(

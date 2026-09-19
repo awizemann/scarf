@@ -186,7 +186,8 @@ private final class URLSink: @unchecked Sendable {
         factory: MockRecorderFactory = MockRecorderFactory(),
         outcome: MockTranscriber.Outcome = .text("Hello from dictation"),
         dictationAvailable: Bool = true,
-        transcriptionTimeout: Duration = .seconds(5)
+        transcriptionTimeout: Duration = .seconds(5),
+        noticeLifetime: Duration = .seconds(4)
     ) -> (controller: PushToTalkController, recorder: MockRecorder, transcriber: MockTranscriber) {
         let transcriber = MockTranscriber(outcome: outcome)
         let controller = PushToTalkController(
@@ -195,7 +196,8 @@ private final class URLSink: @unchecked Sendable {
             transcriber: transcriber,
             dictationAvailability: MockDictationAvailability(available: dictationAvailable),
             makeFileURL: Self.makeMemoFile,
-            transcriptionTimeout: transcriptionTimeout
+            transcriptionTimeout: transcriptionTimeout,
+            noticeLifetime: noticeLifetime
         )
         return (controller, factory.recorder, transcriber)
     }
@@ -613,5 +615,38 @@ private final class URLSink: @unchecked Sendable {
         ] {
             #expect(!notice.opensSystemSettings)
         }
+    }
+
+    // MARK: - Notice lifetime
+
+    /// Two IDENTICAL notices in a row each get their own window. The
+    /// auto-clear used to dedupe by value (`notice == snapshot`), so the
+    /// first take's timer cleared the second take's notice early — the
+    /// user saw "nothing heard" flash away after a fraction of a second.
+    @Test func asecondIdenticalNoticeGetsItsOwnFullWindow() async {
+        let (controller, _, _) = makeController(
+            permissions: MockPermissions(status: .granted),
+            outcome: .silent,
+            noticeLifetime: .milliseconds(400)
+        )
+
+        controller.holdBegan()
+        controller.holdReleased()
+        await waitUntil { controller.notice == .nothingHeard }
+        try? await Task.sleep(for: .milliseconds(250))
+
+        // Same notice again, a quarter of a second in.
+        controller.holdBegan()
+        controller.holdReleased()
+        await waitUntil { controller.phase == .idle }
+        #expect(controller.notice == .nothingHeard)
+
+        // Past the FIRST notice's window: the second one must still show.
+        try? await Task.sleep(for: .milliseconds(250))
+        #expect(controller.notice == .nothingHeard, "the first take's timer cleared the second take's notice")
+
+        // Past its own window: gone.
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(controller.notice == nil)
     }
 }

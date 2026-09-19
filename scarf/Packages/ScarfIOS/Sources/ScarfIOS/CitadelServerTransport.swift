@@ -352,45 +352,21 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
                 // therefore reported empty output, while `SSHTransport`'s
                 // timeout arm hands back `drain.collect()` (round-5 P53).
                 let partial = PartialStdout()
-                collected = try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
-                    group.addTask {
-                        // stdin first, then the drain. Scripts are a few KB,
-                        // far inside the SSH channel window (~2 MB for
-                        // OpenSSH), so the write completes at once. It is not
-                        // cancellable (NIO's writeAndFlush), so a script that
-                        // outgrew the window on a remote that never reads
-                        // could hold the group past `timeout`.
-                        var writeFailure: Error?
-                        if let stdin, !stdin.isEmpty {
-                            do {
-                                try await writer.value.write(ByteBuffer(bytes: stdin))
-                            } catch {
-                                writeFailure = error
-                            }
+                let writeArm: (@Sendable () async throws -> Void)?
+                if let stdin, !stdin.isEmpty {
+                    writeArm = {
+                        try await Self.writeStdin(stdin) { chunk in
+                            try await writer.value.write(ByteBuffer(bytes: chunk))
                         }
-                        // A failed write usually means the remote already
-                        // exited (a login shell that rejected the command):
-                        // its exit status and stderr are the real diagnosis,
-                        // so drain them rather than reporting the write.
-                        let result = try await Self.drain(
-                            boxed, timeout: timeout, midStream: midStream, partial: partial)
-                        if let writeFailure, result.exitCode == 0, result.stdout.isEmpty, result.stderr.isEmpty {
-                            throw TransportError.other(
-                                message: "Failed to send the script over SSH: \(writeFailure.localizedDescription)")
-                        }
-                        return result
                     }
-                    group.addTask {
-                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                        return nil
-                    }
-                    guard let first = try await group.next() else {
-                        group.cancelAll()
-                        throw TransportError.other(message: "SSH exec produced no result")
-                    }
-                    group.cancelAll()
-                    return first
+                } else {
+                    writeArm = nil
                 }
+                collected = try await Self.execArms(
+                    writeStdin: writeArm,
+                    drain: { try await Self.drain(boxed, timeout: timeout, midStream: midStream, partial: partial) },
+                    timeout: timeout
+                )
                 if collected == nil {
                     // The budget went first. THROWING is what closes the
                     // channel: `withExec` closes it on the way out either way,
@@ -411,6 +387,79 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             throw TransportError.other(message: "SSH exec produced no result")
         }
         return collected
+    }
+
+    /// Run the exec's three concurrent parts: the stdin write, the drain of
+    /// the remote's output, and the timeout budget. Returns the drained
+    /// result, or `nil` when the budget won.
+    ///
+    /// The write runs in a task of its OWN, outside the group, for two
+    /// reasons. It used to sit at the head of the drain's task, so no output
+    /// was read until it finished — a remote that answers while still being
+    /// fed, or a stdin larger than the SSH channel window (which only opens
+    /// as the remote reads), stalls that way round. And because NIO's
+    /// `writeAndFlush` ignores cancellation, awaiting the write inside the
+    /// group let a parked write hold `withThrowingTaskGroup` open long past
+    /// `timeout` — charter C10 wants a timeout that can actually fire. The
+    /// write task is cancelled on the way out either way.
+    ///
+    /// A failed write usually means the remote already exited (a login shell
+    /// that rejected the command): its exit status and stderr are the real
+    /// diagnosis, so the write error is reported only when the drain came
+    /// back with nothing at all.
+    static func execArms(
+        writeStdin: (@Sendable () async throws -> Void)?,
+        drain: @escaping @Sendable () async throws -> ProcessResult,
+        timeout: TimeInterval
+    ) async throws -> ProcessResult? {
+        let writeFailure = WriteFailure()
+        let writeTask: Task<Void, Never>? = writeStdin.map { write in
+            Task { do { try await write() } catch { writeFailure.record(error) } }
+        }
+        defer { writeTask?.cancel() }
+        return try await withThrowingTaskGroup(of: ProcessResult?.self) { group in
+            group.addTask {
+                let result = try await drain()
+                if let failure = writeFailure.error, result.exitCode == 0,
+                   result.stdout.isEmpty, result.stderr.isEmpty {
+                    throw TransportError.other(
+                        message: "Failed to send the script over SSH: \(failure.localizedDescription)")
+                }
+                return result
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            guard let first = try await group.next() else {
+                group.cancelAll()
+                throw TransportError.other(message: "SSH exec produced no result")
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// How much stdin goes out per `writeAndFlush`. Small enough that a
+    /// remote which stopped reading parks only one chunk.
+    static let stdinChunkBytes = 16 * 1024
+
+    /// Write `data` to the exec channel in chunks, checking for cancellation
+    /// between them: `writeAndFlush` itself ignores cancellation, so one big
+    /// write on a full channel window is un-interruptible for as long as the
+    /// remote refuses to read. Chunking bounds that to one chunk.
+    static func writeStdin(
+        _ data: Data,
+        chunkSize: Int = stdinChunkBytes,
+        write: (Data) async throws -> Void
+    ) async throws {
+        var offset = data.startIndex
+        while offset < data.endIndex {
+            try Task.checkCancellation()
+            let end = data.index(offset, offsetBy: min(chunkSize, data.distance(from: offset, to: data.endIndex)))
+            try await write(data[offset..<end])
+            offset = end
+        }
     }
 
     /// Read the exec stream to EOF. Cancellation (the timeout arm cancelling
@@ -899,6 +948,25 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             throw TransportError.timeout(seconds: deadline, partialStdout: Data())
         }
         return try resultBox.get()
+    }
+}
+
+/// The stdin write task's error, read by the drain arm that runs alongside
+/// it (``CitadelServerTransport/execArms(writeStdin:drain:timeout:)``).
+final class WriteFailure: @unchecked Sendable {
+    private var stored: (any Error)?
+    private let lock = NSLock()
+
+    func record(_ error: any Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        stored = error
+    }
+
+    var error: (any Error)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
     }
 }
 

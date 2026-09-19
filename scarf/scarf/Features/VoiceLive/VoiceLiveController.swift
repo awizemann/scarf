@@ -32,6 +32,12 @@ final class VoiceLiveController {
 
     typealias SessionFactory = @MainActor (ServerContext, any VoiceTurnHost) -> Session
 
+    /// Why a start the user asked for produced no session.
+    enum StartRefusal: Equatable {
+        /// Another window holds the app's one Live Voice session.
+        case blockedByAnotherWindow
+    }
+
     /// Why the HOST (not the engine) ended the session, when the panel
     /// should say so. The engine reports these as a plain `.userEnded`.
     enum EndNote: Equatable {
@@ -58,6 +64,11 @@ final class VoiceLiveController {
     /// Set when the host ended the session for a reason the panel shows.
     /// Cleared by the next start and by `dismiss`.
     private(set) var endNote: EndNote?
+    /// Why the last ``start(context:host:)`` refused, when the user asked
+    /// for a session and got nothing. Cleared by the next start and by
+    /// ``consumeStartRefusal()``.
+    private(set) var startRefusal: StartRefusal?
+
     /// `start` has built the engine but its start task hasn't run yet
     /// (the engine is still `.idle`). Counts as holding the session, so a
     /// second window can't slip a start into that gap, and an end in it
@@ -109,12 +120,22 @@ final class VoiceLiveController {
     /// party only raises ``pendingConsent`` (the consent sheet); the caller
     /// starts again after ``acceptConsent()``.
     func start(context: ServerContext, host: any VoiceTurnHost) {
-        guard !holdsSession, !isBlockedByAnotherWindow else { return }
+        guard !holdsSession else { return }
+        // The consent sheet can be up for minutes, and another window may
+        // claim the app's one session while it is. Silently returning here
+        // meant the user pressed Continue and nothing at all happened —
+        // record the refusal so the chat can say why.
+        guard !isBlockedByAnotherWindow else {
+            pendingConsent = nil
+            startRefusal = .blockedByAnotherWindow
+            return
+        }
         if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient, store: consent) {
             pendingConsent = recipient
             return
         }
         pendingConsent = nil
+        startRefusal = nil
         // GPT-Live owns the speaker: silence any message being read aloud.
         // (The Mac has no auto-speak, so there is nothing else to mute.)
         MessageSpeechService.shared.stop()
@@ -134,6 +155,13 @@ final class VoiceLiveController {
             self?.isStartPending = false
             await engine.start()
         }
+    }
+
+    /// Read and clear ``startRefusal`` — the caller shows it once
+    /// (`ChatViewModel.startVoiceLive`).
+    func consumeStartRefusal() -> StartRefusal? {
+        defer { startRefusal = nil }
+        return startRefusal
     }
 
     /// Continue on the consent sheet: remember the consent on this Mac.

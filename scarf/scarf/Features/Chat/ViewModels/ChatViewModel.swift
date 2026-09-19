@@ -3108,6 +3108,27 @@ extension ChatViewModel: VoiceTurnHost {
     func startVoiceLive() {
         guard canHostVoiceTurns else { return }
         voiceLive.start(context: context, host: self)
+        // A start refused because another window holds the app's one
+        // session has no panel to say so on (none was built): the
+        // composer's transient hint carries the same sentence the button's
+        // tooltip does.
+        if voiceLive.consumeStartRefusal() == .blockedByAnotherWindow {
+            richChatViewModel.transientHint = String(
+                localized: "Live Voice is running in another Scarf window. End it there first."
+            )
+            scheduleHintClear()
+        }
+    }
+
+    /// Leaving the chat pane — a sidebar section, terminal mode, the
+    /// window closing. `endImmediately` alone kept the engine and its
+    /// bridge (and the now-detached WKWebView) alive, so coming back into
+    /// Chat re-rendered a stale "session ended" strip for a session the
+    /// user had already walked away from. `dismiss` ends it AND drops
+    /// both; the in-chat graceful End still keeps its panel up to show
+    /// the outcome.
+    func leaveChatVoiceLive() {
+        voiceLive.dismiss()
     }
 
     /// Continue on the Live Voice consent sheet: remember the consent, then
