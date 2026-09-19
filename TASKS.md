@@ -93,15 +93,40 @@
 - [ ] Audit P64: YAML writer/reader residue r7 — block-scalar writer corruption, anchors, duplicate sections, str() comments, nulls (id: t-d1d324ff) (added: 2026-09-13) (priority: high)
 - [ ] Audit P65: cron/kanban residue r7 — iOS model snapshots, duplicate strips, Review entrance, unconfirmed dispatch twins, cron split (id: t-ad965a68) (added: 2026-09-13) (priority: high)
 - [ ] UI gate: unit-test host exited with code 0 mid-test once during the 3.2.0 cut (SessionDeletedSignalTests) (id: t-28fcd354) (added: 2026-09-14)
+- [ ] Voice P7: evaluate a free Hermes-supported voice path (id: t-06481958) (added: 2026-09-18)
+- [ ] Voice: Hermes Voice cache ignores tts.speed and provider sub-settings (id: t-eb402e82) (added: 2026-09-18) (priority: low)
+- [ ] ScarfGo: decide App Privacy + privacy manifest for Live Voice audio (id: t-11cc53ea) (added: 2026-09-18) (priority: high)
+- [ ] Fix F2b: old Mac chat issues found in the voice audit (id: t-4e6fa818) (added: 2026-09-18)
+- [ ] ScarfGo: voice should not cancel a typed turn (Mac parity) (id: t-2140ec98) (added: 2026-09-18)
+- [ ] iOS transport: stale "no stdin" error + document rc-file stdin edge (id: t-c7a7b1d4) (added: 2026-09-18) (priority: low)
+- [ ] Voice release blockers: privacy policy, Mac mic string, string catalogs (id: t-af7b8cc4) (added: 2026-09-18) (priority: high)
 
 ## Doing
 
+- [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 
 ## Done
 
+- [x] Mac: local streamScript puts the script in argv (sh -c) (id: t-3ba95f7e) (added: 2026-09-18) (priority: low)
+- [x] Voice: orchestrator audits (plan, memories, fresh eyes, whole surface) (id: t-f8c66377) (added: 2026-09-18) (priority: high)
+- [x] Voice: M1ACPTests flake under the full ScarfCore run (branch-only) (id: t-f1593849) (added: 2026-09-18) (priority: high)
+- [x] Keep Mac tests off the real mini-app signing key in the keychain (id: t-788e4587) (added: 2026-09-18)
+- [x] Voice fix F4: privacy copy, consent and disclosure for Live Voice (id: t-ba3ccc85) (added: 2026-09-18) (priority: urgent)
+- [x] Fix F5: iOS SSH output splits UTF-8 at packet boundaries (old) (id: t-97cf2ed9) (added: 2026-09-18) (priority: high)
+- [x] Voice fix F3: Live Voice engine + page robustness (shared) (id: t-daa906da) (added: 2026-09-18) (priority: high)
+- [x] Voice fix F2a: Mac Live Voice lifecycle and chat-turn fixes (id: t-dd450d3a) (added: 2026-09-18) (priority: high)
+- [x] Voice fix F1: iOS dictation — tap starts endless recording; stuck transcribing (id: t-0fbb1c3c) (added: 2026-09-18) (priority: urgent)
+- [x] Voice: fix Mac convention-test failures on feat/voice (id: t-30667749) (added: 2026-09-18) (priority: high)
+- [x] Voice P6: wiki, README and release-note updates for voice (id: t-b978241b) (added: 2026-09-18)
+- [x] Voice P5a: Live Voice UI on macOS (id: t-8c80d256) (added: 2026-09-18)
+- [x] Voice P5b: Live Voice UI on iOS (ScarfGo) (id: t-50cf07c5) (added: 2026-09-18)
+- [x] Voice P4: Live Voice shared core (ScarfCore) (id: t-a4665c6e) (added: 2026-09-18)
+- [x] Voice P2: harden Hermes speech playback (macOS) (id: t-e267092a) (added: 2026-09-18) (priority: high)
+- [x] Voice P3: Live Voice spike — web view WebRTC via Hermes voice-live (id: t-29bc9831) (added: 2026-09-18) (priority: high)
+- [x] Voice P1: harden iOS push-to-talk dictation (id: t-11fd245b) (added: 2026-09-18) (priority: high)
 - [x] Activity section shows an error banner in the UI sweep, failing testEverySectionRenders (id: t-a9ef75f0) (added: 2026-09-10)
 - [x] Audit P58: C10 residue r6 — streaming spawns on the cooperative pool, iOS runSync seam, main-actor env sites (id: t-10161ba1) (added: 2026-09-12) (priority: high)
 - [x] Audit P57: YAML reader residue r6 — folded-scalar continuation holes, boolishValue trim, dotted-key isBlock (id: t-b24e5fba) (added: 2026-09-12)
@@ -142,6 +167,7 @@
 - [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
 - [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
 - [x] Round-6 exit-0 family: webhook remove/test, backup, import, migrate xai, curator (id: t-4edfd804) (added: 2026-09-12)
+- [x] Voice P0: import #143 dictation + TTS commits onto feat/voice (id: t-039306e3) (added: 2026-09-18)
 
 ## Archived
 
