@@ -162,23 +162,21 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// `ServerContext.sshTransportFactory`. Converting it to `asyncRunProcess`
     /// belongs to `t-02f830f4` with the rest of the end-to-end conversion;
     /// until then `runSync` has eight callers, not seven.
+    ///
+    /// **`stdin` is a straight pass-through to `runExec`'s write arm**
+    /// (the same `Self.writeStdin` mechanism `_streamScriptImpl` uses), not a
+    /// separate code path — `execArms` already runs the write concurrently
+    /// with the drain, so there is nothing process-specific left to wire.
     public func runProcess(
         executable: String,
         args: [String],
         stdin: Data?,
         timeout: TimeInterval
     ) throws -> ProcessResult {
-        if stdin != nil {
-            // Citadel's `executeCommand` doesn't accept stdin. None of
-            // the iOS runtime paths exercise this today (the one call
-            // in `ServerContext.UserHomeCache.probe` passes `nil`), so
-            // fail loudly rather than silently drop.
-            throw TransportError.other(message: "CitadelServerTransport.runProcess does not support stdin yet")
-        }
         // The async op owns `timeout`; the bridge's ceiling only has to
         // outlive it (see `runSync`).
         return try runSync(deadline: timeout + Self.syncGrace) {
-            try await self.asyncRunProcess(executable: executable, args: args, timeout: timeout)
+            try await self.asyncRunProcess(executable: executable, args: args, stdin: stdin, timeout: timeout)
         }
     }
 
@@ -202,12 +200,8 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         stdin: Data?,
         timeout: TimeInterval
     ) async throws -> ProcessResult {
-        if stdin != nil {
-            throw TransportError.other(
-                message: "CitadelServerTransport.runProcess does not support stdin yet")
-        }
-        return try await asyncRunProcess(
-            executable: executable, args: args, timeout: timeout)
+        try await asyncRunProcessImpl(
+            executable: executable, args: args, stdin: stdin, timeout: timeout)
     }
 
     public func streamLines(
@@ -261,6 +255,19 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// heredoc instead. `head -c` is in GNU coreutils, BSD/macOS and BusyBox;
     /// where it were missing, `sh` would see an empty script and exit 0 —
     /// the same failure shape as a missing `base64` before.
+    ///
+    /// **A host whose login rc files themselves read stdin will eat script
+    /// bytes and the call will time out.** `head -c N | /bin/sh` guarantees
+    /// only that the *script* isn't interrupted mid-read by another reader on
+    /// the same pipe — `/bin/sh` here may still source `.bashrc`/`.zshrc`/
+    /// `.profile` before it gets to `head`'s output, and if one of those rc
+    /// files has an interactive-only `read` (a "press enter to continue"
+    /// prompt, an MOTD gate, etc.) that `read` consumes bytes from the same
+    /// stdin the script is riding in on. The fix is on the remote host:
+    /// guard any such line with `[[ $- == *i* ]]` (true only for an
+    /// interactive shell) so it never runs against this non-interactive
+    /// exec. See the wiki Troubleshooting page for the user-facing symptom
+    /// and remedy.
     public func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
         try await ScarfMon.measureAsync(.transport, "ssh.streamScript") {
             try await _streamScriptImpl(script, timeout: timeout)
@@ -780,9 +787,10 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         try await sftp.remove(at: resolved)
     }
 
-    private func asyncRunProcess(
+    private func asyncRunProcessImpl(
         executable: String,
         args: [String],
+        stdin: Data? = nil,
         timeout: TimeInterval
     ) async throws -> ProcessResult {
         // Citadel's raw exec channel doesn't source the user's shell rc
@@ -848,7 +856,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // moved both execs onto `withExec` so the ceiling also CLOSES the
         // channel instead of abandoning it; see `runExec`.
         do {
-            return try await runExec(cmd, timeout: timeout, midStream: .exitMinusOne)
+            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)
         } catch let start as ExecStartFailure {
             return ProcessResult(
                 exitCode: -1,

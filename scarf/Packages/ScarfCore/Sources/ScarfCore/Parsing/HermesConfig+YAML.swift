@@ -379,7 +379,15 @@ public extension HermesConfig {
             // the host's own config (`build_session_config`,
             // `tools/voice_live.py:147` @ v2026.9.14), and no Scarf surface
             // shows them.
-            voiceChatMode: str("voice.voice_chat_mode", default: "chained")
+            voiceChatMode: str("voice.voice_chat_mode", default: "chained"),
+            // Whole-`tts:`-section hash (t-eb402e82) — catches `tts.speed`
+            // and command/plugin `tts.providers.<name>.*` sub-settings none
+            // of the typed fields above model, so a cache keyed on it
+            // invalidates on those edits too instead of replaying stale
+            // audio.
+            ttsSectionFingerprint: HermesYAML.ttsSectionFingerprint(
+                values: values, lists: lists, maps: maps
+            )
         )
 
         func aux(_ name: String) -> AuxiliaryModel {

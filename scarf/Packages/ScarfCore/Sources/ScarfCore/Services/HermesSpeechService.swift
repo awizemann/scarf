@@ -185,29 +185,40 @@ public actor HermesSpeechService {
 
     /// Every per-provider config key that changes the synthesized audio —
     /// the cache must not serve audio from before a voice change.
-    /// Unknown providers (command/plugin providers) key on the provider
-    /// alone — Scarf doesn't model `tts.providers.<name>`, so editing a
-    /// command provider's command keeps serving the older cached audio
-    /// for already-spoken text until the cache evicts it.
+    ///
+    /// **t-eb402e82.** The per-provider switch below only tracks the
+    /// handful of keys Scarf has a typed `VoiceSettings` field for, so it
+    /// stayed blind to two whole classes of edit: the GLOBAL `tts.speed`
+    /// (applies under every provider, and no `VoiceSettings` field reads
+    /// it), and `tts.providers.<name>.*` sub-settings for command/plugin
+    /// providers — unknown providers used to key on the provider name
+    /// ALONE, so editing a command provider's `command` kept serving the
+    /// older cached audio for already-spoken text until the cache evicted
+    /// it. `voice.ttsSectionFingerprint` — a hash of the ENTIRE parsed
+    /// `tts:` section (`HermesYAML.ttsSectionFingerprint`) — is appended
+    /// unconditionally so any `tts.*` edit invalidates the cache, whether
+    /// or not this switch has a case for the key that changed.
     public static func voiceFingerprint(provider: String, voice: VoiceSettings) -> String {
+        let perProvider: String
         switch provider {
         case "edge":
-            return voice.ttsEdgeVoice
+            perProvider = voice.ttsEdgeVoice
         case "elevenlabs":
-            return "\(voice.ttsElevenLabsVoiceID)|\(voice.ttsElevenLabsModelID)"
+            perProvider = "\(voice.ttsElevenLabsVoiceID)|\(voice.ttsElevenLabsModelID)"
         case "openai", "nous":
             // `nous` is served by the OpenAI path with the `tts.openai.*`
             // voice (`_get_provider`, `tools/tts_tool.py:140-144`).
-            return "\(voice.ttsOpenAIVoice)|\(voice.ttsOpenAIModel)"
+            perProvider = "\(voice.ttsOpenAIVoice)|\(voice.ttsOpenAIModel)"
         case "neutts":
-            return "\(voice.ttsNeuTTSModel)|\(voice.ttsNeuTTSDevice)"
+            perProvider = "\(voice.ttsNeuTTSModel)|\(voice.ttsNeuTTSDevice)"
         case "xai":
-            return "\(voice.ttsXAIVoiceID)|\(voice.ttsXAILanguage)|\(voice.ttsXAISpeed)"
+            perProvider = "\(voice.ttsXAIVoiceID)|\(voice.ttsXAILanguage)|\(voice.ttsXAISpeed)"
         case "deepinfra":
-            return "\(voice.ttsDeepInfraModel)|\(voice.ttsDeepInfraVoice)"
+            perProvider = "\(voice.ttsDeepInfraModel)|\(voice.ttsDeepInfraVoice)"
         default:
-            return provider
+            perProvider = provider
         }
+        return "\(perProvider)|tts:\(voice.ttsSectionFingerprint)"
     }
 
     /// Identity of the server (and profile) that synthesizes — part of the

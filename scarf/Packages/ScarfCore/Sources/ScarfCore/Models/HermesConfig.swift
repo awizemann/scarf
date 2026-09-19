@@ -355,6 +355,17 @@ public struct VoiceSettings: Sendable, Equatable {
     /// absent key parses to the same `"chained"` the host behaves as.
     public var voiceChatMode: String
 
+    /// Stable hash of the ENTIRE parsed `tts:` section (every key under it,
+    /// at any depth — `tts.speed`, `tts.providers.<name>.*`, everything),
+    /// sorted and deterministically serialized. Cache-keying only: unlike
+    /// ``HermesSpeechService/voiceFingerprint(provider:voice:)``, which only
+    /// tracks the handful of per-provider keys Scarf models, this catches
+    /// global `tts.speed` and command/plugin `tts.providers.<name>.*`
+    /// sub-settings Scarf has no typed field for — so changing either still
+    /// invalidates cached audio instead of silently replaying stale speech.
+    /// Empty for `HermesConfig.empty` (no parsed YAML to hash).
+    public var ttsSectionFingerprint: String
+
     public init(
         recordKey: String,
         maxRecordingSeconds: Int,
@@ -395,7 +406,8 @@ public struct VoiceSettings: Sendable, Equatable {
         sttCloudTrimThresholdDB: Double = -40,
         sttCloudTrimKeepMS: Int = 300,
         wakeWordCapture: String = "auto",
-        voiceChatMode: String = "chained"
+        voiceChatMode: String = "chained",
+        ttsSectionFingerprint: String = ""
     ) {
         self.recordKey = recordKey
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -437,6 +449,7 @@ public struct VoiceSettings: Sendable, Equatable {
         self.sttCloudTrimKeepMS = sttCloudTrimKeepMS
         self.wakeWordCapture = wakeWordCapture
         self.voiceChatMode = voiceChatMode
+        self.ttsSectionFingerprint = ttsSectionFingerprint
     }
     public nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",
