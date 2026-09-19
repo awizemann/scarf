@@ -106,13 +106,24 @@ enum VoiceLiveComposerNotice: Equatable, Sendable {
     case interrupted
     /// The chat lost its connection to Hermes and the session ended.
     case hermesConnectionLost
+    /// A spoken request arrived while Hermes worked on a typed one, so it
+    /// wasn't sent (t-2140ec98). The session keeps running.
+    case busyWithTypedTurn
+}
+
+/// Somewhere the composer's Live Voice hint can be shown.
+/// `ChatController` holds one weakly so `submitVoiceTurn` can explain why a
+/// spoken request wasn't sent, without owning the session model.
+@MainActor
+protocol VoiceLiveComposerNoticing: AnyObject {
+    func showComposerNotice(_ notice: VoiceLiveComposerNotice)
 }
 
 // MARK: - Session model
 
 @MainActor
 @Observable
-final class VoiceLiveSessionModel {
+final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
 
     /// One running (or just-finished) session: the engine the sheet binds
     /// to, and the web view bridge the sheet must keep mounted
@@ -372,7 +383,7 @@ final class VoiceLiveSessionModel {
         }
     }
 
-    private func showComposerNotice(_ notice: VoiceLiveComposerNotice) {
+    func showComposerNotice(_ notice: VoiceLiveComposerNotice) {
         composerNotice = notice
         noticeGeneration += 1
         let mine = noticeGeneration

@@ -36,11 +36,38 @@ extension ChatController.State {
 ///    `sendPrompt` to RETURN (bounded), because Hermes queues a prompt that
 ///    arrives mid-turn as text only and drops the voice note.
 /// 4. Replies come from `VoiceTurnReply.latest(in:forPrompt:isStreaming:)`.
+/// 5. Voice cancels only VOICE turns (Alan, t-2140ec98). While a typed
+///    request runs — or is queued inside a running voice turn — a spoken
+///    request is not sent: `isVoiceTurnBusy` doesn't count the typed turn,
+///    `cancelActiveVoiceTurn` leaves it alone, and `submitVoiceTurn`
+///    answers with `voiceBusyReply`, which the voice speaks. A voice
+///    request never silently kills something typed.
 extension ChatController: VoiceTurnHost {
 
+    /// A voice turn this controller started is still running and nothing
+    /// typed is mixed into its run. The engine cancels whatever reads busy,
+    /// and voice cancels only its own turns, so a typed request (running,
+    /// or queued inside the voice turn's run) makes this false; the next
+    /// spoken request is then answered "busy" by `submitVoiceTurn`.
     var isVoiceTurnBusy: Bool {
-        promptsInFlight > 0 || vm.isAgentWorking
+        promptsInFlight > 0
+            && busyTurnOrigins.contains(.voice)
+            && !busyTurnOrigins.contains(.typed)
     }
+
+    /// Hermes is busy with something that isn't a voice turn: a typed
+    /// prompt this controller sent (running, or queued behind a voice
+    /// turn), or a turn the transcript shows running that Scarf didn't
+    /// start here.
+    var isBusyWithNonVoiceTurn: Bool {
+        if promptsInFlight > 0 { return busyTurnOrigins.contains(.typed) }
+        return vm.isAgentWorking
+    }
+
+    /// What the voice says when a spoken request arrives while Hermes works
+    /// on a typed one. Model input, not UI copy (the voice speaks it in the
+    /// conversation's language), so English like the engine's own lines.
+    static let voiceBusyReply = "Hermes is busy with another request in this chat, so I didn't send that. Ask me again when it's finished."
 
     var activeVoiceToolName: String? {
         if case .runningTool(let name) = vm.liveActivityStatus { return name }
@@ -55,10 +82,23 @@ extension ChatController: VoiceTurnHost {
         return sessionId
     }
 
+    /// While Hermes works on a typed request, nothing is sent: the request
+    /// is answered with `voiceBusyReply` (through `voiceTurnReply`) and the
+    /// composer notice says why. Returning normally rather than throwing is
+    /// deliberate — a throw makes the engine speak its "could not reach
+    /// Hermes" line instead of the real reason.
     func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {
         guard state == .ready, let client = activeClient,
               let sessionId = vm.sessionId, !sessionId.isEmpty else {
             throw VoiceTurnSubmitError.chatNotReady
+        }
+        if isBusyWithNonVoiceTurn {
+            busyVoiceRequestIDs.append(request.id)
+            if busyVoiceRequestIDs.count > 8 {
+                busyVoiceRequestIDs.removeFirst(busyVoiceRequestIDs.count - 8)
+            }
+            voiceComposerNotices?.showComposerNotice(.busyWithTypedTurn)
+            return
         }
         // Rule 1: the bubble exists before anything can suspend.
         vm.addUserMessage(text: request.prompt)
@@ -72,13 +112,18 @@ extension ChatController: VoiceTurnHost {
             wireText: request.prompt,
             images: [],
             contextNotes: request.contextNotes,
-            restoreDraftText: nil
+            restoreDraftText: nil,
+            origin: .voice
         )
     }
 
+    /// Only turns Live Voice STARTED are cancelled. With a typed request
+    /// running or queued inside a voice turn's run this does nothing: the
+    /// submit that follows answers "busy" instead. The wait stays bounded
+    /// (charter C10) — a wedged host must not freeze the voice session.
     func cancelActiveVoiceTurn() async {
         guard let client = activeClient, let sessionId = vm.sessionId, !sessionId.isEmpty else { return }
-        guard isVoiceTurnBusy else { return }
+        guard !isBusyWithNonVoiceTurn, isVoiceTurnBusy else { return }
         // The cancel RPC has its own 60 s watchdog in ACPClient; don't await
         // it — the turn is over when its `sendPrompt` returns, not when the
         // cancel is acknowledged.
@@ -87,6 +132,9 @@ extension ChatController: VoiceTurnHost {
     }
 
     func voiceTurnReply(for requestID: String) -> VoiceTurnReply? {
+        if busyVoiceRequestIDs.contains(requestID) {
+            return VoiceTurnReply(text: Self.voiceBusyReply, isStreaming: false)
+        }
         guard let prompt = voiceTurnPrompts.last(where: { $0.id == requestID })?.prompt else { return nil }
         return VoiceTurnReply.latest(in: vm.messages, forPrompt: prompt, isStreaming: isVoiceTurnBusy)
     }
