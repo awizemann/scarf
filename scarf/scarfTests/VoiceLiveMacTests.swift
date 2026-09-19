@@ -443,6 +443,64 @@ import ScarfCore
         #expect(windowA.isBlockedByAnotherWindow)
     }
 
+    /// The consent sheet can sit open for minutes. If another
+    /// window claims the app's one session meanwhile, accepting consent
+    /// used to hit `start`'s `guard !isBlockedByAnotherWindow` and return
+    /// in silence — the user pressed Continue and nothing whatsoever
+    /// happened. The refusal must be surfaced.
+    @Test @MainActor func acceptingConsentAfterAnotherWindowTookTheSessionSaysSo() async {
+        let registry = VoiceLiveSessionRegistry()
+        let consent = Self.consentStore(accepted: false)
+        let engineA = FakeEngine()
+        let engineB = FakeEngine()
+        let windowA = Self.controller(engineA, registry: registry, consent: consent)
+        let windowB = Self.controller(engineB, registry: registry, consent: consent)
+        let host = ChatViewModel(context: .local)
+
+        // A asks first and stops on the consent sheet.
+        windowA.start(context: .local, host: host)
+        #expect(windowA.pendingConsent == .openAI)
+        #expect(windowA.engine == nil)
+
+        // B takes the session while A's sheet is still up (B answers its
+        // own consent sheet first).
+        windowB.start(context: .local, host: host)
+        windowB.acceptConsent()
+        windowB.start(context: .local, host: host)
+        let bStarted = await Self.waitUntil { engineB.starts == 1 }
+        #expect(bStarted)
+
+        // A now accepts: nothing starts, and A says why.
+        windowA.acceptConsent()
+        windowA.start(context: .local, host: host)
+        #expect(windowA.engine == nil)
+        #expect(engineA.starts == 0)
+        #expect(windowA.pendingConsent == nil)
+        #expect(windowA.startRefusal == .blockedByAnotherWindow)
+        // Read once, then gone.
+        #expect(windowA.consumeStartRefusal() == .blockedByAnotherWindow)
+        #expect(windowA.startRefusal == nil)
+    }
+
+    /// Leaving Chat must drop the engine and its (dead) web view,
+    /// not just end the session — otherwise the WKWebView bridge survives
+    /// the trip out and back, and the panel re-renders a stale "session
+    /// ended" strip for a session the user already left.
+    @Test @MainActor func leavingChatDropsTheEngineAndItsWebView() async {
+        let engine = FakeEngine()
+        let controller = Self.controller(engine)
+        let vm = ChatViewModel(context: .local, voiceLive: controller)
+        controller.start(context: .local, host: vm)
+        _ = await Self.waitUntil { engine.starts == 1 }
+
+        vm.leaveChatVoiceLive()
+
+        #expect(engine.immediateEnds == [.userEnded])
+        #expect(controller.engine == nil, "the engine survived leaving Chat")
+        #expect(controller.bridge == nil)
+        #expect(controller.endNote == nil)
+    }
+
     // MARK: - F2a: an end right after start
 
     @Test @MainActor func endBeforeTheStartTaskRanCancelsTheStart() async {

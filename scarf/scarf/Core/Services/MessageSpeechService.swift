@@ -167,14 +167,49 @@ final class MessageSpeechService: NSObject {
                 // stop() already reset the observable state.
             } catch {
                 guard let self, !Task.isCancelled, self.playing == id else { return }
+                let summary = Self.logSummary(for: error)
                 self.logger.warning(
-                    "Hermes TTS failed (\(String(describing: error), privacy: .public)) — falling back to system voice"
+                    "Hermes TTS failed (\(summary.publicSummary, privacy: .public)): \(summary.privateDetail, privacy: .private) — falling back to system voice"
                 )
                 self.loading = nil
                 self.speakWithSystemVoice(text, id: id)
             }
         }
     }
+
+    /// Split a TTS failure into the half that may be logged publicly and
+    /// the half that may not (charter C9).
+    ///
+    /// `SpeechError.synthesisFailed` carries a verbatim tail of the host's
+    /// stdout/stderr, and a provider that echoes its key back in an error
+    /// message puts that key in there — so only the CASE NAME is public and
+    /// the payload goes out with `privacy: .private`, redacted in the
+    /// device log unless someone is attached with a debugger.
+    nonisolated static func logSummary(for error: Error) -> (publicSummary: String, privateDetail: String) {
+        switch error {
+        case let speech as HermesSpeechService.SpeechError:
+            switch speech {
+            case .synthesisFailed(let detail): return ("synthesisFailed", detail)
+            case .providerMismatch(let format): return ("providerMismatch", format)
+            case .emptyAudio: return ("emptyAudio", "")
+            case .unexpectedOutputPath(let path): return ("unexpectedOutputPath", path)
+            case .transportFailed(let detail): return ("transportFailed", detail)
+            }
+        default:
+            // An error from somewhere else: its TYPE is safe to name, its
+            // description is not (it may wrap a command line or a response
+            // body).
+            return (String(describing: type(of: error)), String(describing: error))
+        }
+    }
+
+    #if DEBUG
+    /// Test seams for the temp-file bookkeeping: the scheduling path and
+    /// the files it still owns, so a test can prove that audio Core Audio
+    /// refuses leaves nothing behind in $TMPDIR.
+    func playAudioFilesForTesting(_ urls: [URL]) throws { try playAudioFiles(urls) }
+    var pendingTempFileURLs: [URL] { pendingTempFiles }
+    #endif
 
     /// Write verified audio chunks to local temp files, off the main actor.
     /// The extension matches the sniffed container so Core Audio decodes
@@ -209,8 +244,19 @@ final class MessageSpeechService: NSObject {
             playing = nil
             return
         }
+        // Open every file BEFORE registering it: `AVAudioFile(forReading:)`
+        // throws on audio Core Audio can't parse, and the caller's catch
+        // falls back to the system voice without stopping playback — so
+        // anything registered here would sit in `$TMPDIR` until some later
+        // playback happened to flush the list.
+        let files: [AVAudioFile]
+        do {
+            files = try urls.map { try AVAudioFile(forReading: $0) }
+        } catch {
+            urls.forEach { try? FileManager.default.removeItem(at: $0) }
+            throw error
+        }
         pendingTempFiles.append(contentsOf: urls)
-        let files = try urls.map { try AVAudioFile(forReading: $0) }
         playbackGeneration += 1
         let generation = playbackGeneration
         pendingSegments = files.count

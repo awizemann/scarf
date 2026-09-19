@@ -157,7 +157,12 @@ public final class PushToTalkController {
 
     /// Auto-clear window for `notice` — mirrors `RichChatViewModel`'s
     /// transient-hint lifetime so both strips behave the same.
-    private static let noticeLifetimeNanoseconds: UInt64 = 4_000_000_000
+    /// Injectable so a test can prove the window without waiting it out.
+    private let noticeLifetime: Duration
+    /// Bumped by every ``showNotice(_:)``, so each notice's own timer
+    /// clears only the notice it scheduled. Identical notices in a row
+    /// (two silent takes) are two notices, not one.
+    private var noticeGeneration = 0
 
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf.ios", category: "PushToTalk")
@@ -172,6 +177,7 @@ public final class PushToTalkController {
         self.dictationAvailability = OnDeviceDictationAvailabilityClient()
         self.makeFileURL = { Self.defaultMemoURL() }
         self.transcriptionTimeout = .seconds(20)
+        self.noticeLifetime = .seconds(4)
         self.startObservingAudioInterruptionsIfNeeded()
     }
 
@@ -185,7 +191,8 @@ public final class PushToTalkController {
         transcriber: any SpeechTranscribing,
         dictationAvailability: any OnDeviceDictationAvailabilityChecking,
         makeFileURL: @escaping @Sendable () -> URL,
-        transcriptionTimeout: Duration = .seconds(20)
+        transcriptionTimeout: Duration = .seconds(20),
+        noticeLifetime: Duration = .seconds(4)
     ) {
         self.permissions = permissions
         self.recorderFactory = recorderFactory
@@ -193,6 +200,7 @@ public final class PushToTalkController {
         self.dictationAvailability = dictationAvailability
         self.makeFileURL = makeFileURL
         self.transcriptionTimeout = transcriptionTimeout
+        self.noticeLifetime = noticeLifetime
         // Deliberately NOT observing real AVAudioSession notifications
         // in tests — `handleAudioSessionInterruption(began:)` is called
         // directly instead, so a test doesn't depend on posting a real
@@ -463,14 +471,20 @@ public final class PushToTalkController {
         }
     }
 
+    /// Show `value` and clear it after ``noticeLifetime``. The timer is
+    /// keyed by GENERATION, not by the notice's value: deduping by value
+    /// made two identical notices in a row share the first one's timer,
+    /// so the second was cleared early (the same generation rule
+    /// `VoiceLiveSessionModel.showComposerNotice` uses).
     private func showNotice(_ value: PushToTalkNotice) {
         notice = value
-        let snapshot = value
+        noticeGeneration += 1
+        let mine = noticeGeneration
+        let lifetime = noticeLifetime
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.noticeLifetimeNanoseconds)
-            if self?.notice == snapshot {
-                self?.notice = nil
-            }
+            try? await Task.sleep(for: lifetime)
+            guard let self, self.noticeGeneration == mine else { return }
+            self.notice = nil
         }
     }
 

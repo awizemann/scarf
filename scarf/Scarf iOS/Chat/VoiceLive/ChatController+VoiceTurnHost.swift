@@ -10,6 +10,18 @@ enum VoiceTurnSubmitError: Error, Equatable {
     case chatNotReady
 }
 
+extension ChatController.State {
+    /// Whether a Live Voice session must end now that the chat is in this
+    /// state. Only `.ready` has a live ACP session to hand spoken turns to;
+    /// in every other state `submitVoiceTurn` throws ``VoiceTurnSubmitError``
+    /// while the GPT-Live session keeps streaming to OpenAI at $0.05/min.
+    /// A reconnect counts: it lands on a NEW ACP session, which the voice
+    /// session's seeded context and pending turns do not belong to.
+    var endsLiveVoice: Bool {
+        self != .ready
+    }
+}
+
 /// ScarfGo's chat as the Live Voice engine's `VoiceTurnHost` (P4 contract,
 /// `ScarfCore/VoiceLive/VoiceConversationEngine.swift`). The Mac twin is
 /// `ChatViewModel`'s conformance (P5a); both follow the same four rules:

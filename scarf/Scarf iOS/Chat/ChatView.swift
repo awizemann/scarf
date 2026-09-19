@@ -243,6 +243,15 @@ struct ChatView: View {
         .onChange(of: controller.vm.sessionId) { _, _ in
             if voiceLive.isActive { voiceLive.teardown(.sessionChanged) }
         }
+        // A Live Voice session needs a live ACP session to hand its spoken
+        // turns to. When the chat leaves `.ready` — the connection died,
+        // the link dropped, a reconnect landed on a new session — every
+        // turn throws `.chatNotReady` while GPT-Live keeps streaming to
+        // OpenAI at $0.05/min. End it and say why. (The Mac does this from
+        // `ChatViewModel.handleConnectionDied`.)
+        .onChange(of: controller.state) { _, new in
+            if new.endsLiveVoice, voiceLive.isActive { voiceLive.teardown(.hermesConnectionLost) }
+        }
         .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
             guard let sessionID = new else { return }
             coordinator?.pendingResumeSessionID = nil
@@ -939,7 +948,7 @@ struct ChatView: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Dictate message")
             .accessibilityHint(dictationDisabled
-                ? (voiceLive.isActive
+                ? (voiceLive.blocksDictation
                     ? "Unavailable during a Live Voice session."
                     : "Unavailable until the chat is connected.")
                 : "Hold to record; release to transcribe. Slide away to cancel.")
@@ -980,7 +989,11 @@ struct ChatView: View {
     private var dictationDisabled: Bool {
         !VoiceLiveComposerGate.dictationAllowed(
             chatReady: controller.state == .ready,
-            liveVoiceActive: voiceLive.isActive
+            // `blocksDictation`, not `isActive`: the audio session is
+            // handed back a beat after the session ends (WebKit has to let
+            // the microphone go first), and a hold started in that window
+            // was cut off by the late `setActive(false)`.
+            liveVoiceActive: voiceLive.blocksDictation
         )
     }
 
@@ -1199,6 +1212,12 @@ struct ChatView: View {
             dictationStrip(
                 icon: "phone.down",
                 text: Text("Live Voice ended because another app or a call took the audio."),
+                tint: ScarfColor.warning
+            )
+        case .hermesConnectionLost:
+            dictationStrip(
+                icon: "bolt.horizontal.circle",
+                text: Text("Live Voice ended because the connection to Hermes was lost."),
                 tint: ScarfColor.warning
             )
         }

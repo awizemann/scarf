@@ -266,7 +266,13 @@ struct VoiceLiveSessionSheet: View {
     /// One localized sentence per outcome. `VoiceSessionFailure.englishDescription`
     /// is a diagnostic token only (ScarfCore has no string catalog).
     private var outcomeText: Text {
-        switch engine.phase {
+        // The host's own reason wins: the engine reports a host-driven end
+        // as a plain `.userEnded`, which would otherwise read as if the
+        // user had pressed End.
+        if case .ended = engine.phase, model.endNote == .hermesConnectionLost {
+            return Text("Live Voice ended because the connection to Hermes was lost. Your spoken turns and Hermes's replies so far are in the chat.")
+        }
+        return switch engine.phase {
         case .ended(.idleTimeout):
             Text("Live Voice ended on its own after \(Int(VoiceIdleMonitor.defaultTimeout / 60)) minutes with no speech, so it stopped billing.")
         case .ended(.stopPhrase):
