@@ -159,8 +159,12 @@ import WebKit
         try await js(bridge, "return window.__log.slice()") as? [String] ?? []
     }
 
+    /// Polls until `condition` holds. The 10 s bound is a CEILING only the
+    /// failure path pays, never a budget the green path spends: every caller
+    /// asserts the condition afterwards, so a timeout still fails the test.
     private func waitFor(_ condition: @MainActor () async throws -> Bool) async rethrows {
-        for _ in 0..<200 {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
             if try await condition() { return }
             try? await Task.sleep(for: .milliseconds(10))
         }
@@ -241,23 +245,36 @@ import WebKit
 
     /// F3 #7: 'disconnected' is recoverable within the grace; only a
     /// disconnection that outlasts it (or 'failed') loses the connection.
+    ///
+    /// Timed on the PAGE's clock, not Swift's: the grace timer runs in the
+    /// page, and page timers fire in due order, so a recovery scheduled 20 ms
+    /// in always beats a 150 ms grace and a 300 ms wait always outlasts it.
+    /// The first version slept in Swift between the two `setState` calls and
+    /// went red in the full parallel run whenever a round trip to the page
+    /// took longer than the grace.
     @Test func aDisconnectIsLostOnlyAfterTheGrace() async throws {
         let (bridge, log) = try await harnessedBridge()
         _ = try await js(bridge, "scarfVoiceLive.config.disconnectGraceMs = 150; return true")
         try await startLive(bridge, log)
         let lost = VoiceMediaEvent.transportClosed(reason: "connection_lost")
-        _ = try await js(bridge, "window.__pc.setState('disconnected'); return true")
-        try? await Task.sleep(for: .milliseconds(60))
-        _ = try await js(bridge, "window.__pc.setState('connected'); return true")
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(!log.events.contains(lost))           // it came back in time
-        #expect(!(try await pageLog(bridge)).contains("track.stop"))
-        _ = try await js(bridge, "window.__pc.setState('disconnected'); return true")
-        try? await Task.sleep(for: .milliseconds(40))
+        let recovered = try await js(bridge, """
+            window.__pc.setState('disconnected')
+            await new Promise(r => setTimeout(r, 20))
+            window.__pc.setState('connected')
+            await new Promise(r => setTimeout(r, 300))
+            return !window.__log.includes('track.stop')
+            """) as? Bool
+        #expect(recovered == true)                     // it came back in time
         #expect(!log.events.contains(lost))
+        let lostAtOnce = try await js(bridge, """
+            window.__pc.setState('disconnected')
+            return window.__log.includes('track.stop')
+            """) as? Bool
+        #expect(lostAtOnce == false)                   // not lost before the grace
         await waitFor { log.events.contains(lost) }
         #expect(log.events.contains(lost))
         #expect(try await pageLog(bridge).contains("track.stop"))
     }
+
 }
 #endif

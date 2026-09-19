@@ -145,7 +145,7 @@ import Foundation
     #if os(macOS)
     /// venv layout: `hermes` is a `#!/bin/sh` wrapper symlinked from
     /// `~/.local/bin`; the interpreter is the `python` beside the target.
-    @Test func findsSiblingPythonThroughASymlinkedShWrapper() throws {
+    @Test func findsSiblingPythonThroughASymlinkedShWrapper() async throws {
         let dir = try TempDir()
         let bin = dir.url.appendingPathComponent("venv/bin", isDirectory: true)
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -153,20 +153,20 @@ import Foundation
         try write(bin.appendingPathComponent("python"), "#!/bin/sh\necho sibling\n", executable: true)
         let link = dir.url.appendingPathComponent("hermes-link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: bin.appendingPathComponent("hermes"))
-        let out = try runDiscovery(binary: link.path)
+        let out = try await runDiscovery(binary: link.path)
         #expect(out.stdout.hasSuffix("/venv/bin/python"))
         #expect(out.status == 0)
     }
 
     /// pip/uv console script: the shebang names the interpreter directly.
-    @Test func prefersAPythonShebang() throws {
+    @Test func prefersAPythonShebang() async throws {
         let dir = try TempDir()
         let py = dir.url.appendingPathComponent("elsewhere/python3.12")
         try FileManager.default.createDirectory(at: py.deletingLastPathComponent(), withIntermediateDirectories: true)
         try write(py, "#!/bin/sh\n", executable: true)
         let hermes = dir.url.appendingPathComponent("hermes")
         try write(hermes, "#!\(py.path)\nimport sys\n", executable: true)
-        let out = try runDiscovery(binary: hermes.path)
+        let out = try await runDiscovery(binary: hermes.path)
         #expect(out.stdout == py.path)
     }
 
@@ -174,7 +174,7 @@ import Foundation
     /// from `sys.path`: run from a directory holding a decoy
     /// `tools/tts_tool.py`, it must still import the real one (here, the
     /// one on PYTHONPATH).
-    @Test func speechWrapperIgnoresAToolsPackageInTheWorkingDirectory() throws {
+    @Test func speechWrapperIgnoresAToolsPackageInTheWorkingDirectory() async throws {
         let dir = try TempDir()
         func fakeTools(in root: URL, marker: String) throws {
             let tools = root.appendingPathComponent("tools")
@@ -190,23 +190,23 @@ import Foundation
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONPATH"] = legit.path
         environment["SCARF_TTS_OUT"] = dir.url.appendingPathComponent("out.wav").path
-        let out = try ShellTestRunner.run(
+        let out = try await ShellTestRunner.run(
             "/usr/bin/env", arguments: ["python3", "-c", HermesSpeechService.toolPythonScript],
             stdin: Data(#"{"text":"hi"}"#.utf8), environment: environment, currentDirectory: cwd)
         #expect(out.stdout == "SCARF_TTS_ENV:REAL\n", "\(out.stderr)")
     }
 
-    @Test func missingBinaryFailsWithTheCallersMarker() throws {
-        let out = try runDiscovery(binary: "/nonexistent/hermes")
+    @Test func missingBinaryFailsWithTheCallersMarker() async throws {
+        let out = try await runDiscovery(binary: "/nonexistent/hermes")
         #expect(out.status == 3)
         #expect(out.stderr.contains("MARK: hermes binary not found"))
     }
 
     // MARK: helpers
 
-    private func runDiscovery(binary: String) throws -> (stdout: String, stderr: String, status: Int32) {
+    private func runDiscovery(binary: String) async throws -> (stdout: String, stderr: String, status: Int32) {
         let script = HermesPythonDiscovery.shellLines(hermesBinary: binary, errorMarker: "MARK:") + "\nprintf '%s' \"$py\"\n"
-        let out = try ShellTestRunner.run(arguments: ["-c", script])
+        let out = try await ShellTestRunner.run(arguments: ["-c", script])
         return (out.stdout, out.stderr, out.status)
     }
 

@@ -81,8 +81,8 @@ import CryptoKit
     /// only when `~/.hermes/hermes-agent` has a venv AND its
     /// `acp_adapter/content.py` + `tools/voice_live.py` are identical to tag
     /// v2026.9.14 — so it tests the tagged behaviour, never a drifted tree.
-    @Test(.enabled(if: HermesTagCheckout.available(files: ["acp_adapter/content.py", "tools/voice_live.py"])))
-    func hermesParserPersistsOnlyTheSpokenWords() throws {
+    @Test(.enabled { await HermesTagCheckout.available(files: ["acp_adapter/content.py", "tools/voice_live.py"]) })
+    func hermesParserPersistsOnlyTheSpokenWords() async throws {
         let context = "User: the dentist one\nVoice assistant: which day?"
         let blocks = ACPClient.promptBlocks(
             text: "thursday not friday", images: [], contextNotes: [VoiceLiveTurnNote.contextNote(context: context)])
@@ -101,7 +101,7 @@ import CryptoKit
         }))
         """
         let input = try JSONSerialization.data(withJSONObject: ["blocks": blocksJSON, "context": context])
-        let output = try HermesTagCheckout.runPython(script, stdin: input)
+        let output = try await HermesTagCheckout.runPython(script, stdin: input)
         let result = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
         #expect(result["persisted"] as? String == "thursday not friday")
         let model = try #require(result["model"] as? String)
@@ -121,8 +121,8 @@ extension VoiceLiveTurnNoteContractTests {
     /// and leaves it in place for note-bearing blocks, where it would attach
     /// to the chat's next typed prompt. Runs only against a tag-identical
     /// checkout.
-    @Test(.enabled(if: HermesTagCheckout.available(files: ["acp_adapter/server.py", "acp_adapter/content.py"])))
-    func hermesConsumesTheCancelledPromptOnlyForTextOnlyTurns() throws {
+    @Test(.enabled { await HermesTagCheckout.available(files: ["acp_adapter/server.py", "acp_adapter/content.py"]) })
+    func hermesConsumesTheCancelledPromptOnlyForTextOnlyTurns() async throws {
         let superseding = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday",
                                            supersedesCancelledTurn: true)
         let first = VoiceTurnRequest(id: "d2", prompt: "no, thursday", context: "User: no, thursday")
@@ -151,7 +151,7 @@ extension VoiceLiveTurnNoteContractTests {
         let input = try JSONSerialization.data(withJSONObject: [
             "superseding": try blocksJSON(superseding), "first": try blocksJSON(first),
         ])
-        let output = try HermesTagCheckout.runPython(script, stdin: input)
+        let output = try await HermesTagCheckout.runPython(script, stdin: input)
         let result = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: [String: String]])
         #expect(result["superseding"]?["persisted"]
                 == "book the dentist friday\n\nUser correction/guidance after interrupt: no, thursday")
@@ -170,29 +170,27 @@ enum HermesTagCheckout {
     }
     static var python: URL { root.appendingPathComponent("venv/bin/python") }
 
-    static func available(files: [String]) -> Bool {
+    /// Async so the `git diff` never parks a cooperative-pool thread while
+    /// the test plan evaluates the condition.
+    static func available(files: [String]) async -> Bool {
         #if os(macOS)
         guard FileManager.default.isExecutableFile(atPath: python.path) else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", root.path, "diff", "--quiet", tag, "--"] + files
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return false }
-        process.waitUntilExit()
-        return process.terminationStatus == 0
+        guard let out = try? await ShellTestRunner.run(
+            "/usr/bin/git", arguments: ["-C", root.path, "diff", "--quiet", tag, "--"] + files, timeout: 60
+        ) else { return false }
+        return out.status == 0
         #else
         return false
         #endif
     }
 
-    static func runPython(_ script: String, stdin: Data) throws -> String {
+    static func runPython(_ script: String, stdin: Data) async throws -> String {
         #if os(macOS)
         var env = ProcessInfo.processInfo.environment
         env["HERMES_HOME"] = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-hermes-contract-\(UUID().uuidString)").path
         // A hang guard, not an assertion: importing Hermes's ACP adapter takes
         // ~0.3 s idle but blew a 30 s bound under a load average of ~90.
-        let out = try ShellTestRunner.run(python.path, arguments: ["-c", script], stdin: stdin, environment: env,
+        let out = try await ShellTestRunner.run(python.path, arguments: ["-c", script], stdin: stdin, environment: env,
                                           currentDirectory: FileManager.default.temporaryDirectory, timeout: 180)
         return out.stdout.split(separator: "\n").last.map(String.init) ?? ""
         #else

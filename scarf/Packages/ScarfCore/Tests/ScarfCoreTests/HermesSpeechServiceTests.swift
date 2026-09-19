@@ -279,7 +279,7 @@ import Testing
     /// Evaluate the quoted form in a real shell: command substitution,
     /// backticks, variables and embedded quotes must all come back
     /// literally, and nothing must execute.
-    @Test func sharedQuoterDefeatsCommandSubstitutionInARealShell() throws {
+    @Test func sharedQuoterDefeatsCommandSubstitutionInARealShell() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-quote-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -291,14 +291,8 @@ import Testing
             "~/$(touch \(pwned))",
         ]
         for value in hostile {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = ["-c", "printf '%s' \(HermesProfileScope.shellQuotePath(value))"]
-            let out = Pipe()
-            proc.standardOutput = out
-            try proc.run()
-            proc.waitUntilExit()
-            let printed = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let printed = try await ShellTestRunner.run(
+                arguments: ["-c", "printf '%s' \(HermesProfileScope.shellQuotePath(value))"]).stdout
             let expected = value.hasPrefix("~/") ? NSHomeDirectory() + value.dropFirst() : value
             #expect(printed == expected)
         }
