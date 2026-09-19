@@ -39,6 +39,7 @@ struct RichChatInputBar: View {
 
     @State private var text = ""
     @State private var showCompressSheet = false
+    @State private var showVoiceLive = false
     @State private var compressFocus = ""
     @State private var showMenu = false
     @State private var selectedIndex = 0
@@ -129,6 +130,10 @@ struct RichChatInputBar: View {
 
                 if supportsImagePrompts {
                     attachmentButton
+                }
+
+                if showsLiveVoice {
+                    liveVoiceButton
                 }
 
                 TextEditor(text: $text)
@@ -302,6 +307,30 @@ struct RichChatInputBar: View {
         .sheet(isPresented: $showCompressSheet) {
             compressSheet
         }
+        .sheet(isPresented: $showVoiceLive) {
+            VoiceLiveView(context: serverContext)
+        }
+    }
+
+    /// Whether the mic affordance renders. Capability-gated, matching the
+    /// ChatView toolbar entry: the server's live-voice surface (Hermes
+    /// ≥ 0.21.3 in gpt-live mode).
+    private var showsLiveVoice: Bool {
+        capabilitiesStore?.capabilities.hasGPTLiveVoice ?? false
+    }
+
+    private var liveVoiceButton: some View {
+        Button {
+            showVoiceLive = true
+        } label: {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .padding(6)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help("Start a live voice session")
     }
 
     /// Identity for the capability lookup: flips when attachments go
