@@ -205,18 +205,48 @@ public struct ProjectConfigKeychain: Sendable {
     /// ONE atomic operation, closing the "two concurrent first-time
     /// callers each mint a different default and the second `set()`
     /// silently wins" race described on `InMemoryKeychainStore.setIfAbsent`.
-    /// Against the real Keychain this is unchanged from a plain
-    /// `set(service:account:secret:)` — sequential get-then-set, exactly
-    /// as every caller already used — because production is a single
-    /// process minting a machine key once; it never had, and doesn't need,
-    /// the same in-process-parallel-test race this exists to close.
+    ///
+    /// Against the real Keychain it is `SecItemAdd` alone — never the
+    /// update-then-add of `set(service:account:secret:)`, which OVERWRITES.
+    /// `errSecDuplicateItem` is not an error here, it is the answer: someone
+    /// else got there first, so the stored value wins and comes back from
+    /// `get`. That matters because the only caller,
+    /// `MiniAppGrantSigner.signingKey()`, uses the returned bytes to sign
+    /// and verify grants — overwriting an existing machine key would
+    /// invalidate every grant already issued under it (`isAuthentic()` on a
+    /// live grant starts failing), which a "set it if it isn't there" call
+    /// must never be able to do.
     public nonisolated func setIfAbsent(service: String, account: String, secret: Data) throws -> Data {
         let svc = resolved(service: service)
         if useInMemoryStore {
             return InMemoryKeychainStore.shared.setIfAbsent(service: svc, account: account, secret: secret)
         }
-        try set(service: service, account: account, secret: secret)
-        return secret
+        #if DEBUG
+        assert(
+            !Self.isRunningUnderXCTest,
+            "ProjectConfigKeychain.setIfAbsent reached Security.framework while running under XCTest (service: \(svc)). This would prompt for the user's real login Keychain; route this call through the default init (which auto-detects XCTest) instead of forcing a real backing."
+        )
+        #endif
+        let insert: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: svc,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: secret,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let addStatus = SecItemAdd(insert as CFDictionary, nil)
+        if addStatus == errSecSuccess { return secret }
+        guard addStatus == errSecDuplicateItem else {
+            throw Self.error(status: addStatus, op: "add")
+        }
+        // Someone else won the race (or a previous run already minted one):
+        // whatever is stored is authoritative.
+        guard let existing = try get(service: service, account: account) else {
+            // Duplicate on add but absent on read — deleted between the two
+            // calls. Surfacing it beats returning a value that isn't stored.
+            throw Self.error(status: errSecItemNotFound, op: "read-after-duplicate")
+        }
+        return existing
     }
 
     /// Retrieve the secret for (service, account). Returns `nil` when

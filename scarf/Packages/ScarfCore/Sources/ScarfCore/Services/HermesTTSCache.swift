@@ -45,7 +45,13 @@ public struct HermesTTSCache: Sendable {
     /// a temp directory.
     public let directory: URL
 
-    public init(directory: URL? = nil) {
+    /// This cache's effective size cap. Defaults to ``maxBytes``; tests
+    /// inject a small one so a couple of kilobytes can exercise a real
+    /// eviction pass instead of writing 256 MB of audio.
+    public let capBytes: Int64
+
+    public init(directory: URL? = nil, maxBytes: Int64 = HermesTTSCache.maxBytes) {
+        self.capBytes = maxBytes
         if let directory {
             self.directory = directory
             return
@@ -151,49 +157,23 @@ public struct HermesTTSCache: Sendable {
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isDirectoryKey]
         ) else { return }
 
-        // Map every manifest to itself + its chunk files, with sizes and
-        // mtimes. Orphan chunks (no manifest) group under a synthetic
-        // entry so they participate in eviction instead of accumulating
-        // forever after torn stores.
-        struct Entry {
-            var files: [URL]
-            var totalBytes: Int64
-            var mtime: Date
-        }
-        var byManifest: [String: Entry] = [:]
-        var orphans = Entry(files: [], totalBytes: 0, mtime: .distantPast)
+        var stats: [(url: URL, size: Int64, mtime: Date)] = []
         for url in entries {
             let values = try? url.resourceValues(forKeys: [
                 .contentModificationDateKey, .fileSizeKey, .isDirectoryKey
             ])
             guard values?.isDirectory != true else { continue }
-            let size = Int64(values?.fileSize ?? 0)
-            let mtime = values?.contentModificationDate ?? .distantPast
-            if url.pathExtension == "json" {
-                let stem = url.deletingPathExtension().lastPathComponent
-                byManifest[stem] = Entry(files: [url], totalBytes: size, mtime: mtime)
-            } else if let chunkOwner = chunkOwnerKey(path: url.path) {
-                var entry = byManifest[chunkOwner] ?? Entry(files: [], totalBytes: 0, mtime: .distantPast)
-                entry.files.append(url)
-                entry.totalBytes += size
-                byManifest[chunkOwner] = entry
-            } else {
-                orphans.files.append(url)
-                orphans.totalBytes += size
-                orphans.mtime = max(orphans.mtime, mtime)
-            }
+            stats.append((url, Int64(values?.fileSize ?? 0), values?.contentModificationDate ?? .distantPast))
         }
-        var all = Array(byManifest.values)
-        if !orphans.files.isEmpty { all.append(orphans) }
+        var all = Self.groupForEviction(files: stats)
         var total = all.reduce(Int64(0)) { $0 + $1.totalBytes }
-        guard total > Self.maxBytes else { return }
+        guard total > capBytes else { return }
 
-        // Oldest mtime first. Chunks inherit their manifest's mtime (set
-        // above from whichever file was newest in the group — close enough
-        // for an overflow sweep whose goal is a bounded directory).
+        // Oldest mtime first, by manifest mtime — chunks go with their
+        // manifest, so the whole entry leaves or none of it does.
         all.sort { $0.mtime < $1.mtime }
         for entry in all {
-            guard total > Self.maxBytes else { break }
+            guard total > capBytes else { break }
             for url in entry.files {
                 try? fm.removeItem(at: url)
             }
@@ -201,8 +181,58 @@ public struct HermesTTSCache: Sendable {
         }
     }
 
+    /// One eviction unit: a manifest plus the chunk files it owns, or the
+    /// synthetic group that collects everything the cache doesn't recognize.
+    struct Entry: Equatable {
+        var files: [URL]
+        var totalBytes: Int64
+        var mtime: Date
+    }
+
+    /// Group already-stat'ed cache files into eviction units.
+    ///
+    /// Pure and order-independent on purpose: `contentsOfDirectory` returns
+    /// files in an UNSPECIFIED order, so a chunk `<key>-NN.mp3` can be seen
+    /// before its manifest `<key>.json`. The manifest therefore merges into
+    /// whatever the stem already accumulated rather than replacing it —
+    /// replacing dropped those chunks from both the total and the entry's
+    /// file list, so they were never counted toward the cap and never
+    /// deleted, and the directory could sit permanently over it.
+    ///
+    /// Orphan files (no manifest, unrecognized name) group under a single
+    /// synthetic entry so they participate in eviction instead of
+    /// accumulating forever after torn stores.
+    static func groupForEviction(files: [(url: URL, size: Int64, mtime: Date)]) -> [Entry] {
+        var byManifest: [String: Entry] = [:]
+        var orphans = Entry(files: [], totalBytes: 0, mtime: .distantPast)
+        for file in files {
+            if file.url.pathExtension == "json" {
+                let stem = file.url.deletingPathExtension().lastPathComponent
+                var entry = byManifest[stem] ?? Entry(files: [], totalBytes: 0, mtime: .distantPast)
+                entry.files.append(file.url)
+                entry.totalBytes += file.size
+                // The manifest's own mtime is the entry's age — `store()`
+                // rewrites it on every use, so "oldest" tracks last use.
+                entry.mtime = file.mtime
+                byManifest[stem] = entry
+            } else if let chunkOwner = chunkOwnerKey(path: file.url.path) {
+                var entry = byManifest[chunkOwner] ?? Entry(files: [], totalBytes: 0, mtime: .distantPast)
+                entry.files.append(file.url)
+                entry.totalBytes += file.size
+                byManifest[chunkOwner] = entry
+            } else {
+                orphans.files.append(file.url)
+                orphans.totalBytes += file.size
+                orphans.mtime = max(orphans.mtime, file.mtime)
+            }
+        }
+        var all = Array(byManifest.values)
+        if !orphans.files.isEmpty { all.append(orphans) }
+        return all
+    }
+
     /// `…/<key>-NN.<ext>` → `<key>`, or nil for unexpected shapes.
-    private func chunkOwnerKey(path: String) -> String? {
+    private static func chunkOwnerKey(path: String) -> String? {
         let name = (path as NSString).lastPathComponent
         guard let range = name.range(of: "-\\d{2}\\.(wav|mp3|flac|aiff)$", options: .regularExpression) else { return nil }
         return String(name[name.startIndex..<range.lowerBound])

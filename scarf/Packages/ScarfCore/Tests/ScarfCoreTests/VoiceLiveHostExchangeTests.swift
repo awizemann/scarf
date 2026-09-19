@@ -112,6 +112,38 @@ import Foundation
         }
     }
 
+    /// SDP credentials are as sensitive as the API key: WebKit and the
+    /// vendor quote the offending line back in an error message, and every
+    /// caller of `redact` logs its result at `privacy: .public`.
+    @Test func redactStripsSDPCredentials() {
+        let sdp = """
+        v=0
+        a=ice-ufrag:F7gI
+        a=ice-pwd:x9Cl+TsvCRyWFbEGuZaLlWFH
+        a=fingerprint:sha-256 39:4A:09:1E:0E:33
+        a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:NzB4d1BINUAvLEw6UzF3WSJ+PSdFcGdUJShpX1Zj
+        a=rtpmap:111 opus/48000/2
+        """
+        let redacted = VoiceLiveHostExchange.redact(sdp)
+        #expect(!redacted.contains("F7gI"))
+        #expect(!redacted.contains("x9Cl+TsvCRyWFbEGuZaLlWFH"))
+        #expect(!redacted.contains("39:4A:09:1E:0E:33"))
+        #expect(!redacted.contains("NzB4d1BINUAvLEw6UzF3WSJ+PSdFcGdUJShpX1Zj"))
+        // The attribute names survive so a failure is still diagnosable, and
+        // non-credential attributes are untouched.
+        #expect(redacted.contains("a=ice-pwd:<redacted>"))
+        #expect(redacted.contains("a=rtpmap:111 opus/48000/2"))
+    }
+
+    /// The same, for a one-line exception message that quotes the attribute
+    /// inline rather than at the start of a line.
+    @Test func redactStripsSDPCredentialsQuotedInlineInAnErrorMessage() {
+        let message = #"InvalidAccessError: Failed to parse SessionDescription. a=ice-pwd:SUPERSECRETPWD is invalid"#
+        let redacted = VoiceLiveHostExchange.redact(message)
+        #expect(!redacted.contains("SUPERSECRETPWD"))
+        #expect(redacted.contains("a=ice-pwd:<redacted>"))
+    }
+
     @Test func vendorDetailIsRedactedOnThisSideToo() throws {
         let json = #"{"ok": false, "kind": "vendor", "status": 401, "detail": "Incorrect API key provided: sk-proj-abc****wxyz. Bearer ek_12345 rejected"}"#
         do {
@@ -122,6 +154,73 @@ import Foundation
             #expect(!detail.contains("sk-"))
             #expect(!detail.contains("ek_"))
             #expect(detail.contains("<redacted>"))
+        }
+    }
+
+    // MARK: cancellation
+
+    /// A transport whose script never finishes on its own: it waits for the
+    /// caller's cancellation and then reports it the way the real ones do —
+    /// as a plain `TransportError`, NOT as a `CancellationError`
+    /// (`SSHScriptRunner` returns `.connectFailure("Script cancelled")`).
+    final class CancelHangTransport: ServerTransport, @unchecked Sendable {
+        let contextID: ServerID = UUID()
+        let isRemote = false
+        private let lock = NSLock()
+        private var _entered = false
+        var entered: Bool { lock.withLock { _entered } }
+
+        func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
+            lock.withLock { _entered = true }
+            // `try?`: a sleep that throws CancellationError would make this
+            // test pass without the fix under scrutiny.
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            throw TransportError.other(message: "Script cancelled")
+        }
+
+        func readFile(_ path: String) throws -> Data { Data() }
+        func unguardedWriteFile(_ path: String, data: Data) throws {}
+        func fileExists(_ path: String) -> Bool { false }
+        func stat(_ path: String) -> FileStat? { nil }
+        func listDirectory(_ path: String) throws -> [String] { [] }
+        func createDirectory(_ path: String) throws {}
+        func removeFile(_ path: String) throws {}
+        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
+            ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        #if !os(iOS)
+        func makeProcess(executable: String, args: [String]) -> Process { Process() }
+        #endif
+        func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+        func streamRawBytes(executable: String, args: [String]) -> AsyncThrowingStream<Data, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+        func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
+            AsyncStream { $0.finish() }
+        }
+    }
+
+    /// Ending a Live Voice session mid-exchange is the user's own doing, not
+    /// a connection failure: the transport calls it "Script cancelled", so
+    /// only `Task.isCancelled` can tell the two apart.
+    @Test func cancellationSurfacesAsCancellationErrorNotATransportFailure() async throws {
+        let transport = CancelHangTransport()
+        let exchange = VoiceLiveHostExchange(
+            context: ServerContext(id: UUID(), displayName: "h", kind: .local),
+            transport: transport
+        )
+        let task = Task { try await exchange.createSession(offerSDP: Self.offer, history: []) }
+        while !transport.entered { try await Task.sleep(for: .milliseconds(5)) }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("expected a throw")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            Issue.record("expected CancellationError, got \(error)")
         }
     }
 
