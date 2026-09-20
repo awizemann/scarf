@@ -173,7 +173,16 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// Push-to-talk dictation must stand down for this whole window, not
     /// just while the session is active: a hold started between the end of
     /// the session and the deferred `setActive(false)` was cut off by it.
-    var blocksDictation: Bool { isActive || holdsAudioSession }
+    ///
+    /// ``isBeginning`` is part of the window too. The chained branch of
+    /// ``begin(host:engine:dictationIdle:)`` suspends on TWO system dialogs
+    /// (speech recognition, then the microphone) before any session exists,
+    /// so `isActive` and `holdsAudioSession` are both false for as long as
+    /// the user reads them. Without this term the dictation button stayed
+    /// enabled behind the prompts, and a hold started there ran its
+    /// recognizer straight into the audio session and microphone tap that
+    /// `begin` opens the moment authorization returns.
+    var blocksDictation: Bool { isActive || holdsAudioSession || isBeginning }
 
     @ObservationIgnored private let makeSession: SessionFactory
     @ObservationIgnored private let audioSession: any VoiceLiveAudioSessionControlling
@@ -194,7 +203,11 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// that lost its race — another release, or a new session — is skipped
     /// instead of handing the audio session back under whoever holds it now.
     @ObservationIgnored private var audioSessionGeneration = 0
-    @ObservationIgnored private var isBeginning = false
+    /// A start is past its guards and waiting on the system permission
+    /// dialogs. Observed (not `@ObservationIgnored`) because
+    /// ``blocksDictation`` reads it and the composer's dictation button
+    /// must redraw when it changes.
+    private(set) var isBeginning = false
     /// Bumped by every teardown, so a `begin` suspended on the microphone
     /// prompt doesn't open a session after the user already left Chat.
     @ObservationIgnored private var teardownGeneration = 0
@@ -239,12 +252,7 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
                     return Session(engine: engine, kind: .chained, bridge: nil)
                 }
             },
-            externalRecipient: { kind in
-                switch kind {
-                case .gptLive: return GPTLiveEngine.externalRecipient
-                case .chained: return ChainedVoiceEngine.externalRecipient
-                }
-            },
+            externalRecipient: { kind in Self.productionRecipient(for: kind) },
             audioSession: owner,
             backgroundTasks: UIKitBackgroundTaskRunner(),
             microphone: AVMicrophonePermissionClient(),
@@ -252,6 +260,19 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
             speechAuthorizer: AppleSpeechAuthorizer()
         )
         observeAudioInterruptions()
+    }
+
+    /// Who the engine for `kind` sends the user's voice to directly — the
+    /// production answer, used by ``init(context:)`` and asserted directly
+    /// by tests (a test that hardcodes the same mapping into its own
+    /// harness proves nothing about the app). GPT-Live streams audio to
+    /// OpenAI and must ask first; the chained engine transcribes on this
+    /// iPhone and declares no recipient, so it never asks.
+    static func productionRecipient(for kind: VoiceEngineKind) -> VoiceDataRecipient? {
+        switch kind {
+        case .gptLive: return GPTLiveEngine.externalRecipient
+        case .chained: return ChainedVoiceEngine.externalRecipient
+        }
     }
 
     /// Test seam: every collaborator injected; no system notifications.
@@ -288,8 +309,16 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// sheet); the view calls `begin` again after ``acceptConsent()``. Then
     /// it asks for the microphone — the same system prompt P1 dictation
     /// uses — so a denial costs nothing and opens no sheet.
-    func begin(host: any VoiceTurnHost, engine kind: VoiceEngineKind = .gptLive, dictationIdle: Bool) async {
-        guard dictationIdle, !isActive, !isBeginning else { return }
+    /// `dictationIdle` is an autoclosure because it is read TWICE: once up
+    /// front, and again after the permission prompts return, which can be
+    /// many seconds later. The caller passes the live expression
+    /// (`pushToTalk.phase == .idle`) and both reads see the truth.
+    func begin(
+        host: any VoiceTurnHost,
+        engine kind: VoiceEngineKind = .gptLive,
+        dictationIdle: @autoclosure () -> Bool
+    ) async {
+        guard dictationIdle(), !isActive, !isBeginning else { return }
         if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient(kind), store: consent) {
             pendingConsent = recipient
             return
@@ -330,6 +359,12 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
                 return
             }
         }
+
+        // The permission prompts above are the only suspension points in a
+        // start, and a dictation take can begin behind them (the user can
+        // still reach the composer). Re-assert the guard we checked at the
+        // top before claiming the audio session and opening the tap.
+        guard dictationIdle() else { return }
 
         audioSession.activate()
         audioSessionActive = true
@@ -452,6 +487,17 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// while its capture unit still runs fails as "session busy" and the
     /// other app's audio never resumes. A session started in the meantime
     /// keeps the audio session.
+    ///
+    /// The chained engine leans on a DIFFERENT half of that contract: it
+    /// does not override `waitForMediaRelease()`, so the default no-op
+    /// returns at once and the deactivate below runs essentially inline.
+    /// That is only safe because `ChainedVoiceEngine.complete()` calls
+    /// `listener.stop()` and `speaker.stop()` SYNCHRONOUSLY before it
+    /// publishes the terminal phase that brings us here — the microphone
+    /// and the player are already down by the time we deactivate. If the
+    /// chained engine ever grows an asynchronous stop (a fade-out, a
+    /// drain), it must override `waitForMediaRelease()` at the same time,
+    /// or this deactivate will land under a running player.
     private func releaseAudioSession() {
         guard audioSessionActive else { return }
         audioSessionActive = false
