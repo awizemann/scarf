@@ -59,6 +59,22 @@ final class VoiceLiveController {
             self.externalRecipient = externalRecipient
             self.authorize = authorize
         }
+
+        /// This wiring with the hardware swapped out and its CONSENT
+        /// CONTRACT kept. Tests build their fakes through here rather than
+        /// through `Wiring.init`, whose `externalRecipient` default is
+        /// `nil`: a test that re-declared the recipient would pass even if
+        /// the app shipped a different one.
+        func replacingHardware(
+            makeSession: @escaping SessionFactory,
+            authorize: Authorizer?
+        ) -> Wiring {
+            Wiring(
+                makeSession: makeSession,
+                externalRecipient: externalRecipient,
+                authorize: authorize
+            )
+        }
     }
 
     /// Why a start the user asked for produced no session.
@@ -104,7 +120,7 @@ final class VoiceLiveController {
         let box = ChainedEngineBox()
         let preference = UserDefaults.standard.string(forKey: MessageSpeechService.engineKey)
         let speaker: any VoiceSpeaker
-        if preference == HermesSpeechService.PlaybackEngine.hermes.rawValue {
+        if VoiceLiveController.chainedPlaybackEngine(preference: preference) == .hermes {
             speaker = FallbackVoiceSpeaker(
                 primary: HermesVoiceSpeaker(context: context),
                 fallback: SystemVoiceSpeaker(),
@@ -129,6 +145,37 @@ final class VoiceLiveController {
     @MainActor
     private final class ChainedEngineBox {
         weak var engine: ChainedVoiceEngine?
+    }
+
+    /// The chained wiring THE APP SHIPS, as one value the production
+    /// initializer and the tests both point at: the free path's factory,
+    /// its external recipient — `nil`, which is the whole reason a chained
+    /// start never raises the consent sheet — and the TCC prompts it needs
+    /// cleared first.
+    static var chainedProduction: Wiring {
+        Wiring(
+            makeSession: Self.chained,
+            // On-device transcription: nothing to consent to.
+            externalRecipient: ChainedVoiceEngine.externalRecipient,
+            authorize: { await AppleOnDeviceVoiceListener.authorize() }
+        )
+    }
+
+    /// Which engine actually speaks a chained reply, read from the one
+    /// client-side preference the chained factory reads (the Settings ›
+    /// Voice "Playback Engine" picker, shared with the per-message speaker
+    /// button). The privacy line and the Settings rows MUST derive from
+    /// this rather than from the host's `tts.provider` alone — with System
+    /// Voice chosen the provider is never asked to speak anything, so
+    /// naming it (and billing it) would be a lie.
+    ///
+    /// No capability argument: the chained engine only mounts above
+    /// `hasHermesSpeechSynthesis`, which is exactly what
+    /// `PlaybackEngine.resolve` gates "hermes" on.
+    nonisolated static func chainedPlaybackEngine(
+        preference: String?
+    ) -> HermesSpeechService.PlaybackEngine {
+        preference == HermesSpeechService.PlaybackEngine.hermes.rawValue ? .hermes : .system
     }
 
     private(set) var engine: (any VoiceConversationEngine)?
@@ -183,12 +230,7 @@ final class VoiceLiveController {
             makeSession: makeSession ?? Self.gptLive,
             externalRecipient: externalRecipient
         )
-        self.chainedWiring = chained ?? Wiring(
-            makeSession: Self.chained,
-            // On-device transcription: nothing to consent to.
-            externalRecipient: ChainedVoiceEngine.externalRecipient,
-            authorize: { await AppleOnDeviceVoiceListener.authorize() }
-        )
+        self.chainedWiring = chained ?? Self.chainedProduction
         self.registry = registry ?? .shared
         self.consent = consent ?? .shared
     }
@@ -226,17 +268,31 @@ final class VoiceLiveController {
         // record the refusal so the chat can say why.
         guard !isBlockedByAnotherWindow else {
             pendingConsent = nil
+            // The refusal is this start's answer: a permission failure from
+            // an EARLIER start must not still be on the panel underneath it.
+            startFailure = nil
             startRefusal = .blockedByAnotherWindow
             return
         }
         let wiring = self.wiring(for: engineKind)
         if let recipient = VoiceDataConsent.pendingRecipient(for: wiring.externalRecipient, store: consent) {
             pendingConsent = recipient
+            // Likewise: no stale "Allow Scarf in Speech Recognition" under
+            // the consent sheet.
+            startFailure = nil
             return
         }
         pendingConsent = nil
         startRefusal = nil
         startFailure = nil
+        // A start always REPLACES a finished session that is still on the
+        // panel. `VoiceLivePanel` renders `engine` first and `startFailure`
+        // only when there is none, so leaving the ended engine here made a
+        // refused "Start Again" look dead: the panel went on showing the
+        // session that already ended. `holdsSession` is false above, so
+        // nothing live is dropped.
+        engine = nil
+        bridge = nil
         // The voice session owns the speaker, whichever engine it is:
         // silence any message being read aloud. (The Mac has no auto-speak,
         // so there is nothing else to mute.)
@@ -350,6 +406,13 @@ final class VoiceLiveController {
     /// An end that arrives before the start task ran: cancel the start and
     /// drop the never-started session (nothing was opened or billed, so
     /// there is nothing for the panel to report). Returns whether it did.
+    ///
+    /// Cancelling does NOT take down a permission prompt that is already in
+    /// front of the user: `AppleOnDeviceVoiceListener.authorize()` wraps
+    /// TCC's own callback APIs, which have no cancellation. The prompt
+    /// stays up until the user answers it, and the start task's
+    /// `Task.isCancelled` guard after the `await` drops that late answer —
+    /// so an end during the prompt never mounts a session.
     private func cancelPendingStart() -> Bool {
         guard isStartPending else { return false }
         startTask?.cancel()

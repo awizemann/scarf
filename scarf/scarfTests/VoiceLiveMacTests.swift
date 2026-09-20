@@ -930,6 +930,35 @@ import ScarfCore
         func stop() { stops += 1 }
     }
 
+    /// A permission verdict the test can flip BETWEEN starts, so one
+    /// controller can run a session and then meet a refusal on the next
+    /// start (the user revoked Speech Recognition in System Settings).
+    @MainActor
+    final class DenialBox {
+        var denial: VoiceListenerError?
+        init(_ denial: VoiceListenerError? = nil) { self.denial = denial }
+    }
+
+    /// A permission prompt the test holds open: `wait()` suspends the
+    /// controller's start task exactly where the real TCC prompt does, and
+    /// `release()` answers it whenever the test chooses.
+    @MainActor
+    final class AuthorizationGate {
+        private var resume: CheckedContinuation<Void, Never>?
+        private(set) var isWaiting = false
+
+        func wait() async {
+            isWaiting = true
+            await withCheckedContinuation { self.resume = $0 }
+        }
+
+        func release() {
+            isWaiting = false
+            resume?.resume()
+            resume = nil
+        }
+    }
+
     // MARK: - Helpers
 
     static let v0213 = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
@@ -943,9 +972,13 @@ import ScarfCore
     static func chainedWiring(
         listener: FakeListener,
         speaker: FakeSpeaker,
-        authorizationDenial: VoiceListenerError? = nil
+        authorizationDenial: VoiceListenerError? = nil,
+        denials: DenialBox? = nil
     ) -> VoiceLiveController.Wiring {
-        VoiceLiveController.Wiring(
+        // Built from the wiring THE APP SHIPS, so the consent contract
+        // under test is production's and not this helper's own: only the
+        // hardware is swapped out.
+        VoiceLiveController.chainedProduction.replacingHardware(
             makeSession: { _, host in
                 var configuration = ChainedVoiceEngine.Configuration()
                 configuration.tickInterval = nil        // no background loop in tests
@@ -959,7 +992,7 @@ import ScarfCore
                     bridge: nil
                 )
             },
-            authorize: { authorizationDenial }
+            authorize: { denials?.denial ?? authorizationDenial }
         )
     }
 
@@ -968,10 +1001,16 @@ import ScarfCore
         listener: FakeListener,
         speaker: FakeSpeaker,
         authorizationDenial: VoiceListenerError? = nil,
+        denials: DenialBox? = nil,
         registry: VoiceLiveSessionRegistry? = nil
     ) -> VoiceLiveController {
         VoiceLiveController(
-            chained: chainedWiring(listener: listener, speaker: speaker, authorizationDenial: authorizationDenial),
+            chained: chainedWiring(
+                listener: listener,
+                speaker: speaker,
+                authorizationDenial: authorizationDenial,
+                denials: denials
+            ),
             registry: registry ?? VoiceLiveSessionRegistry(),
             // Never accepted: a chained start must not want it anyway.
             consent: VoiceLiveMacTests.consentStore(accepted: false)
@@ -995,8 +1034,12 @@ import ScarfCore
         #expect(controller.engineKind == .chained)
         #expect(controller.engine is ChainedVoiceEngine)
         #expect(controller.engine?.approximateCostUSD == 0)
-        // The rule the consent rests on, asserted where it is relied upon.
+        // The rule the consent rests on, asserted against the wiring the
+        // APP builds — `Self.chainedController` swaps only the hardware
+        // into it, so a production recipient of `.openAI` would have
+        // raised the consent sheet above and failed this test.
         #expect(ChainedVoiceEngine.externalRecipient == nil)
+        #expect(VoiceLiveController.chainedProduction.externalRecipient == nil)
     }
 
     /// The GPT-Live half of the same button is unchanged: it still asks.
@@ -1110,16 +1153,195 @@ import ScarfCore
         #expect(!controller.holdsSession)
     }
 
+    // MARK: - Restarting after a finished session
+
+    /// A finished session on the panel never survives the next start. The
+    /// panel renders `engine` first and `startFailure` only when there is
+    /// no engine, so a refused restart that left the ended engine in place
+    /// made "Start Again" look dead: the user pressed it, a permission was
+    /// refused, and the panel went on showing the session that already
+    /// ended.
+    @Test @MainActor func aRefusedRestartReplacesTheFinishedSessionWithTheFailure() async {
+        let denials = DenialBox()
+        let listener = FakeListener()
+        let controller = Self.chainedController(
+            listener: listener, speaker: FakeSpeaker(), denials: denials
+        )
+        let host = ChatViewModel(context: .local)
+
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let started = await VoiceLiveMacTests.waitUntil { listener.starts == 1 }
+        #expect(started)
+        controller.end()
+        let ended = await VoiceLiveMacTests.waitUntil { !controller.isSessionActive }
+        #expect(ended)
+        #expect(controller.engine != nil)   // the panel still shows how it ended
+
+        // Speech Recognition revoked in System Settings between sessions.
+        denials.denial = .speechRecognitionDenied
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        // Exactly what `VoiceLivePanel` binds to: no engine left, so the
+        // failure branch is the one that renders.
+        #expect(controller.engine == nil)
+        #expect(controller.bridge == nil)
+        #expect(controller.startFailure == .speechRecognitionDenied)
+    }
+
+    /// A start blocked by another window clears the previous start's
+    /// permission failure: the chat says why it refused, and no stale
+    /// "Allow Scarf in Speech Recognition" is left on the panel.
+    @Test @MainActor func aBlockedStartClearsAStalePermissionFailure() async {
+        let registry = VoiceLiveSessionRegistry()
+        let controller = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(),
+            authorizationDenial: .speechRecognitionDenied, registry: registry
+        )
+        let host = ChatViewModel(context: .local)
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        let other = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(), registry: registry
+        )
+        other.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        #expect(other.holdsSession)
+
+        controller.start(context: .local, host: host, engineKind: .chained)
+        #expect(controller.startRefusal == .blockedByAnotherWindow)
+        #expect(controller.startFailure == nil)
+        other.endImmediately()
+    }
+
+    /// Same for a start that only raises the consent sheet: a stale
+    /// permission failure must not show underneath it.
+    @Test @MainActor func aConsentPendingStartClearsAStalePermissionFailure() async {
+        let controller = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(),
+            authorizationDenial: .microphoneDenied
+        )
+        let host = ChatViewModel(context: .local)
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        controller.start(context: .local, host: host, engineKind: .gptLive)
+        #expect(controller.pendingConsent == .openAI)
+        #expect(controller.startFailure == nil)
+    }
+
+    /// Ending while the permission prompt is still in front of the user
+    /// mounts nothing: `AppleOnDeviceVoiceListener.authorize()` is not
+    /// cancellation-aware, so the prompt stays up, but its late answer is
+    /// dropped on the cancelled start task.
+    @Test @MainActor func anEndDuringThePermissionPromptNeverMountsASession() async {
+        let gate = AuthorizationGate()
+        let listener = FakeListener()
+        let speaker = FakeSpeaker()
+        let controller = VoiceLiveController(
+            chained: VoiceLiveController.Wiring(
+                makeSession: { _, host in
+                    var configuration = ChainedVoiceEngine.Configuration()
+                    configuration.tickInterval = nil
+                    return VoiceLiveController.Session(
+                        engine: ChainedVoiceEngine(
+                            listener: listener, speaker: speaker,
+                            turnHost: host, configuration: configuration
+                        ),
+                        bridge: nil
+                    )
+                },
+                externalRecipient: nil,
+                authorize: { await gate.wait(); return nil }
+            ),
+            registry: VoiceLiveSessionRegistry(),
+            consent: VoiceLiveMacTests.consentStore(accepted: false)
+        )
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        let waiting = await VoiceLiveMacTests.waitUntil { gate.isWaiting }
+        #expect(waiting)
+        #expect(controller.holdsSession)
+
+        controller.endImmediately()
+        #expect(!controller.holdsSession)
+        gate.release()   // the user answers the prompt after the session is gone
+
+        let mounted = await VoiceLiveMacTests.waitUntil(timeoutSeconds: 0.4) {
+            controller.engine != nil || listener.starts > 0
+        }
+        #expect(!mounted)
+        #expect(controller.engine == nil)
+        #expect(listener.starts == 0)
+    }
+
     // MARK: - Panel copy
 
     @Test func thePanelSaysTheVoiceStaysOnThisMac() {
-        let hermes = VoiceLivePresentation.chainedPrivacyNote(ttsProvider: "edge")
+        let hermes = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "edge", playbackPreference: "hermes"
+        )
         #expect(hermes.contains("edge"))
         #expect(hermes.contains("this Mac"))
-        // No provider resolved yet, or the system voice chosen: say so
-        // rather than naming a provider Scarf doesn't know.
-        #expect(!VoiceLivePresentation.chainedPrivacyNote(ttsProvider: nil).contains("edge"))
-        #expect(!VoiceLivePresentation.chainedPrivacyNote(ttsProvider: nil).isEmpty)
+        // No provider resolved yet: say so rather than naming a provider
+        // Scarf doesn't know.
+        let unknown = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: nil, playbackPreference: "hermes"
+        )
+        #expect(!unknown.contains("edge"))
+        #expect(!unknown.isEmpty)
+    }
+
+    /// The privacy line and the chained factory read ONE preference. With
+    /// System Voice chosen the factory builds a plain `SystemVoiceSpeaker`
+    /// and the host's provider is never asked to speak anything, so the
+    /// line must not name it (or claim the audio reaches the host).
+    @Test func thePrivacyLineFollowsThePlaybackEnginePreference() {
+        #expect(VoiceLiveController.chainedPlaybackEngine(preference: "hermes") == .hermes)
+        for system in ["system", nil, "", "nonsense"] as [String?] {
+            #expect(VoiceLiveController.chainedPlaybackEngine(preference: system) == .system, "\(system ?? "nil")")
+        }
+
+        let system = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "openai", playbackPreference: "system"
+        )
+        #expect(!system.contains("openai"))
+        #expect(!system.contains("Hermes host"))
+        #expect(system.contains("this Mac"))
+
+        let hermes = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "openai", playbackPreference: "hermes"
+        )
+        #expect(hermes.contains("openai"))
+        #expect(hermes.contains("Hermes host"))
+    }
+
+    /// The Settings row is the same rule: System Voice never bills a
+    /// provider, so it must not print one or badge it Paid.
+    @Test func theSettingsTTSRowFollowsThePlaybackEnginePreference() {
+        let system = VoiceTab.chainedTextToSpeechLabel(provider: "openai", playbackPreference: "system")
+        #expect(!system.lowercased().contains("openai"))
+        #expect(system.contains("this Mac") || system.contains("This Mac"))
+        #expect(VoiceTab.chainedTTSCost(provider: "openai", playbackPreference: "system") == .free)
+
+        let hermes = VoiceTab.chainedTextToSpeechLabel(provider: "openai", playbackPreference: "hermes")
+        #expect(hermes.contains("openai"))
+        #expect(VoiceTab.chainedTTSCost(provider: "openai", playbackPreference: "hermes") == .paid)
+        // An unset key still names Hermes's default when the host speaks.
+        #expect(VoiceTab.chainedTextToSpeechLabel(provider: "", playbackPreference: "hermes").contains("edge"))
+    }
+
+    /// An absent `tts.provider` is Hermes's default, `edge` — resolved by
+    /// NAME (the iOS twin's step) and then classified, so the two apps
+    /// can't drift apart on what "" costs.
+    @Test func anUnsetTTSProviderResolvesToEdgeByName() {
+        #expect(VoiceTab.resolvedTTSProviderName("") == "edge")
+        #expect(VoiceTab.resolvedTTSProviderName("  ") == "edge")
+        #expect(VoiceTab.resolvedTTSProviderName(" OpenAI ") == "openai")
+        #expect(VoiceTab.ttsCost(for: "") == VoiceTab.ttsCost(for: "edge"))
     }
 
     /// The chained panel never shows a cost: there is none.
@@ -1160,7 +1382,7 @@ import ScarfCore
     /// The chained rows say where each half of the loop runs.
     @Test func theChainedRowsNameBothHalvesOfTheLoop() {
         #expect(VoiceTab.chainedSpeechToTextLabel().contains("this Mac"))
-        #expect(VoiceTab.chainedTextToSpeechLabel(provider: "edge").contains("edge"))
+        #expect(VoiceTab.chainedTextToSpeechLabel(provider: "edge", playbackPreference: "hermes").contains("edge"))
         #expect(!VoiceTab.chainedPrivacyNote().isEmpty)
     }
 }

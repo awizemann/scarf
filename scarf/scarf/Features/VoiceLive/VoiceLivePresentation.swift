@@ -36,14 +36,27 @@ enum VoiceLivePresentation {
     }
 
     /// The chained panel's one privacy line, in place of GPT-Live's cost
-    /// line. `ttsProvider` is the host's resolved `tts.provider`; `nil`
-    /// means Scarf doesn't know it yet (the config hasn't been read) or the
-    /// Mac is set to speak with its own voice, so the line names the system
-    /// voice rather than inventing a provider.
-    static func chainedPrivacyNote(ttsProvider: String?) -> String {
+    /// line.
+    ///
+    /// It names the host's provider only when the reply actually goes
+    /// there: `playbackPreference` is the Settings > Voice "Playback
+    /// Engine" choice, the SAME preference `VoiceLiveController.chained`
+    /// reads when it builds the speaker. With System Voice chosen the reply
+    /// is synthesized on this Mac and the provider is never asked to speak
+    /// anything, so naming it would claim a data flow that isn't
+    /// happening. `ttsProvider` is `nil` when Scarf hasn't read the host's
+    /// config yet - same answer, for the same reason: never invent a
+    /// recipient.
+    static func chainedPrivacyNote(ttsProvider: String?, playbackPreference: String?) -> String {
+        let spokenOnThisMac = String(
+            localized: "Your voice stays on this Mac; replies are spoken by this Mac's own voice."
+        )
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return spokenOnThisMac
+        }
         guard let provider = ttsProvider?.trimmingCharacters(in: .whitespacesAndNewlines),
               !provider.isEmpty else {
-            return String(localized: "Your voice stays on this Mac; replies are spoken by the system voice.")
+            return spokenOnThisMac
         }
         return String(localized: "Your voice stays on this Mac; replies are spoken by \(provider) on the Hermes host.")
     }

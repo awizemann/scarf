@@ -276,9 +276,10 @@ struct VoiceTab: View {
     enum TTSCost { case free, paid, unknown }
 
     static func ttsCost(for provider: String) -> TTSCost {
-        // An absent key is Hermes's default, `edge`.
-        let name = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if name.isEmpty { return .free }
+        // Resolve the NAME first (an absent key is Hermes's default,
+        // `edge`) and classify that - the same two steps the iOS twin
+        // takes, so the two apps can't drift apart on what "" costs.
+        let name = resolvedTTSProviderName(provider)
         if ["edge", "piper", "kittentts", "neutts"].contains(name) { return .free }
         if ["openai", "elevenlabs", "xai", "deepinfra", "gemini", "mistral", "minimax"].contains(name) { return .paid }
         return .unknown
@@ -288,10 +289,36 @@ struct VoiceTab: View {
         String(localized: "On this Mac (Apple). The audio never leaves it.")
     }
 
-    static func chainedTextToSpeechLabel(provider: String) -> String {
+    /// What speaks the chained reply, for the "Text to Speech" row.
+    ///
+    /// `playbackPreference` is the Playback Engine picker below it - the
+    /// same preference `VoiceLiveController.chained` reads when it builds
+    /// the speaker. With System Voice chosen the host's `tts.provider` is
+    /// never asked to speak anything, so the row must not name it.
+    static func chainedTextToSpeechLabel(provider: String, playbackPreference: String?) -> String {
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return String(localized: "This Mac's voice")
+        }
         let name = provider.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return String(localized: "edge (the Hermes default)") }
         return name
+    }
+
+    /// The badge next to that label. This Mac's own voice bills nobody,
+    /// whatever the host's `tts.provider` happens to be.
+    static func chainedTTSCost(provider: String, playbackPreference: String?) -> TTSCost {
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return .free
+        }
+        return ttsCost(for: provider)
+    }
+
+    /// The provider name a row prints and `ttsCost` classifies, with
+    /// Hermes's own default filled in for an unset key and the case
+    /// normalized.
+    static func resolvedTTSProviderName(_ provider: String) -> String {
+        let name = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return name.isEmpty ? "edge" : name
     }
 
     static func chainedPrivacyNote() -> String {
@@ -308,10 +335,16 @@ struct VoiceTab: View {
             Spacer()
         }
         LabeledSettingsRow(label: "Text to Speech") {
-            Text(verbatim: Self.chainedTextToSpeechLabel(provider: viewModel.config.voice.ttsProvider))
+            Text(verbatim: Self.chainedTextToSpeechLabel(
+                provider: viewModel.config.voice.ttsProvider,
+                playbackPreference: playbackEngine
+            ))
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            switch Self.ttsCost(for: viewModel.config.voice.ttsProvider) {
+            switch Self.chainedTTSCost(
+                provider: viewModel.config.voice.ttsProvider,
+                playbackPreference: playbackEngine
+            ) {
             case .free: ScarfBadge("Free", kind: .success)
             case .paid: ScarfBadge("Paid", kind: .warning)
             case .unknown: EmptyView()
