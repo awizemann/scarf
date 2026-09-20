@@ -376,12 +376,21 @@ struct SettingsView: View {
                 value: vm.config.voice.sttProvider.isEmpty ? "Auto (unset)" : vm.config.voice.sttProvider
             )
         }
-        // Hermes v0.20.1+ only (charter C1): older hosts can't speak at all,
-        // so this section renders exactly as before. P7c lowered the floor
-        // from v0.21.3 — the chained engine needs only the host's TTS.
-        if caps.hasHermesSpeechSynthesis {
+        if SettingsView.showsVoiceConversationSection(capabilities: caps) {
             liveVoiceSection
         }
+    }
+
+    /// Whether ScarfGo can run a voice conversation against this host at
+    /// all: Hermes v0.20.1+ (charter C1), the floor even the free chained
+    /// path needs, because the reply is spoken by the HOST's text-to-speech.
+    /// P7c lowered it from v0.21.3, which is now only the mode PICKER's
+    /// floor. Below it the whole section is absent and Settings renders
+    /// exactly as it did before P7c. A static so the gate is one testable
+    /// expression rather than a condition buried in a `body` (mirrors the
+    /// Mac's `VoiceTab.showsVoiceConversationSection(capabilities:)`).
+    static func showsVoiceConversationSection(capabilities: HermesCapabilities) -> Bool {
+        capabilities.hasHermesSpeechSynthesis
     }
 
     /// The host's `voice.voice_chat_mode`, and what that mode means on this
@@ -473,8 +482,7 @@ struct SettingsView: View {
 
     /// The host's `tts.provider`, or Hermes's own default when unset.
     private var ttsProviderName: String {
-        let raw = vm.config.voice.ttsProvider.trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw.isEmpty ? "edge" : raw
+        SettingsView.ttsProviderLabel(of: vm.config.voice.ttsProvider)
     }
 
     /// Free or paid, by provider. A conservative split: anything not known
@@ -495,11 +503,23 @@ struct SettingsView: View {
 
     enum TTSCost: Equatable { case free, paid, unknown }
 
+    /// What the row NAMES as the provider: an absent `tts.provider` is
+    /// Hermes's own default, `edge`. The single place the default is
+    /// resolved — the label and ``ttsCost(of:)`` both go through it, so the
+    /// row can never read "edge" while the badge next to it reads nothing
+    /// (the Mac's `VoiceTab.ttsCost(for:)` already treated "" as edge).
+    static func ttsProviderLabel(of provider: String) -> String {
+        let raw = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "edge" : raw
+    }
+
     /// Which of Hermes's `tts.provider` values bill the user. Free ones run
     /// on the host (piper, kittentts, neutts) or on a free public endpoint
-    /// (edge); the rest are vendor APIs on the host's own key.
+    /// (edge); the rest are vendor APIs on the host's own key. A provider
+    /// Scarf doesn't know — a plugin's — claims nothing rather than
+    /// guessing wrong about someone's bill.
     static func ttsCost(of provider: String) -> TTSCost {
-        switch provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        switch ttsProviderLabel(of: provider).lowercased() {
         case "edge", "piper", "kittentts", "neutts": return .free
         case "openai", "elevenlabs", "xai", "deepinfra", "gemini", "mistral", "minimax": return .paid
         default: return .unknown
