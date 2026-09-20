@@ -85,6 +85,54 @@
         }
       }
     },
+    "NSSpeechRecognitionUsageDescription" : {
+      "comment" : "Privacy - Speech Recognition Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf wandelt deine Sprache auf diesem Mac in Text um, für Sprachgespräche mit Hermes. Nichts von dem, was du sagst, wird an Apple gesendet."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf turns your speech into text on this Mac for voice conversations with Hermes. Nothing you say is sent to Apple."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf convierte tu voz en texto en este Mac para conversaciones de voz con Hermes. Nada de lo que dices se envía a Apple."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf convertit votre voix en texte sur ce Mac pour les conversations vocales avec Hermes. Rien de ce que vous dites n’est envoyé à Apple."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は Hermes との音声会話のために、この Mac 上で音声をテキストに変換します。話した内容が Apple に送信されることはありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf converte sua fala em texto neste Mac para conversas por voz com o Hermes. Nada do que você diz é enviado à Apple."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 会在这台 Mac 上将你的语音转换为文字，用于与 Hermes 的语音对话。你说的内容不会发送给 Apple。"
+          }
+        }
+      }
+    },
     "Scarf Project Template" : {
 
     }
