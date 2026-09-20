@@ -57,6 +57,12 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         /// long. `0` disables it. Nothing is billed, but a forgotten open
         /// microphone is its own problem, so the guard is kept.
         public var idleTimeout: TimeInterval = VoiceIdleMonitor.defaultTimeout
+        /// Stalled-turn auto-end, mirroring ``GPTLiveEngine``: a Hermes turn
+        /// open this long with no user speech and no reply progress ends the
+        /// session (``VoiceSessionEndReason/turnStalled``). Nothing is billed
+        /// here, but a wedged turn would otherwise disable the idle guard
+        /// forever and leave the microphone open indefinitely. `0` disables.
+        public var stalledTurnTimeout: TimeInterval = 600
         /// How long before the auto-end the ``VoiceSessionNotice/endingSoon(reason:secondsLeft:)``
         /// notice shows.
         public var endWarningLead: TimeInterval = 60
@@ -132,12 +138,21 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
     @ObservationIgnored private var listenTask: Task<Void, Never>?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var speakTask: Task<Void, Never>?
+    /// Monotonic, bumped whenever the current chunk is abandoned (barge-in, a
+    /// new utterance, the end of the session) and by every ``pumpSpeech()``.
+    /// A speak task whose generation is stale must not clear ``speakTask`` nor
+    /// pump the queue — doing so starts a SECOND concurrent chunk alongside
+    /// the one that replaced it.
+    @ObservationIgnored private var speakGeneration = 0
     @ObservationIgnored private var speechQueue: [String] = []
     @ObservationIgnored private var speakingSince: Date?
     /// The recent spoken exchange, model input only (never a persisted row).
     @ObservationIgnored private var spokenTurns: [(speaker: VoiceTranscriptFragment.Speaker, text: String)] = []
     @ObservationIgnored private var meter = VoiceSessionMeter()
     @ObservationIgnored private var idle: VoiceIdleMonitor
+    /// The stalled-turn guard: armed when a turn starts, reset by every
+    /// observed reply change.
+    @ObservationIgnored private var stall: VoiceIdleMonitor
     @ObservationIgnored private var turnCounter = 0
 
     public init(
@@ -153,6 +168,7 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         self.configuration = configuration
         self.clock = clock
         self.idle = VoiceIdleMonitor(timeout: configuration.idleTimeout, now: clock())
+        self.stall = VoiceIdleMonitor(timeout: configuration.stalledTurnTimeout, now: clock())
     }
 
     // MARK: - Lifecycle
@@ -238,12 +254,22 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
     private func bargeIn(at now: Date) {
         guard state.assistantSpeaking, let since = speakingSince,
               now.timeIntervalSince(since) >= configuration.bargeInGrace else { return }
+        cancelSpeech()
+        apply(.assistantSpeaking(false))
+    }
+
+    /// Abandon the chunk being spoken and everything queued behind it. The
+    /// generation bump is what makes the abandoned task inert: its
+    /// `speak(_:)` still RETURNS (a stop is a normal outcome, not an error),
+    /// and without the bump that return would clear the new ``speakTask`` and
+    /// pump a second chunk alongside it.
+    private func cancelSpeech() {
         speechQueue.removeAll()
         speaker.stop()
         speakTask?.cancel()
         speakTask = nil
+        speakGeneration += 1
         speakingSince = nil
-        apply(.assistantSpeaking(false))
     }
 
     private func handle(utterance raw: String) {
@@ -255,32 +281,34 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
             return
         }
         appendCaption(speaker: .user, text: spoken)
-        noteSpokenTurn(.user, spoken)
 
         // A new utterance always cuts the reply short — the user is talking
         // over it on purpose, whatever the level meter thought.
         if state.assistantSpeaking {
-            speechQueue.removeAll()
-            speaker.stop()
-            speakTask?.cancel()
-            speakTask = nil
-            speakingSince = nil
+            cancelSpeech()
             apply(.assistantSpeaking(false))
         }
 
+        // The model context records what was actually SAID TO HERMES. A
+        // dropped utterance (no host, or a turn already running) never
+        // reaches it, so noting it here would put words the host was never
+        // told into the next request's context — along with the canned line
+        // explaining why they were dropped.
         guard let host = turnHost else {
-            speak(Self.unreachableReply)
+            speak(Self.unreachableReply, note: false)
             return
         }
         // Never cancel: the running turn may be one the user typed.
         guard !host.isVoiceTurnBusy, turn == nil else {
-            speak(Self.busyReply)
+            speak(Self.busyReply, note: false)
             return
         }
 
         turnCounter += 1
         let id = "chained-\(turnCounter)"
         turn = Turn(id: id, prompt: spoken)
+        noteSpokenTurn(.user, spoken)
+        stall = VoiceIdleMonitor(timeout: configuration.stalledTurnTimeout, now: clock())
         apply(.delegationStarted)
 
         let context = contextWindow()
@@ -301,7 +329,10 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         } catch {
             guard isCurrent(id, epoch: myEpoch) else { return }
             Self.logger.notice("Chained voice turn could not be submitted: \(VoiceLiveHostExchange.redact(error.localizedDescription), privacy: .public)")
-            speak(Self.unreachableReply)
+            // The host refused the turn, so these words were never said to
+            // Hermes: take them back out of the model context.
+            dropSpokenTurn(.user, prompt)
+            speak(Self.unreachableReply, note: false)
             settleTurn()
         }
     }
@@ -335,6 +366,8 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
             idle.noteActivity(at: now)
             let streaming = reply.isStreaming || busy
             if reply.text != current.lastRaw || !streaming {
+                // Progress: this turn is working, not wedged.
+                stall.noteActivity(at: now)
                 current.lastRaw = reply.text
                 let raw = Array(reply.text)
                 current.rawSpoken = min(current.rawSpoken, raw.count)   // the reply was rewritten shorter
@@ -373,12 +406,16 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
     /// Queue one already-sanitized piece of speech, split to the same
     /// append-sized chunks GPT-Live uses so a very long sentence is broken on
     /// a sentence boundary rather than mid-word.
-    private func speak(_ text: String) {
+    ///
+    /// - Parameter note: whether the words join the model context. `false`
+    ///   for the canned lines that explain a DROPPED utterance: they are
+    ///   Scarf talking to the user, not part of the exchange Hermes sees.
+    private func speak(_ text: String, note: Bool = true) {
         let chunks = VoiceLiveText.chunkForCommentary(text)
         guard !chunks.isEmpty else { return }
         speechQueue.append(contentsOf: chunks)
         for chunk in chunks { appendCaption(speaker: .assistant, text: chunk) }
-        noteSpokenTurn(.assistant, chunks.joined(separator: " "))
+        if note { noteSpokenTurn(.assistant, chunks.joined(separator: " ")) }
         pumpSpeech()
     }
 
@@ -398,13 +435,15 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
             apply(.assistantSpeaking(true))
         }
         let myEpoch = epoch
+        speakGeneration += 1
+        let myGeneration = speakGeneration
         speakTask = Task { [weak self] in
             guard let self else { return }
             // A speaker error is already the fallback speaker's business; if
             // even the fallback failed, dropping the chunk beats stalling the
             // conversation on it.
             try? await self.speaker.speak(chunk)
-            guard myEpoch == self.epoch else { return }
+            guard myEpoch == self.epoch, myGeneration == self.speakGeneration else { return }
             self.speakTask = nil
             self.idle.noteActivity(at: self.clock())
             self.pumpSpeech()
@@ -461,6 +500,20 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         }
     }
 
+    /// Undo ``noteSpokenTurn(_:_:)`` for words that turned out never to reach
+    /// Hermes (the host refused the submit). The context must describe the
+    /// exchange the host actually had, or the next turn is answered against a
+    /// question it was never asked.
+    private func dropSpokenTurn(_ speaker: VoiceTranscriptFragment.Speaker, _ text: String) {
+        let clean = VoiceLiveText.collapseWhitespace(text)
+        guard !clean.isEmpty, let last = spokenTurns.last, last.speaker == speaker else { return }
+        if last.text == clean {
+            spokenTurns.removeLast()
+        } else if last.text.hasSuffix(" " + clean) {
+            spokenTurns[spokenTurns.count - 1].text.removeLast(clean.count + 1)
+        }
+    }
+
     /// The recent spoken exchange, in the same `User:` / `Assistant:` shape
     /// GPT-Live uses. Model input only — the persisted row is the prompt.
     private func contextWindow() -> String {
@@ -482,15 +535,20 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         driveAutoEnd(now: now)
     }
 
+    /// Two guards, exactly as ``GPTLiveEngine`` has them. Without a turn: no
+    /// speech either side for ``Configuration/idleTimeout``. With one: no user
+    /// speech and no reply progress for ``Configuration/stalledTurnTimeout``,
+    /// so a wedged Hermes turn cannot hold the microphone open forever.
     private func driveAutoEnd(now: Date) {
-        // A running turn or a reply playing is activity, not idleness.
-        let busy = state.assistantSpeaking || turn != nil || !speechQueue.isEmpty
-        if idle.isIdle(at: now, busy: busy) {
-            end(reason: .idleTimeout)
+        // A reply playing is activity, not idleness.
+        let busy = state.assistantSpeaking || !speechQueue.isEmpty
+        let (monitor, reason) = turn == nil ? (idle, VoiceSessionEndReason.idleTimeout) : (stall, .turnStalled)
+        if monitor.isIdle(at: now, busy: busy) {
+            end(reason: reason)
             return
         }
-        if !busy, let remaining = idle.remaining(at: now), remaining <= configuration.endWarningLead {
-            let warning = VoiceSessionNotice.endingSoon(reason: .idleTimeout, secondsLeft: Int(remaining.rounded(.up)))
+        if !busy, let remaining = monitor.remaining(at: now), remaining <= configuration.endWarningLead {
+            let warning = VoiceSessionNotice.endingSoon(reason: reason, secondsLeft: Int(remaining.rounded(.up)))
             if notice != warning { notice = warning }
         } else if case .endingSoon = notice {
             notice = nil
@@ -541,6 +599,7 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         tickTask = nil
         speakTask?.cancel()
         speakTask = nil
+        speakGeneration += 1
         submitTask = nil        // the Hermes turn itself is left to finish in the chat
         speechQueue = []
         speakingSince = nil
@@ -584,11 +643,13 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         submitTask = nil
         listenTask = nil
         speakTask = nil
+        speakGeneration += 1
         speechQueue = []
         speakingSince = nil
         spokenTurns = []
         meter = VoiceSessionMeter()
         idle = VoiceIdleMonitor(timeout: configuration.idleTimeout, now: clock())
+        stall = VoiceIdleMonitor(timeout: configuration.stalledTurnTimeout, now: clock())
         elapsedSeconds = 0
         approximateCostUSD = 0
         micLevel = 0

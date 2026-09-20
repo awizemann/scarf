@@ -381,6 +381,108 @@ import Foundation
         #expect(VoiceDataRecipient.forMode(.chained) == nil)
         #expect(VoiceDataRecipient.forMode(.gptLive) == .openAI)
     }
+
+    // MARK: stalled turn (M2)
+
+    /// The idle guard is disabled while a turn runs, so without a second cap
+    /// a wedged Hermes turn would hold the microphone open forever.
+    @Test func aWedgedTurnEndsTheSessionAtTheStalledTurnCap() async {
+        await engine.start()
+        await say("do something that hangs")
+        host.isVoiceTurnBusy = true          // …and never answers
+
+        advance(VoiceIdleMonitor.defaultTimeout + 10)
+        #expect(engine.phase == .thinking)   // the idle cap alone never fires
+
+        advance(540 - (VoiceIdleMonitor.defaultTimeout + 10))
+        #expect(engine.notice == .endingSoon(reason: .turnStalled, secondsLeft: 60))
+        advance(60)
+        #expect(engine.phase == .ended(.turnStalled))
+        #expect(listener.stops == 1)
+    }
+
+    /// Progress is not a stall: every observed change to the reply rearms it.
+    @Test func replyProgressRearmsTheStalledTurnCap() async {
+        await engine.start()
+        await say("do something slow")
+        host.isVoiceTurnBusy = true
+
+        advance(300)
+        // No sentence boundary yet, so nothing is spoken — this is progress
+        // on the reply and nothing else.
+        reply("working on it")
+        advance(1)
+        advance(590)
+        #expect(engine.phase == .thinking)
+        #expect(speaker.spoken.isEmpty)
+        advance(10)
+        #expect(engine.phase == .ended(.turnStalled))
+    }
+
+    // MARK: speak generations (M1)
+
+    /// A barged-in chunk's `speak()` still returns. If that return clears the
+    /// CURRENT speak task and pumps the queue, two chunks play at once.
+    @Test func aStaleSpeakCompletionNeverStartsASecondChunk() async {
+        speaker.hold = true
+        await engine.start()
+        await say("tell me a story")
+        reply("One. ")
+        advance(0.2)
+        await settle { !self.speaker.spoken.isEmpty }
+        #expect(speaker.spoken == ["One."])
+
+        // Barge in, then queue two more chunks before the abandoned task can
+        // resume — everything here is synchronous on purpose.
+        clock.now = clock.now.addingTimeInterval(0.5)
+        engine.handle(.speechStarted)
+        #expect(speaker.stops == 1)
+        reply("One. Two. ")
+        engine.tick()
+        reply("One. Two. Three.", streaming: false)
+        engine.tick()
+
+        await settle { self.speaker.spoken.count >= 3 }
+        #expect(speaker.spoken == ["One.", "Two."])
+        engine.end(reason: .userEnded)   // release the held chunk
+    }
+
+    // MARK: model context (L2)
+
+    /// A dropped utterance was never said to Hermes, so neither it nor the
+    /// canned line explaining the drop may turn up in the next turn's context.
+    @Test func aDroppedUtteranceNeverJoinsTheModelContext() async {
+        await engine.start()
+        host.isVoiceTurnBusy = true
+        listener.emit(.utterance("cancel the production deploy"))
+        await settle { !self.speaker.spoken.isEmpty }
+        #expect(speaker.spoken == [ChainedVoiceEngine.busyReply])
+        #expect(host.submitted.isEmpty)
+
+        host.isVoiceTurnBusy = false
+        await say("what is the weather")
+        let request = try! #require(host.submitted.first)
+        let note = try! #require(request.contextNotes.first)
+        #expect(!note.text.contains("production deploy"))
+        #expect(!note.text.contains("still working"))
+        #expect(note.text.contains("User: what is the weather"))
+    }
+
+    /// Same rule for an unreachable host.
+    @Test func anUnsubmittableUtteranceNeverJoinsTheModelContextEither() async {
+        await engine.start()
+        host.submitError = Boom()
+        listener.emit(.utterance("rotate the api key"))
+        await settle { !self.speaker.spoken.isEmpty }
+        #expect(speaker.spoken == [ChainedVoiceEngine.unreachableReply])
+
+        host.submitError = nil
+        await say("hello again")
+        let request = try! #require(host.submitted.first)
+        let note = try! #require(request.contextNotes.first)
+        #expect(!note.text.contains("could not reach Hermes"))
+        #expect(note.text.contains("User: hello again"))
+    }
 }
 
 /// The Hermes→system TTS fallback.
@@ -400,6 +502,28 @@ import Foundation
         }
         func stop() {}
         struct Failure: Error {}
+    }
+
+    /// A primary whose `speak()` suspends until `stop()` kills it — and which
+    /// reports that kill as an ordinary error, the way a dropped SSH script
+    /// does, rather than as a cancellation.
+    final class HoldingSpeaker: VoiceSpeaker {
+        var isSpeaking = false
+        private var pending: CheckedContinuation<Void, Error>?
+
+        func speak(_ text: String) async throws {
+            isSpeaking = true
+            defer { isSpeaking = false }
+            try await withCheckedThrowingContinuation { pending = $0 }
+        }
+
+        func stop() {
+            guard let continuation = pending else { return }
+            pending = nil
+            continuation.resume(throwing: Died())
+        }
+
+        struct Died: Error {}
     }
 
     @Test func aFailedChunkFallsBackToTheSystemVoice() async throws {
@@ -439,5 +563,35 @@ import Foundation
         try await speaker.speak("two")
         #expect(system.spoken == ["one"])
         #expect(hermes.spoken == ["two"])
+    }
+
+    /// A stop can race the primary into reporting a plain (non-cancellation)
+    /// error for the chunk it was told to abandon. The fallback must not then
+    /// speak that whole chunk over the silence the user asked for.
+    @Test func aStopRacingAPrimaryErrorDoesNotSpeakTheChunkAnyway() async throws {
+        let hermes = HoldingSpeaker()
+        let system = StubSpeaker()
+        var notices = 0
+        let speaker = FallbackVoiceSpeaker(primary: hermes, fallback: system) { notices += 1 }
+
+        let speaking = Task { try await speaker.speak("a whole paragraph nobody wants to hear") }
+        while !hermes.isSpeaking { await Task.yield() }
+        speaker.stop()
+        try await speaking.value
+
+        #expect(system.spoken.isEmpty)
+        #expect(!speaker.didFallBack)
+        #expect(notices == 0)
+    }
+
+    /// The flag is per chunk: the next one still falls back normally.
+    @Test func aLaterChunkStillFallsBackAfterAStop() async throws {
+        let hermes = StubSpeaker()
+        let system = StubSpeaker()
+        let speaker = FallbackVoiceSpeaker(primary: hermes, fallback: system)
+        speaker.stop()
+        hermes.failures = 1
+        try await speaker.speak("next")
+        #expect(system.spoken == ["next"])
     }
 }
