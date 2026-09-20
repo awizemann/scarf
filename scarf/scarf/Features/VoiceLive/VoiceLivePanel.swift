@@ -15,12 +15,43 @@ struct VoiceLivePanel: View {
     let controller: VoiceLiveController
     /// Start a fresh session after one ended ("Start Again").
     let onRestart: () -> Void
+    /// The host's resolved `tts.provider`, named in the chained privacy
+    /// line — but only when the Playback Engine preference actually sends
+    /// the reply there. `nil` when the config hasn't been read yet.
+    var ttsProvider: String?
     /// Whether "Start Again" can work right now (the chat can host turns).
     let canRestart: Bool
+
+    /// The same client-side preference the chained session factory reads:
+    /// it decides whether the reply is spoken by the host's provider or by
+    /// this Mac, so the privacy line has to read it too.
+    @AppStorage(MessageSpeechService.engineKey)
+    private var playbackPreference = HermesSpeechService.PlaybackEngine.system.rawValue
 
     var body: some View {
         if let engine = controller.engine {
             content(engine)
+                .modifier(PanelChrome(controller: controller))
+                .onChange(of: engine.phase) { old, new in
+                    if let line = VoiceLivePresentation.announcement(from: old, to: new, endNote: controller.endNote) {
+                        AccessibilityNotification.Announcement(line).post()
+                    }
+                }
+        } else if let failure = controller.startFailure {
+            // A permission the engine needs was refused before anything was
+            // built, so there is no engine to carry a `.failed` phase — the
+            // panel shows the same copy it would have.
+            failureFooter(VoiceLivePresentation.failure(failure))
+                .modifier(PanelChrome(controller: controller))
+        }
+    }
+
+    /// The strip's shared frame, background and accessibility identity.
+    private struct PanelChrome: ViewModifier {
+        let controller: VoiceLiveController
+
+        func body(content: Content) -> some View {
+            content
                 .padding(.horizontal, ScarfSpace.s3)
                 .padding(.vertical, ScarfSpace.s2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -32,15 +63,8 @@ struct VoiceLivePanel: View {
                     }
                 }
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text("Live Voice"))
+                .accessibilityLabel(Text("Voice session"))
                 .accessibilityIdentifier("chat.voiceLive.panel")
-                // VoiceOver hears the session's progress without having to
-                // find the panel: connecting, live, ended, failed.
-                .onChange(of: engine.phase) { old, new in
-                    if let line = VoiceLivePresentation.announcement(from: old, to: new, endNote: controller.endNote) {
-                        AccessibilityNotification.Announcement(line).post()
-                    }
-                }
         }
     }
 
@@ -50,6 +74,17 @@ struct VoiceLivePanel: View {
             header(engine)
             if !engine.captions.isEmpty {
                 VoiceLiveCaptions(captions: engine.captions)
+            }
+            // What the free path does with the user's voice, in one line,
+            // where GPT-Live shows its per-minute cost.
+            if controller.engineKind == .chained {
+                Text(verbatim: VoiceLivePresentation.chainedPrivacyNote(
+                    ttsProvider: ttsProvider,
+                    playbackPreference: playbackPreference
+                ))
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let notice = engine.notice, engine.phase.isActive {
                 Label {
@@ -106,14 +141,24 @@ struct VoiceLivePanel: View {
         }
     }
 
+    @ViewBuilder
     private func readout(_ engine: any VoiceConversationEngine) -> some View {
         let elapsed = VoiceLivePresentation.elapsed(engine.elapsedSeconds)
-        let cost = VoiceLivePresentation.cost(engine.approximateCostUSD)
-        return Text("\(elapsed) · about \(cost)")
-            .font(ScarfFont.monoSmall)
-            .foregroundStyle(ScarfColor.foregroundMuted)
-            .help("Approximate GPT-Live cost at $0.05 per minute, billed to the OpenAI key on the Hermes host.")
-            .accessibilityLabel(Text("Elapsed \(elapsed), approximate cost \(cost)"))
+        // Chained costs nothing, so its readout is the clock alone; a
+        // "$0.00" would read as a bill that just hasn't grown yet.
+        if VoiceLivePresentation.showsCost(for: controller.engineKind ?? .gptLive) {
+            let cost = VoiceLivePresentation.cost(engine.approximateCostUSD)
+            Text("\(elapsed) · about \(cost)")
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .help("Approximate GPT-Live cost at $0.05 per minute, billed to the OpenAI key on the Hermes host.")
+                .accessibilityLabel(Text("Elapsed \(elapsed), approximate cost \(cost)"))
+        } else {
+            Text(verbatim: elapsed)
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .accessibilityLabel(Text("Elapsed \(elapsed)"))
+        }
     }
 
     private func activeControls(_ engine: any VoiceConversationEngine) -> some View {
@@ -194,9 +239,14 @@ struct VoiceLivePanel: View {
                 Spacer(minLength: 0)
                 if copy.offersMicrophoneSettings {
                     Button("Open Privacy Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                            NSWorkspace.shared.open(url)
-                        }
+                        openPrivacyPane("Privacy_Microphone")
+                    }
+                }
+                // Speech recognition is its own TCC entry with its own
+                // pane; the microphone pane would show an already-on switch.
+                if copy.offersSpeechRecognitionSettings {
+                    Button("Open Privacy Settings") {
+                        openPrivacyPane("Privacy_SpeechRecognition")
                     }
                 }
                 restartButton(title: Text("Try Again"))
@@ -205,10 +255,16 @@ struct VoiceLivePanel: View {
         .accessibilityElement(children: .contain)
     }
 
+    private func openPrivacyPane(_ anchor: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private var restartHelp: Text {
         if canRestart { return Text("Start a new voice session in this chat") }
         if controller.isBlockedByAnotherWindow {
-            return Text("Live Voice is running in another Scarf window. End it there first.")
+            return Text("A voice session is running in another Scarf window. End it there first.")
         }
         return Text("Open a chat session to talk with Hermes.")
     }

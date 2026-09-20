@@ -33,6 +33,11 @@ public enum VoiceSessionNotice: Sendable, Equatable {
     /// or ``VoiceSessionEndReason/turnStalled``) unless someone speaks.
     /// `secondsLeft` is rounded up, for "about a minute" style copy.
     case endingSoon(reason: VoiceSessionEndReason, secondsLeft: Int)
+    /// The chained engine could not reach the host's TTS for a piece of the
+    /// reply and used the device's system voice instead. Shown ONCE per
+    /// session (``FallbackVoiceSpeaker``): the conversation continues either
+    /// way, so this is information, not a failure.
+    case speechFallback
 
     /// English diagnostic text (ScarfCore has no string catalog).
     public var englishDescription: String {
@@ -43,6 +48,8 @@ public enum VoiceSessionNotice: Sendable, Equatable {
             return "Hermes is still waiting. Live Voice ends in \(seconds) s unless you speak."
         case .endingSoon(_, let seconds):
             return "No one has spoken for a while. Live Voice ends in \(seconds) s unless you speak."
+        case .speechFallback:
+            return "Couldn't reach the Hermes voice, so this is the system voice."
         }
     }
 }
@@ -59,6 +66,15 @@ public enum VoiceSessionFailure: Sendable, Equatable {
     case mediaUnavailable(detail: String)
     /// The user (or the OS) denied the microphone (`NotAllowedError`).
     case microphoneDenied
+    /// Chained only: on-device speech recognition cannot run here — no
+    /// recognizer for the locale, or the device/locale has no on-device
+    /// language model. Never a fallback to Apple's servers: the chained path
+    /// promises the audio stays on the device (``VoiceListenerError``).
+    case speechRecognitionUnavailable
+    /// Chained only: the user (or the OS) denied speech recognition. A
+    /// SEPARATE permission from the microphone, with its own Settings row,
+    /// so the apps can point at the right one.
+    case speechRecognitionDenied
     /// Another app or process holds the microphone (`NotReadableError`).
     case microphoneBusy
     /// There is no microphone (`NotFoundError` / `OverconstrainedError`).
@@ -80,6 +96,9 @@ public enum VoiceSessionFailure: Sendable, Equatable {
     public var setupHint: Bool {
         switch self {
         case .host(.noKey), .host(.unsupported), .host(.interpreterNotFound): return true
+        // Both are fixed in Settings (grant the permission, or install the
+        // language's on-device model), never by retrying.
+        case .speechRecognitionUnavailable, .speechRecognitionDenied: return true
         default: return false
         }
     }
@@ -89,6 +108,8 @@ public enum VoiceSessionFailure: Sendable, Equatable {
         case .host(let error): return error.errorDescription ?? "Live Voice couldn't start."
         case .mediaUnavailable(let detail): return "Couldn't start Live Voice audio: \(detail)"
         case .microphoneDenied: return "Scarf can't use the microphone. Allow microphone access for Scarf, then try again."
+        case .speechRecognitionUnavailable: return "On-device speech recognition isn't available for this language."
+        case .speechRecognitionDenied: return "Scarf can't use speech recognition. Allow it for Scarf, then try again."
         case .microphoneBusy: return "Another app is using the microphone."
         case .microphoneNotFound: return "No microphone was found."
         case .audioConnectFailed(let detail): return "Live Voice couldn't connect its audio: \(detail)"

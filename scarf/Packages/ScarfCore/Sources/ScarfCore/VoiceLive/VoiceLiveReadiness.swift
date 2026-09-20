@@ -41,44 +41,81 @@ public enum VoiceChatMode: String, Sendable, CaseIterable, Equatable {
     }
 }
 
-/// Whether the Live Voice entry point may be shown for one window's server.
+/// Which voice engine a window's server resolves to.
+public enum VoiceEngineKind: Sendable, Equatable {
+    /// ``GPTLiveEngine`` — one full-duplex OpenAI voice, $0.05/min, needs an
+    /// OpenAI key on the host and Hermes ≥ 0.21.3.
+    case gptLive
+    /// ``ChainedVoiceEngine`` — on-device speech in, a normal Hermes turn,
+    /// the host's TTS out. Free, and Hermes's default mode.
+    case chained
+}
+
+/// Whether a voice entry point may be shown for one window's server, and
+/// which engine it mounts.
+///
+/// Three-way since P7 (`documents/plans/2026-09-19-voice-p7-free-voice-path.md`
+/// §4): chained used to be `.hidden(.chainedMode)`, which hid the button on
+/// the MAJORITY of hosts — chained is Hermes's default and needs no API key.
+/// Now it has an engine, so it is shown.
 public enum VoiceLiveAvailability: Sendable, Equatable {
-    /// Show and enable the entry point.
+    /// Show the entry point, mounting ``GPTLiveEngine``.
     case ready
+    /// Show the entry point, mounting ``ChainedVoiceEngine``.
+    case chainedReady
     /// Hide it. The reason is for Settings copy and diagnostics only — the
     /// chat composer renders nothing either way (charter C1).
     case hidden(HiddenReason)
 
     public enum HiddenReason: Sendable, Equatable {
-        /// Hermes below v0.21.3, or the version is undetected.
+        /// Hermes below v0.20.1 (no `hasHermesSpeechSynthesis`, so not even
+        /// the chained path can speak), or the version is undetected.
         case hermesTooOld
-        /// The host runs a capable Hermes but `voice.voice_chat_mode` is
-        /// chained (Hermes's default). Settings can offer the switch.
-        case chainedMode
     }
 
-    public var isReady: Bool { self == .ready }
+    /// The engine this verdict mounts, or `nil` when nothing is available.
+    public var engineKind: VoiceEngineKind? {
+        switch self {
+        case .ready: return .gptLive
+        case .chainedReady: return .chained
+        case .hidden: return nil
+        }
+    }
+
+    /// Show the entry point. True for BOTH engines — the composer button is
+    /// one button and the verdict picks what it mounts.
+    public var isReady: Bool { engineKind != nil }
 }
 
-/// The single readiness rule for Live Voice (Alan's decision, t-a4665c6e):
-/// `hasGPTLiveVoice` (Hermes ≥ 0.21.3) AND the parsed
-/// `voice.voice_chat_mode` is gpt-live. No host status probe: whether an
-/// OpenAI key resolves on the host is discovered when a session starts, and
-/// the no-key answer (``VoiceLiveHostError/noKey``) happens before the
-/// vendor is ever called, so it costs nothing.
+/// The readiness rule, in order:
+///
+/// 1. `voice.voice_chat_mode` is gpt-live AND `hasGPTLiveVoice`
+///    (Hermes ≥ 0.21.3) → ``VoiceLiveAvailability/ready``.
+/// 2. `hasHermesSpeechSynthesis` (Hermes ≥ 0.20.1) →
+///    ``VoiceLiveAvailability/chainedReady``. This covers chained mode (the
+///    default, and an absent key) AND a host asking for gpt-live that is too
+///    old for it — the Hermes desktop falls back to chained in exactly that
+///    case (`use-composer-voice.ts:214-219` @ v2026.9.14).
+/// 3. Otherwise ``VoiceLiveAvailability/HiddenReason/hermesTooOld``.
+///
+/// No host status probe either way: whether an OpenAI key resolves is
+/// discovered when a GPT-Live session starts, and the no-key answer
+/// (``VoiceLiveHostError/noKey``) happens before the vendor is ever called,
+/// so it costs nothing. Chained needs no key at all.
 public enum VoiceLiveReadiness {
     public static func availability(
         capabilities: HermesCapabilities,
         voiceChatMode rawMode: String?
     ) -> VoiceLiveAvailability {
-        guard capabilities.hasGPTLiveVoice else { return .hidden(.hermesTooOld) }
-        guard VoiceChatMode.parse(rawMode) == .gptLive else { return .hidden(.chainedMode) }
-        return .ready
+        if VoiceChatMode.parse(rawMode) == .gptLive, capabilities.hasGPTLiveVoice { return .ready }
+        guard capabilities.hasHermesSpeechSynthesis else { return .hidden(.hermesTooOld) }
+        return .chainedReady
     }
 
     /// Convenience over a parsed config. `nil` (config not loaded yet, or
-    /// unreadable) reads as Hermes's default — chained — so the entry point
-    /// stays hidden until the config is actually known.
+    /// unreadable) reads as Hermes's default — chained — which now has an
+    /// engine, so a capable host shows the entry point even before the
+    /// config is known.
     public static func availability(
         capabilities: HermesCapabilities,
         config: HermesConfig?

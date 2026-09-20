@@ -28,11 +28,12 @@ struct ChatTranscriptPane: View {
     /// `voice.voice_chat_mode: gpt-live`.
     private var voiceLiveEntry: VoiceLiveComposerEntry? {
         guard allowsVoiceLive else { return nil }
-        let capabilities = capabilitiesStore?.capabilities ?? .empty
-        guard chatViewModel.voiceLiveAvailability(capabilities: capabilities).isReady else { return nil }
+        let capabilities = voiceCapabilities
+        guard let engineKind = chatViewModel.voiceLiveAvailability(capabilities: capabilities).engineKind else { return nil }
         // Starting counts: an end in that gap cancels the start.
         let isActive = chatViewModel.voiceLive.holdsSession
         return VoiceLiveComposerEntry(
+            engineKind: engineKind,
             isActive: isActive,
             canStart: chatViewModel.canHostVoiceTurns,
             blockedByAnotherWindow: chatViewModel.voiceLive.isBlockedByAnotherWindow,
@@ -40,11 +41,13 @@ struct ChatTranscriptPane: View {
                 if isActive {
                     chatViewModel.voiceLive.end()
                 } else {
-                    chatViewModel.startVoiceLive()
+                    chatViewModel.startVoiceLive(capabilities: capabilities)
                 }
             }
         )
     }
+
+    private var voiceCapabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,7 +111,8 @@ struct ChatTranscriptPane: View {
             // the whole session). Absent unless a session was started.
             VoiceLivePanel(
                 controller: chatViewModel.voiceLive,
-                onRestart: { chatViewModel.startVoiceLive() },
+                onRestart: { chatViewModel.startVoiceLive(capabilities: voiceCapabilities) },
+                ttsProvider: chatViewModel.voiceTTSProviderRaw,
                 canRestart: chatViewModel.canHostVoiceTurns
                     && !chatViewModel.voiceLive.isBlockedByAnotherWindow
             )
@@ -147,7 +151,7 @@ struct ChatTranscriptPane: View {
             VoiceLiveConsentSheet(
                 recipient: recipient,
                 mode: .ask(
-                    onContinue: { chatViewModel.acceptVoiceLiveConsent() },
+                    onContinue: { chatViewModel.acceptVoiceLiveConsent(capabilities: voiceCapabilities) },
                     onCancel: { chatViewModel.voiceLive.declineConsent() }
                 )
             )

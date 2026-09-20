@@ -29,17 +29,30 @@ public struct VoiceDataRecipient: Sendable, Hashable, Identifiable {
 
     /// OpenAI, for Hermes's GPT-Live mode.
     public static let openAI = VoiceDataRecipient(id: "openai", displayName: "OpenAI", disclosureVersion: 1)
+
+    /// Who a mode's engine sends the user's data to, or `nil` when nothing
+    /// leaves the user's devices and Hermes host.
+    ///
+    /// `.chained` is — and must stay — `nil`: ``ChainedVoiceEngine``
+    /// transcribes on-device (`requiresOnDeviceRecognition`), so the audio
+    /// never leaves the device and only turn text reaches the host the chat
+    /// already talks to. (The host's own TTS provider may send the REPLY text
+    /// onward — Hermes's default `edge` goes to Microsoft — but that is the
+    /// user's Hermes configuration, surfaced in Settings, not something Scarf
+    /// routes.)
+    public static func forMode(_ mode: VoiceChatMode) -> VoiceDataRecipient? {
+        mode.externalRecipient
+    }
 }
 
 extension VoiceChatMode {
     /// Who, outside the user's devices and Hermes host, this mode's voice
     /// sessions send data to, or `nil` when nothing leaves them (no consent
-    /// needed). Chained mode has no in-app session engine yet; when one
-    /// ships it declares its own recipient here.
+    /// needed).
     public var externalRecipient: VoiceDataRecipient? {
         switch self {
         case .gptLive: return GPTLiveEngine.externalRecipient
-        case .chained: return nil
+        case .chained: return ChainedVoiceEngine.externalRecipient   // nil: on-device STT
         }
     }
 }

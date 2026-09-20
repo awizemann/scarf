@@ -18,6 +18,47 @@ enum VoiceLivePresentation {
         // com.scarf / LiveVoice; the panel never shows it (F4).
         /// Offer the macOS microphone privacy pane.
         let offersMicrophoneSettings: Bool
+        /// Offer the macOS speech-recognition privacy pane (chained only —
+        /// speech recognition is a SEPARATE TCC entry from the microphone,
+        /// with its own pane, so pointing at the microphone one would send
+        /// the user to a switch that is already on).
+        var offersSpeechRecognitionSettings = false
+    }
+
+    /// Whether this engine's panel shows the elapsed/cost readout's cost
+    /// half. Chained costs nothing — no vendor minute, no key — so a
+    /// "$0.00" would be noise pretending to be a bill.
+    static func showsCost(for kind: VoiceEngineKind) -> Bool {
+        switch kind {
+        case .gptLive: return true
+        case .chained: return false
+        }
+    }
+
+    /// The chained panel's one privacy line, in place of GPT-Live's cost
+    /// line.
+    ///
+    /// It names the host's provider only when the reply actually goes
+    /// there: `playbackPreference` is the Settings > Voice "Playback
+    /// Engine" choice, the SAME preference `VoiceLiveController.chained`
+    /// reads when it builds the speaker. With System Voice chosen the reply
+    /// is synthesized on this Mac and the provider is never asked to speak
+    /// anything, so naming it would claim a data flow that isn't
+    /// happening. `ttsProvider` is `nil` when Scarf hasn't read the host's
+    /// config yet - same answer, for the same reason: never invent a
+    /// recipient.
+    static func chainedPrivacyNote(ttsProvider: String?, playbackPreference: String?) -> String {
+        let spokenOnThisMac = String(
+            localized: "Your voice stays on this Mac; replies are spoken by this Mac's own voice."
+        )
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return spokenOnThisMac
+        }
+        guard let provider = ttsProvider?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !provider.isEmpty else {
+            return spokenOnThisMac
+        }
+        return String(localized: "Your voice stays on this Mac; replies are spoken by \(provider) on the Hermes host.")
     }
 
     static func phaseLabel(_ phase: VoiceConversationPhase) -> String {
@@ -67,6 +108,8 @@ enum VoiceLivePresentation {
             return String(localized: "Hermes has been waiting a long time. Live Voice ends in about a minute unless you speak, to save cost.")
         case .endingSoon:
             return String(localized: "No one has spoken for a while. Live Voice ends in about a minute unless you speak, to save cost.")
+        case .speechFallback:
+            return String(localized: "The Hermes host couldn't speak part of that reply, so Scarf used this Mac's system voice.")
         }
     }
 
@@ -112,6 +155,19 @@ enum VoiceLivePresentation {
                 message: String(localized: "Scarf can't use the microphone."),
                 guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Microphone, then try again."),
                 offersMicrophoneSettings: true
+            )
+        case .speechRecognitionDenied:
+            return FailureCopy(
+                message: String(localized: "Scarf can't use speech recognition."),
+                guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Speech Recognition, then try again."),
+                offersMicrophoneSettings: false,
+                offersSpeechRecognitionSettings: true
+            )
+        case .speechRecognitionUnavailable:
+            return FailureCopy(
+                message: String(localized: "This Mac can't transcribe your language without sending audio away."),
+                guidance: String(localized: "Download the language in System Settings › Keyboard › Dictation, or switch your Mac's language to one it can transcribe on-device, then try again. Scarf never falls back to a server for this."),
+                offersMicrophoneSettings: false
             )
         case .microphoneBusy:
             return FailureCopy(

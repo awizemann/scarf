@@ -205,23 +205,34 @@ struct VoiceTab: View {
             }
         }
 
-        // v0.21.3+ — Live Voice (GPT-Live). Hidden below the floor so an
-        // older host renders this tab exactly as before (C1).
-        if capabilities.hasGPTLiveVoice {
-            SettingsSection(title: "Live Voice", icon: "waveform.circle") {
-                PickerRow(
-                    label: "Voice Chat Mode",
-                    selection: VoiceChatMode.parse(viewModel.config.voice.voiceChatMode).rawValue,
-                    options: VoiceChatMode.allCases.map(\.rawValue),
-                    optionLabel: { Self.voiceChatModeLabel($0) }
-                ) { raw in
-                    guard let mode = VoiceChatMode(rawValue: raw) else { return }
-                    viewModel.setVoiceChatMode(mode, capabilities: capabilities)
+        // P7b — one "Voice conversation" section for both engines. Gated
+        // on `hasHermesSpeechSynthesis` (v0.20.1): below it neither engine
+        // can run, so the tab renders exactly as it did before (C1).
+        if Self.showsVoiceConversationSection(capabilities: capabilities) {
+            SettingsSection(title: "Voice conversation", icon: "waveform.circle") {
+                // The mode is a Hermes key, and `hermes config set` only
+                // knows it from v0.21.3 — so on an older host the row would
+                // write nothing. Chained is what runs there anyway.
+                if capabilities.hasGPTLiveVoice {
+                    PickerRow(
+                        label: "Mode",
+                        selection: VoiceChatMode.parse(viewModel.config.voice.voiceChatMode).rawValue,
+                        options: VoiceChatMode.allCases.map(\.rawValue),
+                        optionLabel: { Self.voiceChatModeLabel($0) }
+                    ) { raw in
+                        guard let mode = VoiceChatMode(rawValue: raw) else { return }
+                        viewModel.setVoiceChatMode(mode, capabilities: capabilities)
+                    }
+                    .help("Hermes's voice.voice_chat_mode, for the whole Hermes profile — it also switches voice in Hermes's own apps. Either mode turns on the voice button in the chat composer.")
                 }
-                .help("Hermes's voice.voice_chat_mode, for the whole Hermes profile. GPT-Live turns on the Live Voice button in the chat composer, and also switches voice in Hermes's own apps.")
-                liveVoiceNote
-                if let recipient = VoiceChatMode.gptLive.externalRecipient {
-                    consentRow(recipient)
+                voiceConversationNote
+                if resolvedVoiceMode == .gptLive {
+                    liveVoiceNote
+                    if let recipient = VoiceChatMode.gptLive.externalRecipient {
+                        consentRow(recipient)
+                    }
+                } else {
+                    chainedRows
                 }
             }
             .sheet(item: $reviewingConsent) { recipient in
@@ -236,6 +247,140 @@ struct VoiceTab: View {
                     .help("auto: backend PortAudio mic when one exists, else a remote desktop on a mic-less (headless/VPS) backend streams its own mic via the wake.feed RPC. local: always the backend mic. client: always desktop-streamed PCM (detection stays on the backend).")
             }
         }
+    }
+
+    // MARK: - P7b: the voice-conversation section
+
+    /// Whether Scarf can run a voice conversation against this host at all
+    /// (v0.20.1, `hasHermesSpeechSynthesis`) — the floor even the free
+    /// chained path needs. Below it the whole section is absent (C1).
+    static func showsVoiceConversationSection(capabilities: HermesCapabilities) -> Bool {
+        capabilities.hasHermesSpeechSynthesis
+    }
+
+    /// What the mode picker's value means for THIS host: a host that asks
+    /// for gpt-live but is too old for it runs chained, exactly as Hermes
+    /// itself falls back, so the rows must describe chained.
+    private var resolvedVoiceMode: VoiceChatMode {
+        guard capabilities.hasGPTLiveVoice,
+              VoiceChatMode.parse(viewModel.config.voice.voiceChatMode) == .gptLive else { return .chained }
+        return .gptLive
+    }
+
+    /// Whether a `tts.provider` bills the user. Free providers synthesize
+    /// locally on the host or through a free endpoint (Hermes's default
+    /// `edge` is Microsoft's, at no charge); paid ones spend an API key.
+    /// A provider Scarf doesn't know — a plugin's
+    /// (`PluginContext.register_tts_provider`) — claims nothing rather
+    /// than guessing wrong about someone's bill.
+    enum TTSCost { case free, paid, unknown }
+
+    static func ttsCost(for provider: String) -> TTSCost {
+        // Resolve the NAME first (an absent key is Hermes's default,
+        // `edge`) and classify that - the same two steps the iOS twin
+        // takes, so the two apps can't drift apart on what "" costs.
+        let name = resolvedTTSProviderName(provider)
+        if ["edge", "piper", "kittentts", "neutts"].contains(name) { return .free }
+        if ["openai", "elevenlabs", "xai", "deepinfra", "gemini", "mistral", "minimax"].contains(name) { return .paid }
+        return .unknown
+    }
+
+    static func chainedSpeechToTextLabel() -> String {
+        String(localized: "On this Mac (Apple). The audio never leaves it.")
+    }
+
+    /// What speaks the chained reply, for the "Text to Speech" row.
+    ///
+    /// `playbackPreference` is the Playback Engine picker below it - the
+    /// same preference `VoiceLiveController.chained` reads when it builds
+    /// the speaker. With System Voice chosen the host's `tts.provider` is
+    /// never asked to speak anything, so the row must not name it.
+    static func chainedTextToSpeechLabel(provider: String, playbackPreference: String?) -> String {
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return String(localized: "This Mac's voice")
+        }
+        let name = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return String(localized: "edge (the Hermes default)") }
+        return name
+    }
+
+    /// The badge next to that label. This Mac's own voice bills nobody,
+    /// whatever the host's `tts.provider` happens to be.
+    static func chainedTTSCost(provider: String, playbackPreference: String?) -> TTSCost {
+        guard VoiceLiveController.chainedPlaybackEngine(preference: playbackPreference) == .hermes else {
+            return .free
+        }
+        return ttsCost(for: provider)
+    }
+
+    /// The provider name a row prints and `ttsCost` classifies, with
+    /// Hermes's own default filled in for an unset key and the case
+    /// normalized.
+    static func resolvedTTSProviderName(_ provider: String) -> String {
+        let name = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return name.isEmpty ? "edge" : name
+    }
+
+    static func chainedPrivacyNote() -> String {
+        String(localized: "Your voice is transcribed on this Mac and never sent anywhere. Only the words you said reach Hermes, as an ordinary chat turn, and only the reply text reaches the host's text-to-speech provider.")
+    }
+
+    /// The chained path, in two rows: where each half of the loop runs.
+    @ViewBuilder
+    private var chainedRows: some View {
+        LabeledSettingsRow(label: "Speech to Text") {
+            Text(verbatim: Self.chainedSpeechToTextLabel())
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            Spacer()
+        }
+        LabeledSettingsRow(label: "Text to Speech") {
+            Text(verbatim: Self.chainedTextToSpeechLabel(
+                provider: viewModel.config.voice.ttsProvider,
+                playbackPreference: playbackEngine
+            ))
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            switch Self.chainedTTSCost(
+                provider: viewModel.config.voice.ttsProvider,
+                playbackPreference: playbackEngine
+            ) {
+            case .free: ScarfBadge("Free", kind: .success)
+            case .paid: ScarfBadge("Paid", kind: .warning)
+            case .unknown: EmptyView()
+            }
+            Spacer()
+        }
+        // The same client-side preference the per-message speaker button
+        // uses, and the same control: it decides whether the chained reply
+        // is spoken by the host's provider or by this Mac's own voice.
+        PickerRow(
+            label: "Playback Engine",
+            selection: playbackEngine,
+            options: playbackEngineOptions.map(\.id),
+            optionLabel: { id in playbackEngineOptions.first { $0.id == id }?.label ?? id }
+        ) { playbackEngine = $0 }
+            .help("System Voice speaks the reply on this Mac and needs no host setup. Hermes Voice speaks it through the host's configured TTS provider, falling back to this Mac's voice for anything the host can't synthesize.")
+        Text(verbatim: Self.chainedPrivacyNote())
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ScarfSpace.s3)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .combine)
+    }
+
+    /// What the two modes are, above whichever one's rows are showing.
+    private var voiceConversationNote: some View {
+        Text("Talk with Hermes from the chat composer. Chained, Hermes's default, is free: your voice is transcribed on this Mac, runs as a normal turn, and the reply is read aloud. GPT-Live hands the whole conversation to an OpenAI voice model.")
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ScarfSpace.s3)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .combine)
     }
 
     /// Picker labels for `voice.voice_chat_mode`. The stored value is

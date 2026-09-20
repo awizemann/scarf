@@ -129,6 +129,17 @@ import ScarfCore
 
     // MARK: - Helpers
 
+    /// A GPT-Live host, for the tests that exercise that engine's path.
+    static let gptLiveCapabilities = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
+
+    /// Start Live Voice as a gpt-live host would: the chat reads the engine
+    /// off the readiness verdict, so both halves have to say gpt-live.
+    @MainActor
+    static func startGPTLive(_ vm: ChatViewModel) {
+        vm.voiceChatModeRaw = "gpt-live"
+        vm.startVoiceLive(capabilities: gptLiveCapabilities)
+    }
+
     @MainActor
     static func waitUntil(timeoutSeconds: Double = 5, _ condition: @MainActor @escaping () async -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -211,20 +222,25 @@ import ScarfCore
 
     // MARK: - Readiness gate
 
-    @Test @MainActor func gateNeedsBothTheVersionFloorAndGPTLiveMode() {
+    @Test @MainActor func gateSendsEachHostToItsEngine() {
         let vm = ChatViewModel(context: .local)
         let v0213 = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
         let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+        let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.7.20)")
 
-        // Config not read yet: hidden (reads as Hermes's chained default).
-        #expect(vm.voiceLiveAvailability(capabilities: v0213) == .hidden(.chainedMode))
+        // Config not read yet: Hermes's chained default, which since P7 has
+        // an engine of its own, so the button shows.
+        #expect(vm.voiceLiveAvailability(capabilities: v0213) == .chainedReady)
         vm.voiceChatModeRaw = "chained"
-        #expect(vm.voiceLiveAvailability(capabilities: v0213) == .hidden(.chainedMode))
+        #expect(vm.voiceLiveAvailability(capabilities: v0213) == .chainedReady)
         // Hermes's own alternate spelling counts.
         vm.voiceChatModeRaw = "gpt_live"
         #expect(vm.voiceLiveAvailability(capabilities: v0213) == .ready)
-        // Below the floor nothing shows, whatever the config says (C1).
-        #expect(vm.voiceLiveAvailability(capabilities: v0212) == .hidden(.hermesTooOld))
+        // Asking for gpt-live on a host too old for it falls back to
+        // chained, exactly as Hermes's own desktop does.
+        #expect(vm.voiceLiveAvailability(capabilities: v0212) == .chainedReady)
+        // Below the speech floor nothing shows, whatever the config says (C1).
+        #expect(vm.voiceLiveAvailability(capabilities: v0200) == .hidden(.hermesTooOld))
         #expect(vm.voiceLiveAvailability(capabilities: .empty) == .hidden(.hermesTooOld))
     }
 
@@ -248,7 +264,7 @@ import ScarfCore
         }
         #expect(vm.richChatViewModel.messages.isEmpty)
         // And starting a session is refused, so no engine is built.
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         #expect(vm.voiceLive.engine == nil)
     }
 
@@ -363,12 +379,12 @@ import ScarfCore
         var engines: [FakeEngine] = []
         let vm = await Self.connectedChat(home: home, channel: channel) { engines.append($0) }
 
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         let started = await Self.waitUntil { engines.first?.starts == 1 }
         #expect(started)
         #expect(vm.voiceLive.isSessionActive)
         // A second start while one runs is a no-op.
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         #expect(engines.count == 1)
 
         vm.startNewSession()   // sidebar "New Chat"
@@ -382,7 +398,7 @@ import ScarfCore
         let channel = VoiceScriptedChannel(sessionId: "sess-s")
         var engines: [FakeEngine] = []
         let vm = await Self.connectedChat(home: home, channel: channel) { engines.append($0) }
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         _ = await Self.waitUntil { engines.first?.phase == .connecting }
 
         vm.stopACP()
@@ -537,7 +553,7 @@ import ScarfCore
         var engines: [FakeEngine] = []
         let vm = await Self.connectedChat(home: home, channel: channel) { engines.append($0) }
         defer { vm.stopACP() }
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         _ = await Self.waitUntil { engines.first?.phase == .connecting }
 
         // The event stream ends → handleConnectionDied (not stopACP).
@@ -755,14 +771,14 @@ import ScarfCore
         let vm = await Self.connectedChat(home: home, channel: channel, consent: consent) { engines.append($0) }
         defer { vm.stopACP() }
 
-        vm.startVoiceLive()
+        Self.startGPTLive(vm)
         #expect(vm.voiceLive.pendingConsent == .openAI)
         #expect(engines.isEmpty, "a session was built before consent")
         #expect(vm.voiceLive.engine == nil)
         #expect(!vm.voiceLive.holdsSession)
 
         // Continue: remembered, and the session starts.
-        vm.acceptVoiceLiveConsent()
+        vm.acceptVoiceLiveConsent(capabilities: Self.gptLiveCapabilities)
         #expect(vm.voiceLive.pendingConsent == nil)
         #expect(consent.hasConsented(to: .openAI))
         let started = await Self.waitUntil { engines.first?.starts == 1 }
@@ -862,5 +878,511 @@ import ScarfCore
         #expect(VoiceLivePresentation.elapsed(65.9) == "1:05")
         #expect(VoiceLivePresentation.elapsed(0) == "0:00")
         #expect(VoiceLivePresentation.cost(0.05).contains("0.05"))
+    }
+}
+
+/// The Mac binding for the FREE chained voice engine (P7b, t-7932eaee):
+/// which engine the composer's one button mounts, what it asks the user
+/// before starting, and the Settings section that explains the path.
+///
+/// Every fake here replaces real hardware: no microphone, no speech
+/// recognizer and no synthesizer is ever touched.
+@Suite struct ChainedVoiceMacTests {
+
+    // MARK: - Fakes
+
+    /// A `VoiceListener` that opens no microphone. `startError` makes
+    /// `start()` throw, which is how a denied permission reaches the engine.
+    @MainActor
+    final class FakeListener: VoiceListener {
+        let startError: VoiceListenerError?
+        private(set) var starts = 0
+        private(set) var stops = 0
+        private var continuation: AsyncStream<VoiceListenerEvent>.Continuation?
+
+        init(startError: VoiceListenerError? = nil) { self.startError = startError }
+
+        func start() throws -> AsyncStream<VoiceListenerEvent> {
+            starts += 1
+            if let startError { throw startError }
+            let (stream, continuation) = AsyncStream<VoiceListenerEvent>.makeStream()
+            self.continuation = continuation
+            return stream
+        }
+
+        func stop() {
+            stops += 1
+            continuation?.finish()
+            continuation = nil
+        }
+
+        func setPaused(_ paused: Bool) {}
+    }
+
+    /// A `VoiceSpeaker` that synthesizes nothing.
+    @MainActor
+    final class FakeSpeaker: VoiceSpeaker {
+        private(set) var spoken: [String] = []
+        private(set) var stops = 0
+        var isSpeaking = false
+
+        func speak(_ text: String) async throws { spoken.append(text) }
+        func stop() { stops += 1 }
+    }
+
+    /// A permission verdict the test can flip BETWEEN starts, so one
+    /// controller can run a session and then meet a refusal on the next
+    /// start (the user revoked Speech Recognition in System Settings).
+    @MainActor
+    final class DenialBox {
+        var denial: VoiceListenerError?
+        init(_ denial: VoiceListenerError? = nil) { self.denial = denial }
+    }
+
+    /// A permission prompt the test holds open: `wait()` suspends the
+    /// controller's start task exactly where the real TCC prompt does, and
+    /// `release()` answers it whenever the test chooses.
+    @MainActor
+    final class AuthorizationGate {
+        private var resume: CheckedContinuation<Void, Never>?
+        private(set) var isWaiting = false
+
+        func wait() async {
+            isWaiting = true
+            await withCheckedContinuation { self.resume = $0 }
+        }
+
+        func release() {
+            isWaiting = false
+            resume?.resume()
+            resume = nil
+        }
+    }
+
+    // MARK: - Helpers
+
+    static let v0213 = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
+    static let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+    static let v0201 = HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.1)")
+    static let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.7.20)")
+
+    /// Chained wiring over the fakes: the controller's real chained path
+    /// minus the hardware.
+    @MainActor
+    static func chainedWiring(
+        listener: FakeListener,
+        speaker: FakeSpeaker,
+        authorizationDenial: VoiceListenerError? = nil,
+        denials: DenialBox? = nil
+    ) -> VoiceLiveController.Wiring {
+        // Built from the wiring THE APP SHIPS, so the consent contract
+        // under test is production's and not this helper's own: only the
+        // hardware is swapped out.
+        VoiceLiveController.chainedProduction.replacingHardware(
+            makeSession: { _, host in
+                var configuration = ChainedVoiceEngine.Configuration()
+                configuration.tickInterval = nil        // no background loop in tests
+                return VoiceLiveController.Session(
+                    engine: ChainedVoiceEngine(
+                        listener: listener,
+                        speaker: speaker,
+                        turnHost: host,
+                        configuration: configuration
+                    ),
+                    bridge: nil
+                )
+            },
+            authorize: { denials?.denial ?? authorizationDenial }
+        )
+    }
+
+    @MainActor
+    static func chainedController(
+        listener: FakeListener,
+        speaker: FakeSpeaker,
+        authorizationDenial: VoiceListenerError? = nil,
+        denials: DenialBox? = nil,
+        registry: VoiceLiveSessionRegistry? = nil
+    ) -> VoiceLiveController {
+        VoiceLiveController(
+            chained: chainedWiring(
+                listener: listener,
+                speaker: speaker,
+                authorizationDenial: authorizationDenial,
+                denials: denials
+            ),
+            registry: registry ?? VoiceLiveSessionRegistry(),
+            // Never accepted: a chained start must not want it anyway.
+            consent: VoiceLiveMacTests.consentStore(accepted: false)
+        )
+    }
+
+    // MARK: - Which engine the button mounts
+
+    /// A chained host mounts `ChainedVoiceEngine` and asks for nothing: the
+    /// audio is transcribed on this Mac, so there is no third party to
+    /// consent to.
+    @Test @MainActor func chainedHostMountsTheChainedEngineWithoutConsent() async {
+        let listener = FakeListener()
+        let controller = Self.chainedController(listener: listener, speaker: FakeSpeaker())
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+
+        #expect(controller.pendingConsent == nil)
+        let started = await VoiceLiveMacTests.waitUntil { listener.starts == 1 }
+        #expect(started)
+        #expect(controller.engineKind == .chained)
+        #expect(controller.engine is ChainedVoiceEngine)
+        #expect(controller.engine?.approximateCostUSD == 0)
+        // The rule the consent rests on, asserted against the wiring the
+        // APP builds — `Self.chainedController` swaps only the hardware
+        // into it, so a production recipient of `.openAI` would have
+        // raised the consent sheet above and failed this test.
+        #expect(ChainedVoiceEngine.externalRecipient == nil)
+        #expect(VoiceLiveController.chainedProduction.externalRecipient == nil)
+    }
+
+    /// The GPT-Live half of the same button is unchanged: it still asks.
+    @Test @MainActor func gptLiveHostStillAsksForConsent() {
+        let engine = VoiceLiveMacTests.FakeEngine()
+        let controller = VoiceLiveController(
+            makeSession: { _, _ in .init(engine: engine, bridge: nil) },
+            registry: VoiceLiveSessionRegistry(),
+            consent: VoiceLiveMacTests.consentStore(accepted: false)
+        )
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .gptLive)
+
+        #expect(controller.pendingConsent == .openAI)
+        #expect(controller.engine == nil)
+        #expect(engine.starts == 0)
+    }
+
+    /// The chat picks the engine from the readiness verdict, so one button
+    /// serves both hosts.
+    @Test @MainActor func theChatPicksTheEngineFromTheVerdict() {
+        let vm = ChatViewModel(context: .local)
+        vm.voiceChatModeRaw = "chained"
+        #expect(vm.voiceLiveAvailability(capabilities: Self.v0213).engineKind == .chained)
+        vm.voiceChatModeRaw = "gpt-live"
+        #expect(vm.voiceLiveAvailability(capabilities: Self.v0213).engineKind == .gptLive)
+        // Too old for GPT-Live but able to speak: chained, as Hermes itself
+        // falls back.
+        #expect(vm.voiceLiveAvailability(capabilities: Self.v0212).engineKind == .chained)
+        #expect(vm.voiceLiveAvailability(capabilities: Self.v0200).engineKind == nil)
+    }
+
+    // MARK: - Permissions
+
+    /// Speech recognition denied at the permission prompt: nothing is
+    /// started, and the panel has one sentence and a way to fix it.
+    @Test @MainActor func deniedSpeechPermissionNeverOpensTheMicrophone() async {
+        let listener = FakeListener()
+        let controller = Self.chainedController(
+            listener: listener, speaker: FakeSpeaker(),
+            authorizationDenial: .speechRecognitionDenied
+        )
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        let failed = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+
+        #expect(failed)
+        #expect(controller.startFailure == .speechRecognitionDenied)
+        #expect(listener.starts == 0)
+        #expect(!controller.holdsSession)
+        let copy = VoiceLivePresentation.failure(.speechRecognitionDenied)
+        #expect(copy.guidance?.contains("Speech Recognition") == true)
+        #expect(copy.offersSpeechRecognitionSettings)
+    }
+
+    /// A denial that only shows up when listening starts (the TCC state
+    /// changed under us) reaches the engine's failed phase.
+    @Test @MainActor func aListenerDenialEndsInTheFailedPhase() async {
+        let listener = FakeListener(startError: .speechRecognitionDenied)
+        let controller = Self.chainedController(listener: listener, speaker: FakeSpeaker())
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        let failed = await VoiceLiveMacTests.waitUntil {
+            controller.engine?.phase == .failed(.speechRecognitionDenied)
+        }
+        #expect(failed)
+    }
+
+    /// No on-device model for this language: a different sentence, pointing
+    /// at where the language is downloaded.
+    @Test func theUnsupportedLanguageFailureExplainsTheDownload() {
+        let copy = VoiceLivePresentation.failure(.speechRecognitionUnavailable)
+        #expect(!copy.message.isEmpty)
+        #expect(copy.guidance?.contains("Dictation") == true)
+        #expect(VoiceSessionFailure.speechRecognitionUnavailable.setupHint)
+        #expect(VoiceSessionFailure.speechRecognitionDenied.setupHint)
+    }
+
+    // MARK: - The rest of the app stands down
+
+    /// The message speaker button is disabled while a chained session runs,
+    /// exactly as for GPT-Live — one Mac, one speaker.
+    @Test @MainActor func messageSpeechStandsDownDuringAChainedSession() async {
+        let registry = VoiceLiveSessionRegistry()
+        let listener = FakeListener()
+        let controller = Self.chainedController(listener: listener, speaker: FakeSpeaker(), registry: registry)
+
+        #expect(!registry.isAnySessionActive)
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        #expect(registry.isAnySessionActive)
+        #expect(!SpeakMessageButtonState(isPlaying: false, isLoading: false, liveVoiceActive: registry.isAnySessionActive).isEnabled)
+
+        controller.dismiss()
+        #expect(!registry.isAnySessionActive)
+    }
+
+    /// Leaving the chat pane ends a chained session and releases the
+    /// microphone — the listener is stopped, not merely dropped.
+    @Test @MainActor func leavingTheChatEndsAChainedSession() async {
+        let listener = FakeListener()
+        let controller = Self.chainedController(listener: listener, speaker: FakeSpeaker())
+        let vm = ChatViewModel(context: .local, voiceLive: controller)
+
+        controller.start(context: .local, host: vm, engineKind: .chained)
+        let live = await VoiceLiveMacTests.waitUntil { listener.starts == 1 }
+        #expect(live)
+
+        vm.leaveChatVoiceLive()
+        #expect(listener.stops >= 1)
+        #expect(controller.engine == nil)
+        #expect(!controller.holdsSession)
+    }
+
+    // MARK: - Restarting after a finished session
+
+    /// A finished session on the panel never survives the next start. The
+    /// panel renders `engine` first and `startFailure` only when there is
+    /// no engine, so a refused restart that left the ended engine in place
+    /// made "Start Again" look dead: the user pressed it, a permission was
+    /// refused, and the panel went on showing the session that already
+    /// ended.
+    @Test @MainActor func aRefusedRestartReplacesTheFinishedSessionWithTheFailure() async {
+        let denials = DenialBox()
+        let listener = FakeListener()
+        let controller = Self.chainedController(
+            listener: listener, speaker: FakeSpeaker(), denials: denials
+        )
+        let host = ChatViewModel(context: .local)
+
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let started = await VoiceLiveMacTests.waitUntil { listener.starts == 1 }
+        #expect(started)
+        controller.end()
+        let ended = await VoiceLiveMacTests.waitUntil { !controller.isSessionActive }
+        #expect(ended)
+        #expect(controller.engine != nil)   // the panel still shows how it ended
+
+        // Speech Recognition revoked in System Settings between sessions.
+        denials.denial = .speechRecognitionDenied
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        // Exactly what `VoiceLivePanel` binds to: no engine left, so the
+        // failure branch is the one that renders.
+        #expect(controller.engine == nil)
+        #expect(controller.bridge == nil)
+        #expect(controller.startFailure == .speechRecognitionDenied)
+    }
+
+    /// A start blocked by another window clears the previous start's
+    /// permission failure: the chat says why it refused, and no stale
+    /// "Allow Scarf in Speech Recognition" is left on the panel.
+    @Test @MainActor func aBlockedStartClearsAStalePermissionFailure() async {
+        let registry = VoiceLiveSessionRegistry()
+        let controller = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(),
+            authorizationDenial: .speechRecognitionDenied, registry: registry
+        )
+        let host = ChatViewModel(context: .local)
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        let other = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(), registry: registry
+        )
+        other.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        #expect(other.holdsSession)
+
+        controller.start(context: .local, host: host, engineKind: .chained)
+        #expect(controller.startRefusal == .blockedByAnotherWindow)
+        #expect(controller.startFailure == nil)
+        other.endImmediately()
+    }
+
+    /// Same for a start that only raises the consent sheet: a stale
+    /// permission failure must not show underneath it.
+    @Test @MainActor func aConsentPendingStartClearsAStalePermissionFailure() async {
+        let controller = Self.chainedController(
+            listener: FakeListener(), speaker: FakeSpeaker(),
+            authorizationDenial: .microphoneDenied
+        )
+        let host = ChatViewModel(context: .local)
+        controller.start(context: .local, host: host, engineKind: .chained)
+        let refused = await VoiceLiveMacTests.waitUntil { controller.startFailure != nil }
+        #expect(refused)
+
+        controller.start(context: .local, host: host, engineKind: .gptLive)
+        #expect(controller.pendingConsent == .openAI)
+        #expect(controller.startFailure == nil)
+    }
+
+    /// Ending while the permission prompt is still in front of the user
+    /// mounts nothing: `AppleOnDeviceVoiceListener.authorize()` is not
+    /// cancellation-aware, so the prompt stays up, but its late answer is
+    /// dropped on the cancelled start task.
+    @Test @MainActor func anEndDuringThePermissionPromptNeverMountsASession() async {
+        let gate = AuthorizationGate()
+        let listener = FakeListener()
+        let speaker = FakeSpeaker()
+        let controller = VoiceLiveController(
+            chained: VoiceLiveController.Wiring(
+                makeSession: { _, host in
+                    var configuration = ChainedVoiceEngine.Configuration()
+                    configuration.tickInterval = nil
+                    return VoiceLiveController.Session(
+                        engine: ChainedVoiceEngine(
+                            listener: listener, speaker: speaker,
+                            turnHost: host, configuration: configuration
+                        ),
+                        bridge: nil
+                    )
+                },
+                externalRecipient: nil,
+                authorize: { await gate.wait(); return nil }
+            ),
+            registry: VoiceLiveSessionRegistry(),
+            consent: VoiceLiveMacTests.consentStore(accepted: false)
+        )
+
+        controller.start(context: .local, host: ChatViewModel(context: .local), engineKind: .chained)
+        let waiting = await VoiceLiveMacTests.waitUntil { gate.isWaiting }
+        #expect(waiting)
+        #expect(controller.holdsSession)
+
+        controller.endImmediately()
+        #expect(!controller.holdsSession)
+        gate.release()   // the user answers the prompt after the session is gone
+
+        let mounted = await VoiceLiveMacTests.waitUntil(timeoutSeconds: 0.4) {
+            controller.engine != nil || listener.starts > 0
+        }
+        #expect(!mounted)
+        #expect(controller.engine == nil)
+        #expect(listener.starts == 0)
+    }
+
+    // MARK: - Panel copy
+
+    @Test func thePanelSaysTheVoiceStaysOnThisMac() {
+        let hermes = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "edge", playbackPreference: "hermes"
+        )
+        #expect(hermes.contains("edge"))
+        #expect(hermes.contains("this Mac"))
+        // No provider resolved yet: say so rather than naming a provider
+        // Scarf doesn't know.
+        let unknown = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: nil, playbackPreference: "hermes"
+        )
+        #expect(!unknown.contains("edge"))
+        #expect(!unknown.isEmpty)
+    }
+
+    /// The privacy line and the chained factory read ONE preference. With
+    /// System Voice chosen the factory builds a plain `SystemVoiceSpeaker`
+    /// and the host's provider is never asked to speak anything, so the
+    /// line must not name it (or claim the audio reaches the host).
+    @Test func thePrivacyLineFollowsThePlaybackEnginePreference() {
+        #expect(VoiceLiveController.chainedPlaybackEngine(preference: "hermes") == .hermes)
+        for system in ["system", nil, "", "nonsense"] as [String?] {
+            #expect(VoiceLiveController.chainedPlaybackEngine(preference: system) == .system, "\(system ?? "nil")")
+        }
+
+        let system = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "openai", playbackPreference: "system"
+        )
+        #expect(!system.contains("openai"))
+        #expect(!system.contains("Hermes host"))
+        #expect(system.contains("this Mac"))
+
+        let hermes = VoiceLivePresentation.chainedPrivacyNote(
+            ttsProvider: "openai", playbackPreference: "hermes"
+        )
+        #expect(hermes.contains("openai"))
+        #expect(hermes.contains("Hermes host"))
+    }
+
+    /// The Settings row is the same rule: System Voice never bills a
+    /// provider, so it must not print one or badge it Paid.
+    @Test func theSettingsTTSRowFollowsThePlaybackEnginePreference() {
+        let system = VoiceTab.chainedTextToSpeechLabel(provider: "openai", playbackPreference: "system")
+        #expect(!system.lowercased().contains("openai"))
+        #expect(system.contains("this Mac") || system.contains("This Mac"))
+        #expect(VoiceTab.chainedTTSCost(provider: "openai", playbackPreference: "system") == .free)
+
+        let hermes = VoiceTab.chainedTextToSpeechLabel(provider: "openai", playbackPreference: "hermes")
+        #expect(hermes.contains("openai"))
+        #expect(VoiceTab.chainedTTSCost(provider: "openai", playbackPreference: "hermes") == .paid)
+        // An unset key still names Hermes's default when the host speaks.
+        #expect(VoiceTab.chainedTextToSpeechLabel(provider: "", playbackPreference: "hermes").contains("edge"))
+    }
+
+    /// An absent `tts.provider` is Hermes's default, `edge` — resolved by
+    /// NAME (the iOS twin's step) and then classified, so the two apps
+    /// can't drift apart on what "" costs.
+    @Test func anUnsetTTSProviderResolvesToEdgeByName() {
+        #expect(VoiceTab.resolvedTTSProviderName("") == "edge")
+        #expect(VoiceTab.resolvedTTSProviderName("  ") == "edge")
+        #expect(VoiceTab.resolvedTTSProviderName(" OpenAI ") == "openai")
+        #expect(VoiceTab.ttsCost(for: "") == VoiceTab.ttsCost(for: "edge"))
+    }
+
+    /// The chained panel never shows a cost: there is none.
+    @Test func theChainedPanelShowsNoCost() {
+        #expect(!VoiceLivePresentation.showsCost(for: .chained))
+        #expect(VoiceLivePresentation.showsCost(for: .gptLive))
+    }
+
+    @Test func theFallbackToTheSystemVoiceIsExplained() {
+        let line = VoiceLivePresentation.notice(.speechFallback)
+        #expect(!line.isEmpty)
+        #expect(line.contains("system voice"))
+    }
+
+    // MARK: - Settings › Voice
+
+    /// C1: below v0.20.1 the whole "Voice conversation" section is gone, so
+    /// the tab renders exactly as it did before P7.
+    @Test func theVoiceConversationSectionIsHiddenBelowTheSpeechFloor() {
+        #expect(!VoiceTab.showsVoiceConversationSection(capabilities: Self.v0200))
+        #expect(!VoiceTab.showsVoiceConversationSection(capabilities: .empty))
+        #expect(VoiceTab.showsVoiceConversationSection(capabilities: Self.v0201))
+        #expect(VoiceTab.showsVoiceConversationSection(capabilities: Self.v0213))
+    }
+
+    /// The free/paid badge next to the resolved TTS provider.
+    @Test func theTTSProviderBadgeSeparatesFreeFromPaid() {
+        for free in ["edge", "piper", "kittentts", "neutts", ""] {
+            #expect(VoiceTab.ttsCost(for: free) == .free, "\(free)")
+        }
+        for paid in ["openai", "elevenlabs", "xai", "deepinfra", "gemini", "mistral", "minimax"] {
+            #expect(VoiceTab.ttsCost(for: paid) == .paid, "\(paid)")
+        }
+        // A plugin-registered provider Scarf can't classify claims nothing.
+        #expect(VoiceTab.ttsCost(for: "acme-labs") == .unknown)
+    }
+
+    /// The chained rows say where each half of the loop runs.
+    @Test func theChainedRowsNameBothHalvesOfTheLoop() {
+        #expect(VoiceTab.chainedSpeechToTextLabel().contains("this Mac"))
+        #expect(VoiceTab.chainedTextToSpeechLabel(provider: "edge", playbackPreference: "hermes").contains("edge"))
+        #expect(!VoiceTab.chainedPrivacyNote().isEmpty)
     }
 }

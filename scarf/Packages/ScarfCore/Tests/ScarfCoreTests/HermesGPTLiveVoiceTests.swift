@@ -84,11 +84,13 @@ import Foundation
             (new, "gpt-live", .ready),
             (new, "gpt_live", .ready),
             (new, "live", .ready),
-            (new, "chained", .hidden(.chainedMode)),
-            (new, nil, .hidden(.chainedMode)),
-            (new, "", .hidden(.chainedMode)),
-            (old, "gpt-live", .hidden(.hermesTooOld)),
-            (old, "chained", .hidden(.hermesTooOld)),
+            // P7: chained has an engine now, so it is shown, not hidden —
+            // and v0.21.2 clears the chained floor (v0.20.1) either way.
+            (new, "chained", .chainedReady),
+            (new, nil, .chainedReady),
+            (new, "", .chainedReady),
+            (old, "gpt-live", .chainedReady),
+            (old, "chained", .chainedReady),
             (.empty, "gpt-live", .hidden(.hermesTooOld)),
         ]
         for (caps, mode, expected) in rows {
@@ -102,8 +104,8 @@ import Foundation
         let live = HermesConfig(yaml: "voice:\n  voice_chat_mode: gpt_live\n")
         let chained = HermesConfig(yaml: "voice:\n  record_key: ctrl+b\n")
         #expect(VoiceLiveReadiness.availability(capabilities: caps, config: live) == .ready)
-        #expect(VoiceLiveReadiness.availability(capabilities: caps, config: chained) == .hidden(.chainedMode))
-        #expect(VoiceLiveReadiness.availability(capabilities: caps, config: nil) == .hidden(.chainedMode))
+        #expect(VoiceLiveReadiness.availability(capabilities: caps, config: chained) == .chainedReady)
+        #expect(VoiceLiveReadiness.availability(capabilities: caps, config: nil) == .chainedReady)
     }
 
     /// C1: below v0.21.3 the ScarfGo setter refuses without spawning a
