@@ -170,13 +170,13 @@ import Foundation
 
     /// The persisted row is the spoken words; the OpenAI voice-live note is
     /// NOT attached (nothing paraphrases the reply here).
-    @Test func theTurnCarriesTheChainedNoteNotTheVoiceLiveOne() async {
+    @Test func theTurnCarriesTheChainedNoteNotTheVoiceLiveOne() async throws {
         await engine.start()
         await say("hello there")
-        let request = try! #require(host.submitted.first)
+        let request = try #require(host.submitted.first)
         #expect(request.noteStyle == .chained)
         #expect(request.prompt == "hello there")
-        let note = try! #require(request.contextNotes.first)
+        let note = try #require(request.contextNotes.first)
         #expect(note.uri == VoiceChainedTurnNote.uri)
         #expect(!note.text.contains(VoiceLiveTurnNote.note))
         #expect(note.text.contains("User: hello there"))
@@ -451,7 +451,7 @@ import Foundation
 
     /// A dropped utterance was never said to Hermes, so neither it nor the
     /// canned line explaining the drop may turn up in the next turn's context.
-    @Test func aDroppedUtteranceNeverJoinsTheModelContext() async {
+    @Test func aDroppedUtteranceNeverJoinsTheModelContext() async throws {
         await engine.start()
         host.isVoiceTurnBusy = true
         listener.emit(.utterance("cancel the production deploy"))
@@ -461,15 +461,15 @@ import Foundation
 
         host.isVoiceTurnBusy = false
         await say("what is the weather")
-        let request = try! #require(host.submitted.first)
-        let note = try! #require(request.contextNotes.first)
+        let request = try #require(host.submitted.first)
+        let note = try #require(request.contextNotes.first)
         #expect(!note.text.contains("production deploy"))
         #expect(!note.text.contains("still working"))
         #expect(note.text.contains("User: what is the weather"))
     }
 
     /// Same rule for an unreachable host.
-    @Test func anUnsubmittableUtteranceNeverJoinsTheModelContextEither() async {
+    @Test func anUnsubmittableUtteranceNeverJoinsTheModelContextEither() async throws {
         await engine.start()
         host.submitError = Boom()
         listener.emit(.utterance("rotate the api key"))
@@ -478,8 +478,8 @@ import Foundation
 
         host.submitError = nil
         await say("hello again")
-        let request = try! #require(host.submitted.first)
-        let note = try! #require(request.contextNotes.first)
+        let request = try #require(host.submitted.first)
+        let note = try #require(request.contextNotes.first)
         #expect(!note.text.contains("could not reach Hermes"))
         #expect(note.text.contains("User: hello again"))
     }
