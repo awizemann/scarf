@@ -186,7 +186,10 @@ import Foundation
         await engine.start()
         listener.emit(.partial("what is"))
         listener.emit(.partial("what is the weather"))
-        await settle { self.engine.captions.count == 1 }
+        // Settle on the SECOND partial's text, not on "one caption": the
+        // first partial already makes one caption, and under load the
+        // second may not have landed when the count check passes.
+        await settle { self.engine.captions.map(\.text) == ["what is the weather"] }
         #expect(engine.captions.map(\.text) == ["what is the weather"])
         await say("what is the weather today")
         #expect(engine.captions.count == 1)
