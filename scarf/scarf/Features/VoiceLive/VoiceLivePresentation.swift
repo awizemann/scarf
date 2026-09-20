@@ -18,6 +18,34 @@ enum VoiceLivePresentation {
         // com.scarf / LiveVoice; the panel never shows it (F4).
         /// Offer the macOS microphone privacy pane.
         let offersMicrophoneSettings: Bool
+        /// Offer the macOS speech-recognition privacy pane (chained only —
+        /// speech recognition is a SEPARATE TCC entry from the microphone,
+        /// with its own pane, so pointing at the microphone one would send
+        /// the user to a switch that is already on).
+        var offersSpeechRecognitionSettings = false
+    }
+
+    /// Whether this engine's panel shows the elapsed/cost readout's cost
+    /// half. Chained costs nothing — no vendor minute, no key — so a
+    /// "$0.00" would be noise pretending to be a bill.
+    static func showsCost(for kind: VoiceEngineKind) -> Bool {
+        switch kind {
+        case .gptLive: return true
+        case .chained: return false
+        }
+    }
+
+    /// The chained panel's one privacy line, in place of GPT-Live's cost
+    /// line. `ttsProvider` is the host's resolved `tts.provider`; `nil`
+    /// means Scarf doesn't know it yet (the config hasn't been read) or the
+    /// Mac is set to speak with its own voice, so the line names the system
+    /// voice rather than inventing a provider.
+    static func chainedPrivacyNote(ttsProvider: String?) -> String {
+        guard let provider = ttsProvider?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !provider.isEmpty else {
+            return String(localized: "Your voice stays on this Mac; replies are spoken by the system voice.")
+        }
+        return String(localized: "Your voice stays on this Mac; replies are spoken by \(provider) on the Hermes host.")
     }
 
     static func phaseLabel(_ phase: VoiceConversationPhase) -> String {
@@ -67,6 +95,8 @@ enum VoiceLivePresentation {
             return String(localized: "Hermes has been waiting a long time. Live Voice ends in about a minute unless you speak, to save cost.")
         case .endingSoon:
             return String(localized: "No one has spoken for a while. Live Voice ends in about a minute unless you speak, to save cost.")
+        case .speechFallback:
+            return String(localized: "The Hermes host couldn't speak part of that reply, so Scarf used this Mac's system voice.")
         }
     }
 
@@ -112,6 +142,19 @@ enum VoiceLivePresentation {
                 message: String(localized: "Scarf can't use the microphone."),
                 guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Microphone, then try again."),
                 offersMicrophoneSettings: true
+            )
+        case .speechRecognitionDenied:
+            return FailureCopy(
+                message: String(localized: "Scarf can't use speech recognition."),
+                guidance: String(localized: "Allow Scarf in System Settings › Privacy & Security › Speech Recognition, then try again."),
+                offersMicrophoneSettings: false,
+                offersSpeechRecognitionSettings: true
+            )
+        case .speechRecognitionUnavailable:
+            return FailureCopy(
+                message: String(localized: "This Mac can't transcribe your language without sending audio away."),
+                guidance: String(localized: "Download the language in System Settings › Keyboard › Dictation, or switch your Mac's language to one it can transcribe on-device, then try again. Scarf never falls back to a server for this."),
+                offersMicrophoneSettings: false
             )
         case .microphoneBusy:
             return FailureCopy(

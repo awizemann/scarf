@@ -32,6 +32,35 @@ final class VoiceLiveController {
 
     typealias SessionFactory = @MainActor (ServerContext, any VoiceTurnHost) -> Session
 
+    /// Permission prompts an engine needs cleared before it starts.
+    /// Returns `nil` when everything is granted. Chained needs speech
+    /// recognition AND the microphone (two separate TCC entries); GPT-Live
+    /// needs neither here, because its microphone lives inside the web
+    /// view, which asks WebKit's own way.
+    typealias Authorizer = @MainActor () async -> VoiceListenerError?
+
+    /// Everything that differs between the two engines the one composer
+    /// button mounts (``VoiceEngineKind``). Injectable so tests never touch
+    /// a microphone, a speech recognizer or a synthesizer.
+    struct Wiring {
+        let makeSession: SessionFactory
+        /// Who this engine sends the user's data to directly, or `nil` when
+        /// nothing leaves the user's devices and Hermes host — chained is
+        /// `nil` (on-device transcription), so it never asks for consent.
+        let externalRecipient: VoiceDataRecipient?
+        let authorize: Authorizer?
+
+        init(
+            makeSession: @escaping SessionFactory,
+            externalRecipient: VoiceDataRecipient? = nil,
+            authorize: Authorizer? = nil
+        ) {
+            self.makeSession = makeSession
+            self.externalRecipient = externalRecipient
+            self.authorize = authorize
+        }
+    }
+
     /// Why a start the user asked for produced no session.
     enum StartRefusal: Equatable {
         /// Another window holds the app's one Live Voice session.
@@ -59,8 +88,58 @@ final class VoiceLiveController {
         return Session(engine: engine, bridge: bridge)
     }
 
+    /// Production wiring for the FREE path (P7b): on-device speech in, an
+    /// ordinary Hermes turn, spoken audio out. No web view to host, no
+    /// vendor, no key and no cost.
+    ///
+    /// The speaker honours the Settings › Voice "Playback Engine" choice,
+    /// the same client-side preference the per-message speaker button uses:
+    /// Hermes Voice synthesizes through the host's `tts.*` provider and
+    /// drops to this Mac's voice for any sentence the host can't speak;
+    /// System Voice never leaves the Mac at all. No capability check is
+    /// needed here — the chained engine only mounts above
+    /// `hasHermesSpeechSynthesis`, which is exactly what
+    /// `PlaybackEngine.resolve` gates "hermes" on.
+    static let chained: SessionFactory = { context, host in
+        let box = ChainedEngineBox()
+        let preference = UserDefaults.standard.string(forKey: MessageSpeechService.engineKey)
+        let speaker: any VoiceSpeaker
+        if preference == HermesSpeechService.PlaybackEngine.hermes.rawValue {
+            speaker = FallbackVoiceSpeaker(
+                primary: HermesVoiceSpeaker(context: context),
+                fallback: SystemVoiceSpeaker(),
+                // One banner line per session, not per sentence.
+                onFirstFallback: { box.engine?.noteSpeechFallback() }
+            )
+        } else {
+            speaker = SystemVoiceSpeaker()
+        }
+        let engine = ChainedVoiceEngine(
+            listener: AppleOnDeviceVoiceListener(),
+            speaker: speaker,
+            turnHost: host
+        )
+        box.engine = engine
+        return Session(engine: engine, bridge: nil)
+    }
+
+    /// Breaks the speaker ↔ engine cycle: the fallback speaker's one-time
+    /// notice has to reach an engine that does not exist yet when the
+    /// speaker is built.
+    @MainActor
+    private final class ChainedEngineBox {
+        weak var engine: ChainedVoiceEngine?
+    }
+
     private(set) var engine: (any VoiceConversationEngine)?
     private(set) var bridge: WebViewVoiceMediaBridge?
+    /// Which engine the current (or last) session mounts. `nil` before the
+    /// first start.
+    private(set) var engineKind: VoiceEngineKind?
+    /// A start that never produced a session because a permission the
+    /// engine needs was refused. The panel shows it with the same copy an
+    /// engine failure gets; cleared by the next start and by `dismiss`.
+    private(set) var startFailure: VoiceSessionFailure?
     /// Set when the host ended the session for a reason the panel shows.
     /// Cleared by the next start and by `dismiss`.
     private(set) var endNote: EndNote?
@@ -79,26 +158,46 @@ final class VoiceLiveController {
     /// ``acceptConsent()``; ``declineConsent()`` drops the start.
     private(set) var pendingConsent: VoiceDataRecipient?
 
-    @ObservationIgnored private let makeSession: SessionFactory
+    /// One wiring per engine kind. `start` picks by the readiness
+    /// verdict's ``VoiceLiveAvailability/engineKind``.
+    @ObservationIgnored private let gptLiveWiring: Wiring
+    @ObservationIgnored private let chainedWiring: Wiring
     @ObservationIgnored private let registry: VoiceLiveSessionRegistry
     @ObservationIgnored private let consent: VoiceDataConsentStore
-    /// Who the engine `makeSession` builds sends data to directly — the
-    /// consent rule's input (``VoiceDataConsent``). Travels with the
-    /// factory: the production factory is GPT-Live, so the default is its
-    /// recipient, and an engine that keeps data local passes `nil`.
-    @ObservationIgnored private let externalRecipient: VoiceDataRecipient?
     @ObservationIgnored private var startTask: Task<Void, Never>?
 
+    /// - Parameters:
+    ///   - makeSession: overrides how the GPT-Live session is built (tests).
+    ///   - externalRecipient: who that engine sends data to; `nil` means it
+    ///     keeps everything local and never asks for consent.
+    ///   - chained: overrides the whole chained wiring (tests inject a fake
+    ///     listener, speaker and authorizer so no hardware is touched).
     init(
         makeSession: SessionFactory? = nil,
         externalRecipient: VoiceDataRecipient? = GPTLiveEngine.externalRecipient,
+        chained: Wiring? = nil,
         registry: VoiceLiveSessionRegistry? = nil,
         consent: VoiceDataConsentStore? = nil
     ) {
-        self.makeSession = makeSession ?? Self.gptLive
-        self.externalRecipient = externalRecipient
+        self.gptLiveWiring = Wiring(
+            makeSession: makeSession ?? Self.gptLive,
+            externalRecipient: externalRecipient
+        )
+        self.chainedWiring = chained ?? Wiring(
+            makeSession: Self.chained,
+            // On-device transcription: nothing to consent to.
+            externalRecipient: ChainedVoiceEngine.externalRecipient,
+            authorize: { await AppleOnDeviceVoiceListener.authorize() }
+        )
         self.registry = registry ?? .shared
         self.consent = consent ?? .shared
+    }
+
+    private func wiring(for kind: VoiceEngineKind) -> Wiring {
+        switch kind {
+        case .gptLive: return gptLiveWiring
+        case .chained: return chainedWiring
+        }
     }
 
     /// A session exists and hasn't finished (connecting through ending).
@@ -119,7 +218,7 @@ final class VoiceLiveController {
     /// The first start on this Mac for an engine that sends data to a third
     /// party only raises ``pendingConsent`` (the consent sheet); the caller
     /// starts again after ``acceptConsent()``.
-    func start(context: ServerContext, host: any VoiceTurnHost) {
+    func start(context: ServerContext, host: any VoiceTurnHost, engineKind: VoiceEngineKind = .gptLive) {
         guard !holdsSession else { return }
         // The consent sheet can be up for minutes, and another window may
         // claim the app's one session while it is. Silently returning here
@@ -130,30 +229,61 @@ final class VoiceLiveController {
             startRefusal = .blockedByAnotherWindow
             return
         }
-        if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient, store: consent) {
+        let wiring = self.wiring(for: engineKind)
+        if let recipient = VoiceDataConsent.pendingRecipient(for: wiring.externalRecipient, store: consent) {
             pendingConsent = recipient
             return
         }
         pendingConsent = nil
         startRefusal = nil
-        // GPT-Live owns the speaker: silence any message being read aloud.
-        // (The Mac has no auto-speak, so there is nothing else to mute.)
+        startFailure = nil
+        // The voice session owns the speaker, whichever engine it is:
+        // silence any message being read aloud. (The Mac has no auto-speak,
+        // so there is nothing else to mute.)
         MessageSpeechService.shared.stop()
         registry.claim(self)
         endNote = nil
-        let session = makeSession(context, host)
-        engine = session.engine
-        bridge = session.bridge
-        let engine = session.engine
+        self.engineKind = engineKind
+        // `isStartPending` covers the whole build — including the chained
+        // permission prompts, which can sit in front of the user for a long
+        // time — so `holdsSession` is true throughout and a second window
+        // cannot slip a start into the gap.
         isStartPending = true
         startTask = Task { [weak self] in
             // An end before this ran cancelled it; the engine never starts.
             guard !Task.isCancelled else { return }
+            // Chained needs speech recognition and the microphone before it
+            // can open an audio tap. A refusal stops here: no engine is
+            // built, nothing is opened, and the panel says which permission
+            // and where to grant it.
+            if let authorize = wiring.authorize, let denial = await authorize() {
+                guard let self, !Task.isCancelled else { return }
+                self.isStartPending = false
+                self.startFailure = Self.failure(for: denial)
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            let session = wiring.makeSession(context, host)
+            self.engine = session.engine
+            self.bridge = session.bridge
             // No suspension between here and the engine's own
             // `.startRequested`, so `holdsSession` never reads false in
             // between.
-            self?.isStartPending = false
-            await engine.start()
+            self.isStartPending = false
+            await session.engine.start()
+        }
+    }
+
+    /// A refused permission as the panel reports it. Mirrors
+    /// `ChainedVoiceEngine`'s own mapping, for the denials that are caught
+    /// before any engine exists.
+    private static func failure(for error: VoiceListenerError) -> VoiceSessionFailure {
+        switch error {
+        case .speechRecognitionDenied: return .speechRecognitionDenied
+        case .recognizerUnavailable, .onDeviceRecognitionUnsupported: return .speechRecognitionUnavailable
+        case .microphoneDenied: return .microphoneDenied
+        case .audioEngineFailed(let detail), .recognitionFailed(let detail):
+            return .mediaUnavailable(detail: detail)
         }
     }
 
@@ -210,6 +340,7 @@ final class VoiceLiveController {
         engine = nil
         bridge = nil
         endNote = nil
+        startFailure = nil
     }
 
     func toggleMute() {

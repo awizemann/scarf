@@ -2,9 +2,14 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
-/// What the composer needs to show the Live Voice button. Built by the chat
-/// pane only when `VoiceLiveReadiness.availability` is `.ready`.
+/// What the composer needs to show the voice button. Built by the chat pane
+/// only when `VoiceLiveReadiness.availability` names an engine — one button
+/// for both, since the verdict decides what it mounts (P7b).
 struct VoiceLiveComposerEntry {
+    /// Which engine a start would mount. Only the wording differs: chained
+    /// costs nothing and keeps the audio on this Mac, GPT-Live bills the
+    /// host's OpenAI key per minute.
+    let engineKind: VoiceEngineKind
     /// A session is running (the button ends it).
     let isActive: Bool
     /// A session can start: the chat has a live ACP session to hand turns to.
@@ -37,21 +42,29 @@ struct VoiceLiveComposerButton: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .help(helpText)
-        .accessibilityLabel(entry.isActive ? Text("End Live Voice") : Text("Start Live Voice"))
+        .accessibilityLabel(entry.isActive ? Text("End voice session") : Text("Start voice session"))
         .accessibilityHint(accessibilityHint)
         .accessibilityIdentifier("chat.composer.voiceLive")
     }
 
     private var accessibilityHint: Text {
         if entry.isActive { return Text(verbatim: "") }
-        if entry.blockedByAnotherWindow { return Text("Live Voice is running in another Scarf window. End it there first.") }
-        return Text("Talk with Hermes. GPT-Live bills about $0.05 per minute to the OpenAI key on the Hermes host.")
+        if entry.blockedByAnotherWindow { return Text("A voice session is running in another Scarf window. End it there first.") }
+        switch entry.engineKind {
+        case .gptLive:
+            return Text("Talk with Hermes. GPT-Live bills about $0.05 per minute to the OpenAI key on the Hermes host.")
+        case .chained:
+            return Text("Talk with Hermes. Your voice is transcribed on this Mac and the reply is read aloud. Free.")
+        }
     }
 
     private var helpText: Text {
-        if entry.isActive { return Text("End Live Voice (⌘.)") }
-        if entry.blockedByAnotherWindow { return Text("Live Voice is running in another Scarf window. End it there first.") }
-        if entry.canStart { return Text("Start Live Voice: talk with Hermes (about $0.05 per minute)") }
-        return Text("Open a chat session to talk with Hermes.")
+        if entry.isActive { return Text("End voice session (⌘.)") }
+        if entry.blockedByAnotherWindow { return Text("A voice session is running in another Scarf window. End it there first.") }
+        guard entry.canStart else { return Text("Open a chat session to talk with Hermes.") }
+        switch entry.engineKind {
+        case .gptLive: return Text("Start Live Voice: talk with Hermes (about $0.05 per minute)")
+        case .chained: return Text("Start talking with Hermes (free; your voice stays on this Mac)")
+        }
     }
 }
