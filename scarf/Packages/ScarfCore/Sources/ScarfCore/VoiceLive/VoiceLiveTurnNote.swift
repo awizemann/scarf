@@ -39,3 +39,39 @@ public enum VoiceLiveTurnNote {
         ACPContextNote(uri: uri, text: text(context: context))
     }
 }
+
+/// The chained engine's per-turn note (``ChainedVoiceEngine``).
+///
+/// Scarf's own wording, NOT vendored from Hermes: Hermes has no note for its
+/// chained mode (the desktop's chained loop sends the transcript as a plain
+/// prompt), and `VOICE_LIVE_TURN_NOTE` would be wrong here — it tells the
+/// model "a voice model paraphrases your reply", while in the chained path a
+/// text-to-speech voice reads the reply out VERBATIM. What stays the same is
+/// the useful half: the prompt is a transcript that may contain mis-hearings,
+/// and the answer must be short, plain, spoken prose with no markdown.
+///
+/// Like ``VoiceLiveTurnNote`` it rides the model input as an embedded
+/// resource; the persisted user row is the spoken words alone.
+public enum VoiceChainedTurnNote {
+    public static let note =
+        "[Note: this message came from a spoken conversation. The text is a speech-to-text transcript "
+        + "(it may contain mis-hearings and hesitations; use the latest intent). Your reply will be read "
+        + "aloud word for word by a text-to-speech voice: answer in plain conversational sentences, keep "
+        + "it short (a few sentences unless the user asked for detail), no markdown, no lists, no code "
+        + "blocks, and no URLs. Do the work with your tools as usual; only the final facts need to be "
+        + "spoken. Do not claim an action succeeded before it actually did.]"
+
+    /// Hermes shows the last path segment in the "[Attached file: …]" header
+    /// of the model input.
+    public static let uri = "scarf://voice-chained/voice-chained-turn-note"
+
+    public static func text(context: String) -> String {
+        let trimmed = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return note }
+        return "\(note)\n[Recent spoken conversation, newest last:\n\(trimmed)]"
+    }
+
+    public static func contextNote(context: String) -> ACPContextNote {
+        ACPContextNote(uri: uri, text: text(context: context))
+    }
+}

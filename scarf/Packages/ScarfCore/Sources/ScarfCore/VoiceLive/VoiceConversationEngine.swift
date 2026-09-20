@@ -90,12 +90,24 @@ public struct VoiceTurnRequest: Sendable, Equatable {
     /// (`_rewrite_prompt_for_interrupt`, `acp_adapter/server.py:680-693` @
     /// v2026.9.14) instead of leaking it into the next typed message.
     public let supersedesCancelledTurn: Bool
+    /// Which per-turn note rides the MODEL input. GPT-Live sends Hermes's own
+    /// voice-live note (a vendor voice paraphrases the reply); the chained
+    /// engine sends its own, because there the reply is read aloud VERBATIM
+    /// by a text-to-speech voice and nothing paraphrases it.
+    public let noteStyle: VoiceTurnNoteStyle
 
-    public init(id: String, prompt: String, context: String, supersedesCancelledTurn: Bool = false) {
+    public init(
+        id: String,
+        prompt: String,
+        context: String,
+        supersedesCancelledTurn: Bool = false,
+        noteStyle: VoiceTurnNoteStyle = .voiceLive
+    ) {
         self.id = id
         self.prompt = prompt
         self.context = context
         self.supersedesCancelledTurn = supersedesCancelledTurn
+        self.noteStyle = noteStyle
     }
 
     /// Pass these to `ACPClient.sendPrompt(sessionId:text:images:contextNotes:)`
@@ -103,8 +115,23 @@ public struct VoiceTurnRequest: Sendable, Equatable {
     /// embedded resource the model reads and the transcript never stores.
     /// EMPTY for a superseding turn — see ``supersedesCancelledTurn``.
     public var contextNotes: [ACPContextNote] {
-        supersedesCancelledTurn ? [] : [VoiceLiveTurnNote.contextNote(context: context)]
+        guard !supersedesCancelledTurn else { return [] }
+        switch noteStyle {
+        case .voiceLive: return [VoiceLiveTurnNote.contextNote(context: context)]
+        case .chained: return [VoiceChainedTurnNote.contextNote(context: context)]
+        case .none: return []
+        }
     }
+}
+
+/// Which voice note a turn carries as model context.
+public enum VoiceTurnNoteStyle: Sendable, Equatable {
+    /// Hermes's own `VOICE_LIVE_TURN_NOTE` (``VoiceLiveTurnNote``).
+    case voiceLive
+    /// The chained engine's note (``VoiceChainedTurnNote``).
+    case chained
+    /// No note at all.
+    case none
 }
 
 /// The assistant's reply to a voice turn, as far as it has streamed.
