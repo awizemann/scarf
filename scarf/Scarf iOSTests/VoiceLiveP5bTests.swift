@@ -15,9 +15,10 @@ import ScarfCore
 
     private static let v0213 = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
     private static let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+    private static let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.7.20)")
 
     @Test func hiddenUnlessReadyWhateverElseHolds() {
-        for availability in [VoiceLiveAvailability.hidden(.hermesTooOld), .hidden(.chainedMode)] {
+        for availability in [VoiceLiveAvailability.hidden(.hermesTooOld)] {
             for chatReady in [true, false] {
                 for dictationIdle in [true, false] {
                     #expect(VoiceLiveComposerGate.entry(
@@ -28,17 +29,34 @@ import ScarfCore
         }
     }
 
+    /// P7c: chained is no longer hidden — it has an engine, and it is
+    /// Hermes's DEFAULT mode, so the button shows on the majority of hosts.
     @Test func readinessFromCapabilitiesAndMode() {
-        // Old host: hidden even in gpt-live mode (C1).
-        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0212, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
-        // Capable host, chained (or config not read yet): hidden.
-        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: nil) == .hidden(.chainedMode))
-        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: "chained") == .hidden(.chainedMode))
+        // Below v0.20.1 nothing can speak: hidden even in gpt-live mode (C1).
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0200, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
+        #expect(VoiceLiveReadiness.availability(capabilities: .empty, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
+        // v0.20.1-v0.21.2: too old for GPT-Live, but chained works.
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0212, voiceChatMode: "gpt-live") == .chainedReady)
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0212, voiceChatMode: nil) == .chainedReady)
+        // Capable host, chained (or config not read yet): chained.
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: nil) == .chainedReady)
+        #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: "chained") == .chainedReady)
         // Capable host in gpt-live mode (any Hermes spelling): ready.
         for raw in ["gpt-live", "gpt_live", "live"] {
             #expect(VoiceLiveReadiness.availability(capabilities: Self.v0213, voiceChatMode: raw) == .ready)
         }
-        #expect(VoiceLiveReadiness.availability(capabilities: .empty, voiceChatMode: "gpt-live") == .hidden(.hermesTooOld))
+        // And each verdict names the engine the composer mounts.
+        #expect(VoiceLiveAvailability.ready.engineKind == .gptLive)
+        #expect(VoiceLiveAvailability.chainedReady.engineKind == .chained)
+        #expect(VoiceLiveAvailability.hidden(.hermesTooOld).engineKind == nil)
+    }
+
+    @Test func bothEnginesRenderTheSameEntry() {
+        for availability in [VoiceLiveAvailability.ready, .chainedReady] {
+            #expect(VoiceLiveComposerGate.entry(
+                availability: availability, chatReady: true,
+                dictationIdle: true, liveVoiceActive: false) == .enabled)
+        }
     }
 
     @Test func disabledWhileDictatingOrDisconnectedOrAlreadyLive() {
@@ -175,6 +193,8 @@ private struct Harness {
 
     final class EngineBox {
         var made: [FakeVoiceEngine] = []
+        /// Which engine each `begin` asked the factory for.
+        var kinds: [VoiceEngineKind] = []
         var phaseAfterStart: VoiceConversationPhase = .connecting
     }
 
@@ -196,7 +216,8 @@ private struct Harness {
         mic: FakeMicrophone = FakeMicrophone(.granted),
         grace: Duration = .milliseconds(20),
         externalRecipient: VoiceDataRecipient? = .openAI,
-        consent: VoiceDataConsentStore? = nil
+        consent: VoiceDataConsentStore? = nil,
+        speechAuthorizer: any VoiceLiveSpeechAuthorizing = AlwaysAuthorizedSpeech()
     ) {
         let consent = consent ?? Self.consentStore()
         self.consent = consent
@@ -205,18 +226,22 @@ private struct Harness {
         let audio = self.audio
         let tasks = self.tasks
         model = VoiceLiveSessionModel(
-            makeSession: { _ in
+            makeSession: { kind, _ in
                 let engine = FakeVoiceEngine()
                 engine.phaseAfterStart = box.phaseAfterStart
                 box.made.append(engine)
-                return .init(engine: engine, bridge: nil)
+                box.kinds.append(kind)
+                return .init(engine: engine, kind: kind, bridge: nil)
             },
-            externalRecipient: externalRecipient,
+            // The chained engine declares no recipient, exactly as
+            // `ChainedVoiceEngine.externalRecipient` does in production.
+            externalRecipient: { kind in kind == .chained ? nil : externalRecipient },
             audioSession: audio,
             backgroundTasks: tasks,
             microphone: mic,
             consent: consent,
-            teardownGrace: grace
+            teardownGrace: grace,
+            speechAuthorizer: speechAuthorizer
         )
     }
 

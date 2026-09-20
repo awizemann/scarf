@@ -376,34 +376,49 @@ struct SettingsView: View {
                 value: vm.config.voice.sttProvider.isEmpty ? "Auto (unset)" : vm.config.voice.sttProvider
             )
         }
-        // Hermes v0.21.3+ only (charter C1): older hosts have no such mode,
-        // and this section renders exactly as before.
-        if caps.hasGPTLiveVoice {
+        // Hermes v0.20.1+ only (charter C1): older hosts can't speak at all,
+        // so this section renders exactly as before. P7c lowered the floor
+        // from v0.21.3 — the chained engine needs only the host's TTS.
+        if caps.hasHermesSpeechSynthesis {
             liveVoiceSection
         }
     }
 
-    /// `voice.voice_chat_mode`: chained (Hermes's default) or gpt-live, which
-    /// turns on the Live Voice button in Chat. Written through the verified
+    /// The host's `voice.voice_chat_mode`, and what that mode means on this
+    /// iPhone. One section since P7c: BOTH modes now have an engine, so the
+    /// picker is the only thing that differs and the rows below it explain
+    /// whichever mode is selected. Written through the verified
     /// `hermes config set` argv (see `VoiceChatMode`, charter C5).
+    private var selectedVoiceChatMode: VoiceChatMode {
+        VoiceChatMode.parse(vm.config.voice.voiceChatMode)
+    }
+
     @ViewBuilder
     private var liveVoiceSection: some View {
         Section {
-            Picker(selection: Binding(
-                get: { VoiceChatMode.parse(vm.config.voice.voiceChatMode) },
-                set: { newMode in saveVoiceChatMode(newMode) }
-            )) {
-                Text("Chained (default)").tag(VoiceChatMode.chained)
-                Text("Live Voice (GPT-Live)").tag(VoiceChatMode.gptLive)
-            } label: {
-                HStack(spacing: ScarfSpace.s2) {
-                    Text("Voice chat mode")
-                    if voiceModeSaving {
-                        ProgressView().controlSize(.small)
+            // `voice.voice_chat_mode` only EXISTS on v0.21.3+ (and
+            // `IOSSettingsViewModel.saveVoiceChatMode` refuses below it), so
+            // an older host shows the mode it is in, read-only, rather than
+            // a picker whose other option can't be written (charter C1/C5).
+            if caps.hasGPTLiveVoice {
+                Picker(selection: Binding(
+                    get: { selectedVoiceChatMode },
+                    set: { newMode in saveVoiceChatMode(newMode) }
+                )) {
+                    Text("Chained (default)").tag(VoiceChatMode.chained)
+                    Text("Live Voice (GPT-Live)").tag(VoiceChatMode.gptLive)
+                } label: {
+                    HStack(spacing: ScarfSpace.s2) {
+                        Text("Mode")
+                        if voiceModeSaving {
+                            ProgressView().controlSize(.small)
+                        }
                     }
                 }
+                .disabled(voiceModeSaving)
+            } else {
+                LabeledContent("Mode") { Text("Chained") }
             }
-            .disabled(voiceModeSaving)
             if let voiceModeError {
                 Label {
                     Text(verbatim: voiceModeError)
@@ -413,11 +428,81 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(ScarfColor.warning)
             }
+            if caps.hasGPTLiveVoice, selectedVoiceChatMode == .gptLive {
+                gptLiveModeRows
+            } else {
+                chainedModeRows
+            }
         } header: {
-            Text("Live Voice")
+            Text("Voice conversation")
         } footer: {
-            Text("Live Voice is a spoken, back-and-forth conversation with Hermes from the Chat tab. Your voice streams directly from this device to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this device's network address, and each session shares recent chat messages for context. It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY, or voice.gpt_live.api_key) and bills that key about $0.05 per minute while a session is open. This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.")
-                .font(.caption)
+            Group {
+                if caps.hasGPTLiveVoice, selectedVoiceChatMode == .gptLive {
+                    Text("Live Voice is a spoken, back-and-forth conversation with Hermes from the Chat tab. Your voice streams directly from this device to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this device's network address, and each session shares recent chat messages for context. It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY, or voice.gpt_live.api_key) and bills that key about $0.05 per minute while a session is open. This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.")
+                } else {
+                    Text("Chained is a spoken conversation from the Chat tab that costs nothing extra. Your voice is turned into words on this iPhone and never leaves it \u{2014} only the words you said go to Hermes, exactly like a typed message. Replies are read aloud by the host's text-to-speech provider, which sees the reply text (Hermes's default, edge, sends it to Microsoft). This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.")
+                }
+            }
+            .font(.caption)
+        }
+    }
+
+    /// GPT-Live rows: what the vendor path needs. Shown only in that mode.
+    @ViewBuilder
+    private var gptLiveModeRows: some View {
+        LabeledContent("Speech to text", value: "OpenAI")
+        LabeledContent("Text to speech", value: "OpenAI")
+        LabeledContent("Cost") {
+            Text("About $0.05 per minute")
+        }
+    }
+
+    /// Chained rows: the two halves of the client loop, and what each costs.
+    @ViewBuilder
+    private var chainedModeRows: some View {
+        LabeledContent("Speech to text") {
+            Text("On this iPhone")
+        }
+        LabeledContent("Text to speech") {
+            HStack(spacing: ScarfSpace.s2) {
+                Text(verbatim: ttsProviderName)
+                ttsCostBadge
+            }
+        }
+    }
+
+    /// The host's `tts.provider`, or Hermes's own default when unset.
+    private var ttsProviderName: String {
+        let raw = vm.config.voice.ttsProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "edge" : raw
+    }
+
+    /// Free or paid, by provider. A conservative split: anything not known
+    /// to be free is labelled nothing at all rather than guessed at.
+    private var ttsCostBadge: some View {
+        Group {
+            switch SettingsView.ttsCost(of: ttsProviderName) {
+            case .free:
+                Text("Free").foregroundStyle(ScarfColor.success)
+            case .paid:
+                Text("Paid").foregroundStyle(ScarfColor.warning)
+            case .unknown:
+                EmptyView()
+            }
+        }
+        .font(.caption.weight(.semibold))
+    }
+
+    enum TTSCost: Equatable { case free, paid, unknown }
+
+    /// Which of Hermes's `tts.provider` values bill the user. Free ones run
+    /// on the host (piper, kittentts, neutts) or on a free public endpoint
+    /// (edge); the rest are vendor APIs on the host's own key.
+    static func ttsCost(of provider: String) -> TTSCost {
+        switch provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "edge", "piper", "kittentts", "neutts": return .free
+        case "openai", "elevenlabs", "xai", "deepinfra", "gemini", "mistral", "minimax": return .paid
+        default: return .unknown
         }
     }
 
@@ -444,7 +529,7 @@ struct SettingsView: View {
             } header: {
                 Text("Live Voice Privacy")
             } footer: {
-                Text("ScarfGo asks before the first Live Voice session on this device. After a reset it asks again.")
+                Text("ScarfGo asks before the first Live Voice (GPT-Live) session on this device. After a reset it asks again. Chained mode sends no voice to anyone, so it never asks.")
                     .font(.caption)
             }
             .sheet(item: $reviewingVoiceConsent) { recipient in
@@ -454,7 +539,7 @@ struct SettingsView: View {
     }
 
     private func saveVoiceChatMode(_ mode: VoiceChatMode) {
-        guard mode != VoiceChatMode.parse(vm.config.voice.voiceChatMode) else { return }
+        guard mode != selectedVoiceChatMode else { return }
         voiceModeSaving = true
         voiceModeError = nil
         let capabilities = caps

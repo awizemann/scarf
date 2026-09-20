@@ -84,18 +84,24 @@ struct ChatView: View {
         capabilitiesStore?.capabilities.hasACPQueue ?? false
     }
 
-    /// v0.21.3+ host. Gates even the config read the Live Voice gate needs,
-    /// so older hosts behave exactly as before (charter C1).
+    /// v0.20.1+ host (`hasHermesSpeechSynthesis`). Gates even the config
+    /// read the voice gate needs, so older hosts behave exactly as before
+    /// (charter C1). P7c lowered this from v0.21.3: the chained engine needs
+    /// only the host's TTS, and it is Hermes's DEFAULT mode.
     private var supportsLiveVoice: Bool {
-        capabilitiesStore?.capabilities.hasGPTLiveVoice ?? false
+        capabilitiesStore?.capabilities.hasHermesSpeechSynthesis ?? false
+    }
+
+    private var liveVoiceAvailability: VoiceLiveAvailability {
+        VoiceLiveReadiness.availability(
+            capabilities: capabilitiesStore?.capabilities ?? .empty,
+            voiceChatMode: controller.voiceChatModeRaw
+        )
     }
 
     private var liveVoiceEntry: VoiceLiveComposerGate.Entry {
         VoiceLiveComposerGate.entry(
-            availability: VoiceLiveReadiness.availability(
-                capabilities: capabilitiesStore?.capabilities ?? .empty,
-                voiceChatMode: controller.voiceChatModeRaw
-            ),
+            availability: liveVoiceAvailability,
             chatReady: controller.state == .ready,
             dictationIdle: pushToTalk.phase == .idle,
             liveVoiceActive: voiceLive.isActive
@@ -209,9 +215,9 @@ struct ChatView: View {
         .task(id: capabilitiesStore?.capabilities.versionLine ?? "") {
             controller.vm.publishCapabilities(capabilitiesStore?.capabilities ?? .empty)
         }
-        // Live Voice gate: re-read `voice.voice_chat_mode` each time Chat
+        // Voice gate: re-read `voice.voice_chat_mode` each time Chat
         // appears (a `.task` re-runs on every appearance), so a mode flipped
-        // in Settings shows up on return. Skipped entirely below v0.21.3.
+        // in Settings shows up on return. Skipped entirely below v0.20.1.
         .task(id: supportsLiveVoice) {
             guard supportsLiveVoice else { return }
             await controller.refreshVoiceChatMode()
@@ -1185,7 +1191,9 @@ struct ChatView: View {
         .disabled(liveVoiceEntry != .enabled)
         .accessibilityLabel("Live Voice")
         .accessibilityHint(liveVoiceEntry == .enabled
-            ? "Starts a spoken conversation with Hermes. Billed at 5 cents a minute on the host's OpenAI key."
+            ? (liveVoiceAvailability == .ready
+                ? "Starts a spoken conversation with Hermes. Billed at 5 cents a minute on the host's OpenAI key."
+                : "Starts a spoken conversation with Hermes. Your voice stays on this iPhone.")
             : (pushToTalk.phase != .idle
                 ? "Unavailable while dictating."
                 : "Unavailable until the chat is connected."))
@@ -1196,7 +1204,15 @@ struct ChatView: View {
         // So `submitVoiceTurn` can explain a spoken request it didn't send.
         controller.voiceComposerNotices = voiceLive
         Task {
-            await voiceLive.begin(host: controller, dictationIdle: pushToTalk.phase == .idle)
+            await voiceLive.begin(
+                host: controller,
+                // The verdict decides the engine: `.chainedReady` mounts the
+                // free on-device path, `.ready` mounts GPT-Live. `nil` can't
+                // happen (the button is hidden then), but chained is the
+                // safe default — it costs nothing.
+                engine: liveVoiceAvailability.engineKind ?? .chained,
+                dictationIdle: pushToTalk.phase == .idle
+            )
         }
     }
 
