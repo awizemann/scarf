@@ -26,6 +26,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Scarf turns your speech into text on this Mac for voice conversations with Hermes. Nothing you say is sent to Apple.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scarf uses the microphone for the voice features you start: Hermes voice chat, and Live Voice sessions, which stream your voice directly from this Mac to OpenAI.</string>
 	<key>SwiftStatsWriteKey</key>
