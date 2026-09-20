@@ -16,10 +16,17 @@ struct VoiceLivePanel: View {
     /// Start a fresh session after one ended ("Start Again").
     let onRestart: () -> Void
     /// The host's resolved `tts.provider`, named in the chained privacy
-    /// line. `nil` when the config hasn't been read yet.
+    /// line — but only when the Playback Engine preference actually sends
+    /// the reply there. `nil` when the config hasn't been read yet.
     var ttsProvider: String?
     /// Whether "Start Again" can work right now (the chat can host turns).
     let canRestart: Bool
+
+    /// The same client-side preference the chained session factory reads:
+    /// it decides whether the reply is spoken by the host's provider or by
+    /// this Mac, so the privacy line has to read it too.
+    @AppStorage(MessageSpeechService.engineKey)
+    private var playbackPreference = HermesSpeechService.PlaybackEngine.system.rawValue
 
     var body: some View {
         if let engine = controller.engine {
@@ -71,7 +78,10 @@ struct VoiceLivePanel: View {
             // What the free path does with the user's voice, in one line,
             // where GPT-Live shows its per-minute cost.
             if controller.engineKind == .chained {
-                Text(verbatim: VoiceLivePresentation.chainedPrivacyNote(ttsProvider: ttsProvider))
+                Text(verbatim: VoiceLivePresentation.chainedPrivacyNote(
+                    ttsProvider: ttsProvider,
+                    playbackPreference: playbackPreference
+                ))
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
