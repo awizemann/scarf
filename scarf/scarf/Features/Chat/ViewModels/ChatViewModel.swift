@@ -159,8 +159,13 @@ final class ChatViewModel {
 
     /// Raw `voice.voice_chat_mode` from config.yaml, read with the other
     /// config diagnostics (off-main). `nil` until the first read, which
-    /// the readiness gate treats as chained (entry point hidden).
+    /// the readiness gate treats as chained (which now has an engine).
     var voiceChatModeRaw: String?
+
+    /// Raw `tts.provider` from config.yaml, read alongside the mode. The
+    /// chained voice panel names it in its privacy line, so the user can
+    /// see who speaks the replies. `nil` until the first read.
+    var voiceTTSProviderRaw: String?
 
     /// Recent voice turns (id, spoken prompt), newest last, so the engine's
     /// reply lookup by request id can find its prompt in the transcript.
@@ -686,11 +691,15 @@ final class ChatViewModel {
             }
             let mode = config.approvalMode
             let voiceChatMode = config.voice.voiceChatMode
+            // The chained panel names the host's resolved TTS provider in
+            // its privacy line; `nil` until the config has been read.
+            let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             await MainActor.run { [weak self] in
                 self?.modelProviderMismatch = resolvedMismatch
                 self?.approvalMode = mode
                 self?.voiceChatModeRaw = voiceChatMode
+                self?.voiceTTSProviderRaw = ttsProvider
             }
         }
     }
@@ -3153,18 +3162,21 @@ extension ChatViewModel: VoiceTurnHost {
             && richChatViewModel.sessionId != nil
     }
 
-    /// The Live Voice gate for this chat (Alan's rule, t-a4665c6e): Hermes
-    /// ≥ 0.21.3 AND `voice.voice_chat_mode` is gpt-live. Anything but
-    /// `.ready` hides the composer entry entirely.
+    /// The voice gate for this chat (P7b): Hermes ≥ 0.21.3 AND
+    /// `voice.voice_chat_mode: gpt-live` mounts GPT-Live; any host that can
+    /// speak (≥ 0.20.1) mounts the free chained engine; below that the
+    /// composer entry is hidden entirely (C1).
     func voiceLiveAvailability(capabilities: HermesCapabilities) -> VoiceLiveAvailability {
         VoiceLiveReadiness.availability(capabilities: capabilities, voiceChatMode: voiceChatModeRaw)
     }
 
-    /// Start a Live Voice session in this chat. No-op unless the chat can
-    /// host voice turns and no session is running.
-    func startVoiceLive() {
+    /// Start a voice session in this chat, mounting whichever engine the
+    /// readiness verdict names. No-op unless the chat can host voice turns,
+    /// the host passes the gate, and no session is running.
+    func startVoiceLive(capabilities: HermesCapabilities) {
         guard canHostVoiceTurns else { return }
-        voiceLive.start(context: context, host: self)
+        guard let engineKind = voiceLiveAvailability(capabilities: capabilities).engineKind else { return }
+        voiceLive.start(context: context, host: self, engineKind: engineKind)
         // A start refused because another window holds the app's one
         // session has no panel to say so on (none was built): the
         // composer's transient hint carries the same sentence the button's
@@ -3207,10 +3219,10 @@ extension ChatViewModel: VoiceTurnHost {
 
     /// Continue on the Live Voice consent sheet: remember the consent, then
     /// start the session the user asked for.
-    func acceptVoiceLiveConsent() {
+    func acceptVoiceLiveConsent(capabilities: HermesCapabilities) {
         guard voiceLive.pendingConsent != nil else { return }
         voiceLive.acceptConsent()
-        startVoiceLive()
+        startVoiceLive(capabilities: capabilities)
     }
 
     /// A voice turn Scarf started is still running and nothing typed is
