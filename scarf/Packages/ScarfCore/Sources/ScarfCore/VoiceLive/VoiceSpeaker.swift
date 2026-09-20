@@ -241,6 +241,12 @@ public final class FallbackVoiceSpeaker: VoiceSpeaker {
     private let primary: any VoiceSpeaker
     private let fallback: any VoiceSpeaker
     private let onFirstFallback: (@MainActor () -> Void)?
+    /// Set by ``stop()``, cleared by the next ``speak(_:)``. A barge-in can
+    /// race the primary speaker into reporting a plain (non-cancellation)
+    /// error for the chunk it was told to abandon; without this flag the
+    /// fallback would then speak that whole chunk over the silence the user
+    /// just asked for.
+    private var stopped = false
     private static let logger = Logger(subsystem: "com.scarf", category: "LiveVoice")
 
     /// - Parameter onFirstFallback: called on the main actor the first time a
@@ -256,9 +262,13 @@ public final class FallbackVoiceSpeaker: VoiceSpeaker {
     }
 
     public func speak(_ text: String) async throws {
+        stopped = false
         do {
             try await primary.speak(text)
         } catch {
+            // A stop while the primary was speaking: the chunk was abandoned
+            // on purpose, so it must not come back out of the system voice.
+            guard !stopped else { return }
             // The host's wording can echo config and paths: log it redacted,
             // never surface it (the apps show one localized sentence).
             Self.logger.notice("Chained TTS fell back to the system voice: \(VoiceLiveHostExchange.redact(error.localizedDescription), privacy: .public)")
@@ -271,6 +281,7 @@ public final class FallbackVoiceSpeaker: VoiceSpeaker {
     }
 
     public func stop() {
+        stopped = true
         primary.stop()
         fallback.stop()
     }

@@ -212,6 +212,121 @@ public final class DefaultVoiceAudioSession: VoiceAudioSessionControlling {
     }
 }
 
+// MARK: - Recognition seam
+
+/// One streaming recognition request: what the audio tap feeds and the
+/// listener ends. A seam, so the listener's decisions can be driven in a test
+/// without the Speech framework (and without a microphone).
+protocol VoiceRecognitionRequesting: AnyObject {
+    var shouldReportPartialResults: Bool { get set }
+    var requiresOnDeviceRecognition: Bool { get set }
+    /// Safe from the realtime audio thread.
+    func appendAudio(_ buffer: AVAudioPCMBuffer)
+    func finishAudio()
+}
+
+extension SFSpeechAudioBufferRecognitionRequest: VoiceRecognitionRequesting {
+    func appendAudio(_ buffer: AVAudioPCMBuffer) { append(buffer) }
+    func finishAudio() { endAudio() }
+}
+
+/// A recognition task in flight.
+protocol VoiceRecognitionTasking: AnyObject {
+    func cancelRecognition()
+}
+
+extension SFSpeechRecognitionTask: VoiceRecognitionTasking {
+    func cancelRecognition() { cancel() }
+}
+
+/// What one recognition callback carries, flattened so no Speech type has to
+/// cross the seam (or a concurrency boundary).
+struct VoiceRecognitionEvent: Sendable, Equatable {
+    var transcript: String?
+    var isFinal: Bool = false
+    var errorMessage: String?
+}
+
+/// The recognizer itself, behind a seam.
+@MainActor
+protocol VoiceRecognizing: AnyObject {
+    var isRecognizerAvailable: Bool { get }
+    var supportsOnDeviceRecognition: Bool { get }
+    func makeRequest() -> any VoiceRecognitionRequesting
+    /// Start recognizing `request`. The handler may be called from any thread.
+    func startTask(
+        with request: any VoiceRecognitionRequesting,
+        handler: @escaping @Sendable (VoiceRecognitionEvent) -> Void
+    ) -> (any VoiceRecognitionTasking)?
+}
+
+/// The production recognizer: `SFSpeechRecognizer`.
+@MainActor
+final class SpeechFrameworkRecognizer: VoiceRecognizing {
+    private let recognizer: SFSpeechRecognizer
+
+    init(_ recognizer: SFSpeechRecognizer) { self.recognizer = recognizer }
+
+    var isRecognizerAvailable: Bool { recognizer.isAvailable }
+    var supportsOnDeviceRecognition: Bool { recognizer.supportsOnDeviceRecognition }
+
+    func makeRequest() -> any VoiceRecognitionRequesting {
+        SFSpeechAudioBufferRecognitionRequest()
+    }
+
+    func startTask(
+        with request: any VoiceRecognitionRequesting,
+        handler: @escaping @Sendable (VoiceRecognitionEvent) -> Void
+    ) -> (any VoiceRecognitionTasking)? {
+        guard let request = request as? SFSpeechAudioBufferRecognitionRequest else { return nil }
+        return recognizer.recognitionTask(with: request) { result, error in
+            handler(VoiceRecognitionEvent(
+                transcript: result?.bestTranscription.formattedString,
+                isFinal: result?.isFinal ?? false,
+                errorMessage: error?.localizedDescription))
+        }
+    }
+}
+
+/// The microphone tap, behind a seam for the same reason.
+@MainActor
+protocol VoiceAudioTapping: AnyObject {
+    /// Begin tapping. `onBuffer` is called on a REALTIME AUDIO THREAD.
+    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws
+    func stop()
+}
+
+/// The production tap: `AVAudioEngine`'s input node.
+@MainActor
+final class AVAudioEngineTap: VoiceAudioTapping {
+    private var engine: AVAudioEngine?
+
+    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
+        let audioEngine = AVAudioEngine()
+        let input = audioEngine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw VoiceListenerError.audioEngineFailed(detail: "no input format")
+        }
+        // The tap runs on a REALTIME AUDIO THREAD. It may only touch things
+        // that are safe off the main actor: the lock-guarded level box and
+        // the lock-guarded current request (`append` is documented as safe
+        // from the audio thread). Nothing here may hop to, or assume, the
+        // main actor -- everything MainActor happens on the tick instead.
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in onBuffer(buffer) }
+        audioEngine.prepare()
+        try audioEngine.start()
+        engine = audioEngine
+    }
+
+    func stop() {
+        guard let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        self.engine = nil
+    }
+}
+
 // MARK: - Apple on-device listener
 
 /// Streaming on-device speech recognition: `SFSpeechRecognizer` +
@@ -221,7 +336,7 @@ public final class DefaultVoiceAudioSession: VoiceAudioSessionControlling {
 /// **Privacy contract.** `requiresOnDeviceRecognition` is always `true`, and
 /// a recognizer whose `supportsOnDeviceRecognition` is `false` REFUSES to
 /// start (``VoiceListenerError/onDeviceRecognitionUnsupported``). There is no
-/// path here that sends audio to Apple's servers — that is the whole reason
+/// path here that sends audio to Apple's servers -- that is the whole reason
 /// the chained engine declares no ``VoiceDataRecipient``. The same rule is
 /// already enforced for ScarfGo's push-to-talk dictation
 /// (`ScarfIOS/Speech/OnDeviceDictation.swift`), which is file-based; this is
@@ -233,6 +348,13 @@ public final class DefaultVoiceAudioSession: VoiceAudioSessionControlling {
 /// therefore ends the current request and starts a fresh one while the audio
 /// tap keeps running, so the microphone never closes between turns (which is
 /// what makes barge-in possible).
+///
+/// **Generations.** Every request carries a monotonic generation, captured by
+/// the callback that belongs to it. A request we finished ourselves reports
+/// its cancellation asynchronously, after a fresh request is already
+/// installed, so a callback is trusted only while its generation is the
+/// current one -- otherwise a routine restart looks like a mid-stream failure
+/// and kills the session after nearly every utterance.
 @MainActor
 public final class AppleOnDeviceVoiceListener: VoiceListener {
 
@@ -249,19 +371,26 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     private let configuration: Configuration
     private let session: any VoiceAudioSessionControlling
     private let clock: @MainActor () -> Date
+    private let makeRecognizer: @MainActor (Locale?) -> (any VoiceRecognizing)?
+    private let makeAudioTap: @MainActor () -> any VoiceAudioTapping
+    private let isSpeechAuthorized: @MainActor () -> Bool
     private static let logger = Logger(subsystem: "com.scarf", category: "LiveVoice")
 
-    private var recognizer: SFSpeechRecognizer?
+    private var recognizer: (any VoiceRecognizing)?
     /// The request the audio tap feeds. Held in a lock-guarded box because
     /// the tap runs on the audio thread while the main actor swaps it out
-    /// between utterances.
+    /// between utterances -- and because the box, not the tap, is where mute
+    /// is enforced.
     private let requestBox = VoiceRecognitionRequestBox()
-    private var request: SFSpeechAudioBufferRecognitionRequest? {
+    private var request: (any VoiceRecognitionRequesting)? {
         get { requestBox.request }
         set { requestBox.request = newValue }
     }
-    private var task: SFSpeechRecognitionTask?
-    private var engine: AVAudioEngine?
+    /// Monotonic, bumped by every ``startRecognition()``. A callback whose
+    /// generation is stale is ignored entirely.
+    private(set) var requestGeneration = 0
+    private var task: (any VoiceRecognitionTasking)?
+    private var audioTap: (any VoiceAudioTapping)?
     private var continuation: AsyncStream<VoiceListenerEvent>.Continuation?
     private var tickTask: Task<Void, Never>?
     private var detector: VoiceUtteranceDetector
@@ -272,14 +401,38 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     /// Written by the audio tap (off the main actor), drained by the tick.
     private let levelBox = VoiceInputLevelBox()
 
-    public init(
+    public convenience init(
         configuration: Configuration = Configuration(),
         audioSession: (any VoiceAudioSessionControlling)? = nil,
         clock: @escaping @MainActor () -> Date = { Date() }
     ) {
+        self.init(
+            configuration: configuration,
+            audioSession: audioSession,
+            clock: clock,
+            makeRecognizer: { locale in
+                let speech = locale.map { SFSpeechRecognizer(locale: $0) } ?? SFSpeechRecognizer()
+                return speech.map(SpeechFrameworkRecognizer.init)
+            },
+            makeAudioTap: { AVAudioEngineTap() },
+            isSpeechAuthorized: { SFSpeechRecognizer.authorizationStatus() == .authorized })
+    }
+
+    /// The seamed initializer: the tests drive the recognizer and the tap.
+    init(
+        configuration: Configuration = Configuration(),
+        audioSession: (any VoiceAudioSessionControlling)? = nil,
+        clock: @escaping @MainActor () -> Date = { Date() },
+        makeRecognizer: @escaping @MainActor (Locale?) -> (any VoiceRecognizing)?,
+        makeAudioTap: @escaping @MainActor () -> any VoiceAudioTapping,
+        isSpeechAuthorized: @escaping @MainActor () -> Bool
+    ) {
         self.configuration = configuration
         self.session = audioSession ?? DefaultVoiceAudioSession()
         self.clock = clock
+        self.makeRecognizer = makeRecognizer
+        self.makeAudioTap = makeAudioTap
+        self.isSpeechAuthorized = isSpeechAuthorized
         self.detector = VoiceUtteranceDetector(silence: configuration.silence)
     }
 
@@ -318,27 +471,37 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
 
     // MARK: VoiceListener
 
+    /// Open the microphone and begin recognizing.
+    ///
+    /// **Callers must run ``authorize()`` first** (both apps do). `start()`
+    /// only CHECKS the decision already made -- it throws
+    /// ``VoiceListenerError/speechRecognitionDenied`` when speech recognition
+    /// is not authorized yet and never prompts, because a TCC prompt inside a
+    /// synchronous start would block opening the audio graph.
     public func start() throws -> AsyncStream<VoiceListenerEvent> {
         guard !running else { throw VoiceListenerError.audioEngineFailed(detail: "already listening") }
-        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
-            throw VoiceListenerError.speechRecognitionDenied
-        }
-        let candidate = configuration.locale.map { SFSpeechRecognizer(locale: $0) } ?? SFSpeechRecognizer()
-        guard let candidate, candidate.isAvailable else { throw VoiceListenerError.recognizerUnavailable }
-        // Privacy contract — never relax this into a server fallback.
+        guard isSpeechAuthorized() else { throw VoiceListenerError.speechRecognitionDenied }
+        let candidate = makeRecognizer(configuration.locale)
+        guard let candidate, candidate.isRecognizerAvailable else { throw VoiceListenerError.recognizerUnavailable }
+        // Privacy contract -- never relax this into a server fallback.
         guard candidate.supportsOnDeviceRecognition else { throw VoiceListenerError.onDeviceRecognitionUnsupported }
         recognizer = candidate
 
         try session.activateForVoiceConversation()
-        let audioEngine = AVAudioEngine()
-        engine = audioEngine
+        let tap = makeAudioTap()
+        audioTap = tap
         running = true
 
         let (stream, streamContinuation) = AsyncStream<VoiceListenerEvent>.makeStream()
         continuation = streamContinuation
 
         do {
-            try startAudio(audioEngine)
+            let levels = levelBox
+            let sink = requestBox
+            try tap.start { buffer in
+                levels.record(buffer: buffer)
+                sink.append(buffer)
+            }
         } catch {
             running = false
             teardown()
@@ -361,70 +524,60 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     public func setPaused(_ paused: Bool) {
         guard self.paused != paused else { return }
         self.paused = paused
+        // Mute is a real mute: the box drops the tap's buffers while paused,
+        // so no hypothesis accumulates behind the mute waiting to be
+        // submitted to Hermes the moment the user unmutes.
+        requestBox.isPaused = paused
         // Drop whatever was half-heard: a muted stretch must not be stitched
         // onto the next utterance.
         detector.reset()
-        if paused, lastLevel != 0 {
-            lastLevel = 0
-            continuation?.yield(.level(0))
+        if paused {
+            if lastLevel != 0 {
+                lastLevel = 0
+                continuation?.yield(.level(0))
+            }
+        } else {
+            // The recognizer kept its own partial hypothesis across the mute;
+            // a fresh request (and generation) is the only way to clear it.
+            restartRecognition()
         }
         speaking = false
     }
 
-    // MARK: Audio
-
-    private func startAudio(_ audioEngine: AVAudioEngine) throws {
-        let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw VoiceListenerError.audioEngineFailed(detail: "no input format")
-        }
-        let box = levelBox
-        let sink = requestBox
-        // The tap runs on a REALTIME AUDIO THREAD. It may only touch things
-        // that are safe off the main actor: the lock-guarded level box and
-        // the lock-guarded current request (`append` is documented as safe
-        // from the audio thread). Nothing here may hop to, or assume, the
-        // main actor — everything MainActor happens on the tick instead.
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            box.record(buffer: buffer)
-            sink.append(buffer)
-        }
-        audioEngine.prepare()
-        try audioEngine.start()
-    }
+    // MARK: Recognition
 
     private func startRecognition() {
         guard running, let recognizer else { return }
-        let newRequest = SFSpeechAudioBufferRecognitionRequest()
+        requestGeneration += 1
+        let generation = requestGeneration
+        let newRequest = recognizer.makeRequest()
         newRequest.shouldReportPartialResults = true
         newRequest.requiresOnDeviceRecognition = true   // privacy contract
         request = newRequest
-        task = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
-            let transcript = result?.bestTranscription.formattedString
-            let isFinal = result?.isFinal ?? false
-            let message = error?.localizedDescription
+        task = recognizer.startTask(with: newRequest) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handle(transcript: transcript, isFinal: isFinal, errorMessage: message)
+                self?.handle(event, generation: generation)
             }
         }
     }
 
-    private func handle(transcript: String?, isFinal: Bool, errorMessage: String?) {
-        guard running else { return }
-        if let errorMessage {
-            // A request WE finished (an utterance, or a restart) reports an
-            // error too; only report one that arrives while a request is live.
+    /// Route one recognition callback. Internal so tests can drive it.
+    func handle(_ event: VoiceRecognitionEvent, generation: Int) {
+        // A callback from a request we already replaced is not news: its
+        // cancellation error is our own doing, and its last result belongs to
+        // an utterance that has already been emitted.
+        guard running, generation == requestGeneration else { return }
+        if let errorMessage = event.errorMessage {
             guard request != nil else { return }
             Self.logger.notice("Chained listener recognition error: \(errorMessage, privacy: .public)")
             fail(.recognitionFailed(detail: errorMessage))
             return
         }
-        guard let transcript, !paused else { return }
+        guard let transcript = event.transcript, !paused else { return }
         if detector.note(partial: transcript, at: clock()), !transcript.isEmpty {
             continuation?.yield(.partial(transcript))
         }
-        if isFinal, let utterance = detector.take() {
+        if event.isFinal, let utterance = detector.take() {
             emit(utterance: utterance)
         }
     }
@@ -439,9 +592,9 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     }
 
     private func restartRecognition() {
-        request?.endAudio()
+        request?.finishAudio()
         request = nil
-        task?.cancel()
+        task?.cancelRecognition()
         task = nil
         detector.reset()
         startRecognition()
@@ -495,15 +648,13 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     private func teardown() {
         tickTask?.cancel()
         tickTask = nil
-        request?.endAudio()
+        request?.finishAudio()
         request = nil
-        task?.cancel()
+        requestBox.isPaused = false
+        task?.cancelRecognition()
         task = nil
-        if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-        engine = nil
+        audioTap?.stop()
+        audioTap = nil
         recognizer = nil
         detector.reset()
         paused = false
@@ -515,19 +666,28 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
 
 /// The live recognition request, shared between the main actor (which
 /// replaces it after every utterance) and the audio tap (which appends to it).
+/// The mute lives here too: a paused box drops the tap's buffers on the floor,
+/// so muted audio never reaches the recognizer at all.
 final class VoiceRecognitionRequestBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var stored: SFSpeechAudioBufferRecognitionRequest?
+    private var stored: (any VoiceRecognitionRequesting)?
+    private var paused = false
 
-    var request: SFSpeechAudioBufferRecognitionRequest? {
+    var request: (any VoiceRecognitionRequesting)? {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
 
+    var isPaused: Bool {
+        get { lock.withLock { paused } }
+        set { lock.withLock { paused = newValue } }
+    }
+
     func append(_ buffer: AVAudioPCMBuffer) {
-        lock.withLock { stored }?.append(buffer)
+        lock.withLock { paused ? nil : stored }?.appendAudio(buffer)
     }
 }
+
 
 /// The level the audio tap measured, handed across threads under a lock.
 /// Peak-holding between ticks: a meter that sampled only the newest buffer
