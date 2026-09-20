@@ -127069,6 +127069,1726 @@
     },
     "≈ %@" : {
 
+    },
+    "A voice session is running in another Scarf window. End it there first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In einem anderen Scarf-Fenster läuft bereits eine Sprachsitzung. Beenden Sie sie zuerst dort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ya hay una sesión de voz en otra ventana de Scarf. Termínala allí primero."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une session vocale est en cours dans une autre fenêtre Scarf. Terminez-la d’abord là-bas."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別の Scarf ウインドウで音声セッションが実行中です。先にそちらで終了してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Há uma sessão de voz em outra janela do Scarf. Encerre-a lá primeiro."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一个 Scarf 窗口中正在进行语音会话。请先在那里结束。"
+          }
+        }
+      }
+    },
+    "About $0.05 per minute" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Etwa 0,05 $ pro Minute"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unos 0,05 USD por minuto"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Environ 0,05 $ par minute"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 分あたり約 0.05 ドル"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerca de US$ 0,05 por minuto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约每分钟 0.05 美元"
+          }
+        }
+      }
+    },
+    "Allow Scarf in System Settings › Privacy & Security › Speech Recognition, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlauben Sie Scarf in Systemeinstellungen › Datenschutz & Sicherheit › Spracherkennung und versuchen Sie es erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autoriza Scarf en Ajustes del Sistema › Privacidad y seguridad › Reconocimiento de voz e inténtalo de nuevo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisez Scarf dans Réglages Système › Confidentialité et sécurité › Reconnaissance vocale, puis réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「システム設定」›「プライバシーとセキュリティ」›「音声認識」で Scarf を許可してから、もう一度お試しください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permita o Scarf em Ajustes do Sistema › Privacidade e Segurança › Reconhecimento de Fala e tente novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“系统设置”›“隐私与安全性”›“语音识别”中允许 Scarf，然后重试。"
+          }
+        }
+      }
+    },
+    "Chained" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verkettet"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encadenado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chaîné"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チェーン"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encadeado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "链式"
+          }
+        }
+      }
+    },
+    "Chained is a spoken conversation from the Chat tab that costs nothing extra. Your voice is turned into words on this iPhone and never leaves it — only the words you said go to Hermes, exactly like a typed message. Replies are read aloud by the host's text-to-speech provider, which sees the reply text (Hermes's default, edge, sends it to Microsoft). This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verkettet ist ein gesprochenes Gespräch im Chat-Tab, das nichts extra kostet. Ihre Stimme wird auf diesem iPhone in Text umgewandelt und verlässt es nie — nur die von Ihnen gesprochenen Wörter gehen an Hermes, genau wie eine getippte Nachricht. Antworten liest der Text-to-Speech-Anbieter des Hosts vor, der den Antworttext sieht (Hermes’ Standard edge sendet ihn an Microsoft). Dieser Modus ist eine Hermes-Einstellung für das gesamte Profil: Er stellt auch die Sprachausgabe in Hermes’ eigenen Apps um."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encadenado es una conversación hablada desde la pestaña Chat que no cuesta nada más. Tu voz se convierte en texto en este iPhone y nunca sale de él: solo las palabras que dijiste llegan a Hermes, igual que un mensaje escrito. Las respuestas las lee en voz alta el proveedor de texto a voz del host, que ve el texto de la respuesta (el predeterminado de Hermes, edge, lo envía a Microsoft). Este modo es un ajuste de Hermes para todo el perfil: también cambia la voz en las propias apps de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chaîné est une conversation parlée depuis l’onglet Chat, sans coût supplémentaire. Votre voix est transformée en texte sur cet iPhone et n’en sort jamais — seuls les mots que vous avez dits sont envoyés à Hermes, exactement comme un message tapé. Les réponses sont lues à voix haute par le fournisseur de synthèse vocale de l’hôte, qui voit le texte de la réponse (le service par défaut de Hermes, edge, l’envoie à Microsoft). Ce mode est un réglage Hermes pour tout le profil : il change aussi la voix dans les applications de Hermes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チェーンは、チャットタブからの音声での会話で、追加費用はかかりません。あなたの声はこの iPhone で文字に変換され、端末の外に出ることはありません。話した言葉だけが、入力したメッセージとまったく同じように Hermes に送られます。返答はホストの音声合成プロバイダが読み上げ、そのプロバイダには返答のテキストが渡ります（Hermes の既定の edge は、それを Microsoft に送信します）。このモードはプロファイル全体に適用される Hermes の設定で、Hermes 自身のアプリの音声も切り替わります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encadeado é uma conversa falada pela aba Chat que não custa nada a mais. Sua voz é transformada em texto neste iPhone e nunca sai dele — só as palavras que você disse vão para o Hermes, exatamente como uma mensagem digitada. As respostas são lidas em voz alta pelo provedor de texto para fala do host, que vê o texto da resposta (o padrão do Hermes, edge, o envia para a Microsoft). Esse modo é um ajuste do Hermes para todo o perfil: ele também muda a voz nos próprios apps do Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "链式是在“聊天”标签页中进行的语音对话，不会产生额外费用。你的声音会在这台 iPhone 上转换成文字，绝不离开设备——只有你说出的话会发送给 Hermes，和输入的消息完全一样。回复由主机的文字转语音服务朗读，该服务会看到回复文本（Hermes 的默认服务 edge 会将其发送给 Microsoft）。此模式是适用于整个配置文件的 Hermes 设置：它也会切换 Hermes 自有应用中的语音。"
+          }
+        }
+      }
+    },
+    "Couldn't reach your Hermes host's voice, so replies are being read by this iPhone's system voice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Stimme Ihres Hermes-Hosts war nicht erreichbar, daher werden Antworten von der Systemstimme dieses iPhone vorgelesen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo acceder a la voz de tu host de Hermes, así que las respuestas las lee la voz del sistema de este iPhone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La voix de votre hôte Hermes est injoignable : les réponses sont donc lues par la voix système de cet iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes ホストの音声に接続できなかったため、返答はこの iPhone のシステム音声で読み上げられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível acessar a voz do seu host do Hermes, então as respostas estão sendo lidas pela voz do sistema deste iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接到 Hermes 主机的语音，因此回复将由这台 iPhone 的系统语音朗读。"
+          }
+        }
+      }
+    },
+    "Do the same under Settings › Privacy & Security › Microphone, then tap Try Again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tun Sie dasselbe unter Einstellungen › Datenschutz & Sicherheit › Mikrofon und tippen Sie dann auf „Erneut versuchen“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Haz lo mismo en Ajustes › Privacidad y seguridad › Micrófono y toca Reintentar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Faites de même dans Réglages › Confidentialité et sécurité › Microphone, puis touchez Réessayer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「設定」›「プライバシーとセキュリティ」›「マイク」でも同じようにしてから、「再試行」をタップしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Faça o mesmo em Ajustes › Privacidade e Segurança › Microfone e toque em Tentar novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“设置”›“隐私与安全性”›“麦克风”中做同样的操作，然后点按“重试”。"
+          }
+        }
+      }
+    },
+    "Download the language in System Settings › Keyboard › Dictation, or switch your Mac's language to one it can transcribe on-device, then try again. Scarf never falls back to a server for this." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laden Sie die Sprache in Systemeinstellungen › Tastatur › Diktat herunter oder stellen Sie Ihren Mac auf eine Sprache um, die er auf dem Gerät transkribieren kann, und versuchen Sie es erneut. Scarf weicht dafür nie auf einen Server aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descarga el idioma en Ajustes del Sistema › Teclado › Dictado, o cambia el idioma de tu Mac a uno que pueda transcribir en el dispositivo, e inténtalo de nuevo. Scarf nunca recurre a un servidor para esto."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléchargez la langue dans Réglages Système › Clavier › Dictée, ou choisissez pour votre Mac une langue qu’il peut transcrire sur l’appareil, puis réessayez. Scarf ne se rabat jamais sur un serveur pour cela."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「システム設定」›「キーボード」›「音声入力」でその言語をダウンロードするか、Mac の言語を端末内で文字起こしできる言語に変更してから、もう一度お試しください。Scarf がこのためにサーバーを使うことはありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baixe o idioma em Ajustes do Sistema › Teclado › Ditado, ou mude o idioma do seu Mac para um que ele consiga transcrever no próprio dispositivo, e tente novamente. O Scarf nunca recorre a um servidor para isso."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“系统设置”›“键盘”›“听写”中下载该语言，或将这台 Mac 的语言改为可在设备上转录的语言，然后重试。Scarf 绝不会为此改用服务器。"
+          }
+        }
+      }
+    },
+    "Elapsed %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verstrichen %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transcurrido %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écoulé %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "経過 %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decorrido %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已用时 %@"
+          }
+        }
+      }
+    },
+    "Elapsed %@. Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verstrichen %@. Ihre Stimme bleibt auf diesem iPhone; Antworten werden von der Stimme des Hosts oder der Systemstimme gesprochen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transcurrido %@. Tu voz se queda en este iPhone; las respuestas las dice la voz del host o la voz del sistema."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écoulé %@. Votre voix reste sur cet iPhone ; les réponses sont dites par la voix de l’hôte ou par la voix système."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "経過 %@。あなたの声はこの iPhone から出ません。返答はホストの音声かシステム音声で読み上げられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decorrido %@. Sua voz fica neste iPhone; as respostas são faladas pela voz do host ou pela voz do sistema."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已用时 %@。你的声音不会离开这台 iPhone；回复由主机的语音或系统语音朗读。"
+          }
+        }
+      }
+    },
+    "Free" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kostenlos"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gratis"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gratuit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無料"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grátis"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "免费"
+          }
+        }
+      }
+    },
+    "Hermes's voice.voice_chat_mode, for the whole Hermes profile — it also switches voice in Hermes's own apps. Either mode turns on the voice button in the chat composer." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes’ voice.voice_chat_mode, für das gesamte Hermes-Profil — es stellt auch die Sprachausgabe in Hermes’ eigenen Apps um. Beide Modi aktivieren die Sprachtaste im Chat-Eingabefeld."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El voice.voice_chat_mode de Hermes, para todo el perfil de Hermes: también cambia la voz en las propias apps de Hermes. Cualquiera de los dos modos activa el botón de voz en el campo de escritura del chat."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le voice.voice_chat_mode de Hermes, pour tout le profil Hermes — il change aussi la voix dans les applications de Hermes. Les deux modes activent le bouton vocal dans la zone de saisie du chat."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の voice.voice_chat_mode で、Hermes プロファイル全体に適用されます。Hermes 自身のアプリの音声も切り替わります。どちらのモードでも、チャット入力欄の音声ボタンが有効になります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O voice.voice_chat_mode do Hermes, para todo o perfil do Hermes — ele também muda a voz nos próprios apps do Hermes. Qualquer um dos modos ativa o botão de voz no campo de mensagem do chat."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 的 voice.voice_chat_mode，适用于整个 Hermes 配置文件——它也会切换 Hermes 自有应用中的语音。两种模式都会启用聊天输入栏中的语音按钮。"
+          }
+        }
+      }
+    },
+    "If your language has no on-device model, switch to Live Voice (GPT-Live) in Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wenn es für Ihre Sprache kein Modell auf dem Gerät gibt, wechseln Sie in den Einstellungen zu Live Voice (GPT-Live)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Si tu idioma no tiene un modelo en el dispositivo, cambia a Live Voice (GPT-Live) en Ajustes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Si votre langue n’a pas de modèle sur l’appareil, passez à Live Voice (GPT-Live) dans Réglages."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "お使いの言語に端末内モデルがない場合は、「設定」で Live Voice (GPT-Live) に切り替えてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se o seu idioma não tiver um modelo no dispositivo, mude para Live Voice (GPT-Live) em Ajustes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果你的语言没有设备端模型，请在“设置”中切换到 Live Voice (GPT-Live)。"
+          }
+        }
+      }
+    },
+    "On this Mac (Apple). The audio never leaves it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Mac (Apple). Das Audio verlässt ihn nie."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En este Mac (Apple). El audio nunca sale de él."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sur ce Mac (Apple). L’audio n’en sort jamais."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac 上（Apple）。音声が端末の外に出ることはありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neste Mac (Apple). O áudio nunca sai dele."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这台 Mac 上（Apple）。音频绝不会离开设备。"
+          }
+        }
+      }
+    },
+    "On this iPhone" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem iPhone"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En este iPhone"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sur cet iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone 上"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neste iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这台 iPhone 上"
+          }
+        }
+      }
+    },
+    "Open Settings › General › Keyboard and turn on Dictation, so iOS downloads your language's on-device model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffnen Sie Einstellungen › Allgemein › Tastatur und aktivieren Sie „Diktat“, damit iOS das Modell für Ihre Sprache auf das Gerät lädt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abre Ajustes › General › Teclado y activa Dictado para que iOS descargue el modelo en el dispositivo de tu idioma."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrez Réglages › Général › Clavier et activez Dictée pour que iOS télécharge le modèle de votre langue sur l’appareil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「設定」›「一般」›「キーボード」を開いて「音声入力」をオンにすると、iOS がお使いの言語の端末内モデルをダウンロードします。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abra Ajustes › Geral › Teclado e ative Ditado para que o iOS baixe o modelo do seu idioma no dispositivo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“设置”›“通用”›“键盘”并开启“听写”，让 iOS 下载你所用语言的设备端模型。"
+          }
+        }
+      }
+    },
+    "Open Settings › Privacy & Security › Speech Recognition and turn ScarfGo on." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffnen Sie Einstellungen › Datenschutz & Sicherheit › Spracherkennung und aktivieren Sie ScarfGo."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abre Ajustes › Privacidad y seguridad › Reconocimiento de voz y activa ScarfGo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrez Réglages › Confidentialité et sécurité › Reconnaissance vocale et activez ScarfGo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「設定」›「プライバシーとセキュリティ」›「音声認識」を開いて、ScarfGo をオンにしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abra Ajustes › Privacidade e Segurança › Reconhecimento de Fala e ative o ScarfGo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“设置”›“隐私与安全性”›“语音识别”，然后开启 ScarfGo。"
+          }
+        }
+      }
+    },
+    "Paid" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kostenpflichtig"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De pago"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Payant"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有料"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pago"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收费"
+          }
+        }
+      }
+    },
+    "Scarf can't use speech recognition." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf kann die Spracherkennung nicht verwenden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no puede usar el reconocimiento de voz."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf ne peut pas utiliser la reconnaissance vocale."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は音声認識を使用できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não pode usar o reconhecimento de fala."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法使用语音识别。"
+          }
+        }
+      }
+    },
+    "ScarfGo asks before the first Live Voice (GPT-Live) session on this device. After a reset it asks again. Chained mode sends no voice to anyone, so it never asks." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo fragt vor der ersten Live Voice-Sitzung (GPT-Live) auf diesem Gerät. Nach einem Zurücksetzen fragt es erneut. Der Modus „Verkettet“ sendet keine Stimme an irgendwen und fragt deshalb nie."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo pregunta antes de la primera sesión de Live Voice (GPT-Live) en este dispositivo. Tras un restablecimiento vuelve a preguntar. El modo Encadenado no envía tu voz a nadie, así que nunca pregunta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo demande avant la première session Live Voice (GPT-Live) sur cet appareil. Après une réinitialisation, il redemande. Le mode Chaîné n’envoie votre voix à personne : il ne demande donc jamais."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo は、この端末で最初の Live Voice (GPT-Live) セッションの前に確認します。リセット後はもう一度確認します。チェーンモードは音声をどこにも送信しないため、確認はありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O ScarfGo pergunta antes da primeira sessão do Live Voice (GPT-Live) neste dispositivo. Após uma redefinição, ele pergunta de novo. O modo Encadeado não envia sua voz a ninguém, então nunca pergunta."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在本设备上首次使用 Live Voice (GPT-Live) 会话前，ScarfGo 会先询问。重置后会再次询问。链式模式不会把语音发送给任何人，因此从不询问。"
+          }
+        }
+      }
+    },
+    "ScarfGo can't use speech recognition, so it can't turn your voice into words on this iPhone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo kann die Spracherkennung nicht verwenden und Ihre Stimme daher auf diesem iPhone nicht in Text umwandeln."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo no puede usar el reconocimiento de voz, así que no puede convertir tu voz en texto en este iPhone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo ne peut pas utiliser la reconnaissance vocale : il ne peut donc pas transformer votre voix en texte sur cet iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo は音声認識を使用できないため、この iPhone であなたの声を文字に変換できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O ScarfGo não pode usar o reconhecimento de fala, então não consegue transformar sua voz em texto neste iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo 无法使用语音识别，因此无法在这台 iPhone 上把你的声音转换成文字。"
+          }
+        }
+      }
+    },
+    "Session time %@. Nothing was charged." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sitzungsdauer %@. Es wurde nichts berechnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tiempo de sesión %@. No se cobró nada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Durée de session %@. Rien n’a été facturé."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッション時間 %@。課金はありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tempo de sessão %@. Nada foi cobrado."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话时长 %@。未产生任何费用。"
+          }
+        }
+      }
+    },
+    "Speech to Text" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache zu Text"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voz a texto"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voix en texte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声からテキスト"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fala para texto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音转文字"
+          }
+        }
+      }
+    },
+    "Speech to text" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache zu Text"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voz a texto"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voix en texte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声からテキスト"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fala para texto"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音转文字"
+          }
+        }
+      }
+    },
+    "Start talking with Hermes (free; your voice stays on this Mac)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gespräch mit Hermes beginnen (kostenlos; Ihre Stimme bleibt auf diesem Mac)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empezar a hablar con Hermes (gratis; tu voz se queda en este Mac)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Commencer à parler avec Hermes (gratuit ; votre voix reste sur ce Mac)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes との会話を開始（無料。声はこの Mac から出ません）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Começar a falar com o Hermes (grátis; sua voz fica neste Mac)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始与 Hermes 对话（免费；你的声音不会离开这台 Mac）"
+          }
+        }
+      }
+    },
+    "Start voice session" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprachsitzung starten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciar sesión de voz"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Démarrer la session vocale"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声セッションを開始"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciar sessão de voz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始语音会话"
+          }
+        }
+      }
+    },
+    "Starts a spoken conversation with Hermes. Your voice stays on this iPhone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startet ein gesprochenes Gespräch mit Hermes. Ihre Stimme bleibt auf diesem iPhone."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia una conversación hablada con Hermes. Tu voz se queda en este iPhone."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Démarre une conversation parlée avec Hermes. Votre voix reste sur cet iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes との音声での会話を開始します。あなたの声はこの iPhone から出ません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia uma conversa falada com o Hermes. Sua voz fica neste iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始与 Hermes 的语音对话。你的声音不会离开这台 iPhone。"
+          }
+        }
+      }
+    },
+    "System Voice speaks the reply on this Mac and needs no host setup. Hermes Voice speaks it through the host's configured TTS provider, falling back to this Mac's voice for anything the host can't synthesize." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Systemstimme“ spricht die Antwort auf diesem Mac und erfordert keine Einrichtung auf dem Host. Hermes Voice spricht sie über den auf dem Host konfigurierten TTS-Anbieter und weicht auf die Stimme dieses Mac aus, wenn der Host etwas nicht synthetisieren kann."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voz del sistema dice la respuesta en este Mac y no requiere configuración en el host. Hermes Voice la dice con el proveedor de TTS configurado en el host y recurre a la voz de este Mac para lo que el host no pueda sintetizar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voix du système dit la réponse sur ce Mac et ne demande aucune configuration sur l’hôte. Hermes Voice la dit via le fournisseur TTS configuré sur l’hôte, en se rabattant sur la voix de ce Mac pour ce que l’hôte ne peut pas synthétiser."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「システムの音声」は、この Mac で返答を読み上げ、ホスト側の設定は不要です。Hermes Voice は、ホストに設定された TTS プロバイダで読み上げ、ホストが合成できない部分はこの Mac の音声に切り替えます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A Voz do sistema fala a resposta neste Mac e não exige configuração no host. O Hermes Voice a fala pelo provedor de TTS configurado no host, recorrendo à voz deste Mac para o que o host não conseguir sintetizar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“系统语音”在这台 Mac 上朗读回复，无需在主机上做任何设置。Hermes Voice 通过主机配置的 TTS 服务朗读，主机无法合成的部分则改用这台 Mac 的语音。"
+          }
+        }
+      }
+    },
+    "Talk with Hermes from the chat composer. Chained, Hermes's default, is free: your voice is transcribed on this Mac, runs as a normal turn, and the reply is read aloud. GPT-Live hands the whole conversation to an OpenAI voice model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprechen Sie mit Hermes direkt aus dem Chat-Eingabefeld. „Verkettet“, Hermes’ Standard, ist kostenlos: Ihre Stimme wird auf diesem Mac transkribiert, läuft als normaler Zug, und die Antwort wird vorgelesen. GPT-Live übergibt das ganze Gespräch an ein OpenAI-Sprachmodell."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Habla con Hermes desde el campo de escritura del chat. Encadenado, el modo predeterminado de Hermes, es gratis: tu voz se transcribe en este Mac, se ejecuta como un turno normal y la respuesta se lee en voz alta. GPT-Live entrega toda la conversación a un modelo de voz de OpenAI."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parlez avec Hermes depuis la zone de saisie du chat. Chaîné, le mode par défaut de Hermes, est gratuit : votre voix est transcrite sur ce Mac, s’exécute comme un tour normal, et la réponse est lue à voix haute. GPT-Live confie toute la conversation à un modèle vocal OpenAI."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャット入力欄から Hermes と話せます。Hermes の既定である「チェーン」は無料です。あなたの声はこの Mac で文字起こしされ、通常のターンとして実行され、返答が読み上げられます。GPT-Live は会話全体を OpenAI の音声モデルに委ねます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fale com o Hermes pelo campo de mensagem do chat. O Encadeado, padrão do Hermes, é grátis: sua voz é transcrita neste Mac, roda como um turno normal e a resposta é lida em voz alta. O GPT-Live entrega toda a conversa a um modelo de voz da OpenAI."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天输入栏中与 Hermes 对话。Hermes 的默认模式“链式”是免费的：你的声音在这台 Mac 上转录，作为一次普通对话运行，回复会被朗读出来。GPT-Live 则把整场对话交给 OpenAI 的语音模型。"
+          }
+        }
+      }
+    },
+    "Talk with Hermes. Your voice is transcribed on this Mac and the reply is read aloud. Free." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprechen Sie mit Hermes. Ihre Stimme wird auf diesem Mac transkribiert und die Antwort vorgelesen. Kostenlos."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Habla con Hermes. Tu voz se transcribe en este Mac y la respuesta se lee en voz alta. Gratis."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parlez avec Hermes. Votre voix est transcrite sur ce Mac et la réponse est lue à voix haute. Gratuit."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes と話せます。あなたの声はこの Mac で文字起こしされ、返答が読み上げられます。無料です。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fale com o Hermes. Sua voz é transcrita neste Mac e a resposta é lida em voz alta. Grátis."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与 Hermes 对话。你的声音在这台 Mac 上转录，回复会被朗读出来。免费。"
+          }
+        }
+      }
+    },
+    "Text to Speech" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text zu Sprache"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texto a voz"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texte en voix"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テキストから音声"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texto para fala"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字转语音"
+          }
+        }
+      }
+    },
+    "Text to speech" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text zu Sprache"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texto a voz"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texte en voix"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テキストから音声"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texto para fala"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字转语音"
+          }
+        }
+      }
+    },
+    "The Hermes host couldn't speak part of that reply, so Scarf used this Mac's system voice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hermes-Host konnte einen Teil dieser Antwort nicht sprechen, daher hat Scarf die Systemstimme dieses Mac verwendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El host de Hermes no pudo decir parte de esa respuesta, así que Scarf usó la voz del sistema de este Mac."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’hôte Hermes n’a pas pu dire une partie de cette réponse : Scarf a donc utilisé la voix système de ce Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes ホストが返答の一部を読み上げられなかったため、Scarf はこの Mac のシステム音声を使用しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O host do Hermes não conseguiu falar parte dessa resposta, então o Scarf usou a voz do sistema deste Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 主机无法朗读该回复的一部分，因此 Scarf 改用了这台 Mac 的系统语音。"
+          }
+        }
+      }
+    },
+    "This Mac can't transcribe your language without sending audio away." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Mac kann Ihre Sprache nicht transkribieren, ohne Audio zu verschicken."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac no puede transcribir tu idioma sin enviar el audio fuera."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce Mac ne peut pas transcrire votre langue sans envoyer l’audio ailleurs."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac は、音声を外部に送らずにお使いの言語を文字起こしすることができません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este Mac não consegue transcrever seu idioma sem enviar o áudio para fora."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 无法在不外发音频的情况下转录你的语言。"
+          }
+        }
+      }
+    },
+    "This Mac's voice" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stimme dieses Mac"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La voz de este Mac"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La voix de ce Mac"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac の音声"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A voz deste Mac"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 的语音"
+          }
+        }
+      }
+    },
+    "This iPhone has no on-device speech recognition for your language, and ScarfGo never sends your voice away to transcribe it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses iPhone hat für Ihre Sprache keine Spracherkennung auf dem Gerät, und ScarfGo sendet Ihre Stimme nie zum Transkribieren weg."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este iPhone no tiene reconocimiento de voz en el dispositivo para tu idioma, y ScarfGo nunca envía tu voz fuera para transcribirla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet iPhone n’a pas de reconnaissance vocale sur l’appareil pour votre langue, et ScarfGo n’envoie jamais votre voix ailleurs pour la transcrire."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この iPhone には、お使いの言語の端末内音声認識がありません。また ScarfGo は、文字起こしのためにあなたの声を外部へ送ることはありません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este iPhone não tem reconhecimento de fala no dispositivo para o seu idioma, e o ScarfGo nunca envia sua voz para fora para transcrevê-la."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 没有适用于你所用语言的设备端语音识别，而 ScarfGo 绝不会把你的声音外发去转录。"
+          }
+        }
+      }
+    },
+    "Voice conversation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprachgespräch"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversación de voz"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversation vocale"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声での会話"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conversa por voz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音对话"
+          }
+        }
+      }
+    },
+    "Voice session" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprachsitzung"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sesión de voz"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session vocale"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声セッション"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessão de voz"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音会话"
+          }
+        }
+      }
+    },
+    "Your voice is transcribed on this Mac and never sent anywhere. Only the words you said reach Hermes, as an ordinary chat turn, and only the reply text reaches the host's text-to-speech provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Stimme wird auf diesem Mac transkribiert und nirgendwohin gesendet. Nur die von Ihnen gesprochenen Wörter erreichen Hermes, als gewöhnlicher Chat-Zug, und nur der Antworttext erreicht den Text-to-Speech-Anbieter des Hosts."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu voz se transcribe en este Mac y no se envía a ninguna parte. Solo las palabras que dijiste llegan a Hermes, como un turno de chat normal, y solo el texto de la respuesta llega al proveedor de texto a voz del host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre voix est transcrite sur ce Mac et n’est envoyée nulle part. Seuls les mots que vous avez dits parviennent à Hermes, comme un tour de chat ordinaire, et seul le texte de la réponse parvient au fournisseur de synthèse vocale de l’hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの声はこの Mac で文字起こしされ、どこにも送信されません。Hermes に届くのは、通常のチャットのターンとして、あなたが話した言葉だけです。ホストの音声合成プロバイダに届くのは返答のテキストだけです。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sua voz é transcrita neste Mac e nunca é enviada a lugar nenhum. Só as palavras que você disse chegam ao Hermes, como um turno de chat comum, e só o texto da resposta chega ao provedor de texto para fala do host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的声音在这台 Mac 上转录，绝不会发送到任何地方。只有你说出的话会作为一次普通的聊天对话到达 Hermes，也只有回复文本会到达主机的文字转语音服务。"
+          }
+        }
+      }
+    },
+    "Your voice stays on this Mac; replies are spoken by %@ on the Hermes host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Stimme bleibt auf diesem Mac; Antworten werden von %@ auf dem Hermes-Host gesprochen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu voz se queda en este Mac; las respuestas las dice %@ en el host de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre voix reste sur ce Mac ; les réponses sont dites par %@ sur l’hôte Hermes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの声はこの Mac から出ません。返答は Hermes ホスト上の %@ が読み上げます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sua voz fica neste Mac; as respostas são faladas por %@ no host do Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的声音不会离开这台 Mac；回复由 Hermes 主机上的 %@ 朗读。"
+          }
+        }
+      }
+    },
+    "Your voice stays on this Mac; replies are spoken by this Mac's own voice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Stimme bleibt auf diesem Mac; Antworten werden von der eigenen Stimme dieses Mac gesprochen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu voz se queda en este Mac; las respuestas las dice la propia voz de este Mac."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre voix reste sur ce Mac ; les réponses sont dites par la voix propre de ce Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの声はこの Mac から出ません。返答はこの Mac 自身の音声で読み上げられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sua voz fica neste Mac; as respostas são faladas pela própria voz deste Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的声音不会离开这台 Mac；回复由这台 Mac 自身的语音朗读。"
+          }
+        }
+      }
+    },
+    "Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Stimme bleibt auf diesem iPhone; Antworten werden von der Stimme des Hosts oder der Systemstimme gesprochen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu voz se queda en este iPhone; las respuestas las dice la voz del host o la voz del sistema."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre voix reste sur cet iPhone ; les réponses sont dites par la voix de l’hôte ou par la voix système."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの声はこの iPhone から出ません。返答はホストの音声かシステム音声で読み上げられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sua voz fica neste iPhone; as respostas são faladas pela voz do host ou pela voz do sistema."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的声音不会离开这台 iPhone；回复由主机的语音或系统语音朗读。"
+          }
+        }
+      }
+    },
+    "edge (the Hermes default)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge (der Hermes-Standard)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge (el predeterminado de Hermes)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge (le service par défaut de Hermes)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge（Hermes の既定）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge (o padrão do Hermes)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "edge（Hermes 的默认服务）"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

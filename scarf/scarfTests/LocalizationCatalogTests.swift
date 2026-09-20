@@ -225,6 +225,28 @@ struct LocalizationCatalogTests {
         "Your voice streams directly from this device to OpenAI. The Hermes host only sets up the session, so OpenAI also sees this device's network address.",
         "Your voice streams from this device to %@, which also sees this device's network address.",
         "≈ %@",
+        // P7 chained-engine pass: the iOS half of the chained voice
+        // surfaces (session sheet, Settings voice rows, the composer's
+        // voice button). Every key below has its only call site under
+        // `Scarf iOS`, so a macOS-scheme extraction would prune it.
+        "About $0.05 per minute",
+        "Chained",
+        "Chained is a spoken conversation from the Chat tab that costs nothing extra. Your voice is turned into words on this iPhone and never leaves it — only the words you said go to Hermes, exactly like a typed message. Replies are read aloud by the host's text-to-speech provider, which sees the reply text (Hermes's default, edge, sends it to Microsoft). This mode is a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.",
+        "Couldn't reach your Hermes host's voice, so replies are being read by this iPhone's system voice.",
+        "Do the same under Settings › Privacy & Security › Microphone, then tap Try Again.",
+        "Elapsed %@. Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice.",
+        "If your language has no on-device model, switch to Live Voice (GPT-Live) in Settings.",
+        "On this iPhone",
+        "Open Settings › General › Keyboard and turn on Dictation, so iOS downloads your language's on-device model.",
+        "Open Settings › Privacy & Security › Speech Recognition and turn ScarfGo on.",
+        "ScarfGo asks before the first Live Voice (GPT-Live) session on this device. After a reset it asks again. Chained mode sends no voice to anyone, so it never asks.",
+        "ScarfGo can't use speech recognition, so it can't turn your voice into words on this iPhone.",
+        "Session time %@. Nothing was charged.",
+        "Speech to text",
+        "Starts a spoken conversation with Hermes. Your voice stays on this iPhone.",
+        "Text to speech",
+        "This iPhone has no on-device speech recognition for your language, and ScarfGo never sends your voice away to transcribe it.",
+        "Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice.",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
