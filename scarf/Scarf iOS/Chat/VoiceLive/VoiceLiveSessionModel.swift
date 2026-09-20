@@ -126,14 +126,27 @@ protocol VoiceLiveComposerNoticing: AnyObject {
 final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
 
     /// One running (or just-finished) session: the engine the sheet binds
-    /// to, and the web view bridge the sheet must keep mounted
-    /// (`VoiceLiveMediaHostView`). Tests pass `bridge: nil`.
+    /// to, which engine it is (the sheet's cost and privacy copy differ),
+    /// and the web view bridge the sheet must keep mounted
+    /// (`VoiceLiveMediaHostView`). Chained sessions have no bridge; tests
+    /// pass `bridge: nil` for either engine.
     struct Session {
         let engine: any VoiceConversationEngine
+        let kind: VoiceEngineKind
         let bridge: WebViewVoiceMediaBridge?
+
+        init(engine: any VoiceConversationEngine, kind: VoiceEngineKind = .gptLive, bridge: WebViewVoiceMediaBridge? = nil) {
+            self.engine = engine
+            self.kind = kind
+            self.bridge = bridge
+        }
     }
 
-    typealias SessionFactory = @MainActor (any VoiceTurnHost) -> Session
+    /// Builds the session for the engine the host's `voice.voice_chat_mode`
+    /// resolved to (``VoiceLiveAvailability/engineKind``). The KIND is an
+    /// argument rather than baked into the model, because one Chat screen
+    /// can switch modes under it without being rebuilt.
+    typealias SessionFactory = @MainActor (VoiceEngineKind, any VoiceTurnHost) -> Session
 
     /// The current or last session. Kept after it ends so the sheet can
     /// show how it ended; replaced by the next `begin`.
@@ -167,10 +180,14 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     @ObservationIgnored private let backgroundTasks: any VoiceLiveBackgroundTaskRunning
     @ObservationIgnored private let microphone: any VoiceLiveMicrophonePermissionChecking
     @ObservationIgnored private let consent: VoiceDataConsentStore
-    /// Who the engine `makeSession` builds sends data to directly. Travels
-    /// with the factory (GPT-Live in production); `nil` for an engine that
-    /// keeps data local, which never asks.
-    @ObservationIgnored private let externalRecipient: VoiceDataRecipient?
+    /// Who the engine `makeSession` builds sends data to directly, per
+    /// engine kind. GPT-Live declares OpenAI; the chained engine transcribes
+    /// on-device and declares nothing, so it never asks for consent.
+    @ObservationIgnored private let externalRecipient: @MainActor (VoiceEngineKind) -> VoiceDataRecipient?
+    /// Speech-recognition + microphone authorization for the chained engine
+    /// (two separate TCC entries). Behind a seam so tests never touch the
+    /// real microphone or the real Speech framework.
+    @ObservationIgnored private let speechAuthorizer: any VoiceLiveSpeechAuthorizing
     @ObservationIgnored private let teardownGrace: Duration
     @ObservationIgnored private var audioSessionActive = false
     /// Bumped by every ``releaseAudioSession()``, so a deferred deactivate
@@ -192,21 +209,47 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// session exchange on `context`, the real audio session, background
     /// tasks and microphone permission.
     convenience init(context: ServerContext) {
+        // One app-owned `AVAudioSession`: the chained listener and the
+        // Hermes/AVAudioPlayer speaker both run on the session
+        // `VoiceLiveAVAudioSession` configures (playAndRecord + voiceChat +
+        // defaultToSpeaker), so the microphone stays open while the reply
+        // plays. `AppleOnDeviceVoiceListener` is handed that same owner
+        // through its seam, so its default never fights this one.
+        let owner = VoiceLiveAVAudioSession()
         self.init(
-            makeSession: { host in
-                let bridge = WebViewVoiceMediaBridge()
-                let engine = GPTLiveEngine(
-                    bridge: bridge,
-                    exchange: VoiceLiveHostExchange(context: context),
-                    turnHost: host
-                )
-                return Session(engine: engine, bridge: bridge)
+            makeSession: { kind, host in
+                switch kind {
+                case .gptLive:
+                    let bridge = WebViewVoiceMediaBridge()
+                    let engine = GPTLiveEngine(
+                        bridge: bridge,
+                        exchange: VoiceLiveHostExchange(context: context),
+                        turnHost: host
+                    )
+                    return Session(engine: engine, kind: .gptLive, bridge: bridge)
+                case .chained:
+                    let engine = ChainedVoiceEngine(
+                        listener: AppleOnDeviceVoiceListener(audioSession: VoiceLiveAudioSessionAdapter(owner: owner)),
+                        speaker: FallbackVoiceSpeaker(
+                            primary: HermesVoiceSpeaker(context: context),
+                            fallback: SystemVoiceSpeaker()
+                        ),
+                        turnHost: host
+                    )
+                    return Session(engine: engine, kind: .chained, bridge: nil)
+                }
             },
-            externalRecipient: GPTLiveEngine.externalRecipient,
-            audioSession: VoiceLiveAVAudioSession(),
+            externalRecipient: { kind in
+                switch kind {
+                case .gptLive: return GPTLiveEngine.externalRecipient
+                case .chained: return ChainedVoiceEngine.externalRecipient
+                }
+            },
+            audioSession: owner,
             backgroundTasks: UIKitBackgroundTaskRunner(),
             microphone: AVMicrophonePermissionClient(),
-            consent: .shared
+            consent: .shared,
+            speechAuthorizer: AppleSpeechAuthorizer()
         )
         observeAudioInterruptions()
     }
@@ -214,15 +257,17 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// Test seam: every collaborator injected; no system notifications.
     init(
         makeSession: @escaping SessionFactory,
-        externalRecipient: VoiceDataRecipient?,
+        externalRecipient: @escaping @MainActor (VoiceEngineKind) -> VoiceDataRecipient?,
         audioSession: any VoiceLiveAudioSessionControlling,
         backgroundTasks: any VoiceLiveBackgroundTaskRunning,
         microphone: any VoiceLiveMicrophonePermissionChecking,
         consent: VoiceDataConsentStore,
-        teardownGrace: Duration = .seconds(5)
+        teardownGrace: Duration = .seconds(5),
+        speechAuthorizer: any VoiceLiveSpeechAuthorizing = AlwaysAuthorizedSpeech()
     ) {
         self.makeSession = makeSession
         self.externalRecipient = externalRecipient
+        self.speechAuthorizer = speechAuthorizer
         self.consent = consent
         self.audioSession = audioSession
         self.backgroundTasks = backgroundTasks
@@ -243,9 +288,9 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
     /// sheet); the view calls `begin` again after ``acceptConsent()``. Then
     /// it asks for the microphone — the same system prompt P1 dictation
     /// uses — so a denial costs nothing and opens no sheet.
-    func begin(host: any VoiceTurnHost, dictationIdle: Bool) async {
+    func begin(host: any VoiceTurnHost, engine kind: VoiceEngineKind = .gptLive, dictationIdle: Bool) async {
         guard dictationIdle, !isActive, !isBeginning else { return }
-        if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient, store: consent) {
+        if let recipient = VoiceDataConsent.pendingRecipient(for: externalRecipient(kind), store: consent) {
             pendingConsent = recipient
             return
         }
@@ -256,31 +301,70 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
         endNote = nil
         let generation = teardownGeneration
 
-        switch microphone.status() {
-        case .granted:
-            break
-        case .denied:
-            showComposerNotice(.microphoneDenied)
-            return
-        case .undetermined:
-            guard await microphone.request() else {
+        switch kind {
+        case .gptLive:
+            // GPT-Live transcribes at OpenAI: the microphone is the only
+            // permission it needs.
+            switch microphone.status() {
+            case .granted:
+                break
+            case .denied:
                 showComposerNotice(.microphoneDenied)
                 return
+            case .undetermined:
+                guard await microphone.request() else {
+                    showComposerNotice(.microphoneDenied)
+                    return
+                }
+                guard generation == teardownGeneration else { return }
             }
+        case .chained:
+            // Chained transcribes on this device, so it needs BOTH speech
+            // recognition and the microphone — two TCC entries with two
+            // different Settings rows. A denial is shown in the sheet with
+            // the right row named, not as a bare "try again".
+            let denial = await speechAuthorizer.authorize()
             guard generation == teardownGeneration else { return }
+            if let denial {
+                present(failure: Self.failure(for: denial), kind: kind)
+                return
+            }
         }
 
         audioSession.activate()
         audioSessionActive = true
         holdsAudioSession = true
         audioSessionGeneration += 1
-        let next = makeSession(host)
+        let next = makeSession(kind, host)
         session = next
         isPresented = true
         await next.engine.start()
         // `start` returns once the media is up (or failed); a failure is a
         // terminal phase the sheet shows. Release the audio if so.
         phaseDidChange()
+    }
+
+    /// The engine's own mapping, repeated here because the authorization
+    /// happens BEFORE the listener exists (`ChainedVoiceEngine.failure(for:)`
+    /// is internal to ScarfCore). Same three outcomes the listener throws.
+    static func failure(for error: VoiceListenerError) -> VoiceSessionFailure {
+        switch error {
+        case .speechRecognitionDenied: return .speechRecognitionDenied
+        case .recognizerUnavailable, .onDeviceRecognitionUnsupported: return .speechRecognitionUnavailable
+        case .microphoneDenied: return .microphoneDenied
+        case .audioEngineFailed(let detail), .recognitionFailed(let detail):
+            return .mediaUnavailable(detail: detail)
+        }
+    }
+
+    /// Show a start-time failure in the session sheet without ever opening
+    /// the microphone or the audio session. The sheet binds to
+    /// `VoiceConversationEngine`, so the failure travels as a session that
+    /// is born terminal (``StillbornVoiceEngine``) and renders through the
+    /// same localized failure copy as any other.
+    private func present(failure: VoiceSessionFailure, kind: VoiceEngineKind) {
+        session = Session(engine: StillbornVoiceEngine(failure: failure), kind: kind, bridge: nil)
+        isPresented = true
     }
 
     // MARK: Consent
@@ -417,6 +501,81 @@ final class VoiceLiveSessionModel: VoiceLiveComposerNoticing {
             }
         }
     }
+}
+
+// MARK: - Speech authorization seam
+
+/// Speech-recognition + microphone authorization for the chained engine.
+/// A seam so tests never touch the real Speech framework or microphone;
+/// production is ``AppleSpeechAuthorizer`` over
+/// `AppleOnDeviceVoiceListener.authorize()`.
+protocol VoiceLiveSpeechAuthorizing: Sendable {
+    /// `nil` means both permissions are granted.
+    func authorize() async -> VoiceListenerError?
+}
+
+/// Production: the listener's own statics, which prompt for speech
+/// recognition first and then the microphone.
+struct AppleSpeechAuthorizer: VoiceLiveSpeechAuthorizing {
+    func authorize() async -> VoiceListenerError? {
+        await AppleOnDeviceVoiceListener.authorize()
+    }
+}
+
+/// The default for the GPT-Live-only test seam (and any caller that never
+/// mounts the chained engine): nothing to ask.
+struct AlwaysAuthorizedSpeech: VoiceLiveSpeechAuthorizing {
+    func authorize() async -> VoiceListenerError? { nil }
+}
+
+/// An engine that never ran: born in a terminal `.failed` phase so a
+/// permission denial reaches the session sheet through the ordinary
+/// `VoiceConversationEngine` surface. It owns no microphone, no audio
+/// session and no host connection, so every control on it is a no-op.
+@MainActor
+@Observable
+final class StillbornVoiceEngine: VoiceConversationEngine {
+    let phase: VoiceConversationPhase
+    let captions: [VoiceCaption] = []
+    let micLevel: Double = 0
+    let isMuted = false
+    let elapsedSeconds: TimeInterval = 0
+    let approximateCostUSD: Double = 0
+    let notice: VoiceSessionNotice? = nil
+
+    init(failure: VoiceSessionFailure) {
+        phase = .failed(failure)
+    }
+
+    func start() async {}
+    func end(reason: VoiceSessionEndReason) {}
+    func endImmediately(reason: VoiceSessionEndReason) {}
+    func toggleMute() {}
+}
+
+/// Hands ``AppleOnDeviceVoiceListener`` the app's own audio-session owner.
+/// P7c owns the iOS audio-session policy: `VoiceLiveAVAudioSession` is the
+/// single place that sets playAndRecord/voiceChat/defaultToSpeaker and
+/// restores the app's prior configuration, and the model's generation-guarded
+/// deferred release is the only thing that deactivates it. The listener's own
+/// `DefaultVoiceAudioSession` would set the category again on `start()` and
+/// deactivate it on `stop()` — under the speaker, mid-session — so it is
+/// replaced by this no-op adapter.
+@MainActor
+final class VoiceLiveAudioSessionAdapter: VoiceAudioSessionControlling {
+    private weak var owner: VoiceLiveAVAudioSession?
+
+    init(owner: VoiceLiveAVAudioSession) {
+        self.owner = owner
+    }
+
+    /// Already active: ``VoiceLiveSessionModel/begin(host:engine:dictationIdle:)``
+    /// activated the owner before the engine was built.
+    func activateForVoiceConversation() throws {}
+
+    /// Deliberately nothing. The model releases the session after the
+    /// engine's media is down, under a generation guard.
+    func deactivate() {}
 }
 
 // MARK: - Production collaborators

@@ -17,6 +17,9 @@ struct VoiceLiveSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var engine: any VoiceConversationEngine { session.engine }
+    /// Chained runs on-device speech + the host's own voice: no vendor, no
+    /// per-minute cost, so the cost line is replaced by a privacy line.
+    private var isChained: Bool { session.kind == .chained }
 
     var body: some View {
         NavigationStack {
@@ -38,7 +41,7 @@ struct VoiceLiveSessionSheet: View {
             }
             .safeAreaInset(edge: .bottom) { controls }
             .background(ScarfColor.backgroundPrimary.ignoresSafeArea())
-            .navigationTitle("Live Voice")
+            .navigationTitle(isChained ? Text("Voice conversation") : Text("Live Voice"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -138,7 +141,34 @@ struct VoiceLiveSessionSheet: View {
 
     /// Elapsed time plus the approximate spend, always visible while live:
     /// GPT-Live bills the host's OpenAI key $0.05/min.
+    @ViewBuilder
     private var meterRow: some View {
+        if isChained { chainedMeterRow } else { gptLiveMeterRow }
+    }
+
+    /// Chained: elapsed time and the privacy promise, no cost — the speech
+    /// is recognized on this device and the reply is spoken by the host's
+    /// own voice (or, if that fails, the system voice).
+    private var chainedMeterRow: some View {
+        VStack(spacing: 2) {
+            Label {
+                Text(verbatim: Self.elapsedText(engine.elapsedSeconds))
+                    .monospacedDigit()
+            } icon: {
+                Image(systemName: "clock")
+            }
+            .font(.subheadline)
+            Text("Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Elapsed \(Self.elapsedText(engine.elapsedSeconds)). Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice."))
+    }
+
+    private var gptLiveMeterRow: some View {
         VStack(spacing: 2) {
             HStack(spacing: ScarfSpace.s3) {
                 Label {
@@ -237,9 +267,15 @@ struct VoiceLiveSessionSheet: View {
                 setupSteps(failure)
             }
             if engine.elapsedSeconds > 0 {
-                Text("Session time \(Self.elapsedText(engine.elapsedSeconds)), approximately \(Self.costText(engine.approximateCostUSD)).")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Group {
+                    if isChained {
+                        Text("Session time \(Self.elapsedText(engine.elapsedSeconds)). Nothing was charged.")
+                    } else {
+                        Text("Session time \(Self.elapsedText(engine.elapsedSeconds)), approximately \(Self.costText(engine.approximateCostUSD)).")
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -260,6 +296,8 @@ struct VoiceLiveSessionSheet: View {
             Text("Hermes has been waiting a long time. Live Voice ends in about a minute unless you speak, to save cost.")
         case .endingSoon:
             Text("No one has spoken for a while. Live Voice ends in about a minute unless you speak, to save cost.")
+        case .speechFallback:
+            Text("Couldn't reach your Hermes host's voice, so replies are being read by this iPhone's system voice.")
         }
     }
 
@@ -310,6 +348,10 @@ struct VoiceLiveSessionSheet: View {
             Text("Couldn't start Live Voice audio on this device.")
         case .microphoneDenied:
             Text("ScarfGo can't use the microphone. Allow microphone access in Settings, then try again.")
+        case .speechRecognitionDenied:
+            Text("ScarfGo can't use speech recognition, so it can't turn your voice into words on this iPhone.")
+        case .speechRecognitionUnavailable:
+            Text("This iPhone has no on-device speech recognition for your language, and ScarfGo never sends your voice away to transcribe it.")
         case .microphoneBusy:
             Text("Another app is using the microphone. Finish there, then try again.")
         case .microphoneNotFound:
@@ -349,6 +391,34 @@ struct VoiceLiveSessionSheet: View {
         case .host(.unsupported):
             Text("Update Hermes on the host (`hermes update`), then try again.")
                 .font(.callout)
+        case .speechRecognitionDenied:
+            VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+                Label {
+                    Text("Open Settings \u{203A} Privacy & Security \u{203A} Speech Recognition and turn ScarfGo on.")
+                } icon: {
+                    Image(systemName: "1.circle")
+                }
+                Label {
+                    Text("Do the same under Settings \u{203A} Privacy & Security \u{203A} Microphone, then tap Try Again.")
+                } icon: {
+                    Image(systemName: "2.circle")
+                }
+            }
+            .font(.callout)
+        case .speechRecognitionUnavailable:
+            VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+                Label {
+                    Text("Open Settings \u{203A} General \u{203A} Keyboard and turn on Dictation, so iOS downloads your language's on-device model.")
+                } icon: {
+                    Image(systemName: "1.circle")
+                }
+                Label {
+                    Text("If your language has no on-device model, switch to Live Voice (GPT-Live) in Settings.")
+                } icon: {
+                    Image(systemName: "2.circle")
+                }
+            }
+            .font(.callout)
         default:
             EmptyView()
         }
