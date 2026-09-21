@@ -5,9 +5,11 @@ permalink: scarf/conventions/a-scarfcore-test-that-blocks-the-main-thread-or-a-p
 tags: [testing, flake, concurrency, main-actor, cooperative-pool, scarfcore]
 source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesP55Tests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/M1ACPTests.swift]
 source_paths_inferred: false
-source_sha: 834467ab2ab1d5523097d023b965211259223f3d
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-19
+reviewed_by: audit:claude-code (background)
 ---
 
 Found on feat/voice (t-f1593849). The full ScarfCore `swift test` failed about 2 of 3 runs, always M1ACPTests at its `waitFor`. Those tests passed under `--filter`, and main passed. The cause was in OTHER tests, which blocked the executors M1ACPTests hops through. `swift test` runs ~3,500 tests in one process. There is one main thread and one cooperative pool, and the pool is as wide as the core count (10 here).

@@ -5,10 +5,10 @@ permalink: scarf/decisions/hermes-v0-18-0-audit-findings
 tags: [hermes, v018, audit, verification, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-07-04
 updated: 2026-09-10
-reviewed: 2026-09-18
+reviewed: 2026-09-19
 reviewed_by: audit:claude-code (background)
 ---
 

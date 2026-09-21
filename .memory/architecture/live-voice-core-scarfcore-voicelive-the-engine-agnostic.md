@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, s
 source_paths_inferred: false
 source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 Built in P4 (task t-a4665c6e, branch feat/voice-p4). The macOS panel (P5a) and the ScarfGo sheet (P5b) bind only to these types, and a free chained engine (P7) can sit behind the same protocol. The design source is documents/plans/2026-09-18-live-voice-spike.md.
 
@@ -47,3 +47,12 @@ Unverified billing: if the host exchange is cancelled after the script has POSTe
 - relates_to [[GPT-Live session exchange runs as a host script, not via the Hermes dashboard]]
 - relates_to [[GPT-Live voice in WKWebView: origin, permission and hosting requirements]]
 - relates_to [[ACP has no voice-live surface: send the turn note as an embedded resource block]]
+
+
+
+## F6 fresh-eyes fixes on main (t-30cee401, 2026-09-19)
+
+- [gotcha] `GPTLiveEngine` reports an `applyAnswer` (WebKit `setRemoteDescription`) failure with a FIXED detail, never the exception text: WebKit quotes the offending SDP line, which is where `a=ice-pwd:` / `a=fingerprint:` live, and `finish` logs the description at `.public`. `VoiceLiveHostExchange.redact` also strips `a=ice-ufrag|ice-pwd|fingerprint|crypto:` values (line-anchored and inline) on top of `sk-…`/`Bearer`/`ek_` #voice #security
+- [gotcha] The transports surface a cancelled script as a plain transport error ("Script cancelled"), so `createSession` checks `Task.isCancelled` in its catch and rethrows `CancellationError` — otherwise a session the user ended looks like "couldn't reach the Hermes host" #voice #cancellation
+- [gotcha] `SSHScriptRunner.ScriptFeeder` records the errno of any short write other than EINTR/EAGAIN/EPIPE; both run loops then terminate the child and return `.connectFailure("failed to feed the script: …")`. Before, the pipe was closed and the shell ran the truncated prefix as a complete script #transport
+- [todo] Open: a session created while the user ends during `.connecting` is never closed (t-6a545269); consent is enforced only app-side (t-95b5d1cb) #voice #cost

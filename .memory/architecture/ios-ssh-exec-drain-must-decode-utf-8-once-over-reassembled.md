@@ -4,9 +4,11 @@ type: note
 permalink: scarf/architecture/ios-ssh-exec-drain-must-decode-utf-8-once-over-reassembled
 source_paths: [scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: 834467ab2ab1d5523097d023b965211259223f3d
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-19
+reviewed_by: audit:claude-code (background)
 ---
 
 `CitadelServerTransport.absorb` is the ONE drain loop every iOS `runProcess`/`streamScript` exec shares (`runExec` → `drain` → `absorb`). It used to call `ByteBuffer.readString(length:)` on each `ExecCommandOutput.stdout`/`.stderr` chunk — one chunk per Citadel/SSH data packet — and append the decoded `String`'s UTF-8 bytes to the `Data` accumulator.

@@ -5,9 +5,11 @@ permalink: scarf/architecture/mac-live-voice-p5a-gate-voiceturnhost-on-chatviewm
 tags: [voice, gpt-live, macos, architecture]
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/scarf/Features/Chat/Views/ChatTranscriptPane.swift, scarf/scarf/scarfApp.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
+reviewed: 2026-09-19
+reviewed_by: claude-fable-5-1
 ---
 
 Built in P5a (task t-8c80d256, branch feat/voice-p5a). The twin of the ScarfGo P5b note. Everything binds to the P4 core (VoiceConversationEngine / VoiceTurnHost).
@@ -39,3 +41,19 @@ Built in P5a (task t-8c80d256, branch feat/voice-p5a). The twin of the ScarfGo P
 - relates_to [[Live Voice core (ScarfCore/VoiceLive): the engine-agnostic surface both apps bind to]]
 - relates_to [[ScarfGo Live Voice (P5b): gate, mic exclusivity, teardown and the shared prompt path]]
 - relates_to [[ACP turn completion is sendPrompt's return, not a stream .promptComplete event]]
+
+
+
+## F6 fresh-eyes fixes on main (t-521b5646, 2026-09-19)
+
+- [convention] `VoiceLiveController.start` records `StartRefusal.blockedByAnotherWindow` instead of returning silently when another window claimed the session while the consent sheet was up; `ChatViewModel.startVoiceLive` consumes it into the composer's transient hint ("running in another Scarf window"). Consent is now cleared on that path too #voice #ux
+- [convention] Leaving Chat (sidebar section, terminal mode, window close, ContextBoundRoot.onDisappear) goes through `ChatViewModel.leaveChatVoiceLive()` → `voiceLive.dismiss()`, which ends the session AND drops the engine/bridge/WKWebView; `endImmediately` alone kept them alive and re-rendered a stale "session ended" strip on return. The in-chat graceful End still keeps its panel to show the outcome #voice #lifecycle
+- [convention] `MessageSpeechService.logSummary(for:)` splits a speech failure into a public case name and a private detail; the detail (verbatim host stdout/stderr from the TTS script, which can carry a provider key) is logged `privacy: .private` (C9). `playAudioFiles` opens every AVAudioFile before registering temp URLs and deletes them on throw #voice #logging
+
+
+
+## F2b: old Mac chat issues (t-4e6fa818, 2026-09-19)
+
+- [invariant] `ContextBoundRoot.onDisappear` calls `ChatViewModel.leaveChat()` = `stopACP()` then `leaveChatVoiceLive()`. Before, only the voice engine was dropped and the `hermes acp` process (and its reconnect ladder) survived a window close or a server/profile switch as an orphan. Idempotent #acp #lifecycle
+- [convention] Every `loadConfig()` in ChatViewModel runs inside `OffPool.run` (C10): the session-start preflight is split into a synchronous prologue and `continueStartACPSession(intent:config:…)` after the hop, re-checking `startStillCurrent`; `switchModelPreset(nil)` and `toggleVoice` read inside their Tasks. `MacChatF2bTests.everyChatViewModelConfigReadSitsInsideAnOffMainHop` is the source rule, and `ThreadRecordingTransport` through the `fileService` test seam proves where the read ran #c10 #chat
+- [convention] Composer: `RichChatInputBar.shouldSendOnReturn(hasMarkedText:modifiers:)` hands Return back to the IME while marked text exists (Japanese/Chinese/Korean composition); the image cap is owned by `ComposerAttachmentSlots` (slots reserved synchronously on accept, released on failed encode, committed on success), so a burst of drops cannot overshoot the 5-image cap; the text area carries the literal accessibility label "Message Hermes" #chat #a11y

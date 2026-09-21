@@ -15,11 +15,9 @@ Measured in the P3 Live Voice spike (2026-09-18, macOS 27.0 + iOS 26.2 simulator
 ## Observations
 - [constraint] Serve the voice page from a custom WKURLSchemeHandler scheme (scarf-voice://): isSecureContext is true on macOS and iOS; loadHTMLString with baseURL nil is about:blank, not secure, and navigator.mediaDevices is undefined #voice #webkit
 - [gotcha] The WKWebView must be in a window's view hierarchy — a detached web view reports visibilityState hidden and audio.play() of the remote WebRTC track never resolves; alpha 0 or isHidden inside the hierarchy both play #voice #webkit
-- [convention] Implement WKUIDelegate requestMediaCapturePermissionFor and grant only origin.protocol == scarf-voice + microphone; set mediaTypesRequiringUserActionForPlayback = [] (and allowsInlineMediaPlayback on iOS). The OS TCC prompt still follows; macOS needs the hardened-runtime audio-input entitlement + NSMicrophoneUsageDescription (the app is NOT sandboxed) #voice #permissions
+- [convention] Implement WKUIDelegate requestMediaCapturePermissionFor and grant only origin.protocol == scarf-voice + microphone; set mediaTypesRequiringUserActionForPlayback = [] (and allowsInlineMediaPlayback on iOS). The OS TCC prompt still follows. macOS requires the hardened-runtime audio-input entitlement + NSMicrophoneUsageDescription (the app is NOT sandboxed); iOS requires NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription in Info.plist #voice #permissions
 - [gotcha] WebKit hides host ICE candidates behind mDNS .local names until capture is granted, so an in-page WebRTC loopback test is flaky unless the TEST-ONLY SPI _setICECandidateFilteringEnabled:NO is set; _setMockCaptureDevicesEnabled: gives a headless mic. Never ship either #voice #testing
 - [fact] WKWebView WebRTC offers carry opus/48000/2 + a webrtc-datachannel m-line and end in CRLF; getUserMedia track settings report echoCancellation true (WebKit uses the OS voice-processing unit) #voice
-
-
 
 ## Shipped in P4 (WebViewVoiceMediaBridge)
 
@@ -33,8 +31,6 @@ Measured in the P3 Live Voice spike (2026-09-18, macOS 27.0 + iOS 26.2 simulator
 - [gotcha] Only the page's own navigation failing before `ready` loses the page. `didFail` / `didFailProvisionalNavigation` for any other navigation, such as one the policy cancels, used to nil `secureContext`, and `fire()` then silently dropped the teardown, which left the mic open. Teardown is never gated on `secureContext` #voice #webkit
 - [convention] `connectionState == 'disconnected'` is recoverable: `connection_lost` only if it stays down past `CONFIG.disconnectGraceMs` (8 s). `failed` / `closed` still fail at once #voice #webrtc
 - [testing] The page's JS is executed in `swift test` (WebViewVoiceMediaBridgeTests). The page loads over the real scheme, then JS stand-ins for getUserMedia, RTCPeerConnection, the data channel and AudioContext are installed after load. This tests teardown ordering, the flush, getUserMedia error names and the disconnect grace without a mic or network. `scarfVoiceLive.config` exposes the timings for tests #voice #testing
-
-
 
 ## Relations
 - feeds_into [[mac-live-voice-p5a-gate-voiceturnhost-on-chatviewmodel]]

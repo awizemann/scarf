@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-voice-playback-runs-text-to-speech-tool-on-
 tags: [voice, tts, capabilities, security, multi-server]
 source_paths: [scarf/scarf/Core/Services/MessageSpeechService.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
+reviewed: 2026-09-19
+reviewed_by: audit:claude-code (background)
 ---
 
 Settings > Voice > Playback Engine "Hermes Voice" (P2 hardening, branch feat/voice-p2, task t-e267092a). HermesSpeechService runs one opaque script over ServerTransport.streamScript that imports tools.tts_tool.text_to_speech_tool in the hermes binary's interpreter and calls it with output_path only.
@@ -23,3 +25,10 @@ Settings > Voice > Playback Engine "Hermes Voice" (P2 hardening, branch feat/voi
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[GPT-Live session exchange runs as a host script, not via the Hermes dashboard]]
 - relates_to [[Multi-Server Architecture (Scarf 2.0+)]]
+
+
+
+## F6 fix (t-30cee401, 2026-09-19)
+
+- [gotcha] `HermesTTSCache.evictOverflow` groups files through the pure, order-independent `groupForEviction(files:)`: `contentsOfDirectory` returns files in unspecified order, and the old code replaced the stem's entry when the `.json` manifest was seen after its `-NN` chunks, so those chunks were never counted toward the 256 MB cap nor deleted. The cap is now injectable (`init(directory:maxBytes:)`) and `HermesTTSCacheTests` drives a real eviction pass on disk #tts #cache
+- [gotcha] `ProjectConfigKeychain.setIfAbsent` against the real Keychain is `SecItemAdd` only; `errSecDuplicateItem` returns the stored value via `get`. It used to be a plain `set` (SecItemUpdate first), which would have overwritten the mini-app grant signing key and invalidated every issued grant #keychain

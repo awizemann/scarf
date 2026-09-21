@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ProcessACPChannel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-07-13
 updated: 2026-09-13
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-19
+reviewed_by: audit:claude-code (background)
 ---
 
 Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on main — feat/local-models' chat diff is 47 lines in the preflight path and touches none of this; it only supplied triggers: Ollama cold-swap latency, config churn).

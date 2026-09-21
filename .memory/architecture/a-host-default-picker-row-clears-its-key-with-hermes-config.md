@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-host-default-picker-row-clears-its-key-with-herm
 tags: [hermes, capability-gating, settings, cli-verdict]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/IOSSettingsViewModel.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/Scarf iOS/Settings/SettingEditorSheet.swift]
 source_paths_inferred: false
-source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
+source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-14
+reviewed: 2026-09-19
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,9 +5,11 @@ permalink: scarf/operations/mac-scarftests-run-green-only-serially-and-an-unsign
 tags: [testing, xcodebuild, keychain, gotcha]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/scarfTests/ProjectTemplateTests.swift, scarf/scarfTests/SpawnDisciplineP43Tests.swift, scarf/Full.xctestplan]
 source_paths_inferred: false
-source_sha: 834467ab2ab1d5523097d023b965211259223f3d
+source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-19
+reviewed_by: claude-fable-5-1
 ---
 
 Measured 2026-09-18 while making feat/voice pass the Mac suite (t-30667749), with a throwaway worktree of main for comparison. Flags were `-skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO` and each tree had its own DerivedData.

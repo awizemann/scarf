@@ -5,7 +5,7 @@ permalink: scarf/architecture/streaming-chat-ui-upserts-are-throttled-to-50ms-ac
 tags: [performance, chat, streaming, gh-140]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 40a3b5f626e2d4f6689a632bd31e240ec70e8c4a
 created: 2026-08-31
 updated: 2026-08-31
 reviewed: 2026-09-18

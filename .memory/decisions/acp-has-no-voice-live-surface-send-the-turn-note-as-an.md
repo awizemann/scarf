@@ -3,11 +3,13 @@ title: ACP has no voice-live surface: send the turn note as an embedded resource
 type: note
 permalink: scarf/decisions/acp-has-no-voice-live-surface-send-the-turn-note-as-an
 tags: [acp, voice, gpt-live]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceConversationEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceLiveTurnNote.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/VoiceLiveTurnNoteContractTests.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-19
+reviewed_by: audit:claude-code (background)
 ---
 
 Recommended in the P3 Live Voice spike (documents/plans/2026-09-18-live-voice-spike.md section 4); Alan approved it on 2026-09-18 and P4 shipped it (see the section below). Verified offline against Hermes's own acp.schema + acp_adapter.content in the v2026.9.14-equivalent venv; not yet run as a real turn.

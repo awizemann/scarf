@@ -5,7 +5,7 @@ permalink: scarf/architecture/wal-state-db-without-a-shm-sidecar-cannot-be-read-
 tags: [sqlite, state-db, wal, hermes, charter-c3, dashboard]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/LocalSQLiteBackend.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/RemoteSQLiteBackend.swift]
 source_paths_inferred: false
-source_sha: 479886cf715072b2f386431c01089bbd3e560510
+source_sha: 41e58d74562498d9f61a89e0a8ed08575ae13b5c
 created: 2026-09-08
 updated: 2026-09-08
 reviewed: 2026-09-10

@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelCon
 source_paths_inferred: false
 source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-13
-updated: 2026-07-14
+updated: 2026-09-21
 reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
@@ -106,7 +106,7 @@ Reader-verified 2026-07-13 against the LIVE local Hermes install: **Hermes Agent
 ## Upstream status of the aux-alias gap (2026-07-13, gh-verified)
 - [fact] The fix is IN FLIGHT upstream — do NOT file: issue #54405 (open, P3, the exact table gap incl. ollama→custom), PR #56448 (open 2026-07-01, adds 44 aliases + tests, fixes #54405; #62260 already labeled its duplicate), PR #62239 (open, unifies vllm/llamacpp spellings across hermes_cli + ships a table-parity test). Bug still present on main tip as of today — genuinely pending, not stale. #upstream
 - [gotcha] Residual sliver even after both merge: the aux table will still lack the four vllm/llamacpp spellings (#56448 synced from models.py BEFORE #62239 added them there) — the right vehicle is a review comment on #56448, not a new PR. #sliver
-- [fact] Genuinely untracked upstream: `_mark_provider_unhealthy` labels merely-ABSENT openrouter/nous credentials as "payment / credit error" (misleading for local-only users) — fileable as a small standalone issue; draft material in scratchpad/hermes-aux-alias-issue.md (now banner-marked DO NOT FILE for the alias part). #fileable
+- [done] FIXED UPSTREAM in Hermes v0.21.4 (tag v2026.9.21): `_mark_provider_unhealthy` used to label merely-ABSENT openrouter/nous credentials as "payment / credit error". Our issue #64144 + PR #64146 were folded by the maintainer into NousResearch/hermes-agent#113970 (commit a1238adfae4, Co-authored-by credit). Now: `_mark_provider_unhealthy(reason=, level=)` — absent credentials and an exhausted pool log at DEBUG with the real reason, confirmed 402s keep the WARNING payment wording, skip logs echo the recorded reason. Hosts BELOW v0.21.4 still show the misleading WARNING storm. Scarf parses none of this wording, so no Scarf change was needed (verified 2026-09-21). #fixed-upstream
 
 - [done] Upstream submissions filed 2026-07-14: sliver review comment on PR #56448 (github.com/NousResearch/hermes-agent/pull/56448#issuecomment-4965229014); issue #64144 + PR #64146 for the payment-error mislabel (branch fix/aux-unhealthy-label-absent-credentials on the awizemann fork). First submissions made under the [[Hermes upstream submission pattern — clean issue/PR contract]] — duplicate-search-first prevented a duplicate alias filing. #upstream
 

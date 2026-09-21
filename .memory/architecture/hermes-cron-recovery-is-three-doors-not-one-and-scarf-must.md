@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-cron-recovery-is-three-doors-not-one-and-sc
 tags: [hermes, cron, capability-gating, v0.21]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/CronRecoveryOffer.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/IOSCronViewModel.swift, scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: f934cdf6d79ce87411296880ecdff3d0f9b02853
 created: 2026-09-10
 updated: 2026-09-13
-reviewed: 2026-09-18
+reviewed: 2026-09-19
 reviewed_by: audit:claude-code (background)
 ---
 
