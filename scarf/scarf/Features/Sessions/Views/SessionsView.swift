@@ -819,11 +819,12 @@ private struct SessionTableRow: View {
     /// on its own it reads as "nothing here" rather than "Hermes didn't say".
     @ViewBuilder
     private var costCell: some View {
-        let cell = Text(costLabel)
+        let display = session.costDisplay
+        let cell = Text(Self.costLabel(for: display))
             .font(ScarfFont.monoSmall)
             .foregroundStyle(ScarfColor.foregroundMuted)
             .frame(width: 70, alignment: .trailing)
-        if session.costDisplay.isUnknown {
+        if display.isUnknown {
             cell.help("Hermes recorded no cost for this session")
         } else {
             cell
@@ -837,8 +838,8 @@ private struct SessionTableRow: View {
     ///
     /// A pre-v0.7 host has no `cost_status`, lands in `.legacy`, and renders
     /// exactly as it always did (charter C1).
-    private var costLabel: String {
-        switch session.costDisplay {
+    private static func costLabel(for display: SessionCostDisplay) -> String {
+        switch display {
         case .amount(let c, _):
             return c.formatted(.currency(code: "USD").precision(.fractionLength(2)))
         case .unknown:
@@ -855,9 +856,10 @@ private struct SessionTableRow: View {
     /// VoiceOver must say what the em dash means — "cost —" is not a
     /// sentence. Every other case reads its rendered value.
     private var costAccessibilityLabel: String {
-        session.costDisplay.isUnknown
+        let display = session.costDisplay
+        return display.isUnknown
             ? String(localized: "cost unknown")
-            : String(localized: "cost \(costLabel)")
+            : String(localized: "cost \(Self.costLabel(for: display))")
     }
 
     private static let updatedFormatter: RelativeDateTimeFormatter = {
