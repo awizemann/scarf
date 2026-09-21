@@ -93,14 +93,25 @@ Needs **Hermes v0.20.1 or later** — the Hermes Voice option is hidden below th
 
 Contributed by [@danmarauda](https://github.com/danmarauda) ([PR #143](https://github.com/awizemann/scarf/pull/143)); hardened afterward for the multi-server routing and version gate above.
 
-## Live Voice _(Mac and ScarfGo)_
+## Voice conversation _(Mac and ScarfGo)_
 
-A full, two-way **spoken conversation** with Hermes — not dictation, and not one-off playback. Click the waveform button next to Send (or its [ScarfGo](ScarfGo#voice) composer twin) and talk; Hermes talks back. Under the hood it's Hermes's own **GPT-Live** mode: an OpenAI voice model listens and speaks in real time, and hands every real request to Hermes as a normal chat turn, so replies come from your selected model with your full toolset — the same as if you'd typed the prompt.
+A full, two-way **spoken conversation** with Hermes — not dictation, and not one-off playback. Click the waveform button next to Send (or its [ScarfGo](ScarfGo#voice) composer twin) and talk; Hermes talks back. Every real request goes to Hermes as a normal chat turn, so replies come from your selected model with your full toolset — the same as if you'd typed the prompt. The button appears on any host running Hermes v0.20.1 or later, and which engine it starts follows the host's `voice.voice_chat_mode`:
+
+| Hermes mode | What runs | Needs | Cost |
+|---|---|---|---|
+| **Chained** (Hermes's default) | Your speech is turned into text **on your Mac or iPhone** by Apple's on-device recognizer; the words go to Hermes like a typed message; the reply is read aloud by the host's text-to-speech provider (Settings → Voice → Playback Engine on the Mac: Hermes Voice, or the system voice) | Hermes v0.20.1+. No key. | Free |
+| **GPT-Live** | Hermes's own **GPT-Live** mode: an OpenAI voice model listens and speaks in real time, and hands every request to Hermes | Hermes v0.21.3+ and an OpenAI key on the host | About $0.05/min |
+
+### Chained (free)
+
+Nothing to set up. Your voice never leaves the device: Scarf forces on-device recognition and refuses to run when your language has no on-device model (it tells you, rather than falling back to Apple's servers). The first time, macOS or iOS asks for Speech Recognition and Microphone permission. Replies are spoken by whatever the host's `tts.provider` is (Hermes's default, `edge`, is free; so are `piper`, `kittentts` and `neutts`), or by the system voice when the Mac's Playback Engine is set to System Voice. There is no consent sheet, because nothing is sent to a third party by Scarf itself. It's half-duplex: talk, wait for the reply, interrupt by speaking over it. Say "stop" or "goodbye" to end.
+
+### GPT-Live
 
 **Setup**, once per Hermes host:
 
 1. **Hermes v0.21.3 or later.**
-2. **Settings → Voice → Voice Chat Mode → GPT-Live.** Hermes's default is *Chained*; switching to GPT-Live is what turns on the composer button. Scarf writes it with `hermes config set`. This is a Hermes setting for the **whole profile**, not just Scarf: it also switches voice to GPT-Live in Hermes's own apps (the Hermes desktop app, for example).
+2. **Settings → Voice → Mode → GPT-Live.** Hermes's default is *Chained*; switching to GPT-Live is what makes the same button start a GPT-Live session instead. Scarf writes it with `hermes config set`. This is a Hermes setting for the **whole profile**, not just Scarf: it also switches voice to GPT-Live in Hermes's own apps (the Hermes desktop app, for example).
 3. **An OpenAI API key on the Hermes host** — `OPENAI_API_KEY` in its `.env`, or `voice.gpt_live.api_key`. The key never leaves the host; Scarf doesn't read it or transmit it anywhere.
 
 **Privacy: what leaves your device.** The Hermes host only sets up each session. After that, your voice streams **directly from your Mac or phone to OpenAI** over WebRTC, not through the host, so OpenAI also sees your device's network address. Each session also sends OpenAI recent messages from the chat as context (up to 24 messages, about 6,000 characters). Hermes still runs every real request itself. Before the first session on each device, Scarf and ScarfGo show a one-time consent that says this; **Cancel** starts nothing and bills nothing. Review or reset it any time in Settings → Voice (Mac) or Settings → Live Voice Privacy (ScarfGo); after a reset the next session asks again. Scarf never picks the voice model or provider: it uses the voice setup you chose in Hermes, and asks only when that setup sends your data to a third party.
@@ -109,11 +120,10 @@ A full, two-way **spoken conversation** with Hermes — not dictation, and not o
 
 **Troubleshooting:**
 
-- **No waveform button in the composer.** Live Voice needs both a capable Hermes (v0.21.3+) *and* Voice Chat Mode set to GPT-Live — either one missing hides the button entirely, same as any other version-gated Scarf surface. Check Settings → Voice.
+- **No waveform button in the composer.** The host is below Hermes v0.20.1 (or its version isn't detected yet). Chained needs nothing else; GPT-Live additionally needs v0.21.3+ and Mode set to GPT-Live in Settings → Voice — on an older host that mode falls back to chained, the same way Hermes's own desktop app does.
+- **Chained: "On-device speech recognition isn't available for this language."** Download the language's on-device model (macOS: System Settings → Keyboard → Dictation; iOS: Settings → General → Keyboard → Dictation languages) or pick a supported language.
 - **Button's there, but starting a session fails right away.** The host doesn't have an OpenAI key configured yet (see step 3 above) — nothing is billed when this happens.
 - **Session ended on its own.** Either it sat silent for a few minutes, or something closed the window / switched servers / quit the app — all of those end a session on purpose so it never keeps billing unattended.
-
-A free, local alternative — Hermes's *chained* voice mode (speech-to-text → a normal turn → text-to-speech, with no OpenAI key required) behind the same button — is being evaluated for a future release; see [Roadmap](Roadmap).
 
 ## Background completion notifications _(v2.6+, Mac)_
 

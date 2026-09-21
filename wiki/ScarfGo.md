@@ -71,7 +71,10 @@ Two ways to talk to Hermes from your phone, both next to the message composer.
 
 **Push-to-talk dictation.** Hold the mic button, speak, release — ScarfGo transcribes on-device (Apple's Speech framework, with on-device recognition forced on) and drops editable text into your draft; it never sends anything until you tap Send. If your phone or your language can't transcribe on-device, ScarfGo tells you ("Dictation isn't available in your language on this device") and records nothing, rather than quietly falling back to Apple's servers. Contributed by [@danmarauda](https://github.com/danmarauda) ([PR #143](https://github.com/awizemann/scarf/pull/143)).
 
-**Live Voice.** A full spoken back-and-forth with Hermes, started next to the dictation mic. It uses Hermes's own **GPT-Live** mode: an OpenAI voice model listens and talks, and hands every real request to Hermes as a normal turn, so replies come from your selected model with your full toolset. Needs:
+**Voice conversation.** A full spoken back-and-forth with Hermes, started next to the dictation mic. Every real request goes to Hermes as a normal turn, so replies come from your selected model with your full toolset. Which engine runs follows the host's voice mode:
+
+- **Chained** (Hermes's default, free, Hermes v0.20.1+): your speech becomes text **on your iPhone** (on-device only, never Apple's servers), the words go to Hermes like a typed message, and the reply is read aloud by the host's text-to-speech provider, falling back to the system voice. Nothing to set up beyond the Speech Recognition and Microphone permissions; no consent sheet, because ScarfGo sends nothing to a third party itself.
+- **Live Voice (GPT-Live)**: Hermes's own GPT-Live mode — an OpenAI voice model listens and talks, and hands every request to Hermes. Needs:
 
 1. **Hermes v0.21.3+** on the host.
 2. **Voice Chat Mode set to GPT-Live** — Settings tab → Voice on your phone, or Settings → Voice in the Mac app pointed at the same host (Hermes's default is Chained). It's a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.
@@ -79,9 +82,9 @@ Two ways to talk to Hermes from your phone, both next to the message composer.
 
 **What leaves your phone.** The Hermes host only sets up the session; your voice then streams **directly from your phone to OpenAI**, so OpenAI also sees your phone's network address. Each session also sends OpenAI recent messages from the chat as context (up to 24 messages, about 6,000 characters). Before the first session, ScarfGo shows a one-time consent that says this — **Cancel** starts nothing and bills nothing. Review or reset it in Settings → Live Voice Privacy.
 
-Costs about **$0.05 per minute** of session time on that key. A session ends itself after a few minutes of silence, and ScarfGo also ends it if you background the app, switch chats or servers, or dismiss the sheet — nothing keeps billing once you've stepped away. Dictation and Live Voice never hold the microphone at the same time; starting one stops the other.
+Costs about **$0.05 per minute** of session time on that key. A session ends itself after a few minutes of silence, and ScarfGo also ends it if you background the app, switch chats or servers, dismiss the sheet, or lose the connection to Hermes — nothing keeps billing once you've stepped away. Dictation and Live Voice never hold the microphone at the same time; starting one stops the other. A spoken request never cancels something you typed: while Hermes is busy with a typed request, the voice tells you so and the composer shows why, and it waits for your next request once that turn is done.
 
-**Not showing up?** The composer entry is hidden unless the host is on Hermes v0.21.3+ *and* Voice Chat Mode is GPT-Live — check Settings → Voice on the host. If it's showing but a session won't start, the host is most likely missing its OpenAI key.
+**Not showing up?** The composer entry is hidden below Hermes v0.20.1. In GPT-Live mode a session that won't start usually means the host is missing its OpenAI key; in chained mode, "On-device speech recognition isn't available for this language" means the language has no on-device model (Settings → General → Keyboard → Dictation languages).
 
 ## Project-scoped chat
 
