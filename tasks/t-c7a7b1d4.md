@@ -1,7 +1,7 @@
 ---
 id: t-c7a7b1d4
 title: iOS transport: stale "no stdin" error + document rc-file stdin edge
-status: todo
+status: done
 added: 2026-09-18
 priority: low
 ---

@@ -1,7 +1,7 @@
 ---
 id: t-af7b8cc4
 title: Voice release blockers: privacy policy, Mac mic string, string catalogs
-status: todo
+status: done
 added: 2026-09-18
 priority: high
 ---
@@ -19,5 +19,5 @@ From F4 (t-ba3ccc85). These must be done before the release that ships voice:
 
 ## Artifacts
 
-
+2026-09-19 all three done on main: (1) privacy policy Voice features section + analytics install-id correction (18806e7c), wiki mirror updated (tier), gh-pages privacy/index.html + sitemap re-rendered and committed locally on gh-pages 24ee7b60 (NOT pushed); (2) Mac NSMicrophoneUsageDescription + 7 locales (same commit); (3) 294 missing catalog keys (voice plus earlier gaps) added with six translations from the .stringsdata oracle (818f9ff4), validate-catalog clean, LocalizationCatalogTests green. Remaining before a voice release: Alan's App Privacy decision t-11cc53ea and the keyed Live Voice smoke test.
 
