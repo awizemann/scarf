@@ -707,10 +707,7 @@ private struct SessionTableRow: View {
                 Text(formatTokens(session.totalTokens))
                     .font(ScarfFont.monoSmall)
                     .frame(width: 90, alignment: .trailing)
-                Text(costLabel)
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
-                    .frame(width: 70, alignment: .trailing)
+                costCell
                 Text(updatedLabel)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundFaint)
@@ -741,7 +738,7 @@ private struct SessionTableRow: View {
         }
         parts.append(String(localized: "^[\(session.messageCount) message](inflect: true)"))
         parts.append(String(localized: "\(formatTokens(session.totalTokens)) tokens"))
-        parts.append(String(localized: "cost \(costLabel)"))
+        parts.append(costAccessibilityLabel)
         parts.append(String(localized: "updated \(updatedLabel)"))
         if session.rewindCount > 0 {
             parts.append(String(localized: "rewound ^[\(session.rewindCount) time](inflect: true)"))
@@ -818,11 +815,49 @@ private struct SessionTableRow: View {
         session.model ?? "—"
     }
 
-    private var costLabel: String {
-        if let c = session.displayCostUSD, c > 0 {
-            return c.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+    /// The Cost column. The em dash carries a tooltip explaining itself —
+    /// on its own it reads as "nothing here" rather than "Hermes didn't say".
+    @ViewBuilder
+    private var costCell: some View {
+        let cell = Text(costLabel)
+            .font(ScarfFont.monoSmall)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .frame(width: 70, alignment: .trailing)
+        if session.costDisplay.isUnknown {
+            cell.help("Hermes recorded no cost for this session")
+        } else {
+            cell
         }
-        return "$0.00"
+    }
+
+    /// Hermes stores an UNKNOWN cost as the placeholder `0.0`, so the number
+    /// alone cannot tell "free" from "don't know" — `cost_status` can, and
+    /// `costDisplay` is the one rule that reads it. An unknown cost takes the
+    /// em dash this table already uses for a missing model, never `$0.00`.
+    ///
+    /// A pre-v0.7 host has no `cost_status`, lands in `.legacy`, and renders
+    /// exactly as it always did (charter C1).
+    private var costLabel: String {
+        switch session.costDisplay {
+        case .amount(let c, _):
+            return c.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+        case .unknown:
+            return "—"
+        case .includedFree:
+            return Double.zero.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+        case .legacy:
+            // `.legacy` never carries a positive amount (a positive figure is
+            // always `.amount`), so this is the old zero/absent path verbatim.
+            return "$0.00"
+        }
+    }
+
+    /// VoiceOver must say what the em dash means — "cost —" is not a
+    /// sentence. Every other case reads its rendered value.
+    private var costAccessibilityLabel: String {
+        session.costDisplay.isUnknown
+            ? String(localized: "cost unknown")
+            : String(localized: "cost \(costLabel)")
     }
 
     private static let updatedFormatter: RelativeDateTimeFormatter = {

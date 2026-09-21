@@ -5,7 +5,12 @@ import ScarfDesign
 struct SessionInfoBar: View {
     let session: HermesSession?
     let isWorking: Bool
-    /// Fallback token counts from ACP prompt results (DB may have zeros for ACP sessions).
+    /// Fallback token counts from ACP prompt results.
+    ///
+    /// state.db has carried ACP token counts since Hermes v2026.7.1, and the
+    /// bar prefers the DB value whenever it is non-zero. These stay for the
+    /// two windows the DB cannot fill: MID-TURN (state.db is written only at
+    /// turn boundaries) and pre-v2026.7.1 hosts, whose ACP rows were zero.
     var acpInputTokens: Int = 0
     var acpOutputTokens: Int = 0
     var acpThoughtTokens: Int = 0
@@ -352,12 +357,42 @@ struct SessionInfoBar: View {
                     .help("Hermes auto-compacted this session's context ^[\(acpCompressionCount) time](inflect: true)")
                 }
 
-                if let cost = session.displayCostUSD {
+                // `costDisplay` is the one shared rule (ScarfCore
+                // `SessionCostDisplay`): Hermes stores an UNKNOWN cost as the
+                // placeholder 0.0, so this bar used to assert "$0.0000 est."
+                // where Hermes had said "n/a". A pre-v0.7 host has no
+                // `cost_status`, lands in `.legacy`, and renders exactly as
+                // before (charter C1).
+                switch session.costDisplay {
+                case .amount(let cost, let isActual):
                     let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))
-                    Label(session.costIsActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
+                    Label(isActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
                         .contentTransition(.numericText())
                         .lineLimit(1)
                         .fixedSize()
+                case .includedFree:
+                    // A genuine zero on a subscription-included route — a
+                    // real figure, so no " est." marker.
+                    Label(
+                        Double.zero.formatted(.currency(code: "USD").precision(.fractionLength(4))),
+                        systemImage: "dollarsign.circle"
+                    )
+                    .lineLimit(1)
+                    .fixedSize()
+                case .unknown:
+                    Label("—", systemImage: "dollarsign.circle")
+                        .lineLimit(1)
+                        .fixedSize()
+                        .help("Hermes recorded no cost for this session")
+                        .accessibilityLabel(Text("cost unknown"))
+                case .legacy(let amount, let isActual):
+                    if let amount {
+                        let formattedCost = amount.formatted(.currency(code: "USD").precision(.fractionLength(4)))
+                        Label(isActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
+                            .contentTransition(.numericText())
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                 }
 
                 if let start = session.startedAt {

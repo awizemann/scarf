@@ -155,6 +155,22 @@ public struct HermesSession: Identifiable, Sendable {
 
     public var costIsActual: Bool { actualCostUSD != nil }
 
+    /// How this session's cost must be presented — the ONE rule, shared by
+    /// every cost surface. Reads `cost_status` so a cost Hermes recorded as
+    /// unknown is never rendered as a confident `$0.00`; see
+    /// ``SessionCostDisplay`` for the Hermes-side citations.
+    ///
+    /// Prefer this over `displayCostUSD` at any surface that renders a
+    /// figure. `displayCostUSD` remains the raw preference order for callers
+    /// that only need a number (sums, sorting).
+    public var costDisplay: SessionCostDisplay {
+        SessionCostDisplay(
+            actualCostUSD: actualCostUSD,
+            estimatedCostUSD: estimatedCostUSD,
+            costStatus: costStatus
+        )
+    }
+
     public var duration: TimeInterval? {
         guard let start = startedAt, let end = endedAt else { return nil }
         return end.timeIntervalSince(start)
