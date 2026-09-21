@@ -96,6 +96,10 @@ public final class InsightsViewModel {
     public var totalReasoningTokens = 0
     public var totalTokens = 0
     public var totalCost: Double = 0
+    /// How many of the listed sessions have a cost Hermes recorded as
+    /// unknown, and so contribute nothing to ``totalCost``. Greater than
+    /// zero means ``totalCost`` is a partial figure, not a complete total.
+    public var unknownCostSessionCount = 0
     public var activeTime: TimeInterval = 0
     public var avgSessionDuration: TimeInterval = 0
 
@@ -191,6 +195,13 @@ public final class InsightsViewModel {
         totalReasoningTokens = sessions.reduce(0) { $0 + $1.reasoningTokens }
         totalTokens = totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens + totalReasoningTokens
         totalCost = sessions.reduce(0.0) { $0 + ($1.displayCostUSD ?? 0) }
+        // Hermes stores an unknown cost as 0.0, so those sessions add
+        // nothing to the sum and the total silently reads as complete.
+        // Counting them lets the Insights card say the total is partial
+        // instead of asserting a figure Hermes never gave. Zero on any
+        // pre-v0.7 host (no `cost_status` → `.legacy`), so that card keeps
+        // its previous rendering exactly — charter C1.
+        unknownCostSessionCount = sessions.reduce(0) { $0 + ($1.costDisplay.isUnknown ? 1 : 0) }
 
         var total: TimeInterval = 0
         var count = 0

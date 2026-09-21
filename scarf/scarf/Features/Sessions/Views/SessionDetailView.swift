@@ -73,9 +73,29 @@ struct SessionDetailView: View {
                 if session.reasoningTokens > 0 {
                     Label("\(session.reasoningTokens) reasoning", systemImage: "brain")
                 }
-                if let cost = session.displayCostUSD {
+                // One shared rule — ScarfCore `SessionCostDisplay`. Hermes
+                // persists an UNKNOWN cost as the placeholder 0.0, so this
+                // row used to claim "$0.0000 est." for a cost Hermes never
+                // knew. `.legacy` (nil `cost_status`, i.e. a pre-v0.7 host)
+                // reproduces the previous rendering exactly — charter C1.
+                switch session.costDisplay {
+                case .amount(let cost, let isActual):
                     let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))
-                    Label(session.costIsActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
+                    Label(isActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
+                case .includedFree:
+                    Label(
+                        Double.zero.formatted(.currency(code: "USD").precision(.fractionLength(4))),
+                        systemImage: "dollarsign.circle"
+                    )
+                case .unknown:
+                    Label("—", systemImage: "dollarsign.circle")
+                        .help("Hermes recorded no cost for this session")
+                        .accessibilityLabel(Text("cost unknown"))
+                case .legacy(let amount, let isActual):
+                    if let amount {
+                        let formattedCost = amount.formatted(.currency(code: "USD").precision(.fractionLength(4)))
+                        Label(isActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
+                    }
                 }
                 if let date = session.startedAt {
                     Label(date.formatted(.dateTime.month().day().hour().minute()), systemImage: "calendar")

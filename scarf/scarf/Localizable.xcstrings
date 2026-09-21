@@ -115241,6 +115241,88 @@
         }
       }
     },
+    "Hermes recorded no cost for this session" : {
+      "comment" : "Tooltip explaining the em dash shown in place of a session cost.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat für diese Sitzung keine Kosten erfasst"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes no registró ningún coste para esta sesión"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes n’a enregistré aucun coût pour cette session"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes はこのセッションのコストを記録していません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes não registrou nenhum custo para esta sessão"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 未记录此会话的费用"
+          }
+        }
+      }
+    },
+    "Partial — Hermes recorded no cost for ^[%lld session](inflect: true)" : {
+      "comment" : "Tooltip saying the Insights total cost is incomplete.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teilsumme – Hermes hat für ^[%lld Sitzung](inflect: true) keine Kosten erfasst"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parcial: Hermes no registró ningún coste para ^[%lld sesión](inflect: true)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partiel – Hermes n’a enregistré aucun coût pour ^[%lld session](inflect: true)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分的 — Hermes は %lld 件のセッションのコストを記録していません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parcial — o Hermes não registrou nenhum custo para ^[%lld sessão](inflect: true)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分 — Hermes 未记录 %lld 个会话的费用"
+          }
+        }
+      }
+    },
     "“%@” contains a tab or a control character. Remove it, then save." : {
       "comment" : "Bot editor validation error. %@ is the name of the offending field, e.g. “Name”.",
       "localizations" : {
@@ -115360,6 +115442,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "验证错误：%@ 包含制表符或控制字符。请删除后再保存。"
+          }
+        }
+      }
+    },
+    "cost unknown" : {
+      "comment" : "VoiceOver reading for a session cost Hermes did not record.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kosten unbekannt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "coste desconocido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "coût inconnu"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コスト不明"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "custo desconhecido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "费用未知"
           }
         }
       }

@@ -83,6 +83,39 @@ struct InsightsView: View {
 
     // MARK: - Overview
 
+    /// Total Cost. Hermes stores an unknown cost as `0.0`, so those sessions
+    /// add nothing and this sum used to read as a complete total — and, when
+    /// every session's cost was unknown (the common case on a `:free` model),
+    /// asserted a flat `$0.00`.
+    ///
+    /// Smallest honest treatment, deliberately not a redesign: when nothing
+    /// is known the card shows the em dash instead of a fabricated zero, and
+    /// whenever any session is unknown a tooltip says the total is partial.
+    /// With no unknown sessions — which includes every pre-v0.7 host, where
+    /// `cost_status` is nil — the card is byte-identical to before.
+    @ViewBuilder
+    private var totalCostCard: some View {
+        let partial = viewModel.unknownCostSessionCount > 0
+        let card = InsightCard(
+            label: "Total Cost",
+            value: (partial && viewModel.totalCost == 0)
+                ? "—"
+                : viewModel.totalCost.formatted(.currency(code: "USD").precision(.fractionLength(2))),
+            accent: true
+        )
+        if partial {
+            card
+                .help("Partial — Hermes recorded no cost for ^[\(viewModel.unknownCostSessionCount) session](inflect: true)")
+                .accessibilityValue(
+                    viewModel.totalCost == 0
+                        ? Text("cost unknown")
+                        : Text("Partial — Hermes recorded no cost for ^[\(viewModel.unknownCostSessionCount) session](inflect: true)")
+                )
+        } else {
+            card
+        }
+    }
+
     private var overviewSection: some View {
         sectionHeader("Overview", spacing: ScarfSpace.s3) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: ScarfSpace.s3), count: 4), spacing: ScarfSpace.s3) {
@@ -96,11 +129,7 @@ struct InsightsView: View {
                 InsightCard(label: "Cache Write", value: formatTokens(viewModel.totalCacheWriteTokens))
                 InsightCard(label: "Reasoning Tokens", value: formatTokens(viewModel.totalReasoningTokens))
                 InsightCard(label: "Total Tokens", value: formatTokens(viewModel.totalTokens))
-                InsightCard(
-                    label: "Total Cost",
-                    value: viewModel.totalCost.formatted(.currency(code: "USD").precision(.fractionLength(2))),
-                    accent: true
-                )
+                totalCostCard
                 InsightCard(label: "Active Time", value: formatDuration(viewModel.activeTime))
                 InsightCard(label: "Avg Session", value: formatDuration(viewModel.avgSessionDuration))
                 InsightCard(

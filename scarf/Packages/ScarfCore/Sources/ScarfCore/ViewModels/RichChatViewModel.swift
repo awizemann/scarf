@@ -616,7 +616,15 @@ public final class RichChatViewModel {
         }
     }
 
-    // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
+    // Cumulative ACP token tracking, accumulated from each prompt result.
+    //
+    // Since Hermes v2026.7.1 state.db DOES carry ACP token counts — the ACP
+    // path runs through the same `queue_token_counts` chokepoint as the CLI
+    // (`agent/turn_usage.py` → `hermes_state_usage.py`), so `SessionInfoBar`
+    // prefers the DB value whenever it is non-zero. This accumulator stays
+    // for the two cases the DB cannot cover: MID-TURN display (state.db is
+    // only written at turn boundaries) and pre-v2026.7.1 hosts, where the
+    // ACP rows really were zero.
     public private(set) var acpInputTokens = 0
     public private(set) var acpOutputTokens = 0
     public private(set) var acpThoughtTokens = 0
