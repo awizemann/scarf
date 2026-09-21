@@ -20,6 +20,20 @@ public struct HermesSession: Identifiable, Sendable {
     public let reasoningTokens: Int
     public let actualCostUSD: Double?
     public let costStatus: String?
+    /// Whether the host's `sessions` table HAS a `cost_status` column —
+    /// Scarf's probed `hasV07Schema` (charter C4), stamped by the decoder
+    /// that built this row.
+    ///
+    /// Load-bearing for the cost rule and nothing else. `costStatus` decodes
+    /// to nil both on a host too old to have the column AND on a current
+    /// host that never priced the session, and those two mean opposite
+    /// things: the first must keep rendering as it always did (C1), the
+    /// second must say "unknown" rather than `$0.00`. Only the decoder knows
+    /// which it is, so it records that here instead of the surfaces guessing.
+    ///
+    /// Defaults to `false` — the conservative reading — so every fixture and
+    /// hand-built session behaves exactly as it did before this flag existed.
+    public let hasCostStatusColumn: Bool
     public let billingProvider: String?
     /// Number of API calls Hermes made for this session (Hermes
     /// v2026.4.23+; populated from `sessions.api_call_count`). Distinct
@@ -87,6 +101,7 @@ public struct HermesSession: Identifiable, Sendable {
         actualCostUSD: Double?,
         costStatus: String?,
         billingProvider: String?,
+        hasCostStatusColumn: Bool = false,
         apiCallCount: Int = 0,
         rewindCount: Int = 0,
         pinned: Bool = false,
@@ -115,6 +130,7 @@ public struct HermesSession: Identifiable, Sendable {
         self.actualCostUSD = actualCostUSD
         self.costStatus = costStatus
         self.billingProvider = billingProvider
+        self.hasCostStatusColumn = hasCostStatusColumn
         self.apiCallCount = apiCallCount
         self.rewindCount = rewindCount
         self.pinned = pinned
@@ -167,7 +183,8 @@ public struct HermesSession: Identifiable, Sendable {
         SessionCostDisplay(
             actualCostUSD: actualCostUSD,
             estimatedCostUSD: estimatedCostUSD,
-            costStatus: costStatus
+            costStatus: costStatus,
+            hasCostStatusColumn: hasCostStatusColumn
         )
     }
 
@@ -212,7 +229,9 @@ public struct HermesSession: Identifiable, Sendable {
             cacheReadTokens: cacheReadTokens, cacheWriteTokens: cacheWriteTokens,
             estimatedCostUSD: estimatedCostUSD, reasoningTokens: reasoningTokens,
             actualCostUSD: actualCostUSD, costStatus: costStatus,
-            billingProvider: billingProvider, apiCallCount: apiCallCount,
+            billingProvider: billingProvider,
+            hasCostStatusColumn: hasCostStatusColumn,
+            apiCallCount: apiCallCount,
             rewindCount: rewindCount, pinned: pinned,
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,

@@ -360,9 +360,10 @@ struct SessionInfoBar: View {
                 // `costDisplay` is the one shared rule (ScarfCore
                 // `SessionCostDisplay`): Hermes stores an UNKNOWN cost as the
                 // placeholder 0.0, so this bar used to assert "$0.0000 est."
-                // where Hermes had said "n/a". A pre-v0.7 host has no
-                // `cost_status`, lands in `.legacy`, and renders exactly as
-                // before (charter C1).
+                // where Hermes had said "n/a". Only a host BELOW the v0.7
+                // schema — which has no `cost_status` column at all — lands
+                // in `.legacy` and renders exactly as before (charter C1); a
+                // NULL status on a host that HAS the column is `.unknown`.
                 switch session.costDisplay {
                 case .amount(let cost, let isActual):
                     let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))

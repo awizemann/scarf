@@ -836,8 +836,11 @@ private struct SessionTableRow: View {
     /// `costDisplay` is the one rule that reads it. An unknown cost takes the
     /// em dash this table already uses for a missing model, never `$0.00`.
     ///
-    /// A pre-v0.7 host has no `cost_status`, lands in `.legacy`, and renders
-    /// exactly as it always did (charter C1).
+    /// A NULL `cost_status` on a host that HAS the column means Hermes never
+    /// priced the session, and takes the em dash too — that is the common
+    /// case, not an exotic one (9 of 43 live sessions). Only a host BELOW the
+    /// v0.7 schema, which has no `cost_status` column at all, lands in
+    /// `.legacy` and renders exactly as it always did (charter C1).
     private static func costLabel(for display: SessionCostDisplay) -> String {
         switch display {
         case .amount(let c, _):

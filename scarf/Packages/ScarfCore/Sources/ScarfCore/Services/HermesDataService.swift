@@ -2043,6 +2043,14 @@ public actor HermesDataService {
             actualCostUSD: hasV07Schema ? row.optionalDouble(at: 17) : nil,
             costStatus: hasV07Schema ? row.optionalString(at: 18) : nil,
             billingProvider: hasV07Schema ? row.optionalString(at: 19) : nil,
+            // Record that the COLUMN was in the SELECT, not just that the
+            // value came back nil. `costStatus` is nil in both cases and
+            // they mean opposite things — see
+            // `HermesSession.hasCostStatusColumn`. This is the one place any
+            // HermesSession is built from a DB row, for BOTH the local and
+            // the remote/SSH backend (they share `Row` and this parser), so
+            // stamping it here covers every decode path.
+            hasCostStatusColumn: hasV07Schema,
             apiCallCount: apiCallCount,
             rewindCount: rewindCount,
             pinned: pinned,

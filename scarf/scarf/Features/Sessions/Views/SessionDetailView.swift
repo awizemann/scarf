@@ -76,8 +76,10 @@ struct SessionDetailView: View {
                 // One shared rule — ScarfCore `SessionCostDisplay`. Hermes
                 // persists an UNKNOWN cost as the placeholder 0.0, so this
                 // row used to claim "$0.0000 est." for a cost Hermes never
-                // knew. `.legacy` (nil `cost_status`, i.e. a pre-v0.7 host)
-                // reproduces the previous rendering exactly — charter C1.
+                // knew. `.legacy` is reached only when the host has NO
+                // `cost_status` column at all (below the v0.7 schema), and
+                // reproduces the previous rendering exactly — charter C1. A
+                // NULL status on a host that HAS the column is `.unknown`.
                 switch session.costDisplay {
                 case .amount(let cost, let isActual):
                     let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))

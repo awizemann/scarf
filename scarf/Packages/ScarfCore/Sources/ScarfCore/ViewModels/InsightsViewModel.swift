@@ -185,7 +185,10 @@ public final class InsightsViewModel {
         session.displayLabel(preview: sessionPreviews[session.id])
     }
 
-    private func computeAggregates() {
+    /// Internal rather than private so `InsightsAggregatesTests` can drive it
+    /// over a hand-built `sessions` array — the aggregation is pure, and
+    /// reaching it through `load()` would need a real state.db.
+    func computeAggregates() {
         totalMessages = sessions.reduce(0) { $0 + $1.messageCount }
         totalToolCalls = sessions.reduce(0) { $0 + $1.toolCallCount }
         totalInputTokens = sessions.reduce(0) { $0 + $1.inputTokens }
@@ -198,9 +201,12 @@ public final class InsightsViewModel {
         // Hermes stores an unknown cost as 0.0, so those sessions add
         // nothing to the sum and the total silently reads as complete.
         // Counting them lets the Insights card say the total is partial
-        // instead of asserting a figure Hermes never gave. Zero on any
-        // pre-v0.7 host (no `cost_status` → `.legacy`), so that card keeps
-        // its previous rendering exactly — charter C1.
+        // instead of asserting a figure Hermes never gave. A NULL
+        // `cost_status` counts too when the host HAS the column — Hermes
+        // never priced that session either. Zero on any host BELOW the v0.7
+        // schema, where the column does not exist and every session degrades
+        // to `.legacy`, so that card keeps its previous rendering exactly —
+        // charter C1.
         unknownCostSessionCount = sessions.reduce(0) { $0 + ($1.costDisplay.isUnknown ? 1 : 0) }
 
         var total: TimeInterval = 0
