@@ -200,15 +200,40 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
             },
             "Pausing did not flip enabled=false for \(job.id) in cron/jobs.json. cron.message says: '\(cronMessage(app))'."
         )
-        // The same fact through the CLI. `cron list` HIDES paused jobs, so
-        // `--all` is the read that proves it is both present and paused —
-        // and the bare form proves the hiding, which is the behaviour a
-        // reader of this test would otherwise get wrong.
+        // The same fact through the CLI, in BOTH listings.
+        //
+        // A paused job is visible in a bare `hermes cron list`, badged
+        // `[paused]`; `--all` widens the listing to disabled and completed
+        // jobs on top of that. Verified against the installed CLI's own
+        // source (`hermes_cli/cron.py:168-176`): `cron_list` reads
+        // `list_jobs(include_disabled=True)` and, without `--all`, keeps
+        // every job that is `enabled` OR whose effective state is
+        // `paused`.
+        //
+        // This test used to assert the opposite — that the bare form HIDES
+        // a paused job — which was true when it was written (2026-09-08).
+        // Upstream Hermes `3f399c0bd4` ("fix(cli): align kanban edit and
+        // paused cron listing", in v0.21.4) changed `cron_list` from
+        // `list_jobs(include_disabled=show_all)` to the filter above, so
+        // the old assertion failed on a CORRECT current host. Scarf's own
+        // cron UI reads `cron/jobs.json`, never this output, so nothing in
+        // the app moved with it.
+        //
+        // Both reads are scoped to the job's OWN line ("<id> [paused]" is
+        // one row of the listing). A bare `contains(id) && contains(...)`
+        // over the whole listing would pass on some OTHER job's badge —
+        // the fixture home seeds two paused cron jobs of its own, so that
+        // weaker form asserts almost nothing here.
         let listedAll = runHermes(["cron", "list", "--all"]).stdout
-        XCTAssertTrue(listedAll.contains(job.id) && listedAll.contains("[paused]"),
-                      "`hermes cron list --all` does not show \(job.id) as paused:\n\(listedAll)")
-        XCTAssertFalse(runHermes(["cron", "list"]).stdout.contains(job.id),
-                       "A paused job should be absent from a bare `hermes cron list`, but \(job.id) is listed.")
+        XCTAssertTrue(
+            pausedBadgeLine(for: job.id, in: listedAll) != nil,
+            "`hermes cron list --all` does not show \(job.id) as paused:\n\(listedAll)"
+        )
+        let listedBare = runHermes(["cron", "list"]).stdout
+        XCTAssertTrue(
+            pausedBadgeLine(for: job.id, in: listedBare) != nil,
+            "A paused job should still be listed, badged [paused], by a bare `hermes cron list`, but \(job.id) is not:\n\(listedBare)"
+        )
 
         XCTAssertTrue(
             waitUntil("paused state reaches the row", timeout: 25) {
@@ -868,6 +893,22 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
     }
 
     // MARK: - CLI
+
+    /// The line of a `hermes cron list` listing that carries `jobID` AND the
+    /// `[paused]` badge, or nil when the job is absent or not badged paused.
+    ///
+    /// Line-scoped on purpose: the fixture home seeds its own paused cron
+    /// jobs, so asking whether the whole listing contains the id and —
+    /// somewhere, anywhere — the string `[paused]` would pass on a
+    /// neighbour's badge. The CLI prints the pair on one row
+    /// (`hermes_cli/cron.py` `_print_banner` + `_STATE_BADGES`), which is
+    /// what makes the narrow read both exact and cheap.
+    private func pausedBadgeLine(for jobID: String, in listing: String) -> String? {
+        listing
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .first { $0.contains(jobID) && $0.contains("[paused]") }
+    }
 
     /// Run the real `hermes` CLI against THIS TEST'S isolated home.
     ///
