@@ -97,8 +97,10 @@ public enum SessionCostDisplay: Equatable, Sendable {
         costStatus: String?,
         hasCostStatusColumn: Bool = false
     ) {
-        let amount = actualCostUSD ?? estimatedCostUSD
-        let isActual = actualCostUSD != nil
+        let actual = Self.usableAmount(actualCostUSD)
+        let estimated = Self.usableAmount(estimatedCostUSD)
+        let amount = actual ?? estimated
+        let isActual = actual != nil
 
         // A positive figure is always shown, whatever the status says.
         // Hermes only ever stores the placeholder ZERO for an unknown cost
@@ -126,6 +128,21 @@ public enum SessionCostDisplay: Equatable, Sendable {
         default:
             self = .legacy(amount: amount, isActual: isActual)
         }
+    }
+
+    /// A figure Scarf is willing to put on screen, or nil.
+    ///
+    /// Hermes can only ever store a finite, non-negative number here — an
+    /// unknown cost is the placeholder `0.0`, never a NaN and never a
+    /// negative. A value outside that range is corrupt (a mangled row, a
+    /// `0/0` computed upstream) and carries no information, so it is
+    /// treated as "no positive amount" rather than rendered: `NaN > 0` is
+    /// false, so such a value used to skip the ``amount`` arm and then ride
+    /// into ``legacy(amount:isActual:)`` as a figure the surfaces DO print
+    /// — "NaN" or "-$5.00" in a currency label.
+    private static func usableAmount(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        return value
     }
 
     /// True when this session contributes no known figure to a sum, so an

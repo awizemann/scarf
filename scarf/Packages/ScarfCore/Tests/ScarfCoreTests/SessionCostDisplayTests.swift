@@ -242,6 +242,55 @@ struct SessionCostDisplayTests {
         }
     }
 
+    // MARK: - Corrupt amounts
+
+    /// `NaN > 0` is false and so is `-5 > 0`, so a corrupt figure slipped
+    /// past the positive-amount arm and rode into `.legacy(amount:)` — which
+    /// SessionInfoBar and SessionDetailView DO render, printing "NaN" or a
+    /// negative currency label. A value Hermes can never legitimately store
+    /// is not a cost: it must read as "no positive amount", which on a host
+    /// with the column means the em dash.
+    @Test(
+        "a NaN or negative amount is not a cost",
+        arguments: [Double.nan, -5, -0.0001, -.infinity, .infinity]
+    )
+    func corruptAmountsAreNotRendered(bad: Double) {
+        // Column present, status NULL: the common "never priced" host.
+        #expect(
+            SessionCostDisplay(
+                actualCostUSD: bad, estimatedCostUSD: nil,
+                costStatus: nil, hasCostStatusColumn: true
+            ) == .unknown
+        )
+        // …and with an explicit status, the status still decides.
+        #expect(
+            SessionCostDisplay(
+                actualCostUSD: nil, estimatedCostUSD: bad,
+                costStatus: "included", hasCostStatusColumn: true
+            ) == .includedFree
+        )
+        // On a host with no column the legacy tuple must carry NOTHING
+        // rather than the corrupt number, so no surface prints it.
+        #expect(
+            SessionCostDisplay(
+                actualCostUSD: bad, estimatedCostUSD: nil, costStatus: nil
+            ) == .legacy(amount: nil, isActual: false)
+        )
+    }
+
+    /// A corrupt ACTUAL must not shadow a good ESTIMATE — the row still has
+    /// a real figure to show, and it is an estimate, so the " est." marker
+    /// has to come with it.
+    @Test("a corrupt actual falls through to a usable estimate")
+    func corruptActualFallsThroughToTheEstimate() {
+        #expect(
+            SessionCostDisplay(
+                actualCostUSD: .nan, estimatedCostUSD: 1.25,
+                costStatus: "estimated", hasCostStatusColumn: true
+            ) == .amount(1.25, isActual: false)
+        )
+    }
+
     // MARK: - Fixture
 
     /// `hasColumn` defaults to false — a host with no `cost_status` column —
