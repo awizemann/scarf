@@ -83,6 +83,16 @@ struct InsightsView: View {
 
     // MARK: - Overview
 
+    /// The one card in this grid a UI test has to find
+    /// (`CostRenderingUITests`). `InsightCard` is a plain VStack of two
+    /// `Text`s, so without `.accessibilityElement(children: .combine)`
+    /// there is no single element to hang an identifier on — and a `Text`
+    /// publishes its content as the AX VALUE, which makes "find the card
+    /// showing —" unanswerable among a grid of fourteen. Combining also
+    /// reads better in VoiceOver ("Total Cost, —, cost unknown") than two
+    /// orphan strings.
+    static let totalCostIdentifier = "insights.totalCost"
+
     /// Total Cost. Hermes stores an unknown cost as `0.0`, so those sessions
     /// add nothing and this sum used to read as a complete total — and, when
     /// every session's cost was unknown (the common case on a `:free` model),
@@ -109,13 +119,17 @@ struct InsightsView: View {
         if partial {
             card
                 .help("Partial — Hermes recorded no cost for ^[\(viewModel.unknownCostSessionCount) session](inflect: true)")
+                .accessibilityElement(children: .combine)
                 .accessibilityValue(
                     viewModel.totalCost == 0
                         ? Text("cost unknown")
                         : Text("Partial — Hermes recorded no cost for ^[\(viewModel.unknownCostSessionCount) session](inflect: true)")
                 )
+                .accessibilityIdentifier(Self.totalCostIdentifier)
         } else {
             card
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(Self.totalCostIdentifier)
         }
     }
 

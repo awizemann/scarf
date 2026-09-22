@@ -81,6 +81,15 @@ final class ChatJourneyUITests: ScarfUITestCase {
     /// with it.
     private static let replyTimeout: TimeInterval = 90
 
+    /// Seeded ACP chats for the Kanban-badge journey. Duplicated from
+    /// `scripts/ui-fixture/make-ui-fixture.sh`'s "seeded ids" block —
+    /// this bundle links neither the script nor ScarfCore, so there is
+    /// nowhere shared to put them. Change them in both places together.
+    /// The first owns one `running` + one `review` task; the second owns
+    /// none.
+    private static let badgeChatWithTasks = "uibadge-acp-0001"
+    private static let badgeChatWithoutTasks = "uibadge-acp-0003"
+
     // MARK: - Real-home tripwire
 
     /// Modification time of the developer's real `~/.hermes/state.db`
@@ -256,6 +265,149 @@ final class ChatJourneyUITests: ScarfUITestCase {
             "Sessions lists \(listedSessionCount(app).map(String.init(describing:)) ?? "<no stats line>") sessions; expected \(sessionsBefore + 1) after one chat turn. The reply rendered, so the turn ran — this is Scarf's state.db read, not the model."
         )
         attachScreenshot(app, named: "sessions-lists-the-new-session", keepAlways: false)
+    }
+
+    // MARK: - Journey: the Kanban chip's count follows the chat
+
+    /// Switching chats must RESET the Kanban badge, and the count must
+    /// include tasks parked in `review`.
+    ///
+    /// Both halves shipped broken (t-f0a94093): the chip kept asserting
+    /// the previous chat's number after a switch, and `review` — the
+    /// status most urgently waiting on the person reading the badge —
+    /// was left out of the count entirely, so a card parked for approval
+    /// read as 0. `KanbanChatBadgeStateTests` pins the state machine;
+    /// this proves the chip on screen is actually driven by it, which no
+    /// unit test can (the binding runs through
+    /// `ChatTranscriptPane`'s `.task(id:)`, the ACP session id, and a
+    /// 5 s poll of the real `hermes kanban list --session`).
+    ///
+    /// The fixture seeds three ACP chats: two owning a `running` + a
+    /// `review` task each (so the chip must read **2**), and one owning
+    /// none (**0**). Sequence: open A → 2, switch to the empty one → 0,
+    /// switch back to A → 2. The middle step is the regression; the
+    /// third is what separates "the badge reset" from "the badge stopped
+    /// working".
+    ///
+    /// Live-only because the chip is capability-gated on a real host
+    /// (`hasKanbanSessionFilter`, Hermes v0.15+) and each tick spawns a
+    /// real `hermes kanban list`. `Live.xctestplan` selects this whole
+    /// SUITE by class name, so it needs no new entry there.
+    @MainActor
+    func testKanbanChipCountFollowsTheChatAndCountsReview() throws {
+        try requireLive()
+
+        let app = launchExpanded()
+        defer { gracefulQuit(app) }
+
+        try openSection(app, "Chat")
+
+        let withTasks = try requireSeededChat(app, Self.badgeChatWithTasks)
+        let withoutTasks = try requireSeededChat(app, Self.badgeChatWithoutTasks)
+
+        // Open the chat that owns two live tasks. `bindChat` waits for
+        // the row to report itself ACTIVE — i.e. the pane's session id
+        // really is this one — because a resume whose ACP `session/load`
+        // is refused falls back to a brand-new session with a different
+        // id, and the badge would then be truthfully reporting a chat
+        // this test did not mean.
+        try bindChat(app, withTasks, id: Self.badgeChatWithTasks)
+
+        let chip = element(app, "chat.kanbanChip")
+        guard chip.waitForExistence(timeout: 20) else {
+            throw XCTSkip(
+                "No chat.kanbanChip in the chat header. The chip is gated on `hasKanbanSessionFilter` (Hermes v0.15+), so an older host legitimately has none — that is a skip, not a failure."
+            )
+        }
+
+        assertChipReads(app, chip, "2", after: "opening \(Self.badgeChatWithTasks) (one running + one review task)")
+
+        // The regression: switching away must clear the number, not keep
+        // asserting the previous chat's.
+        try bindChat(app, withoutTasks, id: Self.badgeChatWithoutTasks)
+        assertChipReads(app, chip, "0", after: "switching to \(Self.badgeChatWithoutTasks), which owns no tasks")
+
+        // And back — proving the reset above was a rebind, not the
+        // poller dying.
+        try bindChat(app, withTasks, id: Self.badgeChatWithTasks)
+        assertChipReads(app, chip, "2", after: "switching back to \(Self.badgeChatWithTasks)")
+
+        attachScreenshot(app, named: "kanban-chip-follows-the-chat", keepAlways: false)
+    }
+
+    // MARK: - Kanban chip helpers
+
+    /// A seeded chat row, or a skip naming the fixture command.
+    private func requireSeededChat(_ app: XCUIApplication, _ id: String) throws -> XCUIElement {
+        let row = element(app, "chat.session.\(id)")
+        guard row.waitForExistence(timeout: 25) else {
+            throw XCTSkip(
+                "No chat.session.\(id) in the chat list. This journey needs the seeded fixture home: "
+                + "FIXTURE=\"$(scripts/ui-fixture/make-ui-fixture.sh \"$(mktemp -d)/fixture-home\")\" "
+                + "TEST_RUNNER_SCARF_UITEST_FIXTURE=\"$FIXTURE\" xcodebuild test … -testPlan Live"
+            )
+        }
+        return row
+    }
+
+    /// Click a chat row and wait until the pane is genuinely BOUND to
+    /// that session id (`ChatSessionRow`'s accessibility value flips to
+    /// "active" when `session.id == richChat.sessionId`).
+    ///
+    /// A skip rather than a failure when the bind never happens: that
+    /// means Hermes's ACP refused `session/load` for the seeded row and
+    /// `ChatViewModel` fell back to `newSession`, which is correct
+    /// behaviour for an unloadable session and says nothing about the
+    /// badge. It would be dishonest to fail the badge test for it — but
+    /// the message has to name the cause, because the symptom (a chip
+    /// reading 0 forever) looks exactly like the bug this test guards.
+    private func bindChat(_ app: XCUIApplication, _ row: XCUIElement, id: String) throws {
+        let bound = clickUntil(
+            row,
+            appears: app.windows.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier == %@ AND value == 'active'", "chat.session.\(id)"))
+                .firstMatch,
+            named: "chat.session.\(id) to report itself active",
+            in: app
+        )
+        guard bound else {
+            attachScreenshot(app, named: "chat-never-bound-\(id)", keepAlways: true)
+            throw XCTSkip(
+                "Clicking chat.session.\(id) never bound the pane to that session id. `ChatViewModel.resumeSession` asks ACP to `session/load` it and falls back to a NEW session when Hermes refuses, so a seeded row this host's agent cannot restore lands here. The badge assertions need the seeded id to be the bound one, so they are skipped rather than run against a different session."
+            )
+        }
+    }
+
+    /// Poll the chip's accessibility value until it equals `expected`.
+    ///
+    /// The value is the count as a string, published by
+    /// `SessionInfoBar`; empty means "no poll has landed for this chat
+    /// yet", which is why "0" and "" must not be conflated — a chip that
+    /// simply never updated would otherwise pass the reset assertion.
+    /// The budget is generous because the poller ticks every 5 s and
+    /// each tick spawns a real `hermes kanban list`, but it is spent by
+    /// `waitUntil`'s re-querying predicate rather than as one long idle
+    /// wait.
+    private func assertChipReads(
+        _ app: XCUIApplication,
+        _ chip: XCUIElement,
+        _ expected: String,
+        after context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let matched = waitUntil(timeout: 40, describing: "the Kanban chip to read \(expected) after \(context)") {
+            (chip.value as? String) == expected
+        }
+        if !matched {
+            attachScreenshot(app, named: "kanban-chip-\(expected)-expected", keepAlways: true)
+        }
+        XCTAssertTrue(
+            matched,
+            "The Kanban chip reads \"\((chip.value as? String) ?? "<no value>")\" after \(context); expected \"\(expected)\". An empty value means no poll landed for this chat at all; the previous chat's number means the rebind did not clear it; 1 instead of 2 means `review` is not being counted (KanbanChatBadgeState.liveStatuses).",
+            file: file,
+            line: line
+        )
     }
 
     // MARK: - Reply detection

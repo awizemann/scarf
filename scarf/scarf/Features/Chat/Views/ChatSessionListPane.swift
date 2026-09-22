@@ -572,6 +572,23 @@ private struct ChatSessionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        // Addressable by SESSION ID so a journey can open one specific
+        // chat (the Live badge journey clicks two seeded ACP chats in
+        // turn) rather than matching a preview string the accessibility
+        // layer truncates.
+        .accessibilityIdentifier("chat.session.\(session.id)")
+        // `isActive` is `session.id == richChat.sessionId` — i.e. the
+        // chat pane really is BOUND to this session, which is what the
+        // Kanban badge scopes its poll by. Publishing it is what lets a
+        // test wait for the bind instead of guessing that a click landed
+        // (a resume whose ACP `session/load` fails falls back to a NEW
+        // session with a different id, and the badge would then be
+        // correct about a session the test did not mean).
+        // Empty when inactive rather than "inactive", matching the
+        // sidebar section headers' `value == "collapsed"` precedent: a
+        // list of twenty chats should not have VoiceOver say "inactive"
+        // nineteen times.
+        .accessibilityValue(Text(isActive ? "active" : ""))
     }
 
     private var rowBackground: Color {
