@@ -272,6 +272,18 @@ struct SessionInfoBar: View {
                     }
                     .buttonStyle(.plain)
                     .help("Open the Kanban board for this chat")
+                    .accessibilityIdentifier("chat.kanbanChip")
+                    // The count as its OWN readable string. The number
+                    // lives in a `Text` inside the button's label, and
+                    // AppKit flattens a `.plain` Button's children, so
+                    // there is no element carrying just the digit. "0"
+                    // and "" are deliberately different: "" means the
+                    // first poll for this chat has not landed yet, "0"
+                    // means it landed and the board is idle — which is
+                    // exactly the distinction the badge-reset fix is
+                    // about, and a test that cannot see it would pass on
+                    // a badge that simply never updated.
+                    .accessibilityValue(Text(kanbanLiveCount.map(String.init) ?? ""))
                 }
 
                 // Queue chip (v2.8 / Hermes v0.13). Local mirror only —
