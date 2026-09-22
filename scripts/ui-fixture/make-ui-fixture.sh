@@ -29,6 +29,24 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 MARKER_FILENAME=".scarf-test-home-marker"   # HermesProfileResolver.testHomeMarkerFilename
+
+# ---------------------------------------------------------------- seeded ids
+#
+# FIXED ids so the UI tests can address a row exactly
+# (`sessions.row.<id>`, `chat.session.<id>`) instead of matching on a title
+# that the accessibility layer may truncate. These literals are duplicated
+# in `scarf/scarfUITests/CostRenderingUITests.swift` and
+# `ChatJourneyUITests.swift` — the UI-test bundle links neither this script
+# nor ScarfCore, so there is nowhere shared to put them. Change them here
+# and there together.
+COST_UNKNOWN_ID="uicost-unknown-0001"     # cost_status='unknown', estimated 0.0, real tokens
+COST_NULL_ID="uicost-nullstatus-0002"     # cost_status NULL, no amount at all
+COST_AMOUNT_ID="uicost-amount-0003"       # cost_status='estimated', positive amount
+COST_AMOUNT_USD="1.23"                    # renders as "$1.23" (Sessions) / "$1.2300 est." (detail)
+
+BADGE_SESSION_A="uibadge-acp-0001"        # ACP chat WITH live kanban tasks
+BADGE_SESSION_B="uibadge-acp-0002"        # ACP chat WITH live kanban tasks
+BADGE_SESSION_EMPTY="uibadge-acp-0003"    # ACP chat with NONE — the badge must show 0
 HERMES_BIN="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 
 MODE="seed"   # seed | dry-run | self-check
@@ -61,6 +79,21 @@ done
 [ -n "$DEST" ] || usage 2
 
 [ -x "$HERMES_BIN" ] || die "hermes CLI not found or not executable at $HERMES_BIN (override with HERMES_BIN=…)"
+
+# Used ONLY against this fixture's own throwaway databases — see the
+# "seed: cost states" and "seed: chat-scoped kanban" steps for why the CLI
+# cannot produce those rows. Never pointed at the real home.
+#
+# Deliberately NOT invoked with `-readonly`, even for the PRAGMA probes:
+# Hermes leaves both databases in WAL mode, and a read-only open has to
+# create the `-shm` shared-memory file, so `sqlite3 -readonly kanban.db`
+# fails outright with "unable to open database file (14)". The probe would
+# then return empty and be indistinguishable from "the column is missing" —
+# it aborted this script on its first run. Read-only inspection from
+# OUTSIDE (a terminal, a test) should copy the db or checkpoint it first.
+SQLITE_BIN="${SQLITE_BIN:-/usr/bin/sqlite3}"
+[ -x "$SQLITE_BIN" ] || SQLITE_BIN="$(command -v sqlite3 || true)"
+[ -n "$SQLITE_BIN" ] && [ -x "$SQLITE_BIN" ] || die "sqlite3 not found (override with SQLITE_BIN=…)"
 
 # ---------------------------------------------------------------- paths & safety
 
@@ -184,8 +217,13 @@ verify_all_verbs() {
     verify_verb kanban init
     verify_verb kanban create
     verify_flag "--body"    kanban create
+    verify_flag "--initial-status" kanban create
     verify_verb kanban block
+    verify_verb kanban claim
+    verify_verb kanban request-review
+    verify_flag "--force"   kanban request-review
     verify_verb kanban list
+    verify_flag "--session" kanban list
 
     verify_verb project create
     verify_flag "--description" project create
@@ -294,6 +332,86 @@ session_count="$(printf '%s\n' "$sessions_out" | grep -c '^Reply with exactly' |
 [ "$session_count" -ge 3 ] || { printf '%s\n' "$sessions_out" >&2; die "expected 3 seeded sessions, 'hermes sessions list' shows $session_count"; }
 note "sessions in state.db: $session_count"
 
+# ---------------------------------------------------------------- seed: cost states
+
+# Three sessions pinning the three cost presentations Scarf must tell apart
+# (`SessionCostDisplay`, ScarfCore): `cost_status = 'unknown'` with the
+# placeholder 0.0 and REAL token counts, `cost_status` left NULL with no
+# amount at all, and a positive `estimated_cost_usd` with
+# `cost_status = 'estimated'`. `CostRenderingUITests` reads them back off
+# the Sessions table, the session detail and the Insights Total Cost card,
+# and finds them by the FIXED ids below (`sessions.row.<id>`).
+#
+# WHY THIS WRITES THE DATABASE DIRECTLY. There is no hermes verb that sets
+# a session's cost columns: `cost_status` / `estimated_cost_usd` are written
+# only by the agent's own usage-accounting path
+# (`hermes_state_usage.py:275` `update_token_counts`, reached from a priced
+# turn), and `hermes sessions --help` exposes list/show/rename/delete/export
+# only (`sessions import` reads a foreign Claude/Codex transcript and is not
+# a cost writer either). Driving real turns instead would make the fixture non-deterministic
+# in exactly the dimension under test — which of the four statuses Hermes
+# lands on depends on whether the configured model has a pricing entry.
+#
+# Charter C3 ("never write state.db") binds SCARF, which stays read-only on
+# every host; this is the fixture builder writing the THROWAWAY home it just
+# created two steps ago, which the safety checks at the top of this script
+# prove is not (and is not inside) the real `~/.hermes`. The schema itself
+# still comes from Hermes: the table was created by the CLI above, and the
+# INSERT below names only columns a PRAGMA probe found (charter C4) — a
+# column this Hermes does not have is simply dropped from the statement.
+step "Seeding the three cost-state sessions (direct FIXTURE state.db write — no CLI verb sets cost columns)"
+
+STATE_DB="$DEST_ABS/state.db"
+[ -f "$STATE_DB" ] || die "no state.db at $STATE_DB after seeding sessions — the CLI did not create it"
+
+# Charter C4: probe for the column, never infer it from a version string.
+has_session_column() {
+    local col="$1" out
+    out="$("$SQLITE_BIN" "$STATE_DB" "PRAGMA table_info(sessions);" 2>/dev/null || true)"
+    case "$out" in
+        *"|$col|"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if ! has_session_column cost_status; then
+    die "this Hermes's sessions table has no cost_status column, so the fixture cannot pin the cost states the UI gate asserts. Upgrade the installed hermes (the column arrived with the v0.7 schema)."
+fi
+
+# Newest-first so the three land at the top of the Sessions table: the list
+# is a LazyVStack and a row below the fold has no element to assert on.
+COST_BASE_TS="$(date +%s)"
+
+# id | title | model | msgs | in | out | estimated | actual | cost_status
+seed_cost_session() {
+    local id="$1" title="$2" msgs="$3" tin="$4" tout="$5" est="$6" status="$7"
+    local cols="id, source, model, started_at, last_activity_at, message_count, tool_call_count, input_tokens, output_tokens, title"
+    local vals="'$id', 'cli', 'fixture/cost-model', $COST_BASE_TS, $COST_BASE_TS, $msgs, 0, $tin, $tout, '$title'"
+    if has_session_column estimated_cost_usd; then
+        cols="$cols, estimated_cost_usd"; vals="$vals, $est"
+    fi
+    cols="$cols, cost_status"; vals="$vals, $status"
+    "$SQLITE_BIN" "$STATE_DB" \
+        "INSERT OR REPLACE INTO sessions ($cols) VALUES ($vals);" \
+        || die "could not seed cost-state session $id into the fixture state.db"
+    note "$id ($title)"
+}
+
+# 1. Hermes priced the turn, found no rate, and stored the PLACEHOLDER zero
+#    next to real token counts. Must render "—", never "$0.00".
+seed_cost_session "$COST_UNKNOWN_ID" "UICOST Unknown Status" 6 4210 1180 0.0 "'unknown'"
+# 2. A session that never completed a priced turn on a CURRENT host: the
+#    column exists and Hermes left it NULL, with no amount at all. Also "—".
+seed_cost_session "$COST_NULL_ID" "UICOST Null Status" 3 0 0 "NULL" "NULL"
+# 3. A real estimate. Must render the formatted amount, not the dash.
+seed_cost_session "$COST_AMOUNT_ID" "UICOST Estimated Amount" 9 51200 8400 "$COST_AMOUNT_USD" "'estimated'"
+
+cost_rows="$("$SQLITE_BIN" "$STATE_DB" \
+    "SELECT id || '|' || COALESCE(cost_status,'NULL') || '|' || COALESCE(estimated_cost_usd,'NULL') FROM sessions WHERE id LIKE 'uicost-%' ORDER BY id;")"
+[ "$(printf '%s\n' "$cost_rows" | grep -c '^uicost-')" -eq 3 ] \
+    || { printf '%s\n' "$cost_rows" >&2; die "expected 3 uicost-* rows in the fixture state.db"; }
+printf '%s\n' "$cost_rows" | while IFS= read -r line; do note "$line"; done
+
 # ---------------------------------------------------------------- seed: cron (PAUSED)
 
 step "Seeding cron jobs (created, then paused)"
@@ -342,6 +460,117 @@ card_count="$(printf '%s\n' "$kanban_out" | grep -c 'Fixture:' || true)"
 [ "$card_count" -eq 3 ] || { printf '%s\n' "$kanban_out" >&2; die "expected 3 kanban cards, 'hermes kanban list' shows $card_count"; }
 blocked_ok="$(printf '%s\n' "$kanban_out" | grep -c "$card2 *blocked" || true)"
 [ "$blocked_ok" -eq 1 ] || { printf '%s\n' "$kanban_out" >&2; die "kanban card $card2 is not in the blocked column"; }
+
+# ---------------------------------------------------------------- seed: chat-scoped kanban
+
+# Three ACP chats for the Live-plan badge journey: two that each own a
+# `running` + a `review` task (so `SessionInfoBar`'s Kanban chip must read
+# 2 — `KanbanChatBadgeState.liveStatuses` is {running, blocked, review}),
+# and one that owns none (the chip must read 0, not the previous chat's
+# number). The whole point of the badge fix is that switching chats RESETS
+# the count, so the fixture needs both shapes.
+#
+# The STATUSES come from the CLI: `kanban create --initial-status running`
+# and `kanban request-review --force`, both verified above.
+#
+# The SESSION STAMP cannot. `tasks.session_id` is documented in Hermes's own
+# source as "originating HERMES_SESSION_ID; NULL from CLI/dashboard"
+# (`hermes_cli/kanban_db.py:730` @ v2026.9.21), and `kanban.py`'s create
+# handler (`:370`) never passes `session_id` to `kb.create_task` — there is
+# no `--session` flag on `create` (only on `list`, which is how Scarf
+# filters), and `HERMES_SESSION_ID` is read only by the in-agent tool path
+# (`tools/kanban_tools.py:1032`), not by the CLI. So the stamp is a direct
+# UPDATE on the fixture's own throwaway kanban.db. Same reasoning as the
+# cost rows above: the CLI created the schema, we only set one column.
+step "Seeding chat-scoped kanban tasks (statuses via the CLI, session stamp via the fixture kanban.db)"
+
+KANBAN_DB="$DEST_ABS/kanban.db"
+[ -f "$KANBAN_DB" ] || die "no kanban.db at $KANBAN_DB after 'hermes kanban init'"
+
+kanban_has_session_column="$("$SQLITE_BIN" "$KANBAN_DB" "PRAGMA table_info(tasks);" 2>/dev/null | grep -c '|session_id|' || true)"
+[ "$kanban_has_session_column" -ge 1 ] \
+    || die "this Hermes's kanban tasks table has no session_id column, so a chat-scoped board cannot be seeded (the column arrived with the v0.15 session filter Scarf gates the chip on)."
+
+# Create a task and CLAIM it, which is what actually reaches the `running`
+# column. `create --initial-status running` does NOT: exactly as the memory
+# note already records for `--initial-status blocked`, the CLI prints
+# "(running, …)" and the row lands in `ready` (re-verified on 0.21.4 — the
+# first run of this step seeded two `ready` rows and the badge would have
+# counted 1, not 2). `claim` is the atomic ready -> running transition and
+# prints the resolved workspace path.
+kanban_create_claimed() {
+    local title="$1" out id
+    # NOT `run_verb … | grep`: `die` inside a pipeline runs in a subshell and
+    # would not abort this script. Capture first, parse the variable — the
+    # same trap `capture()` documents for `hermes … | grep -q`.
+    out="$(run_verb "kanban create ($title)" kanban create "$title" \
+        --body "Seeded for the chat badge journey" --initial-status running)"
+    id="$(printf '%s' "$out" | grep -oE 't_[0-9a-f]+' | head -1)"
+    [ -n "$id" ] || { printf '%s\n' "$out" >&2; die "could not parse a task id out of 'hermes kanban create' [$title]"; }
+    run_verb "kanban claim ($title)" kanban claim "$id" >/dev/null
+    printf '%s' "$id"
+}
+
+# Create a running + a review task and stamp both with $1.
+seed_chat_tasks() {
+    local session_id="$1" label="$2" running review
+    running="$(kanban_create_claimed "Fixture: $label running")"
+    review="$(kanban_create_claimed "Fixture: $label review")"
+    [ -n "$running" ] && [ -n "$review" ] || die "could not parse the seeded task ids for $label"
+    # `request-review` is the only verb that reaches the `review` column;
+    # --force because the task carries no active review run of its own.
+    run_verb "kanban request-review ($label)" kanban request-review "$review" \
+        --summary "Seeded in review so the chat badge has something waiting on a human" --force >/dev/null
+    "$SQLITE_BIN" "$KANBAN_DB" \
+        "UPDATE tasks SET session_id = '$session_id' WHERE id IN ('$running', '$review');" \
+        || die "could not stamp session_id=$session_id onto $running/$review"
+    note "$label: $running (running) + $review (review) -> session $session_id"
+}
+
+seed_chat_tasks "$BADGE_SESSION_A" "chat A"
+seed_chat_tasks "$BADGE_SESSION_B" "chat B"
+
+# The three chats themselves. Same direct-write reasoning as the cost rows:
+# no CLI verb mints a session with a CHOSEN id, and the Live journey has to
+# know the id in advance to click `chat.session.<id>` and to stamp the board.
+step "Seeding the ACP chats the badge journey switches between"
+BADGE_BASE_TS="$(( $(date +%s) - 600 ))"
+seed_badge_session() {
+    local id="$1" title="$2"
+    "$SQLITE_BIN" "$STATE_DB" \
+        "INSERT OR REPLACE INTO sessions (id, source, model, started_at, last_activity_at, message_count, tool_call_count, title) \
+         VALUES ('$id', 'acp', 'fixture/chat-model', $BADGE_BASE_TS, $BADGE_BASE_TS, 2, 0, '$title');" \
+        || die "could not seed ACP chat $id into the fixture state.db"
+    note "$id ($title)"
+}
+seed_badge_session "$BADGE_SESSION_A"     "UIBADGE Chat With Tasks A"
+seed_badge_session "$BADGE_SESSION_B"     "UIBADGE Chat With Tasks B"
+seed_badge_session "$BADGE_SESSION_EMPTY" "UIBADGE Chat Without Tasks"
+
+# Counted off the STATUS COLUMN, not out of the listing's text: the seeded
+# titles contain the words "running" and "review", so a grep over
+# `kanban list` matched two rows that were both still `ready` and the check
+# passed on a fixture the badge would have rendered as 1.
+for sid in "$BADGE_SESSION_A" "$BADGE_SESSION_B"; do
+    live="$("$SQLITE_BIN" "$KANBAN_DB" \
+        "SELECT COUNT(*) FROM tasks WHERE session_id = '$sid' AND status IN ('running','blocked','review');")"
+    [ "$live" -eq 2 ] || {
+        "$SQLITE_BIN" "$KANBAN_DB" "SELECT id, status FROM tasks WHERE session_id = '$sid';" >&2
+        die "session $sid owns $live live (running/blocked/review) tasks, expected 2 — KanbanChatBadgeState.liveStatuses is what the Live badge journey asserts"
+    }
+    # And prove the CLI's own session filter agrees, since that is the call
+    # `KanbanChatBadgeViewModel` actually makes.
+    scoped="$(capture kanban list --session "$sid")"
+    # Rows are prefixed with a status glyph ("● t_6d0e2215  running …"), so
+    # anchor on the id, not on the start of the line.
+    listed="$(printf '%s\n' "$scoped" | grep -cE '\bt_[0-9a-f]+\b' || true)"
+    [ "$listed" -eq 2 ] || { printf '%s\n' "$scoped" >&2; die "'hermes kanban list --session $sid' lists $listed rows, expected 2"; }
+    note "kanban --session $sid: 2 live rows (running + review)"
+done
+scoped_empty="$(capture kanban list --session "$BADGE_SESSION_EMPTY")"
+empty_rows="$(printf '%s\n' "$scoped_empty" | grep -cE '\bt_[0-9a-f]+\b' || true)"
+[ "$empty_rows" -eq 0 ] || { printf '%s\n' "$scoped_empty" >&2; die "$BADGE_SESSION_EMPTY should own no tasks, sees $empty_rows"; }
+note "kanban --session $BADGE_SESSION_EMPTY: 0 rows"
 
 # ---------------------------------------------------------------- seed: project
 
