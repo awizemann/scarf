@@ -917,6 +917,10 @@ import ScarfCore
         }
 
         func setPaused(_ paused: Bool) {}
+
+        /// Every playback transition the engine announced, in order.
+        private(set) var playbackActive: [Bool] = []
+        func setPlaybackActive(_ active: Bool) { playbackActive.append(active) }
     }
 
     /// A `VoiceSpeaker` that synthesizes nothing.

@@ -117,6 +117,106 @@ import Foundation
 
     // MARK: level box
 
+    // MARK: end-of-utterance, audio gate
+
+    /// Text stillness alone cuts a thinking pause off: the recognizer stops
+    /// revising while the user is still making sound. The audio gate holds
+    /// the utterance until the microphone is actually quiet.
+    @Test func aStillHypothesisOverLiveAudioDoesNotSettleUntilItGoesQuiet() {
+        var detector = VoiceUtteranceDetector(silence: 1.2)
+        detector.note(partial: "what is the", at: start)
+        // Still talking (or humming) for one second, same text.
+        for step in stride(from: 0.0, through: 1.0, by: 0.1) {
+            detector.note(level: 0.3, at: start.addingTimeInterval(step))
+        }
+        // Text has been still 1.2 s, but the mic was loud 0.2 s ago.
+        detector.note(level: 0.02, at: start.addingTimeInterval(1.2))
+        #expect(detector.settled(at: start.addingTimeInterval(1.2)) == nil)
+        // Quiet from t=1.0: the window restarts from the last loud tick.
+        for step in stride(from: 1.3, through: 2.1, by: 0.1) {
+            detector.note(level: 0.02, at: start.addingTimeInterval(step))
+        }
+        #expect(detector.settled(at: start.addingTimeInterval(2.1)) == nil)
+        detector.note(level: 0.0, at: start.addingTimeInterval(2.2))
+        #expect(detector.settled(at: start.addingTimeInterval(2.2)) == "what is the")
+    }
+
+    /// A room whose noise floor never drops under the silence level (a fan,
+    /// a café) must not make the session deaf: the audio gate can delay the
+    /// utterance to at most twice the window, then the text rule decides.
+    @Test func aNoisyRoomCanOnlyDelayTheUtteranceNotHoldIt() {
+        var detector = VoiceUtteranceDetector(silence: 1.2)
+        detector.note(partial: "what is the", at: start)
+        for step in stride(from: 0.0, through: 2.3, by: 0.1) {
+            detector.note(level: 0.3, at: start.addingTimeInterval(step))
+        }
+        #expect(detector.settled(at: start.addingTimeInterval(2.3)) == nil)
+        detector.note(level: 0.3, at: start.addingTimeInterval(2.5))
+        #expect(detector.settled(at: start.addingTimeInterval(2.5)) == "what is the")
+    }
+
+    @Test func aLevelBelowTheSilenceLevelNeverBlocksTheWindow() {
+        var detector = VoiceUtteranceDetector(silence: 1.2)
+        detector.note(partial: "hello", at: start)
+        // Room tone all the way through.
+        for step in stride(from: 0.0, through: 1.2, by: 0.1) {
+            detector.note(level: 0.05, at: start.addingTimeInterval(step))
+        }
+        #expect(detector.settled(at: start.addingTimeInterval(1.2)) == "hello")
+    }
+
+    // MARK: sustained onset
+
+    @Test func oneLoudTickIsNotASpeechOnsetButThreeAre() {
+        var onset = VoiceSpeechOnsetDetector(requiredTicks: 3)
+        var fired = onset.note(level: 0.6, trigger: 0.18)
+        #expect(!fired)
+        fired = onset.note(level: 0.0, trigger: 0.18)     // the run is broken
+        #expect(!fired)
+        fired = onset.note(level: 0.6, trigger: 0.18)
+        #expect(!fired)
+        fired = onset.note(level: 0.6, trigger: 0.18)
+        #expect(!fired)
+        fired = onset.note(level: 0.6, trigger: 0.18)
+        #expect(fired)                                    // confirmed
+        // …and it does not fire again while the level stays up.
+        fired = onset.note(level: 0.6, trigger: 0.18)
+        #expect(!fired)
+    }
+
+    /// The onset is released by quiet, not by the first dip: syllable gaps
+    /// inside one sentence must not re-arm it.
+    @Test func theOnsetIsHeldUntilTheLevelFallsWellBelowTheTrigger() {
+        var onset = VoiceSpeechOnsetDetector(requiredTicks: 2)
+        onset.note(level: 0.6, trigger: 0.2)
+        let fired = onset.note(level: 0.6, trigger: 0.2)
+        #expect(fired)
+        onset.note(level: 0.15, trigger: 0.2)   // a gap, still not quiet
+        #expect(onset.isSpeaking)
+        onset.note(level: 0.05, trigger: 0.2)   // quiet
+        #expect(!onset.isSpeaking)
+    }
+
+    @Test func theRaisedPlaybackTriggerIgnoresLevelsThatWouldTripTheIdleOne() {
+        var onset = VoiceSpeechOnsetDetector(requiredTicks: 3)
+        for _ in 0..<10 {
+            let fired = onset.note(level: 0.3, trigger: VoiceAudioLevel.bargeInOnsetLevel)
+            #expect(!fired)
+        }
+        // The same run at the idle trigger would have fired long ago.
+        var idle = VoiceSpeechOnsetDetector(requiredTicks: 3)
+        idle.note(level: 0.3, trigger: VoiceAudioLevel.speechOnsetLevel)
+        idle.note(level: 0.3, trigger: VoiceAudioLevel.speechOnsetLevel)
+        let idleFired = idle.note(level: 0.3, trigger: VoiceAudioLevel.speechOnsetLevel)
+        #expect(idleFired)
+    }
+
+    @Test func theBargeInTriggerSitsBetweenEchoAndSpeech() {
+        #expect(VoiceAudioLevel.bargeInOnsetLevel > VoiceAudioLevel.speechOnsetLevel)
+        // Normal speech at -25 dBFS still clears it.
+        #expect(VoiceAudioLevel.level(ofRMS: pow(10, -25 / 20.0)) > VoiceAudioLevel.bargeInOnsetLevel)
+    }
+
     @Test func theLevelBoxHoldsThePeakBetweenTicksAndResets() {
         let box = VoiceInputLevelBox()
         box.record(rms: 0.01)
@@ -187,12 +287,21 @@ import Foundation
             onBuffer = nil
         }
 
-        /// One buffer of silence, as the audio thread would deliver it.
-        func push() {
+        /// One buffer, as the audio thread would deliver it. `rms` is the
+        /// constant sample value, so the buffer's RMS is exactly that.
+        func push(rms: Double = 0) {
             let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
             let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 64)!
             buffer.frameLength = 64
+            if let channel = buffer.floatChannelData?[0] {
+                for index in 0..<64 { channel[index] = Float(rms) }
+            }
             onBuffer?(buffer)
+        }
+
+        /// The same, expressed on the 0…1 meter scale.
+        func push(level: Double) {
+            push(rms: level <= 0 ? 0 : pow(10, (level * -VoiceAudioLevel.floorDB + VoiceAudioLevel.floorDB) / 20))
         }
     }
 
@@ -205,17 +314,52 @@ import Foundation
 
     // MARK: harness
 
+    /// A clock the test moves by hand.
+    final class TestClock: @unchecked Sendable {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+    }
+
+    /// Consumes the listener's stream as it runs, so a test can look at what
+    /// has been emitted SO FAR without finishing the stream.
+    @MainActor final class Collector {
+        private(set) var events: [VoiceListenerEvent] = []
+        private var task: Task<Void, Never>?
+
+        init(_ stream: AsyncStream<VoiceListenerEvent>) {
+            task = Task { @MainActor [weak self] in
+                for await event in stream { self?.events.append(event) }
+            }
+        }
+
+        /// Let the consuming task run: yields are enough, the stream buffers.
+        func settle() async {
+            for _ in 0..<50 { await Task.yield() }
+        }
+    }
+
     let recognizer = FakeRecognizer()
     let tap = FakeTap()
     let session = StubAudioSession()
+    let clock = TestClock()
     var authorized = true
 
     private func makeListener() -> AppleOnDeviceVoiceListener {
         AppleOnDeviceVoiceListener(
             audioSession: session,
+            clock: { [clock] in clock.now },
             makeRecognizer: { [recognizer] _ in recognizer },
             makeAudioTap: { [tap] in tap },
             isSpeechAuthorized: { [authorized] in authorized })
+    }
+
+    /// `count` ticks of the listener's loop at `level`, 100 ms apart.
+    private func ticks(_ listener: AppleOnDeviceVoiceListener, _ count: Int, at level: Double) {
+        for _ in 0..<count {
+            tap.push(level: level)
+            clock.advance(0.1)
+            listener.tick()
+        }
     }
 
     /// Everything the stream carried, once it is finished.
@@ -335,5 +479,151 @@ import Foundation
 
         let events = await drain(stream)
         #expect(events == [.partial("unmuted words"), .utterance("unmuted words")])
+    }
+
+    // MARK: playback bleed and barge-in
+
+    /// A single loud tick is a transient, not speech. A sustained run is.
+    @Test func oneLoudTickDoesNotStartSpeechButASustainedRunDoes() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        ticks(listener, 1, at: 0.6)
+        ticks(listener, 1, at: 0.0)
+        ticks(listener, 3, at: 0.6)
+        listener.stop()
+        await collector.settle()
+        #expect(collector.events.filter { $0 == .speechStarted }.count == 1)
+    }
+
+    /// While the reply plays, echo that would clear the IDLE trigger must not
+    /// barge in.
+    @Test func duringPlaybackLevelsAtTheIdleTriggerDoNotBargeIn() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        listener.setPlaybackActive(true)
+        clock.advance(VoiceAudioLevel.bargeInGrace)   // past the grace
+        ticks(listener, 10, at: 0.2)
+        listener.stop()
+        await collector.settle()
+        #expect(!collector.events.contains(.speechStarted))
+    }
+
+    @Test func duringPlaybackASustainedLoudRunIsAConfirmedBargeIn() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        listener.setPlaybackActive(true)
+        clock.advance(VoiceAudioLevel.bargeInGrace)
+        ticks(listener, 3, at: 0.6)
+        listener.stop()
+        await collector.settle()
+        #expect(collector.events.contains(.speechStarted))
+    }
+
+    /// Inside the grace right after playback starts, nothing counts: the echo
+    /// canceller has not converged yet.
+    @Test func theGraceAfterPlaybackStartsSwallowsEvenALoudRun() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        listener.setPlaybackActive(true)
+        ticks(listener, 4, at: 0.9)   // 400 ms, still inside the 500 ms grace
+        listener.stop()
+        await collector.settle()
+        #expect(!collector.events.contains(.speechStarted))
+    }
+
+    /// The bug that fed the loop: the recognizer transcribes the reply's own
+    /// first words. They must never become an utterance, and the request must
+    /// be restarted when playback ends so the recognizer forgets them too.
+    @Test func aHypothesisHeardOnlyDuringPlaybackIsDroppedAndRecognitionRestarts() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        let before = listener.requestGeneration
+
+        listener.setPlaybackActive(true)
+        listener.handle(VoiceRecognitionEvent(transcript: "Here's"), generation: listener.requestGeneration)
+        listener.handle(VoiceRecognitionEvent(transcript: "Here's the", isFinal: true),
+                        generation: listener.requestGeneration)
+        // Even a long quiet stretch cannot settle it: it never reached the
+        // detector at all.
+        ticks(listener, 20, at: 0.0)
+        listener.setPlaybackActive(false)
+        #expect(listener.requestGeneration == before + 1)   // the recognizer was cleared
+
+        // The real user now speaks, and that goes through normally.
+        listener.handle(VoiceRecognitionEvent(transcript: "what is the weather", isFinal: true),
+                        generation: listener.requestGeneration)
+        listener.stop()
+        await collector.settle()
+        #expect(!collector.events.contains(.utterance("Here's the")))
+        #expect(!collector.events.contains(.partial("Here's")))
+        #expect(collector.events.contains(.utterance("what is the weather")))
+    }
+
+    /// Recognition lags the audio: the reply's last word can arrive as a
+    /// transcript only AFTER playback ended. With echo cancellation working
+    /// no bleed text is seen during playback, so the restart must not depend
+    /// on having seen any -- otherwise that late word is a trusted hypothesis
+    /// and, after 1.2 s of quiet, a phantom turn.
+    @Test func playbackEndRestartsRecognitionEvenWhenNoBleedTextWasSeen() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        let before = listener.requestGeneration
+        listener.setPlaybackActive(true)
+        ticks(listener, 10, at: 0.0)
+        let staleGeneration = listener.requestGeneration
+        listener.setPlaybackActive(false)
+        #expect(listener.requestGeneration == before + 1)
+
+        // The late callback belongs to the request that heard the reply.
+        listener.handle(VoiceRecognitionEvent(transcript: "forecast", isFinal: true), generation: staleGeneration)
+        ticks(listener, 20, at: 0.0)
+        listener.stop()
+        await collector.settle()
+        #expect(!collector.events.contains(.utterance("forecast")))
+        #expect(!collector.events.contains(.partial("forecast")))
+    }
+
+    /// A confirmed barge-in keeps its request: the user's words are on it.
+    @Test func playbackEndAfterAConfirmedBargeInDoesNotRestartRecognition() async throws {
+        let listener = makeListener()
+        _ = Collector(try listener.start())
+        listener.setPlaybackActive(true)
+        clock.advance(VoiceAudioLevel.bargeInGrace)
+        ticks(listener, 3, at: 0.6)   // confirmed: this restarts once, to drop the reply's words
+        let afterBargeIn = listener.requestGeneration
+        listener.setPlaybackActive(false)
+        #expect(listener.requestGeneration == afterBargeIn)
+        listener.stop()
+    }
+
+    /// A confirmed barge-in means the user IS talking over the reply, so what
+    /// the recognizer hears from then on is theirs and is kept.
+    @Test func aConfirmedBargeInKeepsTheUtteranceThatFollowsIt() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        listener.setPlaybackActive(true)
+        clock.advance(VoiceAudioLevel.bargeInGrace)
+        ticks(listener, 3, at: 0.6)   // a confirmed onset
+        listener.handle(VoiceRecognitionEvent(transcript: "no, stop that", isFinal: true),
+                        generation: listener.requestGeneration)
+        listener.stop()
+        await collector.settle()
+        #expect(collector.events.contains(.speechStarted))
+        #expect(collector.events.contains(.utterance("no, stop that")))
+    }
+
+    /// End of utterance is gated on quiet audio as well as still text: a
+    /// thinking pause with the microphone still live does not send early.
+    @Test func aStillHypothesisOverLiveAudioDoesNotSettleUntilTheMicGoesQuiet() async throws {
+        let listener = makeListener()
+        let collector = Collector(try listener.start())
+        listener.handle(VoiceRecognitionEvent(transcript: "what is the"), generation: listener.requestGeneration)
+        ticks(listener, 20, at: 0.3)   // 2 s of unchanged text over live audio
+        await collector.settle()
+        #expect(!collector.events.contains(.utterance("what is the")))
+        ticks(listener, 14, at: 0.0)   // 1.4 s of quiet
+        listener.stop()
+        await collector.settle()
+        #expect(collector.events.contains(.utterance("what is the")))
     }
 }
