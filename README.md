@@ -71,6 +71,15 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted without identifying you. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context, and both apps ask before the first session.
 
+## What's New in 3.3.0
+
+- **Voice conversation on Mac and ScarfGo** — a waveform button next to Send starts a two-way spoken conversation with Hermes, following the host's own `voice.voice_chat_mode`: *chained* (Hermes's default) is free, on-device speech-to-text with the reply read aloud by the host's TTS provider or the system voice (Hermes v0.20.1+); *GPT-Live* uses OpenAI's real-time voice model on the host's key (Hermes v0.21.3+, one-time privacy consent per device, running cost shown). Every request is still a normal Hermes turn. The chained listener cancels its own echo so it never hears Hermes's reply as your next question.
+- **Hermes Voice playback** — replies spoken through the connected server's configured text-to-speech provider (Settings → Voice → Playback Engine, Hermes v0.20.1+). **ScarfGo dictation** — hold the mic, on-device only. Thanks to [@danmarauda](https://github.com/danmarauda) for PR #143.
+- **Costs that tell the truth** — an unknown session cost shows a dash instead of "$0.00"; included costs show a genuine zero; the Dashboard's per-model breakdown says it reports all time.
+- **Chat windows clean up** — closing a window stops `hermes acp` and its SSH channel; config reads leave the main actor; the Kanban badge resets per chat and pauses in the background; the composer is named for VoiceOver, respects IME composition, and enforces the image cap.
+- **ScarfGo** — multi-byte text reassembled correctly across SSH packets; host scripts sent on stdin so they never appear in `ps`.
+- Full notes: [releases/v3.3.0/RELEASE_NOTES.md](releases/v3.3.0/RELEASE_NOTES.md).
+
 ## What's New in 3.2.0
 
 - **Hermes v0.21.2** — every v0.21.1 surface a Mac client can use (paused cron create, failure delivery, dispatch diagnostics, Kanban Review exits and completion contracts, MCP device-code OAuth, credential-pool reorder, fast-mode tiers, Perplexity/Keenable web backends), all capability-gated; v0.21.2 verified at the tag and on a live host, with Backup Now passing `--keep 0` so Hermes's new prune never deletes a backup you kept.
