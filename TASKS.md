@@ -108,6 +108,7 @@
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
+- [ ] Cut Scarf v3.3.0 (voice release) (id: t-1d95beb3) (added: 2026-09-22) (priority: high)
 
 ## Done
 
