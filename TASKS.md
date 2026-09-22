@@ -101,20 +101,22 @@
 - [ ] Flaky under load: VoiceLiveP5bTests.voiceStillCancelsItsOwnTurnsAndWaitsForThemAll hits the 10 s cancel bound (id: t-22210014) (added: 2026-09-19) (priority: low)
 - [ ] Voice P7 step 2: "Use my Hermes speech-to-text" option (host STT via transcribe_recording) (id: t-79ae9801) (added: 2026-09-19)
 - [ ] Upstream P9: resume fallback mints a new ACP id — old-id kanban tasks vanish silently (id: t-e875803c) (added: 2026-09-21)
-- [ ] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
 
 ## Doing
 
-- [ ] Upstream P5: orchestrator audit of work + memories, then whole-surface audit (id: t-2e2fc730) (added: 2026-09-21)
+- [ ] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
-- [ ] Upstream P7: nil cost_status on a current host must render as unknown, not "$0.00" (id: t-ba08805b) (added: 2026-09-21) (priority: high)
-- [ ] Upstream P8: kanban chat badge lifecycle — reset on chat switch, pause in background, count review (id: t-f0a94093) (added: 2026-09-21) (priority: high)
 
 ## Done
 
+- [x] Upstream P11: UI tests for unknown-cost rendering and kanban badge lifecycle (id: t-9c4d7c60) (added: 2026-09-21) (priority: high)
+- [x] Upstream P12: fix the two pre-existing UI gate failures (Dashboard error.banner, TemplateInstall journey) (id: t-6fec1932) (added: 2026-09-21) (priority: high)
+- [x] Upstream P5: orchestrator audit of work + memories, then whole-surface audit (id: t-2e2fc730) (added: 2026-09-21)
+- [x] Upstream P8: kanban chat badge lifecycle — reset on chat switch, pause in background, count review (id: t-f0a94093) (added: 2026-09-21) (priority: high)
+- [x] Upstream P7: nil cost_status on a current host must render as unknown, not "$0.00" (id: t-ba08805b) (added: 2026-09-21) (priority: high)
 - [x] Upstream P4: draft PR description + issue comment positioning ours vs the config-based PRs (id: t-c5c33421) (added: 2026-09-21)
 - [x] Upstream P3: independent fresh-eyes audit of the rebuilt Hermes PR (id: t-18b75df6) (added: 2026-09-21) (priority: high)
 - [x] Upstream P2: rebuild Hermes PR #45958 (per-session ACP toolsets) on current main (id: t-3f074bf4) (added: 2026-09-21) (priority: high)
