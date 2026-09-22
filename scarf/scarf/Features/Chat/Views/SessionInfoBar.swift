@@ -49,8 +49,9 @@ struct SessionInfoBar: View {
     /// pre-v0.13 hosts render the v2.7.5 layout unchanged. Coordinated
     /// with WS-2 — both WSes add `capabilities` to this view.
     var capabilities: HermesCapabilities = .empty
-    /// Live count of running + blocked tasks for the chat's tenant
-    /// scope (or global, for non-project chats). Polled by
+    /// Live count of this chat's tasks that are `running`, `blocked` or
+    /// in `review` (`KanbanChatBadgeState.liveStatuses`, which cites the
+    /// Hermes status vocabulary). Polled by
     /// `KanbanChatBadgeViewModel` every 5s. Nil while polling hasn't
     /// produced a result yet (or the host pre-dates kanban) — chip
     /// renders without a badge in that case. Zero renders without a
@@ -237,8 +238,11 @@ struct SessionInfoBar: View {
                 // by `--session` (v0.15+) and (b) the host has a callback
                 // for the chip. Tap handler is owned upstream so it can
                 // post the chat's session id to AppCoordinator. The badge
-                // surfaces this chat's running + blocked task counts so the
-                // user sees agent activity at a glance without leaving chat.
+                // surfaces this chat's running, blocked and in-review task
+                // count so the user sees at a glance both what the agent is
+                // doing and what is waiting on them, without leaving chat.
+                // The badge's label must keep naming exactly those three
+                // statuses — see `KanbanChatBadgeState.liveStatuses`.
                 if capabilities.hasKanbanSessionFilter, let onOpenKanban {
                     Button(action: onOpenKanban) {
                         HStack(spacing: 4) {
@@ -252,6 +256,12 @@ struct SessionInfoBar: View {
                                     .background(
                                         Capsule().fill(ScarfColor.accent.opacity(0.22))
                                     )
+                                    // Verbless noun phrase on purpose: no
+                                    // locale has to agree an adjective or a
+                                    // verb with the count, so no plural
+                                    // inflection markup is needed.
+                                    .help("Running, blocked or in review: \(count)")
+                                    .accessibilityLabel("Running, blocked or in review: \(count)")
                             }
                         }
                         .scarfStyle(.caption)

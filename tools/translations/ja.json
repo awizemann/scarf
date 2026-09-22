@@ -1868,6 +1868,7 @@
   "Running checks…": "チェックを実行中…",
   "Running health checks…": "ヘルスチェックを実行中…",
   "Running supply-chain audit…": "サプライチェーン監査を実行中…",
+  "Running, blocked or in review: %lld": "実行中・ブロック中・レビュー待ち: %lld",
   "Running, collapsed": "実行中、折りたたみ",
   "Running, expanded": "実行中、展開",
   "Runs": "実行",

@@ -65,13 +65,16 @@ struct KanbanChatSessionIdWiringTests {
 
         let constructions = src.ranges(of: "KanbanListFilter(")
         #expect(constructions.count == 1, "the badge must build exactly one kanban filter")
-        #expect(src.contains("KanbanListFilter(session: sessionId)"))
-
-        // `sessionId` must be a parameter threaded from `run`, never re-derived.
-        #expect(src.contains("func run("))
-        #expect(src.contains("sessionId: String"))
-        #expect(src.contains("await poll(sessionId: sessionId)"))
-        #expect(src.contains("private func poll(sessionId: String)"))
+        // `issuedFor` is the id `KanbanChatBadgeState.beginPoll()` hands back —
+        // i.e. the bound chat session — and is both what scopes the filter and
+        // what the result is stamped with, so a stale reply can be rejected.
+        #expect(src.contains("KanbanListFilter(session: issuedFor)"))
+        #expect(src.contains("let issuedFor = state.beginPoll()"))
+        #expect(src.contains("state.accept(count: count, issuedFor: issuedFor)"))
+        #expect(src.contains("state.fail(issuedFor: issuedFor)"))
+        // The bound id comes from the host via `bind(to:)`, never re-derived.
+        #expect(src.contains("func bind(to sessionId: String?)"))
+        #expect(src.contains("state.bind(to: sessionId)"))
 
         for wrong in Self.wrongIdSpellings {
             #expect(!src.contains(wrong), "\(wrong) must not be an id source in the kanban badge")
@@ -95,11 +98,21 @@ struct KanbanChatSessionIdWiringTests {
     func paneFeedsTheACPSessionId() throws {
         let src = try Self.source(Self.panePath)
 
-        // The poller: `sid` is bound from `richChat.sessionId` and is what
-        // `run(sessionId:)` receives.
-        let poller = try Self.region(src, from: ".task(id: kanbanBadgePollKey)", lines: 16)
+        // The poller: `sid` is bound from `richChat.sessionId` and is the only
+        // thing the badge is ever pointed at.
+        let poller = try Self.region(src, from: ".task(id: kanbanBadgePollKey)", lines: 24)
         #expect(poller.contains("let sid = richChat.sessionId"))
-        #expect(poller.contains("sessionId: sid"))
+        #expect(poller.contains("bind(to: sid)"))
+        // Both exits rebind: the unpollable one to nil, so a chat with no
+        // session (a fresh window, a /new) renders no number instead of the
+        // previous chat's.
+        #expect(
+            poller.contains("bind(to: nil)"),
+            "the no-session path must clear the badge, or a switched chat keeps a stale count"
+        )
+        let clearOffset = try #require(poller.range(of: "bind(to: nil)")).lowerBound
+        let runOffset = try #require(poller.range(of: "run(capabilities:")).lowerBound
+        #expect(clearOffset < runOffset, "the clear belongs on the early-return path, not after run")
 
         // The hand-off to the full Kanban board: same source.
         let handoff = try Self.region(src, from: "private func handleOpenKanban()", lines: 10)
@@ -116,8 +129,15 @@ struct KanbanChatSessionIdWiringTests {
         // The poll key restarts the loop when the chat's session changes; if
         // it stopped keying on the same id the badge would show another
         // session's count after a /new.
-        let pollKey = try Self.region(src, from: "private var kanbanBadgePollKey: String", lines: 8)
+        let pollKey = try Self.region(src, from: "private var kanbanBadgePollKey: String", lines: 10)
         #expect(pollKey.contains("richChat.sessionId ?? \"\""))
+        // …and the scene phase, so a backgrounded window stops spawning
+        // `hermes kanban list` every five seconds (C10) — the same pause
+        // KanbanBoardView/KanbanListView/KanbanInspectorPane already have.
+        #expect(
+            pollKey.contains("scenePhase"),
+            "the badge poll key must carry the scene phase, or a backgrounded chat window polls forever"
+        )
     }
 
     // MARK: - Hop 3: the filter turns exactly that id into the flag

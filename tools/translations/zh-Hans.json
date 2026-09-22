@@ -1864,6 +1864,7 @@
   "Running checks…": "正在运行检查…",
   "Running health checks…": "正在运行健康检查…",
   "Running supply-chain audit…": "正在运行供应链审计…",
+  "Running, blocked or in review: %lld": "运行中、已阻塞或待审核: %lld",
   "Running, collapsed": "运行中,已折叠",
   "Running, expanded": "运行中,已展开",
   "Runs": "运行次数",

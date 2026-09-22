@@ -17,7 +17,9 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     public let title: String
     public let body: String?
     public let assignee: String?
-    public let status: String          // archived | blocked | done | ready | running | todo | triage
+    // Hermes's full vocabulary, v2026.9.21:hermes_cli/kanban_db.py:103
+    // (VALID_STATUSES). `scheduled` and `review` arrived in v0.15.
+    public let status: String          // archived | blocked | done | ready | review | running | scheduled | todo | triage
     public let priority: Int?
     public let tenant: String?
     public let workspaceKind: String?  // scratch | worktree | dir
