@@ -91,8 +91,11 @@ struct InsightsView: View {
     /// Smallest honest treatment, deliberately not a redesign: when nothing
     /// is known the card shows the em dash instead of a fabricated zero, and
     /// whenever any session is unknown a tooltip says the total is partial.
-    /// With no unknown sessions — which includes every pre-v0.7 host, where
-    /// `cost_status` is nil — the card is byte-identical to before.
+    /// With no unknown sessions — which includes every host below the v0.7
+    /// schema, where the `cost_status` column does not exist and every
+    /// session degrades to `.legacy` — the card is byte-identical to before.
+    /// A session whose `cost_status` is NULL on a host that HAS the column
+    /// counts as unknown, so the partial marker covers it.
     @ViewBuilder
     private var totalCostCard: some View {
         let partial = viewModel.unknownCostSessionCount > 0

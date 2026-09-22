@@ -22,6 +22,10 @@ struct SessionCostDisplayTests {
         var description: String { why }
     }
 
+    /// Exercised with `hasCostStatusColumn: false` — a host with no
+    /// `cost_status` column — so every `status: nil` row here is the
+    /// genuinely-old-host case. `nullStatusMatrix` covers the same values on
+    /// a host that HAS the column.
     static let matrix: [Row] = [
         // --- The defect. An unknown cost must never render as a figure. ---
         .init(actual: nil, estimated: 0.0, status: "unknown",
@@ -87,6 +91,94 @@ struct SessionCostDisplayTests {
         #expect(display == row.expected, "\(row.why)")
     }
 
+    // MARK: - A NULL cost_status on a host that HAS the column
+
+    /// The second, more common shape of the same defect. Hermes writes
+    /// `cost_status` only from `update_token_counts`
+    /// (`hermes_state_usage.py:275`, `cost_status = COALESCE(?, cost_status)`
+    /// at `:37`), so a session that never completed a priced turn keeps the
+    /// column NULL on a fully CURRENT host — 9 of 43 on the live v0.21.3 host,
+    /// including a 133-message Telegram session. Those must say "unknown",
+    /// not `$0.00`.
+    ///
+    /// The discriminator is the COLUMN's existence (`hasCostStatusColumn`,
+    /// Scarf's probed `hasV07Schema`), never the value, because the value is
+    /// nil either way.
+    static let nullStatusMatrix: [Row] = [
+        .init(actual: nil, estimated: nil, status: nil,
+              expected: .unknown,
+              why: "v0.7+ host, never priced: both cost columns NULL is UNKNOWN, not $0.00"),
+        .init(actual: nil, estimated: 0.0, status: nil,
+              expected: .unknown,
+              why: "v0.7+ host, NULL status with the placeholder zero is UNKNOWN"),
+        .init(actual: 0.0, estimated: nil, status: nil,
+              expected: .unknown,
+              why: "a zero actual with no status on a v0.7+ host is still unknown"),
+        .init(actual: nil, estimated: -1.0, status: nil,
+              expected: .unknown,
+              why: "a non-positive amount cannot make a NULL status a figure"),
+        // A positive amount still outranks the silence, exactly as it does
+        // for an explicit "unknown".
+        .init(actual: nil, estimated: 0.25, status: nil,
+              expected: .amount(0.25, isActual: false),
+              why: "a real cost with no status still renders that cost"),
+        .init(actual: 1.5, estimated: 0.25, status: nil,
+              expected: .amount(1.5, isActual: true),
+              why: "actual outranks estimated and the missing status alike"),
+        // An unrecognised status is NOT the NULL case — it still degrades.
+        .init(actual: nil, estimated: 0.0, status: "quantum-vibes",
+              expected: .legacy(amount: 0.0, isActual: false),
+              why: "only NULL means 'never priced'; a future status still degrades to legacy"),
+    ]
+
+    @Test("a NULL cost_status on a host that HAS the column is unknown, not a zero",
+          arguments: nullStatusMatrix)
+    func nullStatusOnAModernHostIsUnknown(row: Row) {
+        let display = SessionCostDisplay(
+            actualCostUSD: row.actual,
+            estimatedCostUSD: row.estimated,
+            costStatus: row.status,
+            hasCostStatusColumn: true
+        )
+        #expect(display == row.expected, "\(row.why)")
+    }
+
+    /// The whole fix in one assertion: the SAME row decodes differently
+    /// depending only on whether the host has the column. If
+    /// `hasCostStatusColumn` stops being consulted, one of these two fails.
+    @Test("the column's presence is the only thing that separates legacy from unknown")
+    func theColumnIsTheDiscriminator() {
+        let columnAbsent = SessionCostDisplay(
+            actualCostUSD: nil, estimatedCostUSD: nil, costStatus: nil,
+            hasCostStatusColumn: false
+        )
+        let columnPresent = SessionCostDisplay(
+            actualCostUSD: nil, estimatedCostUSD: nil, costStatus: nil,
+            hasCostStatusColumn: true
+        )
+        #expect(columnAbsent == .legacy(amount: nil, isActual: false))
+        #expect(columnPresent == .unknown)
+        #expect(columnAbsent != columnPresent)
+        #expect(!columnAbsent.isUnknown)
+        #expect(columnPresent.isUnknown)
+    }
+
+    /// `HermesSession` must carry the flag through to the rule — a session
+    /// built by the decoder on a v0.7+ host reports unknown, one built
+    /// without the flag keeps the legacy reading. Also pins that `withTitle`
+    /// does not drop it on the way through.
+    @Test("HermesSession carries the column's presence into costDisplay")
+    func sessionCarriesTheFlag() {
+        let modern = Self.session(actual: nil, estimated: nil, status: nil, hasColumn: true)
+        let old = Self.session(actual: nil, estimated: nil, status: nil, hasColumn: false)
+        #expect(modern.costDisplay == .unknown)
+        #expect(old.costDisplay == .legacy(amount: nil, isActual: false))
+        #expect(modern.withTitle("renamed").costDisplay == .unknown,
+                "withTitle must not drop hasCostStatusColumn")
+        #expect(modern.hasCostStatusColumn)
+        #expect(!old.hasCostStatusColumn)
+    }
+
     /// The whole point: `unknown` must be distinguishable from a real zero,
     /// even though Hermes stores the identical number for both. If this
     /// passes while `unknown` falls through to the legacy/zero rendering,
@@ -102,13 +194,20 @@ struct SessionCostDisplayTests {
         #expect(!included.isUnknown)
     }
 
-    /// Charter C1 proof. On a host with no `cost_status` column the rule must
-    /// hand each surface the SAME two values it used to read directly
+    /// Charter C1 proof. On a host with no `cost_status` COLUMN (below the
+    /// v0.7 schema, `hasCostStatusColumn == false`) the rule must hand each
+    /// surface the SAME two values it used to read directly
     /// (`displayCostUSD` and `costIsActual`), so its rendering is unchanged
-    /// byte for byte. Anything that routed a nil-status session into
-    /// `.unknown` — the easy way to "fix" the defect — fails here.
+    /// byte for byte. Anything that routed such a session into `.unknown` —
+    /// the easy way to "fix" the defect — fails here.
+    ///
+    /// Note what this does NOT say: it is about the column being absent, not
+    /// about the value being nil. A NULL value on a host that HAS the column
+    /// is a current host that never priced the session, and
+    /// `nullStatusOnAModernHostIsUnknown` pins it to `.unknown`. Conflating
+    /// the two is exactly the bug this suite previously enshrined.
     @Test(
-        "a nil cost_status never changes what an older host renders",
+        "an absent cost_status column never changes what an older host renders",
         arguments: [nil, 0.0, 0.004, 1.5] as [Double?]
     )
     func nilStatusIsByteIdenticalToBefore(estimated: Double?) {
@@ -145,14 +244,21 @@ struct SessionCostDisplayTests {
 
     // MARK: - Fixture
 
-    static func session(actual: Double?, estimated: Double?, status: String?) -> HermesSession {
+    /// `hasColumn` defaults to false — a host with no `cost_status` column —
+    /// so the C1 test and the shared matrix exercise the legacy reading.
+    static func session(
+        actual: Double?,
+        estimated: Double?,
+        status: String?,
+        hasColumn: Bool = false
+    ) -> HermesSession {
         HermesSession(
             id: "s", source: "acp", userId: nil, model: "fable:free", title: nil,
             parentSessionId: nil, startedAt: nil, endedAt: nil, endReason: nil,
             messageCount: 0, toolCallCount: 0, inputTokens: 0, outputTokens: 0,
             cacheReadTokens: 0, cacheWriteTokens: 0, estimatedCostUSD: estimated,
             reasoningTokens: 0, actualCostUSD: actual, costStatus: status,
-            billingProvider: nil
+            billingProvider: nil, hasCostStatusColumn: hasColumn
         )
     }
 }

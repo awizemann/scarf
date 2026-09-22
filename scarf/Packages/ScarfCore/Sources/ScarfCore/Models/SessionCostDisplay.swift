@@ -19,7 +19,7 @@ import Foundation
 /// BOTH persist paths collapse that `None` to `0.0`: the `UPDATE sessions`
 /// statement built at `hermes_state_usage.py:29`
 /// (`estimated_cost_usd = COALESCE(?, 0)`, with `cost_status = COALESCE(?,
-/// cost_status)` at `:37`, executed by `update_token_counts` at `:274`), and
+/// cost_status)` at `:37`, executed by `update_token_counts` at `:275`), and
 /// the `session_model_usage` upsert at `:367`
 /// (`float(estimated_cost_usd or 0.0)`). The stored number is therefore
 /// byte-identical for "Hermes does not know" and "it was genuinely free";
@@ -37,14 +37,34 @@ public enum SessionCostDisplay: Equatable, Sendable {
     /// not an approximation, so surfaces drop the " est." marker.
     case includedFree
 
-    /// Hermes did not know the cost (`cost_status == "unknown"`) and stored
-    /// the placeholder zero. Must NEVER render as a currency amount.
+    /// Hermes did not know the cost, and stored the placeholder zero (or
+    /// nothing at all). Must NEVER render as a currency amount.
+    ///
+    /// Two shapes reach this, and both are genuine "Hermes never priced
+    /// this":
+    /// * `cost_status == "unknown"` — Hermes priced the turn and could not
+    ///   find a rate (`usage_pricing.py:550`, `amount_usd=None`).
+    /// * `cost_status IS NULL` **on a host that HAS the column**. Hermes
+    ///   writes `cost_status` only from `update_token_counts`
+    ///   (`hermes_state_usage.py:275`, `cost_status = COALESCE(?,
+    ///   cost_status)` at `:37`), so a session that never completed a
+    ///   priced turn keeps the column NULL on a fully CURRENT host. This is
+    ///   not rare: on the live v0.21.3 host 9 of 43 sessions (6 acp, 2
+    ///   cron, 1 telegram — one of them 133 messages) were in exactly that
+    ///   state, and `sessionListPredicate` does not filter them out.
     case unknown
 
-    /// No usable status: `cost_status` is nil (a pre-v0.7 Hermes host, where
-    /// the column sits outside the probed `hasV07Schema` tail of the SELECT
-    /// and decodes to nil) or is a string this Scarf does not recognise —
-    /// and there is no positive amount to show.
+    /// No usable status AND no way to tell what the silence means, with no
+    /// positive amount to show. Two causes:
+    /// * the `cost_status` COLUMN IS ABSENT — a Hermes host below the v0.7
+    ///   schema, where the column sits outside the probed `hasV07Schema`
+    ///   tail of the SELECT. Scarf cannot distinguish "free" from "don't
+    ///   know" on such a host and must not start guessing.
+    /// * `cost_status` is a string this Scarf does not recognise (a value a
+    ///   future Hermes invents).
+    ///
+    /// A NULL value on a host that HAS the column is NOT this case — see
+    /// ``unknown``.
     ///
     /// `amount` is the raw value the surface used to render before this type
     /// existed (nil when the session carried no cost at all), and `isActual`
@@ -60,7 +80,23 @@ public enum SessionCostDisplay: Equatable, Sendable {
 
     /// The one rule. `actualCostUSD` wins over `estimatedCostUSD`, matching
     /// the long-standing `HermesSession.displayCostUSD` preference order.
-    public init(actualCostUSD: Double?, estimatedCostUSD: Double?, costStatus: String?) {
+    ///
+    /// - Parameter hasCostStatusColumn: whether the `sessions.cost_status`
+    ///   COLUMN existed in the SELECT this row came from — Scarf's
+    ///   `hasV07Schema` probe (charter C4: probed with `PRAGMA table_info`,
+    ///   never inferred from a version string). It is the ONLY thing that
+    ///   separates "a host too old to have the column" from "a current host
+    ///   that never priced this session", because both decode `costStatus`
+    ///   to nil. Defaults to `false`, the conservative reading: without
+    ///   positive evidence that the column exists, a nil status degrades to
+    ///   ``legacy`` and the surface renders exactly as it did before this
+    ///   type existed (charter C1).
+    public init(
+        actualCostUSD: Double?,
+        estimatedCostUSD: Double?,
+        costStatus: String?,
+        hasCostStatusColumn: Bool = false
+    ) {
         let amount = actualCostUSD ?? estimatedCostUSD
         let isActual = actualCostUSD != nil
 
@@ -74,9 +110,21 @@ public enum SessionCostDisplay: Equatable, Sendable {
         }
 
         switch costStatus?.lowercased() {
-        case Self.unknownStatus: self = .unknown
-        case Self.includedStatus: self = .includedFree
-        default: self = .legacy(amount: amount, isActual: isActual)
+        case Self.unknownStatus:
+            self = .unknown
+        case Self.includedStatus:
+            self = .includedFree
+        case nil where hasCostStatusColumn:
+            // The column EXISTS and Hermes left it NULL. That is not an old
+            // host — it is a current one that never completed a priced turn
+            // (`hermes_state_usage.py:275` is the only writer), so the
+            // absent number means "never priced", exactly like an explicit
+            // `"unknown"`. Rendering `$0.00` here asserts a fact Hermes
+            // never stated. Reached only when there is no positive amount,
+            // which the early return above has already taken.
+            self = .unknown
+        default:
+            self = .legacy(amount: amount, isActual: isActual)
         }
     }
 
