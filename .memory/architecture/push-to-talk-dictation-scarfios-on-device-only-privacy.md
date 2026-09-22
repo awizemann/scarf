@@ -2,11 +2,13 @@
 title: Push-to-talk dictation (ScarfIOS): on-device-only privacy contract + lifecycle teardown pattern
 type: note
 permalink: scarf/architecture/push-to-talk-dictation-scarfios-on-device-only-privacy
-source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/PrivacyInfo.xcprivacy]
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/Speech/PushToTalkController.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/Speech/OnDeviceDictation.swift, scarf/Scarf iOS/PrivacyInfo.xcprivacy]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
 P1 hardening pass (t-11fd245b) on @danmarauda's push-to-talk dictation feature (commit 51584c0c). The original code set `request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition`, which silently fell back to Apple's server-assisted recognition on locales/devices without on-device support — contradicting `NSSpeechRecognitionUsageDescription`'s "on this device" promise. Fixed by refusing to record at all when on-device isn't available, with a defense-in-depth check inside the transcriber too. Dictation must keep this contract: on-device or nothing, never a silent server fallback. This matters because `NSSpeechRecognitionUsageDescription` promises "on this device" for dictation. The on-device promise is DICTATION's only, not the app's: Live Voice (P5b), started by the user after a one-time consent (F4, t-ba3ccc85), streams microphone audio DIRECTLY from the phone to OpenAI over WebRTC (the Hermes host only runs the session exchange, so OpenAI also sees the phone's IP) and seeds each session with up to 24 recent chat messages / 6,000 chars. `NSMicrophoneUsageDescription` says both (dictation transcribed on this device; Live Voice streams directly to OpenAI). The empty `NSPrivacyCollectedDataTypes` in `Scarf iOS/PrivacyInfo.xcprivacy` means the developer collects nothing; it is not a claim that no data leaves the device (the App Privacy label question for Live Voice is task t-11cc53ea). See "ScarfGo Live Voice (P5b)" and "Live Voice core".

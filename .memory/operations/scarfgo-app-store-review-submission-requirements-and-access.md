@@ -2,12 +2,12 @@
 title: ScarfGo App Store review: submission requirements and access model
 type: note
 permalink: scarf/operations/scarfgo-app-store-review-submission-requirements-and-access
-source_paths: [scarf/Scarf iOS/Info.plist, scarf/Scarf iOS/Scarf_iOS.entitlements, scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Scarf iOS/Onboarding/OnboardingRootView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
+source_paths: [scarf/Scarf iOS/Info.plist, scarf/Scarf iOS/Scarf_iOS.entitlements, scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Scarf iOS/Onboarding/OnboardingRootView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/ACPClient+iOS.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/SSHPrivateKeyDecoding.swift, scarf/scarf.xcodeproj/project.pbxproj]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-08-14
 updated: 2026-08-19
-reviewed: 2026-09-18
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

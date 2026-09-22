@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-mcp-config-is-a-yaml-mcp-servers-block-scar
 tags: [hermes, mcp, config, phase-5, registration]
 source_paths: [scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/scarfApp.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-03
 updated: 2026-09-10
-reviewed: 2026-09-19
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

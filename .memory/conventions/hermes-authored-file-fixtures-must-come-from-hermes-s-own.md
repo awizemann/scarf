@@ -5,10 +5,10 @@ permalink: scarf/conventions/hermes-authored-file-fixtures-must-come-from-hermes
 tags: [fixtures, yaml, parsing, hermes, testing]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotProfileYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/YAMLScalar.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift]
 source_paths_inferred: false
-source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-02
 updated: 2026-09-02
-reviewed: 2026-09-14
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

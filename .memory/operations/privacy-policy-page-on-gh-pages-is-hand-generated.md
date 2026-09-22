@@ -4,10 +4,10 @@ type: note
 permalink: scarf/operations/privacy-policy-page-on-gh-pages-is-hand-generated
 source_paths: [scarf/docs/PRIVACY_POLICY.md, wiki/Privacy-Policy.md]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-08-20
 updated: 2026-08-20
-reviewed: 2026-09-18
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

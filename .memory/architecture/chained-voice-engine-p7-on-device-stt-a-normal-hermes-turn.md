@@ -5,17 +5,18 @@ permalink: scarf/architecture/chained-voice-engine-p7-on-device-stt-a-normal-her
 tags: [voice, chained, stt, tts, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceLiveReadiness.swift]
 source_paths_inferred: false
-source_sha: 5c481a5ad1fff2bc2c556b041ed055c5b8e8b141
+source_sha: 0bc62f678de391d5e1d9fb625443204fb692c5bc
 created: 2026-09-19
 updated: 2026-09-19
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
-The free voice path decided on 2026-09-19 (task t-06481958, report documents/plans/2026-09-19-voice-p7-free-voice-path.md, design A). Built in P7a (t-61648d3d, branch feat/voice-p7a-chained-core) as the second `VoiceConversationEngine` conformer next to `GPTLiveEngine`; the Mac (P7b, t-7932eaee) and ScarfGo (P7c, t-4610560b) mount it behind the SAME composer button and panel.
-
 ## Observations
+- [decision] `VoiceEngineKind` (Sendable, Equatable) is a new enum modeling which voice engine a window's server resolves to: `.gptLive` (GPTLiveEngine—OpenAI full-duplex, $0.05/min, needs API key and Hermes ≥ 0.21.3) or `.chained` (ChainedVoiceEngine—on-device STT, normal Hermes turn, host TTS; free, Hermes's default). The `VoiceLiveAvailability` enum provides an `engineKind` property (returns `VoiceEngineKind?`) to allow callers to branch on which engine is active without matching availability cases #voice
 - [decision] Hermes's "chained" voice mode (its default) is a client loop, not a server engine: at tag v2026.9.14 only the Hermes desktop renderer implements it, and ACP drops audio blocks. Scarf therefore runs the loop itself: `VoiceListener` (Apple on-device speech) → `VoiceTurnHost.submitVoiceTurn` (a normal ACP turn, `noteStyle: .chained`, persisted row = spoken words) → `VoiceSpeaker` (host TTS through `HermesSpeechService`, `SystemVoiceSpeaker` fallback via `FallbackVoiceSpeaker`, one `.speechFallback` notice) #voice #hermes
 - [invariant] `AppleOnDeviceVoiceListener` sets `requiresOnDeviceRecognition = true` and refuses to start when `supportsOnDeviceRecognition` is false: audio never reaches Apple's servers, so chained declares no `VoiceDataRecipient` and needs no consent sheet. The AVAudioEngine tap feeds the request through a lock-guarded box (never `MainActor.assumeIsolated` on the realtime thread). Audio-session policy is a seam (`VoiceAudioSessionControlling`); the iOS app passes its own owner #voice #privacy
-- [decision] `VoiceLiveAvailability` is three-way: `.ready` (gpt-live mode AND hasGPTLiveVoice ≥ 0.21.3) → GPTLiveEngine; `.chainedReady` (hasHermesSpeechSynthesis ≥ 0.20.1; chained mode, absent key, OR gpt-live asked on a host too old for it, matching the Hermes desktop's own fallback) → ChainedVoiceEngine; `.hidden(.hermesTooOld)` below 0.20.1 (C1). `.hidden(.chainedMode)` no longer exists; apps branch on `engineKind` #voice #capabilities
+- [decision] `VoiceLiveAvailability` is three-way (per P7 design, documents/plans/2026-09-19-voice-p7-free-voice-path.md §4): `.ready` (gpt-live mode AND hasGPTLiveVoice ≥ 0.21.3) → mounts GPTLiveEngine via `engineKind`; `.chainedReady` (hasHermesSpeechSynthesis ≥ 0.20.1; covers chained default, absent key, or gpt-live asked on a host too old for it, matching the Hermes desktop's fallback) → mounts ChainedVoiceEngine via `engineKind`; `.hidden(.hermesTooOld)` (Hermes below 0.20.1, C1). The `.hidden(.chainedMode)` case no longer exists; the single composer button mounts the verdict's engine. Apps inspect `engineKind` to determine mounted engine #voice #capabilities
 - [convention] Loop rules mirror GPTLiveEngine: 200 ms tick polls `voiceTurnReply`, sentences are spoken as they stream, the busy reply is spoken, `VoiceLiveText.isVoiceStopCommand` ends the session before reaching Hermes, barge-in = listener stays open during playback and a speech onset after a 300 ms grace stops the speaker, mute pauses the listener, idle auto-end with the shared warning, cost is 0 #voice
 - [gotcha] `ScarfCore` is Swift language mode 5 (Package.swift pins it); the new code is still Sendable-clean with explicit lock-guarded boxes #swift
 

@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-voice-playback-runs-text-to-speech-tool-on-
 tags: [voice, tts, capabilities, security, multi-server]
 source_paths: [scarf/scarf/Core/Services/MessageSpeechService.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-09-19
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

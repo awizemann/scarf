@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesP55Tests.swif
 source_paths_inferred: false
 source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-21
 reviewed: 2026-09-19
 reviewed_by: audit:claude-code (background)
 ---
@@ -25,3 +25,8 @@ Found on feat/voice (t-f1593849). The full ScarfCore `swift test` failed about 2
 - relates_to [[Process.waitDraining lives in ScarfCore — the two halves of a piped spawn, and the poll-interval trap]]
 - relates_to [[A @MainActor suite cannot test detached-read interleaving — such tests pass with the fix removed]]
 - relates_to [[Fast test-iteration commands (swift test vs xcodebuild)]]
+
+
+## Swift Testing macro gotcha (2026-09-21, t-f0a94093)
+
+- [gotcha] `#require(…)` / `#expect(…)` cannot wrap a **mutating** call on a local `var` struct: the macro expands the expression into a closure (`Testing.__checkFunctionCall(state.self, calling: { $0.beginPoll() })`) and `$0` is a `let`, so it fails to compile with `cannot use mutating member on immutable value: '$0' is immutable` — a message that points at generated code and reads like a concurrency error. It also emits a bogus "no calls to throwing functions occur within 'try'" warning alongside. Call the mutating method on its own line into a local, then require/expect the local: `let claimed = state.beginPoll(); let issued = try #require(claimed)`. Hit while testing `KanbanChatBadgeState`'s id-tagged poll claim #testing #gotcha

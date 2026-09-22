@@ -5,11 +5,11 @@ permalink: scarf/architecture/the-acp-adapter-s-slash-roster-is-nine-names-and-h
 tags: [hermes, acp, chat, capability-gating, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-10
 updated: 2026-09-13
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
 Scarf's chat composer speaks ACP, so the only slash table that matters for the composer menu is the ACP adapter's — never `hermes_cli/commands.py` (CLI/TUI) and never the gateway's. P34 walked `acp_adapter/` across all 32 `v2026.*` tags.

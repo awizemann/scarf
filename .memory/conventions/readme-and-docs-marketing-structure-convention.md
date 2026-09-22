@@ -4,10 +4,10 @@ type: note
 permalink: scarf/conventions/readme-and-docs-marketing-structure-convention
 source_paths: [README.md, wiki/Home.md, site/landing/index.html]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-08-13
 updated: 2026-08-13
-reviewed: 2026-09-19
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

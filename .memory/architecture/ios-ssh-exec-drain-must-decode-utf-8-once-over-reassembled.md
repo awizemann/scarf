@@ -4,14 +4,12 @@ type: note
 permalink: scarf/architecture/ios-ssh-exec-drain-must-decode-utf-8-once-over-reassembled
 source_paths: [scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: 0bc62f678de391d5e1d9fb625443204fb692c5bc
 created: 2026-09-18
 updated: 2026-09-18
-reviewed: 2026-09-19
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
-
-`CitadelServerTransport.absorb` is the ONE drain loop every iOS `runProcess`/`streamScript` exec shares (`runExec` → `drain` → `absorb`). It used to call `ByteBuffer.readString(length:)` on each `ExecCommandOutput.stdout`/`.stderr` chunk — one chunk per Citadel/SSH data packet — and append the decoded `String`'s UTF-8 bytes to the `Data` accumulator.
 
 ## Observations
 - [gotcha] Citadel hands `absorb` one `ExecCommandOutput` chunk per SSH data packet, and a multi-byte UTF-8 character (CJK text, emoji — anything non-ASCII in a chat message over roughly 32 KB) routinely lands split across two of them. `ByteBuffer.readString(length:)` decodes via `String(decoding:as: Unicode.UTF8.self)`, which NEVER throws on invalid UTF-8 — it silently substitutes U+FFFD. So a split character became TWO replacement characters with no error anywhere in the call chain: not in `absorb`, not in `runExec`, not in the caller. #gotcha #ios #ssh #utf8

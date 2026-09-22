@@ -3,12 +3,12 @@ title: Integrity is not authenticity: agent-writable Scarf sidecars need a Keych
 type: note
 permalink: scarf/decisions/integrity-is-not-authenticity-agent-writable-scarf-sidecars
 tags: [security, projects, miniapps, keychain]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift]
 source_paths_inferred: false
-source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-04
 updated: 2026-09-08
-reviewed: 2026-09-08
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

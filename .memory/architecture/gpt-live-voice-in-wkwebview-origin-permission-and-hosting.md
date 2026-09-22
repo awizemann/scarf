@@ -5,9 +5,11 @@ permalink: scarf/architecture/gpt-live-voice-in-wkwebview-origin-permission-and-
 tags: [voice, webkit, webrtc, gpt-live]
 source_paths: [scarf/scarf/scarf.entitlements, scarf/scarf/Info.plist, scarf/Scarf iOS/Info.plist]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
 Measured in the P3 Live Voice spike (2026-09-18, macOS 27.0 + iOS 26.2 simulator; harness at scarf/Spikes/VoiceLive on branch feat/voice-spike). Report: documents/plans/2026-09-18-live-voice-spike.md. Real-mic TCC and real-device AEC were NOT exercised (WebKit mock capture device only).

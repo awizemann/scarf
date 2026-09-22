@@ -5,11 +5,11 @@ permalink: scarf/architecture/hermes-messages-fts-contract-an-8-kb-tool-prefix-a
 tags: [hermes, state-db, search, fts, hermes-v0-21-1]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesSearchIndex.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesV0211SearchIndexTests.swift]
 source_paths_inferred: false
-source_sha: 74cd8321517a52f3e067f378ee6c0b84c836c499
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
 Everything a reader of Hermes's `messages_fts` needs in order to know what

@@ -11,19 +11,17 @@ reviewed: 2026-09-19
 reviewed_by: audit:claude-code (background)
 ---
 
-Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on main — feat/local-models' chat diff is 47 lines in the preflight path and touches none of this; it only supplied triggers: Ollama cold-swap latency, config churn).
-
-## Mechanism facts (file:line grounded, v2.16.2 baseline)
-- [fact] One `hermes acp` process per session start — `startACPSession` (ChatViewModel.swift:1137) always `stopACP()` then spawns fresh; config.yaml is read ONLY at spawn. Mid-chat model change = ACP `session/set_model`; global default changes need the next spawn. #lifecycle
-- [fact] "Loading session…" spinner = static label gated on `isPreparingSession` (ChatViewModel:288-293, RichChatMessageList:173-177). NO timeout bounds the start/resume pipeline, and ChatSessionListPane:75 disables all row clicks while preparing → a wedged start is SELF-LOCKING (restart-only recovery). #spinner
-- [fact] Pre-engagement gate (RichChatViewModel:1324-1334) drops ALL stream events — including the synthesized `promptComplete` — until `addUserMessage` sets `hasUserSentPromptThisSession`. Turn completion = sendPrompt's RETURN (see [[acp-turn-completion-is-sendprompt-s-return-not-a-stream-promptcomplete-event]]); the synthesized event still traverses the gate. #gate
+## Mechanism facts (file:line grounded, verified 2026-09-21)
+- [fact] One `hermes acp` process per session start — `startACPSession` (ChatViewModel.swift:1805) always `stopACP()` then spawns fresh; config.yaml is read ONLY at spawn. Mid-chat model change = ACP `session/set_model`; global default changes need the next spawn. #lifecycle
+- [fact] "Loading session…" spinner = static label gated on `isPreparingSession` (ChatViewModel:379-382). NO timeout bounds the start/resume pipeline, and ChatSessionListPane disables all row clicks while preparing → a wedged start is SELF-LOCKING (restart-only recovery). Watchdog added in Fix 3 bounds this. #spinner
+- [fact] Pre-engagement gate (RichChatViewModel:1714-1736, specifically `hasUserSentPromptThisSession` at 1736) drops ALL stream events — including the synthesized `promptComplete` — until `addUserMessage` (RichChatViewModel:1879) sets the gate. Turn completion = sendPrompt's RETURN; promptComplete is intentionally NOT gated per Fix 2. #gate
 - [fact] Hermes replays full history as session/update notifications inside session/load; Scarf drops them by design and hydrates from state.db. Sidebar counts + info-bar tokens come from state.db reads, NOT stream accounting — a session can look alive in the sidebar while the transcript pane is deaf. #streams
 
 ## Confirmed defects (2026-07-13, agent.log + state.db + live probe evidence)
-- [gotcha] S1 phantom load: Hermes 0.17 returns `{}` (empty dict, not null) for a not-restorable session/load; ACPClient's #99 guard (ACPClient.swift:322-327) only catches nil → Scarf attaches to a nonexistent session; next prompt gets stopReason=refusal ("session may have been cleared" banner is accurate). 0.17 real load successes carry `models`/`modes` keys — guard must check those. #s1
-- [gotcha] S2 deaf transcript: sendViaACP's dedup guard (ChatViewModel:841-843, built for the autoStart optimistic echo) matches re-sent text against DB history → skips addUserMessage → gate never opens → every chunk/tool event/promptComplete dropped while the turn runs fine server-side. #s2
-- [gotcha] S3 self-locking spinner: wedged pre-spawn start (no process spawned, no load sent — log-proven) leaves isStartingSession stuck; clicks disabled; no watchdog. Credible contributor: ProcessACPChannel readers (:237-277) BLOCK cooperative-pool threads (2/channel) and are LEAKED by the start-failure catch paths (:799-806, :1361-1368 never call client.stop()) → pool starvation stalls detached/actor work. #s3
-- [gotcha] S4 duplicated message: one DB row with the text twice — Scarf delivered the same prompt in a killed turn then re-sent it; Hermes' alternation repair merged them ("Repaired 1 message-alternation violations"). stopACP kills mid-turn processes with NO session/cancel and no transcript feedback. #s4
+- [gotcha] S1 phantom load: Hermes 0.17 returns `{}` (empty dict, not null) for a not-restorable session/load; ACPClient's guard only catches nil → Scarf attaches to a nonexistent session; next prompt gets stopReason=refusal. 0.17 real load successes carry `models`/`modes` keys — guard must check those. Fixed. #s1
+- [gotcha] S2 deaf transcript: sendViaACP's dedup guard matches re-sent text against DB history → skips addUserMessage → gate never opens → every chunk/tool event dropped while the turn runs fine server-side. Fixed by scoping dedup to localEchoAlreadyAdded flag. #s2
+- [gotcha] S3 self-locking spinner: wedged pre-spawn start leaves isStartingSession stuck; clicks disabled; no watchdog. Credible contributor: ProcessACPChannel readers BLOCK cooperative-pool threads and are LEAKED by start-failure catch paths. Fixed with 90s watchdog + DispatchSourceRead reader reform. #s3
+- [gotcha] S4 duplicated message: one DB row with the text twice — Scarf delivered the same prompt in a killed turn then re-sent it; Hermes' alternation repair merged them. stopACP kills mid-turn processes with NO session/cancel and no transcript feedback. Fixed with bounded session/cancel. #s4
 
 ## Fix list (prioritized, task board: t-891c321a / t-60f2f152 / t-5451bd1b)
 1. loadSession guard: empty-dict result = not restorable (fall back to newSession). 2. Never gate-drop promptComplete; open gate at actual send sites. 3. Scope dedup guard to the optimistic echo only. 4. Watchdog over the whole start pipeline + let a fresh click supersede via sessionStartGeneration (don't disable rows). 5. session/cancel (or painted cancellation) before teardown; client.stop() in catch paths. 6. Move pipe readers off the cooperative pool.
@@ -32,7 +30,6 @@ Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on
 - relates_to [[acp-turn-completion-is-sendprompt-s-return-not-a-stream-promptcomplete-event]]
 - relates_to [[Local model providers — what exists below the UI and what filters them out]]
 - relates_to [[Decision: chat transport stays ACP; min-hermes to 0.18 (proposed)]]
-
 
 ## Fix execution record (2026-07-13, branch feat/local-models)
 - [done] Fix 1 (5262fba + audit da73fc5): loadSession treats nil OR empty-dict result as not-restorable; success discriminator = non-empty dict (modes unconditional since Hermes 0.15; models can be legitimately absent via exclude_none). Audit verified all shapes against 0.14/0.15/0.17/0.18.2 source; reconnect ladder never news sessions (no storm). #fix1
@@ -47,18 +44,7 @@ Deep review triggered by local-models dogfood (all four symptoms PRE-EXISTING on
 
 - [done] deleteSession-of-active leak (59485c1, t-01bd55ec): deleteSession now mirrors startACPSession's entry teardown when the deleted session is the attached one — beginStartIntent (supersedes any in-flight start), richChatViewModel.reset() FIRST (keeps stopACP's attachment-gated cancelled-bubble closed), then stopACP (bounded 2s session/cancel iff inFlightPromptSessionId marks a mid-flight turn, client.stop, watchdog disarm), acpStatus parked at idle, delete-specific toast. Non-active delete returns before teardown (pinned). Server-side `hermes sessions delete --yes` semantics unchanged, now behind an injectable sessionDeleteRunner seam (acpClientFactory pattern) for CLI-free tests. Pre-fix evidence: mid-turn test failed 5 issues (no cancel, channel never closed, stale acpStatus/hasActiveProcess), idle test 3 issues. 242 scarfTests + 901 ScarfCore green. NOTE: SessionsViewModel.confirmDelete is a second, independent delete surface that never touches the chat client — if the Sessions pane deletes the chat-active session the same leak shape exists there (different VM, out of t-01bd55ec scope). #fix-delete
 
-
 ## Round-6 P58 — the same starvation mechanism was still live in the transports
 
-- [fact] **The `DispatchSourceRead` cure that moved ACP off the wedge stayed private for fourteen
-  months, and the identical blocking loop ran in four other places the whole time.**
-  `LocalTransport`/`SSHTransport` × `streamLines`/`streamRawBytes` each read stdout with
-  `Task.detached { while true { handle.availableData } }`. `HermesLogService` drives them with
-  `tail -F`, which never exits, so one open Logs pane held one cooperative-pool thread for as long
-  as the pane was open — the same "pool thread parked in `read(2)` starves unrelated
-  Swift-concurrency work" mechanism this note's diagnosis names, on a surface nobody connected to it
-- [decision] **The reader is `ScarfCore/Transport/PipeReader.swift` now, shared by ACP and the four
-  spawns**, generalised over framing rather than copied. ACP's exact semantics (fail on invalid
-  UTF-8, DROP a trailing partial frame) survive as one `acpLines` factory; the transports take the
-  lenient framing and DELIVER the partial line. If this wedge is ever re-diagnosed, both consumers
-  are one file #c10
+- [fact] **The `DispatchSourceRead` cure that moved ACP off the wedge stayed private for fourteen months, and the identical blocking loop ran in four other places the whole time.** `LocalTransport`/`SSHTransport` × `streamLines`/`streamRawBytes` each read stdout with `Task.detached { while true { handle.availableData } }`. `HermesLogService` drives them with `tail -F`, which never exits, so one open Logs pane held one cooperative-pool thread for as long as the pane was open — the same "pool thread parked in `read(2)` starves unrelated Swift-concurrency work" mechanism this note's diagnosis names, on a surface nobody connected to it
+- [decision] **The reader is `ScarfCore/Transport/PipeReader.swift` now, shared by ACP and the four spawns**, generalised over framing rather than copied. ACP's exact semantics (fail on invalid UTF-8, DROP a trailing partial frame) survive as one `acpLines` factory; the transports take the lenient framing and DELIVER the partial line. If this wedge is ever re-diagnosed, both consumers are one file #c10

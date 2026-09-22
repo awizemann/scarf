@@ -7,7 +7,7 @@ source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarf/ContentView
 source_paths_inferred: false
 source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-21
 reviewed: 2026-09-08
 reviewed_by: claude-fable-5-1
 ---
@@ -29,3 +29,10 @@ Learned while building the section sweep (t-e732e091, 2026-09-08). All four veri
 ## Relations
 - relates_to [[UI gate: section root identifiers and the Smoke/Full/Live test plans]]
 - relates_to [[UI release gate: XCUITest is the gate, Harness is exploratory, fixture home built by the hermes CLI]]
+
+
+## A gate FAIL that ran zero tests (t-6fec1932, 2026-09-21)
+
+- [gotcha] The runner can die before any test runs: `The test runner failed to initialize for UI testing. (Underlying Error: Timed out while enabling automation mode.)`, recorded in the result bundle as a `System Failures` suite with no test nodes at all. Observed on the FIRST `ui-gate.sh --smoke-only` against cold DerivedData, with the console session unlocked and on-console and no second run on the Mac — a plain re-run with the same `--derived-data` passed. It is a testmanagerd/automation-mode init timeout, not a product failure #testing #gotcha
+- [gotcha] ui-gate.sh renders that case as `FAIL` with `UI: ? executed / ? failed` in the summary table, which reads exactly like a real test failure. The `?` is the tell: the script parses its total from the last `Executed N tests…` line, and a runner that never initialized emits none. ALWAYS check for an `Executed` line before hunting an app bug — `xcrun xcresulttool get test-results tests --path <bundle>` names the real cause in one call #testing #gotcha
+- [convention] A UI test that asserts HERMES CLI behaviour (not Scarf behaviour) rots when the agent is upgraded, and presents as a gate failure on a correct host. Two hit at once on 2026-09-21: `cron list` began including paused jobs (upstream `3f399c0bd4`), and the fixture's own growth broke a hard-coded card count. Assert such facts against the installed CLI's source per C5, name the row/job you mean rather than a total, and scope a listing read to the matching LINE — the fixture seeds paused cron jobs and kanban cards of its own, so an unscoped `contains` passes on a neighbour #testing #hermes

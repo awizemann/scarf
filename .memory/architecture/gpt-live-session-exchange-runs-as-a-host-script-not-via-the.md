@@ -19,15 +19,13 @@ Proven in the P3 spike against the real local Hermes venv with a throwaway HERME
 - [convention] Shim prints one SCARF_VOICE_LIVE:{json} marker line (parse the last), kinds unsupported/no_key/vendor(status)/network/bad_request; timeouts 20 s status, 45 s session; never log the offer or answer SDP (ICE pwd + DTLS fingerprints) #voice
 - [fact] tools/voice_live.py first ships at tag v2026.9.14 (Hermes 0.21.3, commit f923faa0b8); status probe costs ~0.3 s locally with no network #voice #capabilities
 
-
-
 ## Shipped in P4 (VoiceLiveHostExchange, feat/voice-p4)
 
 - [decision] There is no `status` op: Alan dropped the host status probe for gating (t-a4665c6e). The gate is hasGPTLiveVoice plus the parsed voice.voice_chat_mode, and a missing key only surfaces when a session starts, as `no_key` before any vendor call #voice
 - [convention] Interpreter discovery is shared with Hermes Voice TTS through `HermesPythonDiscovery.shellLines`. It tries the resolved hermes binary's python shebang first, then `python`/`python3` beside the `readlink -f` target. It was extracted byte-identically from `HermesSpeechService` and is pinned by a golden test #voice
 - [gotcha] `ValueError` does not always mean "no key". `json.JSONDecodeError`/`UnicodeDecodeError` from a 2xx with an unreadable body (`voice_live.py:182`, raised after the session may already exist) and urllib's "unknown url type" are ValueErrors too. The shim maps a ValueError to `no_key` only when its message contains "API key", otherwise to vendor/internal, so the UI never says "nothing was charged" wrongly #voice #cost
 - [gotcha] `python -c` puts the current directory first on `sys.path`. Over SSH that is `$HOME`, where a `~/tools/` package would shadow Hermes's `tools`, so the script runs `cd /` first. `HermesSpeechService` got the same fix in 154459b6, done differently: its Python's first line drops "" and "." from `sys.path`, which keeps the cwd a TTS command provider may rely on #voice #security
-- [fact] Since 5df8d8bd, iOS `CitadelServerTransport.streamScript` writes the script to the exec channel's stdin and runs only `PATH=… head -c <N> | /bin/sh`, so neither the offer SDP nor any script body appears in the host's `ps`. It uses `head -c` because Citadel 0.12's `TTYStdinWriter` cannot send EOF. This has been verified locally only and not yet against a real SSH host from a device. The Mac local path (`SSHScriptRunner.runLocally`) still runs `/bin/sh -c <script>`, which puts the script in argv on the user's own Mac #voice #secrets
+- [fact] iOS `CitadelServerTransport.streamScript` writes the script to the exec channel's stdin and runs `PATH=… head -c <N> | /bin/sh` (since commit 5df8d8bd), so the script body never appears in `ps`. It uses `head -c` because Citadel 0.12's `TTYStdinWriter` cannot send EOF. Mac `SSHScriptRunner.runLocally` also sends the script via stdin using `/bin/sh -s` (since commit 834467ab), so scripts also never appear in argv on the user's Mac #voice #secrets
 
 ## Relations
 - feeds_into [[GPT-Live voice in WKWebView: origin, permission and hosting requirements]]

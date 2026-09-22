@@ -5,10 +5,10 @@ permalink: scarf/ops/releases-under-icloud-drive
 tags: [release, codesign, icloud, gotcha]
 source_paths: [scripts/release.sh, scarf/scarf/Info.plist]
 source_paths_inferred: false
-source_sha: 7c0b8a6367b4a0c476e0b1a38c63e597abac5af6
+source_sha: 0bc62f678de391d5e1d9fb625443204fb692c5bc
 created: 2026-06-04
 updated: 2026-06-04
-reviewed: 2026-09-08
+reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 

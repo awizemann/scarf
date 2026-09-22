@@ -5,11 +5,11 @@ permalink: scarf/architecture/mac-live-voice-p5a-gate-voiceturnhost-on-chatviewm
 tags: [voice, gpt-live, macos, architecture]
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/scarf/Features/Chat/Views/ChatTranscriptPane.swift, scarf/scarf/scarfApp.swift]
 source_paths_inferred: false
-source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
+source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-09-19
-reviewed_by: claude-fable-5-1
+reviewed: 2026-09-21
+reviewed_by: audit:claude-code (background)
 ---
 
 Built in P5a (task t-8c80d256, branch feat/voice-p5a). The twin of the ScarfGo P5b note. Everything binds to the P4 core (VoiceConversationEngine / VoiceTurnHost).
