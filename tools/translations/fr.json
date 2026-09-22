@@ -1865,6 +1865,7 @@
   "Running checks…": "Exécution des vérifications…",
   "Running health checks…": "Vérifications de santé en cours…",
   "Running supply-chain audit…": "Audit de la chaîne d'approvisionnement en cours…",
+  "Running, blocked or in review: %lld": "En cours, bloquées ou en revue : %lld",
   "Running, collapsed": "En cours, replié",
   "Running, expanded": "En cours, déplié",
   "Runs": "Exécutions",

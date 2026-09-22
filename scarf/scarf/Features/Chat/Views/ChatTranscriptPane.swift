@@ -16,6 +16,7 @@ struct ChatTranscriptPane: View {
     var allowsVoiceLive = true
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Live-count badge for the Kanban chip. Created lazily so the VM
     /// is per-context (not per-window) and a re-rendered view doesn't
@@ -164,33 +165,50 @@ struct ChatTranscriptPane: View {
             await refreshResolvedTenant()
         }
         .task(id: kanbanBadgePollKey) {
-            // Long-running poller scoped to (capabilities, chat session).
-            // Restarts cleanly when either changes. The badge counts
-            // tasks this chat produced, scoped by the ACP session id.
+            // Long-running poller scoped to (capabilities, chat session,
+            // scene phase). Restarts cleanly when any changes. The badge
+            // counts tasks this chat produced, scoped by the ACP session id.
             let caps = capabilitiesStore?.capabilities ?? .empty
-            guard caps.hasKanbanSessionFilter,
-                  let sid = richChat.sessionId else { return }
+            let sid = richChat.sessionId
+            guard caps.hasKanbanSessionFilter, sid != nil else {
+                // Nothing to poll — and the badge must go blank rather than
+                // keep asserting the count of whatever chat it last saw.
+                kanbanBadgeViewModel?.bind(to: nil)
+                return
+            }
             if kanbanBadgeViewModel == nil {
                 kanbanBadgeViewModel = KanbanChatBadgeViewModel(
                     context: chatViewModel.context
                 )
             }
-            await kanbanBadgeViewModel?.run(
-                sessionId: sid,
-                capabilities: caps
-            )
+            // Rebind before polling: a different session clears the old
+            // count and releases the previous chat's in-flight slot, and
+            // tags every result so a late one for the old chat is dropped.
+            kanbanBadgeViewModel?.bind(to: sid)
+            await kanbanBadgeViewModel?.run(capabilities: caps)
         }
     }
 
     /// Stable identity for the badge poller's `.task(id:)`. Includes
     /// every input that should restart the poll loop: the chat session
-    /// (so a /new restarts polling for the new session) and the
-    /// capability flag (so a host upgrade activates the chip without
-    /// reload).
+    /// (so a /new restarts polling for the new session), the capability
+    /// flag (so a host upgrade activates the chip without reload), and
+    /// the scene phase.
+    ///
+    /// The scene phase is the same C10 pause every other Kanban surface
+    /// already has (`KanbanBoardView.swift` `.onChange(of: scenePhase)`;
+    /// likewise `KanbanListView`, `KanbanInspectorPane`): a backgrounded
+    /// window used to keep spawning `hermes kanban list` — one process,
+    /// possibly over SSH, every five seconds per open chat window,
+    /// forever — for a number nobody was looking at. Here the poller IS
+    /// the `.task`, so folding the phase into its id is that same pause:
+    /// leaving `.active` cancels the loop, returning restarts it with an
+    /// immediate tick.
     private var kanbanBadgePollKey: String {
         let caps = capabilitiesStore?.capabilities ?? .empty
         return [
             caps.hasKanbanSessionFilter ? "k" : "",
+            scenePhase == .active ? "active" : "paused",
             richChat.sessionId ?? ""
         ].joined(separator: "|")
     }

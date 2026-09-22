@@ -1865,6 +1865,7 @@
   "Running checks…": "Führe Prüfungen aus…",
   "Running health checks…": "Systemprüfungen laufen…",
   "Running supply-chain audit…": "Lieferketten-Audit läuft…",
+  "Running, blocked or in review: %lld": "Läuft, blockiert oder in Prüfung: %lld",
   "Running, collapsed": "Läuft, eingeklappt",
   "Running, expanded": "Läuft, ausgeklappt",
   "Runs": "Läufe",

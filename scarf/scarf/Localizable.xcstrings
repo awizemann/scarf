@@ -85263,6 +85263,46 @@
         }
       }
     },
+    "Running, blocked or in review: %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läuft, blockiert oder in Prüfung: %lld"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En ejecución, bloqueadas o en revisión: %lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En cours, bloquées ou en revue : %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行中・ブロック中・レビュー待ち: %lld"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Em execução, bloqueadas ou em revisão: %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行中、已阻塞或待审核: %lld"
+          }
+        }
+      }
+    },
     "Running, collapsed" : {
       "localizations" : {
         "de" : {
