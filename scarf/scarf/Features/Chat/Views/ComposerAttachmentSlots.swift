@@ -26,7 +26,7 @@ final class ComposerAttachmentSlots {
     /// Hard cap matching what Hermes' vision aux model swallows
     /// comfortably in one prompt. Going higher costs tokens without a
     /// quality gain.
-    static let defaultCapacity = 5
+    nonisolated static let defaultCapacity = 5
 
     let capacity: Int
 
