@@ -25,11 +25,18 @@ import os
 ///    streams (``VoiceLiveText/speakableBoundary(in:)`` → `speechSegment` →
 ///    `chunkForCommentary`), then go back to listening.
 ///
-/// **Half duplex with barge-in.** The listener keeps running while the reply
-/// is spoken, so the user can interrupt: a speech onset after a short grace
-/// (the speaker's own audio can trip the meter on a laptop speaker) stops the
-/// speaker and drops the unspoken queue, and the utterance that follows is an
-/// ordinary turn.
+/// **Half duplex with barge-in, and no self-listening.** The listener keeps
+/// running while the reply is spoken, so the user can interrupt — but the
+/// microphone also hears the reply itself, so the engine tells the listener
+/// when playback starts and stops (``VoiceListener/setPlaybackActive(_:)``)
+/// and the LISTENER owns every echo rule: the OS's voice-processing (echo
+/// cancelling) input chain, a raised onset trigger and a half-second grace
+/// while the reply plays, an onset that must be SUSTAINED (not one loud
+/// tick), and the discarding of any hypothesis that began during playback
+/// without a confirmed onset. The engine therefore keeps NO grace of its own:
+/// a `.speechStarted` that arrives here is already a qualified barge-in, and
+/// it stops the speaker and drops the unspoken queue. The utterance that
+/// follows is an ordinary turn.
 ///
 /// **It never cancels a running Hermes turn.** GPT-Live cancels because its
 /// vendor keeps talking regardless; here, a busy chat simply means the user
@@ -66,11 +73,6 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         /// How long before the auto-end the ``VoiceSessionNotice/endingSoon(reason:secondsLeft:)``
         /// notice shows.
         public var endWarningLead: TimeInterval = 60
-        /// After the reply starts playing, how long a speech onset is ignored
-        /// before it counts as a barge-in. Without a grace the speaker's own
-        /// audio, heard by the microphone on a laptop speaker, interrupts the
-        /// first syllable of every reply.
-        public var bargeInGrace: TimeInterval = 0.3
         /// `SUBMIT_SETTLE_GRACE_MS` equivalent: how long an idle host with no
         /// reply is tolerated before the turn is read as finished.
         public var submitSettleGrace: TimeInterval = 15
@@ -145,7 +147,6 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
     /// the one that replaced it.
     @ObservationIgnored private var speakGeneration = 0
     @ObservationIgnored private var speechQueue: [String] = []
-    @ObservationIgnored private var speakingSince: Date?
     /// The recent spoken exchange, model input only (never a persisted row).
     @ObservationIgnored private var spokenTurns: [(speaker: VoiceTranscriptFragment.Speaker, text: String)] = []
     @ObservationIgnored private var meter = VoiceSessionMeter()
@@ -230,7 +231,7 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
 
         case .speechStarted:
             idle.noteActivity(at: now)
-            bargeIn(at: now)
+            bargeIn()
 
         case .partial(let text):
             idle.noteActivity(at: now)
@@ -248,14 +249,23 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         }
     }
 
-    /// A speech onset while the reply plays: stop talking and throw away what
-    /// has not been spoken yet. The grace keeps the speaker's own audio (no
-    /// AEC on a laptop speaker) from interrupting its own first syllable.
-    private func bargeIn(at now: Date) {
-        guard state.assistantSpeaking, let since = speakingSince,
-              now.timeIntervalSince(since) >= configuration.bargeInGrace else { return }
+    /// A confirmed speech onset while the reply plays: stop talking and throw
+    /// away what has not been spoken yet. There is no grace here — the
+    /// listener already applied its own (a sustained level over the raised
+    /// playback trigger, after a half-second settling window), and a second
+    /// grace with a different meaning would only make the two disagree.
+    private func bargeIn() {
+        guard state.assistantSpeaking else { return }
         cancelSpeech()
-        apply(.assistantSpeaking(false))
+        setAssistantSpeaking(false)
+    }
+
+    /// Flip the speaking flag AND tell the listener, so its echo rules turn
+    /// on and off with the actual playback. Every transition goes through
+    /// here; nothing calls `apply(.assistantSpeaking(_:))` directly.
+    private func setAssistantSpeaking(_ speaking: Bool) {
+        apply(.assistantSpeaking(speaking))
+        listener.setPlaybackActive(speaking)
     }
 
     /// Abandon the chunk being spoken and everything queued behind it. The
@@ -269,7 +279,6 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         speakTask?.cancel()
         speakTask = nil
         speakGeneration += 1
-        speakingSince = nil
     }
 
     private func handle(utterance raw: String) {
@@ -286,7 +295,7 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         // over it on purpose, whatever the level meter thought.
         if state.assistantSpeaking {
             cancelSpeech()
-            apply(.assistantSpeaking(false))
+            setAssistantSpeaking(false)
         }
 
         // The model context records what was actually SAID TO HERMES. A
@@ -424,15 +433,13 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         guard speakTask == nil, state.phase.isActive else { return }
         guard !speechQueue.isEmpty else {
             if state.assistantSpeaking {
-                speakingSince = nil
-                apply(.assistantSpeaking(false))
+                        setAssistantSpeaking(false)
             }
             return
         }
         let chunk = speechQueue.removeFirst()
         if !state.assistantSpeaking {
-            speakingSince = clock()
-            apply(.assistantSpeaking(true))
+            setAssistantSpeaking(true)
         }
         let myEpoch = epoch
         speakGeneration += 1
@@ -591,6 +598,7 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
 
     private func complete(_ event: VoiceConversationEvent) {
         let now = clock()
+        listener.setPlaybackActive(false)
         listener.stop()
         speaker.stop()
         listenTask?.cancel()
@@ -602,7 +610,6 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         speakGeneration += 1
         submitTask = nil        // the Hermes turn itself is left to finish in the chat
         speechQueue = []
-        speakingSince = nil
         turn = nil
         meter.stop(at: now, billedSeconds: nil)
         elapsedSeconds = meter.elapsed(at: now).rounded(.down)
@@ -645,7 +652,6 @@ public final class ChainedVoiceEngine: VoiceConversationEngine {
         speakTask = nil
         speakGeneration += 1
         speechQueue = []
-        speakingSince = nil
         spokenTurns = []
         meter = VoiceSessionMeter()
         idle = VoiceIdleMonitor(timeout: configuration.idleTimeout, now: clock())

@@ -436,6 +436,11 @@ final class FakeVoiceListener: VoiceListener {
     }
 
     func setPaused(_ paused: Bool) {}
+
+    func setPlaybackActive(_ active: Bool) { playbackActive.append(active) }
+
+    /// Every playback transition the engine announced, in order.
+    var playbackActive: [Bool] = []
 }
 
 /// A `VoiceSpeaker` with no audio: counts `stop()`.

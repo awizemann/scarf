@@ -80,6 +80,14 @@ public protocol VoiceListener: AnyObject {
     /// Paused listeners emit no partials, utterances or speech onsets, and
     /// report level 0.
     func setPaused(_ paused: Bool)
+    /// Tell the listener the assistant's reply is playing out loud.
+    ///
+    /// THE LISTENER OWNS THE BARGE-IN GRACE AND THE ECHO RULES; the engine
+    /// only says when playback starts and stops. While playback is active the
+    /// listener raises its onset trigger, ignores onsets for a short grace,
+    /// and refuses to emit any hypothesis that began during playback (that
+    /// text is the reply bleeding back through the microphone, not the user).
+    func setPlaybackActive(_ active: Bool)
 }
 
 // MARK: - End-of-utterance
@@ -98,15 +106,36 @@ public struct VoiceUtteranceDetector: Sendable, Equatable {
     /// short enough that the reply does not feel late.
     public static let defaultSilence: TimeInterval = 1.2
 
+    /// Below this level the microphone counts as quiet for end-of-utterance.
+    /// 0.2 on the 0…1 meter is about -40 dBFS. Measured 2026-09-22 with the
+    /// voice-processing input chain on (its gain control lifts a silent room
+    /// to 0.10-0.13, and the cancelled residue of the reply sits at
+    /// 0.06-0.16): both read as quiet here, while speech reads 0.45 and up.
+    public static let defaultSilenceLevel: Double = 0.2
+
     /// Seconds of an unchanging hypothesis that end the utterance.
     public var silence: TimeInterval
+    /// The level at or above which the microphone is NOT quiet.
+    public var silenceLevel: Double
     /// The hypothesis as last seen.
     public private(set) var text: String = ""
     /// When ``text`` last changed.
     public private(set) var lastChangeAt: Date?
+    /// When the microphone was last at or above ``silenceLevel``. `nil` means
+    /// no level has been reported at all (the pure-text callers, and the
+    /// tests that drive only hypotheses), which leaves the audio gate open.
+    public private(set) var lastLoudAt: Date?
 
-    public init(silence: TimeInterval = defaultSilence) {
+    public init(silence: TimeInterval = defaultSilence, silenceLevel: Double = defaultSilenceLevel) {
         self.silence = silence
+        self.silenceLevel = silenceLevel
+    }
+
+    /// Record the current microphone level. The end-of-utterance rule needs
+    /// it because text stillness alone cuts a thinking pause off: the
+    /// recognizer stops revising while the user is still making sound.
+    public mutating func note(level: Double, at now: Date) {
+        if level >= silenceLevel { lastLoudAt = now }
     }
 
     /// Record a new hypothesis. Returns true when it actually changed.
@@ -126,9 +155,21 @@ public struct VoiceUtteranceDetector: Sendable, Equatable {
     /// Returns `nil` while the user is (probably) still talking, and RESETS
     /// once it returns text, so the next utterance starts clean.
     public mutating func settled(at now: Date) -> String? {
-        guard !text.isEmpty, let lastChangeAt, now.timeIntervalSince(lastChangeAt) >= silence else { return nil }
+        guard !text.isEmpty, let lastChangeAt else { return nil }
+        let still = now.timeIntervalSince(lastChangeAt)
+        guard still >= silence else { return nil }
+        // …and the microphone has actually been quiet for the same window.
+        // The audio gate can only DELAY the utterance, never hold it forever:
+        // a room whose noise floor sits above `silenceLevel` (a fan, a busy
+        // café) would otherwise make the session deaf. Past `maxAudioHold`
+        // of stillness the text rule alone decides.
+        if let lastLoudAt, now.timeIntervalSince(lastLoudAt) < silence, still < maxAudioHold { return nil }
         return take()
     }
+
+    /// The longest the audio gate may hold a still hypothesis: twice the
+    /// silence window, so end-of-utterance is never later than 2.4 s.
+    public var maxAudioHold: TimeInterval { silence * 2 }
 
     /// Force the utterance out (the recognizer declared the result final).
     public mutating func take() -> String? {
@@ -141,6 +182,56 @@ public struct VoiceUtteranceDetector: Sendable, Equatable {
     public mutating func reset() {
         text = ""
         lastChangeAt = nil
+        lastLoudAt = nil
+    }
+}
+
+/// The pure barge-in rule, split out for the same reason: testable without a
+/// microphone.
+///
+/// A SINGLE loud tick is not speech. A door, a keyboard, or one syllable of
+/// the app's own reply leaking back through the speaker all produce one tick
+/// over the trigger, and the old single-tick rule cut every reply off about a
+/// second in. Real speech holds the meter up: requiring the level to sit at
+/// or above the trigger for ``requiredTicks`` CONSECUTIVE ticks (3 × 100 ms =
+/// 300 ms, the same window the Hermes desktop's `voice-barge-in.ts` uses)
+/// keeps transients out while still reacting within a third of a second.
+public struct VoiceSpeechOnsetDetector: Sendable, Equatable {
+    /// 300 ms at the listener's 100 ms tick.
+    public static let defaultRequiredTicks = 3
+
+    /// Consecutive ticks at or above the trigger that confirm an onset.
+    public var requiredTicks: Int
+    /// How many consecutive ticks have been at or above the trigger.
+    public private(set) var run = 0
+    /// Whether an onset is currently held (it is released by quiet).
+    public private(set) var isSpeaking = false
+
+    public init(requiredTicks: Int = defaultRequiredTicks) {
+        self.requiredTicks = requiredTicks
+    }
+
+    /// Record one tick's level. Returns `true` on the single tick where the
+    /// onset is confirmed, and never again until the level drops back to
+    /// quiet — the caller uses that edge to fire `.speechStarted`.
+    @discardableResult
+    public mutating func note(level: Double, trigger: Double) -> Bool {
+        guard level >= trigger else {
+            run = 0
+            // Release on clear quiet, not on the first dip: a syllable gap
+            // inside one sentence must not re-arm the onset.
+            if isSpeaking, level < trigger / 2 { isSpeaking = false }
+            return false
+        }
+        run += 1
+        guard !isSpeaking, run >= requiredTicks else { return false }
+        isSpeaking = true
+        return true
+    }
+
+    public mutating func reset() {
+        run = 0
+        isSpeaking = false
     }
 }
 
@@ -167,9 +258,25 @@ public enum VoiceAudioLevel {
         return min(1, (db - floorDB) / -floorDB)
     }
 
-    /// Voice onset: a level above this counts as "someone started talking"
-    /// for barge-in. Above room tone, below normal speech.
-    public static let speechOnsetLevel: Double = 0.18
+    /// Voice onset: a level at or above this, held for
+    /// ``VoiceSpeechOnsetDetector/requiredTicks``, counts as "someone started
+    /// talking". 0.25 is about -37.5 dBFS: above the voice-processing chain's
+    /// resting floor (0.10-0.13 measured), well below speech (0.45 and up).
+    public static let speechOnsetLevel: Double = 0.25
+
+    /// The same rule WHILE THE ASSISTANT IS SPEAKING. Even with voice
+    /// processing on, the cancelled reply leaves a residue at the microphone
+    /// (0.06-0.16 measured, one 0.36 transient at onset that the grace
+    /// covers) — so a barge-in has to clear a higher bar, sustained. 0.35 is
+    /// about -32.5 dBFS: above the residue, still comfortably under someone
+    /// talking to their laptop (0.45 and up).
+    public static let bargeInOnsetLevel: Double = 0.35
+
+    /// How long after playback starts onsets are ignored entirely. The
+    /// speaker's first syllable arrives before the echo canceller has
+    /// converged, so the first half second is never a barge-in. This is the
+    /// ONE grace in the system: the engine does not keep a second one.
+    public static let bargeInGrace: TimeInterval = 0.5
 }
 
 // MARK: - Audio session seam
@@ -300,10 +407,32 @@ protocol VoiceAudioTapping: AnyObject {
 @MainActor
 final class AVAudioEngineTap: VoiceAudioTapping {
     private var engine: AVAudioEngine?
+    private static let logger = Logger(subsystem: "com.scarf", category: "LiveVoice")
 
     func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
         let audioEngine = AVAudioEngine()
         let input = audioEngine.inputNode
+        // The OS's voice-processing input chain: echo cancellation against
+        // everything the Mac is playing (measured 2026-09-22 with `say`
+        // through the built-in speaker: the reply at the mic drops from
+        // 0.45-0.61 on the meter, indistinguishable from a person, to
+        // 0.06-0.16). Without it no threshold can tell the reply from the
+        // user and the conversation feeds on itself. Two side effects are
+        // handled below: the input format becomes MULTI-CHANNEL (10 on Apple
+        // silicon; channel 0 is the processed voice), and by default the OS
+        // ducks other audio -- which here would duck the reply itself.
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            if #available(macOS 14.0, iOS 17.0, *) {
+                input.voiceProcessingOtherAudioDuckingConfiguration =
+                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            }
+        } catch {
+            // Not fatal: an unprocessed tap still transcribes, and the
+            // listener's raised playback trigger is the second line of defence.
+            Self.logger.notice("Voice processing unavailable on the input node: \(error.localizedDescription, privacy: .public)")
+        }
+        // Read AFTER enabling voice processing: it changes the format.
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw VoiceListenerError.audioEngineFailed(detail: "no input format")
@@ -313,10 +442,38 @@ final class AVAudioEngineTap: VoiceAudioTapping {
         // the lock-guarded current request (`append` is documented as safe
         // from the audio thread). Nothing here may hop to, or assume, the
         // main actor -- everything MainActor happens on the tick instead.
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in onBuffer(buffer) }
+        if format.channelCount == 1 {
+            input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in onBuffer(buffer) }
+        } else {
+            // The speech request does not transcribe a multi-channel buffer
+            // (it silently produces nothing), so channel 0 is copied into a
+            // mono buffer of the same sample rate. One memcpy per 1,024
+            // frames -- cheap enough for the realtime thread.
+            guard let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else {
+                throw VoiceListenerError.audioEngineFailed(detail: "no mono format")
+            }
+            input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+                guard let monoBuffer = Self.channelZero(of: buffer, as: mono) else { return }
+                onBuffer(monoBuffer)
+            }
+        }
         audioEngine.prepare()
         try audioEngine.start()
         engine = audioEngine
+    }
+
+    /// Channel 0 of `buffer` as a fresh mono buffer in `mono`. Realtime-safe
+    /// apart from the allocation, which the tap accepts (the buffer size is
+    /// small and the alternative -- a shared scratch buffer -- races the
+    /// recognizer, which keeps the buffer it was handed).
+    nonisolated static func channelZero(of buffer: AVAudioPCMBuffer, as mono: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frames = buffer.frameLength
+        guard frames > 0, let source = buffer.floatChannelData?[0],
+              let out = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: frames),
+              let target = out.floatChannelData?[0] else { return nil }
+        target.update(from: source, count: Int(frames))
+        out.frameLength = frames
+        return out
     }
 
     func stop() {
@@ -396,8 +553,23 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     private var detector: VoiceUtteranceDetector
     private var paused = false
     private var running = false
-    private var speaking = false
+    private var onset = VoiceSpeechOnsetDetector()
+    /// Whether the assistant's reply is playing right now, and since when.
+    private var playbackActive = false
+    private var playbackStartedAt: Date?
+    /// Set once a sustained onset was confirmed DURING playback: from there
+    /// on the user really is talking over the reply, so what the recognizer
+    /// hears is theirs and is kept.
+    private var confirmedBargeIn = false
+    /// Set when the recognizer produced text during playback that was NOT
+    /// preceded by a confirmed onset — the reply bleeding into the
+    /// microphone. It is never emitted. Diagnostic only: the request is
+    /// restarted at the end of every un-barged playback regardless.
+    private var sawPlaybackBleed = false
     private var lastLevel: Double = 0
+
+    /// The reply is playing (or has stopped). See ``VoiceListener/setPlaybackActive(_:)``.
+    private var isBleeding: Bool { playbackActive && !confirmedBargeIn }
     /// Written by the audio tap (off the main actor), drained by the tick.
     private let levelBox = VoiceInputLevelBox()
 
@@ -541,7 +713,33 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
             // a fresh request (and generation) is the only way to clear it.
             restartRecognition()
         }
-        speaking = false
+        onset.reset()
+        sawPlaybackBleed = false
+        confirmedBargeIn = false
+    }
+
+    public func setPlaybackActive(_ active: Bool) {
+        guard running, playbackActive != active else { return }
+        playbackActive = active
+        onset.reset()
+        if active {
+            playbackStartedAt = clock()
+            confirmedBargeIn = false
+            sawPlaybackBleed = false
+        } else {
+            playbackStartedAt = nil
+            // Whatever the recognizer heard of the reply itself must not be
+            // stitched onto the user's next sentence. The restart is
+            // unconditional (not only when bleed TEXT was seen): recognition
+            // lags the audio by a few hundred milliseconds, so the reply's
+            // last word can arrive as a transcript AFTER playback ends, on a
+            // request that would otherwise still be trusted. A confirmed
+            // barge-in is the one exception -- that request holds the user's
+            // own words.
+            if !confirmedBargeIn { restartRecognition() }
+            sawPlaybackBleed = false
+            confirmedBargeIn = false
+        }
     }
 
     // MARK: Recognition
@@ -574,6 +772,13 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
             return
         }
         guard let transcript = event.transcript, !paused else { return }
+        // Text heard while the reply plays, with no confirmed barge-in behind
+        // it, is the reply itself. Do not caption it, do not let it reach the
+        // detector, and remember to clear the recognizer when playback ends.
+        if isBleeding {
+            if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sawPlaybackBleed = true }
+            return
+        }
         if detector.note(partial: transcript, at: clock()), !transcript.isEmpty {
             continuation?.yield(.partial(transcript))
         }
@@ -587,7 +792,7 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
     /// would go deaf mid-conversation.
     private func emit(utterance: String) {
         continuation?.yield(.utterance(utterance))
-        speaking = false
+        onset.reset()
         restartRecognition()
     }
 
@@ -624,13 +829,27 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
             continuation?.yield(.level(level))
         }
         guard !paused else { return }
-        if !speaking, level >= VoiceAudioLevel.speechOnsetLevel {
-            speaking = true
+        let now = clock()
+        // One trigger while idle, a higher one while the reply plays, and no
+        // onset at all inside the grace right after playback starts.
+        let trigger = playbackActive ? VoiceAudioLevel.bargeInOnsetLevel : VoiceAudioLevel.speechOnsetLevel
+        let inGrace = playbackActive
+            && (playbackStartedAt.map { now.timeIntervalSince($0) < VoiceAudioLevel.bargeInGrace } ?? false)
+        if inGrace {
+            onset.reset()
+        } else if onset.note(level: level, trigger: trigger) {
+            if playbackActive {
+                // A real barge-in. Restart recognition first: the request has
+                // been swallowing the reply's own words, and none of them may
+                // end up prefixed onto what the user is about to say.
+                confirmedBargeIn = true
+                sawPlaybackBleed = false
+                restartRecognition()
+            }
             continuation?.yield(.speechStarted)
-        } else if speaking, level < VoiceAudioLevel.speechOnsetLevel / 2 {
-            speaking = false
         }
-        if let utterance = detector.settled(at: clock()) {
+        detector.note(level: level, at: now)
+        if let utterance = detector.settled(at: now) {
             emit(utterance: utterance)
         }
     }
@@ -658,7 +877,11 @@ public final class AppleOnDeviceVoiceListener: VoiceListener {
         recognizer = nil
         detector.reset()
         paused = false
-        speaking = false
+        onset.reset()
+        playbackActive = false
+        playbackStartedAt = nil
+        confirmedBargeIn = false
+        sawPlaybackBleed = false
         lastLevel = 0
         session.deactivate()
     }

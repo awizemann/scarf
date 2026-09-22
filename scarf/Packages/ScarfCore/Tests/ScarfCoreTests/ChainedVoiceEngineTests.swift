@@ -33,7 +33,27 @@ import Foundation
 
         func setPaused(_ paused: Bool) { pauses.append(paused) }
 
+        /// Every playback transition the engine announced, in order.
+        private(set) var playbackLog: [Bool] = []
+        private(set) var playbackActive = false
+        private var onset = VoiceSpeechOnsetDetector()
+
+        func setPlaybackActive(_ active: Bool) {
+            playbackLog.append(active)
+            playbackActive = active
+            onset.reset()
+        }
+
         func emit(_ event: VoiceListenerEvent) { continuation?.yield(event) }
+
+        /// One 100 ms tick of microphone level, put through the REAL onset
+        /// rule (``VoiceSpeechOnsetDetector``) with the real triggers, so the
+        /// engine sees exactly what the production listener would send.
+        func pushLevel(_ level: Double) {
+            continuation?.yield(.level(level))
+            let trigger = playbackActive ? VoiceAudioLevel.bargeInOnsetLevel : VoiceAudioLevel.speechOnsetLevel
+            if onset.note(level: level, trigger: trigger) { continuation?.yield(.speechStarted) }
+        }
     }
 
     final class FakeSpeaker: VoiceSpeaker {
@@ -262,25 +282,36 @@ import Foundation
 
     // MARK: barge-in
 
-    @Test func aSpeechOnsetAfterTheGraceStopsTheSpeaker() async {
+    /// One loud tick is a door, a keyboard, or the reply itself leaking into
+    /// the microphone — it must not cut the reply off. Held level is a
+    /// person, and it must.
+    @Test func onlyASustainedBurstStopsTheSpeaker() async {
         speaker.hold = true
         await engine.start()
         await say("tell me a long story")
         reply("Once upon a time. ")
         advance(0.2)
         await settle { self.engine.phase == .speaking }
+        #expect(listener.playbackLog.last == true)   // the listener was told
 
-        // Inside the grace: the speaker's own audio must not interrupt it.
-        listener.emit(.speechStarted)
+        // One tick over the playback trigger: a transient, not a barge-in.
+        listener.pushLevel(0.5)
         await settle { self.speaker.stops > 0 }
         #expect(speaker.stops == 0)
         #expect(engine.phase == .speaking)
 
-        clock.now = clock.now.addingTimeInterval(0.5)
-        listener.emit(.speechStarted)
+        // Loud, but only at the IDLE trigger: the reply is playing, so this
+        // is echo, not someone talking over it.
+        for _ in 0..<6 { listener.pushLevel(0.2) }
+        await settle { self.speaker.stops > 0 }
+        #expect(speaker.stops == 0)
+
+        // Held above the playback trigger: a real barge-in.
+        for _ in 0..<3 { listener.pushLevel(0.5) }
         await settle { self.speaker.stops > 0 }
         #expect(speaker.stops == 1)
         #expect(engine.phase == .thinking)   // the reply stopped; the turn runs on
+        #expect(listener.playbackLog.last == false)
 
         // Let the turn settle, then the utterance that follows is ordinary.
         speaker.hold = false
