@@ -726,6 +726,13 @@ private struct SessionTableRow: View {
         // repeated here.
         .accessibilityLabel(Text(verbatim: accessibilityRowLabel))
         .accessibilityHint(Text("Opens the session detail"))
+        // Addressable by SESSION ID, so a UI test can assert on one
+        // specific row instead of matching a composed label the
+        // accessibility layer may truncate (`CostRenderingUITests` pins
+        // the three seeded cost states this way). Safe to put on the
+        // button: it has no inner identifiers for a container identifier
+        // to rewrite, and the project chip is a sibling, not a child.
+        .accessibilityIdentifier("sessions.row.\(session.id)")
     }
 
     /// Fragments compose with `String(localized:)` — passing a plain String
