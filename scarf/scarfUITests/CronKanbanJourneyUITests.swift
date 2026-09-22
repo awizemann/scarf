@@ -343,8 +343,29 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         // --- Seeded cards (fixture only) ------------------------------
         let seeded = kanbanTasks()
         if isFixtureRun {
-            XCTAssertEqual(seeded.count, 3,
-                           "Fixture home should carry 3 seeded kanban cards; `kanban list` reports \(seeded.map(\.title)).")
+            // The three BOARD cards the "Seeding kanban cards" step makes,
+            // asserted by title rather than by a total count.
+            //
+            // A count was the original spelling and it broke the moment the
+            // fixture grew: the "Seeding chat-scoped kanban tasks" step adds
+            // four more cards (a running + a review card for each of two
+            // chats, stamped with a `session_id` for the chat badge journey),
+            // so `kanban list` reports 7 on one global board and `== 3`
+            // failed on a fixture that was entirely correct. Naming the rows
+            // this journey actually depends on says what is meant and lets
+            // the fixture keep growing for other suites.
+            let boardCardTitles = [
+                "Fixture: wire up the sweep",
+                "Fixture: blocked on review",
+                "Fixture: triage the backlog"
+            ]
+            let seededTitles = Set(seeded.map(\.title))
+            for title in boardCardTitles {
+                XCTAssertTrue(
+                    seededTitles.contains(title),
+                    "Fixture home should carry the seeded kanban card '\(title)'; `kanban list` reports \(seeded.map(\.title))."
+                )
+            }
             for task in seeded {
                 XCTAssertTrue(card(app, taskID: task.id).waitForExistence(timeout: 20),
                               "Seeded card \(task.title) (\(task.id)) is in `kanban list` but kanban.card.\(task.id) never rendered.")
