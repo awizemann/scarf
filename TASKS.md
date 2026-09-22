@@ -104,7 +104,6 @@
 
 ## Doing
 
-- [ ] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
@@ -112,6 +111,8 @@
 
 ## Done
 
+- [x] Bring echo cancellation back to the chained voice listener (mono down-mix + re-measured quiet gate) (id: t-44c4e2ff) (added: 2026-09-22)
+- [x] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
 - [x] Upstream P11: UI tests for unknown-cost rendering and kanban badge lifecycle (id: t-9c4d7c60) (added: 2026-09-21) (priority: high)
 - [x] Upstream P12: fix the two pre-existing UI gate failures (Dashboard error.banner, TemplateInstall journey) (id: t-6fec1932) (added: 2026-09-21) (priority: high)
 - [x] Upstream P5: orchestrator audit of work + memories, then whole-surface audit (id: t-2e2fc730) (added: 2026-09-21)

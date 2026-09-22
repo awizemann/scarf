@@ -1,7 +1,7 @@
 ---
 id: t-e84e6e1c
 title: Upstream P10: replace the brittle kanban session-id source-sweep test + low findings
-status: doing
+status: done
 added: 2026-09-21
 priority: low
 ---
