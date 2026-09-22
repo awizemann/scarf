@@ -5,9 +5,11 @@ permalink: scarf/architecture/gpt-live-session-exchange-runs-as-a-host-script-no
 tags: [voice, gpt-live, transport, secrets]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 904c0e60784d0936f39ccbd47242201c12ef23d0
 created: 2026-09-18
 updated: 2026-09-18
+reviewed: 2026-09-22
+reviewed_by: audit:claude-code (background)
 ---
 
 Proven in the P3 spike against the real local Hermes venv with a throwaway HERMES_HOME and a mock vendor endpoint (scarf/Spikes/VoiceLive/voice_live_host.py + run_exchange_tests.sh on feat/voice-spike). No live OpenAI call was made.

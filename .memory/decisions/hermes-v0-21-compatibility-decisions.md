@@ -21,6 +21,9 @@ Forced config-parity decisions for the v0.21.0 ("Pantheon", v2026.8.31) cycle, w
 The recurring shape this cycle: the v0.21 release notes advertise changes that actually shipped in the intermediate v0.20.6 tag. W0 hit this on four capability flags; W1 hit it again on two of six config items. Deciding the floor by grepping only the newest tag would have mis-gated both.
 
 Removal flags use INVERSE semantics (`true` = still show it) and differ deliberately in their unknown-version policy: a whole sub-editor (`hasWebExtractAux`) hides on unknown, matching `hasFlushMemoriesAux`; one entry in a picker (`hasTavilyWebBackend`) is kept on unknown, because hiding a list entry the user's config currently selects strands them on an invisible selection.
+- [decision] Removal flags use INVERSE semantics: `true` means "keep showing", `false` means "hide" #config
+- [gotcha] v0.21 release notes advertise changes shipped in v0.20.6 (W0: 4 flags, W1: 2 config items); grepping newest tag only would mis-gate; must check intermediate versions for accurate floor #versioning
+- [decision] Removal flag unknown-version policies differ: sub-editors hide (`hasFlushMemoriesAux` pattern); list entries stay visible to prevent stranding user selections (`hasTavilyWebBackend` pattern) #config
 
 ## Compatibility Decisions (W1–W9)
 

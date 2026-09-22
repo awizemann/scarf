@@ -5,10 +5,10 @@ permalink: scarf/decisions/acp-has-no-voice-live-surface-send-the-turn-note-as-a
 tags: [acp, voice, gpt-live]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceConversationEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceLiveTurnNote.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/VoiceLiveTurnNoteContractTests.swift]
 source_paths_inferred: false
-source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
+source_sha: 904c0e60784d0936f39ccbd47242201c12ef23d0
 created: 2026-09-18
 updated: 2026-09-18
-reviewed: 2026-09-19
+reviewed: 2026-09-22
 reviewed_by: audit:claude-code (background)
 ---
 

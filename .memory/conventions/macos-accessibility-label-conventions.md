@@ -5,10 +5,10 @@ permalink: scarf/conventions/macos-accessibility-label-conventions
 tags: [accessibility, voiceover, localization]
 source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift, scarf/scarf/Features/Settings/Views/Components/SettingsComponents.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Kanban/Views/KanbanCardView.swift, scarf/scarf/Features/Logs/Views/LogsView.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/scarf/Features/Cron/Views/CronView.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift, scarf/scarf/Features/Common/OutcomeMessage.swift, scarf/scarf/Features/Common/OutcomeMessageBar.swift]
 source_paths_inferred: false
-source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
+source_sha: 5b84e55fef83a814476bb330cd07d7cba8d45740
 created: 2026-08-28
 updated: 2026-09-08
-reviewed: 2026-09-21
+reviewed: 2026-09-22
 reviewed_by: audit:claude-code (background)
 ---
 
