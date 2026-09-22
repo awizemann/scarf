@@ -1,7 +1,7 @@
 ---
 id: t-1d95beb3
 title: Cut Scarf v3.3.0 (voice release)
-status: doing
+status: done
 added: 2026-09-22
 priority: high
 ---

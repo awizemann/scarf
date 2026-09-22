@@ -108,10 +108,10 @@
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
-- [ ] Cut Scarf v3.3.0 (voice release) (id: t-1d95beb3) (added: 2026-09-22) (priority: high)
 
 ## Done
 
+- [x] Cut Scarf v3.3.0 (voice release) (id: t-1d95beb3) (added: 2026-09-22) (priority: high)
 - [x] Bring echo cancellation back to the chained voice listener (mono down-mix + re-measured quiet gate) (id: t-44c4e2ff) (added: 2026-09-22)
 - [x] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
 - [x] Upstream P11: UI tests for unknown-cost rendering and kanban badge lifecycle (id: t-9c4d7c60) (added: 2026-09-21) (priority: high)
