@@ -42,10 +42,11 @@ struct KanbanView: View {
                     sessionScopeId: consumedHandoff?.sessionId
                 )
                 // Re-build the board view when a fresh hand-off lands so
-                // the new tenant + timestamp take effect even if the
-                // route was already on Kanban. Keying by `id` is enough —
-                // the AppCoordinator slot is a struct so equality maps
-                // cleanly.
+                // the new tenant, project and session scope take effect
+                // even if the route was already on Kanban. `boardIdentity`
+                // is exactly those three fields — the hand-off timestamp
+                // it used to carry is gone, so two hand-offs to the SAME
+                // scope no longer churn the board.
                 .id(boardIdentity)
             case .list:
                 KanbanListView(

@@ -190,6 +190,28 @@ import SQLite3
         await service.close()
     }
 
+    /// The per-model breakdown is ALL TIME, which is why the Dashboard's
+    /// heading says so. `modelUsageSQL` is issued with no parameters — it
+    /// carries neither the `statsSince` bound the stat cards get nor
+    /// `sessionListPredicate` — so a window that empties the stat cards
+    /// must leave the breakdown untouched. If this ever starts failing,
+    /// the query grew a window and `DashboardView.modelUsageHeading` is
+    /// now the lie instead.
+    @Test func modelUsageIgnoresTheStatsWindow() async throws {
+        let home = try makeFixtureHome(addV020: true)
+        defer { cleanup(home) }
+        let service = HermesDataService(context: .local(home: home))
+        #expect(await service.open())
+
+        // Both fixture sessions started in 2023; this window excludes them.
+        let windowed = await service.dashboardSnapshot(statsSince: Date())
+        #expect(windowed.stats.totalSessions == 0)
+        #expect(windowed.modelUsage.count == 2)
+        let fable = try #require(windowed.modelUsage.first { $0.model == "claude-fable-5" })
+        #expect(fable.inputTokens == 1500)
+        await service.close()
+    }
+
     @Test func dashboardSnapshotOnOlderDBHasEmptyModelUsage() async throws {
         let home = try makeFixtureHome(addV020: false)
         defer { cleanup(home) }

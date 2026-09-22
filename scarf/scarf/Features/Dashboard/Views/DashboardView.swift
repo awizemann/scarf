@@ -310,9 +310,24 @@ struct DashboardView: View {
     /// host's state.db has the v0.20 table (`viewModel.modelUsage` is
     /// empty otherwise, and the section hides entirely — pre-0.20
     /// Dashboards render exactly as before).
+    ///
+    /// The heading says "all time" because the figures are: the snapshot
+    /// issues `modelUsageSQL` with NO parameters — one `GROUP BY model`
+    /// over the whole of `session_model_usage`, with neither the
+    /// `statsSince` bound the stat cards carry nor `sessionListPredicate`
+    /// (which drops sub-agent, hidden and non-branch child sessions from
+    /// every session listing). Windowing it would mean joining
+    /// `session_model_usage` back to `sessions` and deciding what a
+    /// per-model row means for an excluded session — a bigger change than
+    /// this section is worth, and one that would silently restate the
+    /// numbers. Naming the window honestly is the smaller true fix; it
+    /// sits directly under the "Last 7 days" stats section, which is what
+    /// made the bare "By model" read as part of that window.
+    static let modelUsageHeading: LocalizedStringKey = "By model · all time"
+
     private var modelUsageSection: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-            Text("By model")
+            Text(Self.modelUsageHeading)
                 .scarfStyle(.bodyEmph)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             VStack(spacing: 0) {

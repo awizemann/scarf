@@ -76,14 +76,26 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         // --- Seeded rows (fixture only) -------------------------------
         let seeded = cronJobsOnDisk()
         if isFixtureRun {
-            XCTAssertEqual(
-                seeded.count, 2,
-                "Fixture home should carry exactly the 2 seeded cron jobs; jobs.json has \(seeded.map(\.name))."
-            )
-            XCTAssertTrue(
-                seeded.allSatisfy { !$0.enabled },
-                "Both seeded fixture jobs are created-then-paused; jobs.json says \(seeded.map { "\($0.name)=\($0.enabled)" })."
-            )
+            // The two jobs the fixture's "Seeding cron jobs" step makes,
+            // asserted BY NAME rather than by a total — same reasoning as
+            // the kanban board cards below: an exact count breaks the
+            // moment the fixture seeds one more job for another suite,
+            // even though nothing this journey depends on has changed.
+            let seededNames = [
+                "Fixture Morning Digest",
+                "Fixture Link Check"
+            ]
+            let byName = Dictionary(seeded.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+            for name in seededNames {
+                guard let job = byName[name] else {
+                    XCTFail("Fixture home should carry the seeded cron job '\(name)'; jobs.json has \(seeded.map(\.name)).")
+                    continue
+                }
+                XCTAssertFalse(
+                    job.enabled,
+                    "Seeded fixture job '\(name)' is created-then-paused; jobs.json says \(seeded.map { "\($0.name)=\($0.enabled)" })."
+                )
+            }
             for job in seeded {
                 XCTAssertTrue(
                     row(app, jobID: job.id).waitForExistence(timeout: 15),

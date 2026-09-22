@@ -26,6 +26,17 @@
 #
 # Exits non-zero if the fixture build fails or any run test plan fails.
 #
+# Verdicts per plan: PASS; FAIL (tests ran and some failed); RUNNER-FAILED —
+# the run failed having executed NOTHING (no "Executed N tests" line at all)
+# with the runner-side wedge in the log ("Timed out while enabling automation
+# mode" / "Not authorized for performing UI testing actions"). That is an
+# environment failure and says nothing about the code, so it is reported
+# apart from FAIL — in the plan's row and, when no plan genuinely failed, on
+# the Overall line. It still exits non-zero: the gate was not cleared.
+#   scripts/ui-gate.sh --classify <log-file> <exit-status>
+# prints that verdict for an existing log and nothing else (used by
+# scripts/tests/test_ui_gate_classify.py).
+#
 set -euo pipefail
 
 if [ -z "${DEVELOPER_DIR:-}" ]; then
@@ -47,6 +58,46 @@ die()  { printf '\033[1;31m[ERR] %s\033[0m\n' "$*" >&2; exit 1; }
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 
+# ---------- log parsing / verdict ----------
+# XCTest prints one "Executed N tests…" line per class/bundle and a final
+# total; the total is the LAST line and may read "with 1 test skipped and
+# 5 failures", so the pattern must allow the skipped clause or it picks a
+# per-class line and under-reports (seen: "14 executed / 2 failed" for a
+# run that was really 28 / 5).
+xctest_total_line() {
+  grep -oE "Executed [0-9]+ tests?, with ([0-9]+ tests? skipped and )?[0-9]+ failures?" "$1" | tail -n1 || true
+}
+
+# The runner-side failures that mean NO test ever ran. The first is the one
+# the gate keeps hitting; the second is how the same wedge reports itself
+# once the harness has given up on the app.
+RUNNER_FAILURE_RE='Timed out while enabling automation mode|Not authorized for performing UI testing actions'
+
+# PASS / FAIL / RUNNER-FAILED for one finished plan. RUNNER-FAILED is a
+# failing run that executed NOTHING because the test runner never came up —
+# it says nothing about the code under test, so it must not read as a FAIL
+# that someone will go hunting for a broken assertion in. Still non-zero:
+# the gate has not been cleared either way.
+classify_verdict() {
+  local status="$1" log_file="$2"
+  if [[ "$status" -eq 0 ]]; then printf 'PASS\n'; return 0; fi
+  if [[ -z "$(xctest_total_line "$log_file")" ]] \
+     && grep -qE "$RUNNER_FAILURE_RE" "$log_file" 2>/dev/null; then
+    printf 'RUNNER-FAILED\n'
+    return 1
+  fi
+  printf 'FAIL\n'
+  return 1
+}
+
+# Internal entry point for scripts/tests/test_ui_gate_classify.py: classify
+# a fabricated log without building or running anything.
+if [[ "${1:-}" == "--classify" ]]; then
+  [[ $# -eq 3 ]] || die "usage: $0 --classify <log-file> <exit-status>"
+  [[ -f "$2" ]] || die "no such log file: $2"
+  classify_verdict "$3" "$2" && exit 0 || exit 1
+fi
+
 # ---------- arg parsing ----------
 SMOKE_ONLY=0
 SKIP_LIVE=0
@@ -67,7 +118,7 @@ for arg in "$@"; do
     --derived-data=*) DERIVED_DATA="${arg#--derived-data=}" ;;
     --summary) _prev="$arg" ;;
     --summary=*) SUMMARY_FILE="${arg#--summary=}" ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
@@ -132,6 +183,10 @@ HERMES_VERSION="$("$HERMES_BIN" --version 2>/dev/null | head -n1 || echo unknown
 
 declare -a RESULT_LINES=()
 OVERALL_STATUS=0
+# Set when a plan died before running a single test. The gate still fails,
+# but the overall line must not blame the code for it.
+SAW_RUNNER_FAILURE=0
+SAW_TEST_FAILURE=0
 
 # Serial on purpose. The Full plan carries scarfTests as well as scarfUITests,
 # and the unit half is only green SERIALLY: several suites share process-wide
@@ -165,17 +220,14 @@ run_plan() {
   t1=$(date +%s)
   wall=$((t1 - t0))
 
-  # XCTest prints one "Executed N tests…" line per class/bundle and a final
-  # total; the total is the LAST line and may read "with 1 test skipped and
-  # 5 failures", so the pattern must allow the skipped clause or it picks a
-  # per-class line and under-reports (seen: "14 executed / 2 failed" for a
-  # run that was really 28 / 5). Swift Testing (the ScarfCore + scarfTests
-  # unit suites) reports separately as "Test run with N tests in M suites
-  # passed|failed"; carry that too so the unit total is visible.
+  # See `xctest_total_line` for why the total is parsed the way it is.
+  # Swift Testing (the ScarfCore + scarfTests unit suites) reports
+  # separately as "Test run with N tests in M suites passed|failed"; carry
+  # that too so the unit total is visible.
   local executed failed unit_line
   unit_line="$(grep -oE "Test run with [0-9]+ tests? in [0-9]+ suites? (passed|failed)" "$log_file" | tail -n1 || true)"
   local xctest_total
-  xctest_total="$(grep -oE "Executed [0-9]+ tests?, with ([0-9]+ tests? skipped and )?[0-9]+ failures?" "$log_file" | tail -n1 || true)"
+  xctest_total="$(xctest_total_line "$log_file")"
   executed="$(printf '%s' "$xctest_total" | grep -oE "Executed [0-9]+" | grep -oE "[0-9]+" || true)"
   failed="$(printf '%s' "$xctest_total" | grep -oE "[0-9]+ failures?$" | grep -oE "[0-9]+" || true)"
   [[ -n "$executed" ]] || executed="?"
@@ -183,11 +235,15 @@ run_plan() {
   [[ -n "$unit_line" ]] || unit_line="unit: not reported"
 
   local verdict
-  if [[ $status -eq 0 ]]; then
-    verdict="PASS"
-  else
-    verdict="FAIL"
+  verdict="$(classify_verdict "$status" "$log_file" || true)"
+  if [[ "$verdict" != "PASS" ]]; then
     OVERALL_STATUS=1
+    if [[ "$verdict" == "RUNNER-FAILED" ]]; then
+      SAW_RUNNER_FAILURE=1
+      warn "$plan: the test runner never came up (no tests executed) — an environment failure, not a code failure. See $log_file."
+    else
+      SAW_TEST_FAILURE=1
+    fi
   fi
 
   RESULT_LINES+=("| $plan | $verdict | UI: ${executed} executed / ${failed} failed; ${unit_line} | ${wall}s | \`$bundle\` |")
@@ -212,7 +268,7 @@ SUMMARY_CONTENT="$(cat <<EOF
 | --- | --- | --- | --- | --- |
 $(printf '%s\n' "${RESULT_LINES[@]}")
 
-Overall: $([[ $OVERALL_STATUS -eq 0 ]] && echo "PASS" || echo "FAIL")
+Overall: $(if [[ $OVERALL_STATUS -eq 0 ]]; then echo "PASS"; elif [[ $SAW_RUNNER_FAILURE -eq 1 && $SAW_TEST_FAILURE -eq 0 ]]; then echo "RUNNER-FAILED"; else echo "FAIL"; fi)
 EOF
 )"
 

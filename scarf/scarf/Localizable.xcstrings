@@ -17363,42 +17363,42 @@
         }
       }
     },
-    "By model" : {
+    "By model · all time" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nach Modell"
+            "value" : "Nach Modell · gesamter Zeitraum"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Por modelo"
+            "value" : "Por modelo · histórico"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Par modèle"
+            "value" : "Par modèle · depuis toujours"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "モデル別"
+            "value" : "モデル別・全期間"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Por modelo"
+            "value" : "Por modelo · desde sempre"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按模型"
+            "value" : "按模型 · 全部时间"
           }
         }
       }
