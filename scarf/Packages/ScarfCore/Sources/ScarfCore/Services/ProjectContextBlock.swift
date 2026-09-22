@@ -408,6 +408,29 @@ public enum ProjectContextBlock {
             }
     }
 
+    // MARK: - Environment hint (replaces the AGENTS.md block)
+
+    /// The `HERMES_ENVIRONMENT_HINT` value Scarf sets on the `hermes acp`
+    /// process it launches for a project-scoped chat. Hermes reads this
+    /// env var at prompt-build time (`prompt_builder._embedder_environment_hint`)
+    /// and injects it into the system prompt — so Scarf-delivered context
+    /// reaches only the process Scarf started, not every agent that reads
+    /// the project's `AGENTS.md`.
+    ///
+    /// Keep it short: the detailed Scarf platform reference lives in the
+    /// `scarf-template-author` skill, loaded on demand. The hint names the
+    /// skill and the `scarf-projects` tools so the agent knows where to
+    /// look; project metadata (dashboard, config, cron, slash commands) is
+    /// read from `.scarf/` files or surfaced via `scarf-projects` MCP tools
+    /// when the task needs it.
+    public static func environmentHint(projectName: String, projectPath: String) -> String {
+        """
+        This chat was opened in Scarf for project "\(projectName)" at \(projectPath).
+        For Scarf dashboard or template work, load the scarf-template-author skill.
+        Use scarf-projects tools when available.
+        """
+    }
+
     // MARK: - Private
 
     private static func trimmingRightNewlines(_ s: String) -> String {

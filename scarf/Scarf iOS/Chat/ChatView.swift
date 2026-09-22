@@ -2263,45 +2263,35 @@ final class ChatController {
                 self?.currentGitBranch = branch
             }
         }
-        // Render + write the full Scarf-managed AGENTS.md block (cron,
-        // config fields, template, kanban, slash commands, platform
-        // reference) BEFORE `hermes acp` boots — it reads context from the
-        // process cwd at spawn. Non-fatal: a write failure surfaces a
-        // banner and the chat proceeds without the block.
-        await writeProjectContextBlock(projectPath: project.path, projectName: project.name)
+        // Strip any legacy Scarf-managed AGENTS.md block before `hermes
+        // acp` boots — project context is now delivered via
+        // HERMES_ENVIRONMENT_HINT (gh#142), not a file mutation. The
+        // removal is idempotent: a no-op after the first strip. Non-fatal.
+        await stripLegacyProjectContextBlock(projectPath: project.path)
         await start(projectPath: project.path, projectName: project.name)
     }
 
-    /// Render the full Scarf-managed block for `projectPath` and write it
-    /// over SFTP. Uses `ProjectStore.renderAgentContextBlock` so the block
-    /// is byte-identical to what the Mac writes for the same project state
-    /// (cron jobs included). MUST be called BEFORE the `hermes acp` spawn
-    /// so the block is on disk when Hermes reads context files at boot.
+    /// Strip the Scarf-managed region from `<project>/AGENTS.md` over
+    /// SFTP. Idempotent — a no-op when no markers exist. MUST be called
+    /// BEFORE the `hermes acp` spawn so stale Scarf context doesn't
+    /// enter the system prompt via AGENTS.md.
     ///
-    /// Non-fatal: on failure we surface a yellow banner (so the user knows
-    /// the agent won't see project context this session) with the
-    /// underlying error in "Show details", but the chat still starts.
-    /// Shared by the new-project-chat and resume paths.
-    private func writeProjectContextBlock(projectPath: String, projectName: String) async {
+    /// Non-fatal: on failure we log and the chat proceeds — the
+    /// HERMES_ENVIRONMENT_HINT env var still delivers Scarf context.
+    private func stripLegacyProjectContextBlock(projectPath: String) async {
         let ctx = context
-        let writeResult: Result<Void, Error> = await Task.detached {
-            let store = ProjectStore(context: ctx)
-            let scarfProject = store.loadOrDerive(projectPath: projectPath, name: projectName)
-            let block = store.renderAgentContextBlock(for: scarfProject)
+        let result: Result<Void, Error> = await Task.detached {
             do {
-                try ProjectContextBlock.writeBlock(block, forProjectAt: projectPath, context: ctx)
+                try ProjectContextBlock.removeBlock(forProjectAt: projectPath, context: ctx)
                 return .success(())
             } catch {
                 return .failure(error)
             }
         }.value
-        if case .failure(let error) = writeResult {
-            Self.logger.error(
-                "ProjectContextBlock.writeBlock failed for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
+        if case .failure(let error) = result {
+            Self.logger.warning(
+                "ProjectContextBlock.removeBlock failed for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-            vm.acpError = "Project context not written — agent will proceed without it."
-            vm.acpErrorHint = "Check that the SSH user can write to \(projectPath)/AGENTS.md."
-            vm.acpErrorDetails = error.localizedDescription
         }
     }
 
@@ -2443,12 +2433,11 @@ final class ChatController {
             }
         }
 
-        // Refresh the project's AGENTS.md block before the spawn so a
-        // resumed project chat picks up cron/config changes made since the
-        // chat was created (Hermes re-reads context at every `hermes acp`
-        // boot). Project-attributed sessions only.
+        // Strip any legacy Scarf-managed AGENTS.md block before the spawn
+        // — project context is now via HERMES_ENVIRONMENT_HINT (gh#142).
+        // Project-attributed sessions only.
         if let resumePath = resolved?.path {
-            await writeProjectContextBlock(projectPath: resumePath, projectName: resolved?.name ?? "")
+            await stripLegacyProjectContextBlock(projectPath: resumePath)
         }
 
         state = .connecting

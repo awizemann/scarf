@@ -1723,36 +1723,32 @@ final class ChatViewModel {
         self.acpClient = client
         let attribution = SessionAttributionService(context: context)
 
-        // If the caller passed a project path, refresh the Scarf-
-        // managed block in the project's AGENTS.md BEFORE starting
-        // ACP — Hermes auto-reads AGENTS.md at session boot, so the
-        // block has to land on disk first. Non-blocking on failure:
-        // we log and proceed without the block. Safe on bare
-        // projects (creates AGENTS.md with just the block); safe on
-        // template-installed projects (splices the block into
-        // existing AGENTS.md without touching template content).
+        // If the caller passed a project path, strip any legacy
+        // Scarf-managed block from the project's AGENTS.md BEFORE
+        // starting ACP — Hermes auto-reads AGENTS.md at session boot,
+        // and stale Scarf blocks (project identity, platform reference)
+        // are now delivered via HERMES_ENVIRONMENT_HINT instead (gh#142).
+        // The removal is idempotent: after the first strip, subsequent
+        // calls are a no-op (stat + read, no write). Non-blocking on
+        // failure: we log and proceed.
         let contextForPrep = context
         let prepLogger = logger
         Task { @MainActor [self] in
             if let projectPath {
-                // Synchronous file I/O (ProjectDashboardService.loadRegistry +
-                // ProjectAgentContextService.refresh, which itself walks the
-                // slash-commands directory) must run off the MainActor — the
-                // detached task runs the work on the cooperative pool and we
-                // await it here so the AGENTS.md block lands before client.start().
+                // File I/O must run off the MainActor — the detached task
+                // runs on the cooperative pool and we await it here so the
+                // block is removed before client.start().
                 await Task.detached {
-                    let registry = ProjectDashboardService(context: contextForPrep).loadRegistry()
-                    guard let project = registry.projects.first(where: { $0.path == projectPath }) else {
-                        return
-                    }
                     do {
-                        try ProjectAgentContextService(context: contextForPrep).refresh(for: project)
+                        try ProjectContextBlock.removeBlock(
+                            forProjectAt: projectPath, context: contextForPrep
+                        )
                     } catch {
-                        prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                        prepLogger.warning("couldn't strip legacy project context block at \(projectPath): \(error.localizedDescription)")
                     }
                 }.value
                 // Pre-spawn await — a newer start may have superseded
-                // us while the registry/AGENTS.md I/O ran. Abandon
+                // us while the AGENTS.md I/O ran. Abandon
                 // BEFORE spawning so the superseded attempt never
                 // launches a process at all.
                 guard startStillCurrent(intent, client: client) else { return }

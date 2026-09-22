@@ -655,7 +655,9 @@ public struct SSHTransport: ServerTransport {
     /// (chat, cron run, config set, …) would resolve the server's
     /// `active_profile` while the window's file reads show the viewing
     /// profile — a silent cross-profile split.
-    func composedRemoteCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+    func composedRemoteCommand(
+        executable: String, args: [String], cwd: String? = nil, extraEnv: [String: String]? = nil
+    ) -> String {
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
             forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
         // `~/`-rewritten paths so home-relative args expand on the remote.
@@ -666,7 +668,19 @@ public struct SSHTransport: ServerTransport {
         // the remote `rich` would otherwise take its 80-column non-TTY
         // default and wrap the lines Scarf's verdicts match on. Same value
         // and same reason as ``LocalTransport/wideColumns``.
-        var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
+        //
+        // `extraEnv` entries are shell-quoted and prepended the same way —
+        // this is how `HERMES_ENVIRONMENT_HINT` reaches the remote `hermes`
+        // process: `Process.environment` only affects the local `ssh`
+        // client, not the remote machine, so the var must ride the command
+        // string (same pattern as COLUMNS/HERMES_HOME).
+        var envPrefix = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
+        if let extraEnv {
+            for (key, value) in extraEnv {
+                envPrefix += "\(key)=\(Self.shellQuote(value)) "
+            }
+        }
+        var cmd = envPrefix
             + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
         // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes
         // reads project context files from the process cwd, not the ACP
@@ -697,6 +711,12 @@ public struct SSHTransport: ServerTransport {
     }
 
     public func makeProcess(executable: String, args: [String], cwd: String?) -> Process {
+        makeProcess(executable: executable, args: args, cwd: cwd, extraEnv: nil)
+    }
+
+    public func makeProcess(
+        executable: String, args: [String], cwd: String?, extraEnv: [String: String]?
+    ) -> Process {
         ensureControlDir()
         // `-T` disables pty allocation — critical for binary-clean stdin/stdout
         // (ACP JSON-RPC, log tail bytes). `bash -lc` (login shell) sources the
@@ -705,7 +725,7 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        let cmd = composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+        let cmd = composedRemoteCommand(executable: executable, args: args, cwd: cwd, extraEnv: extraEnv)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)

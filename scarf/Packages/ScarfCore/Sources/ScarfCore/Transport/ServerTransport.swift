@@ -121,6 +121,18 @@ public protocol ServerTransport: Sendable {
     /// A default impl (below) ignores `cwd`, so transports that don't need
     /// it require no change.
     nonisolated func makeProcess(executable: String, args: [String], cwd: String?) -> Process
+
+    /// As `makeProcess(executable:args:cwd:)` but also injects
+    /// `extraEnv` into the subprocess environment. For local transports
+    /// the caller typically sets env on the returned `Process` directly,
+    /// so this is mainly for remote (SSH) transports where env vars must
+    /// be embedded in the remote shell command — `Process.environment`
+    /// only affects the local `ssh` process, not the remote machine.
+    /// A default impl (below) ignores `extraEnv`, delegating to the
+    /// 3-arg version, so transports that don't need it require no change.
+    nonisolated func makeProcess(
+        executable: String, args: [String], cwd: String?, extraEnv: [String: String]?
+    ) -> Process
     #endif
 
     /// Platform-neutral streaming exec. Runs `executable args…` on the target
@@ -361,6 +373,15 @@ public extension ServerTransport {
     /// this; test fakes + iOS inherit the no-op.
     nonisolated func makeProcess(executable: String, args: [String], cwd: String?) -> Process {
         makeProcess(executable: executable, args: args)
+    }
+
+    /// Default: ignore `extraEnv` and fall back to the 3-arg spawn.
+    /// `SSHTransport` overrides this to inject env vars into the remote
+    /// shell command (where `Process.environment` can't reach).
+    nonisolated func makeProcess(
+        executable: String, args: [String], cwd: String?, extraEnv: [String: String]?
+    ) -> Process {
+        makeProcess(executable: executable, args: args, cwd: cwd)
     }
     #endif
 }

@@ -56,21 +56,6 @@ struct ProjectTemplateInstaller: Sendable {
             Self.logger.warning("install couldn't mirror secrets to ~/.hermes/.env: \(error.localizedDescription, privacy: .public)")
         }
 
-        // P4 of the projects-feature fix: refresh the Scarf-managed
-        // AGENTS.md block now so installed-template projects get the
-        // platform-reference + project bookkeeping section without
-        // having to wait for the user to open a chat. Previously the
-        // block was only written at chat-start, so an installed
-        // project that the user inspected before chatting had a
-        // template-author AGENTS.md with no Scarf context. Non-fatal —
-        // a failed refresh just defers the block to chat-start (which
-        // already calls refresh).
-        do {
-            try ProjectAgentContextService(context: context).refresh(for: entry)
-        } catch {
-            Self.logger.warning("install couldn't refresh AGENTS.md block: \(error.localizedDescription, privacy: .public)")
-        }
-
         Self.logger.info("installed template \(plan.manifest.id, privacy: .public) v\(plan.manifest.version, privacy: .public) into \(plan.projectDir, privacy: .public)")
         return entry
     }
