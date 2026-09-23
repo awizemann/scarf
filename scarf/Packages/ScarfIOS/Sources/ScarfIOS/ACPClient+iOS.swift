@@ -72,10 +72,30 @@ public extension ACPClient {
         }
         let client = try await openSSHClient(config: sshConfig, key: key)
 
+        // Build the environment hint for project-scoped chats. The project
+        // name is looked up from the registry; falls back to the path's
+        // basename when not found. Replaces the old AGENTS.md managed
+        // block (gh#142) — the hint rides the remote shell command so it
+        // reaches the remote `hermes` process (ssh doesn't forward the
+        // client env).
+        var envHint: String? = nil
+        if let projectCwd, !projectCwd.isEmpty {
+            let projectName = ProjectDashboardService(context: context)
+                .loadRegistry()
+                .projects
+                .first { $0.path == projectCwd }?
+                .name
+                ?? (projectCwd as NSString).lastPathComponent
+            envHint = ProjectContextBlock.environmentHint(
+                projectName: projectName, projectPath: projectCwd
+            )
+        }
+
         let command = buildACPCommand(
             hermesBinary: context.paths.hermesBinary,
             home: context.paths.home,
-            projectCwd: projectCwd
+            projectCwd: projectCwd,
+            environmentHint: envHint
         )
 
         return try await SSHExecACPChannel(
@@ -113,7 +133,8 @@ public extension ACPClient {
     static func buildACPCommand(
         hermesBinary: String,
         home: String,
-        projectCwd: String?
+        projectCwd: String?,
+        environmentHint: String? = nil
     ) -> String {
         // Scope the chat session to the selected profile's HERMES_HOME
         // (#120, Design B), so chat reads/writes the same profile the rest
@@ -121,13 +142,22 @@ public extension ACPClient {
         // `exec hermes acp`. `home` already carries the profile-resolved
         // remoteHome from ScarfGoTabRoot's effectiveConfig.
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+        // HERMES_ENVIRONMENT_HINT (when set) rides the same assignment
+        // prefix — ssh exec doesn't forward the client env, so the var
+        // must be in the remote shell command (gh#142).
+        let hintAssignment: String
+        if let environmentHint, !environmentHint.isEmpty {
+            hintAssignment = "HERMES_ENVIRONMENT_HINT=\(HermesProfileScope.shellQuotePath(environmentHint)) "
+        } else {
+            hintAssignment = ""
+        }
         let cdPrefix: String
         if let projectCwd, !projectCwd.isEmpty {
             cdPrefix = "cd \(HermesProfileScope.shellQuotePath(projectCwd)); "
         } else {
             cdPrefix = ""
         }
-        return "\(cdPrefix)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) acp"
+        return "\(cdPrefix)\(hintAssignment)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) acp"
     }
 
     /// Shared SSH connect flow — used by ACPClient and

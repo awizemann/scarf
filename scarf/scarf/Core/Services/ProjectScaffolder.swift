@@ -133,19 +133,6 @@ struct ProjectScaffolder: Sendable {
             )
             try ProjectStore(context: context).save(scarfProject)
 
-            // 6. Populate the marker block with project identity.
-            // Non-fatal — the chat handoff calls refresh() again
-            // anyway via startACPSession's project-prep step. Logging
-            // the failure here is enough. `refresh` now renders from the
-            // ScarfProject record written in step 5.
-            do {
-                try ProjectAgentContextService(context: context).refresh(for: entry)
-            } catch {
-                Self.logger.warning(
-                    "couldn't populate AGENTS.md marker block for \(entry.name, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-            }
-
             Self.logger.info(
                 "scaffolded project \(cleanedName, privacy: .public) at \(projectDir, privacy: .public)"
             )

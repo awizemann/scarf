@@ -118,15 +118,6 @@ struct ProjectUpgradeService: Sendable {
             uuid: projectID
         )
 
-        // 3. AGENTS.md managed block — create-or-splice, bounded, idempotent.
-        //    Runs after the tenant exists so the rendered block carries the
-        //    board line; gives the agent Scarf platform context on its next run.
-        do {
-            try ProjectAgentContextService(context: context).refresh(for: entry)
-        } catch {
-            Self.logger.warning("upgrade: AGENTS.md refresh failed for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-        }
-
         // 4. Ensure a `dashboard.json` so the Dashboard panel lights up —
         //    placeholder ONLY if none exists. Never clobber a real dashboard;
         //    the agent replaces the placeholder during enrichment.

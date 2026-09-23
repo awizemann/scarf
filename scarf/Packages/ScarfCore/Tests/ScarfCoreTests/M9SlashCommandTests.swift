@@ -239,6 +239,26 @@ import Foundation
         #expect(a == b)
     }
 
+    // MARK: - Environment hint (gh#142)
+
+    @Test func environmentHintContainsProjectNameAndPath() {
+        let hint = ProjectContextBlock.environmentHint(
+            projectName: "myapp", projectPath: "/home/alan/projects/myapp"
+        )
+        #expect(hint.contains("myapp"))
+        #expect(hint.contains("/home/alan/projects/myapp"))
+        #expect(hint.contains("scarf-template-author"))
+        #expect(hint.contains("scarf-projects"))
+    }
+
+    @Test func environmentHintIsShort() {
+        let hint = ProjectContextBlock.environmentHint(
+            projectName: "myapp", projectPath: "/home/alan/projects/myapp"
+        )
+        // The hint should be a few lines, not a multi-paragraph block.
+        #expect(hint.count < 300)
+    }
+
     // MARK: - v0.13 non-interruptive commands (WS-2 / Persistent Goals + /queue)
 
     @Test func nonInterruptiveListIncludesSteerAndQueueNotGoal() {

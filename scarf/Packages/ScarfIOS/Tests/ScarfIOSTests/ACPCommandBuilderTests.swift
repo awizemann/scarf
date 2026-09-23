@@ -107,6 +107,37 @@ import ScarfCore
         // Standard '\'' close-escape-reopen trick keeps the quoting balanced.
         #expect(cmd.contains(#"cd '/tmp/a'\''b'; "#))
     }
+
+    // MARK: - Environment hint (gh#142)
+
+    @Test func noHintOmitsAssignment() {
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "/root",
+            projectCwd: "/srv/app", environmentHint: nil
+        )
+        #expect(!cmd.contains("HERMES_ENVIRONMENT_HINT"))
+    }
+
+    @Test func hintInjectedAsShellAssignment() {
+        let hint = "This chat was opened in Scarf for project \"myapp\" at /srv/app."
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "/root",
+            projectCwd: "/srv/app", environmentHint: hint
+        )
+        #expect(cmd.contains("HERMES_ENVIRONMENT_HINT="))
+        // The hint must be single-quoted so spaces/newlines/quotes are inert.
+        #expect(cmd.contains("'\(hint)'"))
+        // The cd prefix still comes first.
+        #expect(cmd.hasPrefix("cd '/srv/app'; "))
+    }
+
+    @Test func emptyHintOmitsAssignment() {
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "/root",
+            projectCwd: "/srv/app", environmentHint: ""
+        )
+        #expect(!cmd.contains("HERMES_ENVIRONMENT_HINT"))
+    }
 }
 
 #endif

@@ -68,20 +68,49 @@ extension ACPClient {
     /// credentials exported from `.zprofile` / `.zshrc` are visible)
     /// minus `TERM` (ACP speaks raw JSON over stdio, any terminal
     /// escape sequence would corrupt it).
+    ///
+    /// When `projectCwd` is set, `HERMES_ENVIRONMENT_HINT` is injected so
+    /// the agent knows it's in a Scarf project — replacing the old
+    /// AGENTS.md managed block (gh#142). For local spawns it rides
+    /// `Process.environment`; for remote SSH spawns it rides the remote
+    /// shell command string via `extraEnv` (ssh doesn't forward the
+    /// client env to the remote machine).
     nonisolated private static func makeProcessChannel(
         for context: ServerContext,
         projectCwd: String? = nil,
         profile: String? = nil
     ) async throws -> any ACPChannel {
         let transport = context.makeTransport()
+
+        // Build the environment hint for project-scoped chats. The project
+        // name is looked up from the registry; falls back to the path's
+        // basename when not found (unregistered or stale project).
+        var extraEnv: [String: String]? = nil
+        if let projectCwd, !projectCwd.isEmpty {
+            let projectName = ProjectDashboardService(context: context)
+                .loadRegistry()
+                .projects
+                .first { $0.path == projectCwd }?
+                .name
+                ?? (projectCwd as NSString).lastPathComponent
+            extraEnv = [
+                "HERMES_ENVIRONMENT_HINT": ProjectContextBlock.environmentHint(
+                    projectName: projectName, projectPath: projectCwd
+                )
+            ]
+        }
+
         // Remote takes the SAME argv: `SSHTransport.makeProcess` composes
         // `ssh -T host -- <executable> <args…>`, so the profile flag rides
         // the transport untouched and a bot on an SSH host is pinned
-        // exactly like a local one.
+        // exactly like a local one. `extraEnv` is injected into the remote
+        // shell command by SSHTransport; for local it's ignored (we set
+        // env on the Process below).
         let proc = transport.makeProcess(
             executable: context.paths.hermesBinary,
             args: acpArguments(profile: profile),
-            cwd: projectCwd
+            cwd: projectCwd,
+            extraEnv: extraEnv
         )
 
         if context.isRemote {
@@ -90,6 +119,8 @@ extension ACPClient {
             // PATH / credentials to the remote (hermes runs under the
             // remote user's login env), but the ssh binary itself needs
             // SSH_AUTH_SOCK to reach the local ssh-agent for auth.
+            // HERMES_ENVIRONMENT_HINT rides the remote command string
+            // (set above via extraEnv), NOT the local Process env.
             var env = ProcessInfo.processInfo.environment
             let shellEnv = HermesFileService.enrichedEnvironment()
             for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
@@ -102,9 +133,12 @@ extension ACPClient {
         } else {
             // Local: enriched env so any tools hermes spawns (MCP
             // servers, shell commands) can find brew/nvm/asdf binaries
-            // on PATH.
+            // on PATH. HERMES_ENVIRONMENT_HINT is set here directly.
             var env = HermesFileService.enrichedEnvironment()
             env.removeValue(forKey: "TERM")
+            if let extraEnv {
+                env.merge(extraEnv) { _, new in new }
+            }
             proc.environment = env
         }
 
