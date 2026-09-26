@@ -18,6 +18,7 @@ struct PeersView: View {
     // Coordinator-cached (t-aud24) so run handles survive section
     // switches — `hermes peer` has no way to re-enumerate them.
     @Bindable var viewModel: PeersViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     init(viewModel: PeersViewModel) {
         self.viewModel = viewModel
@@ -206,7 +207,7 @@ struct PeersView: View {
                             .buttonStyle(ScarfSecondaryButton())
                             .disabled(!canSend)
                             .help("Start the same turn asynchronously and track it by run ID. Use this for long turns.")
-                        Button("Send DM") { viewModel.sendDM() }
+                        Button("Send DM") { viewModel.sendDM(capabilities: capabilitiesStore?.capabilities ?? .empty) }
                             .buttonStyle(ScarfPrimaryButton())
                             .disabled(!canSend)
                             .help("Run one synchronous turn on the peer and show its reply. Can take minutes.")

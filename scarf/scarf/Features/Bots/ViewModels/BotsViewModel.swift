@@ -1219,13 +1219,29 @@ final class BotsViewModel: OutcomeMessageHosting {
         let log = logger
         Task.detached(priority: .userInitiated) { [weak self] in
             var failure: String?
+            var warning: String?
             do {
                 let result = try backend.run(action)
-                if result.exitCode != 0 { failure = Self.cliFailureText(result) }
+                if result.exitCode != 0 {
+                    // v0.21.4+: a delete that removed the directory but left
+                    // identity settlement pending exits 1 — a completed
+                    // delete with a follow-up, not a failure
+                    // (`HermesProfileDeleteVerdict`). `_die` prints it on
+                    // stdout (`hermes_cli/profile_cmd.py:15-17`).
+                    if case .delete = action,
+                       let pending = HermesProfileDeleteVerdict.settlementPendingWarning(
+                           output: result.stdoutString + "\n" + result.stderrString,
+                           exitCode: result.exitCode) {
+                        warning = pending
+                    } else {
+                        failure = Self.cliFailureText(result)
+                    }
+                }
             } catch {
                 failure = String(describing: error)
             }
             let result = failure
+            let note = warning
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
@@ -1235,7 +1251,7 @@ final class BotsViewModel: OutcomeMessageHosting {
                     self.errorMessage = result
                 } else {
                     onSuccess()
-                    self.flash(success)
+                    self.flash(note.map { "\(success) — \($0)" } ?? success)
                 }
                 self.load(force: true)
             }

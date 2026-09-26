@@ -7,6 +7,7 @@ struct HealthView: View {
     @State private var expandedSection: UUID?
     @State private var selectedTab = 0
     @State private var showShareConfirm = false
+    @State private var showForceOptimizeConfirm = false
     @State private var showDiagnostics = false
     /// v0.14 — when running `hermes acp --setup-browser`, swap the
     /// button copy + show a spinner so the user knows the long-running
@@ -147,6 +148,20 @@ struct HealthView: View {
                     .padding(.horizontal, ScarfSpace.s6)
                     .padding(.bottom, ScarfSpace.s2)
             }
+            // v0.21.4+: only after Hermes REFUSED because another process
+            // holds state.db, and only where `--force` parses. Never a
+            // default — the confirmation says what the override risks.
+            if viewModel.sessionsOptimizeCanForce {
+                HStack {
+                    Button("Optimize anyway…") { showForceOptimizeConfirm = true }
+                        .buttonStyle(ScarfGhostButton())
+                        .disabled(viewModel.isRunningSessionsOptimize)
+                        .help("Runs `hermes sessions optimize --force` while other processes have the database open.")
+                    Spacer()
+                }
+                .padding(.horizontal, ScarfSpace.s6)
+                .padding(.bottom, ScarfSpace.s2)
+            }
             if capabilitiesStore?.capabilities.hasXAIModelRetirement == true
                 && viewModel.configuredModelIsRetiredXAI {
                 xaiRetirementBanner
@@ -208,6 +223,17 @@ struct HealthView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Upload sends logs, config (with secrets redacted), and system info to Nous Research support infrastructure, and prints paste URLs. Showing the report keeps everything on this machine. Review the output below before sharing anything.")
+        }
+        // Copy follows Hermes's own `--force` help
+        // (`hermes_cli/subcommands/sessions.py:131-132` @ v2026.9.21) and the
+        // refusal's "Nothing is lost" (`hermes_state_holders.py:506-507`).
+        .confirmationDialog("Optimize while the database is in use?", isPresented: $showForceOptimizeConfirm) {
+            Button("Optimize Anyway", role: .destructive) {
+                viewModel.runSessionsOptimize(force: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Hermes rewrites the sessions database (VACUUM) even though other processes have it open. If one of them is writing — a running gateway, cron, or the Hermes desktop app — every agent can start refusing turns until all of them are restarted. No conversation data is lost. Safest: stop the gateway and other Hermes apps first.")
         }
     }
 

@@ -106,6 +106,11 @@ final class HealthViewModel {
     /// Mirrors the audit-message pattern — success summary or the tail of
     /// stderr on failure.
     var sessionsOptimizeMessage: String?
+    /// True after Hermes v0.21.4+ REFUSED the last optimize because another
+    /// process holds `state.db` (``HermesSessionsOptimizeVerdict/heldStoreHolders(output:exitCode:)``)
+    /// AND this host takes `--force`. Drives the "Optimize anyway…" button;
+    /// never true on a pre-v0.21.4 host, which cannot print the refusal.
+    var sessionsOptimizeCanForce = false
 
     // MARK: - xAI retired-model migration (`hermes migrate xai`, v0.15)
 
@@ -932,18 +937,38 @@ final class HealthViewModel {
     /// index and VACUUMs the sessions database. Non-destructive maintenance verb.
     /// On success we surface a one-line summary; on failure we surface the tail
     /// of stderr so the user can see what tripped without leaving the view.
-    func runSessionsOptimize() {
+    ///
+    /// `force` is the deliberate "Optimize anyway" the Health pane offers
+    /// only after Hermes v0.21.4+ refused under a live holder — it appends
+    /// `--force` where the host parses it (``HermesSessionsOptimizeVerdict/forceArguments(capabilities:)``)
+    /// and nothing anywhere else, so a pre-v0.21.4 argv is unchanged.
+    func runSessionsOptimize(force: Bool = false) {
         guard !isRunningSessionsOptimize else { return }
         isRunningSessionsOptimize = true
+        sessionsOptimizeCanForce = false
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
+        let extra = force ? HermesSessionsOptimizeVerdict.forceArguments(capabilities: capabilities) : []
+        let canForce = capabilities.hasSessionsOptimizeForce
         Task.detached { [fileService] in
             let result = await OffPool.run {
                 fileService.runHermesCLI(
-                    args: HermesSessionsOptimizeVerdict.argv, timeout: 120
+                    args: HermesSessionsOptimizeVerdict.argv + extra, timeout: 120
                 )
             }
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
+                // v0.21.4+: Hermes refuses while any other process holds
+                // state.db. Say who, and offer the override only where the
+                // host has `--force` — see `sessionsOptimizeRefusalSummary`.
+                if let holders = HermesSessionsOptimizeVerdict.heldStoreHolders(
+                    output: result.output, exitCode: result.exitCode
+                ) {
+                    self.sessionsOptimizeMessage = Self.sessionsOptimizeRefusalSummary(
+                        holders: holders, isLocal: !self.context.isRemote, canForce: canForce
+                    )
+                    self.sessionsOptimizeCanForce = canForce
+                    return
+                }
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 // P47: judged by OUTPUT. `_cmd_optimize` catches every
                 // exception from `db.vacuum()`, prints
@@ -973,6 +998,34 @@ final class HealthViewModel {
     /// `"Optimize failed. "` with an empty tail said less than nothing. It
     /// says Hermes printed no result instead — the same sentence both
     /// memory-reset sites give (`MemoryView`, iOS `MemoryListView`).
+    /// The strip text for Hermes v0.21.4+'s held-store refusal
+    /// (`hermes_state_holders.py::held_store_refusal`, `:481-515` @ v2026.9.24).
+    ///
+    /// Names the holders Hermes named, verbatim. On a LOCAL host Scarf itself
+    /// can be one of them: `LocalSQLiteBackend` keeps a read-only connection
+    /// to `state.db` open, and Hermes's scan counts every open descriptor
+    /// (`foreign_state_db_holders`, `:324-459`), readers included. Hermes
+    /// prints `PID {pid} (…)` per holder (`describe_holder_pid`, `:59-68`), so
+    /// Scarf recognises its own line by `ownPID` rather than by a process name
+    /// — and says so, because "stop them, then re-run" can never succeed
+    /// while the app asking is itself the holder.
+    static func sessionsOptimizeRefusalSummary(
+        holders: [String], isLocal: Bool, canForce: Bool,
+        ownPID: Int32 = ProcessInfo.processInfo.processIdentifier
+    ) -> String {
+        var text = String(localized: "Hermes refused to optimize: another process has the sessions database open.")
+        if !holders.isEmpty {
+            text += " " + holders.joined(separator: " · ")
+        }
+        let scarfIsHolder = isLocal && holders.contains { $0.hasPrefix("PID \(ownPID) (") }
+        if scarfIsHolder && canForce {
+            text += " " + String(localized: "One of them is Scarf's own read-only view of your sessions, which never writes — Hermes refuses while Scarf is open. Stop the gateway and other Hermes apps first, then use Optimize anyway.")
+        } else {
+            text += " " + String(localized: "Stop the gateway and other Hermes apps, then try again.")
+        }
+        return text
+    }
+
     static func sessionsOptimizeSummary(
         outcome: HermesCLIOutcome, exitCode: Int32, trimmed: String
     ) -> String {

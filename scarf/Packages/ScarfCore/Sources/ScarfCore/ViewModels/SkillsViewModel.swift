@@ -1077,7 +1077,10 @@ public final class SkillsViewModel {
     /// the `do_install(force=True)` it nests (`:868`), so a refusal is printed
     /// and returned from at exit 0: a blocked scan verdict reaches
     /// `_install_blocked` and prints `Installation blocked: …` (`:699`, printed at
-    /// `:498`), and an invalid bundle path reaches `_invalid_path` (`:692`). Judging this by
+    /// `:498`) — relabelled `Not installed: …` from v0.21.4
+    /// (`hermes_cli/skills_hub.py:726` @ v2026.9.21, `:730` @ v2026.9.24; both
+    /// are in `HermesCLIMarkers.skillsUpdateFailure`) — and an invalid bundle
+    /// path reaches `_invalid_path` (`:692`). Judging this by
     /// exit code made the ONE action that destroys the user's local edits
     /// announce that it had succeeded when nothing was written (C5).
     ///

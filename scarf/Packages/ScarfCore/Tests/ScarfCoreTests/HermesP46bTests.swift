@@ -359,9 +359,9 @@ struct DuplicateNamingP46bTests {
             id: "j1", name: "Nightly", prompt: "p",
             schedule: CronSchedule(kind: "interval"),
             enabled: true, state: "scheduled")
-        let first = job.duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"])
+        let first = job.duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"], capabilities: .empty)
         let second = job.duplicatedAsNewJob(
-            id: "j3", existingNames: ["Nightly", first.name]
+            id: "j3", existingNames: ["Nightly", first.name], capabilities: .empty
         )
         #expect(first.name != second.name,
                 "two duplicates share a name — `cron run` is ambiguous for both")

@@ -115,14 +115,14 @@ struct ThreeStateRenderingP54Tests {
 
     @Test func backupConfirmedSaysNothingExtra() {
         let outcome = HermesBackupVerdict.judge(
-            output: "Backup complete: /tmp/b.zip", exitCode: 0)
+            output: "Backup complete: /tmp/b.zip", exitCode: 0, capabilities: .empty)
         #expect(SettingsViewModel.withNote("Backup saved", outcome.warning) == "Backup saved")
     }
 
     @Test func backupIncompleteCarriesItsNoteIntoTheBanner() throws {
         let outcome = HermesBackupVerdict.judge(
             output: "Backup incomplete: /tmp/b.zip\n  Warnings (2 files skipped):",
-            exitCode: 0)
+            exitCode: 0, capabilities: .empty)
         let banner = SettingsViewModel.withNote("Backup saved", outcome.warning)
         #expect(banner.hasPrefix("Backup saved "))
         #expect(banner.contains("Warnings (2 files skipped):"))
@@ -130,7 +130,7 @@ struct ThreeStateRenderingP54Tests {
 
     /// The third state: exit 0, no marker. Never "Backup failed (exit 0)".
     @Test func backupUnconfirmedNamesSilenceNotAStatus() {
-        let outcome = HermesBackupVerdict.judge(output: "", exitCode: 0)
+        let outcome = HermesBackupVerdict.judge(output: "", exitCode: 0, capabilities: .empty)
         let text = SettingsViewModel.backupFailureSummary(outcome: outcome)
         #expect(text.contains("printed no result"))
         #expect(!text.contains("exit"))
@@ -138,7 +138,7 @@ struct ThreeStateRenderingP54Tests {
     }
 
     @Test func backupFailedQuotesHermesOwnLine() {
-        let outcome = HermesBackupVerdict.judge(output: "OSError: disk full", exitCode: 1)
+        let outcome = HermesBackupVerdict.judge(output: "OSError: disk full", exitCode: 1, capabilities: .empty)
         #expect(SettingsViewModel.backupFailureSummary(outcome: outcome).contains("disk full"))
     }
 
@@ -290,7 +290,7 @@ struct UnconfirmedWithOutputP54Tests {
 
     @Test func backupProgressIsNotABackupFailure() {
         let outcome = HermesBackupVerdict.judge(
-            output: "Scanning /Users/alan/.hermes ...\nBacking up 812 files ...", exitCode: 0)
+            output: "Scanning /Users/alan/.hermes ...\nBacking up 812 files ...", exitCode: 0, capabilities: .empty)
         #expect(outcome.confidence == .unconfirmed)
         #expect(outcome.detail == "Backing up 812 files ...")
         let text = SettingsViewModel.backupFailureSummary(outcome: outcome)

@@ -191,9 +191,11 @@ final class FleetApplyViewModel {
             // resolved against the TARGET's provider config and credential
             // pools, so a pin the target has never heard of lands green and
             // fails on its first run. Dropping it lets the target resolve its
-            // own default (`_compute_provider_model_snapshots`,
-            // `cron/jobs.py:1599-1620`) — a defensible outcome, but a silent
-            // change of which model runs the job, and whose bill.
+            // own default (a create-time snapshot up to v0.21.3,
+            // `_compute_provider_model_snapshots` `cron/jobs.py:1630` @
+            // v2026.9.14; the target's main model at fire time from v0.21.4)
+            // — a defensible outcome, but a silent change of which model runs
+            // the job, and whose bill.
             let modelPinned = cronCopySet.copyable.filter(\.hasModelPin)
             if !modelPinned.isEmpty {
                 out.append("\(modelPinned.count) cron job\(modelPinned.count == 1 ? "" : "s") pin their own model, provider or reasoning effort; those pins are this host's, so the copy follows the target host's defaults.")

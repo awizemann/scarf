@@ -14,6 +14,7 @@ import ScarfDesign
 /// already chosen by the roster row.
 struct RemoteBotDetailView: View {
     @Bindable var viewModel: PeersViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     let peer: HermesBotPeer
 
     var body: some View {
@@ -95,7 +96,7 @@ struct RemoteBotDetailView: View {
                         onDismiss: { viewModel.dismissMessage() }
                     )
                     Spacer()
-                    Button("Message") { viewModel.sendDM() }
+                    Button("Message") { viewModel.sendDM(capabilities: capabilitiesStore?.capabilities ?? .empty) }
                         .buttonStyle(ScarfGhostButton())
                         .disabled(viewModel.isSending || viewModel.composeText.trimmingCharacters(in: .whitespaces).isEmpty)
                         .accessibilityLabel("Send a synchronous message to \(peer.name)")

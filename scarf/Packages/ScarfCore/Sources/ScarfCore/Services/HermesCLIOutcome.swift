@@ -309,6 +309,14 @@ public enum HermesCLIMarkers {
     /// - `Cannot install from URL:` / `Invalid --name:` —
     ///   `_resolve_url_bundle_name` (:520, :525).
     /// - `Installation cancelled.` — `_confirm_install` (:642) and :537.
+    /// - `Not installed:` — v0.21.4+: the SCAN-blocked arm relabels
+    ///   `_install_blocked`'s line (`label="Not installed:"`,
+    ///   `hermes_cli/skills_hub.py:726` @ v2026.9.21, `:730` @ v2026.9.24) and
+    ///   still returns at exit 0; `_invalid_path` keeps `Installation blocked:`
+    ///   (`:521` @ v2026.9.24). v2026.9.14 prints `Not installed:` nowhere in
+    ///   `hermes_cli/`, so recognising it changes nothing below the floor. At
+    ///   and above it, without this marker a blocked install read as "printed
+    ///   no result" (install) or quoted no reason (update).
     public static let skillsInstallFailure = [
         "Error:",
         "Installation blocked:",
@@ -317,6 +325,7 @@ public enum HermesCLIMarkers {
         "Cannot install from URL:",
         "Invalid --name:",
         "Installation cancelled.",
+        "Not installed:",
     ]
 
     /// `_report_pair` prints `uninstall_skill`'s message green on success —
@@ -2166,10 +2175,50 @@ public enum HermesSessionsOptimizeVerdict {
     /// `Error: optimization failed: {e}` (`:815`).
     static let failurePrefix = "Error: optimization failed:"
 
+    // MARK: v0.21.4 — the held-store refusal
+
+    /// `Refusing \`hermes sessions optimize\`: another process is using {db_path}.`
+    /// — `hermes_state_holders.py:500` @ v2026.9.21 (`:502` @ v2026.9.24),
+    /// printed by `cmd_sessions` before it exits 1 whenever ANY other process
+    /// holds `state.db`, `-wal` or `-shm` (`hermes_cli/sessions_cmd.py:1032-1037`).
+    /// The holder scan (`foreign_state_db_holders`) counts every open
+    /// descriptor, not just writers — a running gateway, the Hermes desktop
+    /// app, and **Scarf's own read-only connection on a local host**
+    /// (`LocalSQLiteBackend` keeps `state.db` open) all count. No older tag
+    /// prints the line, so it needs no flag to be recognised.
+    static let heldStoreRefusalPrefix = "Refusing `hermes sessions optimize`:"
+
+    /// The `  PID {pid} ({argv}): state.db, state.db-wal` holder lines
+    /// (`hermes_state_holders.py:501`) and the fail-closed
+    /// `  cannot prove the database is quiet (…)` line (`:503`).
+    static let holderLinePrefixes = ["PID ", "cannot prove the database is quiet"]
+
+    /// `--force` — ``HermesCapabilities/hasSessionsOptimizeForce``. Empty below
+    /// the floor, where argparse would reject it. Callers append it only for a
+    /// deliberate "Optimize anyway" after ``heldStoreHolders(output:exitCode:)``
+    /// reported a refusal.
+    public static func forceArguments(capabilities: HermesCapabilities) -> [String] {
+        capabilities.hasSessionsOptimizeForce ? ["--force"] : []
+    }
+
+    /// The processes Hermes named when it refused to optimize under a live
+    /// holder, verbatim — or `nil` when this run was not that refusal. An
+    /// empty array is still a refusal (Hermes printed the refusal line but no
+    /// holder line survived).
+    public static func heldStoreHolders(output: String, exitCode: Int32) -> [String]? {
+        guard exitCode != 0 else { return nil }
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard lines.contains(where: { $0.hasPrefix(heldStoreRefusalPrefix) }) else { return nil }
+        return lines.filter { line in holderLinePrefixes.contains { line.hasPrefix($0) } }
+    }
+
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
         let lines = HermesCLIVerdict.significantLines(output)
         guard exitCode == 0 else {
-            return HermesCLIOutcome(succeeded: false, detail: lines.last)
+            // The held-store refusal ends in a docs URL, so `lines.last` would
+            // quote `Recovery guide: https://…` as the reason.
+            let refusal = lines.first { $0.hasPrefix(heldStoreRefusalPrefix) }
+            return HermesCLIOutcome(succeeded: false, detail: refusal ?? lines.last)
         }
         let refusal = lines.first { HermesCLIVerdict.unglyphed($0).hasPrefix(failurePrefix) }
         // `failureWins` in spirit: the two arms are exclusive branches, but a
@@ -2275,6 +2324,12 @@ public enum HermesBackupVerdict {
     /// `_print_capped` right after the incomplete line.
     static let warningsPrefix = "Warnings ("
 
+    /// `Archive kept, but {len(errors)} file(s) could not be added:` —
+    /// `hermes_cli/backup.py:750` @ v2026.9.21 — the v0.21.4 spelling of the
+    /// line above, on a run that now exits **1** (`hermes_cli/main.py:2254`)
+    /// with the zip still on disk. See ``HermesCapabilities/hasBackupPartialExitNonZero``.
+    static let archiveKeptPrefix = "Archive kept, but "
+
     /// `No files to back up.` (`:633`) — the scan arm that writes no zip.
     static let nothingToBackUpPrefix = "No files to back up."
 
@@ -2288,12 +2343,29 @@ public enum HermesBackupVerdict {
         localized: "Some files were skipped — the archive is incomplete."
     )
 
-    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+    /// `capabilities` has no default: it is what tells a v0.21.4+ partial
+    /// archive (exit 1, zip kept) from a real failure (round-5 lesson 10).
+    public static func judge(
+        output: String, exitCode: Int32, capabilities: HermesCapabilities
+    ) -> HermesCLIOutcome {
         let lines = HermesCLIVerdict.significantLines(output)
+        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
         guard exitCode == 0 else {
+            // v0.21.4+: an incomplete archive exits 1 but is KEPT and
+            // restorable (`run_backup`'s docstring, `backup.py:670-676` @
+            // v2026.9.24) — the same partial success the exit-0 arm below
+            // reports on older hosts, now with Hermes's new count line. Both
+            // markers are required: `Backup incomplete: ` names the kept zip,
+            // `Archive kept, but ` is the line only the kept-archive exit prints.
+            if capabilities.hasBackupPartialExitNonZero,
+               let incomplete = lines.first(where: { head($0).hasPrefix(incompletePrefix) }),
+               let kept = lines.first(where: { head($0).hasPrefix(archiveKeptPrefix) }) {
+                return HermesCLIOutcome(
+                    succeeded: true, detail: incomplete, warning: "\(incompleteNote) \(kept)"
+                )
+            }
             return HermesCLIOutcome(succeeded: false, detail: lines.last)
         }
-        func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
         // The incomplete arm is checked FIRST: it is a distinct prefix, but
         // reading it before the success prefix makes the precedence explicit
         // rather than incidental.

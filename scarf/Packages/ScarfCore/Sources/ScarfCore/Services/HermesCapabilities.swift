@@ -2174,12 +2174,63 @@ public struct HermesCapabilities: Sendable, Equatable {
     // group, with a doc comment citing the Hermes file:line@tag its floor was
     // verified against, matching the style of every group above.
 
+    /// `hermes sessions optimize --force` — `hermes_cli/subcommands/sessions.py:131`
+    /// @ v2026.9.21. From that tag `cmd_sessions` refuses `optimize` with
+    /// exit 1 while ANY other process holds `state.db` or a WAL sidecar
+    /// (`hermes_cli/sessions_cmd.py:1007`, `:1032-1037` → `hermes_state_holders.py
+    /// ::held_store_refusal`), and `--force` is the only override. Absent at
+    /// v2026.9.14 (no `held_store_refusal`, no `--force` on `optimize`), where
+    /// the flag is an argparse error at exit 2. Scarf only ever adds it on a
+    /// deliberate "Optimize anyway" after Hermes has refused — never silently.
+    public var hasSessionsOptimizeForce: Bool { isV0214OrLater }
+
+    /// `hermes backup` exits **1** on a partial archive — `hermes_cli/main.py:2254`
+    /// @ v2026.9.21 (`elif not backup.run_backup(args): raise SystemExit(1)`),
+    /// with `run_backup` returning `not errors` (`hermes_cli/backup.py:760`)
+    /// after printing `Archive kept, but {n} file(s) could not be added:`
+    /// (`:750`). The zip is kept and restorable. At v2026.9.14 the same
+    /// archive exits 0 under `Warnings ({n} files skipped):` (`backup.py:731`).
+    public var hasBackupPartialExitNonZero: Bool { isV0214OrLater }
+
+    /// `hermes cron create --pin` and `cron edit --pin | --unpin` —
+    /// `hermes_cli/subcommands/cron.py:70`, `:136-140` @ v2026.9.21, applied by
+    /// `cron/jobs.py::_main_model_pin` (`:1567`) and `_apply_pin_update`
+    /// (`:1902`). The same tag removes the create-time model snapshot
+    /// (`_compute_provider_model_snapshots`, `cron/jobs.py:1630` @ v2026.9.14)
+    /// and `cron resnap`: an unpinned job now follows the main model at fire
+    /// time, so pinning is the only way to freeze one. Absent at v2026.9.14.
+    public var hasCronModelPin: Bool { isV0214OrLater }
+
+    /// `resolved` cron incident state — `cron/incidents.py:32` @ v2026.9.21
+    /// (`INCIDENT_STATES = ("detected", "alerted", "resolved", "closed")`) and
+    /// `cron incidents --state` choices (`hermes_cli/subcommands/cron.py:176`).
+    /// Set automatically when the job next runs OK; NOT open. v2026.9.14's
+    /// `--state` choices (`:185`) have no `resolved` — an argparse error there.
+    public var hasCronIncidentResolvedState: Bool { isV0214OrLater }
+
+    /// `hermes peer dm` no-resend outcomes — `hermes_cli/subcommands/peer.py:358-375`
+    /// @ v2026.9.21: a timeout AFTER the Bot Chat resolved exits 1 with
+    /// "accepted the message … Do NOT resend.", and a `hermes.session.chat.queued`
+    /// answer exits 0 with `{status: "queued"}` and no `reply`. v2026.9.14
+    /// reports the timeout as an unreachable peer. Gates only Scarf's process
+    /// timeout (see ``HermesPeerCLI/dmProcessTimeout(capabilities:)``): the
+    /// output itself is recognised by its bytes, which no older host prints.
+    public var hasPeerDMNoResendOutcomes: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
     // v2026.9.24:pyproject.toml` reads `version = "0.21.5"`. Same as the
     // v0.21.4 group above — no feature flag here yet; later phases append
     // their flags as a contiguous block at the END of this group.
+
+    /// `cron/job_definition.py:13-18` @ v2026.9.24 — `JOB_DEFINITION_FIELDS`,
+    /// Hermes's own list of the AUTHORED fields of a cron job (everything
+    /// else is scheduler-owned). New at this tag (commit c2063cf61d); no such
+    /// list exists at v2026.9.21 or v2026.9.14. Scarf's iOS duplicate copies
+    /// only these unmodeled keys on a host that publishes the list
+    /// (``HermesCronJob/duplicatedAsNewJob(id:existingNames:capabilities:now:)``).
+    public var hasCronJobDefinitionFields: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 

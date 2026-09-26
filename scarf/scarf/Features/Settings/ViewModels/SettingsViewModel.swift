@@ -1439,7 +1439,9 @@ final class SettingsViewModel {
             let result = await OffPool.run {
                 fileService.runHermesCLI(args: HermesBackupVerdict.argv(capabilities: capabilities), timeout: 300)
             }
-            let outcome = HermesBackupVerdict.judge(output: result.output, exitCode: result.exitCode)
+            let outcome = HermesBackupVerdict.judge(
+                output: result.output, exitCode: result.exitCode, capabilities: capabilities
+            )
             let zipPath = Self.extractZipPath(from: result.output)
             await MainActor.run {
                 self.backupInProgress = false

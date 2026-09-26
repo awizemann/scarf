@@ -416,7 +416,7 @@ struct DuplicateJobNameP46Tests {
             id: "j1", name: "Nightly", prompt: "p",
             schedule: CronSchedule(kind: "interval"),
             enabled: true, state: "completed")
-        let copy = job.duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"])
+        let copy = job.duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"], capabilities: .empty)
         #expect(copy.name == "Nightly (copy)")
     }
 

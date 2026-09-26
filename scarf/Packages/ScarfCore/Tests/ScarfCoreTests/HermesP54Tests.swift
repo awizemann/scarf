@@ -225,7 +225,7 @@ enum P54Fixtures {
 struct HermesBackupVerdictP54Tests {
 
     @Test func aCompleteBackupConfirms() {
-        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupComplete, exitCode: 0)
+        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupComplete, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         #expect(outcome.confidence == .confirmed)
         #expect(outcome.warning == nil)
@@ -234,7 +234,7 @@ struct HermesBackupVerdictP54Tests {
     /// The MED finding: exit 0, an archive on disk, and files missing from
     /// it. A success — the zip is real — but never a silent one.
     @Test func anIncompleteBackupSucceedsWithTheWarningsLine() throws {
-        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupIncomplete, exitCode: 0)
+        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupIncomplete, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         let warning = try #require(outcome.warning)
         #expect(warning.contains(HermesBackupVerdict.incompleteNote))
@@ -249,25 +249,25 @@ struct HermesBackupVerdictP54Tests {
         #expect(!HermesBackupVerdict.incompletePrefix.hasPrefix(HermesBackupVerdict.successPrefix))
         #expect(!HermesBackupVerdict.successPrefix.hasPrefix(HermesBackupVerdict.incompletePrefix))
         // And the complete fixture must not trip the incomplete branch.
-        let complete = HermesBackupVerdict.judge(output: P54Fixtures.backupComplete, exitCode: 0)
+        let complete = HermesBackupVerdict.judge(output: P54Fixtures.backupComplete, exitCode: 0, capabilities: .empty)
         #expect(complete.warning == nil)
     }
 
     @Test func anEmptyScanIsASuccessWithANeutralNote() {
-        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupNothing, exitCode: 0)
+        let outcome = HermesBackupVerdict.judge(output: P54Fixtures.backupNothing, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         #expect(outcome.warning == HermesBackupVerdict.nothingToBackUpNote)
     }
 
     /// C5's third state: exit 0 with none of the three markers.
     @Test func silenceIsUnconfirmedNotSuccess() {
-        let outcome = HermesBackupVerdict.judge(output: "", exitCode: 0)
+        let outcome = HermesBackupVerdict.judge(output: "", exitCode: 0, capabilities: .empty)
         #expect(!outcome.succeeded)
         #expect(outcome.confidence == .unconfirmed)
     }
 
     @Test func aNonZeroExitIsAFailure() {
-        let outcome = HermesBackupVerdict.judge(output: "Traceback...\nOSError: disk full", exitCode: 1)
+        let outcome = HermesBackupVerdict.judge(output: "Traceback...\nOSError: disk full", exitCode: 1, capabilities: .empty)
         #expect(!outcome.succeeded)
         #expect(outcome.confidence == .failed)
         #expect(outcome.detail == "OSError: disk full")

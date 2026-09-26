@@ -189,7 +189,8 @@ struct CronListView: View {
             CronEditorView(
                 initial: job.duplicatedAsNewJob(
                         id: "job_\(UUID().uuidString.prefix(8))",
-                        existingNames: vm.jobs.map(\.name)),
+                        existingNames: vm.jobs.map(\.name),
+                        capabilities: capabilitiesStore?.capabilities ?? .empty),
                 title: "Duplicate cron job",
                 // A duplicate's seed is `enabled: true, state: "scheduled"`
                 // — a fresh record refuses nothing.
@@ -280,6 +281,10 @@ struct CronEditorView: View {
     let title: LocalizedStringResource
     let onSave: (HermesCronJob) -> Void
     @Environment(\.dismiss) private var dismiss
+    /// v0.21.4 model-pin semantics only (`hasCronModelPin`): the Model
+    /// field's hint, and dropping `provider` with an emptied model.
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     // Form-backing state.
     @State private var id: String
@@ -404,7 +409,15 @@ struct CronEditorView: View {
                 }
 
                 Section("Optional") {
-                    TextField("Model (leave blank to use default)", text: $model)
+                    // v0.21.4+: an empty model means "follow the main
+                    // model at each run" (the job is unpinned); older hosts
+                    // keep the wording they always had.
+                    TextField(
+                        capabilities.hasCronModelPin
+                            ? LocalizedStringKey("Model (blank = follow the main model)")
+                            : LocalizedStringKey("Model (leave blank to use default)"),
+                        text: $model
+                    )
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     TextField("Skills (comma-separated)", text: $skills)
@@ -587,9 +600,15 @@ struct CronEditorView: View {
         // unconditionally, so re-timing a live job from the iOS editor left
         // the old label in front of the new time.
         let scheduleMoved = existing?.schedule != schedule
-        let carriedExtra = scheduleMoved
+        let scheduleExtra = scheduleMoved
             ? HermesCronJob.droppingDerivedScheduleDisplay(existing?.extra ?? [:])
             : (existing?.extra ?? [:])
+        // v0.21.4+: emptying the model is an UNPIN, and Hermes's unpin clears
+        // `provider` with it (see `releasingModelPin`).
+        let carriedExtra = HermesCronJob.releasingModelPin(
+            scheduleExtra, previousModel: existing?.model, newModel: emptyToNil(model),
+            capabilities: capabilities
+        )
         return HermesCronJob(
             id: id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),

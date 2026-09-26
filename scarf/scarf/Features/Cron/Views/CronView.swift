@@ -97,6 +97,11 @@ struct CronView: View {
     private var hasCronFailureDeliver: Bool {
         capabilitiesStore?.capabilities.hasCronFailureDeliver ?? false
     }
+    /// v0.21.4 `cron create --pin` / `cron edit --pin | --unpin`. Same
+    /// hide-AND-strip shape as `hasCronFailureDeliver`.
+    private var hasCronModelPin: Bool {
+        capabilitiesStore?.capabilities.hasCronModelPin ?? false
+    }
     /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
     /// diagnostics. Field-presence decides what renders; this only decides
     /// whether to look, so a pre-v0.21.1 host is byte-identical to today.
@@ -178,7 +183,7 @@ struct CronView: View {
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
-            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
+            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
                 viewModel.createJob(
                     schedule: form.schedule,
                     prompt: form.prompt,
@@ -193,7 +198,9 @@ struct CronView: View {
                     // hand-edited jobs.json round-tripped through edit-mode)
                     // can't sneak `--no-agent` into a CLI that doesn't grok it.
                     noAgent: hasCronNoAgent ? form.noAgent : false,
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : "",
+                    // v0.21.4 `--pin`; never on an older host or a no-agent job.
+                    pinModel: hasCronModelPin && !form.noAgent && form.pinModel
                 )
                 viewModel.showCreateSheet = false
             } onCancel: {
@@ -201,7 +208,7 @@ struct CronView: View {
             }
         }
         .sheet(item: $viewModel.editingJob) { job in
-            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
+            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
                 viewModel.updateJob(
                     id: job.id,
                     // Untouched schedule → omit `--schedule` entirely. Re-sending
@@ -231,7 +238,12 @@ struct CronView: View {
                     noAgent: hasCronNoAgent ? form.noAgent : nil,
                     // `""` on edit is Hermes's clear-the-override gesture, so an
                     // emptied field is forwarded; `nil` (older host) omits it.
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : nil
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : nil,
+                    // v0.21.4 `--pin`/`--unpin`, sent only on a change (see
+                    // `modelPinEditArguments`); `nil` on an older host or a
+                    // no-agent job, where the toggle is hidden.
+                    wasModelPinned: job.isModelPinned,
+                    pinModel: hasCronModelPin && !form.noAgent ? form.pinModel : nil
                 )
                 viewModel.editingJob = nil
             } onCancel: {
@@ -246,7 +258,7 @@ struct CronView: View {
         // `rearm_oneshot` refuses anything but `once` (`:2065-2066`), but
         // nothing guards a create.
         .sheet(item: $viewModel.duplicatingJob) { job in
-            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
+            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
                 viewModel.createJob(
                     schedule: form.schedule,
                     prompt: form.prompt,
@@ -257,7 +269,9 @@ struct CronView: View {
                     repeatCount: form.repeatCount,
                     workdir: hasCronWorkdir ? form.workdir : "",
                     noAgent: hasCronNoAgent ? form.noAgent : false,
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : "",
+                    // v0.21.4 `--pin`; never on an older host or a no-agent job.
+                    pinModel: hasCronModelPin && !form.noAgent && form.pinModel
                 )
                 viewModel.duplicatingJob = nil
             } onCancel: {
@@ -1113,6 +1127,10 @@ struct CronView: View {
         case "detected": return ScarfColor.danger
         case "alerted": return ScarfColor.warning
         case "closed": return ScarfColor.success
+        // v0.21.4: recovered on its own (`cron/incidents.py:32` @
+        // v2026.9.21) — green, as Hermes's own `_INCIDENT_STATE_COLORS`
+        // prints it (`hermes_cli/cron.py:325`).
+        case "resolved": return ScarfColor.success
         default: return ScarfColor.foregroundFaint
         }
     }
@@ -1434,6 +1452,9 @@ struct CronJobEditor: View {
         /// v0.13+ `--no-agent` flag — script-only watchdog mode. Hermes
         /// runs the pre-run script and skips the AI turn.
         var noAgent: Bool = false
+        /// v0.21.4 model pin (`--pin` / `--unpin`). Seeded from
+        /// `HermesCronJob.isModelPinned` on edit; `false` on create/duplicate.
+        var pinModel: Bool = false
     }
 
     let mode: Mode
@@ -1464,6 +1485,11 @@ struct CronJobEditor: View {
     /// the whole row: `--failure-deliver` is an unknown flag to older
     /// argparse and would fail the entire create/edit.
     var supportsFailureDeliver: Bool = false
+    /// Pass `true` on v0.21.4+ hosts (`hasCronModelPin`). Hides the pin
+    /// toggle otherwise: `--pin` / `--unpin` are unknown to older argparse,
+    /// and before v0.21.4 an unpinned job was already frozen on its
+    /// create-time snapshot, so there was nothing to pin.
+    var supportsModelPin: Bool = false
     let onSave: (FormState) -> Void
     let onCancel: () -> Void
 
@@ -1564,6 +1590,16 @@ struct CronJobEditor: View {
                         .foregroundStyle(ScarfColor.foregroundMuted)
                         .padding(.leading, ScarfSpace.s3)
                 }
+            }
+            if supportsModelPin && !form.noAgent {
+                Toggle(modelPinToggleTitle, isOn: $form.pinModel)
+                    .scarfStyle(.body)
+                    .tint(ScarfColor.accent)
+                    .accessibilityIdentifier("cron.editor.pinModel")
+                Text(modelPinCaption)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // Rows = the host's roster PLUS any skill this job already
             // carries that the roster doesn't list (an uninstalled skill, or
@@ -1702,8 +1738,39 @@ struct CronJobEditor: View {
                 form.script = job.preRunScript ?? ""
                 form.workdir = job.workdir ?? ""
                 form.noAgent = job.noAgent ?? false
+                // Edit only: `--pin` on a duplicate would lock TODAY's main
+                // model, not the source's pin, so a duplicate starts unpinned
+                // (its gaps line already names the model it can't carry).
+                if case .edit = mode { form.pinModel = job.isModelPinned }
             }
         }
+    }
+
+    /// The job's current pin, when editing a pinned job — the model the
+    /// toggle would release.
+    private var seededPinnedModel: String? {
+        guard case .edit(let job) = mode, job.isModelPinned else { return nil }
+        return job.model?.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var modelPinToggleTitle: String {
+        if let model = seededPinnedModel, form.pinModel {
+            return String(localized: "Pinned to \(model)")
+        }
+        return String(localized: "Pin to the current main model")
+    }
+
+    /// v0.21.4 semantics (`hermes_cli/subcommands/cron.py:66-72`, `:134-140`
+    /// @ v2026.9.21): unpinned jobs run on the main model at FIRE time.
+    private var modelPinCaption: String {
+        if seededPinnedModel != nil {
+            return form.pinModel
+                ? String(localized: "This job keeps its own model when `hermes model` changes. Turn off to release the pin — the job then follows the main model at each run.")
+                : String(localized: "On save the pin is released: the job follows the main model (`hermes model`) at each run.")
+        }
+        return form.pinModel
+            ? String(localized: "On save the main model Hermes uses right now (and its provider) is locked onto this job, so later `hermes model` changes never touch it.")
+            : String(localized: "Off: the job runs on whatever `hermes model` is set to when it fires.")
     }
 
     /// Free-form field; the placeholder is the only capability-driven
