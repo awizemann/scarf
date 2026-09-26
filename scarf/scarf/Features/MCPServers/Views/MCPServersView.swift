@@ -45,6 +45,20 @@ struct MCPServersView: View {
             }
         }
         .onAppear { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
+        // The capability store probes `hermes --version` asynchronously
+        // (HealthView / CronView's same gotcha), so `onAppear` routinely
+        // fires before the first detection lands and `load` snapshots
+        // `.empty` — every boolish MCP field (`enabled`, `tools.resources`,
+        // `supports_parallel_tool_calls`, `lazy`, …) then reads by the
+        // UNGATED rule forever, because `hasLoaded` latches and a plain
+        // `load()` no-ops (see `MCPServersViewModel.load`'s doc comment). A
+        // host upgrade re-probed mid-session hits the same staleness the
+        // other way — the parse stays pinned to whatever capabilities were
+        // in effect when the pane last loaded. `force: true` re-parses with
+        // whatever capabilities just landed either way.
+        .onChange(of: capabilitiesStore?.capabilities) { _, newValue in
+            viewModel.load(force: true, capabilities: newValue ?? .empty)
+        }
         .sheet(isPresented: $viewModel.showPresetPicker) {
             MCPServerPresetPickerView(viewModel: viewModel)
         }
@@ -292,6 +306,11 @@ struct MCPServersView: View {
                 Image(systemName: Self.rowGlyph(for: result.confidence))
                     .foregroundStyle(Self.rowTint(for: result.confidence))
                     .help(Self.rowHelp(for: result))
+                    // `.help` is a hover tooltip, not a VoiceOver label —
+                    // without this, the glyph reads as its raw SF Symbol
+                    // name ("checkmark circle fill") instead of what it
+                    // means for THIS server's test result.
+                    .accessibilityLabel(Self.rowHelp(for: result))
             }
         }
     }
