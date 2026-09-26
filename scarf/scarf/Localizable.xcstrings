@@ -130400,6 +130400,891 @@
           }
         }
       }
+    },
+    "Applies to every platform's decline reply, not just WhatsApp's. Empty uses Hermes's own default reply." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gilt für die Ablehnungsantwort jeder Plattform, nicht nur für WhatsApp. Leer verwendet Hermes' eigene Standardantwort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se aplica a la respuesta de rechazo de todas las plataformas, no solo a la de WhatsApp. Si se deja vacío, se usa la respuesta predeterminada de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S'applique à la réponse de refus de chaque plateforme, pas seulement à celle de WhatsApp. Si vide, la réponse par défaut de Hermes est utilisée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WhatsApp だけでなく、すべてのプラットフォームの辞退返信に適用されます。空欄の場合は Hermes 自身の既定の返信が使われます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplica-se à resposta de recusa de todas as plataformas, não apenas do WhatsApp. Se vazio, usa a resposta padrão do próprio Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于每个平台的拒绝回复，不仅仅是 WhatsApp。留空则使用 Hermes 自身的默认回复。"
+          }
+        }
+      }
+    },
+    "Audit failed (exit 1, no report parsed). %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audit fehlgeschlagen (Exit 1, kein Bericht geparst). %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El análisis falló (salida 1, no se analizó ningún informe). %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de l'audit (code 1, aucun rapport analysé). %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "監査に失敗しました（終了コード 1、レポートを解析できませんでした）。%@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A auditoria falhou (saída 1, nenhum relatório analisado). %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "审计失败（退出码 1，未解析到报告）。%@"
+          }
+        }
+      }
+    },
+    "Couldn't load sessions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sitzungen konnten nicht geladen werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudieron cargar las sesiones"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de charger les sessions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションを読み込めませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível carregar as sessões"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载会话"
+          }
+        }
+      }
+    },
+    "Decline Message (all platforms)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ablehnungsnachricht (alle Plattformen)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mensaje de rechazo (todas las plataformas)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message de refus (toutes les plateformes)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "辞退メッセージ（すべてのプラットフォーム）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mensagem de recusa (todas as plataformas)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝消息（所有平台）"
+          }
+        }
+      }
+    },
+    "Didn't run: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht ausgeführt: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se ejecutó: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Non exécuté : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行されませんでした: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não executado: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未运行:%@"
+          }
+        }
+      }
+    },
+    "Excluded providers are skipped by Hermes's own dashboard, TUI and CLI picker (matched case-insensitively) — Scarf's model picker still lists them." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgeschlossene Anbieter werden von Hermes' eigenem Dashboard, TUI und CLI-Auswahlmenü übersprungen (ohne Beachtung der Groß-/Kleinschreibung) — Scarfs Modellauswahl listet sie weiterhin auf."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los proveedores excluidos se omiten en el propio panel, TUI y selector de CLI de Hermes (comparación sin distinguir mayúsculas y minúsculas); el selector de modelos de Scarf los sigue mostrando."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les fournisseurs exclus sont ignorés par le tableau de bord, le TUI et le sélecteur CLI propres à Hermes (comparaison insensible à la casse) — le sélecteur de modèles de Scarf continue de les répertorier."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除外されたプロバイダーは、Hermes 自身のダッシュボード、TUI、CLI ピッカーではスキップされます（大文字小文字を区別せずに一致）。Scarf のモデルピッカーには引き続き表示されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Os provedores excluídos são ignorados pelo próprio painel, TUI e seletor de CLI do Hermes (comparação sem diferenciar maiúsculas/minúsculas) — o seletor de modelos do Scarf ainda os lista."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "被排除的提供方会被 Hermes 自身的仪表盘、TUI 和 CLI 选择器跳过（不区分大小写匹配）——Scarf 的模型选择器仍会列出它们。"
+          }
+        }
+      }
+    },
+    "Hermes refused to optimize: Scarf's own read was in progress — retry." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat die Optimierung verweigert: Scarf war gerade selbst am Lesen — erneut versuchen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes rechazó optimizar: la propia lectura de Scarf estaba en curso; vuelve a intentarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes a refusé d'optimiser : la lecture de Scarf elle-même était en cours — réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes は最適化を拒否しました。Scarf 自身の読み取りが進行中でした — 再試行してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes recusou otimizar: a própria leitura do Scarf estava em andamento — tente novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 拒绝执行优化：Scarf 自身的读取操作正在进行中——请重试。"
+          }
+        }
+      }
+    },
+    "No result after %lld minutes, so Scarf stopped waiting. Check the job's last run before running it again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach %lld Minuten kein Ergebnis, daher hat Scarf das Warten beendet. Prüfe den letzten Lauf des Jobs, bevor du ihn erneut ausführst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin resultado tras %lld minutos, así que Scarf dejó de esperar. Revisa la última ejecución del trabajo antes de volver a ejecutarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun résultat après %lld minutes, Scarf a donc arrêté d'attendre. Vérifiez la dernière exécution de la tâche avant de la relancer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分経っても結果がなかったため、Scarf は待機を停止しました。再実行する前に、このジョブの最終実行結果を確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem resultado após %lld minutos, então o Scarf parou de esperar. Verifique a última execução do job antes de executá-lo novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待 %lld 分钟后仍无结果，Scarf 已停止等待。请在再次运行该任务前检查其上次运行情况。"
+          }
+        }
+      }
+    },
+    "Profiles not served (their bots stay silent): %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht bediente Profile (ihre Bots bleiben stumm): %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfiles no atendidos (sus bots permanecen en silencio): %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profils non desservis (leurs bots restent silencieux) : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配信されていないプロファイル（そのボットは応答しません）: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfis não atendidos (seus bots ficam em silêncio): %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未提供服务的配置文件（其机器人将保持静默）：%@"
+          }
+        }
+      }
+    },
+    "Run finished — dashboard will update with its output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lauf abgeschlossen — das Dashboard wird mit dessen Ausgabe aktualisiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ejecución finalizada; el panel se actualizará con su resultado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exécution terminée — le tableau de bord sera mis à jour avec sa sortie"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "実行が完了しました — ダッシュボードにはその出力が反映されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Execução concluída — o painel será atualizado com sua saída"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行已完成——仪表盘将随其输出更新"
+          }
+        }
+      }
+    },
+    "Saved, but the model wasn't pinned — no main model is configured. Set one in Settings, then pin again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gespeichert, aber das Modell wurde nicht angeheftet — es ist kein Hauptmodell konfiguriert. Lege eines in den Einstellungen fest und hefte es dann erneut an."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardado, pero el modelo no se fijó: no hay un modelo principal configurado. Configura uno en Ajustes y vuelve a fijarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistré, mais le modèle n'a pas été épinglé — aucun modèle principal n'est configuré. Définissez-en un dans Réglages, puis épinglez-le à nouveau."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存しましたが、モデルはピン留めされていません — メインモデルが設定されていません。設定でメインモデルを設定してから、もう一度ピン留めしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvo, mas o modelo não foi fixado — nenhum modelo principal está configurado. Defina um em Configurações e fixe novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存，但模型未置顶——尚未配置主模型。请在设置中设置一个主模型，然后重新置顶。"
+          }
+        }
+      }
+    },
+    "Search failed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suche fehlgeschlagen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La búsqueda falló"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la recherche"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検索に失敗しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A pesquisa falhou"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索失败"
+          }
+        }
+      }
+    },
+    "This gateway is standalone: it serves only its own profile." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Gateway ist eigenständig: Es bedient nur sein eigenes Profil."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este gateway es independiente: solo atiende su propio perfil."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette gateway est autonome : elle ne dessert que son propre profil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Gateway はスタンドアロンです。自身のプロファイルのみを提供します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este gateway é independente: atende apenas ao próprio perfil."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此网关为独立模式：仅为其自身的配置文件提供服务。"
+          }
+        }
+      }
+    },
+    "Why: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warum: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Por qué: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pourquoi : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "理由: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Por quê: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原因：%@"
+          }
+        }
+      }
+    },
+    "sqlite3 exited %d with no output" : {
+      "comment" : "ScarfCore HermesDataService.queryFailure: hand-added, no Xcode extractor sees ScarfCore string literals. %d is the sqlite3/libsqlite3 process exit code.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 wurde mit Exit %d beendet, ohne Ausgabe"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 terminó con salida %d sin ninguna salida de datos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 s'est terminé avec le code %d, sans sortie"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 は出力なしで終了コード %d で終了しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 saiu com código %d sem nenhuma saída"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 以退出码 %d 退出，且没有任何输出"
+          }
+        }
+      }
+    },
+    "The Hermes state database is not open." : {
+      "comment" : "ScarfCore HermesDataService.queryFailure: hand-added (see above).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Hermes-Statusdatenbank ist nicht geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La base de datos de estado de Hermes no está abierta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La base de données d'état de Hermes n'est pas ouverte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の状態データベースが開かれていません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O banco de dados de estado do Hermes não está aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 状态数据库未打开。"
+          }
+        }
+      }
+    },
+    "Couldn't parse sqlite3's output." : {
+      "comment" : "ScarfCore HermesDataService.queryFailure: hand-added (see above).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Ausgabe von sqlite3 konnte nicht geparst werden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo analizar la salida de sqlite3."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d'analyser la sortie de sqlite3."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 の出力を解析できませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível analisar a saída do sqlite3."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法解析 sqlite3 的输出。"
+          }
+        }
+      }
+    },
+    "Check failed (exit %d)" : {
+      "comment" : "ScarfCore SkillsViewModel.failCheckForUpdates: hand-added, no Xcode extractor sees ScarfCore string literals. %d is hermes skills check's exit code.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prüfung fehlgeschlagen (Exit %d)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La comprobación falló (salida %d)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la vérification (code %d)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認に失敗しました（終了コード %d）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A verificação falhou (saída %d)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查失败（退出码 %d）"
+          }
+        }
+      }
+    },
+    "Check failed (exit %d): %@" : {
+      "comment" : "ScarfCore SkillsViewModel.failCheckForUpdates: hand-added (see above). %@ is the last significant output lines.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prüfung fehlgeschlagen (Exit %d): %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La comprobación falló (salida %d): %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Échec de la vérification (code %d) : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認に失敗しました（終了コード %d）: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A verificação falhou (saída %d): %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查失败（退出码 %d）:%@"
+          }
+        }
+      }
+    },
+    "Doctor timed out" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor hat das Zeitlimit überschritten"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor superó el tiempo de espera"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor a expiré"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor がタイムアウトしました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Doctor expirou"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor 超时"
+          }
+        }
+      }
+    },
+    "Doctor did not complete" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor wurde nicht abgeschlossen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor no se completó"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor ne s'est pas terminé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor が完了しませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Doctor não foi concluído"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor 未完成"
+          }
+        }
+      }
+    },
+    "decline (not supported by this Hermes — behaves as pair)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline (von diesem Hermes nicht unterstützt — verhält sich wie pair)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline (no compatible con este Hermes; se comporta como pair)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline (non pris en charge par ce Hermes — se comporte comme pair)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline（この Hermes ではサポートされていません — pair として動作します）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline (não suportado por este Hermes — comporta-se como pair)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "decline（此 Hermes 不支持——表现为 pair）"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

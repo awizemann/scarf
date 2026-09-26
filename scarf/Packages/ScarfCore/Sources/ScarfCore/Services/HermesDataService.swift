@@ -230,13 +230,13 @@ public actor HermesDataService {
         switch error as? BackendError {
         case .sqlite(let exitCode, let stderr)?:
             let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            raw = text.isEmpty ? "sqlite3 exited \(exitCode) with no output" : text
+            raw = text.isEmpty ? String(localized: "sqlite3 exited \(exitCode) with no output") : text
         case .transport(let reason)?:
             raw = reason
         case .notOpen?:
-            raw = "The Hermes state database is not open."
+            raw = String(localized: "The Hermes state database is not open.")
         case .parseFailure?:
-            raw = "Couldn't parse sqlite3's output."
+            raw = String(localized: "Couldn't parse sqlite3's output.")
         case nil:
             return QueryFailure(message: humanize(error))
         }

@@ -255,6 +255,11 @@ struct LocalizationCatalogTests {
         "Agent is thinking… · %@",
         "Model (blank = follow the main model)",
         "sqlite3 not installed on server",
+        // P8 Final (t-12f511ed item a): the Dashboard's failed-sessions-load
+        // banner (`Scarf iOS/Dashboard/DashboardView.swift`). Its only call
+        // site is under `Scarf iOS`; "Retry" already had a Mac call site
+        // before this sweep, so it needed no entry here.
+        "Couldn't load sessions",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
