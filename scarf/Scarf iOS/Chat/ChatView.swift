@@ -2365,7 +2365,10 @@ final class ChatController {
             // macOS controller by synthesizing it from the resolved
             // `session/prompt` result so the shared VM finalizes the
             // streaming message and clears its working state.
-            guard !othersStillRunning() else { return }
+            // A turn resuming after its client was replaced (New chat, a
+            // resume, a reconnect) belongs to a transcript that is gone —
+            // mirror the Mac `acpClient === client` guard.
+            guard self.client === client, !othersStillRunning() else { return }
             vm.handleACPEvent(
                 .promptComplete(sessionId: sessionId, response: result)
             )
@@ -2378,13 +2381,36 @@ final class ChatController {
             // the user bubble we already appended to the VM stays
             // visible as an orphan, but the agent never saw it so
             // letting the user re-send is the only correct recovery.
-            if case .reconnecting = state {
+            // Checked BEFORE the client guard below: the pause cleared
+            // `client` too. Keyed to this turn's session so a stale turn
+            // can't write its draft into a different chat.
+            if case .reconnecting = state, vm.sessionId == sessionId {
                 if let text = restoreDraftText, !text.isEmpty, draft.isEmpty {
                     draft = text
                     scheduleDraftSave()
                 }
                 vm.transientHint = "Message not sent — tap Send again after reconnecting."
                 scheduleTransientHintClear(snapshot: vm.transientHint)
+                return
+            }
+            // A turn of a torn-down client: `stop()` (New chat, resume,
+            // project start) resumes its held prompt with
+            // `CancellationError` after the chat moved on, so its
+            // synthesized failure would land on the fresh transcript.
+            guard self.client === client else { return }
+            // Cancelled with its client still current: nobody failed, so
+            // no banner or failed state — just end the working state.
+            if error is CancellationError {
+                guard !othersStillRunning() else { return }
+                vm.handleACPEvent(
+                    .promptComplete(sessionId: sessionId, response: ACPPromptResult(
+                        stopReason: "cancelled",
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        thoughtTokens: 0,
+                        cachedReadTokens: 0
+                    ))
+                )
                 return
             }
             // The event task may already have surfaced a
@@ -2736,6 +2762,12 @@ final class ChatController {
     /// agent wrote during the outage become visible.
     private func attemptReconnect(sessionId: String) {
         reconnectTask?.cancel()
+        // Currency token for the awaits below: whatever client this ladder
+        // is replacing (nil after a disconnect or background pause; the
+        // still-installed one when a `.failed` / `.offline` chat retries on
+        // a reachability edge). Another client appearing means a start path
+        // took over.
+        let replacing = client
         reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
@@ -2774,6 +2806,17 @@ final class ChatController {
                     // resume must never come back here.
                     let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
 
+                    // The awaits above can outlive this ladder: "New
+                    // chat", a resume or a project start (`stop()` cancels
+                    // this task; the start paths install their own
+                    // client) can't interrupt `start()` / `loadSession`.
+                    // Installing now would put the dead session's client
+                    // and transcript over the chat the user moved to.
+                    guard !Task.isCancelled, self.client === replacing else {
+                        await client.stop()
+                        return
+                    }
+
                     // Wire up the new client BEFORE merging messages
                     // so any streaming chunks that arrive during the
                     // reconcile land in the right place.
@@ -2798,6 +2841,12 @@ final class ChatController {
                     // case visible to the user.
                     let countBefore = vm.messages.count
                     await vm.reconcileWithDB(sessionId: resolvedSessionId)
+                    // After the reconcile: a teardown in that window
+                    // (`stop()`, a background pause) already stopped this
+                    // installed client and cleared it. A bare cancel from a
+                    // reachability drop leaves it installed — finish wiring
+                    // it, as before.
+                    guard self.client === client else { return }
                     let added = vm.messages.count - countBefore
                     if added > 0 {
                         vm.transientHint = "Resynced \(added) new message\(added == 1 ? "" : "s")."
@@ -3198,6 +3247,11 @@ struct ChatPermissionPresenter: ViewModifier {
 /// the pending permission. Two permissions for the same request-id
 /// are treated as identical (rare — would only happen if the remote
 /// sends a duplicate).
+private struct PermissionWrapper: Identifiable {
+    let value: RichChatViewModel.PendingPermission
+    var id: Int { value.requestId }
+}
+
 /// "Agent is thinking… · 0:12" — the in-flight turn indicator with a
 /// live elapsed clock (#145, parity with the Mac `WorkingElapsedIndicator`).
 /// The per-second tick is confined to this view's `TimelineView`, so the
@@ -3240,11 +3294,6 @@ private struct AgentThinkingRow: View {
             .units(allowed: [.hours, .minutes, .seconds], width: .wide)
         ))
     }
-}
-
-private struct PermissionWrapper: Identifiable {
-    let value: RichChatViewModel.PendingPermission
-    var id: Int { value.requestId }
 }
 
 // MARK: - Message bubble

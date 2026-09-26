@@ -124,9 +124,12 @@ extension ChatController: VoiceTurnHost {
     func cancelActiveVoiceTurn() async {
         guard let client = activeClient, let sessionId = vm.sessionId, !sessionId.isEmpty else { return }
         guard !isBusyWithNonVoiceTurn, isVoiceTurnBusy else { return }
-        // The cancel RPC has its own 60 s watchdog in ACPClient; don't await
-        // it — the turn is over when its `sendPrompt` returns, not when the
-        // cancel is acknowledged.
+        // A superseded request, not a failed one: its `cancelled` return
+        // ends the turn without a failure bubble.
+        vm.noteTurnCancelRequested()
+        // The cancel is a notification with no reply; don't await it — the
+        // turn is over when its `sendPrompt` returns (Hermes answers it
+        // with `stopReason: "cancelled"`), not when the cancel is sent.
         Task { try? await client.cancel(sessionId: sessionId) }
         await waitForPromptsToReturn(timeout: voiceCancelTimeout)
     }
