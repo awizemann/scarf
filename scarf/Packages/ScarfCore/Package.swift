@@ -35,8 +35,18 @@ let package = Package(
         ),
     ],
     targets: [
+        // One non-variadic C wrapper over `sqlite3_db_config`, which Swift
+        // cannot call (C variadics are not imported). `LocalSQLiteBackend`
+        // needs it to set SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE on its
+        // query_only fallback handle (charter C3).
+        .target(
+            name: "CSQLiteShim",
+            path: "Sources/CSQLiteShim",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
         .target(
             name: "ScarfCore",
+            dependencies: ["CSQLiteShim"],
             path: "Sources/ScarfCore",
             // Live Voice's media page, served to a WKWebView from the
             // `scarf-voice://` scheme (WebViewVoiceMediaBridge).
