@@ -2164,6 +2164,23 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// before anything is billed.
     public var hasGPTLiveVoice: Bool { isV0213OrLater }
 
+    // MARK: v0.21.4 (v2026.9.21) flags
+    //
+    // Verified at the tag: `git -C ~/.hermes/hermes-agent show
+    // v2026.9.21:pyproject.toml` reads `version = "0.21.4"`. No feature flag
+    // is added here yet — this group exists so the phases that add v0.21.4
+    // surfaces (see `documents/plans/2026-09-26-hermes-v0-21-5-release-plan.md`)
+    // have a home; add each new flag as a contiguous block at the END of this
+    // group, with a doc comment citing the Hermes file:line@tag its floor was
+    // verified against, matching the style of every group above.
+
+    // MARK: v0.21.5 (v2026.9.24) flags
+    //
+    // Verified at the tag: `git -C ~/.hermes/hermes-agent show
+    // v2026.9.24:pyproject.toml` reads `version = "0.21.5"`. Same as the
+    // v0.21.4 group above — no feature flag here yet; later phases append
+    // their flags as a contiguous block at the END of this group.
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -2321,6 +2338,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for the v0.21.3 group (GPT-Live voice), same rationale as
     /// `isV0212OrLater`.
     public var isV0213OrLater: Bool { atLeastSemver(0, 21, 3) }
+
+    /// Whether the connected host is on v0.21.4 or newer. Patch-level floor
+    /// for the v0.21.4 group, same rationale as `isV0213OrLater`: a v0.21.3
+    /// host satisfies every minor-level check and lacks whatever floors here.
+    public var isV0214OrLater: Bool { atLeastSemver(0, 21, 4) }
+
+    /// Whether the connected host is on v0.21.5 or newer. Patch-level floor
+    /// for the v0.21.5 group, same rationale as `isV0214OrLater`.
+    public var isV0215OrLater: Bool { atLeastSemver(0, 21, 5) }
 
     /// Public form of the private floor test, for tables that carry their
     /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than
