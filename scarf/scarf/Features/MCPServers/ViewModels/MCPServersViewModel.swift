@@ -104,11 +104,21 @@ final class MCPServersViewModel {
     /// (t-aud24).
     @ObservationIgnored private var hasLoaded = false
 
-    func load(force: Bool = false, capabilities: HermesCapabilities = .empty) {
+    /// The host capabilities the last view-driven `load` was given. The
+    /// post-mutation reloads (`finishEdit`, delete, toggle, add, …) call
+    /// `load(force: true)` without them, and reading with `.empty` there
+    /// re-parsed `enabled: 0` as enabled on a v0.21.5 host the moment any
+    /// edit landed (`HermesFileService.boolishOptional`).
+    @ObservationIgnored private var capabilities: HermesCapabilities = .empty
+
+    /// `capabilities: nil` reuses the last ones passed in (see above).
+    func load(force: Bool = false, capabilities: HermesCapabilities? = nil) {
+        if let capabilities { self.capabilities = capabilities }
         if !force, hasLoaded || isLoading { return }
         hasLoaded = true
         isLoading = true
         let svc = fileService
+        let capabilities = self.capabilities
         Task.detached { [weak self] in
             // loadMCPServers reads config.yaml + lists mcp-tokens — both
             // are sync transport calls that block on remote ssh round-trips.

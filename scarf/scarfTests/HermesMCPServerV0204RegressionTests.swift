@@ -281,6 +281,85 @@ struct HermesMCPServerV0204RegressionTests {
         #expect(HermesFileService.boolish("\"0\"", default: true, capabilities: newHost) == false)
     }
 
+    /// The v0.21.5 numeric truthiness lives in `_parse_boolish` ITSELF, so it
+    /// reaches every caller, not only `enabled`: `tools.resources` /
+    /// `tools.prompts` (`tools/mcp_tool_registration.py:156` @ v2026.9.24)
+    /// and `supports_parallel_tool_calls` (`tools/mcp_tool_discovery.py:347`).
+    /// Driven through `loadMCPServers(capabilities:)` so it fails if any one
+    /// of those parse sites stops threading `capabilities`; the old-host half
+    /// pins that a pre-0.21.5 host reads exactly as before (C1).
+    @Test func numericTruthinessReachesEveryBoolishKeyAtV0215() throws {
+        let yaml = """
+        mcp_servers:
+          numeric:
+            command: npx
+            enabled: 0
+            supports_parallel_tool_calls: 1
+            tools:
+              resources: 0
+              prompts: 0
+        """
+        let home = try TempHermesHome()
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let service = HermesFileService(context: home.context)
+
+        let newServer = try #require(service.loadMCPServers(
+            capabilities: HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)")
+        ).first)
+        #expect(newServer.enabled == false)
+        #expect(newServer.resourcesEnabled == false)
+        #expect(newServer.promptsEnabled == false)
+        #expect(newServer.supportsParallelToolCalls == true)
+
+        let oldServer = try #require(service.loadMCPServers(
+            capabilities: HermesCapabilities.parse("Hermes Agent v0.21.4 (2026.9.21)")
+        ).first)
+        #expect(oldServer.enabled == true)
+        #expect(oldServer.resourcesEnabled == true)
+        #expect(oldServer.promptsEnabled == true)
+        #expect(oldServer.supportsParallelToolCalls == nil)
+    }
+
+}
+
+/// The MCP list's post-mutation reloads (`finishEdit`, delete, toggle, add)
+/// call `load(force: true)` with no capabilities. Before the VM stored them,
+/// that reload parsed with `.empty`, so on a v0.21.5 host an `enabled: 0`
+/// server read as disabled on first load and flipped back to enabled the
+/// moment any edit landed. Exercises the real VM reload path.
+@MainActor
+struct MCPServersViewModelCapabilitiesTests {
+
+    private func waitUntilLoaded(_ vm: MCPServersViewModel) async throws {
+        for _ in 0..<500 where vm.isLoading {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.isLoading == false)
+    }
+
+    @Test func postMutationReloadKeepsTheHostCapabilities() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        try """
+        mcp_servers:
+          numeric:
+            command: npx
+            enabled: 0
+        """.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+
+        let vm = MCPServersViewModel(context: home.context)
+        vm.load(capabilities: HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)"))
+        try await waitUntilLoaded(vm)
+        #expect(vm.servers.first?.enabled == false)
+
+        // Blank the list so the assertion below can only pass on a reload
+        // that actually re-read the file.
+        vm.servers = []
+        vm.finishEdit(reload: true)
+        try await waitUntilLoaded(vm)
+        #expect(vm.servers.count == 1)
+        #expect(vm.servers.first?.enabled == false)
+    }
 }
 
 /// Behavioral cover for the `identity_header` / `strict_redirect_headers`
