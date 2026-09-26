@@ -2167,12 +2167,7 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.21.4 (v2026.9.21) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
-    // v2026.9.21:pyproject.toml` reads `version = "0.21.4"`. No feature flag
-    // is added here yet — this group exists so the phases that add v0.21.4
-    // surfaces (see `documents/plans/2026-09-26-hermes-v0-21-5-release-plan.md`)
-    // have a home; add each new flag as a contiguous block at the END of this
-    // group, with a doc comment citing the Hermes file:line@tag its floor was
-    // verified against, matching the style of every group above.
+    // v2026.9.21:pyproject.toml` reads `version = "0.21.4"`.
 
     /// `gateway.multiplex_profiles` defaults ON and an explicit `false` is
     /// RETIRED. The seeded default flips `False` → `True` at
@@ -2197,12 +2192,73 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// check blocks it", and there is no off switch to offer.
     public var hasMultiplexByDefault: Bool { isV0214OrLater }
 
+    /// Whether the `opencode-free` provider (the zero-auth OpenCode Zen
+    /// tier, keyless aggregator) is STILL on this host. `providers.py`
+    /// carries it as a full `HermesOverlay` + `_ALIAS_GROUPS` entry
+    /// (`free`, `opencode_free`) at `v2026.9.14` (`hermes_cli/providers.py:62,126`)
+    /// and has neither at `v2026.9.21` — `_get_config_hint_for_unknown_provider`
+    /// (`hermes_cli/auth.py:1255`) now special-cases exactly those three
+    /// spellings with "the keyless 'opencode-free' provider was removed.
+    /// Switch to 'opencode-zen' … or 'opencode-go' …". A host below this
+    /// floor still runs the provider exactly as before — this flag is
+    /// `true` there so `ModelCatalogService` keeps offering it unchanged,
+    /// and only ≥0.21.4 hosts hide it (`legacyOpenCodeFreeAliases`,
+    /// `legacyAggregatorProviders`, `legacyOverlayOnlyProviders` in
+    /// `ModelCatalogService.swift` / `ModelPreflight.swift` carry the
+    /// pre-removal entries these callers fall back to).
+    public var hasOpenCodeFreeProvider: Bool { !isV0214OrLater }
+
+    /// Whether Hermes accepts the `chatgpt` / `chatgpt-codex` spellings as
+    /// aliases for the `openai-codex` provider. `_ALIAS_GROUPS` gains
+    /// `"openai-codex": ("chatgpt", "chatgpt-codex")` at `v2026.9.21`
+    /// (`hermes_cli/providers.py:122`); absent at `v2026.9.14` (the
+    /// `openai-codex` overlay itself is unconditional and predates the
+    /// target, so only the two new alias spellings are gated). A pre-0.21.4
+    /// host does not resolve either spelling, so offering them there would
+    /// send `model.provider: chatgpt` to a host that treats it as an
+    /// unknown provider verbatim rather than resolving to `openai-codex`.
+    public var hasChatGPTCodexAliases: Bool { isV0214OrLater }
+
+    /// Whether `web.search_backend: openai-native` is a selectable Web
+    /// Tools search backend. `plugins/web/openai_native/` (a new plugin
+    /// directory, `provider.py:68` `NAME = "openai-native"`) first appears
+    /// at `v2026.9.21`; absent (`git ls-tree v2026.9.14 --
+    /// plugins/web/openai_native` empty) before it. Search-only — the
+    /// provider class implements no `extract`, so unlike `keenable` /
+    /// `perplexity` this is NOT added to `WebToolsBackendRoster.extract`.
+    /// It also needs an `openai-codex` OAuth login (`hermes auth add
+    /// openai-codex`), not an API key — the transport swaps in the
+    /// Responses API's server-side `web_search` tool for whichever model
+    /// the Codex Responses transport is already using.
+    public var hasOpenAINativeWebSearchBackend: Bool { isV0214OrLater }
+
+    /// Whether `compression.threshold_tokens`'s shipped default is
+    /// `256_000` rather than `None` (ratio-only). Walked across all three
+    /// tags: `None` at `v2026.9.14:hermes_cli/config_defaults.py:539`,
+    /// `256_000` at both `v2026.9.21:...:570` and `v2026.9.24:...:570` — the
+    /// flip lands with the v0.21.4 release, not v0.21.5. Scarf reads an
+    /// absent key as `0` / "off"; ``HermesConfig/displayCompressionThresholdTokens(capabilities:)``
+    /// uses this to show the host's real default instead of "off" on a
+    /// host that never wrote the key.
+    public var hasCompressionThresholdTokensDefault256K: Bool { isV0214OrLater }
+
+    /// Whether WhatsApp's `gateway.unauthorized_dm_behavior` accepts
+    /// `"decline"` (send one polite refusal, then go silent toward that
+    /// sender) alongside `pair`/`ignore`, and whether
+    /// `unauthorized_dm_decline_message` exists to customize the reply.
+    /// `UNAUTHORIZED_DM_BEHAVIORS = {"pair", "ignore", "decline"}` and
+    /// `unauthorized_dm_decline_message: str = ""` both first appear at
+    /// `v2026.9.21:gateway/config.py:139,627`; at `v2026.9.14` the set is
+    /// `{"pair", "ignore"}` with no decline-message field at all. Below
+    /// this floor a host stored `decline` in config.yaml only via manual
+    /// edit, and `_normalize_choice` would silently coerce it back to
+    /// `pair` — the picker must not offer a choice the host itself rejects.
+    public var hasWhatsAppUnauthorizedDMDecline: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
-    // v2026.9.24:pyproject.toml` reads `version = "0.21.5"`. Same as the
-    // v0.21.4 group above — no feature flag here yet; later phases append
-    // their flags as a contiguous block at the END of this group.
+    // v2026.9.24:pyproject.toml` reads `version = "0.21.5"`.
 
     /// A retired `gateway.multiplex_profiles: false` is REWRITTEN to `true`
     /// by the gateway itself. `persist_resolved_default`
@@ -2236,6 +2292,20 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Gates the status parse (``HermesGatewayParkedStatus``). The lifecycle
     /// verdict needs no gate: it keys on lines no older Hermes prints.
     public var hasGatewayProfileParking: Bool { isV0215OrLater }
+
+    /// Whether Hermes's `_parse_boolish` (the MCP config bool-ish reader)
+    /// treats a bare `int`/`float` value by Python truthiness (`bool(x)`)
+    /// instead of falling through to its `default`. Commit `3e00a356a4`
+    /// ("one reader for mcp_servers.<name>.enabled", first in tag
+    /// `v2026.9.24` — `git tag --contains 3e00a356a4` includes no earlier
+    /// numbered tag) rewrites `tools/mcp_tool_common.py:124-129` to
+    /// `isinstance(value, (bool, int, float))` / `return bool(value)`,
+    /// checked before the string-word match; at `v2026.9.21` the same
+    /// function only matched `isinstance(value, bool)` and fell through
+    /// any bare number to its `default`. So `enabled: 0` flips from
+    /// "enabled" (the default) to "disabled" at this floor — see
+    /// `HermesFileService.boolishOptional(_:capabilities:)`.
+    public var hasMCPBoolishNumericTruthiness: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 

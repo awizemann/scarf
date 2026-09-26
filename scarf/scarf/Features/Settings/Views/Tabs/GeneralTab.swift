@@ -171,7 +171,7 @@ private struct ExcludedProvidersSection: View {
         }
         .task {
             let ids = await ModelCatalogService(context: viewModel.context)
-                .loadProvidersAsync()
+                .loadProvidersAsync(capabilities: capabilities)
                 .map(\.providerID)
             knownProviderIDs = ids.sorted()
         }

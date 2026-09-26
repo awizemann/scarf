@@ -392,9 +392,9 @@ struct HermesFileService: Sendable {
 
     // MARK: - MCP Servers
 
-    nonisolated func loadMCPServers() -> [HermesMCPServer] {
+    nonisolated func loadMCPServers(capabilities: HermesCapabilities = .empty) -> [HermesMCPServer] {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
-        let parsed = parseMCPServersBlock(yaml: yaml)
+        let parsed = parseMCPServersBlock(yaml: yaml, capabilities: capabilities)
         // ONE listing of `mcp-tokens/` for the whole roster. The per-server
         // probe this replaces asked `fileExists` once per candidate spelling
         // — up to 2N serialized SSH round trips inside a single load. An
@@ -1174,7 +1174,9 @@ struct HermesFileService: Sendable {
         )
     }
 
-    nonisolated fileprivate func parseMCPServersBlock(yaml: String) -> [HermesMCPServer] {
+    nonisolated fileprivate func parseMCPServersBlock(
+        yaml: String, capabilities: HermesCapabilities = .empty
+    ) -> [HermesMCPServer] {
         let location = extractMCPBlock(yaml: yaml)
         guard location.block.count > 1 else { return [] }
 
@@ -1242,7 +1244,7 @@ struct HermesFileService: Sendable {
             // and falls back to the DEFAULT for anything else. An exact
             // `!= "false"` test read `enabled: no` as enabled — Scarf showed
             // a live server the gateway was ignoring.
-            let enabled = Self.boolish(fields["enabled"], default: true)
+            let enabled = Self.boolish(fields["enabled"], default: true, capabilities: capabilities)
             let timeout = fields["timeout"].flatMap(Int.init)
             let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
             // v0.14 — supports_parallel_tool_calls is an optional bool;
@@ -2340,8 +2342,10 @@ struct HermesFileService: Sendable {
     /// literal comparison), then matched against the word sets. Anything else
     /// — including an absent key — is `default`, which is what Hermes falls
     /// back to after its `logger.warning`.
-    nonisolated static func boolish(_ raw: String?, default fallback: Bool) -> Bool {
-        boolishOptional(raw) ?? fallback
+    nonisolated static func boolish(
+        _ raw: String?, default fallback: Bool, capabilities: HermesCapabilities = .empty
+    ) -> Bool {
+        boolishOptional(raw, capabilities: capabilities) ?? fallback
     }
 
     /// As `boolish` but `nil` for absent-or-unrecognised, for the callers that
@@ -2366,9 +2370,26 @@ struct HermesFileService: Sendable {
     /// reaches `_parse_boolish` — it is passed to httpx as-is, where a bare
     /// `0` and a CA-bundle path both mean something else again. That one
     /// stays a `String?` all the way to the UI.
-    nonisolated static func boolishOptional(_ raw: String?) -> Bool? {
+    ///
+    /// **v0.21.5 (v2026.9.24, commit `3e00a356a4`) changed this for the ONE
+    /// key that still calls `_parse_boolish` — `enabled`.** The commit
+    /// unified four separate `enabled` readers into `mcp_server_enabled`,
+    /// which special-cases `_parse_boolish` to accept `int`/`float` by
+    /// Python truthiness (`bool(value)`) BEFORE falling back to its
+    /// `default` (`tools/mcp_tool_common.py:124-129` @ that tag):
+    /// `enabled: 0` is now DISABLED, `enabled: 2` / `enabled: 0.0` follow
+    /// the same rule (0.0 disabled, any other float enabled). Below that
+    /// floor a bare number still falls through to `default` exactly as
+    /// documented above — this is gated so a pre-0.21.5 host's `enabled: 0`
+    /// keeps reading as enabled (the DEFAULT), unchanged.
+    nonisolated static func boolishOptional(
+        _ raw: String?, capabilities: HermesCapabilities = .empty
+    ) -> Bool? {
         guard let raw else { return nil }
         let plain = stripInlineComment(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        if capabilities.hasMCPBoolishNumericTruthiness, YAMLScalar.resolvesToNumber(plain) {
+            return !YAMLScalar.numericScalarIsZero(plain)
+        }
         // Anything PyYAML retypes to a non-`str`, non-`bool` (int, float,
         // null, timestamp) never reaches Hermes's word match.
         if YAMLScalar.resolvesToNonString(plain), !YAMLScalar.resolvesToBool(plain) {

@@ -38,13 +38,13 @@ struct MCPServersView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    viewModel.load(force: true)
+                    viewModel.load(force: true, capabilities: capabilitiesStore?.capabilities ?? .empty)
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
             }
         }
-        .onAppear { viewModel.load() }
+        .onAppear { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
         .sheet(isPresented: $viewModel.showPresetPicker) {
             MCPServerPresetPickerView(viewModel: viewModel)
         }
@@ -88,7 +88,7 @@ struct MCPServersView: View {
                     context: viewModel.context,
                     onFinished: { didSucceed in
                         loginServer = nil
-                        if didSucceed { viewModel.load() }
+                        if didSucceed { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
                     }
                 )
             }

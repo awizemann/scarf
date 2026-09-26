@@ -722,7 +722,8 @@ public extension HermesConfig {
 
         let whatsapp = WhatsAppSettings(
             unauthorizedDMBehavior: str("whatsapp.unauthorized_dm_behavior", default: "pair"),
-            replyPrefix: str("whatsapp.reply_prefix")
+            replyPrefix: str("whatsapp.reply_prefix"),
+            unauthorizedDMDeclineMessage: str("whatsapp.unauthorized_dm_decline_message")
         )
 
         // `platform_toolsets.<platform>` is a dict of lists in config.yaml —

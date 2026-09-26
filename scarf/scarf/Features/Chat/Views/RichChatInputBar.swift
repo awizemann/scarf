@@ -343,6 +343,7 @@ struct RichChatInputBar: View {
         guard !slots.attachments.isEmpty else { return }
         let preset = activeModelPreset
         let context = serverContext
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         let (capability, name) = await Task.detached(
             priority: .utility
         ) { () -> (ModelCatalogService.VisionCapability, String) in
@@ -374,7 +375,9 @@ struct RichChatInputBar: View {
             ) else { return (.unknown, "") }
             let displayName = preset?.name ?? active.modelID
             let capability = ModelCatalogService(context: context)
-                .visionCapability(providerID: active.providerID, modelID: active.modelID)
+                .visionCapability(
+                    providerID: active.providerID, modelID: active.modelID,
+                    capabilities: capabilities)
             // Local Ollama models never appear in models.dev, so the
             // catalog lookup is always `.unknown` and the heads-up stays
             // silent for exactly the audience most likely to attach an

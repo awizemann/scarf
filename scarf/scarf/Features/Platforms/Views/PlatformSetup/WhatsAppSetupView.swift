@@ -13,6 +13,22 @@ struct WhatsAppSetupView: View {
     }
 
 
+    /// `"decline"` only from v0.21.4 — see
+    /// `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`. A host below
+    /// the floor coerces an on-disk `decline` back to `pair`
+    /// (`_normalize_choice`), so the picker must not OFFER a choice the host
+    /// itself rejects. `PickerRow` has no built-in widening (unlike
+    /// `WebToolsBackendRoster.finalize`), so a config that already reads
+    /// `decline` (hand-edited, or a downgrade from a newer host) is widened
+    /// in HERE — otherwise the `Picker` shows no matching selection at all
+    /// for a value this list doesn't carry.
+    private var unauthorizedDMOptions: [String] {
+        let base = viewModel.unauthorizedOptions
+        let declineOffered = capabilitiesStore?.capabilities.hasWhatsAppUnauthorizedDMDecline == true
+        guard declineOffered || viewModel.unauthorizedDMBehavior == "decline" else { return base }
+        return base + ["decline"]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             instructions
@@ -30,7 +46,20 @@ struct WhatsAppSetupView: View {
             }
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
-                PickerRow(label: "Unauthorized DM", selection: viewModel.unauthorizedDMBehavior, options: viewModel.unauthorizedOptions) { viewModel.unauthorizedDMBehavior = $0 }
+                PickerRow(label: "Unauthorized DM", selection: viewModel.unauthorizedDMBehavior, options: unauthorizedDMOptions) { viewModel.unauthorizedDMBehavior = $0 }
+                // "decline" — send one polite refusal, then go silent toward
+                // that sender — is v0.21.4+
+                // (`HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`).
+                // The custom message is offered only while "decline" is the
+                // active choice, same show/hide pattern as every other
+                // conditional row in this form.
+                if viewModel.unauthorizedDMBehavior == "decline" {
+                    EditableTextField(
+                        label: "Decline Message",
+                        value: viewModel.unauthorizedDMDeclineMessage
+                    ) { viewModel.unauthorizedDMDeclineMessage = $0 }
+                    .help("Empty uses Hermes's own default reply.")
+                }
                 EditableTextField(label: "Reply Prefix", value: viewModel.replyPrefix) { viewModel.replyPrefix = $0 }
             }
 

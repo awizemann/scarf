@@ -23,6 +23,7 @@ import Foundation
 /// | xai          | v0.15            | ✓      | —       |
 /// | keenable     | v0.20.5          | ✓      | ✓       |
 /// | perplexity   | v0.21.1          | ✓      | ✓       |
+/// | openai-native| v0.21.4          | ✓      | —       |
 ///
 /// `tavily` is the one gap rather than a floor: absent at v0.21.0 only
 /// (deleted at v2026.8.31, restored at v2026.9.7, commit 428e084dcd).
@@ -51,6 +52,10 @@ public enum WebToolsBackendRoster {
         if caps.hasXAIWebSearchBackend { list.append("xai") }
         if caps.hasKeenableWebBackend { list.append("keenable") }
         if caps.hasPerplexityWebBackend { list.append("perplexity") }
+        // Search-only (no `extract` method on the provider class) — needs
+        // an openai-codex OAuth login, not an API key. See
+        // `HermesCapabilities.hasOpenAINativeWebSearchBackend`.
+        if caps.hasOpenAINativeWebSearchBackend { list.append("openai-native") }
         return finalize(list, caps: caps, selected: selected)
     }
 

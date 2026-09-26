@@ -158,4 +158,15 @@ import Testing
             #expect(WebToolsBackendRoster.combined(host, selected: "").filter { $0.isEmpty }.count == 1)
         }
     }
+
+    /// `git ls-tree v2026.9.21 plugins/web/` adds `openai_native/`
+    /// (absent at v2026.9.14) — search-only, so it's never in `extract`.
+    @Test func searchRosterAtV0214AddsOpenAINative() {
+        let v0213 = WebToolsBackendRoster.search(caps("Hermes Agent v0.21.3 (2026.9.14)"))
+        #expect(!v0213.contains("openai-native"))
+        let v0214 = WebToolsBackendRoster.search(caps("Hermes Agent v0.21.4 (2026.9.21)"))
+        #expect(v0214.contains("openai-native"))
+        #expect(!WebToolsBackendRoster.extract(caps("Hermes Agent v0.21.4 (2026.9.21)"))
+            .contains("openai-native"))
+    }
 }

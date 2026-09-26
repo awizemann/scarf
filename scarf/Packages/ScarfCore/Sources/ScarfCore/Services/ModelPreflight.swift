@@ -106,11 +106,34 @@ public enum ModelPreflight: Sendable {
     /// here as bare `opencode`: `providerAliases` maps `opencode-zen` and
     /// `zen` → `opencode` (mirroring providers.py ALIASES), so `opencode`
     /// is the only spelling this lookup can ever see for Zen. `opencode-go`
-    /// and `opencode-free` are canonical in their own right.
+    /// is canonical in its own right. `opencode-free` — canonical too, and
+    /// also `is_aggregator=True` in `providers.py` while it existed — is
+    /// NOT here: it was REMOVED from Hermes at v0.21.4, so it can no longer
+    /// be in the table this one is checked against
+    /// (`scripts/check-hermes-tables.py` lane 2 diffs this set against
+    /// `providers.py` at Scarf's CURRENT target tag). See
+    /// `legacyAggregatorProviders` for the pre-0.21.4 fallback.
     static let aggregatorProviders: Set<String> = [
-        "openrouter", "opencode", "opencode-go", "opencode-free",
+        "openrouter", "opencode", "opencode-go",
         "kilo", "huggingface", "novita", "vercel",
     ]
+
+    /// `aggregatorProviders` entries for a provider Hermes removed at a
+    /// version floor — added back only below that floor. See
+    /// `HermesCapabilities.hasOpenCodeFreeProvider`.
+    static let legacyAggregatorProviders: Set<String> = ["opencode-free"]
+
+    /// `aggregatorProviders`, widened with `legacyAggregatorProviders` when
+    /// the connected host still runs a since-removed aggregator. Defaults to
+    /// `.empty` capabilities, which resolves exactly as the old unconditional
+    /// `aggregatorProviders` did (`hasOpenCodeFreeProvider` is true for an
+    /// undetected host) — every existing caller that doesn't pass real
+    /// capabilities keeps today's behavior.
+    static func aggregatorProviders(capabilities: HermesCapabilities) -> Set<String> {
+        capabilities.hasOpenCodeFreeProvider
+            ? aggregatorProviders.union(legacyAggregatorProviders)
+            : aggregatorProviders
+    }
 
     /// Detect a `model.default` / `model.provider` mismatch. Returns
     /// `nil` when there's no provider prefix on `model.default`, when
@@ -130,13 +153,15 @@ public enum ModelPreflight: Sendable {
     /// catalog is unavailable (keeps the pre-roster behavior).
     public static func detectMismatch(
         _ config: HermesConfig,
-        knownProviders: Set<String>? = nil
+        knownProviders: Set<String>? = nil,
+        capabilities: HermesCapabilities = .empty
     ) -> Mismatch? {
         let modelDefault = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeProvider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isUnset(modelDefault), !isUnset(activeProvider) else { return nil }
-        let canonicalActive = ModelCatalogService.canonicalProviderID(activeProvider)
-        guard !aggregatorProviders.contains(canonicalActive) else { return nil }
+        let canonicalActive = ModelCatalogService.canonicalProviderID(
+            activeProvider, capabilities: capabilities)
+        guard !aggregatorProviders(capabilities: capabilities).contains(canonicalActive) else { return nil }
         // Custom endpoints serve whatever model IDs the user's own server
         // exposes — a slash is never a stale provider prefix. Hermes makes
         // `custom:*` an aggregator outright (providers.py is_aggregator)
@@ -147,7 +172,8 @@ public enum ModelPreflight: Sendable {
         let prefix = String(modelDefault[..<slash])
         let bare = String(modelDefault[modelDefault.index(after: slash)...])
         guard !prefix.isEmpty, !bare.isEmpty else { return nil }
-        let canonicalPrefix = ModelCatalogService.canonicalProviderID(prefix)
+        let canonicalPrefix = ModelCatalogService.canonicalProviderID(
+            prefix, capabilities: capabilities)
         guard canonicalPrefix != canonicalActive else { return nil }
         let prefixKnown = knownProviders.map {
             $0.contains(canonicalPrefix) || $0.contains(prefix.lowercased())

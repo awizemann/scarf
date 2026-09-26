@@ -129,7 +129,7 @@ public struct ModelCatalogService: Sendable {
     /// cache with `Self.overlayOnlyProviders` so Hermes-injected providers
     /// (Nous Portal, OpenAI Codex, …) appear in the picker even when
     /// they're absent from `models_dev_cache.json`.
-    public func loadProviders() -> [HermesProviderInfo] {
+    public func loadProviders(capabilities: HermesCapabilities = .empty) -> [HermesProviderInfo] {
         let catalog = loadCatalog() ?? [:]
         var byID: [String: HermesProviderInfo] = [:]
         for (id, p) in catalog {
@@ -144,7 +144,13 @@ public struct ModelCatalogService: Sendable {
                 subscriptionGated: false
             )
         }
-        for (id, overlay) in Self.overlayOnlyProviders where byID[id] == nil {
+        var overlays = Self.overlayOnlyProviders
+        // Removed-provider overlays (`opencode-free`) only rejoin the
+        // roster below their removal floor — see `legacyOverlayOnlyProviders`.
+        if capabilities.hasOpenCodeFreeProvider {
+            overlays.merge(Self.legacyOverlayOnlyProviders) { current, _ in current }
+        }
+        for (id, overlay) in overlays where byID[id] == nil {
             let resolvedName = Self.providerDisplayNameOverrides[id] ?? overlay.displayName
             byID[id] = HermesProviderInfo(
                 providerID: id,
@@ -186,9 +192,16 @@ public struct ModelCatalogService: Sendable {
     /// CANONICAL id is an `overlayOnlyProviders` key are reachable this way —
     /// `ai-gateway` canonicalises to `vercel`, which is not one, so that
     /// spelling still returns nil and is not an example of what this fixes.
-    public func overlayMetadata(for providerID: String) -> HermesProviderOverlay? {
-        Self.overlayOnlyProviders[providerID]
-            ?? Self.overlayOnlyProviders[Self.canonicalProviderID(providerID)]
+    public func overlayMetadata(
+        for providerID: String, capabilities: HermesCapabilities = .empty
+    ) -> HermesProviderOverlay? {
+        if let overlay = Self.overlayOnlyProviders[providerID]
+            ?? Self.overlayOnlyProviders[Self.canonicalProviderID(providerID, capabilities: capabilities)] {
+            return overlay
+        }
+        guard capabilities.hasOpenCodeFreeProvider else { return nil }
+        return Self.legacyOverlayOnlyProviders[providerID]
+            ?? Self.legacyOverlayOnlyProviders[Self.canonicalProviderID(providerID, capabilities: capabilities)]
     }
 
     /// Async wrapper around `loadProviders()` for use from MainActor view
@@ -198,10 +211,12 @@ public struct ModelCatalogService: Sendable {
     /// still parses ~1500 models — both unsuitable for the main thread.
     /// Issue #59. Existing call sites (tests, any non-View consumers)
     /// can keep using the sync method.
-    public nonisolated func loadProvidersAsync() async -> [HermesProviderInfo] {
+    public nonisolated func loadProvidersAsync(
+        capabilities: HermesCapabilities = .empty
+    ) async -> [HermesProviderInfo] {
         await Task.detached { [self] in
             let providers = ScarfMon.measure(.diskIO, "modelCatalog.loadProviders") {
-                self.loadProviders()
+                self.loadProviders(capabilities: capabilities)
             }
             ScarfMon.event(.diskIO, "modelCatalog.providers.count", count: providers.count)
             return providers
@@ -423,8 +438,10 @@ public struct ModelCatalogService: Sendable {
     /// memo intentionally ignores later rewrites of the cache file —
     /// vision capability for a fixed (provider, model) doesn't flip
     /// within an app run.
-    public func visionCapability(providerID: String, modelID: String) -> VisionCapability {
-        let canonical = Self.modelsDevProviderKey(for: providerID)
+    public func visionCapability(
+        providerID: String, modelID: String, capabilities: HermesCapabilities = .empty
+    ) -> VisionCapability {
+        let canonical = Self.modelsDevProviderKey(for: providerID, capabilities: capabilities)
         let trimmedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !canonical.isEmpty, !trimmedModel.isEmpty else { return .unknown }
 
@@ -435,7 +452,8 @@ public struct ModelCatalogService: Sendable {
         if let cached { return cached }
 
         let result = ScarfMon.measure(.diskIO, "modelCatalog.visionCapability") {
-            uncachedVisionCapability(canonicalProviderID: canonical, modelID: trimmedModel)
+            uncachedVisionCapability(
+                canonicalProviderID: canonical, modelID: trimmedModel, capabilities: capabilities)
         }
         Self.visionCacheLock.lock()
         Self.visionCache[cacheKey] = result
@@ -444,7 +462,8 @@ public struct ModelCatalogService: Sendable {
     }
 
     private func uncachedVisionCapability(
-        canonicalProviderID canonical: String, modelID: String
+        canonicalProviderID canonical: String, modelID: String,
+        capabilities: HermesCapabilities = .empty
     ) -> VisionCapability {
         guard let catalog = loadCatalog(), let provider = catalog[canonical] else {
             // Provider not mirrored to models.dev (local endpoints,
@@ -462,7 +481,8 @@ public struct ModelCatalogService: Sendable {
         if let slash = resolved.firstIndex(of: "/") {
             let prefix = String(resolved[..<slash])
             let bare = String(resolved[resolved.index(after: slash)...])
-            if !bare.isEmpty, Self.modelsDevProviderKey(for: prefix) == canonical,
+            if !bare.isEmpty,
+               Self.modelsDevProviderKey(for: prefix, capabilities: capabilities) == canonical,
                let entry = provider.models?[resolveModelAlias(providerID: canonical, modelID: bare)] {
                 return Self.visionCapability(of: entry)
             }
@@ -513,15 +533,20 @@ public struct ModelCatalogService: Sendable {
     /// Providers absent from both this map and the catalog resolve to
     /// `.unknown` downstream, which is the safe default. Reconcile on
     /// Hermes bumps alongside the other provider tables here.
-    static func modelsDevProviderKey(for providerID: String) -> String {
+    static func modelsDevProviderKey(
+        for providerID: String, capabilities: HermesCapabilities = .empty
+    ) -> String {
         let key = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if capabilities.hasOpenCodeFreeProvider, let mapped = legacyCapabilityProviderOverrides[key] {
+            return mapped
+        }
         if let mapped = capabilityProviderOverrides[key] { return mapped }
         // Hermes normalizes aliases (providers.py ALIASES) BEFORE its
         // PROVIDER_TO_MODELS_DEV lookup, so alias spellings must land
         // on the same models.dev key their canonical form does — e.g.
         // `grok-oauth` → `xai-oauth` → `xai`, and `novita-ai` →
         // `novita` → `novita-ai`.
-        let canonical = canonicalProviderID(key)
+        let canonical = canonicalProviderID(key, capabilities: capabilities)
         return capabilityProviderOverrides[canonical] ?? canonical
     }
 
@@ -545,13 +570,21 @@ public struct ModelCatalogService: Sendable {
         //                           without it muse-spark-* resolved to the
         //                           generic 256K default instead of its real
         //                           1M window, and never reported vision.
-        //   "opencode-free": "opencode"
-        //                           the zero-auth OpenCode tier is Zen-hosted
-        //                           and its *-contributor-free SKUs live in
-        //                           models.dev's "opencode" catalog. The
-        //                           `opencode-zen` spelling gets there through
-        //                           ALIASES; the `free` tier does not.
         "meta-ai": "meta",
+    ]
+
+    /// `capabilityProviderOverrides` entries that mapped a Hermes provider
+    /// REMOVED at v0.21.4 to its models.dev catalog — consulted only when
+    /// ``HermesCapabilities/hasOpenCodeFreeProvider`` is true (a pre-0.21.4
+    /// host), so vision-capability lookups for the now-gone `opencode-free`
+    /// keep resolving against models.dev's `opencode` catalog exactly as
+    /// they did before the removal. See `hasOpenCodeFreeProvider`'s doc
+    /// comment (`HermesCapabilities.swift`) for the removal citation.
+    private static let legacyCapabilityProviderOverrides: [String: String] = [
+        // opencode-free: the zero-auth OpenCode tier is Zen-hosted and its
+        // *-contributor-free SKUs live in models.dev's "opencode" catalog.
+        // The `opencode-zen` spelling gets there through ALIASES; the
+        // `free` tier does not.
         "opencode-free": "opencode",
     ]
 
@@ -1027,20 +1060,30 @@ public struct ModelCatalogService: Sendable {
             subscriptionGated: false,
             docURL: nil
         ),
-        // -- v0.20.5 additions -------------------------------------------
-        // Hermes v2026.8.19 added the zero-auth OpenCode tier as an
-        // overlay-only aggregator. Wire ID `opencode-free` matches
-        // HERMES_OVERLAYS verbatim (aliases `free` / `opencode_free`).
-        // `keyless: true` mirrors the overlay flag: auth.py ships a
-        // deliberately empty `api_key_env_vars` because the tier is
-        // served anonymously, so there is no credential to configure.
-        "opencode-free": HermesProviderOverlay(
-            displayName: "OpenCode Free",
-            baseURL: "https://opencode.ai/zen/v1",
+        // Pre-existing gap (present since tag v2026.4.8 = v0.8.0, well below
+        // Scarf's v0.6.0 floor, so — like every other row in this table —
+        // it is offered unconditionally rather than capability-gated):
+        // `kimi-for-coding` (`hermes_cli/providers.py:47` @ v2026.9.24,
+        // `HermesOverlay(base_url_env_var="KIMI_BASE_URL")`, not an
+        // aggregator) has never been in models.dev
+        // (`models_dev_cache.json` carries `kimi-code-plan-cn` /
+        // `kimi-code-plan-global` instead) nor in this table, so the picker
+        // could never reach it despite `providerAliases` mapping `kimi` /
+        // `kimi-coding` / `kimi-coding-cn` / `moonshot` onto it —
+        // `scripts/check-hermes-tables.py` lane 3 catches exactly this
+        // (`FAIL [overlay-only] Hermes overlay 'kimi-for-coding' isn't in
+        // models.dev or overlayOnlyProviders`). Default base URL
+        // `https://api.moonshot.ai/v1` — `hermes_cli/auth.py:196` and
+        // `hermes_cli/doctor_connectivity.py:67`; a `sk-kimi-` key redirects
+        // to `api.kimi.com/coding` at runtime (`auth_zai_kimi.py:24`), which
+        // is Hermes's own resolution and not something Scarf's overlay
+        // metadata needs to encode.
+        "kimi-for-coding": HermesProviderOverlay(
+            displayName: "Kimi / Moonshot",
+            baseURL: "https://api.moonshot.ai/v1",
             authType: .apiKey,
             subscriptionGated: false,
-            docURL: nil,
-            keyless: true
+            docURL: "https://platform.moonshot.cn/"
         ),
         // -- v0.21.0 additions --------------------------------------------
         // Hermes v2026.8.31 (0.21.0) added Tencent TokenPlan and Nebius
@@ -1111,6 +1154,33 @@ public struct ModelCatalogService: Sendable {
         ),
     ]
 
+    /// `overlayOnlyProviders` entries for a provider Hermes REMOVED at a
+    /// version floor — consulted only below that floor, so the picker and
+    /// `overlayMetadata(for:)` keep offering the provider on a host that
+    /// still runs it, and never on one that doesn't. Kept out of
+    /// `overlayOnlyProviders` itself because that table is checked
+    /// unconditionally against `providers.py` at Scarf's CURRENT target tag
+    /// (`scripts/check-hermes-tables.py` lane 3), which no longer defines
+    /// this provider at all.
+    static let legacyOverlayOnlyProviders: [String: HermesProviderOverlay] = [
+        // opencode-free: Hermes v2026.8.19 (v0.20.5) added the zero-auth
+        // OpenCode tier as an overlay-only aggregator; removed at v0.21.4
+        // (v2026.9.21) — see `HermesCapabilities.hasOpenCodeFreeProvider`.
+        // Wire ID `opencode-free` matched HERMES_OVERLAYS verbatim (aliases
+        // `free` / `opencode_free`, see `legacyProviderAliases`).
+        // `keyless: true` mirrors the overlay flag: auth.py shipped a
+        // deliberately empty `api_key_env_vars` because the tier was served
+        // anonymously, so there was no credential to configure.
+        "opencode-free": HermesProviderOverlay(
+            displayName: "OpenCode Free",
+            baseURL: "https://opencode.ai/zen/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil,
+            keyless: true
+        ),
+    ]
+
     /// Provider-ID aliases — verbatim mirror of `ALIASES` in
     /// hermes_cli/providers.py (minus identity entries). Maps
     /// human-friendly / legacy names to canonical provider IDs, using
@@ -1161,9 +1231,12 @@ public struct ModelCatalogService: Sendable {
         // opencode-go
         "go": "opencode-go",
         "opencode-go-sub": "opencode-go",
-        // opencode-free (v0.20.5 — zero-auth OpenCode tier)
-        "free": "opencode-free",
-        "opencode_free": "opencode-free",
+        // openai-codex (v0.21.4 — `_ALIAS_GROUPS["openai-codex"] = ("chatgpt",
+        // "chatgpt-codex")`, `hermes_cli/providers.py:122` @ v2026.9.21;
+        // absent at v2026.9.14. Suppressed below that floor by
+        // `canonicalProviderID` — see `HermesCapabilities.hasChatGPTCodexAliases`.
+        "chatgpt": "openai-codex",
+        "chatgpt-codex": "openai-codex",
         // kilo (models.dev ID for KiloCode)
         "kilocode": "kilo",
         "kilo-code": "kilo",
@@ -1240,12 +1313,58 @@ public struct ModelCatalogService: Sendable {
         "llama-cpp": "local",
     ]
 
+    /// `providerAliases` entries mirroring Hermes ALIASES spellings that
+    /// exist only BELOW a floor — the removed `opencode-free` aggregator
+    /// (`free`, `opencode_free`; gone from `_ALIAS_GROUPS` at v0.21.4, see
+    /// `HermesCapabilities.hasOpenCodeFreeProvider`). Consulted before
+    /// `providerAliases` so a pre-0.21.4 host still resolves them exactly
+    /// as it always has, and never consulted at or above the floor — the
+    /// checker's mirror of `providers.py` at the CURRENT tag must not carry
+    /// a provider Hermes no longer defines (`scripts/check-hermes-tables.py`
+    /// lane 1), so these live here rather than in `providerAliases` itself.
+    private static let legacyProviderAliases: [String: String] = [
+        "free": "opencode-free",
+        "opencode_free": "opencode-free",
+    ]
+
+    /// `providerAliases` keys that exist only AT OR ABOVE a floor — the new
+    /// `chatgpt` / `chatgpt-codex` spellings for `openai-codex`
+    /// (`HermesCapabilities.hasChatGPTCodexAliases`, floor v0.21.4). They
+    /// stay IN `providerAliases` itself (Hermes's CURRENT tag defines them,
+    /// so the checker requires the literal entry), but `canonicalProviderID`
+    /// suppresses the resolution below the floor: a pre-0.21.4 host does
+    /// not resolve either spelling either, so silently mapping it to
+    /// `openai-codex` here would tell Scarf's diagnostics a broken
+    /// `model.provider: chatgpt` config is fine when the host itself
+    /// treats it as an unrecognized provider string.
+    private static let floorGatedProviderAliasKeys: Set<String> = ["chatgpt", "chatgpt-codex"]
+
     /// Resolve aliases and normalize casing to a canonical provider ID —
     /// mirrors `normalize_provider` in hermes_cli/providers.py. Does not
     /// validate that the result names a known provider.
-    public static func canonicalProviderID(_ name: String) -> String {
+    ///
+    /// `capabilities` defaults to `.empty` (undetected), which resolves
+    /// exactly as this function always has for every existing unconditional
+    /// caller: `hasOpenCodeFreeProvider` is true for `.empty` (so the
+    /// removed provider's aliases still resolve — unchanged pre-0.21.4
+    /// behavior), and `hasChatGPTCodexAliases` is false (so the new
+    /// `chatgpt*` spellings are left unresolved — also unchanged, since
+    /// they did not exist before this cycle). Pass the connected host's
+    /// real capabilities to gate correctly once a version is known.
+    public static func canonicalProviderID(
+        _ name: String, capabilities: HermesCapabilities = .empty
+    ) -> String {
         let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return providerAliases[key] ?? key
+        if capabilities.hasOpenCodeFreeProvider, let legacy = legacyProviderAliases[key] {
+            return legacy
+        }
+        if let mapped = providerAliases[key] {
+            if floorGatedProviderAliasKeys.contains(key), !capabilities.hasChatGPTCodexAliases {
+                return key
+            }
+            return mapped
+        }
+        return key
     }
 
     /// Display-name overrides applied at `loadProviders()` time. Used
