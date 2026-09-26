@@ -432,7 +432,8 @@ public final class RichChatViewModel {
     /// (on a send that is the same instant `addUserMessage` stamps
     /// `currentTurnStart`; deliberately not copied from it, since an
     /// empty turn's finalize leaves that one stale) and cleared when it
-    /// flips off; it changes twice per turn, so
+    /// flips off. A turn the DB poll finds already running is seeded from
+    /// its prompt row instead (`refreshMessages`). It changes twice per turn, so
     /// observing it costs nothing — the per-second tick lives entirely
     /// in the indicator's own `TimelineView`.
     public private(set) var workingSince: Date?
@@ -1644,6 +1645,28 @@ public final class RichChatViewModel {
     @ObservationIgnored
     private var openToolCallIds: Set<String> = []
 
+    /// Scarf itself asked Hermes to stop the running turn
+    /// (`noteTurnCancelRequested`). Consumed by the turn's
+    /// `promptComplete`; cleared by `reset()`.
+    @ObservationIgnored
+    private var turnCancelRequested = false
+
+    /// Record that the running turn is being cancelled ON PURPOSE (a Live
+    /// Voice barge-in), just before the `session/cancel` goes out. The
+    /// turn's `stopReason: "cancelled"` then ends it quietly: no
+    /// "ended without a response" bubble for a request the user
+    /// superseded.
+    public func noteTurnCancelRequested() {
+        turnCancelRequested = true
+    }
+
+    nonisolated static func isCancelledStopReason(_ stopReason: String) -> Bool {
+        switch stopReason.lowercased() {
+        case "cancelled", "canceled": return true
+        default: return false
+        }
+    }
+
     // MARK: - Streaming UI coalescing (gh#140)
     //
     // ACP chunks can arrive far faster than any display refresh —
@@ -1834,6 +1857,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         openToolCallIds = []
+        turnCancelRequested = false
         cancelStreamingFlush()
         setLiveActivityStatus(nil)
         acpInputTokens = 0
@@ -1938,6 +1962,15 @@ public final class RichChatViewModel {
         // and rendered. Until this fires, those events are dropped
         // — see `handleACPEvent` for the rationale.
         hasUserSentPromptThisSession = true
+        // A mid-turn send (`/steer`, a queued prompt, a voice request while
+        // a turn runs) lands while the streaming bubble holds the running
+        // turn's text and tool cards. Finalize it BEFORE appending, so the
+        // partial reply keeps its place ahead of this message; the buffer
+        // reset below used to strand the id-0 placeholder, and the turn's
+        // next chunk then overwrote the text streamed so far.
+        if isAgentWorking {
+            finalizeStreamingMessage()
+        }
         let id = nextLocalId
         nextLocalId -= 1
         let message = HermesMessage(
@@ -2439,6 +2472,15 @@ public final class RichChatViewModel {
         let hadAssistantOutput = streamingAssistantText.isEmpty == false
             || messages.last?.isAssistant == true
         finalizeStreamingMessage()
+        // The turn is over: a `tool_call_update` still on its way for one
+        // of its calls must not close a call of the NEXT turn's stream
+        // (below v0.21.4 there is no turn-end flush, so a call can stay
+        // open forever). Same in the two disconnect paths.
+        openToolCallIds.removeAll()
+        // Consume the intentional-cancel marker whatever this turn's
+        // outcome — it belongs to this turn only.
+        let cancelWasRequested = turnCancelRequested
+        turnCancelRequested = false
         // The turn these belong to is over. An unanswered request that
         // outlived its turn (agent cancelled, tool abandoned, the turn
         // errored out from under a parallel tool call) must be DROPPED,
@@ -2449,7 +2491,17 @@ public final class RichChatViewModel {
         // still blocked on approval.
         clearPendingPermissions()
 
-        if !hadAssistantOutput, response.stopReason != "end_turn" {
+        // Hermes answers `cancelled` only for a turn whose `session/cancel`
+        // it received (`_finish_turn`, acp_adapter/server.py:965,999 @
+        // v2026.9.24) — and Scarf is the only client of its `hermes acp`
+        // process. So a cancel is never a failure: no error banner ever,
+        // and when Scarf asked for it on purpose (a Live Voice barge-in,
+        // `noteTurnCancelRequested`) no bubble either. The teardown path's
+        // synthesized cancel (`stopACP` mid-turn) still gets its bubble —
+        // there the user did not ask for the turn to stop.
+        let isCancelled = Self.isCancelledStopReason(response.stopReason)
+        if !hadAssistantOutput, response.stopReason != "end_turn",
+           !(isCancelled && cancelWasRequested) {
             let reason: String
             switch response.stopReason {
             case "refusal":
@@ -2482,7 +2534,9 @@ public final class RichChatViewModel {
             // nothing happened. The controller registers
             // `acpStderrProvider`; if absent, the banner still shows
             // with the hint fallback.
-            Task { await self.recordPromptStopFailureUsingProvider(stopReason: response.stopReason) }
+            if !isCancelled {
+                Task { await self.recordPromptStopFailureUsingProvider(stopReason: response.stopReason) }
+            }
         }
 
         // Accumulate token usage from this prompt
@@ -2527,6 +2581,10 @@ public final class RichChatViewModel {
 
     private func handleConnectionLost(reason: String) {
         finalizeStreamingMessage()
+        // The turn died with the connection; no update for its calls can
+        // arrive over a new one (see `handlePromptComplete`).
+        openToolCallIds.removeAll()
+        turnCancelRequested = false
         let id = nextLocalId
         nextLocalId -= 1
         messages.append(HermesMessage(
@@ -2718,6 +2776,10 @@ public final class RichChatViewModel {
     /// Saves partial content as a permanent message without adding a system message.
     public func finalizeOnDisconnect() {
         finalizeStreamingMessage()
+        // Same turn-end cleanup as `handleConnectionLost`: the reconnect
+        // is a fresh process, whose updates never close these calls.
+        openToolCallIds.removeAll()
+        turnCancelRequested = false
         isAgentWorking = false
         setLiveActivityStatus(nil)
         clearPendingPermissions()
@@ -2728,6 +2790,10 @@ public final class RichChatViewModel {
     /// Merges DB-persisted messages with any local-only messages (e.g., user messages
     /// that the ACP process may not have persisted before crashing).
     public func reconcileWithDB(sessionId: String) async {
+        // Every caller attaches `sessionId` just before calling; a
+        // transcript that has moved on (or moves on during the awaits
+        // below) must never receive another session's rows.
+        guard self.sessionId == sessionId else { return }
         let opened = await dataService.open()
         guard opened else { return }
 
@@ -2748,6 +2814,17 @@ public final class RichChatViewModel {
 
         let session = await dataService.fetchSession(id: sessionId)
         await dataService.close()
+        guard self.sessionId == sessionId else { return }
+
+        // The tail window only reaches back `reconcile` rows. Rows of this
+        // session OLDER than the window that are already on screen (paged
+        // in through "Load earlier") stay: dropping them would leave the
+        // pagination cursor pointing below a gap nothing ever re-fetches.
+        let sessionRowIds = dbMessages.filter { $0.sessionId == sessionId }.map(\.id)
+        let windowFloor = sessionRowIds.min()
+        let olderLoaded: [HermesMessage] = windowFloor.map { floor in
+            messages.filter { $0.id > 0 && $0.sessionId == sessionId && $0.id < floor }
+        } ?? []
 
         // Find local-only user messages not yet in DB.
         // Local messages have negative IDs; DB messages have positive IDs.
@@ -2757,7 +2834,10 @@ public final class RichChatViewModel {
         }
 
         // Build reconciled list: DB messages + unmatched local user messages
-        var reconciled = dbMessages
+        var reconciled = olderLoaded + dbMessages
+        if !olderLoaded.isEmpty {
+            reconciled.sort(by: HermesMessage.chronologicalOrder)
+        }
         for localMsg in localOnlyMessages {
             if let ts = localMsg.timestamp,
                let insertIdx = reconciled.firstIndex(where: { ($0.timestamp ?? .distantPast) > ts }) {
@@ -2771,6 +2851,27 @@ public final class RichChatViewModel {
         currentSession = session
         let minId = reconciled.map(\.id).min() ?? 0
         nextLocalId = min(minId - 1, -1)
+        // Pagination state follows the rows just installed — left alone,
+        // a cursor from the smaller session-open window made "Load
+        // earlier" re-fetch rows this window already holds (duplicates).
+        // Same rules as `loadSessionHistory` / `loadEarlier`: the cursor
+        // is this session's oldest loaded row; more history exists when
+        // kept paged-in rows said so, or when the window came back full.
+        if olderLoaded.isEmpty {
+            oldestLoadedMessageID = windowFloor
+            hasMoreHistory = sessionRowIds.count >= HistoryPageSize.reconcile
+        } else {
+            oldestLoadedMessageID = olderLoaded.map(\.id).min()
+            // `hasMoreHistory` already describes what lies below the
+            // kept rows — the last `loadEarlier` set it.
+        }
+        // Recall mode applies to rows below the cutoff; with none of
+        // those loaded any more it has nothing to mark, and the next
+        // "Load earlier" re-establishes it at the right boundary.
+        if let cutoff = earlierHistoryCutoffId,
+           !reconciled.contains(where: { $0.id > 0 && $0.id < cutoff }) {
+            earlierHistoryCutoffId = nil
+        }
         buildMessageGroups()
     }
 
@@ -3251,6 +3352,20 @@ public final class RichChatViewModel {
                 isAgentWorking = true
             } else {
                 let wasWorking = isAgentWorking
+                // A turn found running in the DB (attaching to a session
+                // mid-turn) started at its prompt, not when we looked:
+                // seed the elapsed clock from the latest user row so it
+                // doesn't restart at 0:00 on attach — or on every
+                // working → idle → working flicker between ticks, since
+                // the same row seeds the same instant. Set BEFORE the
+                // flag so its `didSet` keeps this value instead of
+                // stamping `Date()`. No user row (a cron- or gateway-born
+                // turn) falls back to `Date()` as before. Only on the edge
+                // into working: a clock already running is never moved.
+                if derivedWorking, !wasWorking,
+                   let started = fetched.last(where: \.isUser)?.timestamp {
+                    workingSince = started
+                }
                 isAgentWorking = derivedWorking
                 if wasWorking && !derivedWorking {
                     stopActivePolling()

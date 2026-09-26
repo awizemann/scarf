@@ -2290,6 +2290,18 @@ final class ChatViewModel {
                     // attemptReconnect).
                     let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
 
+                    // The awaits above can outlive this ladder: a sidebar
+                    // click / delete / leaving the chat runs `stopACP`,
+                    // which cancels this task (and a fresh start installs
+                    // its own client) — but none of that can interrupt
+                    // `start()` or `loadSession`. Installing now would put
+                    // the dead session's client and transcript over the
+                    // one the user moved to, so stop ours and bow out.
+                    guard !Task.isCancelled, self.acpClient == nil else {
+                        await client.stop()
+                        return
+                    }
+
                     // Success — wire up the new client
                     self.acpClient = client
                     self.hasActiveProcess = true
@@ -2308,6 +2320,13 @@ final class ChatViewModel {
                             projectPath: projectPath
                         )
                     }
+
+                    // Same check after the reconcile awaits: a teardown in
+                    // that window already stopped this client (it was
+                    // installed) — arming its event loop and health
+                    // monitor now would turn that stop into a phantom
+                    // "connection died" and a second ladder.
+                    guard !Task.isCancelled, self.acpClient === client else { return }
 
                     acpStatus = ACPPhase.ready
                     clearACPErrorState()
@@ -2358,6 +2377,14 @@ final class ChatViewModel {
         // t-5451bd1b).
         let inFlightSessionId = inFlightPromptSessionId
         let turnWasInFlight = inFlightSessionId != nil
+        // The in-flight turns' tasks, so the teardown below can wait for
+        // their `session/prompt` answers. `cancelAllPromptTurns` cancels
+        // the Swift tasks, but that doesn't abandon the pending RPC — the
+        // task still ends when Hermes answers (its result is then ignored:
+        // `acpClient` is no longer this client).
+        let inFlightTurnTasks = promptTurns.values
+            .filter { !$0.isNonInterruptive }
+            .compactMap(\.task)
         cancelAllPromptTurns()
         acpEventTask?.cancel()
         acpEventTask = nil
@@ -2370,10 +2397,11 @@ final class ChatViewModel {
                 // — the same prompt re-sent later then got merged into
                 // one duplicated DB row by Hermes's alternation repair.
                 // Best-effort and bounded to 2s: teardown must never
-                // hang on a wedged process, and `client.stop()` below
-                // resumes a still-pending cancel RPC either way.
+                // hang on a wedged process.
                 if turnWasInFlight, let sid = inFlightSessionId {
-                    await Self.boundedSessionCancel(client: client, sessionId: sid, seconds: 2)
+                    await Self.boundedSessionCancel(
+                        client: client, sessionId: sid, awaiting: inFlightTurnTasks, seconds: 2
+                    )
                 }
                 await client.stop()
             }
@@ -2411,15 +2439,19 @@ final class ChatViewModel {
         isStartingSession = false
     }
 
-    /// Best-effort `session/cancel` bounded to `seconds`. Returns when
-    /// Hermes acknowledges the cancel OR the deadline passes, whichever
-    /// comes first — a wedged process must not be able to stall
-    /// teardown. The losing branch is harmless: an unanswered cancel
-    /// RPC is resumed with `CancellationError` by the `client.stop()`
-    /// that always follows.
+    /// Best-effort `session/cancel`, then wait for the cancelled turn to
+    /// END — its `session/prompt` answer (`stopReason: "cancelled"`) —
+    /// before the caller's `client.stop()`. The cancel is a notification
+    /// that returns as soon as it is written (P7a); stopping right after
+    /// it closes Hermes's stdin, and the acp lib's `Connection.close()`
+    /// then cancels its in-flight handlers, which can cut the cancel
+    /// short and leave the turn unfinalized (S4). Returns when `turns`
+    /// have all returned OR `seconds` pass, whichever comes first — a
+    /// wedged process that never answers must not stall teardown.
     nonisolated private static func boundedSessionCancel(
         client: ACPClient,
         sessionId: String,
+        awaiting turns: [Task<Void, Never>],
         seconds: Double
     ) async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -2434,6 +2466,7 @@ final class ChatViewModel {
             }
             Task {
                 try? await client.cancel(sessionId: sessionId)
+                for turn in turns { await turn.value }
                 resumeOnce()
             }
             Task {
@@ -3318,9 +3351,12 @@ extension ChatViewModel: VoiceTurnHost {
         guard !isBusyWithNonVoiceTurn, let client = acpClient,
               let sessionId = inFlightPromptSessionId else { return }
         let tasks = promptTurns.values.filter { !$0.isNonInterruptive }.compactMap(\.task)
-        // The turn is over when its `sendPrompt` returns, not when the
-        // cancel is acknowledged, so the cancel RPC isn't awaited
-        // (ACPClient bounds it with its own RPC watchdog).
+        // A superseded request, not a failed one: its `cancelled` return
+        // ends the turn without a failure bubble.
+        richChatViewModel.noteTurnCancelRequested()
+        // The turn is over when its `sendPrompt` returns (Hermes answers
+        // it with `stopReason: "cancelled"`), not when the cancel is sent;
+        // the cancel is a notification with no reply, so it isn't awaited.
         Task { try? await client.cancel(sessionId: sessionId) }
         let all = Task { for task in tasks { await task.value } }
         await Self.boundedWait(for: all, seconds: Self.voiceCancelWaitSeconds)

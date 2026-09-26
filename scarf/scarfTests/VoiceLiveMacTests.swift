@@ -85,6 +85,11 @@ import ScarfCore
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let method = obj["method"] as? String else { return }
             sentMethods.append(method)
+            // `session/cancel` is a notification (no `id`) since P7a.
+            if method == "session/cancel", obj["id"] == nil {
+                if !holdPromptsAfterCancel { releaseHeld() }
+                return
+            }
             guard let id = obj["id"] as? Int else { return }
             switch method {
             case "session/new", "session/load":
