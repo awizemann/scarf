@@ -81,6 +81,25 @@ public enum HermesPeerCLI {
         return args
     }
 
+    /// Scarf's process timeout for one `peer run`. `_peer_run` makes up to
+    /// FOUR sequential requests, each bounded by `LIST_TIMEOUT_S = 30`
+    /// (`hermes_cli/subcommands/peer.py:29`, `:65-67` @ v2026.9.24): the
+    /// `/v1/capabilities` durability probe (`:319`), the Bot Chat lookup and
+    /// its create fallback (`_ensure_bot_chat`, `:118-125`), then the
+    /// `/v1/runs` POST (`:325-328`) — 120 s before Python/SSH startup, which
+    /// is exactly what the old 120 s cap left no room for. A kill during the
+    /// POST can land after the peer created the run, so the retry must reuse
+    /// the same `--idempotency-key` (see ``newIdempotencyKey()``).
+    public static let runProcessTimeout: TimeInterval = 4 * 30 + 60
+
+    /// A Scarf-generated `--idempotency-key`. The CLI accepts any 1-255
+    /// characters without CR/LF/NUL (`peer.py:313-317` @ v2026.9.24, the same
+    /// check since v2026.8.31:348-357 — the flag shipped with `peer run`
+    /// itself, so ``HermesCapabilities/hasPeerRunCommands`` is its floor too).
+    public static func newIdempotencyKey() -> String {
+        "scarf-\(UUID().uuidString.lowercased())"
+    }
+
     public static func statusArgs(target: String, runID: String) -> [String] {
         ["peer", "status", target, runID, "--json"]
     }

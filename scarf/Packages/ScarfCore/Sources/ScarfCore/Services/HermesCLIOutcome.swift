@@ -707,6 +707,30 @@ public enum HermesCLIMarkers {
         "Ran now: failed.",
     ]
 
+    /// `_run_outcome`'s synchronous success verdict (`hermes_cli/cron.py:808`
+    /// @ v2026.9.24; v2026.7.1:411). Absent on v0.17 and older, which only
+    /// ever printed "It will run on the next scheduler tick."
+    public static let cronRanNowSucceeded = "Ran now: succeeded."
+
+    /// Exit-0 `cron run` skips where the job was NOT run and will not be:
+    /// `_claim_for_manual_run`'s paused/missing reasons
+    /// (`tools/cronjob_tools.py:192-197` @ v2026.9.24, identical since
+    /// v2026.7.20:632-634), printed by `_run_outcome` (`hermes_cli/cron.py:809`)
+    /// after the green `Triggered job:` line.
+    public static let cronRunRefused = [
+        "Job is paused/disabled; resume it before running.",
+        "Job no longer exists; nothing to run.",
+    ]
+
+    /// Exit-0 `cron run` skip where the job is ALREADY being fired by the
+    /// scheduler: `_claim_for_manual_run`'s third reason ("Job is already
+    /// being fired…", `tools/cronjob_tools.py:198`) and `_action_run`'s
+    /// fallback ("Already being fired…", `:716-717` @ v2026.9.24 — v0.18.0's
+    /// only skip sentence, v2026.7.1:841). The shared tail matches both.
+    public static let cronRunAlreadyFiring = [
+        "being fired by the scheduler; not run again.",
+    ]
+
     // MARK: plugins enable / disable — hermes_cli/plugins_cmd.py
 
     /// `✓ Plugin <key> enabled. Takes effect on next session.` (:1023), or

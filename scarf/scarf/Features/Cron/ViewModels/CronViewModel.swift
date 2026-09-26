@@ -38,7 +38,12 @@ final class CronViewModel {
     /// that failed to run announced itself in green and then auto-cleared
     /// (go/no-go blocking condition 1, A1-M1/A4-C1). Callers colour by this
     /// instead of sniffing the string, and failures are never auto-cleared.
-    enum MessageOutcome: Equatable { case success, failure }
+    ///
+    /// `unconfirmed` is the third state (P7f): Scarf cannot say whether the
+    /// thing happened — a `cron run` that outlived Scarf's own wait, or one
+    /// Hermes skipped because the scheduler already owns it. Neither green
+    /// nor red, and, like a failure, never auto-cleared.
+    enum MessageOutcome: Equatable { case success, failure, unconfirmed }
     private(set) var messageOutcome: MessageOutcome = .success
 
     /// Single write point for the message channel. Success messages keep the
@@ -89,6 +94,72 @@ final class CronViewModel {
     /// a `force`, or an in-flight load still proceeds/blocks appropriately.
     @ObservationIgnored private var loadedChangeToken: Date?
     @ObservationIgnored private var hasLoaded = false
+    /// Bumped at the START of every `load`, so a completion knows whether it
+    /// read `jobs.json` before or after a given mutation landed.
+    @ObservationIgnored private var loadGeneration = 0
+
+    // MARK: - `--pin` follow-up (v0.21.4+)
+
+    /// A save that sent `--pin`, waiting for the reload that shows whether it
+    /// took. `--pin` locks the main agent's CURRENT model onto the job, and
+    /// with no main model configured `_main_model_pin` returns
+    /// `(None, None)` and the job silently stays unpinned — `create_job`
+    /// (`cron/jobs.py:1805-1806`) and `_apply_pin_update` (`:1937-1939`) both
+    /// just store the empty pair, and the CLI prints its ordinary
+    /// "Created job:"/"Updated job:" line (`_main_model_pin`, `:1593-1610`
+    /// @ v2026.9.24). Only the reloaded record can tell.
+    struct PendingPinCheck: Equatable {
+        enum Target: Equatable { case job(id: String), createdFrom(output: String) }
+        let target: Target
+        /// The first `load` generation that started after the save returned.
+        let firstGeneration: Int
+    }
+    @ObservationIgnored private(set) var pendingPinCheck: PendingPinCheck?
+
+    /// The id `cron create` printed: `Created job: <id>` on its own line
+    /// (`hermes_cli/cron.py:712` @ v2026.9.24, the same at v2026.9.21).
+    nonisolated static func createdJobID(in output: String) -> String? {
+        let marker = "Created job: "
+        for rawLine in HermesCLIVerdict.stripANSI(output).split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix(marker) else { continue }
+            let id = line.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+            return id.isEmpty ? nil : id
+        }
+        return nil
+    }
+
+    /// Which job a successful save's `--pin` has to be checked on, or `nil`
+    /// when the save sent no `--pin`. Only the tokens BEFORE `--` are flags —
+    /// a create's prompt positional may itself read "--pin".
+    /// `cron edit`'s job id is its last token (see `updateJob`).
+    static func pinCheckTarget(arguments: [String], output: String) -> PendingPinCheck.Target? {
+        guard arguments.count > 2, arguments.prefix(while: { $0 != "--" }).contains("--pin") else { return nil }
+        switch arguments[1] {
+        case "create": return .createdFrom(output: output)
+        case "edit": return arguments.last.map { .job(id: $0) }
+        default: return nil
+        }
+    }
+
+    /// The sentence shown when a `--pin` save came back unpinned.
+    nonisolated static let pinDidNotTakeMessage = String(localized: "Saved, but the model wasn't pinned — no main model is configured. Set one in Settings, then pin again.")
+
+    /// Called at the end of every `load`. Loads that STARTED before the save
+    /// returned read the pre-save file and are ignored.
+    private func checkPendingPin(loadGeneration generation: Int) {
+        guard let pending = pendingPinCheck, generation >= pending.firstGeneration else { return }
+        pendingPinCheck = nil
+        let id: String?
+        switch pending.target {
+        case .job(let jobID): id = jobID
+        case .createdFrom(let output): id = Self.createdJobID(in: output)
+        }
+        guard let id, let job = jobs.first(where: { $0.id == id }) else { return }
+        if !job.isModelPinned {
+            post(Self.pinDidNotTakeMessage, outcome: .failure)
+        }
+    }
 
     func load(changeToken: Date? = nil, force: Bool = false) {
         if !force, hasLoaded, loadedChangeToken == changeToken { return }
@@ -97,6 +168,8 @@ final class CronViewModel {
         isLoading = true
         let svc = fileService
         let selectedID = selectedJob?.id
+        loadGeneration += 1
+        let generation = loadGeneration
         Task.detached { [weak self] in
             // Three sync transport ops on remote — keep them off main.
             // v2.8: instrumented so we can see how many SSH RTTs the
@@ -139,9 +212,17 @@ final class CronViewModel {
                     }
                     self.loadDecodeFailed = decodeFailed
                     self.availableSkills = skills
-                    if let refreshed { self.selectedJob = refreshed }
-                    if output != nil { self.jobOutput = output }
+                    // Only onto the selection this load was started for. A
+                    // click that landed while the (remote) read was in flight
+                    // owns `selectedJob` now; writing `refreshed` back would
+                    // snap the detail pane to the old job, and its output
+                    // would overwrite the new job's (P7f).
+                    if self.selectedJob?.id == selectedID {
+                        if let refreshed { self.selectedJob = refreshed }
+                        if output != nil { self.jobOutput = output }
+                    }
                     self.isLoading = false
+                    self.checkPendingPin(loadGeneration: generation)
                 }
             }
         }
@@ -153,7 +234,13 @@ final class CronViewModel {
         let jobID = job.id
         Task.detached { [weak self] in
             let output = svc.loadCronOutput(jobId: jobID)
-            await MainActor.run { [weak self] in self?.jobOutput = output }
+            await MainActor.run { [weak self] in
+                // Same stale-guard as `runHistoryJobID`: a slower read for a
+                // job the user has since clicked away from must not land on
+                // the newer selection's pane (P7f).
+                guard let self, self.selectedJob?.id == jobID else { return }
+                self.jobOutput = output
+            }
         }
     }
 
@@ -638,25 +725,137 @@ final class CronViewModel {
         return line.trimmingCharacters(in: .whitespaces)
     }
 
+    /// Scarf's cap on `hermes cron run`.
+    ///
+    /// From v0.18.0 (`_execute_job_now`, `tools/cronjob_tools.py:604` @
+    /// v2026.7.1) the verb RUNS the job before it returns — and from v0.20.2
+    /// `_job_action` forces that synchronous path even under an inherited
+    /// session env (`_SESSION_ASYNC_DELIVERY.set(False)`,
+    /// `hermes_cli/cron.py:767-784` @ v2026.9.24: a background-dispatched
+    /// run "would be orphaned mid-LLM-call"). A cron job is a full agent
+    /// turn with no wall-clock bound (`HERMES_CRON_TIMEOUT` is an INACTIVITY
+    /// watchdog, `cron/scheduler.py:1162-1173`), so the old 30 s cap SIGTERMed
+    /// real runs mid-LLM-call, leaving a stale claim and a red "failed".
+    ///
+    /// 1800 s is Hermes's own "a run older than this is dead" bound
+    /// (`ONESHOT_RUN_CLAIM_TTL_SECONDS`, `cron/jobs.py:189` @ v2026.9.24), and
+    /// even that expiring is reported as "no result yet", never as a failure
+    /// (``runNowVerdict(exitCode:output:timeout:offer:)``). On a v0.17-and-older
+    /// host the verb only marks the job due and returns at once, so the cap is
+    /// never reached there.
+    nonisolated static let runNowTimeout: TimeInterval = 1800
+
+    /// What one `hermes cron run <id>` actually did, read from what it
+    /// printed (charter C5).
+    enum RunNowVerdict: Equatable {
+        /// `Ran now: succeeded.` — the synchronous run finished (v0.18.0+).
+        case ran
+        /// A green `Triggered job:` with no synchronous verdict: a v0.17 host
+        /// that only marked the job due, a background dispatch, or a
+        /// relay-fronted job forwarded to the running gateway (whose result
+        /// carries no `job`, so `_run_outcome({})` prints "It will run on the
+        /// next scheduler tick.", `tools/cronjob_tools.py:124-154`,
+        /// `hermes_cli/cron.py:809` @ v2026.9.24).
+        case started
+        /// The job was NOT run because it is paused/disabled or gone —
+        /// Hermes's own sentence, verbatim (it names the remedy).
+        case refused(String)
+        /// The job was not started again because the scheduler (or another
+        /// manual run) already owns it — it IS running, just not by us.
+        case alreadyRunning(String)
+        /// Scarf's own ``runNowTimeout`` fired. The run may still be going
+        /// (a remote host keeps it) or may have stopped with the CLI;
+        /// either way nothing proved failure.
+        case stillRunning
+        /// A real failure: a nonzero exit or `Ran now: failed.`.
+        case failed(String)
+    }
+
+    /// Judge a `cron run`. `offer` feeds ``friendlyCronFailure(_:offer:)``
+    /// exactly as the failure path always did.
+    ///
+    /// The skip sentences are `_claim_for_manual_run`'s
+    /// (`tools/cronjob_tools.py:192-199` @ v2026.9.24, identical since
+    /// v2026.7.20) plus `_action_run`'s fallback (`:716-717`, and v0.18.0's
+    /// only one, v2026.7.1:841). `_job_action` prints them after the green
+    /// line and still exits 0 (`hermes_cli/cron.py:790-797`, `_run_outcome`
+    /// `:809`) — which Scarf used to announce as "Agent started".
+    static func runNowVerdict(
+        exitCode: Int32, output: String, timeout: TimeInterval = runNowTimeout,
+        offer: CronRecoveryOffer? = nil
+    ) -> RunNowVerdict {
+        if exitCode == -1,
+           let expected = TransportError.timeout(seconds: timeout, partialStdout: Data()).errorDescription,
+           output.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(expected) {
+            return .stillRunning
+        }
+        let outcome = runOutcome(exitCode: exitCode, output: output)
+        guard outcome.succeeded else {
+            return .failed(
+                friendlyCronFailure(output, offer: offer)
+                    ?? outcome.detail
+                    ?? "Run failed to queue: \(output.prefix(200))"
+            )
+        }
+        let plain = HermesCLIVerdict.stripANSI(output)
+        if let sentence = matchingLine(in: plain, markers: HermesCLIMarkers.cronRunRefused) {
+            return .refused(sentence)
+        }
+        if let sentence = matchingLine(in: plain, markers: HermesCLIMarkers.cronRunAlreadyFiring) {
+            return .alreadyRunning(sentence)
+        }
+        if plain.contains(HermesCLIMarkers.cronRanNowSucceeded) { return .ran }
+        return .started
+    }
+
+    /// The trimmed line carrying one of `markers`, or `nil`.
+    private static func matchingLine(in text: String, markers: [String]) -> String? {
+        for line in text.split(separator: "\n") where markers.contains(where: { line.contains($0) }) {
+            return line.trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
+    /// The bar's sentence and seal for a verdict.
+    static func runNowMessage(
+        _ verdict: RunNowVerdict, timeout: TimeInterval = runNowTimeout
+    ) -> (text: String, outcome: MessageOutcome) {
+        switch verdict {
+        case .ran:
+            return (String(localized: "Run finished — dashboard will update with its output"), .success)
+        case .started:
+            return ("Agent started — dashboard will update when it finishes", .success)
+        case .refused(let sentence):
+            return (String(localized: "Didn't run: \(sentence)"), .failure)
+        case .alreadyRunning(let sentence):
+            // Hermes's sentence already says it all ("…; not run again.").
+            return (sentence, .unconfirmed)
+        case .stillRunning:
+            let minutes = Int(timeout / 60)
+            return (String(localized: "No result after \(minutes) minutes, so Scarf stopped waiting. Check the job's last run before running it again."), .unconfirmed)
+        case .failed(let text):
+            return (text, .failure)
+        }
+    }
+
     func runNow(_ job: HermesCronJob) {
-        // `hermes cron run <id>` only marks the job as due on the next
-        // scheduler tick — it doesn't actually execute. If the Hermes
-        // gateway's scheduler isn't running (common during dev + right
-        // after install), the user's "Run now" click results in zero
-        // visible effect because the tick never comes. We follow up
-        // with `hermes cron tick` which runs all due jobs once and
-        // exits. Redundant-but-harmless when the gateway is running;
-        // the actual trigger when it isn't.
+        // What `hermes cron run <id>` does depends on the host:
         //
-        // Feedback model: show a "Agent started" toast as soon as
-        // `cron run` succeeds, WITHOUT waiting for `cron tick` to
-        // return. Agent jobs routinely run past a minute (network IO +
-        // an LLM call + a file rewrite), and earlier versions with a
-        // 60s tick timeout surfaced a misleading "Run failed" toast
-        // every time while the job kept running in the background.
-        // The app's HermesFileWatcher picks up the dashboard.json
-        // rewrite that the agent lands at the end — that's what the
-        // user actually watches for, not this toast.
+        // - v0.17 and older: it only marks the job due and prints "It will
+        //   run on the next scheduler tick." (`_job_action`,
+        //   `hermes_cli/cron.py:315-316` @ v2026.6.19). If the gateway's
+        //   scheduler isn't running (common in dev and right after install)
+        //   nothing ever fires it, so we follow up with `hermes cron tick`,
+        //   which runs every due job once and exits.
+        // - v0.18.0+: it RUNS the job synchronously and prints `Ran now:
+        //   succeeded.`/`failed.` or a skip sentence (see `runNowVerdict`) —
+        //   except a relay-fronted job, which is forwarded to the running
+        //   gateway and reads like the old "next tick" line. The follow-up
+        //   tick is then redundant but harmless: the run has cleared its
+        //   claim, and a live gateway holds the tick lock.
+        //
+        // The toast lands as soon as `cron run` returns, without waiting
+        // for the tick; HermesFileWatcher picks up whatever the job wrote.
         // `trigger_job` refuses terminal jobs outright
         // (`cron/jobs.py::trigger_job`, v2026.9.7 :2012-2017)
         // — but only from v0.20.6 on; see `refusesTerminalJobLocally`.
@@ -664,39 +863,32 @@ final class CronViewModel {
             post(Self.terminalRefusalMessage(job, offer: recoveryOffer(for: job)), outcome: .failure)
             return
         }
-        let svc = fileService
         let jobID = job.id
         let offer = recoveryOffer(for: job)
-        Task.detached { [weak self] in
-            let runResult = svc.runHermesCLI(args: ["cron", "run", jobID], timeout: 30)
+        let timeout = Self.runNowTimeout
+        Task.detached { [mutationRunner, weak self] in
+            // `OffPool.run`: a spawn that may block for the whole run gets a
+            // thread of its own, not one of the cooperative pool's (C10).
+            let runResult = await OffPool.run { mutationRunner(["cron", "run", jobID], timeout) }
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                let outcome = Self.runOutcome(
-                    exitCode: runResult.exitCode,
-                    output: runResult.output
-                )
-                if !outcome.succeeded {
-                    self.post(
-                        Self.friendlyCronFailure(runResult.output, offer: offer)
-                            ?? outcome.detail
-                            ?? "Run failed to queue: \(runResult.output.prefix(200))",
-                        outcome: .failure
-                    )
+                let verdict = Self.runNowVerdict(
+                    exitCode: runResult.exitCode, output: runResult.output, timeout: timeout, offer: offer)
+                let message = Self.runNowMessage(verdict, timeout: timeout)
+                self.post(message.text, outcome: message.outcome)
+                if case .failed = verdict {
                     self.logger.warning("cron run failed: \(runResult.output)")
-                    self.load(force: true)
-                    return
                 }
-                self.post("Agent started — dashboard will update when it finishes", outcome: .success)
                 self.load(force: true)
             }
-            // `cron run` is queued; now force the tick. The 300s
-            // timeout catches truly stuck processes without killing
-            // the long-but-valid agent case that blew up the 60s
-            // version. A timeout here is survivable — the Hermes
-            // scheduler re-runs due jobs on its own cadence — so we
-            // log but don't surface it as a failure toast.
+            // Now force the tick (see above) — after every verdict, as it
+            // always ran. The 300s timeout catches truly stuck processes
+            // without killing the long-but-valid agent case that blew up the
+            // 60s version. A timeout here is survivable — the Hermes
+            // scheduler re-runs due jobs on its own cadence — so we log but
+            // don't surface it as a failure toast.
             try? await Task.sleep(for: .milliseconds(250))
-            let tickResult = svc.runHermesCLI(args: ["cron", "tick"], timeout: 300)
+            let tickResult = await OffPool.run { mutationRunner(["cron", "tick"], 300) }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if tickResult.exitCode != 0 {
@@ -1064,6 +1256,13 @@ final class CronViewModel {
                 onOutcome?(result.exitCode == 0)
                 if result.exitCode == 0 {
                     self.post(success, outcome: .success)
+                    // Armed only when `--pin` was actually sent, which only a
+                    // v0.21.4+ host is ever sent (`hasCronModelPin`), so an
+                    // older host never reaches the check (C1).
+                    if let target = Self.pinCheckTarget(arguments: arguments, output: result.output) {
+                        self.pendingPinCheck = PendingPinCheck(
+                            target: target, firstGeneration: self.loadGeneration + 1)
+                    }
                 } else {
                     self.post(
                         Self.friendlyCronFailure(result.output, offer: offer)

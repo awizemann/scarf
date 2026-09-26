@@ -255,15 +255,18 @@ struct CronView: View {
                 // Failures no longer auto-clear (see CronViewModel.post), so
                 // they get a colour and an explicit dismiss.
                 let failed = viewModel.messageOutcome == .failure
+                // "We don't know" (a Run Now Scarf stopped waiting on) is
+                // amber and sticky too — neither the success grey nor red.
+                let unconfirmed = viewModel.messageOutcome == .unconfirmed
                 HStack(spacing: ScarfSpace.s1) {
                     Text(msg)
                         .scarfStyle(.caption)
-                        .foregroundStyle(failed ? ScarfColor.danger : ScarfColor.foregroundMuted)
+                        .foregroundStyle(failed ? ScarfColor.danger : unconfirmed ? ScarfColor.warning : ScarfColor.foregroundMuted)
                         // UI gate: the ONLY place a failed `hermes cron …`
                         // is reported to the user, so a journey that sees a
                         // mutation not happen can say WHY.
                         .accessibilityIdentifier("cron.message")
-                    if failed {
+                    if failed || unconfirmed {
                         Button {
                             viewModel.dismissMessage()
                         } label: {
