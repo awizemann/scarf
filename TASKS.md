@@ -101,6 +101,7 @@
 - [ ] Flaky under load: VoiceLiveP5bTests.voiceStillCancelsItsOwnTurnsAndWaitsForThemAll hits the 10 s cancel bound (id: t-22210014) (added: 2026-09-19) (priority: low)
 - [ ] Voice P7 step 2: "Use my Hermes speech-to-text" option (host STT via transcribe_recording) (id: t-79ae9801) (added: 2026-09-19)
 - [ ] Upstream P9: resume fallback mints a new ACP id — old-id kanban tasks vanish silently (id: t-e875803c) (added: 2026-09-21)
+- [ ] ScarfGo accepts any SSH host key — design trust-on-first-use known-hosts (id: t-93ddfdc4) (added: 2026-09-26) (priority: high)
 
 ## Doing
 
@@ -111,6 +112,23 @@
 
 ## Done
 
+- [x] P9 Final-review fixes: threshold parse crash, iOS reconnect stuck, doctor partial, mid-turn tool data, clock seed, peer key (id: t-d6384e2e) (added: 2026-09-26) (priority: urgent)
+- [x] P8 Final: localize P7 strings + fresh-eyes review of P7 (id: t-12f511ed) (added: 2026-09-26) (priority: high)
+- [x] P7f Cron/peers: Run now timeout & skip detection, selection race, duplicate keys, peer run idempotency (id: t-f906a567) (added: 2026-09-26) (priority: high)
+- [x] P7e Gateway/profiles/health/skills: allowlist warning, doctor/audit/update-check honesty, sticky notes (id: t-ee3f22c7) (added: 2026-09-26)
+- [x] P7b Chat view models: reconnect currency, reconcile cursor, mid-turn send, turn-end cleanup (id: t-409ec2da) (added: 2026-09-26) (priority: high)
+- [x] P7d Settings/catalog: WhatsApp decline key, threshold parse, picker aliases, MCP reload, a11y (id: t-3beb5ec1) (added: 2026-09-26)
+- [x] P7c Data layer: no checkpoint on close (C3), honest search/dashboard errors, quoted LIKE fallback (id: t-00ade623) (added: 2026-09-26) (priority: urgent)
+- [x] P7a ACP client: cancel as notification, failed-init teardown, post-EOF guard (id: t-67f960a6) (added: 2026-09-26) (priority: urgent)
+- [x] P5a Review fixes: catalog/config/MCP/kanban + localization sweep (id: t-c3d15135) (added: 2026-09-26) (priority: high)
+- [x] P6 Whole-surface audit of every area the v0.21.5 branch touched (id: t-5ca5eae5) (added: 2026-09-26) (priority: high)
+- [x] P5b Review fixes: peer DM timeout, multiplex null, cron duplicate, optimize UX, call-site tests (id: t-4b8eb661) (added: 2026-09-26) (priority: high)
+- [x] P3 CLI outcome judges: optimize, backup, skills, cron doctor/incidents, profile delete, peer dm (id: t-39a680a5) (added: 2026-09-26) (priority: high)
+- [x] P4 Catalog & config: providers, web backend, MCP boolish, defaults, WhatsApp decline (id: t-e75780fe) (added: 2026-09-26) (priority: high)
+- [x] P2 Gateway multiplex-by-default + parked profiles (id: t-12173991) (added: 2026-09-26) (priority: high)
+- [x] P1a Chat stream: stray approval tool rows + working timer (#145) (id: t-d81c95be) (added: 2026-09-26) (priority: high)
+- [x] P1b Data layer: kanban diagnostics decode, search fallback, sqlite3-missing message (#141) (id: t-b884cfbd) (added: 2026-09-26) (priority: high)
+- [x] P0 Hermes v0.21.5 parity: capability flags + target tag (id: t-4763221c) (added: 2026-09-26) (priority: high)
 - [x] Cut Scarf v3.3.0 (voice release) (id: t-1d95beb3) (added: 2026-09-22) (priority: high)
 - [x] Bring echo cancellation back to the chained voice listener (mono down-mix + re-measured quiet gate) (id: t-44c4e2ff) (added: 2026-09-22)
 - [x] Upstream P10: replace the brittle kanban session-id source-sweep test + low findings (id: t-e84e6e1c) (added: 2026-09-21) (priority: low)
