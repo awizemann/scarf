@@ -71,6 +71,15 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted without identifying you. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context, and both apps ask before the first session.
 
+## What's New in 3.4.0
+
+- **Stop now stops the agent** — Scarf had always sent Hermes's cancel in a shape Hermes's protocol library ignores, so Stop, voice barge-in and ScarfGo cancel ended the turn in Scarf while Hermes kept going. Fixed on every Hermes version.
+- **Hermes v0.21.5** — one gateway serving every profile (routing on by default, parked profiles with a Parked badge, the standalone warning and its fix), the search-index redesign handled so matches deep in tool output aren't lost, and every command whose output changed read correctly (Kanban diagnostics, backup, skills, profile delete, `peer dm`, Optimize). All capability-gated; verified at the tag and on a live v0.21.5 host.
+- **Working · 0:12** — a live elapsed clock replaces the frozen three dots under a running reply, on Mac and ScarfGo.
+- **Cron Run now** — no longer kills jobs after 30 seconds; shows Running…, ignores double clicks, and reports skipped jobs honestly. New **Pin to the current main model** in the cron editor.
+- **Honest results** — reconnects no longer overwrite a newer chat or scramble "Load earlier"; Doctor, security audit and skills update checks stop reporting success when the command failed; Scarf can no longer write to Hermes's database on a fallback connection; a config value that could crash Scarf is read the way Hermes reads it.
+- Full notes: [releases/v3.4.0/RELEASE_NOTES.md](releases/v3.4.0/RELEASE_NOTES.md).
+
 ## What's New in 3.3.0
 
 - **Voice conversation on Mac and ScarfGo** — a waveform button next to Send starts a two-way spoken conversation with Hermes, following the host's own `voice.voice_chat_mode`: *chained* (Hermes's default) is free, on-device speech-to-text with the reply read aloud by the host's TTS provider or the system voice (Hermes v0.20.1+); *GPT-Live* uses OpenAI's real-time voice model on the host's key (Hermes v0.21.3+, one-time privacy consent per device, running cost shown). Every request is still a normal Hermes turn. The chained listener cancels its own echo so it never hears Hermes's reply as your next question.
@@ -153,7 +162,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.2** (v2026.9.11) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.5** (v2026.9.24) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
@@ -165,8 +174,11 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 | v0.20.5 (2026-08-19) | Verified — full-output `--version` probe, unlimited max turns, unseeded `stt.provider`, profile display names, OpenCode Free |
 | v0.20.6 (2026-08-27) | Verified — cron incidents/doctor/Run Now, bot-chat delivery, `browser close-profile`, curator pin/unpin diagnostics, essential `hermes-agent` skill |
 | v0.21.0 "Pantheon" (2026-08-31) | Verified — Peers (`hermes peer`), dotted-key escaping, MCP catalog 20 → 65 servers, turn-lease default 1800 → 5s, two new providers |
-| v0.21.2 (2026-09-11) | **Verified — current target** — the state.db reliability patch; schema, ACP wire and every Scarf argv unchanged at the tag; `hermes backup --keep 0` passed so Hermes's new prune default never deletes your older backups |
+| v0.21.2 (2026-09-11) | Verified — the state.db reliability patch; schema, ACP wire and every Scarf argv unchanged at the tag; `hermes backup --keep 0` passed so Hermes's new prune default never deletes your older backups |
 | v0.21.1 (2026-09-07) | Verified — Tavily back, `perplexity` web backend, bounded `service_tier` modes, shared-metrics telemetry, `plugins compat --json`, cron `--paused`/`--failure-deliver`, MCP device-code OAuth, `messages_fts` 8 KB tool-content prefix |
+| v0.21.3 (2026-09-14) | Verified — GPT-Live voice chat mode (Scarf 3.3.0) |
+| v0.21.4 (2026-09-21) | Verified — multiplex-by-default gateway, FTS index aligned to an 8 KB tool prefix, `opencode-free` removed, `chatgpt` aliases, OpenAI-native web search, cron model pin, new exit codes for backup / profile delete / peer dm / sessions optimize |
+| v0.21.5 (2026-09-24) | **Verified — current target** — parked profiles, the standalone status box, retired `multiplex_profiles: false` rewritten, MCP numeric on/off; verified at the tag and on a live host |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 
