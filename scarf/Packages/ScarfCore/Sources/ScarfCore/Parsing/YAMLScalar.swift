@@ -155,6 +155,70 @@ public enum YAMLScalar {
         ) != nil
     }
 
+    /// True when PyYAML's implicit resolvers load this plain scalar as an
+    /// `int` or a `float` (never a `bool`, `null`, or timestamp) — the two
+    /// types Hermes's `_parse_boolish` reads by numeric truthiness at
+    /// v0.21.5+ (`tools/mcp_tool_common.py:124-129` @ `v2026.9.24`, commit
+    /// `3e00a356a4`: `isinstance(value, (bool, int, float))` then
+    /// `bool(value)`, checked AFTER the `bool` branch so a real `bool` never
+    /// reaches here). Below that floor these same scalars fall through
+    /// `_parse_boolish`'s `isinstance(value, str)` check entirely and return
+    /// its `default` — see ``HermesFileService/boolishOptional(_:)``.
+    public static func resolvesToNumber(_ s: String) -> Bool {
+        guard !resolvesToBool(s) else { return false }
+        for pattern in numberResolverPatterns {
+            if pattern.firstMatch(
+                in: s, options: [], range: NSRange(s.startIndex..., in: s)
+            ) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Python truthiness (`bool(x)`) for a plain scalar already known to
+    /// satisfy ``resolvesToNumber(_:)``: `0`/`0.0`/`-0` (any sign, any of
+    /// PyYAML's int bases) are falsy, every other numeric literal is
+    /// truthy. Scoped to the decimal/hex/octal/binary/float shapes
+    /// `Foundation` can parse; PyYAML's sexagesimal (`1:30`) and
+    /// `.inf`/`.nan` spellings are vanishingly unlikely for an `enabled:`
+    /// value and are treated as truthy (non-zero) rather than mis-parsed.
+    public static func numericScalarIsZero(_ s: String) -> Bool {
+        let cleaned = s.replacingOccurrences(of: "_", with: "")
+        if let d = Double(cleaned) { return d == 0 }
+        for prefix in ["0x", "+0x", "-0x"] where cleaned.lowercased().hasPrefix(prefix) {
+            let hex = cleaned.dropFirst(prefix.count)
+            return (Int(hex, radix: 16) ?? -1) == 0
+        }
+        for prefix in ["0b", "+0b", "-0b"] where cleaned.lowercased().hasPrefix(prefix) {
+            let bin = cleaned.dropFirst(prefix.count)
+            return (Int(bin, radix: 2) ?? -1) == 0
+        }
+        // Leading-zero octal (`010`) and sexagesimal (`1:30`) shapes: not
+        // parsed, so not reported as zero — matches this function's
+        // documented truthy-by-default scope for the exotic cases.
+        return false
+    }
+
+    /// Int/float-only mirror of `implicitResolverPatterns`, split out so
+    /// ``resolvesToNumber(_:)`` doesn't also match null/timestamp/merge-key
+    /// scalars that function was never asked about.
+    private static let numberResolverPatterns: [NSRegularExpression] = {
+        let sources = [
+            #"^[-+]?0b[0-1_]+$"#,
+            #"^[-+]?0[0-7_]+$"#,
+            #"^[-+]?(?:0|[1-9][0-9_]*)$"#,
+            #"^[-+]?0x[0-9a-fA-F_]+$"#,
+            #"^[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+$"#,
+            #"^[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?$"#,
+            #"^\.[0-9][0-9_]*(?:[eE][-+]?[0-9]+)?$"#,
+            #"^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$"#,
+            #"^[-+]?\.(?:inf|Inf|INF)$"#,
+            #"^\.(?:nan|NaN|NAN)$"#,
+        ]
+        return sources.compactMap { try? NSRegularExpression(pattern: $0) }
+    }()
+
     /// Quote a YAML scalar if emitting it bare would change what PyYAML
     /// loads. Beyond `:` `#` and the block indicators, this covers the
     /// YAML 1.2 flow indicators (`[ ] { } ,`), the leading-position

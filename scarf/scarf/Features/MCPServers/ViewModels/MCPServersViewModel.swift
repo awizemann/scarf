@@ -104,7 +104,7 @@ final class MCPServersViewModel {
     /// (t-aud24).
     @ObservationIgnored private var hasLoaded = false
 
-    func load(force: Bool = false) {
+    func load(force: Bool = false, capabilities: HermesCapabilities = .empty) {
         if !force, hasLoaded || isLoading { return }
         hasLoaded = true
         isLoading = true
@@ -112,7 +112,7 @@ final class MCPServersViewModel {
         Task.detached { [weak self] in
             // loadMCPServers reads config.yaml + lists mcp-tokens — both
             // are sync transport calls that block on remote ssh round-trips.
-            let result = svc.loadMCPServers()
+            let result = svc.loadMCPServers(capabilities: capabilities)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.servers = result

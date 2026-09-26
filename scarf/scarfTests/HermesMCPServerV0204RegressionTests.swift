@@ -249,6 +249,38 @@ struct HermesMCPServerV0204RegressionTests {
         #expect(HermesFileService.boolishOptional(nil) == nil)
     }
 
+    /// v0.21.5 (v2026.9.24, commit `3e00a356a4`): `_parse_boolish` now
+    /// special-cases `isinstance(value, (bool, int, float))` → `bool(value)`
+    /// BEFORE the string-word match, so a bare `enabled: 0` flips from
+    /// "enabled" (the pre-fix default) to disabled, and `enabled: 2` /
+    /// `enabled: 0.0` follow Python truthiness too. Below the floor the
+    /// same bare numbers still fall through to `default`, unchanged — this
+    /// test fails on either side if the gate is reverted or the floor is
+    /// wrong.
+    @Test func boolishReadsNumericZeroAsDisabledOnlyAtV0215() {
+        let newHost = HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)")
+        let oldHost = HermesCapabilities.parse("Hermes Agent v0.21.4 (2026.9.21)")
+
+        // `enabled: 0` — disabled at v0.21.5+, the pre-fix default (true)
+        // below it.
+        #expect(HermesFileService.boolish("0", default: true, capabilities: newHost) == false)
+        #expect(HermesFileService.boolish("0", default: true, capabilities: oldHost) == true)
+        #expect(HermesFileService.boolish("0", default: true) == true)  // unconditional default (.empty)
+
+        // Any other bare number is truthy at v0.21.5+; still "use default"
+        // below it.
+        #expect(HermesFileService.boolish("2", default: false, capabilities: newHost) == true)
+        #expect(HermesFileService.boolish("2", default: false, capabilities: oldHost) == false)
+        #expect(HermesFileService.boolish("0.0", default: true, capabilities: newHost) == false)
+        #expect(HermesFileService.boolish("-1", default: false, capabilities: newHost) == true)
+
+        // A real `bool` or a quoted string are unaffected either way — the
+        // int/float branch in `_parse_boolish` runs only for what PyYAML
+        // did NOT already type as a `bool` or a `str`.
+        #expect(HermesFileService.boolish("false", default: true, capabilities: newHost) == false)
+        #expect(HermesFileService.boolish("\"0\"", default: true, capabilities: newHost) == false)
+    }
+
 }
 
 /// Behavioral cover for the `identity_header` / `strict_redirect_headers`
