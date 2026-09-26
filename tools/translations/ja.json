@@ -3103,5 +3103,7 @@
   "Doctor did not complete": "Doctor が完了しませんでした",
   "decline (not supported by this Hermes — behaves as pair)": "decline（この Hermes ではサポートされていません — pair として動作します）",
   "Dismiss this unconfirmed cron result": "この cron の不明な結果を閉じる",
-  "Dismiss this unconfirmed routine result": "このルーティンの不明な結果を閉じる"
+  "Dismiss this unconfirmed routine result": "このルーティンの不明な結果を閉じる",
+  "Doctor could not run": "Doctor を実行できませんでした",
+  "Running \"%@\"…": "\"%@\" を実行中…"
 }

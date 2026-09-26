@@ -86551,6 +86551,46 @@
         }
       }
     },
+    "Running \"%@\"…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Führt \"%@\" aus…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ejecutando \"%@\"…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exécution de « %@ »…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" を実行中…"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Executando \"%@\"…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在运行 \"%@\"…"
+          }
+        }
+      }
+    },
     "Running a single shell session on %@ that exercises every path Scarf reads…" : {
       "localizations" : {
         "de" : {
@@ -131202,6 +131242,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Doctor 超时"
+          }
+        }
+      }
+    },
+    "Doctor could not run" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor konnte nicht ausgeführt werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor no pudo ejecutarse"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor n'a pas pu s'exécuter"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor を実行できませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Doctor não pôde ser executado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor 无法运行"
           }
         }
       }

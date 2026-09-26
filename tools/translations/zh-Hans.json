@@ -3098,5 +3098,7 @@
   "Doctor did not complete": "Doctor 未完成",
   "decline (not supported by this Hermes — behaves as pair)": "decline（此 Hermes 不支持——表现为 pair）",
   "Dismiss this unconfirmed cron result": "忽略此未确认的定时任务结果",
-  "Dismiss this unconfirmed routine result": "忽略此未确认的例行任务结果"
+  "Dismiss this unconfirmed routine result": "忽略此未确认的例行任务结果",
+  "Doctor could not run": "Doctor 无法运行",
+  "Running \"%@\"…": "正在运行 \"%@\"…"
 }
