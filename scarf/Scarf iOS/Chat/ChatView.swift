@@ -2647,8 +2647,13 @@ final class ChatController {
         case .active:
             // No session worth verifying.
             guard let id = lastActiveSessionID else { return }
-            // Already mid-recovery — let it finish.
-            if case .reconnecting = state { return }
+            // Already mid-recovery — let it finish. Only when a ladder
+            // is actually RUNNING: `pauseInBackground` cancels the ladder
+            // and nils `reconnectTask` but leaves `.reconnecting` (its own
+            // `.ready` demote, or a ladder it interrupted), so keying on
+            // the state alone stranded every background round-trip in
+            // "Resuming…" / "Reconnecting (n/5)…" with nothing running.
+            if case .reconnecting = state, reconnectTask != nil { return }
             await verifyAndResume(sessionId: id)
         case .inactive:
             break       // brief: control center, banners, split-screen
