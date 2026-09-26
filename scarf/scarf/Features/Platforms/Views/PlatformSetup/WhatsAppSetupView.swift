@@ -39,7 +39,12 @@ struct WhatsAppSetupView: View {
         guard option == "decline",
               capabilitiesStore?.capabilities.hasWhatsAppUnauthorizedDMDecline != true
         else { return option }
-        return "decline (not supported by this Hermes — behaves as pair)"
+        // `PickerRow` renders every option through `Text(verbatim:)` so raw
+        // Hermes config values ("pair", "decline", "block") show unquoted —
+        // resolve the explanatory sentence against the catalog NOW, since
+        // `String(localized:)` is a synchronous lookup and does not need a
+        // `Text(LocalizedStringKey)` call site to take effect.
+        return String(localized: "decline (not supported by this Hermes — behaves as pair)")
     }
 
     var body: some View {

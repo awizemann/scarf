@@ -1056,8 +1056,8 @@ public final class SkillsViewModel {
         isHubLoading = false
         let tail = HermesCLIVerdict.significantLines(output).suffix(4).joined(separator: " · ")
         hubMessage = tail.isEmpty
-            ? "Check failed (exit \(exitCode))"
-            : "Check failed (exit \(exitCode)): \(tail)"
+            ? String(localized: "Check failed (exit \(exitCode))")
+            : String(localized: "Check failed (exit \(exitCode)): \(tail)")
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil
     }

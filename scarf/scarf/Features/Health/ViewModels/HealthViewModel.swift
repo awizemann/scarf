@@ -767,7 +767,7 @@ final class HealthViewModel {
         let timedOut = exitCode == -1
         guard parsed.isEmpty || timedOut else { return parsed }
         let tail = HermesCLIVerdict.significantLines(output).suffix(4).joined(separator: "\n")
-        let reason = timedOut ? "Doctor timed out" : "Doctor did not complete"
+        let reason = timedOut ? String(localized: "Doctor timed out") : String(localized: "Doctor did not complete")
         return parsed + [HealthSection(
             title: "Doctor",
             icon: "stethoscope",
