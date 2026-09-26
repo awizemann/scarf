@@ -29,6 +29,5 @@ reviewed_by: audit:claude-code (background)
 - [no-op-list] Deliberate NO-OPs (don't re-litigate): gateway /resume+/sessions IDOR series, browser private-network guard, compaction END-MARKER fixes, compression interrupt queueing, kanban creator-wake routing, codex-runtime migration plumbing, MoA desktop preset persistence, delegate toolsets-arg removal, contextvar isolation (GHSA-96vc-wcxf-jjff), _save_mcp_server bool return. All server/desktop-internal. #no-ops
 
 ## Relations
-- extends [[Hermes Version Management]]
 - relates_to [[Hermes v0.17 Compatibility Decisions]]
 - implements [[Hermes Release Audit Process]]

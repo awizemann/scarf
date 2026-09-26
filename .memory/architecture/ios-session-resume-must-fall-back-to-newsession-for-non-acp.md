@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/ios-session-resume-must-fall-back-to-newsession-for-non-acp
 source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift]
 source_paths_inferred: false
-source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
+source_sha: ec82be9ed1ea112c620a39cdcefcd9f5cae6f9b3
 created: 2026-08-19
 updated: 2026-08-19
-reviewed: 2026-09-21
+reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
 

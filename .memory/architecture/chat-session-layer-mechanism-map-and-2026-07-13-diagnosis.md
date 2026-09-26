@@ -11,10 +11,10 @@ reviewed: 2026-09-22
 reviewed_by: audit:claude-code (background)
 ---
 
-## Mechanism facts (file:line grounded, verified 2026-09-21)
-- [fact] One `hermes acp` process per session start — `startACPSession` (ChatViewModel.swift:1805) always `stopACP()` then spawns fresh; config.yaml is read ONLY at spawn. Mid-chat model change = ACP `session/set_model`; global default changes need the next spawn. #lifecycle
-- [fact] "Loading session…" spinner = static label gated on `isPreparingSession` (ChatViewModel:379-382). NO timeout bounds the start/resume pipeline, and ChatSessionListPane disables all row clicks while preparing → a wedged start is SELF-LOCKING (restart-only recovery). Watchdog added in Fix 3 bounds this. #spinner
-- [fact] Pre-engagement gate (RichChatViewModel:1714-1736, specifically `hasUserSentPromptThisSession` at 1736) drops ALL stream events — including the synthesized `promptComplete` — until `addUserMessage` (RichChatViewModel:1879) sets the gate. Turn completion = sendPrompt's RETURN; promptComplete is intentionally NOT gated per Fix 2. #gate
+## Mechanism facts (file:line grounded, verified 2026-09-26)
+- [fact] One `hermes acp` process per session start — `startACPSession` (ChatViewModel.swift:1807) always `stopACP()` then spawns fresh; config.yaml is read ONLY at spawn. Mid-chat model change = ACP `session/set_model`; global default changes need the next spawn. #lifecycle
+- [fact] "Loading session…" spinner = static label gated on `isPreparingSession` (ChatViewModel:379-384). NO timeout bounds the start/resume pipeline, and ChatSessionListPane disables all row clicks while preparing → a wedged start is SELF-LOCKING (restart-only recovery). Watchdog added in Fix 3 bounds this. #spinner
+- [fact] Pre-engagement gate (`hasUserSentPromptThisSession` at RichChatViewModel:1810, checked in handleACPEvent at 2138) drops ALL stream events — including the synthesized `promptComplete` — until `addUserMessage` (RichChatViewModel:1955) sets the gate. Turn completion = sendPrompt's RETURN; promptComplete is intentionally NOT gated per Fix 2. #gate
 - [fact] Hermes replays full history as session/update notifications inside session/load; Scarf drops them by design and hydrates from state.db. Sidebar counts + info-bar tokens come from state.db reads, NOT stream accounting — a session can look alive in the sidebar while the transcript pane is deaf. #streams
 
 ## Confirmed defects (2026-07-13, agent.log + state.db + live probe evidence)

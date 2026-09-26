@@ -3,11 +3,13 @@ title: Hermes v0.21.4 non-zero exits that are NOT failures (backup, profile dele
 type: note
 permalink: scarf/architecture/hermes-v0-21-4-non-zero-exits-that-are-not-failures-backup
 tags: [hermes-cli, hermes-v0-21-4, capability-gating, verdicts]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileDeleteVerdict.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift]
 source_paths_inferred: false
-source_sha: 7b7bc9fb67279185d89be0cb114238b45687025f
+source_sha: ec82be9ed1ea112c620a39cdcefcd9f5cae6f9b3
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
