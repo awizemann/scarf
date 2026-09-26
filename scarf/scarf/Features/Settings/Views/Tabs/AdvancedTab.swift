@@ -70,7 +70,7 @@ struct AdvancedTab: View {
                     // v0.20 tuning keys — hidden on older hosts so the tab renders
                     // exactly as before and no ignored keys get written.
                     if capabilitiesStore?.capabilities.isV020OrLater ?? false {
-                        StepperRow(label: "Token Threshold", value: viewModel.config.compression.thresholdTokens, range: 0...1_000_000, step: 25_000) { viewModel.setCompressionThresholdTokens($0) }
+                        StepperRow(label: "Token Threshold", value: viewModel.config.displayCompressionThresholdTokens(capabilities: capabilities), range: 0...1_000_000, step: 25_000) { viewModel.setCompressionThresholdTokens($0) }
                             .help("Absolute token cap: compression triggers at the LOWER of the ratio Threshold above and this token count. 0 = use the ratio threshold only.")
                         StepperRow(label: "Min Tail User Msgs", value: viewModel.config.compression.minTailUserMessages, range: 1...20) { viewModel.setCompressionMinTailUserMessages($0) }
                             .help("Recent real user messages guaranteed to survive uncompressed, even when bulky tool output fills the tail budget. Hermes default: 1.")

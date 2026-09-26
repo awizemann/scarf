@@ -1018,16 +1018,23 @@ public struct MattermostSettings: Sendable, Equatable {
 
 /// WhatsApp settings under `whatsapp.*`.
 public struct WhatsAppSettings: Sendable, Equatable {
-    public var unauthorizedDMBehavior: String  // "pair" | "ignore"
+    public var unauthorizedDMBehavior: String  // "pair" | "ignore" | "decline" (v0.21.4+)
     public var replyPrefix: String
-
+    /// `whatsapp.unauthorized_dm_decline_message` — the reply sent once when
+    /// `unauthorizedDMBehavior == "decline"`. Empty means "use Hermes's own
+    /// default text" (`gateway/config.py:140` `unauthorized_dm_decline_message:
+    /// str = ""`, `:627` `DEFAULT_UNAUTHORIZED_DM_DECLINE_MESSAGE`); v0.21.4+
+    /// only — see `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`.
+    public var unauthorizedDMDeclineMessage: String
 
     public init(
         unauthorizedDMBehavior: String,
-        replyPrefix: String
+        replyPrefix: String,
+        unauthorizedDMDeclineMessage: String = ""
     ) {
         self.unauthorizedDMBehavior = unauthorizedDMBehavior
         self.replyPrefix = replyPrefix
+        self.unauthorizedDMDeclineMessage = unauthorizedDMDeclineMessage
     }
     public nonisolated static let empty = WhatsAppSettings(unauthorizedDMBehavior: "pair", replyPrefix: "")
 }
@@ -1530,6 +1537,23 @@ public struct HermesConfig: Sendable {
     public func displayApprovalTimeout(capabilities: HermesCapabilities) -> Int {
         if approvalTimeout > 0 { return approvalTimeout }
         return capabilities.isV0191OrLater ? 300 : 60
+    }
+
+    /// Effective `compression.threshold_tokens` for display: the on-disk
+    /// value when it's a positive count, otherwise the host's shipped
+    /// default — **256,000** on v0.21.4+, **0** ("off"/ratio-only) on older
+    /// supported hosts. Same `<= 0` conflation as `displayApprovalTimeout`
+    /// above: Hermes's own reader treats an explicit `0` and an absent key
+    /// identically ("off", `config.py`'s `_tt > 0` display guard), so this
+    /// can't and doesn't need to tell them apart — only the ABSENT case
+    /// changed defaults, from `None` to `256_000`
+    /// (`config_defaults.py:539` @ v2026.9.14 vs `:570` @ v2026.9.21, both
+    /// v0.21.4). See `HermesCapabilities.hasCompressionThresholdTokensDefault256K`.
+    ///
+    /// Display-only. Unknown host version resolves to the older `0`.
+    public func displayCompressionThresholdTokens(capabilities: HermesCapabilities) -> Int {
+        if compression.thresholdTokens > 0 { return compression.thresholdTokens }
+        return capabilities.hasCompressionThresholdTokensDefault256K ? 256_000 : 0
     }
 
     /// Effective `agent.gateway_notify_interval` for display: the on-disk

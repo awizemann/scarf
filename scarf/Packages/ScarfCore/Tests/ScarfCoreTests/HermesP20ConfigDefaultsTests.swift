@@ -131,6 +131,45 @@ struct HermesP20ConfigDefaultsTests {
         #expect(set.displayApprovalTimeout(capabilities: Self.caps("0.21.1")) == 45)
     }
 
+    /// `compression.threshold_tokens` went `None` → `256_000` at tag
+    /// **v2026.9.21 (v0.21.4)** (`config_defaults.py:539` @ v2026.9.14 vs
+    /// `:570` @ v2026.9.21 — both walked directly, not from the audit's
+    /// v2026.9.24 citation). Scarf's parser reads an absent key as `0`, the
+    /// same "off" sentinel Hermes's own `_tt > 0` display guard uses for an
+    /// explicit `0` — so this can't and doesn't try to tell "absent" and
+    /// "explicitly 0" apart, matching `displayApprovalTimeout`'s convention.
+    @Test func compressionThresholdTokensIsASentinelResolvedAtV0214() {
+        let absent = HermesConfig(yaml: Self.bare)
+        #expect(absent.compression.thresholdTokens == 0)
+        #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == 256_000)
+        #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.5")) == 256_000)
+        #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.3")) == 0)
+        #expect(absent.displayCompressionThresholdTokens(capabilities: .empty) == 0)
+        let set = HermesConfig(yaml: "compression:\n  threshold_tokens: 100000\n")
+        #expect(set.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == 100_000)
+    }
+
+    /// `whatsapp.unauthorized_dm_behavior` gains `"decline"` and
+    /// `whatsapp.unauthorized_dm_decline_message` is a new key, both at tag
+    /// **v2026.9.21 (v0.21.4)** (`gateway/config.py:139,627`). Parsing
+    /// itself is unconditional — Scarf reads whatever the file holds
+    /// regardless of host version, exactly as every other config value
+    /// does; the FLOOR only gates whether the PICKER offers `"decline"` as
+    /// a choice (`WhatsAppSetupView.unauthorizedDMOptions`,
+    /// `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`).
+    @Test func whatsAppUnauthorizedDMDeclineParsesVerbatim() {
+        let absent = HermesConfig(yaml: Self.bare)
+        #expect(absent.whatsapp.unauthorizedDMBehavior == "pair")
+        #expect(absent.whatsapp.unauthorizedDMDeclineMessage == "")
+        let set = HermesConfig(yaml: """
+        whatsapp:
+          unauthorized_dm_behavior: decline
+          unauthorized_dm_decline_message: "Sorry, owner only."
+        """)
+        #expect(set.whatsapp.unauthorizedDMBehavior == "decline")
+        #expect(set.whatsapp.unauthorizedDMDeclineMessage == "Sorry, owner only.")
+    }
+
     /// `agent.gateway_notify_interval` went 600 → 180 at tag **v2026.4.23
     /// (v0.11.0)** and holds through v2026.9.7 (`config_defaults.py:196`);
     /// v2026.4.13/v2026.4.16 (v0.9.0/v0.10.0) ship 600 and no earlier tag has
