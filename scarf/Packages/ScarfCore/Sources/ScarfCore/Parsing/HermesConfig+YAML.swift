@@ -471,7 +471,7 @@ public extension HermesConfig {
             // legal PyYAML int/float literals, `int()`/`float()` accepting
             // the underscore per PEP 515) must parse to the same int Python
             // would get, not the sentinel — see `pythonIntCoerce`.
-            thresholdTokens: scalar("compression.threshold_tokens").map { Self.pythonIntCoerce($0) },
+            thresholdTokens: values["compression.threshold_tokens"].map { Self.pythonIntCoerce($0) },
             minTailUserMessages: int("compression.min_tail_user_messages", default: 1),
             idleCompactAfterSeconds: int("compression.idle_compact_after_seconds", default: 0),
             progressNotices: boolish("compression.progress_notices", default: false)
@@ -1195,31 +1195,135 @@ public extension HermesConfig {
         return nil
     }
 
-    /// Mirrors Python's `int(raw)` for a scalar `_positive_int` will later
-    /// call on a value PyYAML's own resolvers already turned into a number
-    /// — the two forms that trip a literal `Int(_:)`:
+    /// `_positive_int(value)` for `compression.threshold_tokens`, where
+    /// `value` is whatever PyYAML loaded from the RAW scalar
+    /// (`agent/agent_init.py:1410-1418,1492-1494` @ v2026.9.24): the positive
+    /// `int(value)`, else `0` — the ratio-only sentinel this reader already
+    /// uses for everything `_positive_int` rejects (`null`, `0`, a negative,
+    /// `"abc"`). It is a total function: it never traps, whatever the text.
     ///
-    /// - **Underscore digit grouping** (`256_000`): legal in an UNQUOTED
-    ///   YAML int (PyYAML's int resolver regex allows `_` between digits,
-    ///   matching Python's PEP 515 `int()`/`float()` string parsing), so
-    ///   Hermes's `cfg.get("threshold_tokens")` is already the Python int
-    ///   `256000` by the time `_positive_int` calls `int()` on it — a no-op
-    ///   there. `Int("256_000")` is `nil` in Swift, so stripping `_` first
-    ///   is what recovers the same value.
-    /// - **A whole-number float literal** (`300000.0`): PyYAML's float
-    ///   resolver matches an unquoted decimal point, so the value is the
-    ///   Python float `300000.0`; `_positive_int` then does `int(300000.0)`
-    ///   = `300000` (truncates toward zero). `Int("300000.0")` is also
-    ///   `nil` in Swift, so falling back to `Double` + truncation mirrors
-    ///   `int(float)`.
+    /// P9 (crash fix): the previous `Int(Double(raw))` fallback trapped on
+    /// `nan`, `inf`, `1e30` and any integer past `Int.max`, and it also
+    /// invented values Hermes never sees — PyYAML's float resolver requires
+    /// a `.` and a SIGNED exponent, so bare `1e30` / `1.5e3` / `nan` / `inf`
+    /// load as Python `str`s and `int("1.5e3")` is a `ValueError` (probed
+    /// against PyYAML 6.0.3 in the v0.21.5 venv). The Python type is decided
+    /// first, exactly as PyYAML's implicit resolvers decide it, and only then
+    /// is `int()` applied:
     ///
-    /// Genuinely unparseable text (`"abc"`, empty after stripping) returns
-    /// `0` — the same "ratio-only" sentinel this reader already used for
-    /// anything `_positive_int` itself rejects (`null`, a negative, `"0"`).
+    /// - QUOTED scalar → `str` → `int(str)`: base-10 digits with single `_`
+    ///   separators (PEP 515), so `"256_000"` is `256000` but `"300000.0"` is
+    ///   rejected.
+    /// - `null` / `~` / empty → `None` → ratio-only (`:1493`).
+    /// - YAML 1.1 bool → `int(True)` is `1`, `int(False)` is `0`.
+    /// - PyYAML int (``pyYAMLIntValue(_:)``: `256_000`, `010` octal, `0x10`,
+    ///   `1:30` sexagesimal) → the int itself.
+    /// - PyYAML float (``pyYAMLFloatValue(_:)``: `300000.0`, `1.5e+3`,
+    ///   `.nan`, `.inf`) → `int(float)` truncates toward zero; `nan` is a
+    ///   `ValueError` (→ `0`). `int(inf)` is an `OverflowError` that
+    ///   `_positive_int` does not catch, so that host fails to start at all —
+    ///   `0` is as honest a display as any.
+    /// - anything else → `str` → `int(str)` as above.
+    ///
+    /// A positive value too large for a Swift `Int` (`99999999999999999999`,
+    /// `1.0e+30`) is a real cap to Hermes, but `_effective_threshold_cap`
+    /// clamps every cap to the context window before use
+    /// (`agent/context_compressor.py:2513-2516` @ v2026.9.24), so it never
+    /// lowers the ratio trigger — behaviourally ratio-only, hence `0`.
     static func pythonIntCoerce(_ raw: String) -> Int {
-        let stripped = raw.replacingOccurrences(of: "_", with: "")
-        if let i = Int(stripped) { return i }
-        if let d = Double(stripped) { return Int(d) }
-        return 0
+        func positive(_ v: Int?) -> Int { v.map { $0 > 0 ? $0 : 0 } ?? 0 }
+        if HermesYAML.isQuotedScalar(raw) {
+            return positive(pythonIntFromString(HermesYAML.unquotedScalar(raw)))
+        }
+        let bare = HermesYAML.normalizedScalar(raw)
+        if bare.isEmpty || ["null", "Null", "NULL", "~"].contains(bare) { return 0 }
+        if HermesYAML.pyYAMLTrue.contains(bare) { return 1 }
+        if HermesYAML.pyYAMLFalse.contains(bare) { return 0 }
+        if let int = pyYAMLIntValue(bare) { return positive(int) }
+        if let float = pyYAMLFloatValue(bare) {
+            // `int(float)`: truncate toward zero; `Int(exactly:)` is nil for
+            // nan, ±inf and anything outside `Int`'s range — never a trap.
+            return positive(Int(exactly: float.rounded(.towardZero)))
+        }
+        return positive(pythonIntFromString(bare))
+    }
+
+    /// Python's `int(s)` for a `str`: surrounding whitespace stripped, an
+    /// optional sign, then ASCII decimal digits with single `_` separators
+    /// between them (PEP 515). `nil` for a `ValueError` or a value no Swift
+    /// `Int` holds.
+    static func pythonIntFromString(_ s: String) -> Int? {
+        var body = Substring(s.trimmingCharacters(in: .whitespacesAndNewlines))
+        var negative = false
+        if let sign = body.first, sign == "+" || sign == "-" {
+            negative = sign == "-"
+            body = body.dropFirst()
+        }
+        let groups = body.split(separator: "_", omittingEmptySubsequences: false)
+        guard !body.isEmpty,
+              groups.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } })
+        else { return nil }
+        return Int((negative ? "-" : "") + groups.joined())
+    }
+
+    /// PyYAML's `int` resolver + `construct_yaml_int` (`yaml/resolver.py`,
+    /// `yaml/constructor.py`, PyYAML 6.0.3) for a BARE scalar: `nil` when the
+    /// resolver leaves it a string, `.some(nil)` when it IS an int but no
+    /// Swift `Int` holds it (the caller reads that as ratio-only).
+    static func pyYAMLIntValue(_ bare: String) -> Int?? {
+        let pattern = #"^(?:[-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*)|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$"#
+        guard bare.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        var value = Substring(bare.filter { $0 != "_" })
+        var sign = 1
+        if let first = value.first, first == "+" || first == "-" {
+            if first == "-" { sign = -1 }
+            value = value.dropFirst()
+        }
+        let magnitude: Int?
+        if value == "0" {
+            magnitude = 0
+        } else if value.hasPrefix("0b") {
+            magnitude = Int(value.dropFirst(2), radix: 2)
+        } else if value.hasPrefix("0x") {
+            magnitude = Int(value.dropFirst(2), radix: 16)
+        } else if value.first == "0" {
+            magnitude = Int(value, radix: 8)
+        } else if value.contains(":") {
+            // Base 60, most-significant group first: `1:30` is 90.
+            var total: Int? = 0
+            for part in value.split(separator: ":") {
+                guard let t = total, let digit = Int(part) else { total = nil; break }
+                let (shifted, o1) = t.multipliedReportingOverflow(by: 60)
+                let (sum, o2) = shifted.addingReportingOverflow(digit)
+                total = (o1 || o2) ? nil : sum
+            }
+            magnitude = total
+        } else {
+            magnitude = Int(value)
+        }
+        return .some(magnitude.map { sign * $0 })
+    }
+
+    /// PyYAML's `float` resolver + `construct_yaml_float` for a BARE scalar:
+    /// `nil` when the resolver leaves it a string. The resolver demands a
+    /// `.` (or the `.inf` / `.nan` spellings) and a SIGNED exponent, so
+    /// `1e30`, `1.5e3`, `nan` and `inf` are all strings to PyYAML.
+    static func pyYAMLFloatValue(_ bare: String) -> Double? {
+        let pattern = #"^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"#
+        guard bare.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        var value = Substring(bare.filter { $0 != "_" }.lowercased())
+        var sign = 1.0
+        if let first = value.first, first == "+" || first == "-" {
+            if first == "-" { sign = -1 }
+            value = value.dropFirst()
+        }
+        if value == ".inf" { return sign * .infinity }
+        if value == ".nan" { return .nan }
+        if value.contains(":") {
+            var total = 0.0
+            for part in value.split(separator: ":") { total = total * 60 + (Double(part) ?? 0) }
+            return sign * total
+        }
+        return Double(value).map { sign * $0 }
     }
 }
