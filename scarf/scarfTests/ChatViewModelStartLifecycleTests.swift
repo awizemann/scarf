@@ -50,6 +50,12 @@ import ScarfCore
             /// SUCCEED here and be caught by the sentMethods
             /// assertions, not masked by a transport error.
             case loadNotRestorable(sessionId: String)
+            /// Like `happy`, but `session/set_model` answers with the
+            /// JSON-RPC error Hermes >= v0.21.4 raises for a model
+            /// switch while a turn is running (`acp_adapter/server.py:1026`
+            /// @ v2026.9.21; frame is `acp.RequestError(...).to_error_obj()`
+            /// verbatim, `data: null` included).
+            case busyOnSetModel(sessionId: String)
         }
 
         nonisolated let incoming: AsyncThrowingStream<String, Error>
@@ -85,9 +91,16 @@ import ScarfCore
             case .failInitialize:
                 reply(["jsonrpc": "2.0", "id": id,
                        "error": ["code": -32603, "message": "scripted initialize failure"]])
-            case .happy(let sessionId), .happyHoldingCancel(let sessionId):
+            case .happy(let sessionId), .happyHoldingCancel(let sessionId),
+                 .busyOnSetModel(let sessionId):
                 let holdCancel: Bool = if case .happyHoldingCancel = behavior { true } else { false }
+                let busyOnSetModel: Bool = if case .busyOnSetModel = behavior { true } else { false }
                 switch method {
+                case "session/set_model" where busyOnSetModel:
+                    reply(["jsonrpc": "2.0", "id": id,
+                           "error": ["code": -32603,
+                                     "message": "Session is busy; switch models while the session is idle",
+                                     "data": NSNull()]])
                 case "session/new", "session/load", "session/resume":
                     reply(["jsonrpc": "2.0", "id": id,
                            "result": ["sessionId": sessionId,
