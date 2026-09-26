@@ -182,8 +182,13 @@ public actor HermesDataService {
             || lower.contains("command not found: sqlite3")
     }
 
+    /// Localized through the app's catalogue (`String(localized:)` resolves
+    /// against the main bundle, like the other ScarfCore sentences). The key
+    /// is hand-maintained in `Localizable.xcstrings`: this package has no
+    /// catalogue of its own, so extraction never sees it.
     private nonisolated func sqlite3MissingMessage() -> String {
-        "sqlite3 is not installed on \(context.displayName). Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora)."
+        let host = context.displayName
+        return String(localized: "sqlite3 is not installed on \(host). Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora).")
     }
 
     /// Turn a transport / backend error into the one-line string Dashboard

@@ -50,6 +50,288 @@
         }
       }
     },
+    "%@ has its Bot Chat open, so the message went into that chat and will be answered there. The reply can't come back here — don't resend." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ hat seinen Bot Chat geöffnet, daher ist die Nachricht in diesem Chat gelandet und wird dort beantwortet. Die Antwort kann nicht hierher zurückkommen — sende sie nicht erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tiene su Bot Chat abierto, así que el mensaje entró en ese chat y se responderá allí. La respuesta no puede volver aquí — no lo reenvíes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ a son Bot Chat ouvert : le message est donc arrivé dans ce chat et y recevra sa réponse. La réponse ne peut pas revenir ici — ne le renvoyez pas."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ は Bot Chat を開いているため、メッセージはそのチャットに届き、そこで返信されます。返信はここには戻ってきません — 再送しないでください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ está com o Bot Chat aberto, então a mensagem entrou nesse chat e será respondida lá. A resposta não pode voltar para cá — não reenvie."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已打开其 Bot Chat,因此消息已进入该聊天并将在那里得到回复。回复无法返回到这里 — 请勿重新发送。"
+          }
+        }
+      }
+    },
+    "`multiplex_profiles: false` is retired and no longer turns multiplexing off — Hermes ignores it, and once the gateway starts multiplexed it writes `true` into the default profile's config.yaml. One host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` ist ausgemustert und schaltet Multiplexing nicht mehr ab — Hermes ignoriert es, und sobald das Gateway im Multiplex-Modus startet, schreibt es `true` in die config.yaml des Standardprofils. Ein Host-Gateway bedient jedes Profil, daher laufen Routen — es sei denn, seine Startprüfung hält es eigenständig (nur ein Profil, ein Profil, das noch sein eigenes Gateway betreibt, ein doppeltes Bot-Token). `hermes gateway status` nennt den Grund."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` está retirado y ya no desactiva el multiplexado — Hermes lo ignora y, en cuanto el gateway arranca multiplexado, escribe `true` en el config.yaml del perfil predeterminado. Un gateway del host atiende a todos los perfiles, así que las rutas se ejecutan — salvo que su comprobación de arranque lo mantenga independiente (un solo perfil, un perfil que aún ejecuta su propio gateway, un token de bot duplicado). `hermes gateway status` indica el motivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` est retiré et ne désactive plus le multiplexage — Hermes l'ignore et, dès que le gateway démarre en mode multiplexé, il écrit `true` dans le config.yaml du profil par défaut. Un gateway hôte sert tous les profils, donc les routes s'exécutent — sauf si sa vérification au démarrage le maintient autonome (un seul profil, un profil qui exécute encore son propre gateway, un jeton de bot en double). `hermes gateway status` en indique la raison."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` は廃止され、多重化をオフにしなくなりました — Hermes はこれを無視し、Gateway が多重化モードで起動すると、デフォルトプロファイルの config.yaml に `true` を書き込みます。1 つのホスト Gateway がすべてのプロファイルを処理するため、ルートは実行されます — ただし起動時のチェックで単独動作のままになる場合を除きます(プロファイルが 1 つだけ、独自の Gateway をまだ実行しているプロファイルがある、ボットトークンの重複)。理由は `hermes gateway status` で確認できます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` foi aposentado e não desativa mais a multiplexação — o Hermes o ignora e, assim que o gateway inicia multiplexado, grava `true` no config.yaml do perfil padrão. Um gateway do host atende todos os perfis, então as rotas rodam — a menos que a verificação de inicialização o mantenha independente (apenas um perfil, um perfil ainda rodando o próprio gateway, um token de bot duplicado). `hermes gateway status` informa o motivo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` 已停用,不再关闭多路复用 — Hermes 会忽略它,并且一旦 Gateway 以多路复用方式启动,就会将 `true` 写入默认配置的 config.yaml。一个主机 Gateway 服务所有配置,因此路由会运行 — 除非其启动检查使其保持独立运行(只有一个配置、某个配置仍在运行自己的 Gateway、机器人令牌重复)。`hermes gateway status` 会说明原因。"
+          }
+        }
+      }
+    },
+    "`multiplex_profiles: false` is retired and no longer turns multiplexing off — Hermes ignores it. One host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` ist ausgemustert und schaltet Multiplexing nicht mehr ab — Hermes ignoriert es. Ein Host-Gateway bedient jedes Profil, daher laufen Routen — es sei denn, seine Startprüfung hält es eigenständig (nur ein Profil, ein Profil, das noch sein eigenes Gateway betreibt, ein doppeltes Bot-Token). `hermes gateway status` nennt den Grund."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` está retirado y ya no desactiva el multiplexado — Hermes lo ignora. Un gateway del host atiende a todos los perfiles, así que las rutas se ejecutan — salvo que su comprobación de arranque lo mantenga independiente (un solo perfil, un perfil que aún ejecuta su propio gateway, un token de bot duplicado). `hermes gateway status` indica el motivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` est retiré et ne désactive plus le multiplexage — Hermes l'ignore. Un gateway hôte sert tous les profils, donc les routes s'exécutent — sauf si sa vérification au démarrage le maintient autonome (un seul profil, un profil qui exécute encore son propre gateway, un jeton de bot en double). `hermes gateway status` en indique la raison."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` は廃止され、多重化をオフにしなくなりました — Hermes はこれを無視します。1 つのホスト Gateway がすべてのプロファイルを処理するため、ルートは実行されます — ただし起動時のチェックで単独動作のままになる場合を除きます(プロファイルが 1 つだけ、独自の Gateway をまだ実行しているプロファイルがある、ボットトークンの重複)。理由は `hermes gateway status` で確認できます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` foi aposentado e não desativa mais a multiplexação — o Hermes o ignora. Um gateway do host atende todos os perfis, então as rotas rodam — a menos que a verificação de inicialização o mantenha independente (apenas um perfil, um perfil ainda rodando o próprio gateway, um token de bot duplicado). `hermes gateway status` informa o motivo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`multiplex_profiles: false` 已停用,不再关闭多路复用 — Hermes 会忽略它。一个主机 Gateway 服务所有配置,因此路由会运行 — 除非其启动检查使其保持独立运行(只有一个配置、某个配置仍在运行自己的 Gateway、机器人令牌重复)。`hermes gateway status` 会说明原因。"
+          }
+        }
+      }
+    },
+    "Agent is thinking" : {
+      "comment" : "ScarfGo chat: VoiceOver label of the in-flight turn row; the elapsed time is read as its value.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent denkt nach"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El agente está pensando"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'agent réfléchit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントが思考中"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O agente está pensando"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 正在思考"
+          }
+        }
+      }
+    },
+    "Agent is thinking… · %@" : {
+      "comment" : "ScarfGo chat: in-flight turn row with a live elapsed clock. %@ is the elapsed time, e.g. 0:12.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent denkt nach… · %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El agente está pensando… · %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'agent réfléchit… · %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントが思考中… · %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O agente está pensando… · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 正在思考… · %@"
+          }
+        }
+      }
+    },
+    "Agent is working" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent arbeitet"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El agente está trabajando"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'agent travaille"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントが処理中"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O agente está trabalhando"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 正在处理"
+          }
+        }
+      }
+    },
+    "Another Scarf window or copy (such as Scarf Dev) also has it open — quit that copy too." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein anderes Scarf-Fenster oder eine andere Scarf-Kopie (etwa Scarf Dev) hat sie ebenfalls geöffnet — beende auch diese Kopie."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otra ventana o copia de Scarf (como Scarf Dev) también la tiene abierta — cierra también esa copia."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une autre fenêtre ou copie de Scarf (comme Scarf Dev) l'a aussi ouverte — quittez également cette copie."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別の Scarf ウインドウまたはコピー(Scarf Dev など)も開いています — そのコピーも終了してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outra janela ou cópia do Scarf (como o Scarf Dev) também está com ele aberto — encerre essa cópia também."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一个 Scarf 窗口或副本(例如 Scarf Dev)也打开了它 — 请同时退出该副本。"
+          }
+        }
+      }
+    },
     "Completion contract set at create time: local-only, OWNER/REPO for publication, or a PR URL whose CI gates completion. Read-only — Hermes has no update verb." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -91,6 +373,166 @@
         }
       }
     },
+    "Decline Message" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ablehnungsnachricht"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mensaje de rechazo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message de refus"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒否メッセージ"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mensagem de recusa"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝消息"
+          }
+        }
+      }
+    },
+    "Empty uses Hermes's own default reply." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leer verwendet die Standardantwort von Hermes."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Si se deja vacío, se usa la respuesta predeterminada de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vide : Hermes utilise sa propre réponse par défaut."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空欄の場合は Hermes 自身の既定の返信を使います。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vazio usa a resposta padrão do próprio Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留空则使用 Hermes 自带的默认回复。"
+          }
+        }
+      }
+    },
+    "Hermes refused to optimize: another process has the sessions database open." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat die Optimierung abgelehnt: Ein anderer Prozess hat die Sitzungsdatenbank geöffnet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes se negó a optimizar: otro proceso tiene abierta la base de datos de sesiones."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes a refusé d'optimiser : un autre processus a ouvert la base de données des sessions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes は最適化を拒否しました: 別のプロセスがセッションデータベースを開いています。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes se recusou a otimizar: outro processo está com o banco de dados de sessões aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 拒绝优化:另一个进程正打开着会话数据库。"
+          }
+        }
+      }
+    },
+    "Hermes rewrites the sessions database (VACUUM) even though other processes have it open. If one of them is writing — a running gateway, cron, or the Hermes desktop app — every agent can start refusing turns until all of them are restarted. No conversation data is lost. Safest: stop the gateway and other Hermes apps first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes schreibt die Sitzungsdatenbank neu (VACUUM), obwohl andere Prozesse sie geöffnet haben. Schreibt einer davon gerade — ein laufendes Gateway, Cron oder die Hermes-Desktop-App —, können alle Agents Turns ablehnen, bis sie alle neu gestartet wurden. Es gehen keine Unterhaltungsdaten verloren. Am sichersten: Stoppe zuerst das Gateway und andere Hermes-Apps."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes reescribe la base de datos de sesiones (VACUUM) aunque otros procesos la tengan abierta. Si alguno está escribiendo — un gateway en ejecución, cron o la app de escritorio de Hermes —, todos los agentes pueden empezar a rechazar turnos hasta que se reinicien todos. No se pierden datos de conversaciones. Lo más seguro: detén primero el gateway y las demás apps de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes réécrit la base de données des sessions (VACUUM) même si d'autres processus l'ont ouverte. Si l'un d'eux écrit — un gateway en cours d'exécution, cron ou l'app de bureau Hermes —, tous les agents peuvent se mettre à refuser des tours jusqu'à ce qu'ils soient tous redémarrés. Aucune donnée de conversation n'est perdue. Le plus sûr : arrêtez d'abord le gateway et les autres apps Hermes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "他のプロセスが開いていても、Hermes はセッションデータベースを書き直します(VACUUM)。そのうちのどれかが書き込み中の場合 — 実行中の Gateway、cron、Hermes デスクトップアプリなど —、すべてを再起動するまで全エージェントがターンを拒否し始めることがあります。会話データは失われません。最も安全なのは、先に Gateway と他の Hermes アプリを停止することです。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes reescreve o banco de dados de sessões (VACUUM) mesmo com outros processos o mantendo aberto. Se um deles estiver gravando — um gateway em execução, o cron ou o app de desktop do Hermes —, todos os agentes podem começar a recusar turnos até que todos sejam reiniciados. Nenhum dado de conversa é perdido. O mais seguro: pare primeiro o gateway e os outros apps do Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即使其他进程正打开着会话数据库,Hermes 也会重写它(VACUUM)。如果其中某个进程正在写入 — 运行中的 Gateway、cron 或 Hermes 桌面应用 — 所有 agent 都可能开始拒绝轮次,直到它们全部重启。不会丢失任何对话数据。最稳妥的做法:先停止 Gateway 和其他 Hermes 应用。"
+          }
+        }
+      }
+    },
     "Installed, but it could not be enabled: %@" : {
       "localizations" : {
         "de" : {
@@ -127,6 +569,87 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已安装，但无法启用：%@"
+          }
+        }
+      }
+    },
+    "Model (blank = follow the main model)" : {
+      "comment" : "ScarfGo cron editor: model field placeholder. Blank means the job uses whatever the main Hermes model is at run time.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modell (leer = dem Hauptmodell folgen)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modelo (vacío = seguir el modelo principal)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modèle (vide = suivre le modèle principal)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデル(空欄 = メインモデルに従う)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modelo (vazio = seguir o modelo principal)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型(留空 = 跟随主模型)"
+          }
+        }
+      }
+    },
+    "No answer from %@ yet, but the message may already be in its Bot Chat — check there instead of resending." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Antwort von %@, aber die Nachricht ist möglicherweise schon in seinem Bot Chat — sieh dort nach, statt sie erneut zu senden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aún no hay respuesta de %@, pero puede que el mensaje ya esté en su Bot Chat — revísalo allí en lugar de reenviarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas encore de réponse de %@, mais le message est peut-être déjà dans son Bot Chat — vérifiez-y plutôt que de le renvoyer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ からはまだ返信がありませんが、メッセージはすでにその Bot Chat に届いている可能性があります — 再送せずにそちらを確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ainda não há resposta de %@, mas a mensagem pode já estar no Bot Chat dele — confira lá em vez de reenviar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 尚未回复,但消息可能已在其 Bot Chat 中 — 请到那里查看,而不要重新发送。"
           }
         }
       }
@@ -172,6 +695,246 @@
         }
       }
     },
+    "Off: the job runs on whatever `hermes model` is set to when it fires." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus: Der Job läuft mit dem Modell, auf das `hermes model` beim Auslösen gesetzt ist."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado: la tarea se ejecuta con el modelo que tenga `hermes model` en el momento de dispararse."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Désactivé : la tâche s'exécute avec le modèle défini par `hermes model` au moment où elle se déclenche."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフ: ジョブは実行時点で `hermes model` に設定されているモデルで実行されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desativado: o job roda com o modelo que `hermes model` tiver no momento em que disparar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭:任务触发时使用 `hermes model` 当时设置的模型运行。"
+          }
+        }
+      }
+    },
+    "On save the main model Hermes uses right now (and its provider) is locked onto this job, so later `hermes model` changes never touch it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Speichern wird das Hauptmodell, das Hermes gerade verwendet (samt Anbieter), an diesen Job gebunden, sodass spätere Änderungen mit `hermes model` ihn nie betreffen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al guardar, el modelo principal que Hermes usa ahora (y su proveedor) queda fijado a esta tarea, así que los cambios posteriores de `hermes model` nunca la afectan."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À l'enregistrement, le modèle principal qu'Hermes utilise actuellement (et son fournisseur) est verrouillé sur cette tâche : les changements ultérieurs de `hermes model` ne l'affectent jamais."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存すると、Hermes が現在使っているメインモデル(とそのプロバイダー)がこのジョブに固定され、以後の `hermes model` の変更は影響しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ao salvar, o modelo principal que o Hermes usa agora (e seu provedor) fica travado neste job, então mudanças posteriores em `hermes model` nunca o afetam."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存时,Hermes 当前使用的主模型(及其提供商)会锁定到此任务上,之后 `hermes model` 的更改不会影响它。"
+          }
+        }
+      }
+    },
+    "On save the pin is released: the job follows the main model (`hermes model`) at each run." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Speichern wird die Bindung aufgehoben: Der Job folgt bei jedem Lauf dem Hauptmodell (`hermes model`)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al guardar se libera la fijación: la tarea sigue el modelo principal (`hermes model`) en cada ejecución."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "À l'enregistrement, l'épinglage est levé : la tâche suit le modèle principal (`hermes model`) à chaque exécution."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存すると固定が解除され、ジョブは実行のたびにメインモデル(`hermes model`)に従います。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ao salvar, a fixação é liberada: o job segue o modelo principal (`hermes model`) a cada execução."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存时将解除固定:任务每次运行都跟随主模型(`hermes model`)。"
+          }
+        }
+      }
+    },
+    "One of them is Scarf's own read-only view of your sessions, which never writes — Hermes refuses while Scarf is open. Stop the gateway and other Hermes apps first, then use Optimize anyway." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einer davon ist Scarfs eigene schreibgeschützte Ansicht deiner Sitzungen, die nie schreibt — Hermes lehnt ab, solange Scarf geöffnet ist. Stoppe zuerst das Gateway und andere Hermes-Apps und verwende dann „Trotzdem optimieren“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uno de ellos es la vista de solo lectura de tus sesiones de Scarf, que nunca escribe — Hermes se niega mientras Scarf esté abierto. Detén primero el gateway y las demás apps de Hermes y luego usa Optimizar de todos modos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'un d'eux est la vue en lecture seule de vos sessions propre à Scarf, qui n'écrit jamais — Hermes refuse tant que Scarf est ouvert. Arrêtez d'abord le gateway et les autres apps Hermes, puis utilisez Optimiser quand même."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのうちの 1 つは Scarf 自身の読み取り専用のセッション表示で、書き込みは一切行いません — Scarf が開いている間、Hermes は拒否します。先に Gateway と他の Hermes アプリを停止してから、「それでも最適化」を使ってください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Um deles é a visualização somente leitura das suas sessões do próprio Scarf, que nunca grava — o Hermes se recusa enquanto o Scarf estiver aberto. Pare primeiro o gateway e os outros apps do Hermes e depois use Otimizar mesmo assim."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其中之一是 Scarf 自己的会话只读视图,它从不写入 — 只要 Scarf 处于打开状态,Hermes 就会拒绝。请先停止 Gateway 和其他 Hermes 应用,然后使用“仍然优化”。"
+          }
+        }
+      }
+    },
+    "Optimize Anyway" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trotzdem optimieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimizar de todos modos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimiser quand même"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "それでも最適化"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otimizar mesmo assim"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍然优化"
+          }
+        }
+      }
+    },
+    "Optimize anyway…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trotzdem optimieren…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimizar de todos modos…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimiser quand même…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "それでも最適化…"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otimizar mesmo assim…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍然优化…"
+          }
+        }
+      }
+    },
     "Optimize failed. %@" : {
       "localizations" : {
         "de" : {
@@ -208,6 +971,368 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "优化失败。%@"
+          }
+        }
+      }
+    },
+    "Optimize while the database is in use?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimieren, während die Datenbank verwendet wird?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Optimizar mientras la base de datos está en uso?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimiser pendant que la base de données est utilisée ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "データベースの使用中に最適化しますか?"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otimizar enquanto o banco de dados está em uso?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要在数据库使用中时进行优化吗?"
+          }
+        }
+      }
+    },
+    "Parked" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geparkt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aparcado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mis en attente"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パーク中"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estacionado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Pin to the current main model" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An das aktuelle Hauptmodell binden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fijar al modelo principal actual"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Épingler au modèle principal actuel"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在のメインモデルに固定"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixar no modelo principal atual"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定到当前主模型"
+          }
+        }
+      }
+    },
+    "Pinned to %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebunden an %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fijado a %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Épinglé sur %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ に固定"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixado em %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已固定到 %@"
+          }
+        }
+      }
+    },
+    "Profile multiplexing is on by default on this Hermes version: one host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profil-Multiplexing ist in dieser Hermes-Version standardmäßig aktiv: Ein Host-Gateway bedient jedes Profil, daher laufen Routen — es sei denn, seine Startprüfung hält es eigenständig (nur ein Profil, ein Profil, das noch sein eigenes Gateway betreibt, ein doppeltes Bot-Token). `hermes gateway status` nennt den Grund."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El multiplexado de perfiles está activado por defecto en esta versión de Hermes: un gateway del host atiende a todos los perfiles, así que las rutas se ejecutan — salvo que su comprobación de arranque lo mantenga independiente (un solo perfil, un perfil que aún ejecuta su propio gateway, un token de bot duplicado). `hermes gateway status` indica el motivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le multiplexage de profil est activé par défaut sur cette version d'Hermes : un gateway hôte sert tous les profils, donc les routes s'exécutent — sauf si sa vérification au démarrage le maintient autonome (un seul profil, un profil qui exécute encore son propre gateway, un jeton de bot en double). `hermes gateway status` en indique la raison."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes バージョンでは、プロファイルの多重化がデフォルトでオンです: 1 つのホスト Gateway がすべてのプロファイルを処理するため、ルートは実行されます — ただし起動時のチェックで単独動作のままになる場合を除きます(プロファイルが 1 つだけ、独自の Gateway をまだ実行しているプロファイルがある、ボットトークンの重複)。理由は `hermes gateway status` で確認できます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A multiplexação de perfis vem ativada por padrão nesta versão do Hermes: um gateway do host atende todos os perfis, então as rotas rodam — a menos que a verificação de inicialização o mantenha independente (apenas um perfil, um perfil ainda rodando o próprio gateway, um token de bot duplicado). `hermes gateway status` informa o motivo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 版本默认开启配置多路复用:一个主机 Gateway 服务所有配置,因此路由会运行 — 除非其启动检查使其保持独立运行(只有一个配置、某个配置仍在运行自己的 Gateway、机器人令牌重复)。`hermes gateway status` 会说明原因。"
+          }
+        }
+      }
+    },
+    "Runs `hermes sessions optimize --force` while other processes have the database open." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Führt `hermes sessions optimize --force` aus, während andere Prozesse die Datenbank geöffnet haben."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ejecuta `hermes sessions optimize --force` mientras otros procesos tienen abierta la base de datos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exécute `hermes sessions optimize --force` pendant que d'autres processus ont la base de données ouverte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "他のプロセスがデータベースを開いている状態で `hermes sessions optimize --force` を実行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Executa `hermes sessions optimize --force` enquanto outros processos estão com o banco de dados aberto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在其他进程打开数据库的情况下运行 `hermes sessions optimize --force`。"
+          }
+        }
+      }
+    },
+    "sqlite3 is not installed on %@. Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora)." : {
+      "comment" : "Dashboard error when the remote host has no sqlite3 binary. %@ is the server's display name. Keep the backtick commands verbatim.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 ist auf %@ nicht installiert. Installiere es mit `apt install sqlite3` (Ubuntu/Debian) oder `yum install sqlite` (RHEL/Fedora)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 no está instalado en %@. Instálalo con `apt install sqlite3` (Ubuntu/Debian) o `yum install sqlite` (RHEL/Fedora)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 n'est pas installé sur %@. Installez-le avec `apt install sqlite3` (Ubuntu/Debian) ou `yum install sqlite` (RHEL/Fedora)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ に sqlite3 がインストールされていません。`apt install sqlite3`(Ubuntu/Debian)または `yum install sqlite`(RHEL/Fedora)でインストールしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O sqlite3 não está instalado em %@. Instale com `apt install sqlite3` (Ubuntu/Debian) ou `yum install sqlite` (RHEL/Fedora)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上未安装 sqlite3。请使用 `apt install sqlite3`(Ubuntu/Debian)或 `yum install sqlite`(RHEL/Fedora)进行安装。"
+          }
+        }
+      }
+    },
+    "sqlite3 not installed on server" : {
+      "comment" : "ScarfGo dashboard: banner title when the remote host has no sqlite3 binary.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 ist auf dem Server nicht installiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 no está instalado en el servidor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 n'est pas installé sur le serveur"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーに sqlite3 がインストールされていません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sqlite3 não está instalado no servidor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器上未安装 sqlite3"
+          }
+        }
+      }
+    },
+    "Stop the gateway and other Hermes apps, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppe das Gateway und andere Hermes-Apps und versuche es dann erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detén el gateway y las demás apps de Hermes y vuelve a intentarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrêtez le gateway et les autres apps Hermes, puis réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gateway と他の Hermes アプリを停止してから、もう一度お試しください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pare o gateway e os outros apps do Hermes e tente novamente."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请停止 Gateway 和其他 Hermes 应用,然后重试。"
           }
         }
       }
@@ -335,6 +1460,127 @@
         }
       }
     },
+    "The host gateway is not serving this profile — its bots and cron are stopped. Start serves it again without restarting the host gateway." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Host-Gateway bedient dieses Profil nicht — seine Bots und Cron sind gestoppt. „Starten“ bedient es wieder, ohne das Host-Gateway neu zu starten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El gateway del host no está atendiendo este perfil — sus bots y cron están detenidos. Iniciar vuelve a atenderlo sin reiniciar el gateway del host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le gateway hôte ne sert pas ce profil — ses bots et son cron sont arrêtés. Démarrer le sert à nouveau sans redémarrer le gateway hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト Gateway はこのプロファイルを処理していません — ボットと cron は停止しています。「開始」を押すと、ホスト Gateway を再起動せずに再び処理されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O gateway do host não está atendendo este perfil — os bots e o cron dele estão parados. Iniciar volta a atendê-lo sem reiniciar o gateway do host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机 Gateway 当前未服务此配置 — 其机器人和 cron 已停止。点击“启动”可在不重启主机 Gateway 的情况下重新服务它。"
+          }
+        }
+      }
+    },
+    "The host gateway restarted this profile." : {
+      "comment" : "Success note after restarting a named profile that the shared host gateway serves in-process; the host gateway itself stayed up.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Host-Gateway hat dieses Profil neu gestartet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El gateway del host reinició este perfil."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le gateway hôte a redémarré ce profil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト Gateway がこのプロファイルを再起動しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O gateway do host reiniciou este perfil."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机 Gateway 已重启此配置。"
+          }
+        }
+      }
+    },
+    "The only holder is Scarf's own read-only view of your sessions, which never writes — nothing else is using the database. Use Optimize anyway to run it now." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einziger Nutzer ist Scarfs eigene schreibgeschützte Ansicht deiner Sitzungen, die nie schreibt — sonst verwendet nichts die Datenbank. Verwende „Trotzdem optimieren“, um sie jetzt auszuführen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El único que la tiene abierta es la vista de solo lectura de tus sesiones de Scarf, que nunca escribe — nada más está usando la base de datos. Usa Optimizar de todos modos para ejecutarla ahora."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le seul détenteur est la vue en lecture seule de vos sessions propre à Scarf, qui n'écrit jamais — rien d'autre n'utilise la base de données. Utilisez Optimiser quand même pour lancer l'opération maintenant."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開いているのは Scarf 自身の読み取り専用のセッション表示だけで、書き込みは一切行いません — 他にデータベースを使っているものはありません。今すぐ実行するには「それでも最適化」を使ってください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O único que o mantém aberto é a visualização somente leitura das suas sessões do próprio Scarf, que nunca grava — nada mais está usando o banco de dados. Use Otimizar mesmo assim para executar agora."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "唯一占用者是 Scarf 自己的会话只读视图,它从不写入 — 没有其他程序在使用该数据库。使用“仍然优化”即可立即运行。"
+          }
+        }
+      }
+    },
     "There was no stored auth state for this provider." : {
       "localizations" : {
         "de" : {
@@ -415,6 +1661,46 @@
         }
       }
     },
+    "This config sets `gateway.standalone: true`. On a named profile that keeps its gateway out of the host gateway — it serves only itself, so routes to other profiles don't run from it. The default profile ignores the key. Hermes treats it as a temporary compatibility shim." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Konfiguration setzt `gateway.standalone: true`. Bei einem benannten Profil hält das sein Gateway aus dem Host-Gateway heraus — es bedient nur sich selbst, daher laufen Routen zu anderen Profilen nicht von ihm aus. Das Standardprofil ignoriert den Schlüssel. Hermes behandelt ihn als vorübergehende Kompatibilitätsbrücke."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta configuración define `gateway.standalone: true`. En un perfil con nombre, eso mantiene su gateway fuera del gateway del host — solo se atiende a sí mismo, así que las rutas a otros perfiles no se ejecutan desde él. El perfil predeterminado ignora la clave. Hermes la trata como una capa de compatibilidad temporal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette configuration définit `gateway.standalone: true`. Sur un profil nommé, cela tient son gateway à l'écart du gateway hôte — il ne sert que lui-même, donc les routes vers d'autres profils ne s'exécutent pas depuis lui. Le profil par défaut ignore la clé. Hermes la traite comme une couche de compatibilité temporaire."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この設定では `gateway.standalone: true` が指定されています。名前付きプロファイルでは、その Gateway がホスト Gateway から切り離されます — 自分自身だけを処理するため、他のプロファイルへのルートはそこからは実行されません。デフォルトプロファイルはこのキーを無視します。Hermes はこれを一時的な互換性のための措置として扱います。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta configuração define `gateway.standalone: true`. Em um perfil nomeado, isso mantém o gateway dele fora do gateway do host — ele atende apenas a si mesmo, então as rotas para outros perfis não rodam a partir dele. O perfil padrão ignora a chave. O Hermes a trata como uma camada de compatibilidade temporária."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配置设置了 `gateway.standalone: true`。对于具名配置,这会使其 Gateway 不并入主机 Gateway — 它只服务自身,因此通往其他配置的路由不会从它运行。默认配置会忽略此键。Hermes 将其视为临时兼容措施。"
+          }
+        }
+      }
+    },
     "This Hermes installation is managed; plugin activation is read-only" : {
       "localizations" : {
         "de" : {
@@ -491,6 +1777,168 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 Hermes 由 %@ 管理。此处无法启用或停用插件，请在软件包管理器的配置中修改并重新部署。"
+          }
+        }
+      }
+    },
+    "This job keeps its own model when `hermes model` changes. Turn off to release the pin — the job then follows the main model at each run." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Job behält sein eigenes Modell, wenn sich `hermes model` ändert. Schalte die Option aus, um die Bindung aufzuheben — der Job folgt dann bei jedem Lauf dem Hauptmodell."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta tarea conserva su propio modelo cuando cambia `hermes model`. Desactívalo para liberar la fijación — la tarea seguirá entonces el modelo principal en cada ejecución."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette tâche conserve son propre modèle lorsque `hermes model` change. Désactivez pour lever l'épinglage — la tâche suit alors le modèle principal à chaque exécution."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブは `hermes model` が変わっても独自のモデルを維持します。オフにすると固定が解除され、ジョブは実行のたびにメインモデルに従います。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este job mantém o próprio modelo quando `hermes model` muda. Desative para liberar a fixação — o job passa a seguir o modelo principal a cada execução."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当 `hermes model` 更改时,此任务会保留自己的模型。关闭即可解除固定 — 之后任务每次运行都跟随主模型。"
+          }
+        }
+      }
+    },
+    "This profile is parked; the host gateway keeps serving the other profiles." : {
+      "comment" : "Result of `hermes gateway stop` for one profile: the shared host gateway stops serving it but keeps running.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Profil ist geparkt; das Host-Gateway bedient die anderen Profile weiter."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil está aparcado; el gateway del host sigue atendiendo a los demás perfiles."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce profil est mis en attente ; le gateway hôte continue de servir les autres profils."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロファイルはパーク中です。ホスト Gateway は他のプロファイルの処理を続けます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil está estacionado; o gateway do host continua atendendo os outros perfis."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配置已暂停;主机 Gateway 会继续服务其他配置。"
+          }
+        }
+      }
+    },
+    "This profile is served by the host gateway again." : {
+      "comment" : "Result of `hermes gateway start` for a previously parked profile.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Profil wird wieder vom Host-Gateway bedient."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil vuelve a ser atendido por el gateway del host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce profil est de nouveau servi par le gateway hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロファイルは再びホスト Gateway によって処理されています。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil voltou a ser atendido pelo gateway do host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配置已重新由主机 Gateway 服务。"
+          }
+        }
+      }
+    },
+    "Working · %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbeite · %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trabajando · %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En cours · %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "処理中 · %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trabalhando · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理中 · %@"
           }
         }
       }
