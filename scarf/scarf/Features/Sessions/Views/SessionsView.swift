@@ -298,6 +298,7 @@ struct SessionsView: View {
                     if viewModel.searchText.isEmpty {
                         viewModel.isSearching = false
                         viewModel.searchResults = []
+                        viewModel.searchError = nil
                         viewModel.searchIndexRebuilding = false
                     }
                 }
@@ -440,7 +441,19 @@ struct SessionsView: View {
     @ViewBuilder
     private var searchResultRows: some View {
         searchIndexRebuildingNote
-        if viewModel.searchResults.isEmpty {
+        if let searchError = viewModel.searchError {
+            VStack(spacing: ScarfSpace.s2) {
+                Label("Search failed", systemImage: "exclamationmark.triangle")
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text(searchError)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(ScarfSpace.s8)
+        } else if viewModel.searchResults.isEmpty {
             Text("No matches for \"\(viewModel.searchText)\".")
                 .scarfStyle(.body)
                 .foregroundStyle(ScarfColor.foregroundMuted)

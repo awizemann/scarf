@@ -8,6 +8,7 @@
 
 import Foundation
 import SQLite3
+import CSQLiteShim
 #if canImport(os)
 import os
 #endif
@@ -52,7 +53,8 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     /// True when `open()` had to fall back to a READWRITE handle guarded by
     /// `PRAGMA query_only=1` because the plain READONLY open could not create
     /// the WAL sidecars. Diagnostics only — the connection is still incapable
-    /// of writing a row (charter C3).
+    /// of writing a row, and has checkpoint-on-close disabled so closing it
+    /// never rewrites the main file either (charter C3).
     private(set) public var isQueryOnlyFallback = false
 
     private let context: ServerContext
@@ -100,9 +102,9 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             // can't, so every statement fails SQLITE_CANTOPEN.
             //
             // Creating a sidecar is not a state mutation (charter C3): reopen
-            // READWRITE (never CREATE) and immediately clamp the connection
-            // with `PRAGMA query_only=1`, which is what makes it incapable of
-            // writing a row.
+            // READWRITE (never CREATE), turn off checkpoint-on-close, and
+            // clamp the connection with `PRAGMA query_only=1`, which is what
+            // makes it incapable of writing a row.
             if rc == SQLITE_CANTOPEN, openQueryOnlyFallback(path: path) {
                 #if canImport(os)
                 Self.logger.info(
@@ -145,15 +147,38 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         return (stepRC == SQLITE_ROW || stepRC == SQLITE_DONE) ? SQLITE_OK : stepRC
     }
 
-    /// Reopen `path` READWRITE (never CREATE) and clamp it with
-    /// `PRAGMA query_only=1`. Returns true only when the open, the pragma,
-    /// AND the readability probe all succeed; on any failure `db` is left nil
-    /// so the caller reports the ORIGINAL error unchanged.
+    /// Reopen `path` READWRITE (never CREATE), disable checkpoint-on-close,
+    /// and clamp it with `PRAGMA query_only=1`. Returns true only when the
+    /// open, the no-checkpoint flag, the pragma, AND the readability probe
+    /// all succeed; on any failure `db` is left nil so the caller reports the
+    /// ORIGINAL error unchanged.
+    ///
+    /// **Why `SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`.** `query_only` stops row
+    /// writes, not checkpoints. A READWRITE connection that is the LAST one
+    /// to close a WAL database checkpoints the WAL into the main file and
+    /// deletes the WAL — i.e. it rewrites `state.db` (charter C3). That is
+    /// exactly this handle's situation whenever Hermes exits (or crashes)
+    /// while Scarf is still open: reproduced on SQLite 3.54 with a
+    /// sidecar-less WAL db, a writer committing ~5000 rows and exiting,
+    /// then this handle closing — the main file went 8 KB → 368 KB. With
+    /// the flag set the main file is byte-identical and the WAL is left
+    /// for Hermes's next open to checkpoint. The flag is set BEFORE the
+    /// first statement so no path can close this handle with it off; if
+    /// SQLite won't confirm it, the fallback is refused outright.
     private func openQueryOnlyFallback(path: String) -> Bool {
         var handle: OpaquePointer?
         let flags: Int32 = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX
         guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK, let handle else {
             if let handle { sqlite3_close(handle) }
+            return false
+        }
+        guard scarf_sqlite3_disable_checkpoint_on_close(handle) == SQLITE_OK else {
+            #if canImport(os)
+            Self.logger.warning("SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE not confirmed at \(path, privacy: .public); refusing the writable handle")
+            #endif
+            // Nothing has been read yet, so this close has no WAL
+            // connection to checkpoint.
+            sqlite3_close(handle)
             return false
         }
         guard sqlite3_exec(handle, "PRAGMA query_only=1", nil, nil, nil) == SQLITE_OK else {

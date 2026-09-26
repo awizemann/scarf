@@ -157,6 +157,9 @@ final class SessionsViewModel {
     var searchText = ""
     var searchResults: [HermesMessage] = []
     var isSearching = false
+    /// Set when the search QUERY failed (as opposed to matching nothing),
+    /// so the results pane can say so instead of "No matches".
+    var searchError: String?
 
     /// Set when Hermes is mid-FTS-rebuild, so search can say its results
     /// are knowingly partial instead of quietly under-returning. Probed
@@ -448,11 +451,18 @@ final class SessionsViewModel {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else {
             searchResults = []
+            searchError = nil
             isSearching = false
             return
         }
         isSearching = true
-        searchResults = await dataService.searchMessages(query: query)
+        do {
+            searchResults = try await dataService.searchMessagesChecked(query: query)
+            searchError = nil
+        } catch {
+            searchResults = []
+            searchError = error.localizedDescription
+        }
         searchIndexRebuilding = await dataService.searchIndexStatus().isRebuilding
     }
 

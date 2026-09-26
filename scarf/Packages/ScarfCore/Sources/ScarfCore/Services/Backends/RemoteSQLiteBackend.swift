@@ -59,7 +59,9 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     /// reading: creating a WAL sidecar is not a state mutation, and
     /// `PRAGMA query_only=1` is what makes the connection incapable of
     /// writing a row (a write through it fails "attempt to write a readonly
-    /// database").
+    /// database"). It does NOT stop the checkpoint-on-close a writable
+    /// connection runs as the last closer, which is why the relaxed form
+    /// also sets `.dbconfig no_ckpt_on_close on` (see `sqlite3Flags`).
     ///
     /// **Why it is a FALLBACK and not the unconditional form.** `sqlite3`
     /// without `-readonly` CREATES a missing database file. Dropping the flag
@@ -159,7 +161,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             let result = try await runSQLite(timeout: preflightTimeout) { queryOnly in
                 """
                 set -e
-                \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 --version
+                \(Self.fallbackGuards(quotedPath, queryOnly: queryOnly))sqlite3 --version
                 sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) "\(Self.sqlPrefix(queryOnly: queryOnly))\(preflightSQL)"
                 """
             }
@@ -230,7 +232,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
                 do {
                     result = try await runSQLite(timeout: queryTimeout) { queryOnly in
                         """
-                        \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
+                        \(Self.fallbackGuards(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
                         \(Self.sqlPrefix(queryOnly: queryOnly))\(inlined)
                         __SCARF_SQL__
                         """
@@ -296,7 +298,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             let timeout = min(30, queryTimeout + Double(statements.count) * 2)
             result = try await runSQLite(timeout: timeout) { queryOnly in
                 """
-                \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
+                \(Self.fallbackGuards(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
                 \(Self.sqlPrefix(queryOnly: queryOnly))\(combined)
                 __SCARF_SQL__
                 """
@@ -676,12 +678,41 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     /// found", which is why the fallback's existence guard reproduces it.
     private static let cantOpenNeedle = "unable to open database file"
 
+    /// Marker in the relaxed form's stderr when the host's sqlite3 cannot
+    /// confirm `.dbconfig no_ckpt_on_close on`. Carries `cantOpenNeedle` so
+    /// a latched host still maps through `HermesDataService.humanize` the
+    /// way the strict CANTOPEN did.
+    static let noCheckpointRefusal = "\(cantOpenNeedle) (sqlite3 cannot disable checkpoint-on-close; query_only fallback refused)"
+
     /// Flags for the sqlite3 invocation. The strict form keeps `-readonly`
     /// (SQLite refuses to create the file OR the WAL sidecar); the relaxed
     /// form drops it so the sidecar can be created, and pairs with
     /// `sqlPrefix`'s `PRAGMA query_only=1`.
+    ///
+    /// The relaxed form also turns off checkpoint-on-close (charter C3).
+    /// `query_only` stops row writes, not checkpoints: a READWRITE
+    /// connection that is the last to close a WAL database copies the WAL
+    /// into the main file. Each sqlite3 process here IS a short-lived
+    /// connection, so whenever the WAL holds frames nobody else is attached
+    /// to (Hermes crashed, or exited while another reader held on) the
+    /// query's own exit rewrote `state.db` — reproduced with the CLI on
+    /// 3.54: main file 4 KB → 368 KB after one relaxed `SELECT`, and
+    /// byte-identical with the flag. The dot-command echoes
+    /// `no_ckpt_on_close on` to stdout, so it runs between `.output
+    /// /dev/null` and `.output stdout` to keep the `-json` stream (and the
+    /// preflight's first-line version parse) clean. `-cmd` runs before
+    /// the SQL argument / stdin script, on the same connection.
+    ///
+    /// Availability: `.dbconfig no_ckpt_on_close` is in the CLI since
+    /// SQLite 3.24.0 (`src/shell.c.in` at `version-3.24.0`), and `-json`
+    /// — which both forms already require — since 3.33.0, so every host
+    /// that can run this invocation at all has it. `fallbackGuards` still
+    /// probes, because the CLI treats an UNKNOWN `.dbconfig` name as a
+    /// stderr warning with exit 0 and would silently keep checkpointing.
     static func sqlite3Flags(queryOnly: Bool) -> String {
-        queryOnly ? "-json" : "-readonly -json"
+        queryOnly
+            ? "-json -cmd '.output /dev/null' -cmd '.dbconfig no_ckpt_on_close on' -cmd '.output stdout'"
+            : "-readonly -json"
     }
 
     /// SQL prepended to every relaxed-form script. `PRAGMA query_only=1`
@@ -692,15 +723,25 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         queryOnly ? "PRAGMA query_only=1;\n" : ""
     }
 
-    /// Shell guard emitted ONLY in the relaxed form. Without `-readonly`,
-    /// sqlite3 CREATES a missing database file — which would write into
-    /// Hermes's data dir and make "not installed" indistinguishable from
-    /// "installed but empty". The guard fails an absent DB with the same
-    /// message `-readonly` produces, so the absent-vs-unreadable
-    /// discriminator survives the fallback unchanged.
-    static func missingDBGuard(_ quotedPath: String, queryOnly: Bool) -> String {
+    /// Shell guards emitted ONLY in the relaxed form.
+    ///
+    /// 1. Existence. Without `-readonly`, sqlite3 CREATES a missing
+    ///    database file — which would write into Hermes's data dir and make
+    ///    "not installed" indistinguishable from "installed but empty". The
+    ///    guard fails an absent DB with the same message `-readonly`
+    ///    produces, so the absent-vs-unreadable discriminator survives the
+    ///    fallback unchanged.
+    /// 2. No-checkpoint support. Runs `.dbconfig no_ckpt_on_close on`
+    ///    against `:memory:` and requires the CLI to echo it back ON; a
+    ///    sqlite3 that can't is refused the writable form rather than
+    ///    allowed to checkpoint into `state.db` (see `sqlite3Flags`).
+    static func fallbackGuards(_ quotedPath: String, queryOnly: Bool) -> String {
         guard queryOnly else { return "" }
-        return "if [ ! -f \(quotedPath) ]; then echo 'Error: \(cantOpenNeedle)' >&2; exit 1; fi\n"
+        return """
+        if [ ! -f \(quotedPath) ]; then echo 'Error: \(cantOpenNeedle)' >&2; exit 1; fi
+        case "$(sqlite3 :memory: '.dbconfig no_ckpt_on_close on' 2>/dev/null)" in *'no_ckpt_on_close on'*) ;; *) echo 'Error: \(noCheckpointRefusal)' >&2; exit 1;; esac
+
+        """
     }
 
     /// True when a non-zero sqlite3 exit is the WAL/sidecar CANTOPEN we can
@@ -732,7 +773,14 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         let strict = try await transport.streamScript(build(false), timeout: timeout)
         guard strict.exitCode != 0, Self.isCantOpen(strict) else { return strict }
         let relaxed = try await transport.streamScript(build(true), timeout: timeout)
-        guard relaxed.exitCode == 0 else { return strict }
+        guard relaxed.exitCode == 0 else {
+            #if canImport(os)
+            if relaxed.stderrString.contains(Self.noCheckpointRefusal) {
+                Self.logger.warning("Remote sqlite3 cannot disable checkpoint-on-close; refusing the query_only fallback (charter C3)")
+            }
+            #endif
+            return strict
+        }
         isQueryOnlyFallback = true
         #if canImport(os)
         Self.logger.info("Remote state.db could not be opened -readonly (WAL without -shm); using PRAGMA query_only=1 for this host")

@@ -274,7 +274,18 @@ struct DashboardView: View {
 
             List {
                 let filtered = vm.sessions(filteredBy: sessionProjectFilter)
-                if filtered.isEmpty {
+                if filtered.isEmpty, let err = vm.lastError {
+                    // A failed load is not an empty history — say so.
+                    ContentUnavailableView {
+                        Label("Couldn't load sessions", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(err)
+                    } actions: {
+                        Button("Retry") { Task { await vm.refresh() } }
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                } else if filtered.isEmpty {
                     ContentUnavailableView(
                         "No sessions",
                         systemImage: "clock.badge.questionmark",
