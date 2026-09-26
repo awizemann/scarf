@@ -1677,4 +1677,55 @@ import Foundation
         // No date suffix is still fine.
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.3").detected)
     }
+
+    // MARK: - v0.21.4 capability flags
+
+    @Test func v0214FlagsOnAtFloor() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.4 (2026.9.21)")
+        #expect(caps.isV0214OrLater)
+        #expect(!caps.hasOpenCodeFreeProvider)
+        #expect(caps.hasChatGPTCodexAliases)
+        #expect(caps.hasOpenAINativeWebSearchBackend)
+        #expect(caps.hasCompressionThresholdTokensDefault256K)
+        #expect(caps.hasWhatsAppUnauthorizedDMDecline)
+        // v0.21.5 is a later group, not yet reached at the v0.21.4 floor.
+        #expect(!caps.hasMCPBoolishNumericTruthiness)
+    }
+
+    @Test func v0213HostHidesEveryV0214Flag() {
+        // v2026.9.14 (v0.21.3) still has `opencode-free` fully defined in
+        // providers.py (HERMES_OVERLAYS + _ALIAS_GROUPS); v2026.9.21
+        // (v0.21.4) has neither. Same walk for the `chatgpt`/`chatgpt-codex`
+        // aliases (absent @ 9.14, present @ 9.21), `plugins/web/openai_native/`
+        // (`git ls-tree` empty @ 9.14, present @ 9.21), and
+        // `compression.threshold_tokens` (`None` @ 9.14, `256_000` @ 9.21).
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)")
+        #expect(!caps.isV0214OrLater)
+        #expect(caps.hasOpenCodeFreeProvider)
+        #expect(!caps.hasChatGPTCodexAliases)
+        #expect(!caps.hasOpenAINativeWebSearchBackend)
+        #expect(!caps.hasCompressionThresholdTokensDefault256K)
+        #expect(!caps.hasWhatsAppUnauthorizedDMDecline)
+    }
+
+    // MARK: - v0.21.5 capability flags
+
+    @Test func v0215FlagOnAtFloor() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        #expect(caps.isV0215OrLater)
+        #expect(caps.hasMCPBoolishNumericTruthiness)
+        // Every v0.21.4 flag stays on for a patch bump.
+        #expect(!caps.hasOpenCodeFreeProvider)
+        #expect(caps.hasChatGPTCodexAliases)
+    }
+
+    @Test func v0214HostHidesTheV0215Flag() {
+        // Commit 3e00a356a4 ("one reader for mcp_servers.<name>.enabled")
+        // first ships in tag v2026.9.24 (v0.21.5); v2026.9.21's
+        // `_parse_boolish` still matches only `isinstance(value, bool)`,
+        // falling through any bare int/float to its `default`.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.4 (2026.9.21)")
+        #expect(!caps.isV0215OrLater)
+        #expect(!caps.hasMCPBoolishNumericTruthiness)
+    }
 }
