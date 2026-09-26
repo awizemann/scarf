@@ -462,11 +462,12 @@ public extension HermesConfig {
             threshold: double("compression.threshold", default: 0.5),
             targetRatio: double("compression.target_ratio", default: 0.2),
             protectLastN: int("compression.protect_last_n", default: 20),
-            // -- v0.20 tuning keys. `threshold_tokens` defaults to `None`
-            // in Hermes (config_defaults.py:577); 0 is Scarf's "absent"
-            // sentinel and Hermes treats <= 0 as off, so the round-trip is
-            // lossless either way.
-            thresholdTokens: int("compression.threshold_tokens", default: 0),
+            // -- v0.20 tuning keys. `threshold_tokens`: `nil` = ABSENT (the
+            // host default applies — see `displayCompressionThresholdTokens`);
+            // a PRESENT value Hermes can't read as a positive int (`0`,
+            // `null`, garbage) is "ratio-only" there (`_positive_int`,
+            // agent_init.py:1476-1478 @ v2026.9.21), so it lands as `0`.
+            thresholdTokens: scalar("compression.threshold_tokens").map { Int($0) ?? 0 },
             minTailUserMessages: int("compression.min_tail_user_messages", default: 1),
             idleCompactAfterSeconds: int("compression.idle_compact_after_seconds", default: 0),
             progressNotices: boolish("compression.progress_notices", default: false)

@@ -2237,9 +2237,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// tags: `None` at `v2026.9.14:hermes_cli/config_defaults.py:539`,
     /// `256_000` at both `v2026.9.21:...:570` and `v2026.9.24:...:570` — the
     /// flip lands with the v0.21.4 release, not v0.21.5. Scarf reads an
-    /// absent key as `0` / "off"; ``HermesConfig/displayCompressionThresholdTokens(capabilities:)``
+    /// absent key as `nil`; ``HermesConfig/displayCompressionThresholdTokens(capabilities:)``
     /// uses this to show the host's real default instead of "off" on a
-    /// host that never wrote the key.
+    /// host that never wrote the key (an explicit `0`/`null` stays "off").
     public var hasCompressionThresholdTokensDefault256K: Bool { isV0214OrLater }
 
     /// Whether WhatsApp's `gateway.unauthorized_dm_behavior` accepts

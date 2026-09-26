@@ -133,20 +133,34 @@ struct HermesP20ConfigDefaultsTests {
 
     /// `compression.threshold_tokens` went `None` → `256_000` at tag
     /// **v2026.9.21 (v0.21.4)** (`config_defaults.py:539` @ v2026.9.14 vs
-    /// `:570` @ v2026.9.21 — both walked directly, not from the audit's
-    /// v2026.9.24 citation). Scarf's parser reads an absent key as `0`, the
-    /// same "off" sentinel Hermes's own `_tt > 0` display guard uses for an
-    /// explicit `0` — so this can't and doesn't try to tell "absent" and
-    /// "explicitly 0" apart, matching `displayApprovalTimeout`'s convention.
-    @Test func compressionThresholdTokensIsASentinelResolvedAtV0214() {
+    /// `:570` @ v2026.9.21 — both walked directly). Only an ABSENT key picks
+    /// that default up: Hermes `_deep_merge`s `DEFAULT_CONFIG` under the file
+    /// (`hermes_cli/config.py:1534`, a leaf `None` overrides) and runs any
+    /// PRESENT value through `_positive_int` (`agent/agent_init.py:1476-1478`
+    /// @ v2026.9.21), so an explicit `0` / `null` means ratio-only.
+    @Test func compressionThresholdTokensAbsentResolvesAtV0214() {
         let absent = HermesConfig(yaml: Self.bare)
-        #expect(absent.compression.thresholdTokens == 0)
+        #expect(absent.compression.thresholdTokens == nil)
         #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == 256_000)
         #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.5")) == 256_000)
         #expect(absent.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.3")) == 0)
         #expect(absent.displayCompressionThresholdTokens(capabilities: .empty) == 0)
         let set = HermesConfig(yaml: "compression:\n  threshold_tokens: 100000\n")
         #expect(set.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == 100_000)
+        #expect(set.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.3")) == 100_000)
+    }
+
+    /// An explicit `0` / `null` (or anything `_positive_int` rejects) is
+    /// PRESENT, so it overrides the 256K default on a v0.21.4+ host and must
+    /// display as `0` ("ratio-only") — not the shipped default. Pre-target
+    /// hosts showed `0` for these before and still do (C1).
+    @Test(arguments: ["0", "null", "~", "-5", "\"0\"", "abc"])
+    func compressionThresholdTokensExplicitOffIsNotAbsent(_ raw: String) {
+        let cfg = HermesConfig(yaml: "compression:\n  threshold_tokens: \(raw)\n")
+        #expect(cfg.compression.thresholdTokens != nil)
+        #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == 0)
+        #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.5")) == 0)
+        #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.3")) == 0)
     }
 
     /// `whatsapp.unauthorized_dm_behavior` gains `"decline"` and

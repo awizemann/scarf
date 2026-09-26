@@ -36,14 +36,14 @@ import Testing
 
     @Test func compressionTuningAbsentKeysUseHermesDefaults() {
         let cfg = HermesConfig(yaml: "compression:\n  enabled: true\n")
-        // config_defaults.py: threshold_tokens None → 0 sentinel,
+        // config_defaults.py: threshold_tokens absent → nil (host default),
         // min_tail_user_messages 1, idle_compact_after_seconds 0,
         // progress_notices False.
-        #expect(cfg.compression.thresholdTokens == 0)
+        #expect(cfg.compression.thresholdTokens == nil)
         #expect(cfg.compression.minTailUserMessages == 1)
         #expect(cfg.compression.idleCompactAfterSeconds == 0)
         #expect(cfg.compression.progressNotices == false)
-        #expect(CompressionSettings.empty.thresholdTokens == 0)
+        #expect(CompressionSettings.empty.thresholdTokens == nil)
         #expect(CompressionSettings.empty.minTailUserMessages == 1)
     }
 
