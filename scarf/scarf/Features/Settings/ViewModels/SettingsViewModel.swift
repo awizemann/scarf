@@ -1124,7 +1124,8 @@ final class SettingsViewModel {
         }
     }
 
-    /// `gateway.multiplex_profile_allowlist` (v0.20.4+) warning helper for
+    /// `gateway.multiplex_profile_allowlist` (v0.20.1 – v0.21.2 window,
+    /// `hasMultiplexProfileAllowlist`) warning helper for
     /// `ProfileRoutesSection` — returns a user-facing message when
     /// `profile` would never be reachable at runtime even though a route
     /// targets it, or `nil` when there's nothing to warn about.
@@ -1135,7 +1136,15 @@ final class SettingsViewModel {
     /// is reachable and no warning is ever shown. `"default"` is implicitly
     /// always allowed regardless of list contents, so it's exempted here
     /// even when the list doesn't literally contain it.
-    func multiplexProfileAllowlistWarning(for profile: String) -> String? {
+    ///
+    /// Below `hasMultiplexProfileAllowlist`'s floor Hermes has never read
+    /// the key yet; at and above its ceiling (migration 43, v0.21.3+)
+    /// Hermes has deleted it and stopped reading it — either way "Hermes
+    /// will reject messages routed here" would be a false claim, so this
+    /// returns `nil` outside the window regardless of what a stale
+    /// config.yaml still contains.
+    func multiplexProfileAllowlistWarning(for profile: String, capabilities: HermesCapabilities) -> String? {
+        guard capabilities.hasMultiplexProfileAllowlist else { return nil }
         guard let allowlist = config.multiplexProfileAllowlist else { return nil }
         if profile.isEmpty || profile == "default" { return nil }
         if allowlist.contains(profile) { return nil }

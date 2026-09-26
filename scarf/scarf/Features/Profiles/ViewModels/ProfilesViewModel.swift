@@ -304,8 +304,16 @@ final class ProfilesViewModel {
                 }
                 self.message = result.exitCode == 0 ? success : Self.failureMessage(result.output)
                 self.load()
+                // P7e: capture what THIS action put up and only clear that
+                // exact text. A bare `self?.message = nil` after the fixed
+                // delay wipes whatever is on screen when the timer fires —
+                // including a later action's persistent
+                // `completedWithWarning` banner (never scheduled its own
+                // clear, above) landing inside this one's 3s window.
+                let shown = self.message
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
+                    guard let self, self.message == shown else { return }
+                    self.message = nil
                 }
             }
         }

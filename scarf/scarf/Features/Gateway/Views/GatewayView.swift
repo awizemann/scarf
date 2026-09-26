@@ -215,7 +215,46 @@ struct GatewayView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+
+            if let warning = viewModel.gateway.standaloneWarning {
+                standaloneWarningBanner(warning)
+            }
         }
+    }
+
+    /// v0.21.5's boxed `gateway status` warning (P7e, live finding on
+    /// Alan's host 2026-09-26): the default profile's boot guard is keeping
+    /// this host gateway standalone, so the named profiles it should be
+    /// carrying are silent. `fixCommand` is plain, selectable text — not a
+    /// button — `hermes gateway migrate --multiplex` rewires every
+    /// profile's topology and shouldn't fire from one click in a pane that
+    /// is otherwise read-only.
+    private func standaloneWarningBanner(_ warning: HermesGatewayStandaloneWarning) -> some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Label("This gateway is standalone: it serves only its own profile.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.bold())
+                .foregroundStyle(.orange)
+            if !warning.unservedProfiles.isEmpty {
+                Text("Profiles not served (their bots stay silent): \(warning.unservedProfiles.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !warning.reason.isEmpty {
+                Text("Why: \(warning.reason)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !warning.fixCommand.isEmpty {
+                Text(warning.fixCommand)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.horizontal, ScarfSpace.s2)
+                    .padding(.vertical, 2)
+                    .background(ScarfColor.backgroundTertiary, in: RoundedRectangle(cornerRadius: 4))
+            }
+        }
+        .padding(ScarfSpace.s3)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Platforms

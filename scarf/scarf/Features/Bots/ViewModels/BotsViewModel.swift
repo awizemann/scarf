@@ -1251,7 +1251,19 @@ final class BotsViewModel: OutcomeMessageHosting {
                     self.errorMessage = result
                 } else {
                     onSuccess()
-                    self.flash(note.map { "\(success) — \($0)" } ?? success)
+                    if let note {
+                        // P7e: the delete DID complete (`onSuccess()` above
+                        // already ran) — but the settlement-pending
+                        // follow-up (`hermes profile purge-identity <name>`)
+                        // is something the user must still act on, not a
+                        // toast that should vanish after
+                        // `OutcomeMessage.successTTL` (3s). `showUnconfirmed`
+                        // uses the same bar without scheduling the
+                        // auto-clear timer `showSuccess` would.
+                        self.showUnconfirmed("\(success) — \(note)")
+                    } else {
+                        self.flash(success)
+                    }
                 }
                 self.load(force: true)
             }

@@ -29,6 +29,45 @@ import ScarfCore
         }
     }
 
+    // MARK: - P7e item 6: remote optimize refusal naming Scarf's transient sqlite3 reader
+
+    /// `RemoteSQLiteBackend` reads `state.db` by spawning a TRANSIENT
+    /// `sqlite3 -readonly …` over SSH per query (`sqlite3Flags(queryOnly:)`)
+    /// — it has no PID Scarf can compare against `ownPID` since it never ran
+    /// locally, so `isLocal`-gated `PID \(ownPID) (` matching can never
+    /// recognise it. Before this fix, a remote refusal whose only holder was
+    /// this transient reader told the user to "stop other Hermes apps" —
+    /// hunting for a process that has usually already exited.
+    @Test func remoteRefusalNamesItsOwnTransientSQLiteReader() {
+        let text = HealthViewModel.sessionsOptimizeRefusalSummary(
+            holders: ["PID 55123 (sqlite3 -readonly -json /home/alan/.hermes/state.db)"],
+            isLocal: false, canForce: true)
+        #expect(text.contains("Scarf's own read was in progress — retry"))
+        #expect(!text.contains("Stop the gateway and other Hermes apps"))
+    }
+
+    /// A real remote holder alongside the transient reader still gets the
+    /// normal "stop it" copy — the transient-reader shortcut only fires when
+    /// EVERY named holder is one.
+    @Test func remoteRefusalWithARealHolderIsNotShortCircuited() {
+        let text = HealthViewModel.sessionsOptimizeRefusalSummary(
+            holders: [
+                "PID 55123 (sqlite3 -readonly -json /home/alan/.hermes/state.db)",
+                "PID 9001 (hermes gateway run): state.db",
+            ],
+            isLocal: false, canForce: true)
+        #expect(!text.contains("Scarf's own read was in progress"))
+        #expect(text.contains("Stop the gateway and other Hermes apps, then try again."))
+    }
+
+    /// Local hosts don't use the remote CLI reader at all — the shortcut
+    /// must never fire there even if a holder happens to be named `sqlite3`.
+    @Test func localHostNeverTakesTheTransientReaderShortcut() {
+        let text = HealthViewModel.sessionsOptimizeRefusalSummary(
+            holders: ["PID 55123 (sqlite3 -readonly /tmp/x.db)"], isLocal: true, canForce: true, ownPID: 1)
+        #expect(!text.contains("Scarf's own read was in progress"))
+    }
+
     /// The pane still runs the base argv (P47's source scan relies on it)
     /// and `--force` rides only on the forced run.
     @Test func healthForceArgvIsGated() throws {

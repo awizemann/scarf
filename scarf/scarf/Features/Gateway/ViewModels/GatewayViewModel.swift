@@ -53,6 +53,13 @@ struct MessagingGatewayInfo {
     /// Only ever set where ``HermesCapabilities/hasGatewayProfileParking``;
     /// `false` everywhere else, so older hosts render exactly as before.
     var isParked: Bool = false
+    /// v0.21.5: the boxed "this gateway is STANDALONE" warning parsed out of
+    /// the same `gateway status` output, when the default profile's boot
+    /// guard kept it standalone — see ``HermesGatewayStandaloneWarning``.
+    /// `nil` on every host below ``HermesCapabilities/hasGatewayStandaloneStatusBox``
+    /// and whenever the guard didn't fire, so this changes nothing for a
+    /// pre-target host or a healthy multiplexer (charter C1).
+    var standaloneWarning: HermesGatewayStandaloneWarning? = nil
 }
 
 struct PlatformInfo: Identifiable {
@@ -310,13 +317,17 @@ final class MessagingGatewayViewModel {
         }
         let isLoaded = isServiceLoaded(pid: pid, statusOutput: statusOutput)
 
-        return MessagingGatewayInfo(
+        var info = MessagingGatewayInfo(
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
             platforms: platforms, isLoaded: isLoaded,
             isServedByMultiplexer: isServedByMultiplexer(statusOutput: statusOutput),
             isRunning: isGatewayRunning(state: state, statusOutput: statusOutput)
         )
+        if capabilities.hasGatewayStandaloneStatusBox {
+            info.standaloneWarning = HermesGatewayStandaloneWarning.parse(statusOutput: statusOutput)
+        }
+        return info
     }
 
     /// v0.21.5 parked verdict — see `MessagingGatewayInfo.isParked` and

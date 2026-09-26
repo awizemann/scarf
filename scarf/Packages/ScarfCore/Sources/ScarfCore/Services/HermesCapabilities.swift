@@ -1558,6 +1558,28 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// rendering is identical to the last release.
     public var hasMCPIdentityHeader: Bool { isV0201OrLater }
 
+    /// Whether `gateway.multiplex_profile_allowlist` is still read anywhere
+    /// on the host — a WINDOW, not a floor (P7e re-walk; charter C2). The
+    /// audit's `≥0.20.4` guess undershot: `gateway/config.py`'s
+    /// `_normalize_multiplex_profile_allowlist` (plus the `profiles.py` and
+    /// `gateway.py` readers) all land together in commit `c8f235a106`,
+    /// first tagged at **v2026.8.13** (`0.20.1`) — `git tag --contains` that
+    /// commit lists no earlier numbered tag. Migration 43
+    /// (`hermes_cli/config_migrations.py:640-649` @ `v2026.9.14`) deletes
+    /// the key from `config.yaml` on load, and `git grep
+    /// multiplex_profile_allowlist v2026.9.14 -- 'gateway/*.py'
+    /// hermes_cli/gateway.py hermes_cli/profiles.py` is empty — every
+    /// reader is gone in the SAME release, whose `pyproject.toml` reads
+    /// `0.21.3`. `git grep` at `v2026.9.11` (`0.21.2`) still shows all of
+    /// them. So the key is live for `0.20.1 – 0.21.2` only.
+    ///
+    /// `SettingsViewModel.multiplexProfileAllowlistWarning` and
+    /// `ProfileRoutesSection`'s `allowlistWarning` gate on this — below
+    /// `0.20.1` or at `0.21.3`+ Hermes never consults the key, so warning
+    /// that a route "will be rejected" because of it would be false on a
+    /// host where the allowlist is either not-yet or no-longer read.
+    public var hasMultiplexProfileAllowlist: Bool { isV0201OrLater && !isV0213OrLater }
+
     // MARK: v0.20.5 (v2026.8.19) flags
 
     /// `get_managed_system()` READS the `.managed` marker file's contents and
@@ -2362,6 +2384,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// only these unmodeled keys on a host that publishes the list
     /// (``HermesCronJob/duplicatedAsNewJob(id:existingNames:capabilities:now:)``).
     public var hasCronJobDefinitionFields: Bool { isV0215OrLater }
+
+    /// Whether `hermes gateway status` prints the boxed "this gateway is
+    /// STANDALONE" warning (P7e, live finding on Alan's host 2026-09-26) —
+    /// `standalone_warning_lines`/`recorded_standalone_warning_lines`
+    /// (`hermes_cli/gateway_multiplex_mode.py:299-335` @ `v2026.9.24`),
+    /// hooked into `_cmd_status` at `hermes_cli/gateway.py:5051,5059`. At
+    /// `v2026.9.21` the same boot guard prints a single unboxed line instead
+    /// — `⚠ Serving the default profile only: {reason}`
+    /// (`hermes_cli/gateway.py:1542-1548` @ that tag), with no unserved-
+    /// profile list and no fix command — so this is a real floor, not the
+    /// audit's guess of "absent" (P7e re-walk; charter C2): v0.21.4 already
+    /// warns, just not in the box `HermesGatewayStandaloneWarning` parses.
+    public var hasGatewayStandaloneStatusBox: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 
