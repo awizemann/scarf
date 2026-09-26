@@ -681,7 +681,10 @@ private struct AddCredentialSheet: View {
     private var catalog: ModelCatalogService { ModelCatalogService(context: viewModel.context) }
 
     private func oauthGate(for rawID: String) -> CredentialPoolsOAuthGate {
-        CredentialPoolsOAuthGate.resolve(providerID: rawID, catalog: catalog)
+        CredentialPoolsOAuthGate.resolve(
+            providerID: rawID, catalog: catalog,
+            capabilities: capabilitiesStore?.capabilities ?? .empty
+        )
     }
 
     var body: some View {
@@ -849,7 +852,7 @@ private struct AddCredentialSheet: View {
                 Text("No API key needed.")
                     .font(.caption)
             }
-            Text("`\(ModelCatalogService.canonicalProviderID(providerID))` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.")
+            Text("`\(ModelCatalogService.canonicalProviderID(providerID, capabilities: capabilitiesStore?.capabilities ?? .empty))` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

@@ -353,6 +353,24 @@ import Foundation
         #expect(svc.validateModel("deepseek/deepseek-v4-flash", for: "nous") == .valid)
     }
 
+    /// `chatgpt` is an `openai-codex` (overlay-only) spelling from v0.21.4
+    /// (`hermes_cli/providers.py:122` @ v2026.9.21), so on such a host it
+    /// validates like the canonical id and names that overlay — while a
+    /// pre-0.21.4 / undetected host keeps treating it as an unknown id.
+    @Test func validateModelResolvesChatGPTAliasOnlyAtV0214() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        let newHost = HermesCapabilities.parse("Hermes Agent v0.21.4 (2026.9.21)")
+        let oldHost = HermesCapabilities.parse("Hermes Agent v0.21.3 (2026.9.14)")
+        #expect(svc.validateModel("gpt-5.5", for: "chatgpt", capabilities: newHost) == .valid)
+        #expect(svc.validateModel("gpt-5.5", for: "chatgpt", capabilities: oldHost) == .unknownProvider(providerID: "chatgpt"))
+        #expect(svc.validateModel("gpt-5.5", for: "chatgpt") == .unknownProvider(providerID: "chatgpt"))
+        #expect(svc.providerByID("chatgpt", capabilities: newHost)?.isOverlay == true)
+        #expect(svc.providerByID("chatgpt", capabilities: oldHost) == nil)
+    }
+
     @Test func validateModelRejectsEmptyInput() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }

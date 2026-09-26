@@ -744,11 +744,45 @@ import Foundation
         }
     }
 
-    /// One malformed row among good ones costs only that row.
+    /// A row with a non-null `task_id` that doesn't decode is a per-task row
+    /// whose shape drifted: it fails the whole decode, exactly as the
+    /// pre-v0.21.4 strict `[Entry]` decode did — and the trailing home-scope
+    /// row must not vouch for it. Counting that row as "recognised" turned
+    /// `[drifted task row, home-scope row]` into a healthy-looking empty
+    /// board (charter C5).
+    @Test func driftedTaskRowFailsTheDecodeEvenWithTheHomeScopeRow() {
+        let drifted = #"{"task_id": "t_1", "diagnostics": [{"kind": 7}]}"#
+        let homeScope = #"{"task_id": null, "dispatch_profiles": "any", "diagnostics": []}"#
+        let good = #"{"task_id": "t_ok", "diagnostics": []}"#
+        for json in ["[\(drifted), \(homeScope)]", "[\(drifted)]", "[\(good), \(drifted), \(homeScope)]"] {
+            // The pre-target (strict) decode throws on it too — same outcome.
+            #expect(throws: (any Error).self) {
+                try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: Data(json.utf8))
+            }
+            #expect(throws: KanbanError.self) {
+                try KanbanService.diagnosticsByTask(from: Data(json.utf8))
+            }
+        }
+        // Wrong-TYPED task_id is still a non-null task_id.
+        #expect(throws: KanbanError.self) {
+            try KanbanService.diagnosticsByTask(from: Data(#"[{"task_id": 42, "diagnostics": []}]"#.utf8))
+        }
+    }
+
+    /// The home-scope row alone doesn't make unknown rows acceptable.
+    @Test func homeScopeRowDoesNotVouchForUnrecognisedRows() {
+        let json = #"[{"unexpected": true}, {"task_id": null, "dispatch_profiles": "any", "diagnostics": []}]"#
+        #expect(throws: KanbanError.self) {
+            try KanbanService.diagnosticsByTask(from: Data(json.utf8))
+        }
+    }
+
+    /// A row with no `task_id` at all (not a task row) among good ones costs
+    /// only that row.
     @Test func oneUnrecognisedRowCostsOnlyItself() throws {
         let json = """
         [
-          {"task_id": 42, "diagnostics": "garbage"},
+          {"unexpected": 42, "diagnostics": "garbage"},
           {"task_id": "t_ok", "diagnostics": [{"kind": "stuck_in_blocked", "severity": "warning",
             "title": "Blocked 3d", "detail": "", "count": 1}]}
         ]

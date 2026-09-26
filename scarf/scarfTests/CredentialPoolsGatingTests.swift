@@ -62,6 +62,24 @@ import ScarfCore
         }
     }
 
+    /// `chatgpt` / `chatgpt-codex` are `openai-codex` spellings from v0.21.4
+    /// (`hermes_cli/providers.py:122` @ v2026.9.21; absent @ v2026.9.14), and
+    /// `hermes auth add chatgpt` normalises them itself (`_PROVIDER_ALIASES`,
+    /// `hermes_cli/auth.py:1332` @ v2026.9.21) — so on such a host they must
+    /// hit the same CLI gate as the canonical id instead of the PKCE flow
+    /// that stalls. Below the floor they are unknown ids and stay `.ok` (C1).
+    @Test func chatGPTAliasRoutesToCLIOnlyAtV0214() throws {
+        let catalog = try makeCatalog()
+        let newHost = HermesCapabilities.parse("Hermes Agent v0.21.4 (2026.9.21)")
+        let oldHost = HermesCapabilities.parse("Hermes Agent v0.21.3 (2026.9.14)")
+        for alias in ["chatgpt", "ChatGPT-Codex"] {
+            #expect(CredentialPoolsOAuthGate.resolve(providerID: alias, catalog: catalog, capabilities: newHost)
+                    == .useCLI(provider: alias.lowercased()))
+            #expect(CredentialPoolsOAuthGate.resolve(providerID: alias, catalog: catalog, capabilities: oldHost) == .ok)
+            #expect(CredentialPoolsOAuthGate.resolve(providerID: alias, catalog: catalog) == .ok)
+        }
+    }
+
     @Test func pkceProvidersPassThroughAsOK() throws {
         let catalog = try makeCatalog()
         // Anthropic is a standard PKCE provider in Hermes — must not be gated.

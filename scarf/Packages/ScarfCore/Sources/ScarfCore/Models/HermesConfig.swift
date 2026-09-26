@@ -684,12 +684,20 @@ public struct CompressionSettings: Sendable, Equatable {
     public var targetRatio: Double
     public var protectLastN: Int
     // -- v0.20 tuning keys (config_defaults.py `compression` block) ------
-    /// `compression.threshold_tokens` — absolute token cap. Hermes default
-    /// is `None` (unset); Scarf uses 0 as the "absent" sentinel. When > 0,
+    /// `compression.threshold_tokens` — absolute token cap. When > 0,
     /// compression triggers at the LOWER of the ratio `threshold` and this
-    /// count (Hermes clamps to the model context at apply-time and treats
-    /// `<= 0` as off — config.py's `_tt > 0` display guard).
-    public var thresholdTokens: Int
+    /// count (Hermes clamps to the model context at apply-time).
+    ///
+    /// `nil` means the key is ABSENT from config.yaml, which is distinct
+    /// from a present `0` / `null`: Hermes deep-merges `DEFAULT_CONFIG`
+    /// under the file (`hermes_cli/config.py:1534` `_deep_merge`, a leaf
+    /// `None` overrides), so only an absent key picks up the shipped
+    /// default (`None` @ v2026.9.14, `256_000` @ v2026.9.21+), while any
+    /// PRESENT value runs through `_positive_int` (`agent/agent_init.py:
+    /// 1476-1478` @ v2026.9.21) and `0` / `null` / garbage mean
+    /// "ratio-only". A present value Scarf can't read as an integer is
+    /// therefore stored as `0`, never `nil`.
+    public var thresholdTokens: Int?
     /// `compression.min_tail_user_messages` — real user messages guaranteed
     /// to survive uncompressed in the tail. Hermes default 1.
     public var minTailUserMessages: Int
@@ -706,7 +714,7 @@ public struct CompressionSettings: Sendable, Equatable {
         threshold: Double,
         targetRatio: Double,
         protectLastN: Int,
-        thresholdTokens: Int = 0,
+        thresholdTokens: Int? = nil,
         minTailUserMessages: Int = 1,
         idleCompactAfterSeconds: Int = 0,
         progressNotices: Bool = false
@@ -1539,20 +1547,20 @@ public struct HermesConfig: Sendable {
         return capabilities.isV0191OrLater ? 300 : 60
     }
 
-    /// Effective `compression.threshold_tokens` for display: the on-disk
-    /// value when it's a positive count, otherwise the host's shipped
-    /// default — **256,000** on v0.21.4+, **0** ("off"/ratio-only) on older
-    /// supported hosts. Same `<= 0` conflation as `displayApprovalTimeout`
-    /// above: Hermes's own reader treats an explicit `0` and an absent key
-    /// identically ("off", `config.py`'s `_tt > 0` display guard), so this
-    /// can't and doesn't need to tell them apart — only the ABSENT case
-    /// changed defaults, from `None` to `256_000`
-    /// (`config_defaults.py:539` @ v2026.9.14 vs `:570` @ v2026.9.21, both
-    /// v0.21.4). See `HermesCapabilities.hasCompressionThresholdTokensDefault256K`.
+    /// Effective `compression.threshold_tokens` for display: a PRESENT
+    /// value as Hermes reads it (positive count, else `0` = ratio-only —
+    /// `_positive_int` at `agent/agent_init.py:1476-1478` @ v2026.9.21), and
+    /// for an ABSENT key the host's shipped default — **256,000** on
+    /// v0.21.4+, **0** ("off"/ratio-only) on older supported hosts
+    /// (`config_defaults.py:539` @ v2026.9.14 vs `:570` @ v2026.9.21). An
+    /// explicit `0` / `null` is NOT conflated with absent: it overrides the
+    /// default through `_deep_merge`, so a user who turned the cap off on a
+    /// v0.21.4+ host sees `0`, not `256000`. See
+    /// `HermesCapabilities.hasCompressionThresholdTokensDefault256K`.
     ///
     /// Display-only. Unknown host version resolves to the older `0`.
     public func displayCompressionThresholdTokens(capabilities: HermesCapabilities) -> Int {
-        if compression.thresholdTokens > 0 { return compression.thresholdTokens }
+        if let present = compression.thresholdTokens { return max(present, 0) }
         return capabilities.hasCompressionThresholdTokensDefault256K ? 256_000 : 0
     }
 

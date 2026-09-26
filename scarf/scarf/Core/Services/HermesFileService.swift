@@ -1251,10 +1251,12 @@ struct HermesFileService: Sendable {
             // absent means "use Hermes's default" and stays nil.
             // Absent stays nil ("use Hermes's default"); a present value is
             // read with the same boolish words Hermes uses
-            // (`mcp_tool_discovery.py:254`). A present-but-unparseable value
-            // stays nil, which renders as the default Hermes will apply.
+            // (`mcp_tool_discovery.py:254`; `:347` @ v2026.9.24, where a
+            // bare number reads by truthiness — see `boolishOptional`). A
+            // present-but-unparseable value stays nil, which renders as the
+            // default Hermes will apply.
             let parallel: Bool? = fields["supports_parallel_tool_calls"]
-                .flatMap { Self.boolishOptional($0) }
+                .flatMap { Self.boolishOptional($0, capabilities: capabilities) }
             // v0.15 — mTLS client-certificate config. `client_cert` is normally
             // a scalar PEM-path string but Hermes also accepts an inline list
             // form `[cert, key, password]`; tolerate it by taking the first
@@ -1452,9 +1454,9 @@ struct HermesFileService: Sendable {
                     } else if trimmed == "exclude:" {
                         subSection = "tools.exclude"
                     } else if let (key, value) = keyValue(trimmed), key == "resources" {
-                        resources = Self.boolish(value, default: true)
+                        resources = Self.boolish(value, default: true, capabilities: capabilities)
                     } else if let (key, value) = keyValue(trimmed), key == "prompts" {
-                        prompts = Self.boolish(value, default: true)
+                        prompts = Self.boolish(value, default: true, capabilities: capabilities)
                     }
                 case "tools.include":
                     if trimmed.hasPrefix("- ") {
@@ -2371,17 +2373,22 @@ struct HermesFileService: Sendable {
     /// `0` and a CA-bundle path both mean something else again. That one
     /// stays a `String?` all the way to the UI.
     ///
-    /// **v0.21.5 (v2026.9.24, commit `3e00a356a4`) changed this for the ONE
-    /// key that still calls `_parse_boolish` — `enabled`.** The commit
-    /// unified four separate `enabled` readers into `mcp_server_enabled`,
-    /// which special-cases `_parse_boolish` to accept `int`/`float` by
-    /// Python truthiness (`bool(value)`) BEFORE falling back to its
-    /// `default` (`tools/mcp_tool_common.py:124-129` @ that tag):
-    /// `enabled: 0` is now DISABLED, `enabled: 2` / `enabled: 0.0` follow
-    /// the same rule (0.0 disabled, any other float enabled). Below that
-    /// floor a bare number still falls through to `default` exactly as
-    /// documented above — this is gated so a pre-0.21.5 host's `enabled: 0`
-    /// keeps reading as enabled (the DEFAULT), unchanged.
+    /// **v0.21.5 (v2026.9.24, commit `3e00a356a4`) changed `_parse_boolish`
+    /// ITSELF, so it applies to EVERY caller, not just `enabled`.** The
+    /// commit (which also unified the `enabled` readers into
+    /// `mcp_server_enabled`) makes `_parse_boolish` accept `int`/`float` by
+    /// Python truthiness (`bool(value)`) BEFORE the word match
+    /// (`tools/mcp_tool_common.py:124-137` @ that tag). Its callers at that
+    /// tag: `enabled` (`mcp_server_enabled`, `:140-144`),
+    /// `tools.resources` / `tools.prompts`
+    /// (`tools/mcp_tool_registration.py:156`),
+    /// `supports_parallel_tool_calls` (`tools/mcp_tool_discovery.py:347`)
+    /// and `lazy` (`:188`, not surfaced by Scarf). So `enabled: 0` and
+    /// `tools.prompts: 0` are now OFF and `supports_parallel_tool_calls: 1`
+    /// is ON; `0.0` is false, any other number true. Below that floor a
+    /// bare number still falls through to `default` exactly as documented
+    /// above — every caller passes `capabilities` so a pre-0.21.5 host
+    /// keeps reading `enabled: 0` as enabled (the DEFAULT), unchanged.
     nonisolated static func boolishOptional(
         _ raw: String?, capabilities: HermesCapabilities = .empty
     ) -> Bool? {
