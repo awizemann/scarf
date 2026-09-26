@@ -206,7 +206,7 @@ struct BotRoutinesView: View {
                 }
                 Button("Run Now") { viewModel.runNow(job) }
                     .buttonStyle(ScarfGhostButton())
-                    .disabled(viewModel.refusesTerminalJobLocally(job))
+                    .disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))
                 Button {
                     pendingDelete = job
                 } label: {

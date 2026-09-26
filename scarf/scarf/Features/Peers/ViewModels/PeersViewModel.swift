@@ -254,6 +254,9 @@ final class PeersViewModel: OutcomeMessageHosting {
             let parsed = HermesPeerCLI.parseRun(
                 exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr
             )
+            let mayHaveCreatedRun = HermesPeerCLI.runFailureMayHaveCreatedRun(
+                exitCode: result.exitCode, stderr: result.stderr
+            )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isSending = false
@@ -286,17 +289,23 @@ final class PeersViewModel: OutcomeMessageHosting {
                 case .failure(let failure):
                     log.warning("peer run failed: \(failure.message, privacy: .public)")
                     self.errorMessage = failure.message
+                    // P9: only an outcome that may have left a run on the
+                    // peer keeps its key (see `runFailureMayHaveCreatedRun`).
+                    if !mayHaveCreatedRun, self.pendingRunKey?.key == key { self.pendingRunKey = nil }
                 }
             }
         }
     }
 
     /// The `--idempotency-key` of the last `peer run` that did not come back
-    /// with a run id, and what it was for. A failure — above all Scarf's own
-    /// timeout, which can land after the peer's `/v1/runs` POST created the
-    /// run — keeps it, so pressing Start Run again for the SAME target and
-    /// text replays that run (`"replayed": true`) instead of starting a
-    /// second one. Any other target or text gets a fresh key.
+    /// with a run id, and what it was for. A failure that may have created
+    /// the run anyway — Scarf's own timeout, or the CLI's "Could not reach
+    /// peer" arm, either of which can land after the peer's `/v1/runs` POST
+    /// was admitted — keeps it, so pressing Start Run again for the SAME
+    /// target and text replays that run (`"replayed": true`) instead of
+    /// starting a second one. A failure that provably created nothing (an
+    /// HTTP rejection, a local refusal) drops it. Any other target or text
+    /// gets a fresh key.
     struct PendingRunKey: Equatable {
         let target: String
         let message: String

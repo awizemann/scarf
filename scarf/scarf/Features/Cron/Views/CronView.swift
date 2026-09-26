@@ -454,7 +454,7 @@ struct CronView: View {
                 // (`cron/jobs.py:2012` @ v2026.9.7) with no
                 // recoverable-error exemption, so a terminal job can never be
                 // run — disabled exactly as `BotRoutinesView` disables it.
-                .disabled(viewModel.refusesTerminalJobLocally(job))
+                .disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))
             Button("Edit") { viewModel.editingJob = job }
             // Round-4 decision 5: the row menu offers the same remedy the
             // detail pane's hint names, unconditionally — a `cron create`
@@ -640,7 +640,7 @@ struct CronView: View {
             // context menu (`:494`) and `BotRoutinesView` (`:201-203`) already
             // disabled it; this pane's PRIMARY button was the one left live,
             // which is the loudest place to offer a refusal.
-            .disabled(viewModel.refusesTerminalJobLocally(job))
+            .disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))
 
             // The offer is computed once, from the two Hermes predicates —
             // `_is_recoverable_error_job` and `rearm_oneshot`'s

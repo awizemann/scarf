@@ -103,6 +103,7 @@ final class BotRoutinesViewModel {
     func resume(_ job: HermesCronJob) { cron.resumeJob(job) }
     func resumeAndRunNow(_ job: HermesCronJob) { cron.resumeAndRunNow(job) }
     func runNow(_ job: HermesCronJob) { cron.runNow(job) }
+    func isRunningNow(_ job: HermesCronJob) -> Bool { cron.isRunningNow(job) }
 
     /// Round-4 decision 5, the Bots half. A routine Hermes will not
     /// re-activate gets the same remedy its hint names: an ORDINARY

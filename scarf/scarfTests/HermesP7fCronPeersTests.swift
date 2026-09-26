@@ -128,6 +128,40 @@ import ScarfCore
         #expect(calls.all(["cron", "tick"]).first?.timeout == 300)
     }
 
+    /// P9 (t-d6384e2e item 8): `cron run` is a whole synchronous agent run
+    /// since v0.18.0, so the click posts an immediate unconfirmed
+    /// "Running…", and a second click while it is in flight starts nothing.
+    @Test func runNowPostsRunningAndIgnoresASecondClickInFlight() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let calls = Calls()
+        let gate = DispatchSemaphore(value: 0)
+        let vm = CronViewModel(context: home.context, mutationRunner: { args, timeout in
+            calls.append(args, timeout)
+            if args.starts(with: ["cron", "run"]) {
+                gate.wait()
+                return ("Triggered job: Nightly (j1)\n  Ran now: succeeded.\n", 0)
+            }
+            return ("", 0)
+        })
+        let job = HermesCronJob(id: "j1", name: "Nightly", prompt: "p", model: nil,
+                                schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
+                                enabled: true, state: "scheduled")
+        vm.runNow(job)
+        #expect(vm.message == "Running \"Nightly\"…")
+        #expect(vm.messageOutcome == .unconfirmed)
+        #expect(vm.isRunningNow(job))
+        await Self.settle { calls.all(["cron", "run"]).count == 1 }
+        vm.runNow(job)
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(calls.all(["cron", "run"]).count == 1, "a second click started a second run")
+
+        gate.signal()
+        await Self.settle { !calls.all(["cron", "tick"]).isEmpty }
+        #expect(!vm.isRunningNow(job))
+        #expect(vm.message == CronViewModel.runNowMessage(.ran).text)
+    }
+
     // MARK: - (3) selection race
 
     private static func writeJobs(_ home: TempHermesHome, _ jobs: String) throws {
@@ -266,6 +300,35 @@ import ScarfCore
         vm.startRun()
         await Self.settle { !vm.isSending && calls.items.count == 3 }
         #expect(Self.key(in: calls.items[2].args) != key1, "a new run after a success gets a new key")
+    }
+
+    /// P9 (t-d6384e2e item 6): only a failure that may have created the
+    /// run keeps its key. An HTTP rejection is the peer answering — the key
+    /// is reserved only after admission (`api_server_runs.py:626-675` @
+    /// v2026.9.24) — and a kept key after a `409 idempotency_key_conflict`
+    /// (fingerprint includes the Bot Chat `session_id`, `:593-596`) would
+    /// hit the same 409 on every retry of that text. "Could not reach peer"
+    /// is where the POST's own urllib timeout lands (`peer.py:325-329`), so
+    /// that one stays ambiguous and keeps the key. Stderr literals are
+    /// `_peer_failure`'s (`peer.py:209-212`).
+    @Test(arguments: [
+        ("Peer 'spark' rejected the request (HTTP 409): Idempotency-Key was already used with a different request payload", false),
+        ("Peer 'spark' rejected the request (HTTP 400): Missing 'input' field", false),
+        ("Could not reach peer 'spark': timed out", true),
+        ("Could not reach peer 'spark': <urlopen error [Errno 61] Connection refused>", true),
+    ])
+    func peerRunKeyIsKeptOnlyWhenTheRunMayExist(_ stderr: String, keeps: Bool) async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let calls = Calls()
+        let vm = peersViewModel(home, calls: calls) { _, _ in (1, "", stderr) }
+        vm.startRun()
+        await Self.settle { !vm.isSending && calls.items.count == 1 }
+        vm.startRun()
+        await Self.settle { !vm.isSending && calls.items.count == 2 }
+        let key1 = try #require(Self.key(in: calls.items[0].args))
+        let key2 = try #require(Self.key(in: calls.items[1].args))
+        #expect((key1 == key2) == keeps, "stderr: \(stderr)")
     }
 
     /// A different message never inherits the pending key.
