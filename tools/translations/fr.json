@@ -3106,5 +3106,7 @@
   "Doctor did not complete": "Doctor ne s'est pas terminé",
   "decline (not supported by this Hermes — behaves as pair)": "decline (non pris en charge par ce Hermes — se comporte comme pair)",
   "Dismiss this unconfirmed cron result": "Ignorer ce résultat incertain de cron",
-  "Dismiss this unconfirmed routine result": "Ignorer ce résultat incertain de routine"
+  "Dismiss this unconfirmed routine result": "Ignorer ce résultat incertain de routine",
+  "Doctor could not run": "Doctor n'a pas pu s'exécuter",
+  "Running \"%@\"…": "Exécution de « %@ »…"
 }
