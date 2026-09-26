@@ -62,6 +62,8 @@ import ScarfCore
 
         private let autoHandshake: Bool
         private let sessionId: String
+        /// Answer `session/new` with a JSON-RPC error instead of a session.
+        private let failSessionNew: Bool
         private(set) var sent: [String] = []
         private(set) var closed = false
 
@@ -72,7 +74,11 @@ import ScarfCore
             sent.filter { Self.method(of: $0) == "session/prompt" }.count
         }
 
-        init(autoHandshake: Bool = true, sessionId: String = FakeACPChannel.defaultSessionId) {
+        init(
+            autoHandshake: Bool = true,
+            sessionId: String = FakeACPChannel.defaultSessionId,
+            failSessionNew: Bool = false
+        ) {
             let (inStream, inCont) = AsyncThrowingStream<String, Error>.makeStream()
             let (errStream, errCont) = AsyncThrowingStream<String, Error>.makeStream()
             self.incoming = inStream
@@ -81,6 +87,7 @@ import ScarfCore
             self.stderrCont = errCont
             self.autoHandshake = autoHandshake
             self.sessionId = sessionId
+            self.failSessionNew = failSessionNew
         }
 
         func send(_ line: String) async throws {
@@ -96,6 +103,11 @@ import ScarfCore
             switch method {
             case "initialize":
                 yieldJSON(["jsonrpc": "2.0", "id": id, "result": [:] as [String: Any]])
+            case "session/new" where failSessionNew:
+                yieldJSON([
+                    "jsonrpc": "2.0", "id": id,
+                    "error": ["code": -32603, "message": "Internal error"] as [String: Any],
+                ])
             case "session/new":
                 yieldJSON(["jsonrpc": "2.0", "id": id, "result": ["sessionId": sessionId]])
             default:
@@ -432,6 +444,22 @@ import ScarfCore
             _ = try await self.withTimeout { try await prompt.value }
         }
         #expect(isCancelled(err))
+        try await waitFor { await fake.isClosed }
+    }
+
+    /// P7a: a failed cold start must stop the client it built. The client
+    /// isn't stored until `session/new` succeeds, so `shutdown()` can't reach
+    /// it — before the fix a failed `session/new` leaked the channel (in
+    /// production, the `hermes acp` process) for the app's lifetime.
+    @Test func failedSessionNewStopsTheClient() async throws {
+        let fake = FakeACPChannel(failSessionNew: true)
+        let session = makeSession(fake)
+
+        let err = await captureError {
+            _ = try await self.withTimeout { try await session.prompt("hi") }
+        }
+        #expect(err != nil)
+        #expect(!(err is TimeoutError))
         try await waitFor { await fake.isClosed }
     }
 
