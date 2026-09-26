@@ -255,7 +255,7 @@ enum PlatformSetupHelpers {
 
     /// What a setup form's `load()` reads off disk, gathered in ONE off-main
     /// pass so the form can commit it all in a single main-actor hop.
-    struct FormSnapshot: Sendable {
+    nonisolated struct FormSnapshot: Sendable {
         var env: [String: String] = [:]
         /// Non-nil when `.env` exists but could not be read (GW-F6 / DI L10).
         var envFailure: String?

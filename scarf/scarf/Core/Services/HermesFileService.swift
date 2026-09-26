@@ -814,7 +814,7 @@ struct HermesFileService: Sendable {
     }
 
     /// One-bit out-param for a `mutate` closure that has no return value.
-    private final class RefusalFlag: @unchecked Sendable { var hit = false }
+    private nonisolated final class RefusalFlag: @unchecked Sendable { var hit = false }
 
     /// Updates the v0.20.4 `strict_redirect_headers` bool scalar (HTTP/SSE
     /// only — Portable Agent Plugins v1 §7.2.1). Pass `nil` to drop the key
@@ -988,7 +988,7 @@ struct HermesFileService: Sendable {
         return tools
     }
 
-    private static let toolsDiscoveredMarker = "Tools discovered: "
+    private nonisolated static let toolsDiscoveredMarker = "Tools discovered: "
 
     /// Drop CSI/OSC escape sequences from a CLI line.
     nonisolated private static func stripANSI(_ text: String) -> String {
@@ -2335,8 +2335,8 @@ struct HermesFileService: Sendable {
     /// The two word sets `_parse_boolish` accepts
     /// (`tools/mcp_tool_common.py:120-121` at `v2026.9.7`; identical at
     /// `v2026.6.19:tools/mcp_tool.py:3762-3765`, so this is not gated).
-    private static let boolishTrueWords: Set<String> = ["true", "1", "yes", "on"]
-    private static let boolishFalseWords: Set<String> = ["false", "0", "no", "off"]
+    private nonisolated static let boolishTrueWords: Set<String> = ["true", "1", "yes", "on"]
+    private nonisolated static let boolishFalseWords: Set<String> = ["false", "0", "no", "off"]
 
     /// Read a YAML scalar the way Hermes's `_parse_boolish` does: the value is
     /// unquoted and inline-comment-stripped first (a `"false"` and a

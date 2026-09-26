@@ -76,7 +76,7 @@ enum SessionExportFormat: String, CaseIterable, Identifiable {
     /// Value passed to `--format`.
     var cliValue: String { rawValue }
 
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .jsonl: return "JSONL"
         case .markdown: return "Markdown"
@@ -91,7 +91,7 @@ enum SessionExportFormat: String, CaseIterable, Identifiable {
     /// (the existing local/remote-safe flow). `html`/`md`/`qmd` don't
     /// support stdout and must be given a real output path, which the CLI
     /// then writes to wherever `hermes` runs.
-    var usesStdout: Bool { self == .jsonl || self == .trace }
+    nonisolated var usesStdout: Bool { self == .jsonl || self == .trace }
 
     /// md/qmd export a *directory* of files (CLI default:
     /// `<hermes home>/session-exports`), not a single file.
@@ -509,7 +509,7 @@ final class SessionsViewModel {
     /// after `--` is positional. Title stays ONE argv element — Hermes
     /// re-joins the list with a single space (`sessions_cmd.py:681`), so
     /// splitting here would collapse the user's internal spacing.
-    static func renameArgv(sessionId: String, title: String) -> [String] {
+    nonisolated static func renameArgv(sessionId: String, title: String) -> [String] {
         ["sessions", "rename", "--", sessionId, title]
     }
 

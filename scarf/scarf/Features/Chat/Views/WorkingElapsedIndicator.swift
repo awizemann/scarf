@@ -62,7 +62,7 @@ struct WorkingElapsedIndicator: View {
 
     /// "12 seconds", "1 minute, 5 seconds" — clock digits read badly
     /// aloud ("zero colon twelve").
-    private static func spokenElapsed(_ seconds: TimeInterval) -> Text {
+    private nonisolated static func spokenElapsed(_ seconds: TimeInterval) -> Text {
         let whole = max(0, Int(seconds.rounded(.down)))
         return Text(Duration.seconds(whole).formatted(
             .units(allowed: [.hours, .minutes, .seconds], width: .wide)

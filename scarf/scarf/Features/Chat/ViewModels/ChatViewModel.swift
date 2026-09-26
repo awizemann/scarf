@@ -1514,7 +1514,7 @@ final class ChatViewModel {
             defer { settlePromptTurn(token) }
             // Whether another interruptive turn is still in flight — then
             // this return doesn't end the chat's busy period.
-            func othersStillRunning() -> Bool {
+            @MainActor func othersStillRunning() -> Bool {
                 promptTurns.contains { $0.key != token && !$0.value.isNonInterruptive }
             }
             do {

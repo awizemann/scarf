@@ -25,7 +25,7 @@ enum GatewayActionBanner {
     /// The neutral message for a `.unconfirmed` outcome. `detail` carries the
     /// verdict's own note when it has one — the live case is
     /// ``ScarfCore/HermesGatewayServiceVerdict/foregroundStartNote``.
-    static func unconfirmed(_ verb: HermesGatewayServiceVerdict.Verb, detail: String?) -> String {
+    nonisolated static func unconfirmed(_ verb: HermesGatewayServiceVerdict.Verb, detail: String?) -> String {
         let stem: String = switch verb {
         case .start:
             String(localized: "Start sent; Scarf could not confirm it from the output — the status will update")

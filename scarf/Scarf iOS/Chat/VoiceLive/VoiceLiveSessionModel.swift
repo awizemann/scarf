@@ -570,7 +570,7 @@ struct AppleSpeechAuthorizer: VoiceLiveSpeechAuthorizing {
 
 /// The default for the GPT-Live-only test seam (and any caller that never
 /// mounts the chained engine): nothing to ask.
-struct AlwaysAuthorizedSpeech: VoiceLiveSpeechAuthorizing {
+nonisolated struct AlwaysAuthorizedSpeech: VoiceLiveSpeechAuthorizing {
     func authorize() async -> VoiceListenerError? { nil }
 }
 

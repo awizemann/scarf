@@ -307,7 +307,7 @@ public final class DefaultVoiceAudioSession: VoiceAudioSessionControlling {
         // `.voiceChat` asks for the system's echo cancellation, which is the
         // only defence the chained path has against the microphone hearing
         // its own TTS (there is no WebRTC AEC here).
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true)
         #endif
     }

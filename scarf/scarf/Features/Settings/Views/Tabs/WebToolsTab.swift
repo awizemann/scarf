@@ -54,13 +54,13 @@ struct WebToolsTab: View {
     /// `""` is Hermes's default for both override keys and means "fall back
     /// to `web.backend`" — name it so, rather than PickerRow's generic
     /// "(none)", which reads like "no backend at all".
-    private static func overrideOptionLabel(_ option: String) -> String {
+    private nonisolated static func overrideOptionLabel(_ option: String) -> String {
         option.isEmpty ? String(localized: "Inherit (web.backend)") : option
     }
 
     /// The shared `web.backend` key has nothing above it to inherit from —
     /// empty there means Hermes picks, via the keyless free-tier ring.
-    private static func sharedOptionLabel(_ option: String) -> String {
+    private nonisolated static func sharedOptionLabel(_ option: String) -> String {
         option.isEmpty ? String(localized: "Automatic") : option
     }
 

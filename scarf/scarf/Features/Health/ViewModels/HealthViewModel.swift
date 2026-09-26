@@ -983,7 +983,7 @@ final class HealthViewModel {
     /// thing distinguishing "found advisories" from "the scan broke", so the
     /// threshold that produces it must be Scarf's choice, not whatever a
     /// future Hermes changes the default to.
-    static let auditArgs = ["security", "audit", "--fail-on", "critical"]
+    nonisolated static let auditArgs = ["security", "audit", "--fail-on", "critical"]
 
     /// Run `hermes security audit` (v0.15 OSV.dev supply-chain scan) off
     /// MainActor. Non-destructive read-only verb.
@@ -1220,7 +1220,7 @@ final class HealthViewModel {
     /// argv Hermes printed must be one of Scarf's own invocation shapes
     /// (`RemoteSQLiteBackend.isOwnReaderCommandLine`, `sqlite3 -readonly
     /// -json …` or the query-only `.dbconfig` form).
-    static func isTransientRemoteSQLiteReader(_ holder: String) -> Bool {
+    nonisolated static func isTransientRemoteSQLiteReader(_ holder: String) -> Bool {
         guard holder.hasPrefix("PID "), let open = holder.range(of: " (") else { return false }
         return RemoteSQLiteBackend.isOwnReaderCommandLine(String(holder[open.upperBound...]))
     }

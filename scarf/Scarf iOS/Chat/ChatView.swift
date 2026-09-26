@@ -3293,7 +3293,7 @@ private struct AgentThinkingRow: View {
         .accessibilityValue(elapsed.map(Self.spokenElapsed) ?? Text(verbatim: ""))
     }
 
-    private static func spokenElapsed(_ seconds: TimeInterval) -> Text {
+    private nonisolated static func spokenElapsed(_ seconds: TimeInterval) -> Text {
         let whole = max(0, Int(seconds.rounded(.down)))
         return Text(Duration.seconds(whole).formatted(
             .units(allowed: [.hours, .minutes, .seconds], width: .wide)
