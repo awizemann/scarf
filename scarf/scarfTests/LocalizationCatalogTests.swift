@@ -247,6 +247,14 @@ struct LocalizationCatalogTests {
         "Text to speech",
         "This iPhone has no on-device speech recognition for your language, and ScarfGo never sends your voice away to transcribe it.",
         "Your voice stays on this iPhone; replies are spoken by the host's voice or the system voice.",
+        // Hermes v0.21.5 parity localization sweep (t-c3d15135 item 6):
+        // ScarfGo's live-elapsed thinking row (#145), the cron editor's
+        // model-pin placeholder, and the dashboard's missing-sqlite3 banner.
+        // Every key below has its only call site under `Scarf iOS`.
+        "Agent is thinking",
+        "Agent is thinking… · %@",
+        "Model (blank = follow the main model)",
+        "sqlite3 not installed on server",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
