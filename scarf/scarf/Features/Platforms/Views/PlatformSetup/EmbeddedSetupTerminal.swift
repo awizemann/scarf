@@ -62,7 +62,7 @@ final class EmbeddedSetupTerminalController {
         }
         // C10. `HermesFileService.enrichedEnvironment()` reads a `static let`
         // backed by two `zsh` probes at 5 s + 3 s
-        // (`HermesFileService.swift:2566-2583`, probes at `:2575` and
+        // (`HermesFileService.swift:2587-2604`, probes at `:2575` and
         // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
         // launch, but a `static let` initialiser is a `swift_once`, so a
         // main-actor reader that arrives while the warm-up is still running

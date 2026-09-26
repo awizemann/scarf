@@ -103,7 +103,7 @@ struct OffPoolDisciplineP52Tests {
     /// Deliberately a short, evidenced list rather than a general "blocking
     /// call" heuristic: each entry is a site round-5 actually got wrong.
     /// `enrichedEnvironment()` reads a `static let` whose initialiser is two
-    /// `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2566-2583`, probes
+    /// `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2587-2604`, probes
     /// at `:2575` and `:2580`) behind a `swift_once`; `loadState()` is a
     /// `readFile` of `auth.json` through the context's transport, i.e. an SSH
     /// round trip on a remote server.
