@@ -31,8 +31,12 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
     var allowAllUsers: Bool = false
 
     // config.yaml knobs
-    var unauthorizedDMBehavior: String = "pair"     // "pair" | "ignore"
+    var unauthorizedDMBehavior: String = "pair"     // "pair" | "ignore" | "decline" (v0.21.4+)
     var replyPrefix: String = ""
+    /// `whatsapp.unauthorized_dm_decline_message` — only meaningful (and
+    /// only shown by ``WhatsAppSetupView``) while `unauthorizedDMBehavior
+    /// == "decline"`. Empty uses Hermes's own default reply text.
+    var unauthorizedDMDeclineMessage: String = ""
 
     var message: String?
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
@@ -68,6 +72,7 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
             guard let cfg = snapshot.config?.whatsapp else { return }
             unauthorizedDMBehavior = cfg.unauthorizedDMBehavior
             replyPrefix = cfg.replyPrefix
+            unauthorizedDMDeclineMessage = cfg.unauthorizedDMDeclineMessage
         }
     }
 
@@ -79,10 +84,15 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
             "WHATSAPP_ALLOWED_USERS": allowAllUsers ? "*" : allowedUsers,
             "WHATSAPP_ALLOW_ALL_USERS": allowAllUsers ? "true" : ""
         ]
-        let configKV: [String: String] = [
+        var configKV: [String: String] = [
             "whatsapp.unauthorized_dm_behavior": unauthorizedDMBehavior,
             "whatsapp.reply_prefix": replyPrefix
         ]
+        // Only written while "decline" is active — a blank value on any
+        // other choice is Hermes's own inert default, not worth a key.
+        if unauthorizedDMBehavior == "decline" {
+            configKV["whatsapp.unauthorized_dm_decline_message"] = unauthorizedDMDeclineMessage
+        }
         commitSave(envPairs: envPairs, configKV: configKV)
     }
 
