@@ -35,6 +35,30 @@ public struct ACPRequest: Encodable, Sendable {
     }
 }
 
+/// An outgoing JSON-RPC NOTIFICATION: no `id` member at all. Not
+/// `"id": null` — the acp lib Hermes ships classifies a frame by the id
+/// KEY's presence (`has_id = "id" in message`, acp/connection.py:166 in
+/// agent-client-protocol 0.9.0; same in 0.8.1), so a null id still routes
+/// as a request.
+public struct ACPNotification: Encodable, Sendable {
+    public nonisolated let jsonrpc = "2.0"
+    public nonisolated let method: String
+    public nonisolated let params: [String: AnyCodable]
+
+    public init(method: String, params: [String: AnyCodable]) {
+        self.method = method
+        self.params = params
+    }
+    public enum CodingKeys: String, CodingKey { case jsonrpc, method, params }
+
+    public nonisolated func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(jsonrpc, forKey: .jsonrpc)
+        try c.encode(method, forKey: .method)
+        try c.encode(params, forKey: .params)
+    }
+}
+
 public struct ACPRawMessage: Decodable, Sendable {
     public nonisolated let jsonrpc: String?
     public nonisolated let id: Int?
