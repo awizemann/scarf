@@ -572,6 +572,11 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
                            "latest_execution", "quota_hold_until"] {
             carried.removeValue(forKey: runtimeKey)
         }
+        if capabilities.isV0214OrLater {
+            for runtimeKey in Self.schedulerOwnedExtraKeys {
+                carried.removeValue(forKey: runtimeKey)
+            }
+        }
         carried = Self.droppingDerivedScheduleDisplay(carried)
         // `repeat.completed` is a run counter on a config field — reset the
         // count, keep the limit, so a duplicate of a job that ran all 3 of
@@ -605,6 +610,33 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             attachToSession: attachToSession, extra: carried
         )
     }
+
+    /// Scheduler-owned keys a v0.21.4 (v2026.9.21) duplicate must not carry
+    /// either — the denylist path (no `JOB_DEFINITION_FIELDS` there), so
+    /// they are named explicitly. Each is written by the scheduler, never
+    /// authored, at v2026.9.21 `cron/jobs.py`:
+    ///
+    /// - `pending_slot` — the dispatcher's "taken off the schedule, not yet
+    ///   claimed" stamp (`:3168-3172`). A copied stamp is orphaned by
+    ///   construction, so `_restore_unclaimed_slot` (`:3077-3087`, via
+    ///   `cron/occurrences.py::unclaimed_pending_slot` `:77-102`) restores
+    ///   the SOURCE's slot as the copy's due instant — an immediate "missed"
+    ///   run of a job that was never scheduled for it.
+    /// - `fire_claim` / `run_claim` — dispatch and run leases (`:2285-2295`);
+    ///   a copied live `fire_claim` reads as "running in another process"
+    ///   (`:955`).
+    /// - `failure_streak`, `created_at` — stamped by `create_job`
+    ///   (`:1805`, `:1813`) and bumped by `mark_job_run` (`:2285-2289`); a
+    ///   copy is a new job and starts its own.
+    /// - `last_fire_error` — `_record_fire_error` (`:2254-2259`).
+    ///
+    /// These keys predate v0.21.4 (all present at v2026.9.14), but the
+    /// denylist change is gated on `isV0214OrLater` so an older host's
+    /// duplicate stays byte-identical (charter C1).
+    nonisolated static let schedulerOwnedExtraKeys: [String] = [
+        "pending_slot", "fire_claim", "run_claim", "failure_streak",
+        "created_at", "last_fire_error",
+    ]
 
     /// `JOB_DEFINITION_FIELDS` (`cron/job_definition.py:13-18` @ v2026.9.24)
     /// plus `repeat` — the unmodeled keys a v0.21.5+ duplicate may carry.
