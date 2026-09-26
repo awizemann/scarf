@@ -1728,4 +1728,28 @@ import Foundation
         #expect(!caps.isV0215OrLater)
         #expect(!caps.hasMCPBoolishNumericTruthiness)
     }
+
+    // MARK: - hasOpenCodeFreeProvider's true floor is v0.20.5, not v0.6.0
+
+    /// `opencode-free` first ships at tag `v2026.8.19` (v0.20.5, commit
+    /// `28a9b6c565` — absent at the prior tag `v2026.8.18`, walked directly)
+    /// and is removed at `v2026.9.21` (v0.21.4). A DETECTED host below
+    /// v0.20.5 never had the provider at all, so offering it there sent
+    /// `model.provider: opencode-free` to a host that treats it as an
+    /// unknown provider — indistinguishable from a typo.
+    @Test func openCodeFreeProviderOnAtItsRealFloor() {
+        let atFloor = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        #expect(atFloor.hasOpenCodeFreeProvider)
+        let oneReleaseBelow = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
+        #expect(!oneReleaseBelow.hasOpenCodeFreeProvider)
+    }
+
+    /// `.empty` (undetected — no live version probe yet) stays `true`,
+    /// preserving `canonicalProviderID(_:)`'s documented default-parameter
+    /// behavior and every other unconditional caller that doesn't thread
+    /// real capabilities through. Only a GENUINELY detected pre-0.20.5 host
+    /// hides the provider.
+    @Test func openCodeFreeProviderStaysTrueForUndetectedCapabilities() {
+        #expect(HermesCapabilities.empty.hasOpenCodeFreeProvider)
+    }
 }
