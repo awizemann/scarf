@@ -14,7 +14,7 @@ import ScarfCore
     /// three-state shape as `security audit` — so a normal run with real
     /// findings (ending in `_print_summary`'s block, `:153-159`) parses
     /// sections and must NOT get the "did not complete" row.
-    @Test func normalRunWithSectionsIsUnchanged() {
+    @Test func normalRunWithSectionsIsUnchanged() throws {
         let output = """
         ◆ Configuration
         ✓ model: gpt-5
@@ -28,7 +28,7 @@ import ScarfCore
           Tip: run 'hermes doctor --fix' to auto-fix what's possible.
         """
         let sections = HealthViewModel.doctorSections(output: output, exitCode: 1)
-        #expect(sections.count == 1)
+        try #require(sections.count == 1)
         #expect(sections[0].title == "Configuration")
         #expect(!sections.contains { $0.title == "Doctor" })
     }
@@ -37,7 +37,7 @@ import ScarfCore
     /// loop wraps no `warn_on_error` around it (`doctor.py:174-176`), so an
     /// uncaught exception prints a bare Python traceback and exits non-zero
     /// with zero `◆` sections ever printed.
-    @Test func zeroSectionsAddsADidNotCompleteRow() {
+    @Test func zeroSectionsAddsADidNotCompleteRow() throws {
         let output = """
         Traceback (most recent call last):
           File "hermes_cli/doctor.py", line 176, in run_doctor
@@ -45,7 +45,7 @@ import ScarfCore
         KeyError: 'model'
         """
         let sections = HealthViewModel.doctorSections(output: output, exitCode: 1)
-        #expect(sections.count == 1)
+        try #require(sections.count == 1)
         #expect(sections[0].title == "Doctor")
         #expect(sections[0].checks.first?.status == .error)
     }
@@ -114,26 +114,27 @@ import ScarfCore
     /// The exact bug named in the audit: a bare `Key: value`-shaped line
     /// from a traceback (`KeyError: 'model'`) must not be recorded as a
     /// passing check inside `parseOutputStatic`'s generic fallback.
-    @Test func exceptionLinesInsideASectionDoNotCountAsPassing() {
+    @Test func exceptionLinesInsideASectionDoNotCountAsPassing() throws {
         let output = """
         ◆ Configuration
         ✓ model: gpt-5
         KeyError: 'provider'
         """
         let sections = HealthViewModel.parseOutputStatic(output)
-        #expect(sections.count == 1)
-        #expect(sections[0].checks.count == 1)
+        try #require(sections.count == 1)
+        try #require(sections[0].checks.count == 1)
         #expect(sections[0].checks[0].label == "model")
     }
 
     /// A real Hermes check-echo line keeps working — the guard is specific
     /// to exception-class-shaped keys, not every bare `Key: value` line.
-    @Test func realKeyValueLinesStillParse() {
+    @Test func realKeyValueLinesStillParse() throws {
         let output = """
         ◆ Configuration
         Provider: openai
         """
         let sections = HealthViewModel.parseOutputStatic(output)
+        try #require(sections.count == 1)
         #expect(sections[0].checks.first?.label == "Provider")
         #expect(sections[0].checks.first?.detail == "openai")
     }
