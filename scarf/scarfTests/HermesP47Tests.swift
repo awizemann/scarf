@@ -181,7 +181,9 @@ struct CLIVerdictCallSitesP47Tests {
         let source = try PluginsManagedLockP47Tests
             .source("scarf/Features/Health/ViewModels/HealthViewModel.swift")
         #expect(source.contains("HermesSessionsOptimizeVerdict.judge("))
-        #expect(source.contains("args: HermesSessionsOptimizeVerdict.argv"))
+        // P5b: spawned through `optimizeRunner(argv, timeout)` (a test seam),
+        // still from the base argv.
+        #expect(source.contains("optimizeRunner(HermesSessionsOptimizeVerdict.argv"))
         // The old exit-code branch is gone: nothing on this path may claim a
         // summary just because the process finished.
         #expect(source.contains("[\"sessions\", \"optimize\"]") == false)

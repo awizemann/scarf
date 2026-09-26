@@ -102,6 +102,13 @@ struct CronView: View {
     private var hasCronModelPin: Bool {
         capabilitiesStore?.capabilities.hasCronModelPin ?? false
     }
+    /// The editor's save-time strip, handed to the view model with the form.
+    private var editorSupport: CronViewModel.EditorSupport {
+        CronViewModel.EditorSupport(
+            workdir: hasCronWorkdir, noAgent: hasCronNoAgent,
+            failureDeliver: hasCronFailureDeliver, modelPin: hasCronModelPin
+        )
+    }
     /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
     /// diagnostics. Field-presence decides what renders; this only decides
     /// whether to look, so a pre-v0.21.1 host is byte-identical to today.
@@ -184,24 +191,9 @@ struct CronView: View {
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
             CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
-                viewModel.createJob(
-                    schedule: form.schedule,
-                    prompt: form.prompt,
-                    name: form.name,
-                    deliver: form.deliver,
-                    skills: form.skills,
-                    script: form.script,
-                    repeatCount: form.repeatCount,
-                    workdir: hasCronWorkdir ? form.workdir : "",
-                    // Mirrors the workdir strip-on-pre-version pattern: pre-v0.13
-                    // hosts get a hard `false`, so a stale form value (or a
-                    // hand-edited jobs.json round-tripped through edit-mode)
-                    // can't sneak `--no-agent` into a CLI that doesn't grok it.
-                    noAgent: hasCronNoAgent ? form.noAgent : false,
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : "",
-                    // v0.21.4 `--pin`; never on an older host or a no-agent job.
-                    pinModel: hasCronModelPin && !form.noAgent && form.pinModel
-                )
+                // Capability stripping (workdir, --no-agent, --failure-deliver,
+                // --pin) happens in the view model — see `createJob(from:support:)`.
+                viewModel.createJob(from: form, support: editorSupport)
                 viewModel.showCreateSheet = false
             } onCancel: {
                 viewModel.showCreateSheet = false
@@ -209,42 +201,9 @@ struct CronView: View {
         }
         .sheet(item: $viewModel.editingJob) { job in
             CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
-                viewModel.updateJob(
-                    id: job.id,
-                    // Untouched schedule → omit `--schedule` entirely. Re-sending
-                    // a one-shot's own `run_at` would be rejected once that
-                    // instant has passed (`cron/jobs.py` refuses a run_at outside
-                    // the grace window), so a rename of a fired one-shot must not
-                    // drag its spent timestamp along.
-                    schedule: form.schedule == job.schedule.editValue ? nil : form.schedule,
-                    prompt: form.prompt,
-                    // The value the editor was SEEDED with, so `updateJob`
-                    // can tell "user emptied the field" (a real clear
-                    // gesture Hermes can express) from "field was always
-                    // blank" — the same distinction `existingSkills` draws.
-                    existingPrompt: job.prompt,
-                    name: form.name,
-                    deliver: form.deliver,
-                    repeatCount: form.repeatCount,
-                    existingRepeatCount: job.repeatEditValue,
-                    // The job's STORED skills, so the edit can be sent as a
-                    // diff — `cron edit` treats "no --skill flags" as
-                    // "untouched", not "clear" (see `skillEditArguments`).
-                    existingSkills: job.skills ?? [],
-                    newSkills: form.skills,
-                    clearSkills: form.clearSkills,
-                    script: form.script,
-                    workdir: hasCronWorkdir ? form.workdir : nil,
-                    noAgent: hasCronNoAgent ? form.noAgent : nil,
-                    // `""` on edit is Hermes's clear-the-override gesture, so an
-                    // emptied field is forwarded; `nil` (older host) omits it.
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : nil,
-                    // v0.21.4 `--pin`/`--unpin`, sent only on a change (see
-                    // `modelPinEditArguments`); `nil` on an older host or a
-                    // no-agent job, where the toggle is hidden.
-                    wasModelPinned: job.isModelPinned,
-                    pinModel: hasCronModelPin && !form.noAgent ? form.pinModel : nil
-                )
+                // Diffing against the seeded job and capability stripping
+                // happen in the view model — see `updateJob(_:from:support:)`.
+                viewModel.updateJob(job, from: form, support: editorSupport)
                 viewModel.editingJob = nil
             } onCancel: {
                 viewModel.editingJob = nil
@@ -259,20 +218,7 @@ struct CronView: View {
         // nothing guards a create.
         .sheet(item: $viewModel.duplicatingJob) { job in
             CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
-                viewModel.createJob(
-                    schedule: form.schedule,
-                    prompt: form.prompt,
-                    name: form.name,
-                    deliver: form.deliver,
-                    skills: form.skills,
-                    script: form.script,
-                    repeatCount: form.repeatCount,
-                    workdir: hasCronWorkdir ? form.workdir : "",
-                    noAgent: hasCronNoAgent ? form.noAgent : false,
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : "",
-                    // v0.21.4 `--pin`; never on an older host or a no-agent job.
-                    pinModel: hasCronModelPin && !form.noAgent && form.pinModel
-                )
+                viewModel.createJob(from: form, support: editorSupport)
                 viewModel.duplicatingJob = nil
             } onCancel: {
                 viewModel.duplicatingJob = nil

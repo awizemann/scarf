@@ -52,11 +52,27 @@ final class HealthViewModel {
     /// the Tool Gateway section's Web Extract row on `hasWebExtractAux`.
     let capabilities: HermesCapabilities
 
-    init(context: ServerContext = .local, capabilities: HermesCapabilities = .empty) {
+    /// How `hermes sessions optimize` spawns. Production is
+    /// `HermesFileService.runHermesCLI`; tests inject a fake so the refusal
+    /// handling (``sessionsOptimizeCanForce``, the `--force` argv) is
+    /// provable at the call site (see `HermesCLIRunner`). Only the optimize
+    /// verb reads it today.
+    @ObservationIgnored nonisolated let optimizeRunner: HermesCLIRunner
+
+    init(
+        context: ServerContext = .local,
+        capabilities: HermesCapabilities = .empty,
+        optimizeRunner: HermesCLIRunner? = nil
+    ) {
         self.context = context
-        self.fileService = HermesFileService(context: context)
+        let fileService = HermesFileService(context: context)
+        self.fileService = fileService
         self.subscriptionService = NousSubscriptionService(context: context)
         self.capabilities = capabilities
+        self.optimizeRunner = optimizeRunner ?? { args, timeout in
+            let result = fileService.runHermesCLI(args: args, timeout: timeout)
+            return (result.output, result.exitCode)
+        }
     }
 
 
@@ -111,6 +127,12 @@ final class HealthViewModel {
     /// AND this host takes `--force`. Drives the "Optimize anyway…" button;
     /// never true on a pre-v0.21.4 host, which cannot print the refusal.
     var sessionsOptimizeCanForce = false
+    /// True when that refusal named ONLY this Scarf process — its own
+    /// read-only `state.db` view — and no "cannot prove" line
+    /// (``sessionsOptimizeOnlyScarfHolds(holders:isLocal:ownPID:)``). The
+    /// pane then offers the override behind a light confirmation instead of
+    /// the destructive-risk one. Never true unless ``sessionsOptimizeCanForce``.
+    var sessionsOptimizeForceIsOnlyScarf = false
 
     // MARK: - xAI retired-model migration (`hermes migrate xai`, v0.15)
 
@@ -946,14 +968,13 @@ final class HealthViewModel {
         guard !isRunningSessionsOptimize else { return }
         isRunningSessionsOptimize = true
         sessionsOptimizeCanForce = false
+        sessionsOptimizeForceIsOnlyScarf = false
         sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         let extra = force ? HermesSessionsOptimizeVerdict.forceArguments(capabilities: capabilities) : []
         let canForce = capabilities.hasSessionsOptimizeForce
-        Task.detached { [fileService] in
+        Task.detached { [optimizeRunner] in
             let result = await OffPool.run {
-                fileService.runHermesCLI(
-                    args: HermesSessionsOptimizeVerdict.argv + extra, timeout: 120
-                )
+                optimizeRunner(HermesSessionsOptimizeVerdict.argv + extra, 120)
             }
             await MainActor.run {
                 self.isRunningSessionsOptimize = false
@@ -963,10 +984,13 @@ final class HealthViewModel {
                 if let holders = HermesSessionsOptimizeVerdict.heldStoreHolders(
                     output: result.output, exitCode: result.exitCode
                 ) {
+                    let isLocal = !self.context.isRemote
                     self.sessionsOptimizeMessage = Self.sessionsOptimizeRefusalSummary(
-                        holders: holders, isLocal: !self.context.isRemote, canForce: canForce
+                        holders: holders, isLocal: isLocal, canForce: canForce
                     )
                     self.sessionsOptimizeCanForce = canForce
+                    self.sessionsOptimizeForceIsOnlyScarf = canForce
+                        && Self.sessionsOptimizeOnlyScarfHolds(holders: holders, isLocal: isLocal)
                     return
                 }
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1018,12 +1042,45 @@ final class HealthViewModel {
             text += " " + holders.joined(separator: " · ")
         }
         let scarfIsHolder = isLocal && holders.contains { $0.hasPrefix("PID \(ownPID) (") }
-        if scarfIsHolder && canForce {
+        if canForce && sessionsOptimizeOnlyScarfHolds(holders: holders, isLocal: isLocal, ownPID: ownPID) {
+            // Nothing to stop: the only holder is this app's reader.
+            text += " " + String(localized: "The only holder is Scarf's own read-only view of your sessions, which never writes — nothing else is using the database. Use Optimize anyway to run it now.")
+        } else if scarfIsHolder && canForce {
             text += " " + String(localized: "One of them is Scarf's own read-only view of your sessions, which never writes — Hermes refuses while Scarf is open. Stop the gateway and other Hermes apps first, then use Optimize anyway.")
         } else {
             text += " " + String(localized: "Stop the gateway and other Hermes apps, then try again.")
         }
+        // Fallback by NAME for another Scarf process (a second copy such as
+        // Scarf Dev): its PID is not ours, so the line above can't claim it,
+        // but "other Hermes apps" would not make the user think of it.
+        if holders.contains(where: { isOtherScarfHolder($0, ownPID: ownPID) }) {
+            text += " " + String(localized: "Another Scarf window or copy (such as Scarf Dev) also has it open — quit that copy too.")
+        }
         return text
+    }
+
+    /// True when every holder Hermes named is THIS process — Scarf's own
+    /// read-only `state.db` connection — on a local host. A `cannot prove
+    /// the database is quiet` line (`hermes_state_holders.py:504-505` @
+    /// v2026.9.24) is never "only Scarf": the scan was incomplete, so an
+    /// unseen writer is possible. An empty list is not either.
+    static func sessionsOptimizeOnlyScarfHolds(
+        holders: [String], isLocal: Bool,
+        ownPID: Int32 = ProcessInfo.processInfo.processIdentifier
+    ) -> Bool {
+        isLocal && !holders.isEmpty && holders.allSatisfy { $0.hasPrefix("PID \(ownPID) (") }
+    }
+
+    /// A holder line (`PID {pid} ({argv}): …`, `describe_holder_pid`,
+    /// `hermes_state_holders.py:59-68` @ v2026.9.24) for a Scarf process that
+    /// is NOT this one. Hermes prints `basename(argv[0])` first, and every
+    /// Scarf build — release and the `scarf-dev.app` dev copy — runs
+    /// `Contents/MacOS/scarf`.
+    static func isOtherScarfHolder(_ holder: String, ownPID: Int32) -> Bool {
+        guard holder.hasPrefix("PID "), !holder.hasPrefix("PID \(ownPID) ("),
+              let open = holder.range(of: " (") else { return false }
+        let program = holder[open.upperBound...].prefix { $0 != " " && $0 != ")" }
+        return program.lowercased() == "scarf"
     }
 
     static func sessionsOptimizeSummary(

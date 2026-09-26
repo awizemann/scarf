@@ -8,6 +8,9 @@ struct HealthView: View {
     @State private var selectedTab = 0
     @State private var showShareConfirm = false
     @State private var showForceOptimizeConfirm = false
+    /// The light confirmation, for a refusal whose only holder was Scarf's
+    /// own read-only view (`sessionsOptimizeForceIsOnlyScarf`).
+    @State private var showOwnHolderOptimizeConfirm = false
     @State private var showDiagnostics = false
     /// v0.14 — when running `hermes acp --setup-browser`, swap the
     /// button copy + show a spinner so the user knows the long-running
@@ -153,7 +156,15 @@ struct HealthView: View {
             // default — the confirmation says what the override risks.
             if viewModel.sessionsOptimizeCanForce {
                 HStack {
-                    Button("Optimize anyway…") { showForceOptimizeConfirm = true }
+                    Button("Optimize anyway…") {
+                        // Only Scarf's own reader held it → the light
+                        // confirmation; any other holder → the risk dialog.
+                        if viewModel.sessionsOptimizeForceIsOnlyScarf {
+                            showOwnHolderOptimizeConfirm = true
+                        } else {
+                            showForceOptimizeConfirm = true
+                        }
+                    }
                         .buttonStyle(ScarfGhostButton())
                         .disabled(viewModel.isRunningSessionsOptimize)
                         .help("Runs `hermes sessions optimize --force` while other processes have the database open.")
@@ -234,6 +245,16 @@ struct HealthView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Hermes rewrites the sessions database (VACUUM) even though other processes have it open. If one of them is writing — a running gateway, cron, or the Hermes desktop app — every agent can start refusing turns until all of them are restarted. No conversation data is lost. Safest: stop the gateway and other Hermes apps first.")
+        }
+        // Nothing but Scarf's own read-only connection held the database
+        // (the strip above says so), so there is no live writer for the
+        // override to endanger — still a deliberate click, never automatic,
+        // and still `--force` because Hermes counts Scarf's reader.
+        .confirmationDialog("Optimize sessions database", isPresented: $showOwnHolderOptimizeConfirm) {
+            Button("Optimize Anyway") {
+                viewModel.runSessionsOptimize(force: true)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

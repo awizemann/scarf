@@ -82,6 +82,7 @@ struct BotsViewModelTests {
         var saveError: BotsError?
         /// Exit code the next `run` reports, plus its stderr.
         var lifecycleExit: Int32 = 0
+        var lifecycleStdout = ""
         var lifecycleStderr = ""
         /// When set, `run` throws instead of completing.
         var lifecycleThrows: BotsError?
@@ -188,7 +189,7 @@ struct BotsViewModelTests {
             }
             return ProcessResult(
                 exitCode: lifecycleExit,
-                stdout: Data(),
+                stdout: Data(lifecycleStdout.utf8),
                 stderr: Data(lifecycleStderr.utf8)
             )
         }
@@ -622,6 +623,43 @@ struct BotsViewModelTests {
 
         #expect(backend.lifecycleActions == [.delete(name: "scratch")])
         #expect(backend.lifecycleActions.first?.isDestructive == true)
+    }
+
+    /// P5b call-site test: v0.21.4's settlement-pending exit 1 reaches the
+    /// banner as a completed delete. `_die` prints it on STDOUT
+    /// (`hermes_cli/profile_cmd.py:15-17` @ v2026.9.21), with the
+    /// `ProfileIdentitySettlementPending` text (`profiles.py:1676-1678` @
+    /// v2026.9.24). Fails if `runLifecycle` stops consulting
+    /// `HermesProfileDeleteVerdict`.
+    @Test("a settlement-pending delete is a completed delete, not a failure")
+    func deleteWithPendingSettlementIsACompletedDelete() async {
+        let identity = Self.bot("bot1", title: "Bot One")
+        let backend = MockBotsBackend([identity])
+        backend.lifecycleExit = 1
+        backend.lifecycleStdout = """
+            ✓ Removed /tmp/bot1
+            Profile 'bot1' deleted.
+            Error: Profile 'bot1' was deleted, but its session/routing identity settlement is still pending — run: hermes profile purge-identity bot1
+            """
+        let viewModel = makeViewModel(backend)
+        viewModel.selectedProfileName = "bot1"
+
+        viewModel.delete(BotRow(identity: identity, avatar: nil))
+        await waitForIdle(viewModel)
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.messageIsFailure == false)
+        #expect(viewModel.message?.contains("hermes profile purge-identity bot1") == true)
+        #expect(viewModel.message?.hasPrefix("Deleted bot1 — ") == true)
+
+        // A real exit-1 failure is still a failure.
+        let failing = MockBotsBackend([identity])
+        failing.lifecycleExit = 1
+        failing.lifecycleStderr = "Error: Profile 'bot1' does not exist."
+        let other = makeViewModel(failing)
+        other.delete(BotRow(identity: identity, avatar: nil))
+        await waitForIdle(other)
+        #expect(other.errorMessage != nil)
     }
 
     @Test("rename refuses an invalid target without spawning anything")
