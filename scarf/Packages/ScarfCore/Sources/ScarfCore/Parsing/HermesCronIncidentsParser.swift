@@ -10,7 +10,7 @@ import Foundation
 /// closed until the error text changes (which mints a new incident id).
 public struct HermesCronIncident: Sendable, Equatable, Identifiable {
     public let id: String
-    /// `detected` / `alerted` / `closed` — or whatever a future Hermes
+    /// `detected` / `alerted` / `closed` (+ `resolved` on v0.21.4+) — or whatever a future Hermes
     /// prints. `INCIDENT_STATES` is deliberately Python-side only (no
     /// SQLite CHECK), so new states can appear; the parser never validates.
     public let state: String
@@ -46,7 +46,15 @@ public struct HermesCronIncident: Sendable, Equatable, Identifiable {
     }
 
     /// Only an open incident is worth acking.
-    public var isOpen: Bool { state != "closed" }
+    ///
+    /// v0.21.4 adds `resolved` (`cron/incidents.py:32` @ v2026.9.21): the job
+    /// ran OK after the failure, so `close_incidents_for_recovered_job`
+    /// retires it (`:237-250` @ v2026.9.24). It is not open — a repeat of the
+    /// same error re-opens it as `detected` on Hermes's side (`:173-179`) —
+    /// and acking it would instead silence that signature for good, which is
+    /// not what "Ack" on a recovered job means. No older host prints the
+    /// state, so this is inert below the floor.
+    public var isOpen: Bool { state != "closed" && state != "resolved" }
 }
 
 /// Argv builder + text parser for `hermes cron incidents [--state s]`
@@ -78,12 +86,26 @@ public enum HermesCronIncidentsParser {
     /// `state` is validated against the CLI's argparse `choices` — an
     /// unknown value would make argparse reject the whole invocation,
     /// so it is dropped rather than forwarded.
-    public static func listArgs(state: String? = nil) -> [String] {
+    /// `resolved` joins the choices on v0.21.4+
+    /// (``HermesCapabilities/hasCronIncidentResolvedState``,
+    /// `hermes_cli/subcommands/cron.py:176` @ v2026.9.21); v2026.9.14's
+    /// argparse (`:185`) would reject it, so it is dropped there like any
+    /// other unknown value.
+    public static func listArgs(
+        state: String? = nil, capabilities: HermesCapabilities = .empty
+    ) -> [String] {
         var args = ["cron", "incidents"]
-        if let state, ["detected", "alerted", "closed"].contains(state) {
+        if let state, filterStates(capabilities: capabilities).contains(state) {
             args += ["--state", state]
         }
         return args
+    }
+
+    /// The `--state` values this host's argparse accepts.
+    public static func filterStates(capabilities: HermesCapabilities) -> [String] {
+        capabilities.hasCronIncidentResolvedState
+            ? ["detected", "alerted", "resolved", "closed"]
+            : ["detected", "alerted", "closed"]
     }
 
     /// `["cron", "incidents", "ack", "<id>"]`.

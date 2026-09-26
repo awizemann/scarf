@@ -14,6 +14,9 @@ import Foundation
 /// - `0` — success; the `--json` payload is on **stdout**.
 /// - `1` — delivery/peer error (unreachable, HTTP rejection, unknown
 ///   peer, missing key). The human-readable reason is on **stderr**.
+///   Exception, v0.21.4+: a `dm` timeout after the peer ACCEPTED the
+///   message also exits 1 — ``parseDM(exitCode:stdout:stderr:)`` reads that
+///   one as ``DMResult/Delivery/stillRunning(notice:)``, never a failure.
 /// - `2` — usage error (bad target/profile, empty message, malformed
 ///   idempotency key, missing run id).
 ///
@@ -94,22 +97,65 @@ public enum HermesPeerCLI {
 
     // MARK: - Results
 
-    /// `peer dm --json` → `{peer, profile, session_id, reply}`.
+    /// `peer dm --json` → `{peer, profile, session_id, reply}`, or — v0.21.4+
+    /// — the queued shape `{peer, profile, session_id, status, delivery_id}`.
     public struct DMResult: Sendable, Equatable {
+        /// How the message landed. Only ``replied`` carries a reply; the
+        /// other two mean the peer HAS the message and will answer it in its
+        /// own Bot Chat — a resend would run the turn twice.
+        public enum Delivery: Sendable, Equatable {
+            /// The synchronous turn finished (the pre-v0.21.4 shape, always).
+            case replied
+            /// v0.21.4 `hermes.session.chat.queued`: the peer's Bot Chat is
+            /// open in its Desktop, so the message went into that chat
+            /// (`hermes_cli/subcommands/peer.py:368-375` @ v2026.9.21). The
+            /// payload's `status` (normally `queued`) is carried verbatim.
+            case queued(status: String)
+            /// v0.21.4: the turn outlasted `DM_TIMEOUT_S` AFTER the peer took
+            /// the message (`peer.py:356-365` @ v2026.9.21) — exit 1, but
+            /// Hermes says "Do NOT resend". `notice` is its sentence.
+            case stillRunning(notice: String)
+        }
+
         public let peer: String
         public let profile: String?
         public let sessionID: String
         /// The remote agent's reply. Empty when the peer answered with no
-        /// message content (the CLI's text mode prints "(no reply)").
+        /// message content (the CLI's text mode prints "(no reply)"), and
+        /// always empty unless ``delivery`` is ``Delivery/replied``.
         public let reply: String
+        public let delivery: Delivery
 
-        public init(peer: String, profile: String?, sessionID: String, reply: String) {
+        public init(
+            peer: String, profile: String?, sessionID: String, reply: String,
+            delivery: Delivery = .replied
+        ) {
             self.peer = peer
             self.profile = profile
             self.sessionID = sessionID
             self.reply = reply
+            self.delivery = delivery
         }
     }
+
+    /// Scarf's process timeout for one `peer dm`. The CLI's own read timeout
+    /// is `DM_TIMEOUT_S = 600` (`peer.py:28`) and it starts only after the
+    /// Bot Chat lookup and Python startup, so a 600 s kill always landed
+    /// first — before v0.21.4's "accepted … Do NOT resend" line could be
+    /// printed, turning an accepted message into "no output" and inviting
+    /// exactly the resend it warns against. v0.21.4+ gets 60 s of headroom
+    /// (``HermesCapabilities/hasPeerDMNoResendOutcomes``); older hosts keep
+    /// the 600 s they always had.
+    public static func dmProcessTimeout(capabilities: HermesCapabilities) -> TimeInterval {
+        capabilities.hasPeerDMNoResendOutcomes ? 660 : 600
+    }
+
+    /// The distinctive tail of the accepted-but-still-running line
+    /// (`peer.py:362-364` @ v2026.9.21).
+    static let acceptedStillRunningMarkers = [
+        "accepted the message but its turn is still running",
+        "Do NOT resend",
+    ]
 
     /// `peer run --json` → `{peer, profile, session_id, run_id, status,
     /// idempotency_key, replayed}`.
@@ -233,13 +279,33 @@ public enum HermesPeerCLI {
         stdout: String,
         stderr: String
     ) -> Result<DMResult, Failure> {
-        decode(exitCode: exitCode, stdout: stdout, stderr: stderr) { object in
+        // v0.21.4: exit 1 AFTER the peer took the message. Not a delivery
+        // failure — reporting it as one is what makes a user resend and the
+        // peer run the turn twice. No older host prints this line.
+        if exitCode == 1,
+           let notice = stderr
+               .split(separator: "\n", omittingEmptySubsequences: true)
+               .map({ $0.trimmingCharacters(in: .whitespaces) })
+               .first(where: { line in acceptedStillRunningMarkers.allSatisfy { line.contains($0) } }) {
+            return .success(DMResult(
+                peer: "", profile: nil, sessionID: "", reply: "",
+                delivery: .stillRunning(notice: notice)
+            ))
+        }
+        return decode(exitCode: exitCode, stdout: stdout, stderr: stderr) { object in
             guard let peer = string(object["peer"]) else { return nil }
+            // The queued payload carries `status` and no `reply`
+            // (`peer.py:372-373` @ v2026.9.21); a replied payload never has
+            // `status`, so its presence is the discriminator.
+            let delivery: DMResult.Delivery = object["reply"] == nil
+                ? string(object["status"]).map { .queued(status: $0) } ?? .replied
+                : .replied
             return DMResult(
                 peer: peer,
                 profile: string(object["profile"]),
                 sessionID: string(object["session_id"]) ?? "",
-                reply: string(object["reply"]) ?? ""
+                reply: string(object["reply"]) ?? "",
+                delivery: delivery
             )
         }
     }

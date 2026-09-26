@@ -704,7 +704,7 @@ final class CronViewModel {
         }
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
         // grace window with a non-zero exit. Say so before the round-trip —
         // and only on a host that would actually refuse (see `isV0211OrLater`).
@@ -720,7 +720,8 @@ final class CronViewModel {
             Self.createJobArguments(
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
-                workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver
+                workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
+                pinModel: pinModel
             ),
             success: "Job created",
             onOutcome: onOutcome
@@ -731,7 +732,7 @@ final class CronViewModel {
     /// that compose a create — and the tests that pin their composition —
     /// assert the PRODUCTION command line rather than a parallel builder that
     /// can drift from it.
-    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "") -> [String] {
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false) -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
         if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
@@ -751,6 +752,11 @@ final class CronViewModel {
         // Caller (CronView) strips this on pre-v0.13 hosts so the flag is
         // never emitted to a Hermes that can't parse it.
         if noAgent { args.append("--no-agent") }
+        // v0.21.4 `--pin` (`hermes_cli/subcommands/cron.py:70` @ v2026.9.21):
+        // lock the CURRENT main model + provider onto the job. The caller
+        // (CronView) passes `false` on a host without `hasCronModelPin`, so
+        // an older argparse never sees it.
+        if pinModel { args.append("--pin") }
         // End-of-options before the positionals (`schedule`, optional
         // `prompt`). A prompt that legitimately opens with a dash —
         // "--deliver isn't working, investigate" — is otherwise claimed by
@@ -875,7 +881,22 @@ final class CronViewModel {
         return [HermesCLIOption.joined("--repeat", trimmed)]
     }
 
-    func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
+    /// The `--pin` / `--unpin` tail of a `cron edit` (v0.21.4,
+    /// `hermes_cli/subcommands/cron.py:136-140` @ v2026.9.21 — a mutually
+    /// exclusive pair). Only a CHANGE is sent: `_apply_pin_update`
+    /// (`cron/jobs.py:1902` @ v2026.9.21) re-locks the main model on `--pin`
+    /// only when the job has no model, and `--unpin` clears BOTH `model` and
+    /// `provider` — so re-sending the seeded state on every unrelated edit
+    /// would be at best a no-op and at worst a surprise. `nil` (older host,
+    /// or the toggle hidden) sends nothing.
+    ///
+    /// "Pinned" is Hermes's own test: a non-empty stored `model`.
+    nonisolated static func modelPinEditArguments(wasPinned: Bool, pinned: Bool?) -> [String] {
+        guard let pinned, pinned != wasPinned else { return [] }
+        return [pinned ? "--pin" : "--unpin"]
+    }
+
+    func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil, wasModelPinned: Bool = false, pinModel: Bool? = nil) {
         // `job_id` is `cron edit`'s only positional, so it moves to the very
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
@@ -901,6 +922,7 @@ final class CronViewModel {
             if noAgent { args.append("--no-agent") }
             else { args.append("--agent") }
         }
+        args += Self.modelPinEditArguments(wasPinned: wasModelPinned, pinned: pinModel)
         args.append(contentsOf: ["--", id])
         // The record `cron edit` addresses, when it is still on screen —
         // so a refusal on a RECURRING job does not name a re-arm

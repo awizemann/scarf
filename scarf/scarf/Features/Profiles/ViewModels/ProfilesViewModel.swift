@@ -174,8 +174,23 @@ final class ProfilesViewModel {
     /// Callers must put this behind `ProfilesView`'s existing destructive
     /// confirmation dialog — `-y` skips Hermes's prompt, so Scarf's own
     /// prompt becomes the only one the user ever sees.
+    ///
+    /// v0.21.4+ can exit 1 AFTER the directory is gone, when only the
+    /// identity settlement is pending (``HermesProfileDeleteVerdict``) — that
+    /// reads as a completed delete carrying Hermes's follow-up sentence, not
+    /// as a failure inviting a retry that can no longer succeed.
     func delete(_ profile: HermesProfile) {
-        runAndReload(["profile", "delete", "-y", "--", profile.name], success: String(localized: "Deleted \(profile.name)"))
+        runAndReload(["profile", "delete", "-y", "--", profile.name], success: String(localized: "Deleted \(profile.name)"),
+            partialSuccess: { output, exitCode in
+                HermesProfileDeleteVerdict.settlementPendingWarning(output: output, exitCode: exitCode)
+            }
+        )
+    }
+
+    /// The banner for a delete that completed with pending identity
+    /// settlement. A `static` so the sentence is reachable from a test.
+    nonisolated static func completedWithWarning(_ success: String, warning: String) -> String {
+        "\(success) — \(warning)"
     }
 
     /// Export always lands on **this Mac**, whichever host Hermes runs on
@@ -254,12 +269,28 @@ final class ProfilesViewModel {
     /// locale. `String(localized:)` at the call site is what puts them in the
     /// catalogue — extraction is a compile-time scan of the literal, so
     /// wrapping the PARAMETER here would localize nothing.
-    private func runAndReload(_ args: [String], success: String) {
+    ///
+    /// `partialSuccess` lets one verb (v0.21.4 `profile delete`) name a
+    /// non-zero exit that nonetheless completed; it returns the warning to
+    /// show beside `success`, or `nil` for a real failure. Such a banner
+    /// stays up until the next action, like a failure, so the follow-up
+    /// command in it can be read and copied.
+    private func runAndReload(
+        _ args: [String],
+        success: String,
+        partialSuccess: (@Sendable (_ output: String, _ exitCode: Int32) -> String?)? = nil
+    ) {
         Task.detached { [fileService, self] in
             let result = await OffPool.run {
                 fileService.runHermesCLI(args: args, timeout: 60)
             }
+            let warning = partialSuccess?(result.output, result.exitCode)
             await MainActor.run {
+                if let warning {
+                    self.message = Self.completedWithWarning(success, warning: warning)
+                    self.load()
+                    return
+                }
                 self.message = result.exitCode == 0 ? success : Self.failureMessage(result.output)
                 self.load()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

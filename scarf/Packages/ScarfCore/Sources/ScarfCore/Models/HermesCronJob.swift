@@ -545,13 +545,31 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// and re-creates the ambiguity on the second duplicate of one job —
     /// which is the shape `resolve_job_ref` raises `AmbiguousJobReference`
     /// for. Pass `[]` explicitly to say "nothing to collide with".
+    ///
+    /// **Which unmodeled keys travel** (`capabilities`, no default — the
+    /// parameter is the fix). On v0.21.5+ Hermes publishes its own list of
+    /// AUTHORED job fields, `JOB_DEFINITION_FIELDS` (`cron/job_definition.py:13-18`
+    /// @ v2026.9.24), and everything else is scheduler-owned: there the copy
+    /// keeps only those keys (plus `repeat`, whose `times` is authored — see
+    /// `merge_job_definition`, `:28-31`). Below that tag there is no such
+    /// list, so the older denylist stands — an allowlist there would drop
+    /// keys that did mean something on those hosts (v2026.9.14's
+    /// `provider_snapshot`/`model_snapshot`, which its scheduler reads,
+    /// `cron/scheduler.py:1355-1369`). The denylist also names v0.21.4's
+    /// `quota_hold_until` (`cron/quota_hold.py:27` @ v2026.9.21): a copied
+    /// hold would park the NEW job until the source's provider window
+    /// reopens. No older host writes that key, so naming it is inert there.
     public nonisolated func duplicatedAsNewJob(
-        id newID: String, existingNames: [String], now: Date = Date()
+        id newID: String, existingNames: [String], capabilities: HermesCapabilities,
+        now: Date = Date()
     ) -> HermesCronJob {
         var carried = extra
+        if capabilities.hasCronJobDefinitionFields {
+            carried = carried.filter { Self.authoredExtraKeys.contains($0.key) }
+        }
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
                            "last_status", "last_dispatch", "last_delivery_unverified",
-                           "latest_execution"] {
+                           "latest_execution", "quota_hold_until"] {
             carried.removeValue(forKey: runtimeKey)
         }
         carried = Self.droppingDerivedScheduleDisplay(carried)
@@ -587,6 +605,19 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             attachToSession: attachToSession, extra: carried
         )
     }
+
+    /// `JOB_DEFINITION_FIELDS` (`cron/job_definition.py:13-18` @ v2026.9.24)
+    /// plus `repeat` — the unmodeled keys a v0.21.5+ duplicate may carry.
+    /// Modeled fields (`prompt`, `model`, `schedule`, `workdir`, …) are
+    /// copied field-by-field and never ride in `extra`; they are listed here
+    /// anyway so the set reads 1:1 against Hermes's.
+    nonisolated static let authoredExtraKeys: Set<String> = [
+        "name", "prompt", "skills", "skill", "model", "provider", "base_url",
+        "script", "no_agent", "monitor_script", "monitor_url", "context_from",
+        "schedule", "schedule_display", "deliver", "origin", "enabled_toolsets",
+        "workdir", "attach_to_session", "reasoning_effort", "failure_deliver",
+        "repeat",
+    ]
 
     /// Copy of this job with `next_run_at` cleared, for the JSON-write
     /// fallback path when the `hermes cron resume` CLI is unreachable.
@@ -996,11 +1027,13 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// resolved against the target's own provider config and credential
     /// pools; forwarding one the target has never heard of lands a green
     /// "created" job that fails on its first run, days later. Dropping the
-    /// pin instead lets `_compute_provider_model_snapshots`
-    /// (`cron/jobs.py:1599-1620`) resolve the target's own default, which is
-    /// the only answer Scarf can stand behind — and the note is what stops
-    /// that being a silent change of which model (and whose bill) runs the
-    /// user's job.
+    /// pin instead lets the TARGET resolve its own default, which is the only
+    /// answer Scarf can stand behind — up to v0.21.3 by snapshotting it at
+    /// create time (`_compute_provider_model_snapshots`, `cron/jobs.py:1630`
+    /// @ v2026.9.14), from v0.21.4 by following the target's main model at
+    /// fire time (the snapshot is gone; `cron/scheduler.py::_load_cron_job_config`
+    /// @ v2026.9.21) — and the note is what stops that being a silent change
+    /// of which model (and whose bill) runs the user's job.
     ///
     /// Reads `provider` / `reasoning_effort` out of `extra` because Scarf
     /// keeps every unmodeled key verbatim there; `nonEmptyString` is what
@@ -1008,6 +1041,36 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// `_normalize_job_optional_text` does (`cron/jobs.py:1522-1527`).
     public nonisolated var hasModelPin: Bool {
         !modelPinFields.isEmpty
+    }
+
+    /// Hermes's own "is this job pinned" test for `cron edit --pin/--unpin`
+    /// (v0.21.4): a non-empty stored `model` — `_apply_pin_update` re-locks
+    /// only when `_normalize_job_optional_text(job.get("model"))` is empty
+    /// (`cron/jobs.py:1902-1914` @ v2026.9.21). Narrower than
+    /// ``hasModelPin``, which also counts `provider` / `reasoning_effort`.
+    public nonisolated var isModelPinned: Bool {
+        !(model?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+    }
+
+    /// The `extra` a JSON-writing editor (iOS) should save when the user
+    /// EMPTIES a job's model on a v0.21.4+ host: `provider` goes too.
+    ///
+    /// That is what Hermes's own unpin does — `_apply_pin_update(pinned=False)`
+    /// sets `provider` and `model` to `None` together (`cron/jobs.py:1902-1916`
+    /// @ v2026.9.21) — because from v0.21.4 an unpinned job runs on the MAIN
+    /// model at fire time, and `_run_job` still honours a stored
+    /// `job["provider"]` (`cron/scheduler.py:1732` @ v2026.9.24). Left behind,
+    /// it would send the main model to the old pin's provider. Below the
+    /// floor the extra is returned untouched (C1).
+    public nonisolated static func releasingModelPin(
+        _ extra: [String: JSONValue], previousModel: String?, newModel: String?,
+        capabilities: HermesCapabilities
+    ) -> [String: JSONValue] {
+        func isEmpty(_ s: String?) -> Bool { s?.trimmingCharacters(in: .whitespaces).isEmpty ?? true }
+        guard capabilities.hasCronModelPin, !isEmpty(previousModel), isEmpty(newModel) else { return extra }
+        var copy = extra
+        copy.removeValue(forKey: "provider")
+        return copy
     }
 
     /// The pinned axes, as short human labels — what the downgrade note

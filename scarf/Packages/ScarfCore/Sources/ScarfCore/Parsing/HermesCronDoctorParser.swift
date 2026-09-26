@@ -67,6 +67,9 @@ public struct HermesCronDoctorFinding: Sendable, Equatable, Identifiable {
 /// Next: fix the listed job config, then run `hermes cron doctor` again.
 /// ```
 ///
+/// (v0.21.4+ closes with `Review the findings above, then run \`hermes cron
+/// doctor\` again.` instead — `hermes_cli/cron.py:666` @ v2026.9.21.)
+///
 /// and the clean case `✓ Cron doctor found no issues` + `Checked N
 /// active job(s).`. Only jobs WITH issues are printed, and disabled jobs
 /// are never checked (`list_jobs(include_disabled=False)`).
@@ -217,9 +220,16 @@ public enum HermesCronDoctorParser {
         let lower = trimmed.lowercased()
         // Printed verbatim by `cron_doctor` — safe to recognize even in
         // the middle of a traceback.
+        // The closing hint is `Next: fix the listed job config, then run …`
+        // up to v2026.9.14 (`hermes_cli/cron.py:545`) and
+        // `Review the findings above, then run \`hermes cron doctor\` again.`
+        // from v2026.9.21 (`:666`, same line @ v2026.9.24). It follows the
+        // LAST issue directly, so without the second spelling a v0.21.4 host
+        // glued the hint onto that issue as a traceback continuation.
         if lower.hasPrefix("cron doctor found")
             || lower.hasPrefix("✓ cron doctor")
-            || lower.hasPrefix("next: fix the listed job config") {
+            || lower.hasPrefix("next: fix the listed job config")
+            || lower.hasPrefix("review the findings above, then run `hermes cron doctor` again") {
             return true
         }
         if strict { return false }

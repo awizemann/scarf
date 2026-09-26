@@ -125,7 +125,10 @@ final class PeersViewModel: OutcomeMessageHosting {
 
     // MARK: - Actions
 
-    func sendDM() {
+    /// `capabilities` has no default: it sets the process timeout that lets
+    /// v0.21.4's "accepted … Do NOT resend" line arrive at all
+    /// (``HermesPeerCLI/dmProcessTimeout(capabilities:)``).
+    func sendDM(capabilities: HermesCapabilities) {
         guard let target = currentTarget else { return }
         let text = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -138,13 +141,15 @@ final class PeersViewModel: OutcomeMessageHosting {
         lastReply = nil
         let svc = fileService
         let log = logger
+        let timeout = HermesPeerCLI.dmProcessTimeout(capabilities: capabilities)
         Task.detached { [weak self] in
             // One synchronous remote agent turn — legitimately minutes
             // long, so the CLI's own DM_TIMEOUT_S (600) is the bound
-            // Scarf mirrors rather than cutting it short locally.
+            // Scarf mirrors rather than cutting it short locally (plus
+            // headroom on v0.21.4+, see `dmProcessTimeout`).
             let result = svc.runHermesCLISplit(
                 args: HermesPeerCLI.dmArgs(target: target, message: text),
-                timeout: 600
+                timeout: timeout
             )
             let parsed = HermesPeerCLI.parseDM(
                 exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr
@@ -154,14 +159,34 @@ final class PeersViewModel: OutcomeMessageHosting {
                 self.isSending = false
                 switch parsed {
                 case .success(let dm):
+                    // Every success arm clears the compose field: the peer
+                    // HAS the message in all three, and leaving it filled
+                    // is an invitation to send it twice.
                     self.composeText = ""
-                    self.lastReply = dm.reply.isEmpty ? "(no reply)" : dm.reply
+                    self.lastReply = Self.dmReplyText(dm, target: target)
                     self.flash("Delivered to \(target)")
                 case .failure(let failure):
                     log.warning("peer dm failed: \(failure.message, privacy: .public)")
                     self.errorMessage = failure.message
                 }
             }
+        }
+    }
+
+    /// What the Reply slot shows for a delivered DM. A `static` so the three
+    /// arms are reachable from a test without a live peer.
+    ///
+    /// Before v0.21.4 there is only ``HermesPeerCLI/DMResult/Delivery/replied``,
+    /// and it renders exactly as it always did. The two v0.21.4 arms must NOT
+    /// read "(no reply)": the peer is answering, just not on this call.
+    nonisolated static func dmReplyText(_ dm: HermesPeerCLI.DMResult, target: String) -> String {
+        switch dm.delivery {
+        case .replied:
+            return dm.reply.isEmpty ? "(no reply)" : dm.reply
+        case .queued:
+            return String(localized: "\(target) has its Bot Chat open, so the message went into that chat and will be answered there. The reply can't come back here — don't resend.")
+        case .stillRunning(let notice):
+            return notice
         }
     }
 

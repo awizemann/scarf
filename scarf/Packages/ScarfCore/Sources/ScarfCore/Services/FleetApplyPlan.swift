@@ -392,10 +392,13 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// - `model` / `provider` / `reasoning_effort` — the inference PIN. Not
     ///   forwarded because the source's model reference may not be configured
     ///   on the target at all (`cron create --model` would land a job that
-    ///   errors at first run), and `_compute_provider_model_snapshots`
-    ///   (`cron/jobs.py:1599-1620` @ `v2026.9.7`) resolves the unpinned axes
-    ///   against the TARGET's own config, which is the honest answer for a
-    ///   copy. Round-6 decision 8 makes it a DOWNGRADE NOTE rather than a
+    ///   errors at first run), and an unpinned job resolves against the
+    ///   TARGET's own config, which is the honest answer for a copy — frozen
+    ///   at create time up to v0.21.3 (`_compute_provider_model_snapshots`,
+    ///   `cron/jobs.py:1630` @ `v2026.9.14`), followed at fire time from
+    ///   v0.21.4, where the snapshot is removed (`cron/scheduler.py::
+    ///   _load_cron_job_config` @ `v2026.9.21`). `--pin` is not forwarded
+    ///   either: it locks the TARGET's current main model, not the source's. Round-6 decision 8 makes it a DOWNGRADE NOTE rather than a
     ///   silence, in the P50 `pre_run_script` shape: `HermesCronJob.hasModelPin`
     ///   is the predicate, `FleetApplyViewModel.caveats` the preview seam and
     ///   `FleetApplyExecutor`'s `modelPinDowngrades` the report seam.
