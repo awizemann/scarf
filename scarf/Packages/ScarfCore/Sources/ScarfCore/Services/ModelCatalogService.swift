@@ -348,7 +348,13 @@ public struct ModelCatalogService: Sendable {
     /// no entry. Use this when resolving a stored `model.provider` to display
     /// metadata — `nous` and other overlay-only IDs never appear in the
     /// cache, so a plain catalog lookup returns nil for them.
-    public func providerByID(_ providerID: String) -> HermesProviderInfo? {
+    ///
+    /// `capabilities` gates the alias half of the overlay lookup: `chatgpt`
+    /// resolves to `openai-codex` only on a v0.21.4+ host
+    /// (`HermesCapabilities.hasChatGPTCodexAliases`).
+    public func providerByID(
+        _ providerID: String, capabilities: HermesCapabilities = .empty
+    ) -> HermesProviderInfo? {
         let catalog = loadCatalog()
         let key = catalog.map { Self.catalogKey(providerID, in: $0) } ?? providerID
         if let p = catalog?[key] {
@@ -367,7 +373,7 @@ public struct ModelCatalogService: Sendable {
         // whose overlay is registered under the canonical id.
         let overlayKey = Self.overlayOnlyProviders[providerID] != nil
             ? providerID
-            : Self.canonicalProviderID(providerID)
+            : Self.canonicalProviderID(providerID, capabilities: capabilities)
         if let overlay = Self.overlayOnlyProviders[overlayKey] {
             return HermesProviderInfo(
                 providerID: providerID,
@@ -613,7 +619,13 @@ public struct ModelCatalogService: Sendable {
     /// save `claude-haiku-4-5-20251001` under provider `nous` —
     /// Nous's catalog has no such model and Hermes later failed with
     /// HTTP 404 at runtime. Catch that at save time, not 6 hours later.
-    public func validateModel(_ modelID: String, for providerID: String) -> ModelValidation {
+    ///
+    /// `capabilities` reaches the overlay-only check's alias resolution, so a
+    /// v0.21.4+ host's `chatgpt` (→ `openai-codex`) validates like the
+    /// canonical id; `.empty` resolves as before.
+    public func validateModel(
+        _ modelID: String, for providerID: String, capabilities: HermesCapabilities = .empty
+    ) -> ModelValidation {
         ScarfMon.measure(.diskIO, "modelCatalog.validateModel") {
             let raw = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else {
@@ -638,7 +650,7 @@ public struct ModelCatalogService: Sendable {
             let models = loadModels(for: providerID)
             if models.isEmpty {
                 if Self.overlayOnlyProviders[providerID] != nil
-                    || Self.overlayOnlyProviders[Self.canonicalProviderID(providerID)] != nil {
+                    || Self.overlayOnlyProviders[Self.canonicalProviderID(providerID, capabilities: capabilities)] != nil {
                     return .valid
                 }
                 return .unknownProvider(providerID: providerID)
@@ -659,7 +671,7 @@ public struct ModelCatalogService: Sendable {
             let suggestions = byPrefix.isEmpty
                 ? Array(models.prefix(5).map(\.modelID))
                 : Array(byPrefix)
-            let providerName = providerByID(providerID)?.providerName ?? providerID
+            let providerName = providerByID(providerID, capabilities: capabilities)?.providerName ?? providerID
             return .invalid(providerName: providerName, suggestions: suggestions)
         }
     }

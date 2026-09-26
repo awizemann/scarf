@@ -1386,7 +1386,7 @@ struct ModelPickerSheet: View {
         // Block unknown models before they land in config.yaml.
         // Overlay-only providers short-circuit to .valid inside the
         // validator because their catalogs aren't in models.dev.
-        switch catalog.validateModel(model, for: provider) {
+        switch catalog.validateModel(model, for: provider, capabilities: capabilitiesStore?.capabilities ?? .empty) {
         case .valid, .unknownProvider:
             onSelect(model, provider)
         case .invalid(let providerName, let suggestions):

@@ -39,11 +39,20 @@ enum CredentialPoolsOAuthGate: Equatable {
     /// Compute the gate for a typed provider ID. Consults the Hermes
     /// overlay table via ``ModelCatalogService/overlayMetadata(for:)`` to
     /// decide which OAuth style applies.
-    static func resolve(providerID rawID: String, catalog: ModelCatalogService) -> CredentialPoolsOAuthGate {
+    ///
+    /// `capabilities` reaches the overlay's alias resolution: on a v0.21.4+
+    /// host `chatgpt` / `chatgpt-codex` are spellings of `openai-codex`
+    /// (`HermesCapabilities.hasChatGPTCodexAliases`), which must route to the
+    /// CLI like the canonical id rather than fall through to the PKCE flow.
+    static func resolve(
+        providerID rawID: String,
+        catalog: ModelCatalogService,
+        capabilities: HermesCapabilities = .empty
+    ) -> CredentialPoolsOAuthGate {
         let id = rawID.trimmingCharacters(in: .whitespaces).lowercased()
         guard !id.isEmpty else { return .providerEmpty }
         if id == "nous" { return .useNousSignIn }
-        switch catalog.overlayMetadata(for: id)?.authType {
+        switch catalog.overlayMetadata(for: id, capabilities: capabilities)?.authType {
         case .oauthDeviceCode, .oauthExternal, .externalProcess:
             return .useCLI(provider: id)
         default:
