@@ -267,6 +267,83 @@ import SQLite3
         #expect(fallback.sql.contains("ESCAPE '\\'"))
     }
 
+    /// t-00ade623: the FTS pass strips `"` before phrase-quoting, so a
+    /// quoted search finds the shallow hits — the LIKE top-up must search
+    /// for the SAME word, or `"needle"` becomes `LIKE '%"needle"%'` and
+    /// every hit past the 8 KB prefix silently disappears.
+    @Test func quotedSearchStillRecoversDeepToolHit() async throws {
+        let home = try makeFixtureHome(highWater: 10)
+        defer { cleanup(home) }
+        let service = await service(home)
+        let ids = Set(await service.searchMessages(query: "\"\(Self.needle)\"").map(\.id))
+        await service.close()
+        #expect(ids.contains(21), "the FTS pass already handled quotes")
+        #expect(ids.contains(20), "the deep row must be recovered for a quoted query too")
+    }
+
+    @Test func likeTermsDropQuotesLikeTheFTSPass() async throws {
+        let mock = MockHermesQueryBackend()
+        await mock._seedRow(
+            forSQLPrefix: "SELECT CAST(value AS INTEGER) AS v FROM state_meta",
+            columns: ["v": 0], values: [.integer(0)]
+        )
+        let service = HermesDataService(context: .local, backend: mock)
+        #expect(await service.open())
+        _ = await service.searchMessages(query: "\"gateway/run.py\" \"\" say\"s")
+        let match = try #require(await mock.queryLog.first { $0.sql.contains("MATCH") })
+        #expect(match.params.first == .text("\"gateway/run.py\" \"says\""))
+        let fallback = try #require(await mock.queryLog.last { $0.sql.contains("LIKE") })
+        let likeTerms = fallback.params.compactMap { value -> String? in
+            if case .text(let s) = value { return s } else { return nil }
+        }
+        #expect(likeTerms == ["%gateway/run.py%", "%says%"], "a bare `\"\"` token is dropped, not searched for")
+    }
+
+    // MARK: - Failed search is not "no matches"
+
+    @Test func failedFTSQueryThrowsFromTheCheckedSearch() async throws {
+        let mock = MockHermesQueryBackend()
+        await mock._seedFailure(
+            forSQLPrefix: "SELECT m.id",
+            error: .sqlite(exitCode: 1, stderr: "Error: no such table: messages_fts\n")
+        )
+        let service = HermesDataService(context: .local, backend: mock)
+        #expect(await service.open())
+        do {
+            _ = try await service.searchMessagesChecked(query: "needle")
+            Issue.record("a failed FTS query must throw, not return []")
+        } catch let failure as HermesDataService.QueryFailure {
+            #expect(failure.message.contains("no such table: messages_fts"))
+        }
+        // The legacy form keeps its old contract.
+        #expect(await service.searchMessages(query: "needle").isEmpty)
+    }
+
+    /// The deep top-up is best-effort: its failure keeps the FTS hits
+    /// rather than turning a partial answer into an error.
+    @Test func failedDeepTopUpKeepsTheFTSHits() async throws {
+        let mock = MockHermesQueryBackend()
+        await mock._seedRow(
+            forSQLPrefix: "SELECT CAST(value AS INTEGER) AS v FROM state_meta",
+            columns: ["v": 0], values: [.integer(0)]
+        )
+        let cols = ["id": 0, "session_id": 1, "role": 2, "content": 3, "tool_call_id": 4,
+                    "tool_calls": 5, "tool_name": 6, "timestamp": 7, "token_count": 8, "finish_reason": 9]
+        await mock._seedRows(forSQLPrefix: "SELECT m.id", [
+            Row(values: [.integer(1), .text("s"), .text("tool"), .text("hit"), .null,
+                         .null, .null, .real(1), .null, .null], columnIndex: cols)
+        ])
+        // Longer than "SELECT m.id", so it wins for the top-up query only.
+        let topUpPrefix = "SELECT m.id, m.session_id, m.role, m.content, m.tool_call_id, m.tool_calls, m.tool_name, m.timestamp, m.token_count, m.finish_reason\nFROM ("
+        await mock._seedFailure(forSQLPrefix: topUpPrefix, error: .sqlite(exitCode: 1, stderr: "interrupted"))
+        let service = HermesDataService(context: .local, backend: mock)
+        #expect(await service.open())
+        let hits = try await service.searchMessagesChecked(query: "hit", limit: 5)
+        #expect(hits.map(\.id) == [1])
+        let topUp = try #require(await mock.queryLog.last { $0.sql.contains("LIKE") })
+        #expect(topUp.sql.hasPrefix(topUpPrefix), "the top-up ran and hit the scripted failure")
+    }
+
     // MARK: - Rebuild affordance (A10b)
 
     @Test func rebuildMarkersReportAPartialIndex() async throws {

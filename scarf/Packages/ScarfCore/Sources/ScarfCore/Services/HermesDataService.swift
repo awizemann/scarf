@@ -81,6 +81,16 @@ public actor HermesDataService {
         case other
     }
 
+    /// A query that failed AFTER a good `open()`, carrying `humanize`'s
+    /// one-line text. Thrown by the `…Checked` fetches so a view can tell
+    /// "the query failed" from "the query found nothing" — the non-checked
+    /// forms collapse both into `[]`, which rendered a failed search as
+    /// "No matches" and a failed session list as "No sessions yet".
+    public struct QueryFailure: LocalizedError, Sendable, Equatable {
+        public let message: String
+        public var errorDescription: String? { message }
+    }
+
     public init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
@@ -209,6 +219,28 @@ public actor HermesDataService {
             return "Hermes state not found at ~/.hermes on \(context.displayName). If Hermes is installed elsewhere, set its data directory in Manage Servers."
         }
         return desc
+    }
+
+    /// Wrap a failed query for the `…Checked` fetches. `BackendError` is
+    /// not a `LocalizedError`, so `humanize` alone would render sqlite3's
+    /// actual complaint as "The operation couldn't be completed"; lift the
+    /// carried text out first, then run it through the same hint ladder.
+    private nonisolated func queryFailure(_ error: Error) -> QueryFailure {
+        let raw: String
+        switch error as? BackendError {
+        case .sqlite(let exitCode, let stderr)?:
+            let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            raw = text.isEmpty ? "sqlite3 exited \(exitCode) with no output" : text
+        case .transport(let reason)?:
+            raw = reason
+        case .notOpen?:
+            raw = "The Hermes state database is not open."
+        case .parseFailure?:
+            raw = "Couldn't parse sqlite3's output."
+        case nil:
+            return QueryFailure(message: humanize(error))
+        }
+        return QueryFailure(message: humanize(QueryFailure(message: raw)))
     }
 
     // MARK: - Column shapes
@@ -451,13 +483,19 @@ public actor HermesDataService {
     // MARK: - Session Queries
 
     public func fetchSessions(limit: Int = QueryDefaults.sessionLimit) async -> [HermesSession] {
+        (try? await fetchSessionsChecked(limit: limit)) ?? []
+    }
+
+    /// `fetchSessions` that reports a failed query as `QueryFailure`
+    /// instead of an empty list. Same SQL.
+    public func fetchSessionsChecked(limit: Int = QueryDefaults.sessionLimit) async throws -> [HermesSession] {
         let sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
             return rows.map { sessionFromRow($0) }
         } catch {
             Self.logger.warning("fetchSessions failed: \(error.localizedDescription, privacy: .public)")
-            return []
+            throw queryFailure(error)
         }
     }
 
@@ -839,6 +877,14 @@ public actor HermesDataService {
     }
 
     public func searchMessages(query: String, limit: Int = QueryDefaults.messageSearchLimit) async -> [HermesMessage] {
+        (try? await searchMessagesChecked(query: query, limit: limit)) ?? []
+    }
+
+    /// `searchMessages` that reports a failed FTS query as `QueryFailure`
+    /// instead of an empty result, so the UI can say "search failed"
+    /// rather than "No matches". The deep tool-content top-up stays
+    /// best-effort: when it fails, the FTS hits are still returned.
+    public func searchMessagesChecked(query: String, limit: Int = QueryDefaults.messageSearchLimit) async throws -> [HermesMessage] {
         let sanitized = sanitizeFTSQuery(query)
         guard !sanitized.isEmpty else { return [] }
         var msgCols = "m.id, m.session_id, m.role, m.content, m.tool_call_id, m.tool_calls, m.tool_name, m.timestamp, m.token_count, m.finish_reason"
@@ -875,7 +921,8 @@ public actor HermesDataService {
             let rows = try await backend.query(sql, params: [.text(sanitized), .integer(Int64(limit))])
             matches = rows.map { messageFromRow($0) }
         } catch {
-            return []
+            Self.logger.warning("searchMessages failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
         }
 
         // v0.21.1 (A10): on a host that bounds tool-row indexing to the
@@ -984,10 +1031,11 @@ public actor HermesDataService {
         msgCols: String,
         limit: Int
     ) async -> [HermesMessage] {
-        let terms = query
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .prefix(HermesFTSIndex.fallbackMaxTerms)
-            .map(String.init)
+        // The SAME terms the FTS pass matched (quotes stripped, empties
+        // dropped). Raw tokens kept a typed `"` — `"foo"` became
+        // `LIKE '%"foo"%'`, so a quoted search found the FTS hits but never
+        // the deep ones past the 8 KB prefix.
+        let terms = Array(Self.searchTerms(query).prefix(HermesFTSIndex.fallbackMaxTerms))
         guard !terms.isEmpty else { return [] }
 
         // The inner query is over bare `messages`, so it needs the SAME
@@ -2265,14 +2313,18 @@ public actor HermesDataService {
     /// tokenizing it away is the correct search behaviour and removes the
     /// vector at the source.
     private func sanitizeFTSQuery(_ raw: String) -> String {
-        raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .map { token in
-                let t = String(token)
-                let stripped = t.replacingOccurrences(of: "\"", with: "")
-                return stripped.isEmpty ? nil : "\"\(stripped)\""
-            }
-            .compactMap { $0 }
+        Self.searchTerms(raw)
+            .map { "\"\($0)\"" }
             .joined(separator: " ")
+    }
+
+    /// Whitespace-split search terms with every `"` removed and empty
+    /// tokens dropped. Shared by the FTS phrase quoting above and the deep
+    /// tool-content LIKE fallback so both passes search for the same words.
+    private nonisolated static func searchTerms(_ raw: String) -> [String] {
+        raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map { $0.replacingOccurrences(of: "\"", with: "") }
+            .filter { !$0.isEmpty }
     }
 }
 
