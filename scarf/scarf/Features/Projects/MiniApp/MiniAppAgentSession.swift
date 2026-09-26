@@ -185,8 +185,17 @@ actor MiniAppAgentSession {
     private func ensureSession() async throws -> (ACPClient, String) {
         if let client, let sessionId { return (client, sessionId) }
         let newClient = clientFactory(context)
-        try await newClient.start()
-        let sid = try await newClient.newSession(cwd: projectRoot)
+        let sid: String
+        do {
+            try await newClient.start()
+            sid = try await newClient.newSession(cwd: projectRoot)
+        } catch {
+            // The client isn't stored yet, so `shutdown()` can't reach it:
+            // stop it here or a failed `session/new` (or `initialize`)
+            // leaks its `hermes acp` process for the app's lifetime.
+            await newClient.stop()
+            throw error
+        }
         client = newClient
         sessionId = sid
         startEventLoop(client: newClient, sessionId: sid)

@@ -321,12 +321,50 @@ public actor ACPClient {
                 "version": "1.0",
             ] as [String: Any]),
         ]
-        _ = try await sendRequest(method: "initialize", params: initParams)
+        do {
+            _ = try await sendRequest(method: "initialize", params: initParams)
+        } catch {
+            await tearDownFailedStart(channel: ch, generation: generation, error: error)
+            throw error
+        }
         statusMessage = "Connected"
         #if canImport(os)
         logger.info("ACP connection initialized")
         #endif
         startKeepalive()
+    }
+
+    /// Undo a start whose channel opened but whose `initialize` failed
+    /// (RPC error, 60 s watchdog, process exit). Without this the channel
+    /// and read loops stayed live: the `hermes acp` process leaked, and a
+    /// retry `start()` hit the `channel != nil` early return and reported
+    /// `.running` on a connection that never initialised.
+    ///
+    /// Only when this start is still current (same generation): a `stop()`
+    /// that landed mid-initialize already closed `ch` and reset the
+    /// client, and only a `stop()` can let a successor start own `channel`
+    /// while this one is in flight (concurrent starts join `startTask`).
+    private func tearDownFailedStart(channel ch: any ACPChannel, generation: Int, error: Error) async {
+        guard generation == startGeneration else { return }
+        readTask?.cancel()
+        readTask = nil
+        stderrTask?.cancel()
+        stderrTask = nil
+        for (_, continuation) in pendingRequests {
+            continuation.resume(throwing: ACPClientError.notConnected)
+        }
+        pendingRequests.removeAll()
+        eventContinuation?.finish()
+        eventContinuation = nil
+        // Drop the references BEFORE the close suspension so nothing
+        // reentering meanwhile sees a live-looking channel.
+        channel = nil
+        isConnected = false
+        statusMessage = "Failed to start: \(error.localizedDescription)"
+        #if canImport(os)
+        logger.error("ACP initialize failed; channel closed: \(error.localizedDescription)")
+        #endif
+        await ch.close()
     }
 
     public func stop() async {
@@ -596,11 +634,32 @@ public actor ACPClient {
         return blocks
     }
 
+    /// Ask Hermes to stop the session's running turn.
+    ///
+    /// `session/cancel` is a JSON-RPC NOTIFICATION, never a request: the
+    /// acp lib routes it with `route_notification(AGENT_METHODS[
+    /// "session_cancel"], CancelNotification, agent, "cancel")`
+    /// (acp/agent/router.py:112 in agent-client-protocol 0.9.0, pinned
+    /// `==0.9.0` by pyproject.toml at v2026.9.14 and v2026.9.24; `:53` in
+    /// 0.8.1, the `>=0.8.1,<0.9` pin at v2026.3.30 / v0.6.0). Its router
+    /// looks request-shaped frames up in the REQUEST table only, so a
+    /// frame carrying an `id` (even `null`) gets `-32601 Method not found`
+    /// and `Agent.cancel` never runs. Scarf sent it as a request until
+    /// P7a, which is why Stop, voice barge-in and iOS cancel never
+    /// stopped a Hermes turn (probed against the installed 0.9.0 router).
+    ///
+    /// Fire-and-forget: there is no reply to wait for. This returns once
+    /// the frame is written; the turn's end arrives as the pending
+    /// `session/prompt` response with `stopReason: "cancelled"`
+    /// (`acp_adapter/server.py:999` @ v2026.9.24). Throws
+    /// `processTerminated` / `notConnected` when the frame can't be sent.
+    /// Signature unchanged from the request-shaped version so callers
+    /// compile as-is.
     public func cancel(sessionId: String) async throws {
         let params: [String: AnyCodable] = [
             "sessionId": AnyCodable(sessionId),
         ]
-        _ = try await sendRequest(method: "session/cancel", params: params)
+        try await sendNotification(method: "session/cancel", params: params)
         statusMessage = "Cancelled"
     }
 
@@ -780,6 +839,15 @@ public actor ACPClient {
         guard let ch = channel else {
             throw ACPClientError.notConnected
         }
+        // After EOF / a broken pipe `performDisconnectCleanup` drops
+        // `isConnected` but keeps `channel` (so its exit code stays
+        // readable). Nothing can answer a request on a dead transport, and
+        // `session/prompt` has no watchdog, so without this a prompt sent
+        // after the process died hung until `stop()`. Fail fast with the
+        // same diagnostics the in-flight requests got.
+        guard isConnected else {
+            throw await disconnectedError()
+        }
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             pendingRequests[requestId] = continuation
@@ -796,6 +864,41 @@ public actor ACPClient {
                 }
             }
         }
+    }
+
+    /// Write a JSON-RPC notification (no `id`, no reply). Awaits the write
+    /// itself so a dead transport surfaces as an error instead of a silent
+    /// drop.
+    private func sendNotification(method: String, params: [String: AnyCodable]) async throws {
+        guard let ch = channel else {
+            throw ACPClientError.notConnected
+        }
+        guard isConnected else {
+            throw await disconnectedError()
+        }
+        let notification = ACPNotification(method: method, params: params)
+        guard let data = try? JSONEncoder().encode(notification),
+              let line = String(data: data, encoding: .utf8)
+        else {
+            throw ACPClientError.encodingFailed
+        }
+        #if canImport(os)
+        logger.debug("Sending notification: \(method)")
+        #endif
+        do {
+            try await ch.send(line)
+        } catch {
+            let terminated = await disconnectedError()
+            await handleWriteFailed()
+            throw terminated
+        }
+    }
+
+    /// The error for a request or notification attempted on a channel
+    /// whose transport already ended — the exit code and stderr tail the
+    /// in-flight requests were failed with.
+    private func disconnectedError() async -> ACPClientError {
+        .processTerminated(exitCode: await channel?.lastExitCode, stderrTail: recentStderr)
     }
 
     private func timeoutRequest(id: Int, method: String) {

@@ -901,6 +901,10 @@ private struct RecordingTransport: ServerTransport {
         #expect(retry.contains("PRAGMA query_only=1;"))
         #expect(retry.contains("if [ ! -f"))
         #expect(retry.contains("unable to open database file"))
+        // Charter C3: checkpoint-on-close off, echo suppressed, support probed.
+        #expect(retry.contains("sqlite3 -json -cmd '.output /dev/null' -cmd '.dbconfig no_ckpt_on_close on' -cmd '.output stdout'"))
+        #expect(retry.contains("sqlite3 :memory: '.dbconfig no_ckpt_on_close on'"))
+        #expect(!(scripts.first ?? "").contains("no_ckpt_on_close"))
         let latched = await backend.isQueryOnlyFallback
         #expect(latched)
     }
@@ -1043,6 +1047,98 @@ private struct RecordingTransport: ServerTransport {
         // And the row was NOT written.
         let rows = try await backend.query("SELECT id FROM sessions", params: [])
         #expect(rows.count == 1)
+    }
+
+    /// Charter C3 (t-00ade623): each relaxed sqlite3 process is a READWRITE
+    /// connection, and `query_only` does not stop the checkpoint it runs
+    /// when it is the LAST to close a WAL database. Shape: fallback latched,
+    /// then a Hermes stand-in commits and leaves frames in the WAL with
+    /// nobody attached, then Scarf runs one query. Before the fix that
+    /// query's exit copied the WAL into `state.db` (4 KB → ~370 KB).
+    @Test func relaxedQueryClosingLastDoesNotCheckpointIntoStateDB() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let db = try makeWALFixture(inDir: dir)
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport(homeOverride: dir.path))
+        #expect(await backend.open())
+        try #require(await backend.isQueryOnlyFallback)
+
+        // Hermes stand-in: commit ~5000 rows and exit WITHOUT checkpointing
+        // (as a writer that isn't the last closer would), leaving the WAL
+        // full and no connection attached.
+        let writer = Process()
+        writer.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        writer.arguments = [
+            "-cmd", ".output /dev/null", "-cmd", ".dbconfig no_ckpt_on_close on", "-cmd", ".output stdout",
+            db.path,
+            """
+            PRAGMA wal_autocheckpoint=0;
+            WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 5000)
+            INSERT INTO messages (session_id, role, content) SELECT 's1', 'user', hex(randomblob(32)) FROM r;
+            """,
+        ]
+        writer.standardOutput = FileHandle.nullDevice
+        writer.standardError = FileHandle.nullDevice
+        try writer.run()
+        writer.waitUntilExit()
+        try #require(writer.terminationStatus == 0)
+        let walPath = db.path + "-wal"
+        let walSize = (try? FileManager.default.attributesOfItem(atPath: walPath)[.size] as? Int) ?? 0
+        try #require(walSize > 100_000, "fixture must leave uncheckpointed frames in the WAL")
+
+        let bytesBefore = try Data(contentsOf: db)
+        let mtimeBefore = try FileManager.default.attributesOfItem(atPath: db.path)[.modificationDate] as? Date
+
+        // One relaxed query; its sqlite3 process is the last closer.
+        let rows = try await backend.query("SELECT COUNT(*) AS n FROM messages", params: [])
+        #expect(rows.first?.int(at: 0) == 5001, "the query reads through the WAL")
+
+        let bytesAfter = try Data(contentsOf: db)
+        let mtimeAfter = try FileManager.default.attributesOfItem(atPath: db.path)[.modificationDate] as? Date
+        #expect(bytesAfter == bytesBefore, "state.db bytes changed: \(bytesBefore.count) → \(bytesAfter.count)")
+        #expect(mtimeAfter == mtimeBefore)
+        let walSizeAfter = (try? FileManager.default.attributesOfItem(atPath: walPath)[.size] as? Int) ?? 0
+        #expect(walSizeAfter == walSize, "the WAL is left for Hermes to checkpoint")
+    }
+
+    /// A sqlite3 that can't confirm `.dbconfig no_ckpt_on_close on` must be
+    /// REFUSED the writable fallback — reporting the original CANTOPEN —
+    /// rather than allowed to checkpoint into state.db. The stand-in CLI
+    /// mimics a real one given an unknown `.dbconfig` name: stderr warning,
+    /// exit 0, nothing echoed.
+    @Test func sqlite3WithoutNoCheckpointSupportIsRefusedTheFallback() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let db = try makeWALFixture(inDir: dir)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let fake = bin.appendingPathComponent("sqlite3")
+        try """
+        #!/bin/sh
+        case "$*" in *'.dbconfig no_ckpt_on_close'*) echo 'Error: unknown dbconfig "no_ckpt_on_close"' >&2; exit 0;; esac
+        exec /usr/bin/sqlite3 "$@"
+        """.write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let bytesBefore = try Data(contentsOf: db)
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: LocalSQLite3Transport(homeOverride: dir.path, pathOverride: "\(bin.path):/usr/bin:/bin")
+        )
+        #expect(await backend.open() == false)
+        #expect(await backend.isQueryOnlyFallback == false)
+        let err = (await backend.lastOpenError ?? "").lowercased()
+        #expect(err.contains("unable to open database file"))
+        #expect(!err.contains("checkpoint-on-close"), "the ORIGINAL strict error surfaces, not the refusal")
+        #expect(try Data(contentsOf: db) == bytesBefore)
+        #expect(!FileManager.default.fileExists(atPath: db.path + "-shm"), "the relaxed sqlite3 never ran")
     }
 
     /// A DELETE-journal db opens read-only fine, so the strict path must be
