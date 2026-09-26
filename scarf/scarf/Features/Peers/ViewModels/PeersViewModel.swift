@@ -47,9 +47,21 @@ final class PeersViewModel: OutcomeMessageHosting {
     let context: ServerContext
     private let fileService: HermesFileService
 
-    init(context: ServerContext = .local) {
+    /// How `hermes peer dm` is spawned: `(args, timeout) → (exit, stdout,
+    /// stderr)`. Production is `HermesFileService.runHermesCLISplit`; a test
+    /// injects a fake to see the timeout `sendDM` passes and to play back a
+    /// Scarf-side timeout without waiting twelve minutes.
+    typealias SplitRunner = @Sendable (_ args: [String], _ timeout: TimeInterval)
+        -> (exitCode: Int32, stdout: String, stderr: String)
+    @ObservationIgnored private let dmRunner: SplitRunner
+
+    init(context: ServerContext = .local, dmRunner: SplitRunner? = nil) {
         self.context = context
-        self.fileService = HermesFileService(context: context)
+        let fileService = HermesFileService(context: context)
+        self.fileService = fileService
+        self.dmRunner = dmRunner ?? { args, timeout in
+            fileService.runHermesCLISplit(args: args, timeout: timeout)
+        }
     }
 
     // MARK: - Registry
@@ -139,24 +151,36 @@ final class PeersViewModel: OutcomeMessageHosting {
         isSending = true
         errorMessage = nil
         lastReply = nil
-        let svc = fileService
+        let run = dmRunner
         let log = logger
         let timeout = HermesPeerCLI.dmProcessTimeout(capabilities: capabilities)
+        let noResendOutcomes = capabilities.hasPeerDMNoResendOutcomes
         Task.detached { [weak self] in
             // One synchronous remote agent turn — legitimately minutes
             // long, so the CLI's own DM_TIMEOUT_S (600) is the bound
             // Scarf mirrors rather than cutting it short locally (plus
             // headroom on v0.21.4+, see `dmProcessTimeout`).
-            let result = svc.runHermesCLISplit(
-                args: HermesPeerCLI.dmArgs(target: target, message: text),
-                timeout: timeout
-            )
+            let result = run(HermesPeerCLI.dmArgs(target: target, message: text), timeout)
             let parsed = HermesPeerCLI.parseDM(
                 exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr
+            )
+            // v0.21.4+: if Scarf's own cap fired, the peer may already hold
+            // the message and be running the turn (`peer.py:356-365` @
+            // v2026.9.21) — so this is "unconfirmed, don't resend", never a
+            // failure that keeps the text in the box. Older hosts keep the
+            // failure they always showed (C1).
+            let timedOutLocally = noResendOutcomes && HermesPeerCLI.isLocalDMTimeout(
+                exitCode: result.exitCode, stderr: result.stderr, timeout: timeout
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isSending = false
+                if timedOutLocally {
+                    log.warning("peer dm hit Scarf's \(Int(timeout), privacy: .public)s cap; delivery unconfirmed")
+                    self.composeText = ""
+                    self.showUnconfirmed(Self.dmLocalTimeoutText(target: target))
+                    return
+                }
                 switch parsed {
                 case .success(let dm):
                     // Every success arm clears the compose field: the peer
@@ -188,6 +212,12 @@ final class PeersViewModel: OutcomeMessageHosting {
         case .stillRunning(let notice):
             return notice
         }
+    }
+
+    /// The bar for a v0.21.4+ `peer dm` that Scarf itself gave up on. A
+    /// `static` so the sentence is reachable from a test.
+    nonisolated static func dmLocalTimeoutText(target: String) -> String {
+        String(localized: "No answer from \(target) yet, but the message may already be in its Bot Chat — check there instead of resending.")
     }
 
     func startRun() {

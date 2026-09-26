@@ -143,11 +143,39 @@ public enum HermesPeerCLI {
     /// Bot Chat lookup and Python startup, so a 600 s kill always landed
     /// first — before v0.21.4's "accepted … Do NOT resend" line could be
     /// printed, turning an accepted message into "no output" and inviting
-    /// exactly the resend it warns against. v0.21.4+ gets 60 s of headroom
-    /// (``HermesCapabilities/hasPeerDMNoResendOutcomes``); older hosts keep
-    /// the 600 s they always had.
+    /// exactly the resend it warns against.
+    ///
+    /// v0.21.4+ (``HermesCapabilities/hasPeerDMNoResendOutcomes``) gets the
+    /// CLI's whole worst case plus a margin: `_ensure_bot_chat` is a
+    /// `_find_bot_chat` GET and, when none exists, a create POST, each bounded
+    /// by `LIST_TIMEOUT_S = 30` (`peer.py:29`, `:65-67`, `:111`, `:123-125` @
+    /// v2026.9.21), and only then does the 600 s chat POST start (`:348-351`)
+    /// — 660 s before Python/SSH startup, so a 660 s cap could still land
+    /// first. 600 + 2 × 30 + 60 s margin. Even that is not a guarantee
+    /// (urllib's timeout is per socket operation), which is why a Scarf-side
+    /// kill on such a host reads as "may already be delivered", never as a
+    /// failure (``isLocalDMTimeout(exitCode:stderr:timeout:)``). Older hosts
+    /// keep the 600 s they always had.
     public static func dmProcessTimeout(capabilities: HermesCapabilities) -> TimeInterval {
-        capabilities.hasPeerDMNoResendOutcomes ? 660 : 600
+        capabilities.hasPeerDMNoResendOutcomes ? 720 : 600
+    }
+
+    /// True when a `peer dm` result is Scarf's OWN process timeout firing —
+    /// not anything the CLI said. `runHermesCLISplit` turns a
+    /// ``TransportError/timeout(seconds:partialStdout:)`` (thrown by both the
+    /// local and the SSH transport with the cap they were given) into exit
+    /// `-1` with the error's description as stderr, so the match is against
+    /// that exact sentence for this exact cap, never a substring a real
+    /// CLI line could contain.
+    ///
+    /// The distinction matters on v0.21.4+: by the time Scarf gives up, the
+    /// peer may already hold the message in its Bot Chat and be running the
+    /// turn (`peer.py:356-365` @ v2026.9.21), so a resend would deliver it
+    /// twice.
+    public static func isLocalDMTimeout(exitCode: Int32, stderr: String, timeout: TimeInterval) -> Bool {
+        guard exitCode == -1 else { return false }
+        let expected = TransportError.timeout(seconds: timeout, partialStdout: Data()).errorDescription
+        return stderr.trimmingCharacters(in: .whitespacesAndNewlines) == expected
     }
 
     /// The distinctive tail of the accepted-but-still-running line
