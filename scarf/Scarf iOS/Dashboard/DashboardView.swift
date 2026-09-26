@@ -124,12 +124,22 @@ struct DashboardView: View {
         .background(ScarfColor.backgroundPrimary)
     }
 
+    /// gh#141: a host without the sqlite3 CLI connected fine — it just
+    /// can't be read — so it gets its own title. Two literal `Text`s (not
+    /// a ternary, which would bind the verbatim `String` overload).
+    private var errorBannerTitle: Text {
+        if vm.lastErrorIsMissingSQLite3 {
+            return Text("sqlite3 not installed on server")
+        }
+        return Text("Connection issue")
+    }
+
     private func errorBanner(_ err: String) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(ScarfColor.warning)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Connection issue")
+                errorBannerTitle
                     .font(.headline)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                 Text(err)

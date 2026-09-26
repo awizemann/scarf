@@ -54,15 +54,32 @@ public actor HermesDataService {
     /// "not probed yet". The value is immutable for the life of a DB —
     /// Hermes stamps it once and returns early ever after
     /// (`hermes_state_schema.py:292-295`) — so caching it is sound, and
-    /// `open()`/`refresh()` clear it anyway.
+    /// `open()`/`refresh()` clear it anyway. The v0.21.4 aligned-layout
+    /// probe folded into it changes only at a Hermes open's one-time
+    /// realign, which the next `refresh()` picks up.
     private var ftsToolPrefixHighWaterProbe: Int??
 
     /// Last error from `open()` / `refresh()`, user-presentable. `nil`
     /// means the last attempt succeeded. Views surface this when their
     /// own load path fails, so the user sees "Permission denied
     /// reading state.db" instead of an empty Dashboard with no
-    /// explanation.
+    /// explanation. A remote host without `sqlite3` gets `humanize`'s
+    /// install hint rather than the raw `/bin/sh: 2: sqlite3: not found`
+    /// (gh#141); see `adoptOpenError`.
     public private(set) var lastOpenError: String?
+
+    /// What kind of failure `lastOpenError` describes, so a view can
+    /// title its banner accurately instead of calling every failure a
+    /// connection issue. `nil` when the last open succeeded.
+    public private(set) var lastOpenErrorKind: OpenErrorKind?
+
+    /// Coarse classes of `open()` failure (see `adoptOpenError`).
+    public enum OpenErrorKind: Sendable, Equatable {
+        /// The remote host has no `sqlite3` binary on PATH.
+        case sqlite3Missing
+        /// Anything else — SSH, permissions, a missing state.db.
+        case other
+    }
 
     public init(context: ServerContext = .local) {
         self.context = context
@@ -101,7 +118,7 @@ public actor HermesDataService {
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
         ftsToolPrefixHighWaterProbe = nil
-        lastOpenError = await backend.lastOpenError
+        adoptOpenError(await backend.lastOpenError)
         return ok
     }
 
@@ -120,12 +137,53 @@ public actor HermesDataService {
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
         ftsToolPrefixHighWaterProbe = nil
-        lastOpenError = await backend.lastOpenError
+        adoptOpenError(await backend.lastOpenError)
         return ok
     }
 
     public func close() async {
         await backend.close()
+    }
+
+    /// Publish the backend's open error. The remote preflight's first
+    /// command is `sqlite3 --version`, so a host without the CLI fails
+    /// open() with the shell's raw "not found" line (gh#141: dash prints
+    /// `/bin/sh: 2: sqlite3: not found`). That one case is rewritten with
+    /// `humanize`'s install hint and tagged so the banner can say what is
+    /// actually wrong.
+    ///
+    /// Deliberately NOT the whole `humanize` ladder: open() failures also
+    /// carry SSH-layer text (`Permission denied (publickey)`, an identity
+    /// file's `No such file or directory`), which the permission and
+    /// not-found rungs would mislabel as Hermes-state problems. Those keep
+    /// their raw text, as before.
+    private func adoptOpenError(_ raw: String?) {
+        guard let raw else {
+            lastOpenError = nil
+            lastOpenErrorKind = nil
+            return
+        }
+        if context.isRemote && Self.mentionsMissingSQLite3(raw) {
+            lastOpenError = sqlite3MissingMessage()
+            lastOpenErrorKind = .sqlite3Missing
+        } else {
+            lastOpenError = raw
+            lastOpenErrorKind = .other
+        }
+    }
+
+    /// The shells' "no such command" wordings: bash
+    /// (`sqlite3: command not found`), dash/busybox (`sqlite3: not found`),
+    /// zsh (`command not found: sqlite3`).
+    private nonisolated static func mentionsMissingSQLite3(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("sqlite3: command not found")
+            || lower.contains("sqlite3: not found")
+            || lower.contains("command not found: sqlite3")
+    }
+
+    private nonisolated func sqlite3MissingMessage() -> String {
+        "sqlite3 is not installed on \(context.displayName). Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora)."
     }
 
     /// Turn a transport / backend error into the one-line string Dashboard
@@ -136,8 +194,8 @@ public actor HermesDataService {
     private nonisolated func humanize(_ error: Error) -> String {
         let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         let lower = desc.lowercased()
-        if lower.contains("sqlite3: command not found") || lower.contains("sqlite3: not found") {
-            return "sqlite3 is not installed on \(context.displayName). Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora)."
+        if Self.mentionsMissingSQLite3(desc) {
+            return sqlite3MissingMessage()
         }
         if lower.contains("permission denied") {
             return "Permission denied reading Hermes state on \(context.displayName). The SSH user may not have read access to ~/.hermes/state.db — try Run Diagnostics."
@@ -835,24 +893,55 @@ public actor HermesDataService {
         return matches + extra.filter { !seen.contains($0.id) }
     }
 
-    /// `state_meta.fts_tool_full_content_high_water`, or nil when this
-    /// host does not bound tool-row FTS indexing. Probed at most once
-    /// per `open()`; a DB old enough to lack `state_meta` entirely
-    /// throws and is cached as "no bound", same as a missing key.
+    /// The message id above which tool rows are prefix-truncated in
+    /// `messages_fts`, or nil when this host does not bound tool-row FTS
+    /// indexing. Probed at most once per `open()`.
+    ///
+    /// Two detected layouts, never a version (charter C4):
+    /// - `messages_fts` reads the `messages_fts_src` view (v0.21.4+
+    ///   aligned layout) ⇒ EVERY tool row is truncated ⇒ `0`. That
+    ///   migration also deletes the high-water marker, which the older
+    ///   rule below would misread as "nothing truncated".
+    /// - otherwise `state_meta.fts_tool_full_content_high_water` exactly
+    ///   as before; a DB old enough to lack `state_meta` entirely throws
+    ///   and is cached as "no bound", same as a missing key.
     private func ftsToolPrefixHighWater() async -> Int? {
         if let cached = ftsToolPrefixHighWaterProbe { return cached }
         var value: Int?
-        do {
-            let rows = try await backend.query(
-                "SELECT CAST(value AS INTEGER) AS v FROM state_meta WHERE key = ? LIMIT 1",
-                params: [.text(HermesFTSIndex.toolFullContentHighWaterKey)]
-            )
-            value = rows.first?.optionalInt(at: 0)
-        } catch {
-            value = nil
+        if await ftsReadsAlignedProjection() {
+            value = 0
+        } else {
+            do {
+                let rows = try await backend.query(
+                    "SELECT CAST(value AS INTEGER) AS v FROM state_meta WHERE key = ? LIMIT 1",
+                    params: [.text(HermesFTSIndex.toolFullContentHighWaterKey)]
+                )
+                value = rows.first?.optionalInt(at: 0)
+            } catch {
+                value = nil
+            }
         }
         ftsToolPrefixHighWaterProbe = .some(value)
         return value
+    }
+
+    /// True when `messages_fts` is external-content over the
+    /// `messages_fts_src` projection view. Same discriminator Hermes uses
+    /// for its own realign migration (`_fts_index_is_misaligned_source`:
+    /// the vtable's `sqlite_master.sql` naming `messages_fts_src`,
+    /// `hermes_state_schema.py:283-293` @ v2026.9.21). Any failure reads
+    /// as "not aligned", i.e. the pre-v0.21.4 path.
+    private func ftsReadsAlignedProjection() async -> Bool {
+        do {
+            let rows = try await backend.query(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts' LIMIT 1",
+                params: []
+            )
+            return rows.first?.optionalString(at: 0)?
+                .contains(HermesFTSIndex.alignedSourceViewName) == true
+        } catch {
+            return false
+        }
     }
 
     /// The LIKE half of the v0.21.1 search fallback: tool rows above the

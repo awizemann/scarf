@@ -20,10 +20,14 @@ private struct LocalSQLite3Transport: ServerTransport {
     /// default `~/.hermes/state.db`) expands to an isolated temp dir
     /// instead of the developer's real home (t-aud25).
     let homeOverride: String?
+    /// Replaces the child's `PATH` (only together with `homeOverride`), so
+    /// a test can stand in for a host with no `sqlite3` on PATH (gh#141).
+    let pathOverride: String?
 
-    init(contextID: ServerID = ServerContext.local.id, homeOverride: String? = nil) {
+    init(contextID: ServerID = ServerContext.local.id, homeOverride: String? = nil, pathOverride: String? = nil) {
         self.contextID = contextID
         self.homeOverride = homeOverride
+        self.pathOverride = pathOverride
     }
 
     func readFile(_ path: String) throws -> Data {
@@ -76,6 +80,7 @@ private struct LocalSQLite3Transport: ServerTransport {
     /// code into a `ProcessResult`.
     func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
         let homeOverride = self.homeOverride
+        let pathOverride = self.pathOverride
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global().async {
                 let proc = Process()
@@ -96,7 +101,7 @@ private struct LocalSQLite3Transport: ServerTransport {
                     // `/usr/bin` carries the system sqlite3 (see requireSqlite3).
                     proc.environment = [
                         "HOME": homeOverride,
-                        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+                        "PATH": pathOverride ?? "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
                     ]
                 }
                 let outPipe = Pipe()
@@ -1078,6 +1083,91 @@ private struct RecordingTransport: ServerTransport {
         let err = (await backend.lastOpenError ?? "").lowercased()
         #expect(err.contains("unable to open database file"))
         #expect(!FileManager.default.fileExists(atPath: dbPath), "absent state.db must never be created")
+    }
+}
+
+// MARK: - gh#141: a host without the sqlite3 CLI
+
+/// ScarfGo showed "Connection issue / /bin/sh: 2: sqlite3: not found": the
+/// remote preflight's raw shell error went straight to the banner. The
+/// open error is now rewritten with `humanize`'s install hint and tagged
+/// `.sqlite3Missing` so the banner can title it accurately.
+@Suite struct RemoteSQLite3MissingTests {
+
+    private func remoteContext(home: String = "~/.hermes") -> ServerContext {
+        ServerContext(
+            id: UUID(),
+            displayName: "box",
+            kind: .ssh(SSHConfig(host: "fake.invalid", remoteHome: home))
+        )
+    }
+
+    /// Real exercise: the production preflight script run by a real
+    /// `/bin/sh` whose PATH has no sqlite3, through the real backend.
+    @Test func realShellWithoutSQLite3YieldsTheInstallHint() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-nosqlite-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let ctx = remoteContext(home: dir.path)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: LocalSQLite3Transport(homeOverride: dir.path, pathOverride: dir.path)
+        )
+        #expect(await backend.open() == false)
+        let raw = try #require(await backend.lastOpenError)
+        #expect(raw.contains("sqlite3"), "precondition — the shell's own not-found line: \(raw)")
+
+        let service = HermesDataService(context: ctx, backend: backend)
+        #expect(await service.open() == false)
+        #expect(await service.lastOpenErrorKind == .sqlite3Missing)
+        let shown = try #require(await service.lastOpenError)
+        #expect(shown.hasPrefix("sqlite3 is not installed on box."), "got: \(shown)")
+    }
+
+    /// The literal text from the gh#141 report (dash's wording).
+    @Test(arguments: [
+        "/bin/sh: 2: sqlite3: not found",
+        "bash: line 2: sqlite3: command not found",
+        "zsh:2: command not found: sqlite3"
+    ])
+    func everyShellWordingIsRecognised(_ stderr: String) async {
+        let mock = MockHermesQueryBackend()
+        await mock.setOpenShouldSucceed(false)
+        await mock.setLastOpenError(stderr)
+        let service = HermesDataService(context: remoteContext(), backend: mock)
+        _ = await service.open()
+        #expect(await service.lastOpenErrorKind == .sqlite3Missing)
+        #expect(await service.lastOpenError?.hasPrefix("sqlite3 is not installed on box.") == true)
+    }
+
+    /// Only the sqlite3 case is rewritten: SSH-layer text would otherwise
+    /// trip `humanize`'s permission / not-found rungs and be mislabelled.
+    @Test func otherOpenErrorsKeepTheirRawText() async {
+        for raw in ["user@box: Permission denied (publickey).",
+                    "Warning: Identity file /x not accessible: No such file or directory."] {
+            let mock = MockHermesQueryBackend()
+            await mock.setOpenShouldSucceed(false)
+            await mock.setLastOpenError(raw)
+            let service = HermesDataService(context: remoteContext(), backend: mock)
+            _ = await service.open()
+            #expect(await service.lastOpenError == raw)
+            #expect(await service.lastOpenErrorKind == .other)
+        }
+    }
+
+    @Test func aHealthyOpenClearsTheKind() async {
+        let mock = MockHermesQueryBackend()
+        await mock.setOpenShouldSucceed(false)
+        await mock.setLastOpenError("/bin/sh: 2: sqlite3: not found")
+        let service = HermesDataService(context: remoteContext(), backend: mock)
+        _ = await service.open()
+        await mock.setOpenShouldSucceed(true)
+        await mock.setLastOpenError(nil)
+        _ = await service.refresh()
+        #expect(await service.lastOpenErrorKind == nil)
+        #expect(await service.lastOpenError == nil)
     }
 }
 

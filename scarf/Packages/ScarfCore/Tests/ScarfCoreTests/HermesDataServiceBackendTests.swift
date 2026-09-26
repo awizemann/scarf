@@ -456,11 +456,14 @@ import Foundation
         _ = await service.searchMessages(query: "config.yaml v0.7.0")
 
         let log = await mock.queryLog
-        // The MATCH pass, then the one-time v0.21.1 bounded-tool marker
-        // probe (`state_meta.fts_tool_full_content_high_water`). The probe
-        // finds nothing here, so no LIKE fallback is issued.
-        try #require(log.count == 2)
-        #expect(log[1].sql.contains("state_meta"))
+        // The MATCH pass, then the one-time FTS-layout probes: the v0.21.4
+        // aligned-source check (`sqlite_master`), and — not aligned — the
+        // v0.21.1 bounded-tool marker
+        // (`state_meta.fts_tool_full_content_high_water`). Both find
+        // nothing here, so no LIKE fallback is issued.
+        try #require(log.count == 3)
+        #expect(log[1].sql.contains("sqlite_master"))
+        #expect(log[2].sql.contains("state_meta"))
         // FTS query is the first param.
         guard case .text(let fts) = log[0].params[0] else {
             Issue.record("Expected first FTS search param to be .text")
