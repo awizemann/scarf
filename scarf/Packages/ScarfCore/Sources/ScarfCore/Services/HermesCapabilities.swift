@@ -2181,8 +2181,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// finds nothing — a single-profile install (`:116`), an unsupported host
     /// such as s6 (`:118-120`), a profile still running its own gateway
     /// (`:122`) or a migrate-preflight blocker like a duplicate bot token
-    /// (`:127`) keeps the gateway standalone. An explicit `true` is never
-    /// second-guessed. `gateway/config.py:781` @ `v2026.9.21` now keeps an
+    /// (`:127`) keeps the gateway standalone. At v0.21.4 an explicit `true`
+    /// is never second-guessed (`:143-145`); from v0.21.5 one guard runs even
+    /// before it — `standalone_launcher_decision`
+    /// (`gateway_multiplex_mode.py:116-121`, called at `:240-242` @
+    /// `v2026.9.24`) keeps a NAMED profile with `gateway.standalone: true`
+    /// standalone whatever the key says (see ``hasGatewayStandaloneProfiles``).
+    /// `gateway/config.py:781` @ `v2026.9.21` now keeps an
     /// unset key `None` (it was `_coerce_bool(…, False)` before), which is
     /// what lets the verdict tell "unset" from "chosen".
     ///

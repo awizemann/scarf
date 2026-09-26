@@ -16,9 +16,20 @@ final class ProfilesViewModel {
     let context: ServerContext
     private let fileService: HermesFileService
 
-    init(context: ServerContext = .local) {
+    /// How `profile list` and the lifecycle verbs (`runAndReload`) spawn.
+    /// Production is `HermesFileService.runHermesCLI`; tests inject a fake
+    /// so a verb's outcome handling (v0.21.4's settlement-pending delete) is
+    /// provable without a Hermes home (see `HermesCLIRunner`).
+    @ObservationIgnored nonisolated let cliRunner: HermesCLIRunner
+
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.context = context
-        self.fileService = HermesFileService(context: context)
+        let fileService = HermesFileService(context: context)
+        self.fileService = fileService
+        self.cliRunner = cliRunner ?? { args, timeout in
+            let result = fileService.runHermesCLI(args: args, timeout: timeout)
+            return (result.output, result.exitCode)
+        }
     }
 
 
@@ -30,9 +41,9 @@ final class ProfilesViewModel {
 
     func load() {
         isLoading = true
-        Task.detached { [fileService] in
+        Task.detached { [cliRunner] in
             let result = await OffPool.run {
-                fileService.runHermesCLI(args: ["profile", "list"], timeout: 20)
+                cliRunner(["profile", "list"], 20)
             }
             let (parsed, active) = Self.parseProfileList(result.output)
             await MainActor.run {
@@ -280,9 +291,9 @@ final class ProfilesViewModel {
         success: String,
         partialSuccess: (@Sendable (_ output: String, _ exitCode: Int32) -> String?)? = nil
     ) {
-        Task.detached { [fileService, self] in
+        Task.detached { [cliRunner, self] in
             let result = await OffPool.run {
-                fileService.runHermesCLI(args: args, timeout: 60)
+                cliRunner(args, 60)
             }
             let warning = partialSuccess?(result.output, result.exitCode)
             await MainActor.run {

@@ -107,14 +107,27 @@ public enum ProfileRoutesYAML {
         // Scarf, and no token that can resolve to a bool or to null carries
         // an escape — so the full decoder would answer identically while
         // widening the rule for a value Hermes also writes.
-        let topLevel = values["multiplex_profiles"].flatMap { raw -> String? in
-            let v = HermesYAML.normalizedScalar(raw).lowercased()
-            // `null` / `~` only — an explicitly quoted `key: ''` is the empty
-            // STRING to PyYAML, which is not None, so the top-level spelling
-            // still wins (and `_coerce_bool("", False)` reads it as off).
-            return (v == "null" || v == "~") ? nil : raw
+        //
+        // The nested spelling gets the same null mapping: a
+        // `gateway.multiplex_profiles: null` is `None` after the fallback too,
+        // and from v0.21.4 Hermes keeps `None` as "unset" (`gateway/config.py:756-758`,
+        // `:781` @ v2026.9.21) — the implicit default, subject to
+        // `implicit_multiplex_blocker` — not a chosen value. Reading it as set
+        // reported `.on` for a host whose startup check can still keep it
+        // standalone. Pre-v0.21.4 readings are unaffected: `boolishValue`
+        // already read `null` as unrecognised → `false`, and `isTopLevel`
+        // never looked at the nested key.
+        func nonNull(_ raw: String?) -> String? {
+            raw.flatMap { raw -> String? in
+                let v = HermesYAML.normalizedScalar(raw).lowercased()
+                // `null` / `~` only — an explicitly quoted `key: ''` is the
+                // empty STRING to PyYAML, which is not None, so that spelling
+                // still counts (and `_coerce_bool("", False)` reads it as off).
+                return (v == "null" || v == "~") ? nil : raw
+            }
         }
-        let raw = topLevel ?? values["gateway.multiplex_profiles"]
+        let topLevel = nonNull(values["multiplex_profiles"])
+        let raw = topLevel ?? nonNull(values["gateway.multiplex_profiles"])
         // Hermes coerces this with `_coerce_bool(multiplex_profiles, False)`
         // (`gateway/config.py:733`), i.e. the boolish token sets at :25-26 —
         // a literal `== "true"` read `multiplex_profiles: yes` (and `on`,

@@ -9,9 +9,20 @@ final class CronViewModel {
     let context: ServerContext
     private let fileService: HermesFileService
 
-    init(context: ServerContext = .local) {
+    /// How the job mutations (`runAndReload`: create, edit, pause, …) spawn.
+    /// Production is `HermesFileService.runHermesCLI`; tests inject a fake to
+    /// read the argv the editor's save actually produced (see
+    /// `HermesCLIRunner`).
+    @ObservationIgnored nonisolated let mutationRunner: HermesCLIRunner
+
+    init(context: ServerContext = .local, mutationRunner: HermesCLIRunner? = nil) {
         self.context = context
-        self.fileService = HermesFileService(context: context)
+        let fileService = HermesFileService(context: context)
+        self.fileService = fileService
+        self.mutationRunner = mutationRunner ?? { args, timeout in
+            let result = fileService.runHermesCLI(args: args, timeout: timeout)
+            return (result.output, result.exitCode)
+        }
     }
 
 
@@ -704,6 +715,81 @@ final class CronViewModel {
         }
     }
 
+    /// The capability gates the Mac editor applies to its form before any
+    /// value reaches the CLI. Each is the matching `HermesCapabilities` flag,
+    /// mirrored by `CronView`; a `false` both hides the editor row and
+    /// strips the form value here, so an older argparse never sees the flag.
+    struct EditorSupport: Equatable, Sendable {
+        var workdir = false
+        var noAgent = false
+        var failureDeliver = false
+        var modelPin = false
+    }
+
+    /// The editor's Create and Duplicate save. The capability stripping lives
+    /// here rather than in the view's closure so the argv a save produces is
+    /// testable end to end.
+    func createJob(from form: CronJobEditor.FormState, support: EditorSupport) {
+        createJob(
+            schedule: form.schedule,
+            prompt: form.prompt,
+            name: form.name,
+            deliver: form.deliver,
+            skills: form.skills,
+            script: form.script,
+            repeatCount: form.repeatCount,
+            workdir: support.workdir ? form.workdir : "",
+            // Mirrors the workdir strip-on-pre-version pattern: pre-v0.13
+            // hosts get a hard `false`, so a stale form value (or a
+            // hand-edited jobs.json round-tripped through edit-mode)
+            // can't sneak `--no-agent` into a CLI that doesn't grok it.
+            noAgent: support.noAgent ? form.noAgent : false,
+            failureDeliver: support.failureDeliver ? form.failureDeliver : "",
+            // v0.21.4 `--pin`; never on an older host or a no-agent job.
+            pinModel: support.modelPin && !form.noAgent && form.pinModel
+        )
+    }
+
+    /// The editor's Edit save for `job` — see ``createJob(from:support:)``.
+    func updateJob(_ job: HermesCronJob, from form: CronJobEditor.FormState, support: EditorSupport) {
+        updateJob(
+            id: job.id,
+            // Untouched schedule → omit `--schedule` entirely. Re-sending
+            // a one-shot's own `run_at` would be rejected once that
+            // instant has passed (`cron/jobs.py` refuses a run_at outside
+            // the grace window), so a rename of a fired one-shot must not
+            // drag its spent timestamp along.
+            schedule: form.schedule == job.schedule.editValue ? nil : form.schedule,
+            prompt: form.prompt,
+            // The value the editor was SEEDED with, so `updateJob`
+            // can tell "user emptied the field" (a real clear
+            // gesture Hermes can express) from "field was always
+            // blank" — the same distinction `existingSkills` draws.
+            existingPrompt: job.prompt,
+            name: form.name,
+            deliver: form.deliver,
+            repeatCount: form.repeatCount,
+            existingRepeatCount: job.repeatEditValue,
+            // The job's STORED skills, so the edit can be sent as a
+            // diff — `cron edit` treats "no --skill flags" as
+            // "untouched", not "clear" (see `skillEditArguments`).
+            existingSkills: job.skills ?? [],
+            newSkills: form.skills,
+            clearSkills: form.clearSkills,
+            script: form.script,
+            workdir: support.workdir ? form.workdir : nil,
+            noAgent: support.noAgent ? form.noAgent : nil,
+            // `""` on edit is Hermes's clear-the-override gesture, so an
+            // emptied field is forwarded; `nil` (older host) omits it.
+            failureDeliver: support.failureDeliver ? form.failureDeliver : nil,
+            // v0.21.4 `--pin`/`--unpin`, sent only on a change (see
+            // `modelPinEditArguments`); `nil` on an older host or a
+            // no-agent job, where the toggle is hidden.
+            wasModelPinned: job.isModelPinned,
+            pinModel: support.modelPin && !form.noAgent ? form.pinModel : nil
+        )
+    }
+
     func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
         // grace window with a non-zero exit. Say so before the round-trip —
@@ -970,8 +1056,10 @@ final class CronViewModel {
         onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let offer = job.map { recoveryOffer(for: $0) }
-        Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: arguments, timeout: 60)
+        Task.detached { [mutationRunner, self] in
+            // `OffPool.run`: the blocking spawn gets a thread of its own,
+            // not one of the cooperative pool's (C10).
+            let result = await OffPool.run { mutationRunner(arguments, 60) }
             await MainActor.run {
                 onOutcome?(result.exitCode == 0)
                 if result.exitCode == 0 {

@@ -312,7 +312,12 @@ import Testing
         let copy = try Self.jobWithRuntimeExtras().duplicatedAsNewJob(
             id: "j2", existingNames: ["Nightly"], capabilities: Self.v0214)
         #expect(copy.extra["provider_snapshot"] == .string("nous"))
-        #expect(copy.extra["created_at"] != nil)
+        // P5b: v0.21.4 drops the scheduler-owned stamps by name (see
+        // `schedulerOwnedExtraKeys`); v0.21.3 carries them exactly as before.
+        #expect(copy.extra["created_at"] == nil)
+        let older = try Self.jobWithRuntimeExtras().duplicatedAsNewJob(
+            id: "j2", existingNames: ["Nightly"], capabilities: Self.v0213)
+        #expect(older.extra["created_at"] != nil)
     }
 
     // MARK: - model pin
