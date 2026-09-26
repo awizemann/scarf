@@ -47,10 +47,11 @@ final class PeersViewModel: OutcomeMessageHosting {
     let context: ServerContext
     private let fileService: HermesFileService
 
-    /// How `hermes peer dm` is spawned: `(args, timeout) → (exit, stdout,
-    /// stderr)`. Production is `HermesFileService.runHermesCLISplit`; a test
-    /// injects a fake to see the timeout `sendDM` passes and to play back a
-    /// Scarf-side timeout without waiting twelve minutes.
+    /// How `hermes peer dm` and `peer run` are spawned: `(args, timeout) →
+    /// (exit, stdout, stderr)`. Production is
+    /// `HermesFileService.runHermesCLISplit`; a test injects a fake to see the
+    /// timeout and argv each passes and to play back a Scarf-side timeout
+    /// without waiting twelve minutes.
     typealias SplitRunner = @Sendable (_ args: [String], _ timeout: TimeInterval)
         -> (exitCode: Int32, stdout: String, stderr: String)
     @ObservationIgnored private let dmRunner: SplitRunner
@@ -151,6 +152,8 @@ final class PeersViewModel: OutcomeMessageHosting {
         isSending = true
         errorMessage = nil
         lastReply = nil
+        // The draft as sent — see `clearDraft(ifStill:)`.
+        let sentDraft = composeText
         let run = dmRunner
         let log = logger
         let timeout = HermesPeerCLI.dmProcessTimeout(capabilities: capabilities)
@@ -181,7 +184,7 @@ final class PeersViewModel: OutcomeMessageHosting {
                 self.isSending = false
                 if timedOutLocally {
                     log.warning("peer dm hit Scarf's \(Int(timeout), privacy: .public)s cap; delivery unconfirmed")
-                    self.composeText = ""
+                    self.clearDraft(ifStill: sentDraft)
                     self.showUnconfirmed(Self.dmLocalTimeoutText(target: target))
                     return
                 }
@@ -190,7 +193,7 @@ final class PeersViewModel: OutcomeMessageHosting {
                     // Every success arm clears the compose field: the peer
                     // HAS the message in all three, and leaving it filled
                     // is an invitation to send it twice.
-                    self.composeText = ""
+                    self.clearDraft(ifStill: sentDraft)
                     self.lastReply = Self.dmReplyText(dm, target: target)
                     self.flash("Delivered to \(target)")
                 case .failure(let failure):
@@ -234,13 +237,17 @@ final class PeersViewModel: OutcomeMessageHosting {
         errorMessage = nil
         durabilityNote = nil
         let preview = String(text.split(separator: "\n").first ?? "").prefix(120)
-        let svc = fileService
+        let sentDraft = composeText
+        let key = idempotencyKey(target: target, message: text)
+        let run = dmRunner
         let log = logger
         Task.detached { [weak self] in
-            let result = svc.runHermesCLISplit(
-                args: HermesPeerCLI.runArgs(target: target, message: text),
-                timeout: 120
-            )
+            // `OffPool.run`: a blocking spawn of up to three minutes gets a
+            // thread of its own, not one of the cooperative pool's (C10).
+            let result = await OffPool.run {
+                run(HermesPeerCLI.runArgs(target: target, message: text, idempotencyKey: key),
+                    HermesPeerCLI.runProcessTimeout)
+            }
             // Non-fatal: read it regardless of outcome, but only keep it
             // on the success path (a failure has its own message).
             let warning = HermesPeerCLI.durabilityWarning(inStderr: result.stderr)
@@ -252,7 +259,9 @@ final class PeersViewModel: OutcomeMessageHosting {
                 self.isSending = false
                 switch parsed {
                 case .success(let run):
-                    self.composeText = ""
+                    // The peer has this run: the next Start Run is a new one.
+                    if self.pendingRunKey?.key == key { self.pendingRunKey = nil }
+                    self.clearDraft(ifStill: sentDraft)
                     self.durabilityNote = warning
                     let row = PeerRunRow(
                         id: run.runID,
@@ -280,6 +289,35 @@ final class PeersViewModel: OutcomeMessageHosting {
                 }
             }
         }
+    }
+
+    /// The `--idempotency-key` of the last `peer run` that did not come back
+    /// with a run id, and what it was for. A failure — above all Scarf's own
+    /// timeout, which can land after the peer's `/v1/runs` POST created the
+    /// run — keeps it, so pressing Start Run again for the SAME target and
+    /// text replays that run (`"replayed": true`) instead of starting a
+    /// second one. Any other target or text gets a fresh key.
+    struct PendingRunKey: Equatable {
+        let target: String
+        let message: String
+        let key: String
+    }
+    @ObservationIgnored private(set) var pendingRunKey: PendingRunKey?
+
+    private func idempotencyKey(target: String, message: String) -> String {
+        if let pending = pendingRunKey, pending.target == target, pending.message == message {
+            return pending.key
+        }
+        let key = HermesPeerCLI.newIdempotencyKey()
+        pendingRunKey = PendingRunKey(target: target, message: message, key: key)
+        return key
+    }
+
+    /// Clear the compose field only if it still holds what was sent. A send
+    /// or run can take minutes, and the editor stays live meanwhile — a
+    /// finished call must not wipe the next message the user started typing.
+    private func clearDraft(ifStill sent: String) {
+        if composeText == sent { composeText = "" }
     }
 
     func refresh(_ run: PeerRunRow) {

@@ -88,6 +88,8 @@ final class BotRoutinesViewModel {
     /// in green and then auto-cleared (go/no-go blocking condition 1).
     var messageOutcome: CronViewModel.MessageOutcome { cron.messageOutcome }
     var messageIsFailure: Bool { cron.messageOutcome == .failure }
+    /// P7f: a Run Now Scarf could not confirm — must not be painted green.
+    var messageIsUnconfirmed: Bool { cron.messageOutcome == .unconfirmed }
 
     func dismissMessage() { cron.dismissMessage() }
 

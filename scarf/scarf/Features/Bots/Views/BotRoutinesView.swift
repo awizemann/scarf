@@ -58,10 +58,11 @@ struct BotRoutinesView: View {
                     }
                     Text(message)
                         .scarfStyle(.caption)
-                        .foregroundStyle(viewModel.messageIsFailure ? ScarfColor.danger : ScarfColor.success)
+                        .foregroundStyle(viewModel.messageIsFailure ? ScarfColor.danger
+                                         : viewModel.messageIsUnconfirmed ? ScarfColor.warning : ScarfColor.success)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                    if viewModel.messageIsFailure {
+                    if viewModel.messageIsFailure || viewModel.messageIsUnconfirmed {
                         Spacer(minLength: 0)
                         Button {
                             viewModel.dismissMessage()

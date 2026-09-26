@@ -199,7 +199,9 @@ struct PeersView: View {
                             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
                                 .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
                         )
-                        .accessibilityLabel("Send")
+                        // The field, not an action: VoiceOver read "Send"
+                        // here and then again on the Send DM button.
+                        .accessibilityLabel("Message")
                     HStack(spacing: ScarfSpace.s2) {
                         if viewModel.isSending { ProgressView().controlSize(.small) }
                         Spacer()

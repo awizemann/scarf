@@ -629,13 +629,24 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///   (`:1805`, `:1813`) and bumped by `mark_job_run` (`:2285-2289`); a
     ///   copy is a new job and starts its own.
     /// - `last_fire_error` — `_record_fire_error` (`:2254-2259`).
+    /// - `manual_run_at` / `manual_run_prompt` — `trigger_job`'s one-fire
+    ///   stamp (`:2106-2115`), popped by `mark_job_run` (`:2273-2275`). A
+    ///   copied pair makes the copy's first fire a "manual" one and injects
+    ///   the SOURCE's pending run prompt into it (`cron/scheduler.py:2720-2721`).
+    /// - `preflight_alerted` — the blocked-config alert-once bit
+    ///   (`mark_preflight_alerted`, `:2243-2245`); a copy that inherits it
+    ///   would stay silent about its own first blocked preflight.
+    /// - `last_delivery_queued` — the Bot Chat delivery-queued marker
+    ///   (`cron/scheduler_delivery.py:1282`, first at v2026.9.14).
     ///
     /// These keys predate v0.21.4 (all present at v2026.9.14), but the
     /// denylist change is gated on `isV0214OrLater` so an older host's
-    /// duplicate stays byte-identical (charter C1).
+    /// duplicate stays byte-identical (charter C1). On v0.21.5+ the
+    /// `JOB_DEFINITION_FIELDS` allowlist drops them all anyway.
     nonisolated static let schedulerOwnedExtraKeys: [String] = [
         "pending_slot", "fire_claim", "run_claim", "failure_streak",
         "created_at", "last_fire_error",
+        "manual_run_at", "manual_run_prompt", "preflight_alerted", "last_delivery_queued",
     ]
 
     /// `JOB_DEFINITION_FIELDS` (`cron/job_definition.py:13-18` @ v2026.9.24)

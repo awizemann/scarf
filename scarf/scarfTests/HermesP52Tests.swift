@@ -251,7 +251,8 @@ struct OffPoolDisciplineP52Tests {
     /// (`runHermesCLISplit(`, `runHermesSync(`, `capabilitiesSync(`),
     /// converted the three sites that were the plain
     /// `await Task.detached { … }.value` shape and baselined eleven more:
-    /// **47 hits across 32 keys** (P5b moved one Cron and one Peers site to `OffPool.run`).
+    /// **44 hits across 32 keys** (P5b moved one Cron and one Peers site to `OffPool.run`;
+    /// P7f moved two more Cron sites and one more Peers site).
     ///
     /// It is COUNTED so it cannot rot into a licence: one more
     /// `runHermesCLI(` in `CronViewModel` is a new offender even though the
@@ -270,7 +271,7 @@ struct OffPoolDisciplineP52Tests {
         "HermesFileService.swift:runHermesCLI(": 1,
         "HermesProxyService.swift:runHermesCLI(": 1,
         "OAuthKeepaliveCronService.swift:runHermesCLI(": 2,
-        "CronViewModel.swift:runHermesCLI(": 3,  // P5b: runAndReload → OffPool
+        "CronViewModel.swift:runHermesCLI(": 1,  // P5b: runAndReload → OffPool; P7f: runNow run + tick → OffPool
         "HealthView.swift:runHermesCLI(": 1,
         "MCPLoginController.swift:runProcess(": 2,
         "MCPServersViewModel.swift:runHermesCLI(": 1,
@@ -343,7 +344,7 @@ struct OffPoolDisciplineP52Tests {
         "PluginsViewModel.swift:runHermesCLISplit(": 1,
         "PluginsViewModel.swift:capabilitiesSync(": 1,
         "CronViewModel.swift:runHermesCLISplit(": 3,
-        "PeersViewModel.swift:runHermesCLISplit(": 2,  // P5b: sendDM → OffPool
+        "PeersViewModel.swift:runHermesCLISplit(": 1,  // P5b: sendDM → OffPool; P7f: startRun → OffPool
     ]
 
     /// A `Task.detached` closure the sweep may keep, keyed
@@ -710,7 +711,7 @@ struct OffPoolDisciplineP52Tests {
     }
 
     /// The baseline's own size, pinned (lesson 6: a number in a comment is a
-    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 47
+    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 44
     /// hits across 32 keys; this is what re-measures it, so a phase that
     /// adds or clears an entry must restate the prose. The needle set's own
     /// size is pinned for the same reason. The vocabulary has been widened
@@ -720,7 +721,7 @@ struct OffPoolDisciplineP52Tests {
     @Test("the pending-site baseline is the size its documentation claims")
     func baselineSizeIsPinned() {
         #expect(Self.pendingOffPoolSites.count == 32)
-        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 47)
+        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 44)
         #expect(Self.blockingNeedles.count == 15)
         #expect(Set(Self.blockingNeedles).count == 15, "a needle is listed twice")
     }
