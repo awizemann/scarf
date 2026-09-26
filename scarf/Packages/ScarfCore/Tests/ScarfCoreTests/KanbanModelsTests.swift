@@ -675,6 +675,86 @@ import Foundation
         // A healthy board prints `[]` — must not be read as an error.
         let entries = try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: Data("[]".utf8))
         #expect(entries.isEmpty)
+        #expect(try KanbanService.diagnosticsByTask(from: Data("[]".utf8)).isEmpty)
+    }
+
+    // MARK: v0.21.4 trailing home-scope row
+
+    /// Literal v2026.9.21 fleet output: per-task rows unchanged, then
+    /// `[{"task_id": None, "dispatch_profiles": allowlist, "diagnostics": []}]`
+    /// appended (`hermes_cli/kanban.py:690-694` @ v2026.9.21) where
+    /// `allowlist` is `dispatch_profile_allowlist_summary()`'s string
+    /// (`kanban_db_dispatch.py:1710-1727`). A strict `[Entry]` decode threw
+    /// on the null `task_id` and dropped every task's diagnostics.
+    static let v0214DiagnosticsJSON = """
+    [
+      {
+        "task_id": "t_abc123",
+        "title": "Ship the parser",
+        "status": "blocked",
+        "assignee": "worker-1",
+        "diagnostics": [
+          {
+            "kind": "repeated_failures",
+            "severity": "critical",
+            "title": "Agent failed x3",
+            "detail": "This task has failed 3 times in a row (most recent: failed).",
+            "actions": [],
+            "first_seen_at": 1778160614,
+            "last_seen_at": 1778160614,
+            "count": 3,
+            "run_id": null,
+            "data": {}
+          }
+        ]
+      },
+      {"task_id": null, "dispatch_profiles": "coder, reviewer", "diagnostics": []}
+    ]
+    """
+
+    @Test func v0214TrailingHomeScopeRowDoesNotSinkTheBoard() throws {
+        let data = Data(Self.v0214DiagnosticsJSON.utf8)
+        // The failure mode being fixed: the strict decode throws outright.
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: data)
+        }
+        let byTask = try KanbanService.diagnosticsByTask(from: data)
+        #expect(Array(byTask.keys) == ["t_abc123"])
+        #expect(byTask["t_abc123"]?.first?.kind == "repeated_failures")
+    }
+
+    /// A healthy v0.21.4+ board prints ONLY the home-scope row (the
+    /// fail-closed wording is `kanban_db_dispatch.py:1726-1727`). That is a
+    /// healthy board, not an error.
+    @Test func v0214HealthyBoardIsJustTheHomeScopeRow() throws {
+        let json = """
+        [{"task_id": null, "dispatch_profiles": "any", "diagnostics": []}]
+        """
+        #expect(try KanbanService.diagnosticsByTask(from: Data(json.utf8)).isEmpty)
+    }
+
+    /// Tolerance is per ROW, but output with nothing recognisable in it is
+    /// still an error rather than an empty board (charter C5).
+    @Test func diagnosticsOutputWithNoRecognisableRowStillThrows() {
+        #expect(throws: KanbanError.self) {
+            try KanbanService.diagnosticsByTask(from: Data(#"[{"unexpected": true}]"#.utf8))
+        }
+        #expect(throws: KanbanError.self) {
+            try KanbanService.diagnosticsByTask(from: Data(#"{"task_id": "t_1"}"#.utf8))
+        }
+    }
+
+    /// One malformed row among good ones costs only that row.
+    @Test func oneUnrecognisedRowCostsOnlyItself() throws {
+        let json = """
+        [
+          {"task_id": 42, "diagnostics": "garbage"},
+          {"task_id": "t_ok", "diagnostics": [{"kind": "stuck_in_blocked", "severity": "warning",
+            "title": "Blocked 3d", "detail": "", "count": 1}]}
+        ]
+        """
+        let byTask = try KanbanService.diagnosticsByTask(from: Data(json.utf8))
+        #expect(Array(byTask.keys) == ["t_ok"])
     }
 
     @Test func diagnosticsArgvFleetAndTaskScoped() {

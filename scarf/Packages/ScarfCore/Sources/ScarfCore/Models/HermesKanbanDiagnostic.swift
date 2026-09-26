@@ -198,7 +198,7 @@ public enum KanbanDiagnosticSeverity: String, Sendable, CaseIterable {
 
 // MARK: - `kanban diagnostics --json` envelope
 
-/// One element of `hermes kanban diagnostics --json`:
+/// One per-task element of `hermes kanban diagnostics --json`:
 /// `{"task_id": …, "title": …, "status": …, "assignee": …,
 ///   "diagnostics": [Diagnostic, …]}` (`hermes_cli/kanban.py:678-681`,
 /// v2026.9.7). `title` / `status` / `assignee` are absent when the task row
@@ -215,5 +215,74 @@ public struct HermesKanbanDiagnosticsEntry: Sendable, Equatable, Decodable {
     public init(taskId: String, diagnostics: [HermesKanbanDiagnostic]) {
         self.taskId = taskId
         self.diagnostics = diagnostics
+    }
+
+    /// Decode a whole `kanban diagnostics --json` payload one row at a
+    /// time, so a row Scarf doesn't recognise cannot take the rest of the
+    /// board's diagnostics down with it.
+    ///
+    /// **Why.** From v2026.9.21 (v0.21.4) the array ends with a home-scope
+    /// row — `{"task_id": null, "dispatch_profiles": <str>, "diagnostics": []}`
+    /// (`hermes_cli/kanban.py:690-694` @ v2026.9.21, `:683-687` @
+    /// v2026.9.24) — emitted even when the board is healthy. A strict
+    /// `[Entry]` decode throws on the null `task_id`, which lost EVERY
+    /// task's diagnostics on those hosts. That row is recognised and
+    /// skipped: `dispatch_profiles` is a human-readable summary string
+    /// (`dispatch_profile_allowlist_summary`,
+    /// `hermes_cli/kanban_db_dispatch.py:1710` @ v2026.9.21) that nothing in
+    /// Scarf renders.
+    ///
+    /// **No capability flag.** Older hosts print only per-task rows, each of
+    /// which decodes exactly as before, so their result is unchanged. A
+    /// top level that isn't a JSON array, or an array whose rows are ALL
+    /// unrecognised, still throws — unknown output is never read as a
+    /// healthy board (charter C5).
+    public static func decodeList(from data: Data) throws -> [HermesKanbanDiagnosticsEntry] {
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        var entries: [HermesKanbanDiagnosticsEntry] = []
+        var recognised = 0
+        for row in rows {
+            switch row {
+            case .task(let entry):
+                entries.append(entry)
+                recognised += 1
+            case .homeScope:
+                recognised += 1
+            case .unrecognised:
+                continue
+            }
+        }
+        if recognised == 0 && !rows.isEmpty {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "No recognisable row in kanban diagnostics output."
+            ))
+        }
+        return entries
+    }
+
+    /// One array element, classified without letting a failure escape.
+    private enum Row: Decodable {
+        case task(HermesKanbanDiagnosticsEntry)
+        /// The v0.21.4+ trailing `task_id: null` allowlist row.
+        case homeScope
+        case unrecognised
+
+        private enum Keys: String, CodingKey {
+            case taskId = "task_id"
+            case dispatchProfiles = "dispatch_profiles"
+        }
+
+        init(from decoder: any Decoder) throws {
+            if let entry = try? HermesKanbanDiagnosticsEntry(from: decoder) {
+                self = .task(entry)
+            } else if let c = try? decoder.container(keyedBy: Keys.self),
+                      (try? c.decodeNil(forKey: .taskId)) == true,
+                      c.contains(.dispatchProfiles) {
+                self = .homeScope
+            } else {
+                self = .unrecognised
+            }
+        }
     }
 }

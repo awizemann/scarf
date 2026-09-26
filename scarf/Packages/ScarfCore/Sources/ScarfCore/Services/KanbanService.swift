@@ -173,7 +173,8 @@ public actor KanbanService {
     /// has no `diagnostics` subcommand and Hermes routes an unknown
     /// kanban verb to the agent (charter C5).
     ///
-    /// Returns `[:]` when the board is healthy: fleet mode prints `[]`.
+    /// Returns `[:]` when the board is healthy: fleet mode prints `[]`
+    /// (v0.21.4+: just the home-scope row, which `decodeList` skips).
     public func diagnostics(taskId: String? = nil) async throws -> [String: [HermesKanbanDiagnostic]] {
         let args = KanbanService.diagnosticsArgv(board: board, taskId: taskId)
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 20)
@@ -181,8 +182,15 @@ public actor KanbanService {
         guard let data = stdout.data(using: .utf8) else {
             throw KanbanError.decoding(message: "non-UTF8 stdout")
         }
+        return try KanbanService.diagnosticsByTask(from: data)
+    }
+
+    /// Pure decode half of `diagnostics(taskId:)`, split out so the exact
+    /// stdout shapes can be asserted without a live transport (there is no
+    /// injection seam — see `prefix(board:_:)`).
+    nonisolated static func diagnosticsByTask(from data: Data) throws -> [String: [HermesKanbanDiagnostic]] {
         do {
-            let entries = try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: data)
+            let entries = try HermesKanbanDiagnosticsEntry.decodeList(from: data)
             return Dictionary(
                 entries.map { ($0.taskId, $0.diagnostics) },
                 uniquingKeysWith: { $1 }
