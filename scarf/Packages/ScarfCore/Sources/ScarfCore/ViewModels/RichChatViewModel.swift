@@ -3402,10 +3402,11 @@ public final class RichChatViewModel {
                 // the same row seeds the same instant. Set BEFORE the
                 // flag so its `didSet` keeps this value instead of
                 // stamping `Date()`. No user row (a cron- or gateway-born
-                // turn) falls back to `Date()` as before. Only on the edge
+                // turn), or one too old to be this turn's prompt (P9 —
+                // `workingSinceSeed`), falls back to `Date()`. Only on the edge
                 // into working: a clock already running is never moved.
                 if derivedWorking, !wasWorking,
-                   let started = fetched.last(where: \.isUser)?.timestamp {
+                   let started = Self.workingSinceSeed(fetched: fetched, now: Date()) {
                     workingSince = started
                 }
                 isAgentWorking = derivedWorking
@@ -3470,6 +3471,27 @@ public final class RichChatViewModel {
     private func stopActivePolling() {
         activePollingTimer?.invalidate()
         activePollingTimer = nil
+    }
+
+    /// Oldest prompt row `workingSinceSeed` will seed the elapsed clock
+    /// from. `deriveAgentWorking` is a shape heuristic — a session whose
+    /// last turn died mid-tool days ago still reads "working" — and the
+    /// latest user row can belong to a long-finished turn when the running
+    /// one was cron- or gateway-born. Past this age the prompt row is far
+    /// likelier stale than a turn genuinely that long, so the clock starts
+    /// at attach time instead of reading "Working · 71:14:03".
+    static let workingSinceSeedMaxAge: TimeInterval = 6 * 60 * 60
+
+    /// The instant a turn found running in the DB started, for the
+    /// elapsed clock: the latest user row's timestamp when it is within
+    /// ``workingSinceSeedMaxAge`` of `now` (clamped to `now`, so a remote
+    /// clock ahead of this Mac can't show a negative time), else `nil` —
+    /// the caller then lets `isAgentWorking`'s `didSet` stamp `Date()`.
+    nonisolated static func workingSinceSeed(fetched: [HermesMessage], now: Date) -> Date? {
+        guard let started = fetched.last(where: \.isUser)?.timestamp,
+              now.timeIntervalSince(started) <= workingSinceSeedMaxAge
+        else { return nil }
+        return min(started, now)
     }
 
     private func deriveAgentWorking(from fetched: [HermesMessage]) -> Bool {

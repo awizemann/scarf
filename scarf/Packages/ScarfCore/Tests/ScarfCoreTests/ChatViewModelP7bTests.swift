@@ -182,6 +182,46 @@ import SQLite3
         #expect(abs(again.timeIntervalSince1970 - promptTime) < 1, "poll flicker restarted the clock")
     }
 
+    /// P9 (t-d6384e2e item 5): a session whose last turn died days ago
+    /// still derives "working" from its row shape; seeding from that
+    /// prompt row showed "Working · 72:00:00". Past the bound the clock
+    /// starts at attach time.
+    @Test func workingSinceIgnoresAStalePromptRow() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        let promptTime = Date().addingTimeInterval(-3 * 24 * 60 * 60).timeIntervalSince1970
+        try fx.exec("INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (1, 's', 'user', 'go', \(promptTime));")
+        let vm = RichChatViewModel(context: fx.context)
+        vm.setSessionId("s")
+
+        let attach = Date()
+        await vm.refreshMessages()
+        #expect(vm.isAgentWorking)
+        let seeded = try #require(vm.workingSince)
+        #expect(seeded >= attach.addingTimeInterval(-1), "clock seeded from a days-old prompt row: \(seeded)")
+    }
+
+    /// The seed's bounds, directly: inside the window it is the prompt
+    /// row; past it, nil; a prompt stamped AHEAD of this Mac (remote clock
+    /// skew) is clamped to `now`, never a negative elapsed time.
+    @Test func workingSinceSeedBounds() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func rows(userAt t: Date) -> [HermesMessage] {
+            [HermesMessage(id: 1, sessionId: "s", role: "user", content: "go", toolCallId: nil,
+                           toolCalls: [], toolName: nil, timestamp: t, tokenCount: nil,
+                           finishReason: nil, reasoning: nil)]
+        }
+        let fresh = now.addingTimeInterval(-600)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: fresh), now: now) == fresh)
+        let edge = now.addingTimeInterval(-RichChatViewModel.workingSinceSeedMaxAge)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: edge), now: now) == edge)
+        let stale = edge.addingTimeInterval(-1)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: stale), now: now) == nil)
+        let ahead = now.addingTimeInterval(30)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: ahead), now: now) == now)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: [], now: now) == nil)
+    }
+
     // MARK: - Event-driven helpers
 
     @MainActor
