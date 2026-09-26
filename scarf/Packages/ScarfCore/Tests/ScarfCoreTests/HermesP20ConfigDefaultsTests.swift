@@ -163,25 +163,83 @@ struct HermesP20ConfigDefaultsTests {
         #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.3")) == 0)
     }
 
-    /// `whatsapp.unauthorized_dm_behavior` gains `"decline"` and
-    /// `whatsapp.unauthorized_dm_decline_message` is a new key, both at tag
-    /// **v2026.9.21 (v0.21.4)** (`gateway/config.py:139,627`). Parsing
-    /// itself is unconditional — Scarf reads whatever the file holds
-    /// regardless of host version, exactly as every other config value
-    /// does; the FLOOR only gates whether the PICKER offers `"decline"` as
-    /// a choice (`WhatsAppSetupView.unauthorizedDMOptions`,
+    /// A present value Hermes CAN read as a positive int must parse to that
+    /// int, not fall through to the ratio-only `0` sentinel. Both spellings
+    /// are legal UNQUOTED YAML that PyYAML resolves to a Python number
+    /// before `_positive_int` ever calls `int()` on it (`agent/agent_init.py
+    /// :1476-1478` @ v2026.9.21): `256_000` matches PyYAML's int resolver
+    /// (underscore digit grouping, mirroring Python's `int()` string
+    /// parsing per PEP 515) and `300000.0` matches its float resolver, so
+    /// `_positive_int` truncates the float exactly as `int(300000.0)` does.
+    /// Reverting `pythonIntCoerce` to a literal `Int(_:) ?? 0` makes both
+    /// cases fail (they parsed to `0` before this fix).
+    @Test(arguments: [("256_000", 256_000), ("300000.0", 300_000)])
+    func compressionThresholdTokensParsesUnderscoresAndFloats(_ raw: String, expected: Int) {
+        let cfg = HermesConfig(yaml: "compression:\n  threshold_tokens: \(raw)\n")
+        #expect(cfg.compression.thresholdTokens == expected)
+        #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == expected)
+    }
+
+    /// `whatsapp.unauthorized_dm_behavior` gains `"decline"` at tag
+    /// **v2026.9.21 (v0.21.4)** (`gateway/config.py:139,625`) and IS read
+    /// from the `whatsapp.*` block (`unauthorized_dm_behavior` is a
+    /// `_SHARED_KEYS` member — `gateway/config_loader.py:197-213` — bridged
+    /// into `platforms.whatsapp.extra`). Parsing itself is unconditional —
+    /// Scarf reads whatever the file holds regardless of host version,
+    /// exactly as every other config value does; the FLOOR only gates
+    /// whether the PICKER offers `"decline"` as a choice
+    /// (`WhatsAppSetupView.unauthorizedDMOptions`,
     /// `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`).
-    @Test func whatsAppUnauthorizedDMDeclineParsesVerbatim() {
+    @Test func whatsAppUnauthorizedDMBehaviorParsesVerbatim() {
         let absent = HermesConfig(yaml: Self.bare)
         #expect(absent.whatsapp.unauthorizedDMBehavior == "pair")
-        #expect(absent.whatsapp.unauthorizedDMDeclineMessage == "")
         let set = HermesConfig(yaml: """
         whatsapp:
           unauthorized_dm_behavior: decline
-          unauthorized_dm_decline_message: "Sorry, owner only."
         """)
         #expect(set.whatsapp.unauthorizedDMBehavior == "decline")
-        #expect(set.whatsapp.unauthorizedDMDeclineMessage == "Sorry, owner only.")
+    }
+
+    /// `unauthorized_dm_decline_message` is a NEW key at the same tag
+    /// (`gateway/config.py:139,626`), but it is a GLOBAL `GatewayConfig`
+    /// field with no per-platform override — `_hm_send_unauthorized_decline`
+    /// reads `self.config.unauthorized_dm_decline_message` directly
+    /// (`gateway/run_inbound.py:140` @ `v2026.9.24`), and the key is bridged
+    /// from the top level by PRESENCE, else from `gateway.*`
+    /// (`gateway/config_loader.py:103` `_presence(…)`), never from
+    /// `whatsapp.*` — no Hermes reader at any tag looks there. A
+    /// `whatsapp.unauthorized_dm_decline_message` key is therefore inert;
+    /// P7d's audit fix (t-3beb5ec1) moved both the read and the write off
+    /// it onto the bare top-level spelling.
+    @Test func whatsAppUnauthorizedDMDeclineMessageIsAGlobalKey() {
+        let absent = HermesConfig(yaml: Self.bare)
+        #expect(absent.whatsapp.unauthorizedDMDeclineMessage == "")
+        // The inert, pre-fix spelling must NOT be read back.
+        let wrongSpelling = HermesConfig(yaml: """
+        whatsapp:
+          unauthorized_dm_decline_message: "Sorry, owner only."
+        """)
+        #expect(wrongSpelling.whatsapp.unauthorizedDMDeclineMessage == "")
+        // The real, GLOBAL spelling — bare top-level.
+        let bareTopLevel = HermesConfig(yaml: """
+        unauthorized_dm_decline_message: "Sorry, owner only."
+        """)
+        #expect(bareTopLevel.whatsapp.unauthorizedDMDeclineMessage == "Sorry, owner only.")
+        // The nested `gateway.*` fallback, consulted only when the bare
+        // top-level key is absent (presence-mode bridge).
+        let nested = HermesConfig(yaml: """
+        gateway:
+          unauthorized_dm_decline_message: "Nested owner only."
+        """)
+        #expect(nested.whatsapp.unauthorizedDMDeclineMessage == "Nested owner only.")
+        // Bare top-level wins over `gateway.*` by PRESENCE, even when its
+        // own value is the empty string.
+        let bothPresent = HermesConfig(yaml: """
+        unauthorized_dm_decline_message: ""
+        gateway:
+          unauthorized_dm_decline_message: "Nested owner only."
+        """)
+        #expect(bothPresent.whatsapp.unauthorizedDMDeclineMessage == "")
     }
 
     /// `agent.gateway_notify_interval` went 600 → 180 at tag **v2026.4.23
