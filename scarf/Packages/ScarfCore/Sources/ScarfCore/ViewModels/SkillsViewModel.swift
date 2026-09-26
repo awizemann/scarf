@@ -765,6 +765,24 @@ public final class SkillsViewModel {
         uninstallOutcome(exitCode: 0, output: output).detail
     }
 
+    /// `hermes skills check` closing line, per `do_check`
+    /// (`hermes_cli/skills_hub.py:831-849` @ v2026.9.24): either the
+    /// early-return `No hub-installed skills to check.` (:837, nothing
+    /// installed) or `N update(s) available across M checked skill(s)`
+    /// (:844, printed after the table on every non-empty run). Both are
+    /// byte-identical back to at least v2026.7.1 (0.18), well below any
+    /// target floor (C1). Exit code alone is not enough (charter C5): a
+    /// crash before either line prints (a network adapter exception, a
+    /// malformed lock file) can still exit non-zero OR zero, and an
+    /// EMPTY parse from truncated/garbled output must not read as "no
+    /// updates" either way.
+    nonisolated static func checkForUpdatesCompleted(exitCode: Int32, output: String) -> Bool {
+        guard exitCode == 0 else { return false }
+        let lines = HermesCLIVerdict.significantLines(output)
+        return lines.contains { $0.contains("No hub-installed skills to check.") }
+            || lines.contains { $0.contains("update(s) available across") && $0.contains("checked skill(s)") }
+    }
+
     public func checkForUpdates() {
         isHubLoading = true
         let bin = context.paths.hermesBinary
@@ -776,8 +794,12 @@ public final class SkillsViewModel {
                 transport: xport,
                 timeout: 60
             )
-            let parsed = HermesSkillsHubParser.parseUpdateList(result.output)
-            await self?.finishCheckForUpdates(updates: parsed)
+            if Self.checkForUpdatesCompleted(exitCode: result.exitCode, output: result.output) {
+                let parsed = HermesSkillsHubParser.parseUpdateList(result.output)
+                await self?.finishCheckForUpdates(updates: parsed)
+            } else {
+                await self?.failCheckForUpdates(exitCode: result.exitCode, output: result.output)
+            }
         }
     }
 
@@ -1020,6 +1042,22 @@ public final class SkillsViewModel {
         self.updates = rows.filter { $0.status.isActionable }
         self.updateFaults = rows.filter { $0.status.faultDescription != nil }
         hubMessage = updates.isEmpty ? "No updates available" : "\(updates.count) update(s)"
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        hubMessage = nil
+    }
+
+    /// `checkForUpdates` didn't reach either of `do_check`'s honest closing
+    /// lines (P7e) — a broken check, not "no updates". Leaves `updates` /
+    /// `updateFaults` exactly as they were: an earlier successful check's
+    /// list is still the best information Scarf has, and wiping it on a
+    /// transient failure would be a regression, not a refresh.
+    @MainActor
+    private func failCheckForUpdates(exitCode: Int32, output: String) async {
+        isHubLoading = false
+        let tail = HermesCLIVerdict.significantLines(output).suffix(4).joined(separator: " · ")
+        hubMessage = tail.isEmpty
+            ? "Check failed (exit \(exitCode))"
+            : "Check failed (exit \(exitCode)): \(tail)"
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil
     }

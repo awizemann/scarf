@@ -114,22 +114,27 @@ struct ProfileRoutesSection: View {
                 ProfileRouteRow(
                     rank: row.rank,
                     route: row.route,
-                    // v0.20.4+ — `gateway.multiplex_profile_allowlist`. The
-                    // allowlist is inert without multiplexing actually
-                    // enabled — `profiles_to_serve` returns the active
-                    // profile and never looks at the allowlist when
-                    // `multiplex=False` (`hermes_cli/profiles.py:712-713`,
-                    // function at `:703-713`, @ `v2026.9.7`) — so only
-                    // surface the warning once `multiplex_profiles` is on;
-                    // otherwise a route just never runs, and that's already
-                    // covered by `multiplexPrerequisite` above. `nil`
-                    // allowlist (key absent) means "no warning" either way.
+                    // `gateway.multiplex_profile_allowlist` is only ever
+                    // read in the v0.20.1 – v0.21.2 window
+                    // (`hasMultiplexProfileAllowlist` — P7e re-floor; it is
+                    // NOT a v0.20.4 floor, and migration 43 deletes the key
+                    // entirely at v0.21.3). The allowlist is also inert
+                    // without multiplexing actually enabled —
+                    // `profiles_to_serve` returns the active profile and
+                    // never looks at the allowlist when `multiplex=False`
+                    // (`hermes_cli/profiles.py:712-713`, function at
+                    // `:703-713`, @ `v2026.9.7`) — so only surface the
+                    // warning once `multiplex_profiles` is on; otherwise a
+                    // route just never runs, and that's already covered by
+                    // `multiplexPrerequisite` above. `nil` allowlist (key
+                    // absent) means "no warning" either way.
                     // v0.21.4+: an unset/retired key is multiplexing by
-                    // default, so the allowlist is live there too; below the
-                    // floor `multiplexStatus != .off` is exactly the old
-                    // `block.multiplexProfiles` test.
-                    allowlistWarning: (capabilities.isV0204OrLater && multiplexStatus != .off)
-                        ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
+                    // default, so `multiplexStatus != .off` still gates
+                    // correctly there even though the allowlist itself is
+                    // dead from v0.21.3 on (the callee returns `nil` for
+                    // that window via `hasMultiplexProfileAllowlist`).
+                    allowlistWarning: (capabilities.isV0201OrLater && multiplexStatus != .off)
+                        ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile, capabilities: capabilities)
                         : nil,
                     onEdit: {
                         editingIsNew = false

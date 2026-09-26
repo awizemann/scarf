@@ -195,4 +195,80 @@ import Testing
             #expect(HermesGatewayParkedStatus.parkedProfile(statusOutput: output) == nil, "\(output)")
         }
     }
+
+    // MARK: - P7e: `gateway.multiplex_profile_allowlist` window
+
+    private static let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+    private static let v0201 = HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)")
+    private static let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+
+    /// Re-floored to 0.20.1 – 0.21.2 (P7e re-walk): `gateway/config.py`'s
+    /// `_normalize_multiplex_profile_allowlist` first lands in commit
+    /// `c8f235a106`, first tagged at v2026.8.13 (0.20.1) — `git tag
+    /// --contains` that commit lists no earlier numbered tag. Migration 43
+    /// (`hermes_cli/config_migrations.py:640-649` @ v2026.9.14) deletes the
+    /// key on load, and every reader is gone in that SAME release
+    /// (`git grep multiplex_profile_allowlist v2026.9.14 -- 'gateway/*.py'
+    /// hermes_cli/gateway.py hermes_cli/profiles.py` is empty), whose
+    /// `pyproject.toml` reads 0.21.3. The audit's `≥0.20.4` guess undershot
+    /// the true floor and never named the ceiling at all.
+    @Test func multiplexProfileAllowlistIsAWindowNotAFloor() {
+        #expect(!Self.v0200.hasMultiplexProfileAllowlist)
+        #expect(Self.v0201.hasMultiplexProfileAllowlist)
+        #expect(Self.v0212.hasMultiplexProfileAllowlist)
+        #expect(!Self.v0213.hasMultiplexProfileAllowlist)
+        #expect(!Self.v0214.hasMultiplexProfileAllowlist)
+        #expect(!Self.v0215.hasMultiplexProfileAllowlist)
+        #expect(!HermesCapabilities.empty.hasMultiplexProfileAllowlist)
+    }
+
+    // `SettingsViewModel.multiplexProfileAllowlistWarning`'s window gating
+    // is covered in the Mac app target (`scarfTests/ProfileRoutesAllowlistP7eTests.swift`)
+    // since the view model lives there, not in ScarfCore.
+
+    // MARK: - P7e: the v0.21.5 boxed STANDALONE warning
+
+    /// Alan's live host, 2026-09-26: two profiles collided on
+    /// `TELEGRAM_BOT_TOKEN`. Literal box shape from
+    /// `standalone_warning_lines`/`_box` (`hermes_cli/gateway_multiplex_mode.py:299-335,221-225`
+    /// @ v2026.9.24) — border width tracks the longest body line, so this
+    /// fixture's borders are wider than a shorter reason would need, which
+    /// is exactly why the parser keys on line prefixes rather than a fixed
+    /// width.
+    private static let standaloneBox = """
+    ✓ Gateway is running (PID: 4821)
+      (Running manually, not as a system service)
+
+    ┌──────────────────────────────────────────────────────────────────────────────┐
+    │ ⚠ This gateway is STANDALONE: it serves only its own profile.                │
+    │ Profiles NOT served (their bots stay silent): gateway, scarfbox-test          │
+    │ Why: duplicate TELEGRAM_BOT_TOKEN in 'gateway' and 'scarfbox-test' profiles   │
+    │ Fix: hermes gateway migrate --multiplex                                      │
+    └──────────────────────────────────────────────────────────────────────────────┘
+    """
+
+    @Test func standaloneBoxParsesUnservedReasonAndFix() {
+        let warning = HermesGatewayStandaloneWarning.parse(statusOutput: Self.standaloneBox)
+        #expect(warning?.unservedProfiles == ["gateway", "scarfbox-test"])
+        #expect(warning?.reason == "duplicate TELEGRAM_BOT_TOKEN in 'gateway' and 'scarfbox-test' profiles")
+        #expect(warning?.fixCommand == "hermes gateway migrate --multiplex")
+    }
+
+    @Test func noBoxMeansNoWarning() {
+        #expect(HermesGatewayStandaloneWarning.parse(statusOutput: "✓ Gateway is running (PID: 4821)\n") == nil)
+    }
+
+    /// v0.21.4's DIFFERENT, unboxed line (`hermes_cli/gateway.py:1542-1548`
+    /// @ v2026.9.21) must not be misread as the box — it carries no
+    /// unserved-profile list or fix command for this parser to extract.
+    @Test func theOlderV0214OneLinerIsNotTheBox() {
+        #expect(HermesGatewayStandaloneWarning.parse(
+            statusOutput: "⚠ Serving the default profile only: single-profile install\n") == nil)
+    }
+
+    @Test func standaloneStatusBoxFloorIsV0215() {
+        #expect(Self.v0215.hasGatewayStandaloneStatusBox)
+        #expect(!Self.v0214.hasGatewayStandaloneStatusBox)
+        #expect(!HermesCapabilities.empty.hasGatewayStandaloneStatusBox)
+    }
 }

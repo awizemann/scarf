@@ -218,7 +218,19 @@ final class HealthViewModel {
             // that omits it cannot be read as having chosen anything. These
             // two are read-only probes behind a spinner.
             async let statusProbe     = OffPool.run { ctx.runHermes(["status"], timeout: 60).output }
-            async let doctorProbe     = OffPool.run { ctx.runHermes(["doctor"], timeout: 60).output }
+            // `doctor` runs every `DOCTOR_CHECKS` entry plus optional live
+            // network probes (`hermes_cli/doctor.py:166-181` @ v2026.9.24)
+            // — slower than `status` and occasionally over the old 60s cap
+            // on a loaded remote host, so it gets its own longer budget
+            // (P7e). The exit code is kept (not just `.output`): `run_doctor`
+            // returns `int(bool(total.issues or total.manual_issues))`
+            // (`doctor.py:181`) — 1 means findings, same three-state shape
+            // as `security audit` — but an uncaught exception in a single
+            // check also exits non-zero with no `_print_summary` line ever
+            // printed, so the exit code alone can't tell "issues found"
+            // from "crashed"; `parseOutputStatic` producing zero sections is
+            // the tell used below.
+            async let doctorProbe     = OffPool.run { ctx.runHermes(["doctor"], timeout: 120) }
             async let subscriptionRead = OffPool.run { subSvc.loadState() }
             async let configRead      = OffPool.run { svc.loadConfig() }
             // v0.18+ — `computer-use permissions status --json` exits 1
@@ -239,7 +251,8 @@ final class HealthViewModel {
             let pid = await pidProbe
             let versionOutput = await versionProbe
             let statusOutput = await statusProbe
-            let doctorOutput = await doctorProbe
+            let doctorResult = await doctorProbe
+            let doctorOutput = doctorResult.output
             let subscription = await subscriptionRead
             let config = await configRead
             let computerUse = await computerUseProbe
@@ -259,7 +272,7 @@ final class HealthViewModel {
             let statusSections = Self.parseOutputStatic(statusOutput)
                 + [Self.toolGatewaySection(subscription: subscription, config: config, capabilities: caps)]
                 + (computerUse.map { [Self.computerUseSection($0)] } ?? [])
-            let doctorSections = Self.parseOutputStatic(doctorOutput)
+            let doctorSections = Self.doctorSections(output: doctorOutput, exitCode: doctorResult.exitCode)
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -695,7 +708,20 @@ final class HealthViewModel {
                 if parts.count == 2 {
                     let key = parts[0].trimmingCharacters(in: .whitespaces)
                     let val = parts[1].trimmingCharacters(in: .whitespaces)
-                    if !key.isEmpty && key.count < 30 {
+                    // P7e: a bare `Key: value` line is only a real Hermes
+                    // check echo INSIDE an already-opened ◆ section — an
+                    // uncaught exception (no `warn_on_error` wraps the
+                    // `DOCTOR_CHECKS` loop itself, `doctor.py:174-176` @
+                    // v2026.9.24) prints its traceback to the SAME combined
+                    // stream, and the final `SomeError: message` line has
+                    // exactly this shape. `key.count < 30` alone let
+                    // `OSError`, `KeyError`, `RuntimeError`, etc. through as
+                    // a fake passing check. `isExceptionClassNameStatic`
+                    // rejects any single CamelCase identifier ending
+                    // `Error`/`Exception`/`Warning`, which no real Hermes
+                    // doctor label is shaped like.
+                    if !key.isEmpty && key.count < 30 && !currentTitle.isEmpty
+                        && !Self.isExceptionClassNameStatic(key) {
                         currentChecks.append(HealthCheck(label: key, status: .ok, detail: val))
                     }
                 }
@@ -710,6 +736,47 @@ final class HealthViewModel {
             ))
         }
         return sections
+    }
+
+    /// True for a bare identifier shaped like a Python exception class —
+    /// `CamelCase` (or dotted, e.g. `requests.exceptions.ConnectionError`),
+    /// no internal spaces, ending in `Error`/`Exception`/`Warning`. Used to
+    /// keep a stray traceback's final `SomeError: message` line out of
+    /// `parseOutputStatic`'s bare `Key: value` fallback — no real Hermes
+    /// doctor check label has this shape.
+    nonisolated private static func isExceptionClassNameStatic(_ key: String) -> Bool {
+        guard !key.contains(" ") else { return false }
+        guard key.hasSuffix("Error") || key.hasSuffix("Exception") || key.hasSuffix("Warning") else { return false }
+        return key.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+    }
+
+    /// `hermes doctor`'s honest section list (P7e): parses the run, then
+    /// overrides with a single "did not complete" row when the CLI never
+    /// printed a single `◆` section header (an exception crashed the run
+    /// before `_section()` first fired, or a total transport/timeout
+    /// failure — `runHermesCLI` returns `-1` for both, matching every other
+    /// call site's timeout sentinel) OR the run timed out at all (a
+    /// partial doctor report — some sections done, then silence — is still
+    /// not "doctor completed"). `HealthCheck.status` is `.error` so the row
+    /// reads as a failure, never a passing check; `detail` is the last few
+    /// significant lines of combined stdout+stderr, the same "tail" shape
+    /// `RemoteRestoreService.outputTail` uses elsewhere for a truncated
+    /// process's last words.
+    nonisolated static func doctorSections(output: String, exitCode: Int32) -> [HealthSection] {
+        let parsed = parseOutputStatic(output)
+        let timedOut = exitCode == -1
+        guard parsed.isEmpty || timedOut else { return parsed }
+        let tail = HermesCLIVerdict.significantLines(output).suffix(4).joined(separator: "\n")
+        let reason = timedOut ? "Doctor timed out" : "Doctor did not complete"
+        return parsed + [HealthSection(
+            title: "Doctor",
+            icon: "stethoscope",
+            checks: [HealthCheck(
+                label: reason,
+                status: .error,
+                detail: tail.isEmpty ? nil : tail
+            )]
+        )]
     }
 
     nonisolated private static func splitCheckStatic(_ text: String) -> (String, String?) {
@@ -939,14 +1006,30 @@ final class HealthViewModel {
                         self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
                     }
                 case .findings:
-                    // The report IS the answer here; `_render_human` leads with
-                    // `Found N known vulnerability finding(s) across M
-                    // component(s):` (security_audit.py:257) and the highest
-                    // severities sort first (:247-249), so show the head.
-                    let head = trimmed.split(separator: "\n").prefix(4).joined(separator: " · ")
-                    self.auditMessage = head.isEmpty
-                        ? String(localized: "Advisories found.")
-                        : String(localized: "Advisories found. \(head)")
+                    // Exit 1 means "a finding met --fail-on"
+                    // (`cmd_security_audit`, security_audit.py:311-312) —
+                    // but that is ONLY true when `_render_human`'s
+                    // `Found N known vulnerability finding(s) …` head
+                    // (:257) actually parses. Nothing else in this
+                    // function's control flow returns 1 (P7e re-walk:
+                    // both early exits are `return 2`, :293 and :307), so
+                    // an exit 1 with no parseable count is unexplained —
+                    // showing "Advisories found" would be inventing a
+                    // report Hermes never printed (charter C1/C2). Judge
+                    // it exactly like `.failed` instead.
+                    let report = HermesSecurityAuditReport.parse(result.output)
+                    if report.findingCount > 0 {
+                        // `_render_human` leads with the head line
+                        // (:257) and the highest severities sort first
+                        // (:247-249), so show the head.
+                        let head = trimmed.split(separator: "\n").prefix(4).joined(separator: " · ")
+                        self.auditMessage = head.isEmpty
+                            ? String(localized: "Advisories found.")
+                            : String(localized: "Advisories found. \(head)")
+                    } else {
+                        let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
+                        self.auditMessage = String(localized: "Audit failed (exit 1, no report parsed). \(tail)")
+                    }
                 case .failed(let code):
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
                     self.auditMessage = String(localized: "Audit failed (exit \(code)). \(tail)")
@@ -1037,6 +1120,19 @@ final class HealthViewModel {
         holders: [String], isLocal: Bool, canForce: Bool,
         ownPID: Int32 = ProcessInfo.processInfo.processIdentifier
     ) -> String {
+        // Remote-only: `RemoteSQLiteBackend` reads `state.db` by spawning a
+        // TRANSIENT `sqlite3 -readonly …` (or the query-only relaxed form)
+        // over SSH per round-trip — never a persistent connection, and it
+        // has no PID Scarf can compare against `ownPID` (it never ran
+        // locally), so `sessionsOptimizeOnlyScarfHolds`'s local PID check
+        // can never recognise it. If every holder Hermes named is one of
+        // these (`isTransientRemoteSQLiteReader`), telling the user to
+        // "stop the gateway and other Hermes apps" sends them hunting for a
+        // process that has usually already exited by the time they read the
+        // sentence — a plain retry is the honest fix.
+        if !isLocal, !holders.isEmpty, holders.allSatisfy(isTransientRemoteSQLiteReader) {
+            return String(localized: "Hermes refused to optimize: Scarf's own read was in progress — retry.")
+        }
         var text = String(localized: "Hermes refused to optimize: another process has the sessions database open.")
         if !holders.isEmpty {
             text += " " + holders.joined(separator: " · ")
@@ -1081,6 +1177,19 @@ final class HealthViewModel {
               let open = holder.range(of: " (") else { return false }
         let program = holder[open.upperBound...].prefix { $0 != " " && $0 != ")" }
         return program.lowercased() == "scarf"
+    }
+
+    /// A holder line for Scarf's own remote `state.db` read: same shape as
+    /// `isOtherScarfHolder`, but matching the CLI `RemoteSQLiteBackend`
+    /// spawns per query (`sqlite3Flags(queryOnly:)` — argv[0] is always
+    /// `sqlite3`, `-readonly` or the query-only `.dbconfig` form). Hermes'
+    /// own writer runs in-process against the sqlite3 Python module, never
+    /// the CLI binary, so a bare `sqlite3` holder of Hermes's own state.db
+    /// is Scarf's transient reader (P7e).
+    static func isTransientRemoteSQLiteReader(_ holder: String) -> Bool {
+        guard holder.hasPrefix("PID "), let open = holder.range(of: " (") else { return false }
+        let program = holder[open.upperBound...].prefix { $0 != " " && $0 != ")" }
+        return program.lowercased() == "sqlite3"
     }
 
     static func sessionsOptimizeSummary(
