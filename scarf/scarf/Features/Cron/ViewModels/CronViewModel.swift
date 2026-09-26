@@ -1057,7 +1057,9 @@ final class CronViewModel {
     ) {
         let offer = job.map { recoveryOffer(for: $0) }
         Task.detached { [mutationRunner, self] in
-            let result = mutationRunner(arguments, 60)
+            // `OffPool.run`: the blocking spawn gets a thread of its own,
+            // not one of the cooperative pool's (C10).
+            let result = await OffPool.run { mutationRunner(arguments, 60) }
             await MainActor.run {
                 onOutcome?(result.exitCode == 0)
                 if result.exitCode == 0 {

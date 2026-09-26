@@ -160,7 +160,11 @@ final class PeersViewModel: OutcomeMessageHosting {
             // long, so the CLI's own DM_TIMEOUT_S (600) is the bound
             // Scarf mirrors rather than cutting it short locally (plus
             // headroom on v0.21.4+, see `dmProcessTimeout`).
-            let result = run(HermesPeerCLI.dmArgs(target: target, message: text), timeout)
+            // `OffPool.run`: a blocking spawn of up to twelve minutes gets
+            // a thread of its own, not one of the cooperative pool's (C10).
+            let result = await OffPool.run {
+                run(HermesPeerCLI.dmArgs(target: target, message: text), timeout)
+            }
             let parsed = HermesPeerCLI.parseDM(
                 exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr
             )
