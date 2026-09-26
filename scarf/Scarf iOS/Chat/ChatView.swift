@@ -458,14 +458,13 @@ struct ChatView: View {
                     .id(msg.id)
                 }
                 if controller.vm.isGenerating {
-                    HStack {
-                        ProgressView()
-                        Text("Agent is thinking…")
-                            .font(.caption)
-                            .foregroundStyle(ScarfColor.foregroundMuted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
+                    // Mac parity (#145): the running turn's elapsed time
+                    // rides next to the spinner. The 1 Hz tick lives in
+                    // `AgentThinkingRow`'s own TimelineView — this list
+                    // re-renders only when `workingSince` flips.
+                    AgentThinkingRow(since: controller.vm.workingSince)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
                 } else if controller.vm.isPostProcessing {
                     HStack(spacing: 6) {
                         Image(systemName: "ellipsis")
@@ -3199,6 +3198,50 @@ struct ChatPermissionPresenter: ViewModifier {
 /// the pending permission. Two permissions for the same request-id
 /// are treated as identical (rare — would only happen if the remote
 /// sends a duplicate).
+/// "Agent is thinking… · 0:12" — the in-flight turn indicator with a
+/// live elapsed clock (#145, parity with the Mac `WorkingElapsedIndicator`).
+/// The per-second tick is confined to this view's `TimelineView`, so the
+/// message list never re-renders on the clock (gh#140). VoiceOver gets
+/// one element: static label, elapsed time as the value — readable on
+/// demand, never re-announced each second.
+private struct AgentThinkingRow: View {
+    let since: Date?
+
+    var body: some View {
+        if let since {
+            TimelineView(.periodic(from: since, by: 1)) { context in
+                row(elapsed: context.date.timeIntervalSince(since))
+            }
+        } else {
+            row(elapsed: nil)
+        }
+    }
+
+    private func row(elapsed: TimeInterval?) -> some View {
+        HStack {
+            ProgressView()
+            if let elapsed {
+                Text("Agent is thinking… · \(RichChatViewModel.formatElapsedClock(elapsed))")
+                    .monospacedDigit()
+            } else {
+                Text("Agent is thinking…")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Agent is thinking"))
+        .accessibilityValue(elapsed.map(Self.spokenElapsed) ?? Text(verbatim: ""))
+    }
+
+    private static func spokenElapsed(_ seconds: TimeInterval) -> Text {
+        let whole = max(0, Int(seconds.rounded(.down)))
+        return Text(Duration.seconds(whole).formatted(
+            .units(allowed: [.hours, .minutes, .seconds], width: .wide)
+        ))
+    }
+}
+
 private struct PermissionWrapper: Identifiable {
     let value: RichChatViewModel.PendingPermission
     var id: Int { value.requestId }

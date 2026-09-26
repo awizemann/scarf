@@ -33,7 +33,7 @@ struct RichChatMessageList: View {
     /// only after the turn's first ACP event and while no visible text
     /// is streaming; the trailing group's ActivityBubble renders it
     /// (spinner + "Running <tool>…" / "Reasoning…" / "Receiving
-    /// response…"). While nil, the classic three-dots indicator covers
+    /// response…"). While nil, `WorkingElapsedIndicator` covers
     /// the pre-first-event gap.
     var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
     /// Recall-mode boundary: DB rows with ids below this were paged in
@@ -41,6 +41,12 @@ struct RichChatMessageList: View {
     /// activity marker per turn (no tool cards / reasoning). Nil until
     /// the user pages back.
     var earlierCutoffId: Int? = nil
+    /// Start of the in-flight busy period (`RichChatViewModel.workingSince`)
+    /// — feeds the pre-first-event "Working · 0:12" indicator (#145).
+    /// Changes twice per turn; the per-second tick lives inside
+    /// `WorkingElapsedIndicator`'s own `TimelineView`, so this list's
+    /// body is never re-evaluated by the clock.
+    var workingSince: Date? = nil
 
     /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
     /// `.defaultScrollAnchor(.bottom)`.
@@ -156,12 +162,15 @@ struct RichChatMessageList: View {
                         }
                     }
 
-                    // Three-dots indicator only for the pre-first-event
-                    // gap (P2): once the turn emits its first event the
+                    // Waiting indicator only for the pre-first-event gap
+                    // (P2): once the turn emits its first event the
                     // trailing ActivityBubble (or streaming text bubble)
-                    // is the progress signal.
+                    // is the progress signal. A live elapsed clock, not
+                    // the old three dots — their `.symbolEffect(.pulse)`
+                    // never animated plain `Circle`s, so a slow first
+                    // token read as a frozen app (#145).
                     if isWorking && liveStatus == nil {
-                        typingIndicator
+                        WorkingElapsedIndicator(since: workingSince)
                             .id("typing-indicator")
                     }
 
@@ -228,26 +237,6 @@ struct RichChatMessageList: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private var typingIndicator: some View {
-        HStack {
-            HStack(spacing: 4) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle()
-                        .fill(.secondary)
-                        .frame(width: 6, height: 6)
-                        .opacity(0.6)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.secondary.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Spacer(minLength: 80)
-        }
-        .symbolEffect(.pulse)
     }
 }
 

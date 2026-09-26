@@ -409,7 +409,33 @@ public final class RichChatViewModel {
     /// thinking about your message" from "agent is closing out" and
     /// avoid the misleading "spinner after the reply has landed" UX
     /// we saw in pass-1 (M7 #4).
-    public var isAgentWorking = false
+    public var isAgentWorking = false {
+        didSet {
+            // Keep `workingSince` in lock-step. Equality-guarded both
+            // ways: the terminal-mode poll re-asserts `true` every tick,
+            // and an unchanged write would still invalidate observers.
+            if isAgentWorking {
+                if workingSince == nil { workingSince = Date() }
+            } else if workingSince != nil {
+                workingSince = nil
+            }
+        }
+    }
+
+    /// Wall-clock start of the in-flight busy period, or nil while idle —
+    /// drives the transcript's "Working · 0:12" elapsed indicator (#145).
+    /// Distinct from the private `currentTurnStart`, which feeds the
+    /// per-reply stopwatch pill and is cleared by EVERY
+    /// `finalizeStreamingMessage` (once per completed tool call), so it
+    /// can't answer "how long has this turn been running" past the
+    /// first tool. This one is set once when `isAgentWorking` flips on
+    /// (on a send that is the same instant `addUserMessage` stamps
+    /// `currentTurnStart`; deliberately not copied from it, since an
+    /// empty turn's finalize leaves that one stale) and cleared when it
+    /// flips off; it changes twice per turn, so
+    /// observing it costs nothing — the per-second tick lives entirely
+    /// in the indicator's own `TimelineView`.
+    public private(set) var workingSince: Date?
     /// FIFO queue of permission requests the agent has raised and the
     /// user hasn't answered yet.
     ///
@@ -920,6 +946,21 @@ public final class RichChatViewModel {
         let minutes = totalSeconds / 60
         let remainder = totalSeconds % 60
         return "\(minutes)m \(remainder)s"
+    }
+
+    /// Format a running turn's elapsed time for the live "Working · 0:12"
+    /// indicator (#145): whole seconds as `m:ss`, `h:mm:ss` from an hour.
+    /// Whole seconds only — the indicator ticks at 1 Hz, so a decimal
+    /// would just flicker. Negative input (clock skew) clamps to `0:00`.
+    public static func formatElapsedClock(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
     }
 
     /// Merged slash-menu list. Precedence: **ACP > project-scoped >
@@ -1593,6 +1634,16 @@ public final class RichChatViewModel {
     private var streamingThinkingText = ""
     private var streamingToolCalls: [HermesToolCall] = []
 
+    /// Ids of tool calls whose `tool_call` start this VM processed and
+    /// whose `tool_call_update` has not arrived yet. Separate from
+    /// `streamingToolCalls`, which `finalizeStreamingMessage` empties on
+    /// every completion — with parallel calls (start A, start B,
+    /// update A) B has left `streamingToolCalls` but is still open.
+    /// `handleToolCallComplete` drops any update whose id is not in
+    /// here (see there). Not observed: no view reads it.
+    @ObservationIgnored
+    private var openToolCallIds: Set<String> = []
+
     // MARK: - Streaming UI coalescing (gh#140)
     //
     // ACP chunks can arrive far faster than any display refresh —
@@ -1782,6 +1833,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        openToolCallIds = []
         cancelStreamingFlush()
         setLiveActivityStatus(nil)
         acpInputTokens = 0
@@ -2248,7 +2300,7 @@ public final class RichChatViewModel {
     /// Derived from live ACP events (never from the poll-based
     /// `sessions.last_activity_description` column, which lags).
     /// `nil` = no status to show: either the turn hasn't produced its
-    /// first event yet (the classic three-dots indicator covers that
+    /// first event yet (the "Working · 0:12" elapsed indicator covers that
     /// gap) or visible text is streaming (the text bubble itself is
     /// the progress signal).
     public enum LiveActivityStatus: Equatable, Sendable {
@@ -2279,6 +2331,7 @@ public final class RichChatViewModel {
             startedAt: Date()
         )
         streamingToolCalls.append(toolCall)
+        openToolCallIds.insert(call.toolCallId)
         setLiveActivityStatus(.runningTool(call.functionName))
         // Tally for `agent_turn_completed`'s bucket. Counted at *start* so a
         // turn cut short by a disconnect still has an honest tally; the
@@ -2289,6 +2342,31 @@ public final class RichChatViewModel {
     }
 
     private func handleToolCallComplete(_ update: ACPToolCallUpdateEvent) {
+        // Only close calls we saw start, and each at most once. Hermes
+        // >= v0.21.4 (v2026.9.21) closes the synthetic tool call carried
+        // INSIDE a `session/request_permission` — ids `perm-check-N`
+        // (acp_adapter/permissions.py:54-64, closed at :113) and
+        // `edit-approval-N` (edit_approval.py:199-207, wired with
+        // `send_update` at server.py:922-929) — with a bare
+        // `tool_call_update` that never had a `tool_call` start. Treating
+        // it as a completion finalized the streaming message mid-turn
+        // (locking a still-running tool out of its own result's telemetry)
+        // and appended an empty `role: "tool"` row.
+        //
+        // Deliberately ungated: through v0.21.3 the only `tool_call_update`
+        // emitter is `build_tool_complete` (acp_adapter/tools.py:829 @
+        // v2026.9.14), sent by the step callback for an id it popped off
+        // the per-turn queue that `tool.started` → `tool_call` filled
+        // (events.py) — every update Scarf could receive has a start, and
+        // the pre-engagement gate drops starts and updates alike. So the
+        // guard is a no-op on pre-target hosts. The dedupe half is the
+        // same: one terminal update per id at every tag (v0.21.4's
+        // `tool.completed` close, step-callback fallback and turn-end
+        // `flush_open_tool_calls` each pop the id first).
+        guard openToolCallIds.remove(update.toolCallId) != nil else {
+            ScarfMon.event(.chatStream, "toolCallUpdate.unknownIdDropped", count: 1)
+            return
+        }
         // Populate live telemetry on the matching streaming call BEFORE
         // finalizing — once finalize runs, streamingToolCalls is cleared
         // and the call is locked into the parent HermesMessage's `let
