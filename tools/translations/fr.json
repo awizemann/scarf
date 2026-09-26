@@ -3104,5 +3104,7 @@
   "Check failed (exit %d): %@": "Échec de la vérification (code %d) : %@",
   "Doctor timed out": "Doctor a expiré",
   "Doctor did not complete": "Doctor ne s'est pas terminé",
-  "decline (not supported by this Hermes — behaves as pair)": "decline (non pris en charge par ce Hermes — se comporte comme pair)"
+  "decline (not supported by this Hermes — behaves as pair)": "decline (non pris en charge par ce Hermes — se comporte comme pair)",
+  "Dismiss this unconfirmed cron result": "Ignorer ce résultat incertain de cron",
+  "Dismiss this unconfirmed routine result": "Ignorer ce résultat incertain de routine"
 }

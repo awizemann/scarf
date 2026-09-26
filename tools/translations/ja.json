@@ -3101,5 +3101,7 @@
   "Check failed (exit %d): %@": "確認に失敗しました（終了コード %d）: %@",
   "Doctor timed out": "Doctor がタイムアウトしました",
   "Doctor did not complete": "Doctor が完了しませんでした",
-  "decline (not supported by this Hermes — behaves as pair)": "decline（この Hermes ではサポートされていません — pair として動作します）"
+  "decline (not supported by this Hermes — behaves as pair)": "decline（この Hermes ではサポートされていません — pair として動作します）",
+  "Dismiss this unconfirmed cron result": "この cron の不明な結果を閉じる",
+  "Dismiss this unconfirmed routine result": "このルーティンの不明な結果を閉じる"
 }

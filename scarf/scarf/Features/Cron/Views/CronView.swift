@@ -274,7 +274,7 @@ struct CronView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(ScarfColor.foregroundMuted)
-                        .accessibilityLabel("Dismiss this cron error")
+                        .accessibilityLabel(unconfirmed ? "Dismiss this unconfirmed cron result" : "Dismiss this cron error")
                     }
                 }
             }

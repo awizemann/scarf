@@ -3125,5 +3125,7 @@
   "Check failed (exit %d): %@": "A verificação falhou (saída %d): %@",
   "Doctor timed out": "O Doctor expirou",
   "Doctor did not complete": "O Doctor não foi concluído",
-  "decline (not supported by this Hermes — behaves as pair)": "decline (não suportado por este Hermes — comporta-se como pair)"
+  "decline (not supported by this Hermes — behaves as pair)": "decline (não suportado por este Hermes — comporta-se como pair)",
+  "Dismiss this unconfirmed cron result": "Dispensar este resultado incerto de cron",
+  "Dismiss this unconfirmed routine result": "Dispensar este resultado incerto de rotina"
 }

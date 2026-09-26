@@ -71,7 +71,7 @@ struct BotRoutinesView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(ScarfColor.foregroundMuted)
-                        .accessibilityLabel("Dismiss this routine error")
+                        .accessibilityLabel(viewModel.messageIsUnconfirmed ? "Dismiss this unconfirmed routine result" : "Dismiss this routine error")
                     }
                 }
                 .accessibilityElement(children: .contain)
