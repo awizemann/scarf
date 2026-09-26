@@ -197,6 +197,31 @@ public enum HermesPeerCLI {
         return stderr.trimmingCharacters(in: .whitespacesAndNewlines) == expected
     }
 
+    /// Whether a FAILED `peer run` may nonetheless have left a run on the
+    /// peer — the only case whose `--idempotency-key` is worth reusing.
+    ///
+    /// Two outcomes are ambiguous: Scarf's own process timeout (the kill can
+    /// land after the `/v1/runs` POST was admitted), and the CLI's
+    /// `Could not reach peer '…': …` arm, which is also where the POST's own
+    /// 30 s urllib timeout lands (`except (URLError, TimeoutError, OSError,
+    /// RuntimeError)` → `_peer_failure`, `hermes_cli/subcommands/peer.py
+    /// :205-213,325-329` @ v2026.9.24; the same wording inline at
+    /// v2026.8.31:384-386). Everything else proves no run was created: an
+    /// HTTP rejection (`rejected the request (HTTP …)`) is the peer
+    /// answering, and the key is reserved only after admission
+    /// (`gateway/platforms/api_server_runs.py:626-675`); the rest are local
+    /// refusals before any request. Keeping the key there could only hurt —
+    /// above all a `409 idempotency_key_conflict`, which the server returns
+    /// when the fingerprint (body incl. `session_id`, `:593-596`) changed,
+    /// e.g. the peer's Bot Chat was recreated, and which every retry of the
+    /// same text would hit again.
+    public static func runFailureMayHaveCreatedRun(exitCode: Int32, stderr: String) -> Bool {
+        if isLocalDMTimeout(exitCode: exitCode, stderr: stderr, timeout: runProcessTimeout) { return true }
+        return stderr.split(whereSeparator: \.isNewline).contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("Could not reach peer '")
+        }
+    }
+
     /// The distinctive tail of the accepted-but-still-running line
     /// (`peer.py:362-364` @ v2026.9.21).
     static let acceptedStillRunningMarkers = [

@@ -2408,21 +2408,14 @@ public final class RichChatViewModel {
         // exitCode for the inspector to render. No-op for sessions
         // loaded from `state.db` (no live event ever fires).
         if let idx = streamingToolCalls.firstIndex(where: { $0.callId == update.toolCallId }) {
-            let started = streamingToolCalls[idx].startedAt
-            if let started {
-                streamingToolCalls[idx].duration = Date().timeIntervalSince(started)
-            }
-            streamingToolCalls[idx].exitCode = Self.exitCode(forStatus: update.status)
-            // Backfill arguments: the `tool_call` start event sometimes
-            // omits `rawInput` (stored as the literal "{}" placeholder);
-            // when the completing update carries the real arguments,
-            // splice them in before finalize locks the call into the
-            // permanent message.
-            let stored = streamingToolCalls[idx].arguments
-            if stored.isEmpty || stored == "{}",
-               let backfilled = update.argumentsJSON {
-                streamingToolCalls[idx].arguments = backfilled
-            }
+            Self.applyCompletion(update, to: &streamingToolCalls[idx])
+        } else {
+            // P9: a mid-turn send (`addUserMessage` while the agent works)
+            // finalizes the streaming bubble with this call still OPEN, so
+            // it is already locked into a permanent message. Patch it there
+            // by callId, or the inspector shows it without duration / exit
+            // code / backfilled arguments forever.
+            patchFinalizedToolCall(update)
         }
         // Tool finished; until the next event lands we're waiting on
         // the model again.
@@ -2448,6 +2441,55 @@ public final class RichChatViewModel {
             reasoning: nil
         ))
         buildMessageGroups()
+    }
+
+    /// Live telemetry from a completing update: duration since the start
+    /// event, a synthetic exit code, and the real arguments when the start
+    /// event omitted `rawInput` (stored as the literal "{}" placeholder).
+    private static func applyCompletion(_ update: ACPToolCallUpdateEvent, to call: inout HermesToolCall) {
+        if let started = call.startedAt {
+            call.duration = Date().timeIntervalSince(started)
+        }
+        call.exitCode = exitCode(forStatus: update.status)
+        let stored = call.arguments
+        if stored.isEmpty || stored == "{}",
+           let backfilled = update.argumentsJSON {
+            call.arguments = backfilled
+        }
+    }
+
+    /// Apply a completion to a call that was already finalized into a
+    /// permanent assistant message (see `handleToolCallComplete`). Searches
+    /// newest-first — the call belongs to the running turn — and rebuilds
+    /// that one message, every other field unchanged.
+    private func patchFinalizedToolCall(_ update: ACPToolCallUpdateEvent) {
+        guard let msgIdx = messages.lastIndex(where: { msg in
+                  msg.isAssistant && msg.toolCalls.contains { $0.callId == update.toolCallId }
+              }),
+              let callIdx = messages[msgIdx].toolCalls.firstIndex(where: { $0.callId == update.toolCallId })
+        else { return }
+        let old = messages[msgIdx]
+        var calls = old.toolCalls
+        Self.applyCompletion(update, to: &calls[callIdx])
+        withTransaction(Transaction(animation: nil)) {
+            messages[msgIdx] = HermesMessage(
+                id: old.id,
+                sessionId: old.sessionId,
+                role: old.role,
+                content: old.content,
+                toolCallId: old.toolCallId,
+                toolCalls: calls,
+                toolName: old.toolName,
+                timestamp: old.timestamp,
+                tokenCount: old.tokenCount,
+                finishReason: old.finishReason,
+                reasoning: old.reasoning,
+                reasoningContent: old.reasoningContent,
+                reasoningContentAvailable: old.reasoningContentAvailable,
+                isCompactionSummary: old.isCompactionSummary,
+                containsCompactionSummary: old.containsCompactionSummary
+            )
+        }
     }
 
     /// Derive a synthetic exit code from the ACP update event's status
@@ -3360,10 +3402,11 @@ public final class RichChatViewModel {
                 // the same row seeds the same instant. Set BEFORE the
                 // flag so its `didSet` keeps this value instead of
                 // stamping `Date()`. No user row (a cron- or gateway-born
-                // turn) falls back to `Date()` as before. Only on the edge
+                // turn), or one too old to be this turn's prompt (P9 —
+                // `workingSinceSeed`), falls back to `Date()`. Only on the edge
                 // into working: a clock already running is never moved.
                 if derivedWorking, !wasWorking,
-                   let started = fetched.last(where: \.isUser)?.timestamp {
+                   let started = Self.workingSinceSeed(fetched: fetched, now: Date()) {
                     workingSince = started
                 }
                 isAgentWorking = derivedWorking
@@ -3428,6 +3471,27 @@ public final class RichChatViewModel {
     private func stopActivePolling() {
         activePollingTimer?.invalidate()
         activePollingTimer = nil
+    }
+
+    /// Oldest prompt row `workingSinceSeed` will seed the elapsed clock
+    /// from. `deriveAgentWorking` is a shape heuristic — a session whose
+    /// last turn died mid-tool days ago still reads "working" — and the
+    /// latest user row can belong to a long-finished turn when the running
+    /// one was cron- or gateway-born. Past this age the prompt row is far
+    /// likelier stale than a turn genuinely that long, so the clock starts
+    /// at attach time instead of reading "Working · 71:14:03".
+    static let workingSinceSeedMaxAge: TimeInterval = 6 * 60 * 60
+
+    /// The instant a turn found running in the DB started, for the
+    /// elapsed clock: the latest user row's timestamp when it is within
+    /// ``workingSinceSeedMaxAge`` of `now` (clamped to `now`, so a remote
+    /// clock ahead of this Mac can't show a negative time), else `nil` —
+    /// the caller then lets `isAgentWorking`'s `didSet` stamp `Date()`.
+    nonisolated static func workingSinceSeed(fetched: [HermesMessage], now: Date) -> Date? {
+        guard let started = fetched.last(where: \.isUser)?.timestamp,
+              now.timeIntervalSince(started) <= workingSinceSeedMaxAge
+        else { return nil }
+        return min(started, now)
     }
 
     private func deriveAgentWorking(from fetched: [HermesMessage]) -> Bool {

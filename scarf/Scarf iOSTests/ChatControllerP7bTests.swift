@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftUI
 import ScarfCore
 @testable import scarf_mobile
 
@@ -185,6 +186,79 @@ import ScarfCore
             #expect(!controller.vm.messages.contains { $0.role == "system" },
                     "the old turn's failure bubble landed on the new chat")
             #expect(controller.vm.acpError == nil, "the old turn's error banner landed on the new chat")
+        }
+    }
+
+    // MARK: - P9 (t-d6384e2e item 2) Background round-trip never strands
+
+    /// `.ready` → background demotes to `.reconnecting(0)` with no ladder
+    /// running; `.active` must start one. Before the fix the `.active`
+    /// early-return keyed on `.reconnecting` alone and the chat sat in
+    /// "Resuming…" forever.
+    @Test func foregroundAfterBackgroundPauseReconnects() async throws {
+        try await Self.withFakeRemote { ctx in
+            let chA = HoldingChannel(sessionId: "sess-A")
+            let chResume = HoldingChannel(sessionId: "sess-A")
+            let calls = Counter()
+            let controller = ChatController(context: ctx)
+            controller.clientFactory = { _ in
+                let first = calls.next() == 1
+                return ACPClient(context: ctx) { _ in first ? chA : chResume }
+            }
+
+            await controller.start()
+            #expect(Self.isReady(controller))
+
+            await controller.handleScenePhase(.background)
+            #expect(controller.state == .reconnecting(attempt: 0, of: 5))
+
+            await controller.handleScenePhase(.active)
+            let recovered = await Self.waitUntil { Self.isReady(controller) }
+            #expect(recovered, "stranded in \(controller.state) after the background round-trip")
+            #expect(await chResume.sentMethods.contains("session/load"))
+            #expect(controller.vm.sessionId == "sess-A")
+        }
+    }
+
+    /// A ladder interrupted by the background pause (cancelled, handle
+    /// nilled, state left at `.reconnecting(n)`) must also restart on
+    /// `.active` rather than being mistaken for one still in flight.
+    @Test func foregroundAfterPauseInterruptedALadderReconnects() async throws {
+        try await Self.withFakeRemote { ctx in
+            let chA = HoldingChannel(sessionId: "sess-A")
+            let chWedged = HoldingChannel(sessionId: "sess-A")
+            let chResume = HoldingChannel(sessionId: "sess-A")
+            let (gate, gateCont) = AsyncStream<Void>.makeStream()
+            let calls = Counter()
+            let controller = ChatController(context: ctx)
+            controller.clientFactory = { _ in
+                switch calls.next() {
+                case 1: return ACPClient(context: ctx) { _ in chA }
+                case 2: return ACPClient(context: ctx) { _ in
+                    for await _ in gate { break } // wedged spawn
+                    return chWedged
+                }
+                default: return ACPClient(context: ctx) { _ in chResume }
+                }
+            }
+
+            await controller.start()
+            #expect(Self.isReady(controller))
+            await chA.close() // transport dies → reconnect ladder
+            let spawning = await Self.waitUntil { calls.count >= 2 }
+            #expect(spawning, "reconnect never reached its spawn")
+            #expect(controller.state == .reconnecting(attempt: 1, of: 5))
+
+            await controller.handleScenePhase(.background)
+            gateCont.yield(())
+            gateCont.finish()
+            let wedgedStopped = await Self.waitUntil { await chWedged.closed }
+            #expect(wedgedStopped, "the cancelled ladder's client was not stopped")
+
+            await controller.handleScenePhase(.active)
+            let recovered = await Self.waitUntil { Self.isReady(controller) }
+            #expect(recovered, "stranded in \(controller.state) after the interrupted ladder")
+            #expect(await chResume.sentMethods.contains("session/load"))
         }
     }
 }

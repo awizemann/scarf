@@ -219,17 +219,17 @@ final class HealthViewModel {
             // two are read-only probes behind a spinner.
             async let statusProbe     = OffPool.run { ctx.runHermes(["status"], timeout: 60).output }
             // `doctor` runs every `DOCTOR_CHECKS` entry plus optional live
-            // network probes (`hermes_cli/doctor.py:166-181` @ v2026.9.24)
+            // network probes (`hermes_cli/doctor.py:166-188` @ v2026.9.24)
             // — slower than `status` and occasionally over the old 60s cap
             // on a loaded remote host, so it gets its own longer budget
             // (P7e). The exit code is kept (not just `.output`): `run_doctor`
             // returns `int(bool(total.issues or total.manual_issues))`
-            // (`doctor.py:181`) — 1 means findings, same three-state shape
+            // (`doctor.py:188`) — 1 means findings, same three-state shape
             // as `security audit` — but an uncaught exception in a single
             // check also exits non-zero with no `_print_summary` line ever
             // printed, so the exit code alone can't tell "issues found"
-            // from "crashed"; `parseOutputStatic` producing zero sections is
-            // the tell used below.
+            // from "crashed"; the missing summary line is the tell
+            // (`doctorSections`).
             async let doctorProbe     = OffPool.run { ctx.runHermes(["doctor"], timeout: 120) }
             async let subscriptionRead = OffPool.run { subSvc.loadState() }
             async let configRead      = OffPool.run { svc.loadConfig() }
@@ -750,24 +750,42 @@ final class HealthViewModel {
         return key.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
     }
 
-    /// `hermes doctor`'s honest section list (P7e): parses the run, then
-    /// overrides with a single "did not complete" row when the CLI never
-    /// printed a single `◆` section header (an exception crashed the run
-    /// before `_section()` first fired, or a total transport/timeout
-    /// failure — `runHermesCLI` returns `-1` for both, matching every other
-    /// call site's timeout sentinel) OR the run timed out at all (a
-    /// partial doctor report — some sections done, then silence — is still
-    /// not "doctor completed"). `HealthCheck.status` is `.error` so the row
+    /// `hermes doctor`'s honest section list (P7e, P9): parses the run,
+    /// then appends a single failure row whenever the run did not provably
+    /// finish — `runHermesCLI`'s `-1` (timeout or could-not-spawn), or no
+    /// `_print_summary` line (an exception crashed the run, before or after
+    /// some sections printed). `HealthCheck.status` is `.error` so the row
     /// reads as a failure, never a passing check; `detail` is the last few
     /// significant lines of combined stdout+stderr, the same "tail" shape
     /// `RemoteRestoreService.outputTail` uses elsewhere for a truncated
     /// process's last words.
+    ///
+    /// P9: "some sections parsed" is not completion either. The
+    /// `DOCTOR_CHECKS` loop has no per-check guard
+    /// (`hermes_cli/doctor.py:179-182` @ v2026.9.24), so a check that raises
+    /// mid-run leaves the earlier sections on stdout, a traceback, and exit
+    /// 1 — the same exit code as a clean run with findings (`:188`). The
+    /// only proof the loop finished is `_print_summary`'s closing line
+    /// (`:142-163`), so a run without it (``doctorPrintedSummary(_:)``) gets
+    /// the row too. And `-1` is not always a timeout: `runHermesCLI` also
+    /// returns it for a missing local binary and for every other transport
+    /// failure, so only a `TransportError.timeout` message is labelled
+    /// "timed out".
     nonisolated static func doctorSections(output: String, exitCode: Int32) -> [HealthSection] {
         let parsed = parseOutputStatic(output)
-        let timedOut = exitCode == -1
-        guard parsed.isEmpty || timedOut else { return parsed }
-        let tail = HermesCLIVerdict.significantLines(output).suffix(4).joined(separator: "\n")
-        let reason = timedOut ? String(localized: "Doctor timed out") : String(localized: "Doctor did not complete")
+        let spawnFailed = exitCode == -1
+        guard spawnFailed || !doctorPrintedSummary(output) else { return parsed }
+        let lines = HermesCLIVerdict.significantLines(output)
+        let tail = lines.suffix(4).joined(separator: "\n")
+        let reason: String
+        if spawnFailed {
+            // `TransportError.timeout`'s `errorDescription`, which
+            // `runHermesCLI` appends as the LAST line of a timed-out run.
+            let timedOut = lines.last?.hasPrefix("Command timed out after") == true
+            reason = timedOut ? String(localized: "Doctor timed out") : String(localized: "Doctor could not run")
+        } else {
+            reason = String(localized: "Doctor did not complete")
+        }
         return parsed + [HealthSection(
             title: "Doctor",
             icon: "stethoscope",
@@ -777,6 +795,20 @@ final class HealthViewModel {
                 detail: tail.isEmpty ? nil : tail
             )]
         )]
+    }
+
+    /// Whether `hermes doctor` reached `_print_summary`
+    /// (`hermes_cli/doctor.py:142-163` @ v2026.9.24), which always prints
+    /// exactly one of three lines: `Fixed N issue(s).` (`--fix` only),
+    /// `Found N issue(s) to address:`, or `All checks passed! 🎉`. The
+    /// wording is unchanged at every tag from v2026.3.12 through
+    /// v2026.9.24, so this is not version-gated.
+    nonisolated static func doctorPrintedSummary(_ output: String) -> Bool {
+        HermesCLIVerdict.significantLines(output).contains { line in
+            line.hasPrefix("All checks passed!")
+                || line.range(of: #"^Found \d+ issue\(s\) to address:"#, options: .regularExpression) != nil
+                || line.range(of: #"^Fixed \d+ issue\(s\)\."#, options: .regularExpression) != nil
+        }
     }
 
     nonisolated private static func splitCheckStatic(_ text: String) -> (String, String?) {
@@ -1181,15 +1213,16 @@ final class HealthViewModel {
 
     /// A holder line for Scarf's own remote `state.db` read: same shape as
     /// `isOtherScarfHolder`, but matching the CLI `RemoteSQLiteBackend`
-    /// spawns per query (`sqlite3Flags(queryOnly:)` — argv[0] is always
-    /// `sqlite3`, `-readonly` or the query-only `.dbconfig` form). Hermes'
-    /// own writer runs in-process against the sqlite3 Python module, never
-    /// the CLI binary, so a bare `sqlite3` holder of Hermes's own state.db
-    /// is Scarf's transient reader (P7e).
+    /// spawns per query. Hermes' own writer runs in-process against the
+    /// sqlite3 Python module, never the CLI binary — but a user's own
+    /// `sqlite3 ~/.hermes/state.db` session, or a backup script, IS the CLI
+    /// binary, so the program name alone was not enough (P9): the whole
+    /// argv Hermes printed must be one of Scarf's own invocation shapes
+    /// (`RemoteSQLiteBackend.isOwnReaderCommandLine`, `sqlite3 -readonly
+    /// -json …` or the query-only `.dbconfig` form).
     static func isTransientRemoteSQLiteReader(_ holder: String) -> Bool {
         guard holder.hasPrefix("PID "), let open = holder.range(of: " (") else { return false }
-        let program = holder[open.upperBound...].prefix { $0 != " " && $0 != ")" }
-        return program.lowercased() == "sqlite3"
+        return RemoteSQLiteBackend.isOwnReaderCommandLine(String(holder[open.upperBound...]))
     }
 
     static func sessionsOptimizeSummary(

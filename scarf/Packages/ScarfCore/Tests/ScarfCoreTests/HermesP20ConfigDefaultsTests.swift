@@ -180,6 +180,47 @@ struct HermesP20ConfigDefaultsTests {
         #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.4")) == expected)
     }
 
+    /// P9: every literal here is paired with what Hermes itself computes —
+    /// `yaml.safe_load` (PyYAML 6.0.3, the v0.21.5 venv) then
+    /// `_positive_int` (`agent/agent_init.py:1410-1418` @ v2026.9.24), with
+    /// `None` shown as the ratio-only `0`. Probed, not assumed:
+    ///
+    ///     nan / inf / -inf     str   → int() ValueError → None
+    ///     .nan                 float → int(nan) ValueError → None
+    ///     .inf / -.inf         float → int() OverflowError (Hermes raises)
+    ///     1e30 / 1.5e3         str (no `.`/unsigned exponent) → None
+    ///     1.0e+30              float → 10**30-ish (> Int.max; clamped to
+    ///                          the window by Hermes → ratio-only)
+    ///     1.5e+3               float → 1500
+    ///     99999999999999999999 int   → itself (> Int.max; same as 1.0e+30)
+    ///     "256000" / "256_000" str   → 256000 (PEP 515 `int(str)`)
+    ///     "300000.0"           str   → ValueError → None
+    ///     010 / 0x10 / 1:30    int   → 8 / 16 / 90 (YAML 1.1 octal/hex/base-60)
+    ///     true                 bool  → int(True) = 1
+    ///     300000.9 / 1_000.5   float → 300000 / 1000 (truncates)
+    ///     0.5 / -0.5 / _100    → None
+    ///
+    /// The old `Int(Double(raw))` fallback TRAPPED (process crash) on `nan`,
+    /// `inf`, `-inf`, `1e30`, `.inf`, `1.0e+30` and `99999999999999999999`,
+    /// and returned 1500 for `1.5e3`, 10 for `010`, 0 for `0x10`/`1:30`/
+    /// `true` and 300000 for `"300000.0"` — all wrong against the host.
+    @Test(arguments: [
+        ("nan", 0), ("inf", 0), ("-inf", 0), (".nan", 0), (".inf", 0), ("-.inf", 0),
+        ("1e30", 0), ("1.0e+30", 0), ("1.5e3", 0), ("1.5e+3", 1500),
+        ("99999999999999999999", 0), ("-99999999999999999999", 0),
+        ("256_000", 256_000), ("300000.0", 300_000), ("\"0\"", 0), ("-5", 0), ("abc", 0),
+        ("\"256000\"", 256_000), ("\"256_000\"", 256_000), ("'300000'", 300_000),
+        ("\"300000.0\"", 0), ("\"1__0\"", 0),
+        ("010", 8), ("0x10", 16), ("0b11", 3), ("1:30", 90), ("0o10", 0),
+        ("true", 1), ("off", 0), ("300000.9", 300_000), ("1_000.5", 1000),
+        ("0.5", 0), ("-0.5", 0), ("_100", 0), ("256000  # cap", 256_000),
+    ])
+    func compressionThresholdTokensMatchesPyYAMLPositiveInt(_ raw: String, expected: Int) {
+        let cfg = HermesConfig(yaml: "compression:\n  threshold_tokens: \(raw)\n")
+        #expect(cfg.compression.thresholdTokens == expected)
+        #expect(cfg.displayCompressionThresholdTokens(capabilities: Self.caps("0.21.5")) == expected)
+    }
+
     /// `whatsapp.unauthorized_dm_behavior` gains `"decline"` at tag
     /// **v2026.9.21 (v0.21.4)** (`gateway/config.py:139,625`) and IS read
     /// from the `whatsapp.*` block (`unauthorized_dm_behavior` is a

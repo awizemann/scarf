@@ -1193,7 +1193,7 @@ public enum HermesYAML {
     /// string. Bare `y` / `n` are NOT in the resolver's regex either, whatever
     /// the YAML 1.1 spec says.
     static let pyYAMLTrue: Set<String> = ["yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON"]
-    private static let pyYAMLFalse: Set<String> = ["no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
+    static let pyYAMLFalse: Set<String> = ["no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"]
 
     /// `mattermost.require_mention` as read from a config.yaml scalar.
     ///

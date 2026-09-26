@@ -163,7 +163,7 @@ import Foundation
     @Test func bothCronViewRunNowSitesRefuseATerminalJob() throws {
         let source = try Self.source("scarf/scarf/Features/Cron/Views/CronView.swift")
         let sites = source.components(
-            separatedBy: ".disabled(viewModel.refusesTerminalJobLocally(job))").count - 1
+            separatedBy: ".disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))").count - 1
         #expect(sites == 2, "expected exactly two guarded Run Now sites, found \(sites)")
     }
 

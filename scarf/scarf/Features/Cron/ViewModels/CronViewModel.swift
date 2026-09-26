@@ -838,6 +838,16 @@ final class CronViewModel {
         }
     }
 
+    /// Jobs whose `hermes cron run` this view model has in flight. Cleared
+    /// when the run returns (before the follow-up tick), whatever the verdict.
+    private(set) var runningNowJobIDs: Set<String> = []
+
+    /// Whether a Run Now for `job` is still in flight — the Run Now buttons
+    /// disable on it.
+    func isRunningNow(_ job: HermesCronJob) -> Bool {
+        runningNowJobIDs.contains(job.id)
+    }
+
     func runNow(_ job: HermesCronJob) {
         // What `hermes cron run <id>` does depends on the host:
         //
@@ -864,6 +874,13 @@ final class CronViewModel {
             return
         }
         let jobID = job.id
+        // P9: since v0.18.0 `cron run` is a whole synchronous agent run
+        // (up to `runNowTimeout`), so the bar must say something the moment
+        // the click lands, and a second click on the same job must not
+        // start a second run while the first is still in flight.
+        guard !runningNowJobIDs.contains(jobID) else { return }
+        runningNowJobIDs.insert(jobID)
+        post(String(localized: "Running \"\(job.name)\"…"), outcome: .unconfirmed)
         let offer = recoveryOffer(for: job)
         let timeout = Self.runNowTimeout
         Task.detached { [mutationRunner, weak self] in
@@ -872,6 +889,7 @@ final class CronViewModel {
             let runResult = await OffPool.run { mutationRunner(["cron", "run", jobID], timeout) }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.runningNowJobIDs.remove(jobID)
                 let verdict = Self.runNowVerdict(
                     exitCode: runResult.exitCode, output: runResult.output, timeout: timeout, offer: offer)
                 let message = Self.runNowMessage(verdict, timeout: timeout)

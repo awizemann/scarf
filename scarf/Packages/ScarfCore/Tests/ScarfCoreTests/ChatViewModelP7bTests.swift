@@ -182,6 +182,46 @@ import SQLite3
         #expect(abs(again.timeIntervalSince1970 - promptTime) < 1, "poll flicker restarted the clock")
     }
 
+    /// P9 (t-d6384e2e item 5): a session whose last turn died days ago
+    /// still derives "working" from its row shape; seeding from that
+    /// prompt row showed "Working · 72:00:00". Past the bound the clock
+    /// starts at attach time.
+    @Test func workingSinceIgnoresAStalePromptRow() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        let promptTime = Date().addingTimeInterval(-3 * 24 * 60 * 60).timeIntervalSince1970
+        try fx.exec("INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (1, 's', 'user', 'go', \(promptTime));")
+        let vm = RichChatViewModel(context: fx.context)
+        vm.setSessionId("s")
+
+        let attach = Date()
+        await vm.refreshMessages()
+        #expect(vm.isAgentWorking)
+        let seeded = try #require(vm.workingSince)
+        #expect(seeded >= attach.addingTimeInterval(-1), "clock seeded from a days-old prompt row: \(seeded)")
+    }
+
+    /// The seed's bounds, directly: inside the window it is the prompt
+    /// row; past it, nil; a prompt stamped AHEAD of this Mac (remote clock
+    /// skew) is clamped to `now`, never a negative elapsed time.
+    @Test func workingSinceSeedBounds() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func rows(userAt t: Date) -> [HermesMessage] {
+            [HermesMessage(id: 1, sessionId: "s", role: "user", content: "go", toolCallId: nil,
+                           toolCalls: [], toolName: nil, timestamp: t, tokenCount: nil,
+                           finishReason: nil, reasoning: nil)]
+        }
+        let fresh = now.addingTimeInterval(-600)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: fresh), now: now) == fresh)
+        let edge = now.addingTimeInterval(-RichChatViewModel.workingSinceSeedMaxAge)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: edge), now: now) == edge)
+        let stale = edge.addingTimeInterval(-1)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: stale), now: now) == nil)
+        let ahead = now.addingTimeInterval(30)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: rows(userAt: ahead), now: now) == now)
+        #expect(RichChatViewModel.workingSinceSeed(fetched: [], now: now) == nil)
+    }
+
     // MARK: - Event-driven helpers
 
     @MainActor
@@ -226,6 +266,34 @@ import SQLite3
         let transcript = vm.messages.filter { $0.isUser || $0.isAssistant }.map(\.content)
         #expect(transcript == ["go", "Partial answer", "/steer be brief", "More"])
         #expect(!vm.messages.contains { $0.id == 0 }, "a streaming placeholder was left behind")
+    }
+
+    /// P9 (t-d6384e2e item 4): the mid-turn finalize above locks a still-
+    /// OPEN tool call into a permanent message. Its later `tool_call_update`
+    /// must patch that message by callId — pre-fix it only looked in the
+    /// (now empty) streaming buffer, so the call kept no duration, no exit
+    /// code and the "{}" argument placeholder forever.
+    @Test @MainActor func lateUpdatePatchesACallFinalizedByAMidTurnSend() throws {
+        let vm = Self.engagedVM()
+        vm.handleACPEvent(Self.toolStart("tc-1"))
+        vm.addUserMessage(text: "/steer be brief")
+        vm.handleACPEvent(.toolCallUpdate(sessionId: "s", update: ACPToolCallUpdateEvent(
+            toolCallId: "tc-1", kind: "execute", status: "failed", content: "boom",
+            rawOutput: nil, rawInput: ["command": "ls"]
+        )))
+
+        let owner = try #require(vm.messages.first { msg in
+            msg.isAssistant && msg.toolCalls.contains { $0.callId == "tc-1" }
+        })
+        let call = try #require(owner.toolCalls.first { $0.callId == "tc-1" })
+        #expect(call.exitCode == 1)
+        #expect(call.duration != nil)
+        #expect(call.arguments == #"{"command":"ls"}"#)
+        // Still ahead of the steer message, and the result row still lands.
+        let ownerIdx = try #require(vm.messages.firstIndex { $0.id == owner.id })
+        let steerIdx = try #require(vm.messages.firstIndex { $0.content == "/steer be brief" })
+        #expect(ownerIdx < steerIdx)
+        #expect(vm.messages.contains { $0.role == "tool" && $0.toolCallId == "tc-1" })
     }
 
     // MARK: - (4) open tool calls end with the turn

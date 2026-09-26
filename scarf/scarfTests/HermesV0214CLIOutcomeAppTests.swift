@@ -46,6 +46,28 @@ import ScarfCore
         #expect(!text.contains("Stop the gateway and other Hermes apps"))
     }
 
+    /// P9 (t-d6384e2e item 7): "Scarf's own read" is claimed only for
+    /// Scarf's own invocation shapes, as Hermes renders them
+    /// (`describe_holder_pid`: basename + argv, whitespace-collapsed, cut to
+    /// 80 — `hermes_state_holders.py:59-68` @ v2026.9.24; the query-only
+    /// literal below is that function's output for `RemoteSQLiteBackend`'s
+    /// argv). A user's own `sqlite3` session on state.db, or a backup
+    /// script, is a real holder — pre-fix the bare program name `sqlite3`
+    /// was enough to call it Scarf's and tell the user to just retry.
+    @Test(arguments: [
+        ("PID 55123 (sqlite3 -readonly -json /home/alan/.hermes/state.db): state.db", true),
+        ("PID 55124 (sqlite3 -json -cmd .output /dev/null -cmd .dbconfig no_ckpt_on_close on -cmd .ou): state.db", true),
+        ("PID 55125 (sqlite3 /home/alan/.hermes/state.db): state.db", false),
+        ("PID 55126 (sqlite3 -readonly /home/alan/.hermes/state.db): state.db", false),
+        ("PID 55127 (sqlite3 -json /home/alan/.hermes/state.db .backup /tmp/b.db): state.db", false),
+    ])
+    func remoteReaderShortcutNeedsScarfsOwnArgv(_ holder: String, isScarf: Bool) {
+        #expect(HealthViewModel.isTransientRemoteSQLiteReader(holder) == isScarf)
+        let text = HealthViewModel.sessionsOptimizeRefusalSummary(
+            holders: [holder], isLocal: false, canForce: true)
+        #expect(text.contains("Scarf's own read was in progress") == isScarf)
+    }
+
     /// A real remote holder alongside the transient reader still gets the
     /// normal "stop it" copy — the transient-reader shortcut only fires when
     /// EVERY named holder is one.
