@@ -249,6 +249,23 @@ import Foundation
         }
     }
 
+    @Test func detectMismatchTreatsOpenCodeFreeAsUnknownProviderOnV0214Host() {
+        // Below the removal floor, `opencode-free` is still a real
+        // aggregator — no mismatch banner. `capabilities` defaults to
+        // `.empty`, matching every pre-existing call site that doesn't
+        // pass one.
+        var cfg = HermesConfig.empty
+        cfg.model = "moonshotai/kimi-k2"
+        cfg.provider = "opencode-free"
+        #expect(ModelPreflight.detectMismatch(cfg) == nil)
+
+        // At/above it, Hermes no longer resolves `opencode-free` as an
+        // aggregator (removed from providers.py entirely), so the
+        // `model.default` prefix IS a live mismatch again on that host.
+        let newHost = HermesHost.caps("Hermes Agent v0.21.4 (2026.9.21)")
+        #expect(ModelPreflight.detectMismatch(cfg, capabilities: newHost) != nil)
+    }
+
     @Test func aggregatorProvidersAreAllCanonicalIDs() {
         // A non-canonical entry would be dead weight: the lookup happens
         // after canonicalProviderID(), so an alias could never match.
@@ -256,7 +273,17 @@ import Foundation
             #expect(ModelCatalogService.canonicalProviderID(provider) == provider,
                     "\(provider) is an alias, not a canonical provider id")
         }
-        #expect(ModelPreflight.aggregatorProviders.contains("opencode-free"))
+        // `opencode-free` was REMOVED from Hermes at v0.21.4 (see
+        // `HermesCapabilities.hasOpenCodeFreeProvider`), so it moved out of
+        // the unconditional `aggregatorProviders` mirror (which
+        // `scripts/check-hermes-tables.py` diffs against the CURRENT
+        // target tag) into `legacyAggregatorProviders`, added back by
+        // `aggregatorProviders(capabilities:)` only below that floor.
+        #expect(!ModelPreflight.aggregatorProviders.contains("opencode-free"))
+        #expect(ModelPreflight.legacyAggregatorProviders.contains("opencode-free"))
+        #expect(ModelPreflight.aggregatorProviders(capabilities: .empty).contains("opencode-free"))
+        let newHost = HermesHost.caps("Hermes Agent v0.21.4 (2026.9.21)")
+        #expect(!ModelPreflight.aggregatorProviders(capabilities: newHost).contains("opencode-free"))
     }
 
     @Test func detectMismatchReturnsNilForBareOpenAIAlias() {

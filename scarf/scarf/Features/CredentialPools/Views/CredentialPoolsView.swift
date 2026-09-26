@@ -611,6 +611,7 @@ struct CredentialPoolsView: View {
 ///    OAuth flow so the user can paste the authorization code back.
 private struct AddCredentialSheet: View {
     @Bindable var viewModel: CredentialPoolsViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     /// Optional pre-fill from the re-auth path. When non-nil, the sheet
     /// opens with this provider name + OAuth selected, mirroring the
     /// state the user would otherwise have to type. Plain "Add
@@ -712,7 +713,7 @@ private struct AddCredentialSheet: View {
             // sync inside `.onAppear` and froze the Add Credential sheet
             // for 1–2 minutes on remote contexts (issue #59).
             isLoadingProviders = true
-            providers = await catalog.loadProvidersAsync()
+            providers = await catalog.loadProvidersAsync(capabilities: capabilitiesStore?.capabilities ?? .empty)
             isLoadingProviders = false
         }
         // Auto-close the sheet once a credential is actually saved. We key
@@ -834,8 +835,9 @@ private struct AddCredentialSheet: View {
     /// `keyless`, e.g. `opencode-free`) — there is no credential to store,
     /// so the key field would be a dead end.
     private var isKeylessProvider: Bool {
-        let id = ModelCatalogService.canonicalProviderID(providerID)
-        return catalog.overlayMetadata(for: id)?.keyless ?? false
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
+        let id = ModelCatalogService.canonicalProviderID(providerID, capabilities: capabilities)
+        return catalog.overlayMetadata(for: id, capabilities: capabilities)?.keyless ?? false
     }
 
     /// Stand-in for the API-key row on keyless providers.

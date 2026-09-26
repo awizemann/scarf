@@ -665,9 +665,10 @@ final class ChatViewModel {
     func refreshConfigDiagnostics() {
         let svc = fileService
         let ctx = context
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             let config = svc.loadConfig()
-            var mismatch = ModelPreflight.detectMismatch(config)
+            var mismatch = ModelPreflight.detectMismatch(config, capabilities: capabilities)
             if mismatch != nil {
                 var known = await MainActor.run { [weak self] in self?.knownProviderIDs }
                 if known == nil {
@@ -678,7 +679,7 @@ final class ChatViewModel {
                     // Empty set = "catalog unavailable", cached so the
                     // (possibly SSH-backed) read isn't retried every
                     // refresh.
-                    let infos = ModelCatalogService(context: ctx).loadProviders()
+                    let infos = ModelCatalogService(context: ctx).loadProviders(capabilities: capabilities)
                     let loaded = infos.contains(where: { !$0.isOverlay })
                         ? Set(infos.map(\.providerID))
                         : Set()
@@ -686,7 +687,8 @@ final class ChatViewModel {
                     known = loaded
                 }
                 if let known, !known.isEmpty {
-                    mismatch = ModelPreflight.detectMismatch(config, knownProviders: known)
+                    mismatch = ModelPreflight.detectMismatch(
+                        config, knownProviders: known, capabilities: capabilities)
                 }
             }
             let mode = config.approvalMode

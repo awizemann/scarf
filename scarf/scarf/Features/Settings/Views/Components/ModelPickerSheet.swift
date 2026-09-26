@@ -46,6 +46,7 @@ struct ModelPickerSheet: View {
         case local
     }
 
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var providers: [HermesProviderInfo] = []
     @State private var selectedProviderID: String = ""
     @State private var models: [HermesModelInfo] = []
@@ -160,7 +161,7 @@ struct ModelPickerSheet: View {
             // sync inside `.onAppear` and froze the picker for 1–2
             // minutes on remote contexts (issue #59).
             isLoadingCatalog = true
-            providers = await catalog.loadProvidersAsync()
+            providers = await catalog.loadProvidersAsync(capabilities: capabilitiesStore?.capabilities ?? .empty)
             selectedProviderID = initialProvider.isEmpty ? (providers.first?.providerID ?? "") : initialProvider
             selectedModelID = initialModel
             overlayModelID = initialModel
@@ -439,7 +440,7 @@ struct ModelPickerSheet: View {
     /// users locked out of the latest releases.
     @ViewBuilder
     private func nousOverlayDetail(_ provider: HermesProviderInfo) -> some View {
-        let overlay = catalog.overlayMetadata(for: provider.providerID)
+        let overlay = catalog.overlayMetadata(for: provider.providerID, capabilities: capabilitiesStore?.capabilities ?? .empty)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -590,7 +591,7 @@ struct ModelPickerSheet: View {
     /// model ID they know is valid for the provider's API.
     @ViewBuilder
     private func overlayProviderDetail(_ provider: HermesProviderInfo) -> some View {
-        let overlay = catalog.overlayMetadata(for: provider.providerID)
+        let overlay = catalog.overlayMetadata(for: provider.providerID, capabilities: capabilitiesStore?.capabilities ?? .empty)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {

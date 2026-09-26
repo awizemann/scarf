@@ -508,7 +508,17 @@ import Foundation
         // v0.20.5 (Hermes v2026.8.19): zero-auth OpenCode tier.
         // providers.py:160 — base_url_override https://opencode.ai/zen/v1,
         // is_aggregator, keyless; providers.py:441 label "OpenCode Free".
-        let overlay = ModelCatalogService.overlayOnlyProviders["opencode-free"]
+        //
+        // REMOVED from Hermes at v0.21.4 (v2026.9.21) — see
+        // `HermesCapabilities.hasOpenCodeFreeProvider`. The unconditional
+        // `overlayOnlyProviders` mirror (which
+        // `scripts/check-hermes-tables.py` lane 3 diffs against the CURRENT
+        // target tag) no longer carries it; it now lives in
+        // `legacyOverlayOnlyProviders`, offered only below the removal
+        // floor via `overlayMetadata(for:capabilities:)` /
+        // `loadProviders(capabilities:)`.
+        #expect(ModelCatalogService.overlayOnlyProviders["opencode-free"] == nil)
+        let overlay = ModelCatalogService.legacyOverlayOnlyProviders["opencode-free"]
         #expect(overlay != nil)
         #expect(overlay?.displayName == "OpenCode Free")
         #expect(overlay?.baseURL == "https://opencode.ai/zen/v1")
@@ -516,9 +526,17 @@ import Foundation
         #expect(overlay?.subscriptionGated == false)
         #expect(overlay?.keyless == true)
         // Every other overlay is credentialed — keyless defaults false.
-        for (id, other) in ModelCatalogService.overlayOnlyProviders where id != "opencode-free" {
+        for (id, other) in ModelCatalogService.overlayOnlyProviders {
             #expect(other.keyless == false, "\(id) should not be keyless")
         }
+
+        // `overlayMetadata(for:)` still resolves it below the floor
+        // (default `.empty` capabilities, matching every existing
+        // unconditional caller) and stops resolving it at/above.
+        let catalog = ModelCatalogService(path: "/nonexistent")
+        #expect(catalog.overlayMetadata(for: "opencode-free")?.keyless == true)
+        let newHost = HermesHost.caps("Hermes Agent v0.21.4 (2026.9.21)")
+        #expect(catalog.overlayMetadata(for: "opencode-free", capabilities: newHost) == nil)
     }
 
     @Test func openCodeAliasesResolveToCanonicalTiers() {
