@@ -151,7 +151,12 @@ struct GatewayView: View {
                     // stored `state` is stale ("stopped"/"unknown") while the
                     // live probe says running — showing that stale word next
                     // to a green badge would read as a contradiction.
-                    label: viewModel.gateway.isServedByMultiplexer
+                    // v0.21.5: a parked profile is neither running nor merely
+                    // "not running" — it is stopped on purpose inside a live
+                    // host gateway, and says so.
+                    label: viewModel.gateway.isParked
+                        ? "parked"
+                        : viewModel.gateway.isServedByMultiplexer
                         ? "running"
                         : (viewModel.gateway.isRunning ? viewModel.gateway.state : "not running"),
                     isActive: viewModel.gateway.isRunning
@@ -176,7 +181,14 @@ struct GatewayView: View {
                 // rather than the generic "Loaded" one. Pre-v0.21.1 hosts
                 // never print the marker, so this branch is unreachable there
                 // and the row renders exactly as before.
-                if viewModel.gateway.isServedByMultiplexer {
+                // v0.21.5: only ever true where `hasGatewayProfileParking`,
+                // so this branch is unreachable on an older host.
+                if viewModel.gateway.isParked {
+                    Label("Parked", systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("The host gateway is not serving this profile — its bots and cron are stopped. Start serves it again without restarting the host gateway.")
+                } else if viewModel.gateway.isServedByMultiplexer {
                     Label("Served by default profile", systemImage: "arrow.triangle.branch")
                         .font(.caption)
                         .foregroundStyle(.green)

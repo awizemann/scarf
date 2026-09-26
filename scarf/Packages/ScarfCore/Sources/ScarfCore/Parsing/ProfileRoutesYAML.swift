@@ -47,7 +47,10 @@ public enum ProfileRoutesYAML {
                 routes: routes,
                 location: location,
                 multiplexProfiles: multiplex.value,
-                multiplexIsTopLevel: multiplex.isTopLevel
+                multiplexIsTopLevel: multiplex.isTopLevel,
+                multiplexIsSet: multiplex.isSet,
+                multiplexIsExplicitFalse: multiplex.isExplicitFalse,
+                gatewayStandalone: multiplex.standalone
             )
         }
 
@@ -75,7 +78,15 @@ public enum ProfileRoutesYAML {
 
     /// `multiplex_profiles` — top-level form wins over `gateway.multiplex_profiles`,
     /// matching `gateway/config.py:708-710` at `v2026.9.7`.
-    private static func parseMultiplex(_ yaml: String) -> (value: Bool, isTopLevel: Bool) {
+    ///
+    /// `isSet` / `isExplicitFalse` feed the v0.21.4+ reading (see
+    /// ``HermesProfileRoutes/multiplexStatus(capabilities:)``), and
+    /// `standalone` is `gateway.standalone` — `gateway:` section only, the
+    /// one spelling `profile_is_standalone` reads
+    /// (`hermes_cli/profiles.py:1018`, `:1029-1031` @ `v2026.9.24`).
+    private static func parseMultiplex(_ yaml: String) -> (
+        value: Bool, isTopLevel: Bool, isSet: Bool, isExplicitFalse: Bool, standalone: Bool
+    ) {
         let values = HermesYAML.parseNestedYAML(yaml).values
         // Top-level wins only when it is NOT null: Hermes does
         // `multiplex_profiles = data.get("multiplex_profiles"); if
@@ -110,7 +121,8 @@ public enum ProfileRoutesYAML {
         // and `1`) as OFF on a host that had it ON. `False` is the dataclass
         // default (:561) and what an unrecognised token falls back to.
         let value = HermesYAML.boolishValue(raw) ?? false
-        return (value, topLevel != nil)
+        let standalone = HermesYAML.boolishValue(values["gateway.standalone"]) ?? false
+        return (value, topLevel != nil, raw != nil, HermesYAML.boolishValue(raw) == false, standalone)
     }
 
     /// True when `profile_routes` is written as a NON-empty flow list

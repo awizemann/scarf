@@ -2174,12 +2174,68 @@ public struct HermesCapabilities: Sendable, Equatable {
     // group, with a doc comment citing the Hermes file:line@tag its floor was
     // verified against, matching the style of every group above.
 
+    /// `gateway.multiplex_profiles` defaults ON and an explicit `false` is
+    /// RETIRED. The seeded default flips `False` → `True` at
+    /// `hermes_cli/config_defaults.py:2120` @ `v2026.9.21` (`:1968` reads
+    /// `False` @ `v2026.9.14`), and the boot-time verdict
+    /// `hermes_cli/gateway_multiplex_mode.py` — absent at `v2026.9.14` —
+    /// resolves an explicit `false` exactly like an unset key
+    /// (`resolve_multiplex_mode`, `:132-158`, `retired_opt_out` at `:146`,
+    /// `:154`). Neither is unconditional: an unset/`false` key is a REQUEST
+    /// the gateway grants only when `implicit_multiplex_blocker` (`:93-129`)
+    /// finds nothing — a single-profile install (`:116`), an unsupported host
+    /// such as s6 (`:118-120`), a profile still running its own gateway
+    /// (`:122`) or a migrate-preflight blocker like a duplicate bot token
+    /// (`:127`) keeps the gateway standalone. An explicit `true` is never
+    /// second-guessed. `gateway/config.py:781` @ `v2026.9.21` now keeps an
+    /// unset key `None` (it was `_coerce_bool(…, False)` before), which is
+    /// what lets the verdict tell "unset" from "chosen".
+    ///
+    /// Scarf's profile-routing section reads this: below the floor an absent
+    /// key means routing is off and "Enable Multiplexing" is the fix; at and
+    /// above it an absent or `false` key means "on unless the host's startup
+    /// check blocks it", and there is no off switch to offer.
+    public var hasMultiplexByDefault: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
     // v2026.9.24:pyproject.toml` reads `version = "0.21.5"`. Same as the
     // v0.21.4 group above — no feature flag here yet; later phases append
     // their flags as a contiguous block at the END of this group.
+
+    /// A retired `gateway.multiplex_profiles: false` is REWRITTEN to `true`
+    /// by the gateway itself. `persist_resolved_default`
+    /// (`hermes_cli/gateway_multiplex_mode.py:171-197` @ `v2026.9.24`) writes
+    /// `true` into the default profile's config.yaml after any non-guard
+    /// verdict and, for a rewritten `false`, leaves the one-time
+    /// `.multiplex_opt_out_rewritten` marker (`REWRITTEN_MARKER_NAME`, `:50`,
+    /// written at `:190-191`). The function does not exist at `v2026.9.21`,
+    /// where a retired `false` is only logged and ignored — so the copy Scarf
+    /// shows for it differs between the two releases.
+    public var hasMultiplexOptOutRewrite: Bool { isV0215OrLater }
+
+    /// `gateway.standalone: true` — the temporary per-profile shim that keeps
+    /// a NAMED profile's gateway out of the host multiplexer.
+    /// `profile_is_standalone` (`hermes_cli/profiles.py:979-1027` @
+    /// `v2026.9.24`; the default profile ignores the key, `:976`) and the
+    /// guard that binds it, `STANDALONE_PROFILE_REASON`
+    /// (`hermes_cli/gateway_multiplex_mode.py:29`, `:143-144`). `git grep
+    /// standalone v2026.9.21 -- hermes_cli/profiles.py` is empty.
+    public var hasGatewayStandaloneProfiles: Bool { isV0215OrLater }
+
+    /// Parked profiles: `gateway start|stop|restart` on a named profile the
+    /// host multiplexer serves is handled INSIDE the host gateway
+    /// (`hermes_cli/gateway_profile_lifecycle.py:18-79` @ `v2026.9.24`,
+    /// hooked at `hermes_cli/gateway.py:4764`, `:4799`, `:4911`), and
+    /// `gateway status` on a parked profile early-returns
+    /// `Profile '{name}': parked (hermes -p {name} gateway start)` with no
+    /// ✓/✗ verdict (`gateway_profile_lifecycle.py:82-98`, hooked at
+    /// `gateway.py:5021-5023`). The module is absent at `v2026.9.21`.
+    ///
+    /// Gates the status parse (``HermesGatewayParkedStatus``). The lifecycle
+    /// verdict needs no gate: it keys on lines no older Hermes prints.
+    public var hasGatewayProfileParking: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 

@@ -223,17 +223,73 @@ public struct HermesProfileRoutes: Sendable, Equatable {
     /// the toggle would appear to do nothing — so the UI explains instead of
     /// offering a control that can't win.
     public var multiplexIsTopLevel: Bool
+    /// Whether the `multiplex_profiles` spelling in effect carries a value at
+    /// all. From v0.21.4 Hermes keeps an unset key `None` so its boot verdict
+    /// can tell "the default applies" from "the operator chose"
+    /// (`gateway/config.py:781` @ `v2026.9.21`) — see ``multiplexStatus(capabilities:)``.
+    public var multiplexIsSet: Bool
+    /// The value in effect is an explicit boolish `false` (`false`, `no`,
+    /// `off`, `0`). From v0.21.4 that spelling is RETIRED — resolved exactly
+    /// like an unset key (`hermes_cli/gateway_multiplex_mode.py:146`, `:154`
+    /// @ `v2026.9.21`). An unrecognised token is NOT this: v0.21.4 coerces it
+    /// with `_coerce_bool(…, True)` (`gateway/config.py:781`).
+    public var multiplexIsExplicitFalse: Bool
+    /// `gateway.standalone` is truthy in this config — the v0.21.5
+    /// per-profile shim that keeps a NAMED profile's gateway out of the host
+    /// multiplexer (`hermes_cli/profiles.py:979-1031` @ `v2026.9.24`, which
+    /// reads only the `gateway:` section's key and ignores it on the default
+    /// profile, `:976`). Parsed on every host; only surfaced where
+    /// ``HermesCapabilities/hasGatewayStandaloneProfiles``.
+    public var gatewayStandalone: Bool
 
     public init(
         routes: [HermesProfileRoute] = [],
         location: Location = .absent,
         multiplexProfiles: Bool = false,
-        multiplexIsTopLevel: Bool = false
+        multiplexIsTopLevel: Bool = false,
+        multiplexIsSet: Bool = false,
+        multiplexIsExplicitFalse: Bool = false,
+        gatewayStandalone: Bool = false
     ) {
         self.routes = routes
         self.location = location
         self.multiplexProfiles = multiplexProfiles
         self.multiplexIsTopLevel = multiplexIsTopLevel
+        self.multiplexIsSet = multiplexIsSet
+        self.multiplexIsExplicitFalse = multiplexIsExplicitFalse
+        self.gatewayStandalone = gatewayStandalone
+    }
+
+    /// What `multiplex_profiles` means for routing on the connected host.
+    public enum MultiplexStatus: Sendable, Equatable {
+        /// Routing runs: pre-v0.21.4 the key is truthy; from v0.21.4 it is
+        /// set to something other than a boolish `false`, which the boot
+        /// verdict never second-guesses (`resolve_multiplex_mode`,
+        /// `gateway_multiplex_mode.py:143-144` @ `v2026.9.21`).
+        case on
+        /// Pre-v0.21.4 only: absent or falsy, so `_profile_name_for_source`
+        /// returns before matching and every route is inert.
+        case off
+        /// v0.21.4+: the key is unset, so multiplexing is the default — but a
+        /// REQUEST the gateway grants only when `implicit_multiplex_blocker`
+        /// finds nothing (single profile, s6 host, a profile still running
+        /// its own gateway, a duplicate bot token). Not "always on".
+        case defaultOn
+        /// v0.21.4+: an explicit `false`, retired and resolved like
+        /// ``defaultOn``. v0.21.5 also rewrites it to `true` on the next
+        /// gateway start (``HermesCapabilities/hasMultiplexOptOutRewrite``).
+        case retiredOptOut
+    }
+
+    /// Below ``HermesCapabilities/hasMultiplexByDefault`` this is exactly the
+    /// pre-v0.21.4 reading — ``multiplexProfiles`` on or off — so an older
+    /// host renders byte-identically.
+    public func multiplexStatus(capabilities: HermesCapabilities) -> MultiplexStatus {
+        guard capabilities.hasMultiplexByDefault else {
+            return multiplexProfiles ? .on : .off
+        }
+        if multiplexIsExplicitFalse { return .retiredOptOut }
+        return multiplexIsSet ? .on : .defaultOn
     }
 
     public static let empty = HermesProfileRoutes()
