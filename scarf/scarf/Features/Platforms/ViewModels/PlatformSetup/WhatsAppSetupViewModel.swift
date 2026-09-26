@@ -33,9 +33,12 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
     // config.yaml knobs
     var unauthorizedDMBehavior: String = "pair"     // "pair" | "ignore" | "decline" (v0.21.4+)
     var replyPrefix: String = ""
-    /// `whatsapp.unauthorized_dm_decline_message` — only meaningful (and
-    /// only shown by ``WhatsAppSetupView``) while `unauthorizedDMBehavior
-    /// == "decline"`. Empty uses Hermes's own default reply text.
+    /// The GLOBAL `unauthorized_dm_decline_message` — applies to every
+    /// platform's decline reply, not just WhatsApp's (see
+    /// ``WhatsAppSettings/unauthorizedDMDeclineMessage``'s doc comment for
+    /// the reader-verified reason). Only meaningful (and only shown by
+    /// ``WhatsAppSetupView``) while `unauthorizedDMBehavior == "decline"`.
+    /// Empty uses Hermes's own default reply text.
     var unauthorizedDMDeclineMessage: String = ""
 
     var message: String?
@@ -90,8 +93,17 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
         ]
         // Only written while "decline" is active — a blank value on any
         // other choice is Hermes's own inert default, not worth a key.
+        //
+        // GLOBAL key, bare (not `whatsapp.…`, not `gateway.…`):
+        // `_hm_send_unauthorized_decline` reads `self.config
+        // .unauthorized_dm_decline_message` (`gateway/run_inbound.py:140`
+        // @ `v2026.9.24`) — a top-level `GatewayConfig` field with no
+        // per-platform override, unlike `unauthorized_dm_behavior` (a
+        // `_SHARED_KEYS` member the WhatsApp block DOES carry). A
+        // `whatsapp.unauthorized_dm_decline_message` key is inert: no
+        // Hermes reader at any tag ever looks under `whatsapp.*` for it.
         if unauthorizedDMBehavior == "decline" {
-            configKV["whatsapp.unauthorized_dm_decline_message"] = unauthorizedDMDeclineMessage
+            configKV["unauthorized_dm_decline_message"] = unauthorizedDMDeclineMessage
         }
         commitSave(envPairs: envPairs, configKV: configKV)
     }

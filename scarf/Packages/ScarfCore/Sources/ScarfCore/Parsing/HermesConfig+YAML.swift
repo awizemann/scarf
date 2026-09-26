@@ -466,8 +466,12 @@ public extension HermesConfig {
             // host default applies — see `displayCompressionThresholdTokens`);
             // a PRESENT value Hermes can't read as a positive int (`0`,
             // `null`, garbage) is "ratio-only" there (`_positive_int`,
-            // agent_init.py:1476-1478 @ v2026.9.21), so it lands as `0`.
-            thresholdTokens: scalar("compression.threshold_tokens").map { Int($0) ?? 0 },
+            // agent_init.py:1476-1478 @ v2026.9.21), so it lands as `0`. A
+            // present value Hermes CAN read (`256_000`, `300000.0` — both
+            // legal PyYAML int/float literals, `int()`/`float()` accepting
+            // the underscore per PEP 515) must parse to the same int Python
+            // would get, not the sentinel — see `pythonIntCoerce`.
+            thresholdTokens: scalar("compression.threshold_tokens").map { Self.pythonIntCoerce($0) },
             minTailUserMessages: int("compression.min_tail_user_messages", default: 1),
             idleCompactAfterSeconds: int("compression.idle_compact_after_seconds", default: 0),
             progressNotices: boolish("compression.progress_notices", default: false)
@@ -724,7 +728,15 @@ public extension HermesConfig {
         let whatsapp = WhatsAppSettings(
             unauthorizedDMBehavior: str("whatsapp.unauthorized_dm_behavior", default: "pair"),
             replyPrefix: str("whatsapp.reply_prefix"),
-            unauthorizedDMDeclineMessage: str("whatsapp.unauthorized_dm_decline_message")
+            // GLOBAL key, not `whatsapp.*` — see `WhatsAppSettings
+            // .unauthorizedDMDeclineMessage`'s doc comment. Presence-first:
+            // a present bare `unauthorized_dm_decline_message` (even an
+            // empty string) wins over `gateway.unauthorized_dm_decline_message`
+            // (`gateway/config_loader.py:103` `_presence(…)`, mirrors
+            // `_bridge_lookup`'s "presence" mode @ `v2026.9.24`).
+            unauthorizedDMDeclineMessage: values["unauthorized_dm_decline_message"] != nil
+                ? str("unauthorized_dm_decline_message")
+                : str("gateway.unauthorized_dm_decline_message")
         )
 
         // `platform_toolsets.<platform>` is a dict of lists in config.yaml —
@@ -1181,5 +1193,33 @@ public extension HermesConfig {
         if let resolved = resolve("multiplex_profile_allowlist") { return resolved }
         if let resolved = resolve("gateway.multiplex_profile_allowlist") { return resolved }
         return nil
+    }
+
+    /// Mirrors Python's `int(raw)` for a scalar `_positive_int` will later
+    /// call on a value PyYAML's own resolvers already turned into a number
+    /// — the two forms that trip a literal `Int(_:)`:
+    ///
+    /// - **Underscore digit grouping** (`256_000`): legal in an UNQUOTED
+    ///   YAML int (PyYAML's int resolver regex allows `_` between digits,
+    ///   matching Python's PEP 515 `int()`/`float()` string parsing), so
+    ///   Hermes's `cfg.get("threshold_tokens")` is already the Python int
+    ///   `256000` by the time `_positive_int` calls `int()` on it — a no-op
+    ///   there. `Int("256_000")` is `nil` in Swift, so stripping `_` first
+    ///   is what recovers the same value.
+    /// - **A whole-number float literal** (`300000.0`): PyYAML's float
+    ///   resolver matches an unquoted decimal point, so the value is the
+    ///   Python float `300000.0`; `_positive_int` then does `int(300000.0)`
+    ///   = `300000` (truncates toward zero). `Int("300000.0")` is also
+    ///   `nil` in Swift, so falling back to `Double` + truncation mirrors
+    ///   `int(float)`.
+    ///
+    /// Genuinely unparseable text (`"abc"`, empty after stripping) returns
+    /// `0` — the same "ratio-only" sentinel this reader already used for
+    /// anything `_positive_int` itself rejects (`null`, a negative, `"0"`).
+    static func pythonIntCoerce(_ raw: String) -> Int {
+        let stripped = raw.replacingOccurrences(of: "_", with: "")
+        if let i = Int(stripped) { return i }
+        if let d = Double(stripped) { return Int(d) }
+        return 0
     }
 }

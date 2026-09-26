@@ -16,17 +16,30 @@ struct WhatsAppSetupView: View {
     /// `"decline"` only from v0.21.4 — see
     /// `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`. A host below
     /// the floor coerces an on-disk `decline` back to `pair`
-    /// (`_normalize_choice`), so the picker must not OFFER a choice the host
-    /// itself rejects. `PickerRow` has no built-in widening (unlike
-    /// `WebToolsBackendRoster.finalize`), so a config that already reads
-    /// `decline` (hand-edited, or a downgrade from a newer host) is widened
-    /// in HERE — otherwise the `Picker` shows no matching selection at all
-    /// for a value this list doesn't carry.
+    /// (`_normalize_choice`, `gateway/config.py:144-147` @ `v2026.9.24`), so
+    /// the picker must not OFFER a choice the host itself rejects. `PickerRow`
+    /// has no built-in widening (unlike `WebToolsBackendRoster.finalize`), so
+    /// a config that already reads `decline` (hand-edited, or a downgrade
+    /// from a newer host) is widened in HERE — otherwise the `Picker` shows
+    /// no matching selection at all for a value this list doesn't carry.
     private var unauthorizedDMOptions: [String] {
         let base = viewModel.unauthorizedOptions
         let declineOffered = capabilitiesStore?.capabilities.hasWhatsAppUnauthorizedDMDecline == true
         guard declineOffered || viewModel.unauthorizedDMBehavior == "decline" else { return base }
         return base + ["decline"]
+    }
+
+    /// `"decline"`'s row label: a plain choice once the host actually
+    /// honors it, else a sentence saying so — a pre-0.21.4 host's own
+    /// `_normalize_choice` silently coerces it back to `pair`
+    /// (`gateway/config.py:144-147` @ `v2026.9.24`), so showing it as an
+    /// ordinary working option would tell the user their selection does
+    /// something it does not.
+    private func unauthorizedDMOptionLabel(_ option: String) -> String {
+        guard option == "decline",
+              capabilitiesStore?.capabilities.hasWhatsAppUnauthorizedDMDecline != true
+        else { return option }
+        return "decline (not supported by this Hermes — behaves as pair)"
     }
 
     var body: some View {
@@ -46,19 +59,29 @@ struct WhatsAppSetupView: View {
             }
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
-                PickerRow(label: "Unauthorized DM", selection: viewModel.unauthorizedDMBehavior, options: unauthorizedDMOptions) { viewModel.unauthorizedDMBehavior = $0 }
+                PickerRow(
+                    label: "Unauthorized DM",
+                    selection: viewModel.unauthorizedDMBehavior,
+                    options: unauthorizedDMOptions,
+                    optionLabel: unauthorizedDMOptionLabel
+                ) { viewModel.unauthorizedDMBehavior = $0 }
                 // "decline" — send one polite refusal, then go silent toward
                 // that sender — is v0.21.4+
                 // (`HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`).
                 // The custom message is offered only while "decline" is the
                 // active choice, same show/hide pattern as every other
-                // conditional row in this form.
+                // conditional row in this form. The message itself is a
+                // GLOBAL setting (`unauthorized_dm_decline_message`, no
+                // per-platform override — see `WhatsAppSettings
+                // .unauthorizedDMDeclineMessage`'s doc comment): every
+                // platform's decline reply uses the same text, so the label
+                // says so even though this is the only form that edits it.
                 if viewModel.unauthorizedDMBehavior == "decline" {
                     EditableTextField(
-                        label: "Decline Message",
+                        label: "Decline Message (all platforms)",
                         value: viewModel.unauthorizedDMDeclineMessage
                     ) { viewModel.unauthorizedDMDeclineMessage = $0 }
-                    .help("Empty uses Hermes's own default reply.")
+                    .help("Applies to every platform's decline reply, not just WhatsApp's. Empty uses Hermes's own default reply.")
                 }
                 EditableTextField(label: "Reply Prefix", value: viewModel.replyPrefix) { viewModel.replyPrefix = $0 }
             }

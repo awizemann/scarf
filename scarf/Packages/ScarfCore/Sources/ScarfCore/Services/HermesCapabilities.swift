@@ -2198,20 +2198,36 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasMultiplexByDefault: Bool { isV0214OrLater }
 
     /// Whether the `opencode-free` provider (the zero-auth OpenCode Zen
-    /// tier, keyless aggregator) is STILL on this host. `providers.py`
-    /// carries it as a full `HermesOverlay` + `_ALIAS_GROUPS` entry
-    /// (`free`, `opencode_free`) at `v2026.9.14` (`hermes_cli/providers.py:62,126`)
-    /// and has neither at `v2026.9.21` — `_get_config_hint_for_unknown_provider`
-    /// (`hermes_cli/auth.py:1255`) now special-cases exactly those three
-    /// spellings with "the keyless 'opencode-free' provider was removed.
-    /// Switch to 'opencode-zen' … or 'opencode-go' …". A host below this
-    /// floor still runs the provider exactly as before — this flag is
-    /// `true` there so `ModelCatalogService` keeps offering it unchanged,
-    /// and only ≥0.21.4 hosts hide it (`legacyOpenCodeFreeAliases`,
-    /// `legacyAggregatorProviders`, `legacyOverlayOnlyProviders` in
-    /// `ModelCatalogService.swift` / `ModelPreflight.swift` carry the
-    /// pre-removal entries these callers fall back to).
-    public var hasOpenCodeFreeProvider: Bool { !isV0214OrLater }
+    /// tier, keyless aggregator) is STILL on this host — true only inside
+    /// the window it actually existed. `providers.py` gains the overlay +
+    /// `_ALIAS_GROUPS` entry (`free`, `opencode_free`) at `v2026.8.19`
+    /// (v0.20.5, commit `28a9b6c565`; absent at the prior tag `v2026.8.18`,
+    /// walked directly), carries it through `v2026.9.14`
+    /// (`hermes_cli/providers.py:62,126`), and has neither at `v2026.9.21` —
+    /// `_get_config_hint_for_unknown_provider` (`hermes_cli/auth.py:1255`)
+    /// now special-cases exactly those three spellings with "the keyless
+    /// 'opencode-free' provider was removed. Switch to 'opencode-zen' … or
+    /// 'opencode-go' …". Below v0.20.5 the provider never existed at all —
+    /// offering it there sends `model.provider: opencode-free` to a host
+    /// that has no such overlay and no such alias, an unknown-provider
+    /// config indistinguishable from a typo. For a DETECTED host this flag
+    /// is `true` only between those two floors; `ModelCatalogService`'s
+    /// legacy tables (`legacyOpenCodeFreeAliases`, `legacyAggregatorProviders`,
+    /// `legacyOverlayOnlyProviders` in `ModelCatalogService.swift` /
+    /// `ModelPreflight.swift`) are consulted only while it is true.
+    ///
+    /// `.empty` (undetected — `semver == nil`) stays `true`, preserving
+    /// this flag's ORIGINAL resolution for every unconditional caller that
+    /// doesn't pass real capabilities (`canonicalProviderID(_:)`'s default
+    /// parameter, `ModelCatalogService.swift:245,801`) — those call sites
+    /// never distinguished "no live connection" from "an old host", and
+    /// narrowing `.empty` to match the new lower bound would silently stop
+    /// resolving `free`/`opencode_free` for every one of them, not just the
+    /// genuinely-below-0.20.5 case this fix targets.
+    public var hasOpenCodeFreeProvider: Bool {
+        guard semver != nil else { return true }
+        return isV0205OrLater && !isV0214OrLater
+    }
 
     /// Whether Hermes accepts the `chatgpt` / `chatgpt-codex` spellings as
     /// aliases for the `openai-codex` provider. `_ALIAS_GROUPS` gains

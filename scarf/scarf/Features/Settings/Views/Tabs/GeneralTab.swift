@@ -111,10 +111,13 @@ struct GeneralTab: View {
 }
 
 /// Editor for `model_catalog.excluded_providers` (v0.20+) — a simple list
-/// of provider IDs hidden from model pickers and Hermes's built-in model
-/// resolution (matched case-insensitively by Hermes). Lists are
-/// inexpressible via `hermes config set`, so writes go through the
-/// direct-YAML path; removing the last row deletes the key entirely.
+/// of provider IDs Hermes's OWN model resolution skips (`hermes_cli
+/// /inventory.py:54`, `main_provider_setup.py:883-889` @ v2026.9.24,
+/// matched case-insensitively). `ModelCatalogService` never reads this
+/// key, so Scarf's own pickers still list an excluded provider — the
+/// audit finding this struct's `.help` text used to get backwards (t-3beb5ec1).
+/// Lists are inexpressible via `hermes config set`, so writes go through
+/// the direct-YAML path; removing the last row deletes the key entirely.
 private struct ExcludedProvidersSection: View {
     @Bindable var viewModel: SettingsViewModel
     let capabilities: HermesCapabilities
@@ -167,7 +170,14 @@ private struct ExcludedProvidersSection: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(ScarfColor.backgroundTertiary.opacity(0.5))
-            .help("Excluded providers are hidden from model pickers and skipped by Hermes's built-in model resolution.")
+            // `model_catalog.excluded_providers` only ever reaches Hermes's
+            // OWN model resolution (`hermes_cli/inventory.py:54`,
+            // `main_provider_setup.py:883-889` @ v2026.9.24, matched
+            // case-insensitively) — it is not read anywhere in
+            // `ModelCatalogService`, so Scarf's own picker (`ModelPickerSheet`,
+            // `ModelPresetEditSheet`, …) still lists an excluded provider.
+            // The help text used to claim the opposite.
+            .help("Excluded providers are skipped by Hermes's own dashboard, TUI and CLI picker (matched case-insensitively) — Scarf's model picker still lists them.")
         }
         .task {
             let ids = await ModelCatalogService(context: viewModel.context)

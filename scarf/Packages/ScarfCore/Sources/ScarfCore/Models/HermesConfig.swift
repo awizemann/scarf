@@ -1028,11 +1028,24 @@ public struct MattermostSettings: Sendable, Equatable {
 public struct WhatsAppSettings: Sendable, Equatable {
     public var unauthorizedDMBehavior: String  // "pair" | "ignore" | "decline" (v0.21.4+)
     public var replyPrefix: String
-    /// `whatsapp.unauthorized_dm_decline_message` — the reply sent once when
-    /// `unauthorizedDMBehavior == "decline"`. Empty means "use Hermes's own
-    /// default text" (`gateway/config.py:140` `unauthorized_dm_decline_message:
-    /// str = ""`, `:627` `DEFAULT_UNAUTHORIZED_DM_DECLINE_MESSAGE`); v0.21.4+
-    /// only — see `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`.
+    /// The GLOBAL `unauthorized_dm_decline_message` (bare top-level, or
+    /// nested `gateway.unauthorized_dm_decline_message`) — NOT
+    /// `whatsapp.unauthorized_dm_decline_message`, which no Hermes reader
+    /// ever consults. `_hm_send_unauthorized_decline`
+    /// (`gateway/run_inbound.py:126-140` @ `v2026.9.24`) reads
+    /// `self.config.unauthorized_dm_decline_message` — a plain
+    /// `GatewayConfig` field (`gateway/config.py:626,789`), bridged
+    /// from the top level by presence, else from `gateway:`
+    /// (`gateway/config_loader.py:103` `_TOPLEVEL_BRIDGE`'s
+    /// `_presence("unauthorized_dm_decline_message")`, distinct from the
+    /// per-platform `_SHARED_KEYS` bridge `unauthorized_dm_behavior` goes
+    /// through). So the message applies to every platform's decline reply,
+    /// not just WhatsApp's — the field lives on `WhatsAppSettings` only
+    /// because `WhatsAppSetupView` is the one form that edits it today.
+    /// Empty means "use Hermes's own default text" (`gateway/config.py:626`
+    /// `unauthorized_dm_decline_message: str = ""`, `:141`
+    /// `DEFAULT_UNAUTHORIZED_DM_DECLINE_MESSAGE`); v0.21.4+ only — see
+    /// `HermesCapabilities.hasWhatsAppUnauthorizedDMDecline`.
     public var unauthorizedDMDeclineMessage: String
 
     public init(

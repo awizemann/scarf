@@ -161,8 +161,11 @@ struct ModelPickerSheet: View {
             // sync inside `.onAppear` and froze the picker for 1–2
             // minutes on remote contexts (issue #59).
             isLoadingCatalog = true
-            providers = await catalog.loadProvidersAsync(capabilities: capabilitiesStore?.capabilities ?? .empty)
-            selectedProviderID = initialProvider.isEmpty ? (providers.first?.providerID ?? "") : initialProvider
+            let capabilities = capabilitiesStore?.capabilities ?? .empty
+            providers = await catalog.loadProvidersAsync(capabilities: capabilities)
+            selectedProviderID = Self.resolveInitialProviderID(
+                initialProvider, in: providers, capabilities: capabilities
+            )
             selectedModelID = initialModel
             overlayModelID = initialModel
             // Round-trip: when the saved provider is one of the local
@@ -1335,6 +1338,32 @@ struct ModelPickerSheet: View {
             // Leave overlayModelID alone — it's a user-typed value
             // that may legitimately not be in the catalog.
         }
+    }
+
+    /// The provider column's initial selection. A saved `model.provider`
+    /// that is an ALIAS spelling — `chatgpt` (≥0.21.4), `kimi`,
+    /// `moonshot`, … — is not itself a `providers` row (the catalog list
+    /// carries canonical IDs only), so a literal match left the sheet with
+    /// no row highlighted, `modelColumn` falling through to the empty
+    /// `cachedModelList`, and the picker looking blank on open. Canonicalize
+    /// via `ModelCatalogService.canonicalProviderID(_:capabilities:)` ONLY
+    /// when the literal spelling doesn't match anything — an exact literal
+    /// match (including a provider ID that also happens to look like an
+    /// alias key) always wins, so this never redirects a host that already
+    /// has a genuine row for the saved spelling.
+    static func resolveInitialProviderID(
+        _ initialProvider: String,
+        in providers: [HermesProviderInfo],
+        capabilities: HermesCapabilities
+    ) -> String {
+        guard !initialProvider.isEmpty else { return providers.first?.providerID ?? "" }
+        if providers.contains(where: { $0.providerID == initialProvider }) { return initialProvider }
+        let canonical = ModelCatalogService.canonicalProviderID(initialProvider, capabilities: capabilities)
+        if providers.contains(where: { $0.providerID == canonical }) { return canonical }
+        // Neither matched — leave it unchanged rather than silently
+        // substituting the first provider; the existing "no row selected"
+        // fallback behavior for a truly unknown ID is unaffected.
+        return initialProvider
     }
 
     /// When the user enters a custom model ID without explicitly naming a
