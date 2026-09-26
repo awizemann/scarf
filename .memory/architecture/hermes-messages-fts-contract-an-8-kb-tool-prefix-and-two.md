@@ -2,12 +2,12 @@
 title: Hermes messages_fts contract: an 8 KB tool prefix and two rebuild markers
 type: note
 permalink: scarf/architecture/hermes-messages-fts-contract-an-8-kb-tool-prefix-and-two
-tags: [hermes, state-db, search, fts, hermes-v0-21-1]
+tags: [hermes, state-db, search, fts, hermes-v0-21-1, hermes-v0-21-4]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesSearchIndex.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesV0211SearchIndexTests.swift]
 source_paths_inferred: false
 source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-26
 reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
@@ -23,6 +23,13 @@ contract is `HermesFTSIndex` in `HermesSearchIndex.swift`.
 - [invariant] `fts_rebuild_high_water` (H) and `fts_rebuild_progress` (P) mark a PENDING chunked backfill: a row is in the index iff `id <= P OR id > H`, and rows in (P, H] are simply absent. Both keys are DELETED TOGETHER when it lands (_CLEAR_REBUILD_MARKERS_SQL, hermes_state_schema.py:124), so their presence is the whole signal — no version comparison, and either key alone still means partial #search
 - [gotcha] The rebuild markers are far older than the 8 KB prefix — they first appear at v2026.7.30 and belong to the opt-in `sessions optimize-storage` transition, not to v0.21.1. v0.21.1 swaps the triggers WITHOUT any rebuild (hermes_state_schema.py:287-291), so 'a full FTS rebuild runs at first v0.21.1 open' is false #verification
 - [constraint] Any LIKE top-up over these rows must be bounded by rows READ (an inner `ORDER BY id DESC LIMIT n` subquery), not by rows returned: every candidate is a >8 KB payload SQLite must read, so `WHERE … LIKE … LIMIT n` makes the no-result search the expensive one. 400 candidates ≈ 42 MB ≈ 0.06-0.10s on a 1.6 GB state.db #performance
+
+## v0.21.4 aligned layout (v2026.9.21, commit 42e97f3808)
+- [fact] `messages_fts` becomes external-content over a VIEW, `messages_fts_src` (`content='messages_fts_src'`, hermes_state_common.py:712-726@v2026.9.21), and `_fts_indexed_content_sql` (:275-278) truncates EVERY `role='tool'` row to 8192 chars — no high-water exemption, no state_meta lookup (FTS_STORAGE_VERSION 3) #search
+- [gotcha] The one-time realign (`_migrate_misaligned_fts_source` → `do_align`, hermes_state_schema.py:342-366) rebuilds from the view and DELETES `fts_tool_full_content_high_water` (`_DROP_RETIRED_TOOL_HIGH_WATER_SQL`, :138). So a MISSING marker now means the opposite of before: every tool row is truncated. Reading "absent ⇒ fully indexed" silently loses deep tool-output hits #search
+- [rule] Detect the layout the way Hermes does (`_fts_index_is_misaligned_source`, :283-293): the vtable's `sqlite_master.sql` contains `messages_fts_src`. Scarf checks that FIRST and treats aligned as high-water 0 (fallback scans `id > 0`); only a non-aligned vtable falls back to the marker rule. Never SCHEMA_VERSION (C4). Legacy inline (pre-v23) installs skip the realign and keep marker behaviour #state-db
+- [fact] The rebuild markers (`fts_rebuild_high_water` / `fts_rebuild_progress`) are unchanged by the redesign #search
+
 
 ## Relations
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]

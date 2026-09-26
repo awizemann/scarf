@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.
 source_paths_inferred: false
 source_sha: 3e64448e9c9e625348b929019a1050994b774e8a
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-26
 reviewed: 2026-09-10
 reviewed_by: audit:claude-code (background)
 ---
@@ -27,6 +27,9 @@ Wire shapes of `hermes peer` (Hermes v0.21+, `hermes_cli/subcommands/peer.py`), 
 - [fact] Exit codes are 0 ok / 1 delivery-or-peer error / 2 usage; a run that FAILED remotely still exits 0 with {"status":"failed","error":…}, which is a successful invocation carrying a remote failure #hermes-v0-21
 - [constraint] A peer's API_SERVER_KEY lives in ~/.hermes/.env as HERMES_PEER_<NAME>_KEY (uppercase, hyphens to underscores), never in config.yaml — so Scarf reads the registry from config.yaml's bot_peers: map and models only name/url/note, and registration stays a CLI act #security
 - [fact] There is no verb to re-enumerate peer runs: the run_id returned by `peer run` is the only handle, so any UI tracking runs must persist them itself #hermes-v0-21
+
+- [gotcha] `peer dm`'s 600 s DM_TIMEOUT_S is a per-socket read timeout that starts only AFTER up to two 30 s LIST_TIMEOUT_S requests (Bot Chat lookup + optional create POST, peer.py:29,111,123-125 @ v2026.9.21) plus Python/SSH startup — so any Scarf process cap can still fire after the peer accepted the message. On v0.21.4+ Scarf uses 720 s and treats its OWN TransportError.timeout (exit -1, exact "Command timed out after Ns." sentence, `HermesPeerCLI.isLocalDMTimeout`) as "may already be delivered — check Bot Chat, don't resend" with the compose box cleared; pre-v0.21.4 keeps the failure (C1) #hermes-v0-21-4
+
 
 ## Relations
 - relates_to [[Hermes v0.21 Compatibility Decisions]]

@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatVie
 source_paths_inferred: false
 source_sha: 40a3b5f626e2d4f6689a632bd31e240ec70e8c4a
 created: 2026-09-02
-updated: 2026-09-03
+updated: 2026-09-26
 reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
@@ -30,3 +30,7 @@ reviewed_by: audit:claude-code (background)
 - [decision] "Load earlier" pages render in recall mode (Alan 2026-09-03): prompts + visible-text replies + ONE muted EarlierActivityMarker per turn ("N tools · M reasoning — not loaded"); boundary tracked by RichChatViewModel.earlierHistoryCutoffId (ids > 0 and < cutoff), the session-open window keeps full ActivityBubble rendering #chat-transcript
 - [gotcha] Tool-card status must derive from ToolCallRunState.state(hasResult:exitCode:isSettled:) — historical tool results are usually NOT loaded (loadHistoricalToolResults defaults false), so result==nil must never render a spinner on a settled turn #chat-transcript
 - [fact] loadEarlier loops up to maxEarlierPageFetches pages until pageHasRenderableContent (user/visible-text/tools/reasoning/"(empty)") or table exhaustion — a junk page can never strand the spinner or produce a no-op click #paging
+
+
+- [gotcha] Hermes >= v0.21.4 (v2026.9.21) sends a bare tool_call_update with NO prior tool_call start to close the synthetic tool call inside session/request_permission (ids perm-check-N / edit-approval-N, acp_adapter/permissions.py:113). RichChatViewModel.handleToolCallComplete only honours updates for ids in openToolCallIds (inserted at start, removed on first update) — never key this on streamingToolCalls, which every finalize empties while parallel calls are still open. Ungated: <= v0.21.3 every update had a start #acp
+- [fact] RichChatViewModel.workingSince (set/cleared by isAgentWorking's didSet) is the whole-turn clock for the "Working · 0:12" indicator (#145); currentTurnStart is NOT — every per-tool finalize clears it. The 1 Hz tick lives in WorkingElapsedIndicator's own TimelineView (Mac) / AgentThinkingRow (iOS) so the transcript never re-renders on the clock #perf

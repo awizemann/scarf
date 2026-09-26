@@ -7,7 +7,7 @@ source_paths: [tools/validate-catalog.py]
 source_paths_inferred: true
 source_sha: 7ccb6d6d5feb78ddf9809429181d313a1db31775
 created: 2026-05-29
-updated: 2026-09-08
+updated: 2026-09-26
 ---
 
 ## Observations
@@ -54,3 +54,16 @@ updated: 2026-09-08
 - implements [[Section-audit remediation 2026-09]]
 - relates_to [[Scarf Design System (ScarfDesign)]]
 - relates_to [[ScarfGo iOS Companion App]]
+
+
+## ScarfCore `String(localized:)` keys and branch-scoped sweeps (2026-09-26)
+
+- [tooling] To scope a sweep to one branch, intersect the `.stringsdata` keys (app targets `scarf.build` + `scarf mobile.build`, plus `ScarfCore-t.build` / `ScarfIOS.build`) with the lines ADDED in `git diff -U0 <base>..HEAD`. Gotcha: git appends a TAB to `+++ b/...` header paths that contain a space (`scarf/Scarf iOS/...`), so strip it or every iOS key is silently missed #tooling
+- [gotcha] ScarfCore `String(localized:)` keys resolve against the main bundle at runtime, but the app extractor never sees them; they are hand-added rows carrying a `comment` field. Unlike iOS-only keys, NO test pins them, so an interactive macOS extraction may prune them (unverified). Candidates: `sqlite3 is not installed on %@…`, the three `HermesCLIOutcome.profile*Note` sentences, `Nothing is running — sent as a normal prompt…` #gotcha
+- [tooling] `tools/translations/<locale>.json` is insertion-ordered, NOT key-sorted: append new keys with `json.dumps(indent=2, ensure_ascii=False, sort_keys=False)` + newline, which round-trips byte-exact #tooling
+
+## P8a sweep (2026-09-26): merge-translations.py reformat trap, PickerRow verbatim fix
+
+- [gotcha] **Never run `tools/merge-translations.py` after hand-inserting new keys straight into `Localizable.xcstrings`.** It round-trips the WHOLE file through `json.dump`, which doesn't reproduce Xcode's on-disk style (space-before-colon, no trailing newline, non-codepoint key order) — running it on an otherwise-untouched, already-correctly-formatted catalog produced an 86k-line diff with zero semantic change. If you're hand-editing the catalog directly (as this sweep did, to keep byte-identical diffs), write the SAME translations into `tools/translations/*.json` yourself (plain `json.dump(indent=2, ensure_ascii=False)` + trailing newline — that file's format is NOT Xcode-styled, so this is safe there) and skip the merge script entirely; it is only safe to run when you want a full reformat pass (or right before an interactive Xcode extraction that will reformat anyway).
+- [rule] **`PickerRow` (SettingsComponents.swift) renders every option through `Text(verbatim: displayLabel(for:))`** — deliberate, so raw Hermes CLI/config values ("pair", "decline", "block") show unquoted rather than being treated as translatable prose. To localize an explanatory sentence embedded in an `optionLabel` closure's return value (e.g. WhatsAppSetupView's "decline (not supported by this Hermes — behaves as pair)"), wrap the returned `String` in `String(localized:)` at the point it's produced — the lookup is synchronous and resolves against the catalog immediately, so it works correctly even though the value then flows through `Text(verbatim:)` rather than a `Text(LocalizedStringKey)` call site.
+- [tooling] Confirmed two of the prior "unverified" ScarfCore `String(localized:)` candidates were real gaps and fixed them: `HermesDataService.queryFailure`'s three sqlite3/state-db error strings, and `SkillsViewModel.failCheckForUpdates`'s "Check failed (exit %d)[: %@]" — both were plain Swift string literals assigned to a `String`/`String?` property that a View renders via `Text(check.label)` / `Label(msg, systemImage:)` (the `StringProtocol` overload), so they were never extractable and never translated. No test pins ScarfCore keys against a macOS-only extraction pruning them (still true, still unverified either way) — treat every ScarfCore string reaching a View through a stored `String` property as a localization gap until proven otherwise, not just the ones on this list.

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-09-08
-updated: 2026-09-14
+updated: 2026-09-26
 reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
@@ -6468,3 +6468,13 @@ Not a parity cycle. Hermes shipped v0.21.2 four days after our v0.21.1 target; A
 - [gotcha] **`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES` is Release-only, so Swift 6 isolation diagnostics are warnings in every Debug build and test run and errors only at `release.sh`'s archive.** The 3.2.0 Universal archive failed on nine of them across three files, all from the branch's `OffPool`/`Task.detached` conversions: `@MainActor` view models' `static let` timeouts read inside off-actor closures (`GatewayViewModel.probeTimeout/mutationTimeout`, `TestConnectionProbe.probeTimeout` — the app target defaults declarations to `@MainActor`), a captured `var args` (`WebhooksViewModel`), and a weak `self` used in a nested `MainActor.run` without its own capture list. Same class the 3.1.0 notes recorded. Fixed in one commit; the rule for a phase that moves work off an actor: mark the constants it reads `nonisolated static let`, freeze `var`s to `let` before the closure, and re-capture `self` in every nested closure #concurrency #release
 - [convention] **Before `release.sh`, run the Release archive** (`scripts/test-build.sh`, or `xcodebuild … -configuration Release ARCHS='arm64 x86_64' archive` into a scratch path). Every whole-surface round should end with it; six rounds ended with Debug only #release #process
 - [gotcha] The 3.2.0 cut also hit the gate's parallel-unit red (fixed, `63408e4d`) and a one-off test-host exit (`t-28fcd354`). Three cut attempts, three different classes; none a product defect #testing
+
+
+
+## v0.21.5 update (P4, 2026-09-26)
+
+- [decision] `_parse_boolish`'s bare-number handling changed again at v0.21.5 (v2026.9.24, commit `3e00a356a4`, "one reader for mcp_servers.<name>.enabled"): it now special-cases `isinstance(value, (bool, int, float))` → `bool(value)` BEFORE the string-word match, so `enabled: 0` flips from "enabled" (falls through to `default=True`, the v0.21.1-era behavior this note documented) to DISABLED. `enabled: 2` / `enabled: 0.0` follow Python truthiness too. Below v0.21.5 the old fall-through-to-default behavior is unchanged — only `enabled` is affected; `_parse_boolish` is no longer called for anything else in `tools/mcp_tool_common.py` at this tag. #mcp #boolish #config-parsing
+- [decision] Scarf mirrors this with `HermesCapabilities.hasMCPBoolishNumericTruthiness` (`isV0215OrLater`) gating `HermesFileService.boolishOptional(_:capabilities:)` / `.boolish(_:default:capabilities:)`, both now taking a `capabilities: HermesCapabilities = .empty` default param so every existing unconditional caller keeps the pre-v0.21.5 behavior automatically. New `YAMLScalar.resolvesToNumber(_:)` / `.numericScalarIsZero(_:)` do the int/float classification and zero test. `MCPServersViewModel.load(capabilities:)` threads the connected host's capabilities in from `MCPServersView`.
+
+
+- [gotcha] The P52 OffPool sweep matches blocking CALL NAMES (`runHermesCLI(`, `runHermesCLISplit(`, …), so a view model that swaps its spawn for an injected `HermesCLIRunner`-style closure (`cliRunner(args, t)`, `run(args, t)`) makes a `Task.detached` spawn invisible to it. Always call an injected runner inside `await OffPool.run { … }` and lower the `pendingOffPoolSites` baseline + pinned total in HermesP52Tests (P5b did this for CronViewModel.runAndReload and PeersViewModel.sendDM) #concurrency
