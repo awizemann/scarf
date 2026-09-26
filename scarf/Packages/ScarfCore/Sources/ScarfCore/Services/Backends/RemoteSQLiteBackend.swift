@@ -715,6 +715,24 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             : "-readonly -json"
     }
 
+    /// Whether a command line as Hermes's held-store refusal prints it is
+    /// one of THIS backend's `sqlite3` invocations (either `sqlite3Flags`
+    /// form), so the Health pane may call the holder "Scarf's own read".
+    ///
+    /// Hermes renders `basename(argv[0])` plus the rest of argv, whitespace-
+    /// collapsed and cut to 80 characters (`describe_holder_pid`,
+    /// `hermes_state_holders.py:59-68` @ v2026.9.24) — so the shell's single
+    /// quotes are gone and the query-only form (91 characters of flags) is
+    /// truncated inside them. A bare `sqlite3` alone proves nothing: any
+    /// user or script can have the CLI open on `state.db`.
+    public static func isOwnReaderCommandLine(_ commandLine: String) -> Bool {
+        let shown = commandLine.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return [false, true].contains { queryOnly in
+            let argv = "sqlite3 " + sqlite3Flags(queryOnly: queryOnly).replacingOccurrences(of: "'", with: "")
+            return shown.hasPrefix(String((argv + " ").prefix(80)))
+        }
+    }
+
     /// SQL prepended to every relaxed-form script. `PRAGMA query_only=1`
     /// makes the connection incapable of writing a row for the rest of the
     /// session; it returns no result set, so batch marker parsing is

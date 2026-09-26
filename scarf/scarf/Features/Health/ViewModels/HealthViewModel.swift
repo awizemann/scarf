@@ -1213,15 +1213,16 @@ final class HealthViewModel {
 
     /// A holder line for Scarf's own remote `state.db` read: same shape as
     /// `isOtherScarfHolder`, but matching the CLI `RemoteSQLiteBackend`
-    /// spawns per query (`sqlite3Flags(queryOnly:)` — argv[0] is always
-    /// `sqlite3`, `-readonly` or the query-only `.dbconfig` form). Hermes'
-    /// own writer runs in-process against the sqlite3 Python module, never
-    /// the CLI binary, so a bare `sqlite3` holder of Hermes's own state.db
-    /// is Scarf's transient reader (P7e).
+    /// spawns per query. Hermes' own writer runs in-process against the
+    /// sqlite3 Python module, never the CLI binary — but a user's own
+    /// `sqlite3 ~/.hermes/state.db` session, or a backup script, IS the CLI
+    /// binary, so the program name alone was not enough (P9): the whole
+    /// argv Hermes printed must be one of Scarf's own invocation shapes
+    /// (`RemoteSQLiteBackend.isOwnReaderCommandLine`, `sqlite3 -readonly
+    /// -json …` or the query-only `.dbconfig` form).
     static func isTransientRemoteSQLiteReader(_ holder: String) -> Bool {
         guard holder.hasPrefix("PID "), let open = holder.range(of: " (") else { return false }
-        let program = holder[open.upperBound...].prefix { $0 != " " && $0 != ")" }
-        return program.lowercased() == "sqlite3"
+        return RemoteSQLiteBackend.isOwnReaderCommandLine(String(holder[open.upperBound...]))
     }
 
     static func sessionsOptimizeSummary(
