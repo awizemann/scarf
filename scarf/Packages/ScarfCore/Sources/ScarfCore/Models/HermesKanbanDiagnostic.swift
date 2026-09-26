@@ -233,26 +233,32 @@ public struct HermesKanbanDiagnosticsEntry: Sendable, Equatable, Decodable {
     /// Scarf renders.
     ///
     /// **No capability flag.** Older hosts print only per-task rows, each of
-    /// which decodes exactly as before, so their result is unchanged. A
-    /// top level that isn't a JSON array, or an array whose rows are ALL
-    /// unrecognised, still throws — unknown output is never read as a
-    /// healthy board (charter C5).
+    /// which decodes exactly as before, so their result is unchanged —
+    /// including the failure: a row that carries a non-null `task_id` but
+    /// doesn't decode is a per-task row whose shape drifted, and it throws
+    /// exactly as the strict `[Entry]` decode did. Dropping it instead would
+    /// render a board whose diagnostics silently vanished as healthy. The
+    /// home-scope row proves nothing about the per-task rows, so it never
+    /// vouches for the output: a top level that isn't a JSON array, or one
+    /// whose only other rows are unrecognised, still throws — unknown output
+    /// is never read as a healthy board (charter C5).
     public static func decodeList(from data: Data) throws -> [HermesKanbanDiagnosticsEntry] {
         let rows = try JSONDecoder().decode([Row].self, from: data)
         var entries: [HermesKanbanDiagnosticsEntry] = []
-        var recognised = 0
+        var unrecognised = 0
         for row in rows {
             switch row {
             case .task(let entry):
                 entries.append(entry)
-                recognised += 1
+            case .malformedTask(let error):
+                throw error
             case .homeScope:
-                recognised += 1
-            case .unrecognised:
                 continue
+            case .unrecognised:
+                unrecognised += 1
             }
         }
-        if recognised == 0 && !rows.isEmpty {
+        if entries.isEmpty && unrecognised > 0 {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: [],
                 debugDescription: "No recognisable row in kanban diagnostics output."
@@ -261,9 +267,12 @@ public struct HermesKanbanDiagnosticsEntry: Sendable, Equatable, Decodable {
         return entries
     }
 
-    /// One array element, classified without letting a failure escape.
+    /// One array element, classified without letting a failure escape
+    /// `[Row]`'s own decode (``decodeList(from:)`` decides what throws).
     private enum Row: Decodable {
         case task(HermesKanbanDiagnosticsEntry)
+        /// A non-null `task_id` whose row didn't decode — carries the error.
+        case malformedTask(any Error)
         /// The v0.21.4+ trailing `task_id: null` allowlist row.
         case homeScope
         case unrecognised
@@ -274,11 +283,20 @@ public struct HermesKanbanDiagnosticsEntry: Sendable, Equatable, Decodable {
         }
 
         init(from decoder: any Decoder) throws {
-            if let entry = try? HermesKanbanDiagnosticsEntry(from: decoder) {
-                self = .task(entry)
-            } else if let c = try? decoder.container(keyedBy: Keys.self),
-                      (try? c.decodeNil(forKey: .taskId)) == true,
-                      c.contains(.dispatchProfiles) {
+            let taskError: any Error
+            do {
+                self = .task(try HermesKanbanDiagnosticsEntry(from: decoder))
+                return
+            } catch {
+                taskError = error
+            }
+            guard let c = try? decoder.container(keyedBy: Keys.self), c.contains(.taskId) else {
+                self = .unrecognised
+                return
+            }
+            if (try? c.decodeNil(forKey: .taskId)) != true {
+                self = .malformedTask(taskError)
+            } else if c.contains(.dispatchProfiles) {
                 self = .homeScope
             } else {
                 self = .unrecognised
