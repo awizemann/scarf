@@ -6,6 +6,131 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.4.0</title>
+      <sparkle:version>73</sparkle:version>
+      <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 26 Sep 2026 23:14:09 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.4.0</p>
+<p>This release brings Scarf up to Hermes v0.21.5 and fixes a long list of things Scarf said that weren&#x27;t true. The most important: <strong>Stop now actually stops the agent.</strong> Scarf has always sent Hermes&#x27;s cancel message in a shape Hermes&#x27;s protocol library rejects, so clicking Stop, talking over a voice reply, or cancelling on iPhone ended the turn in Scarf while Hermes kept working, tools included. Alongside that, Scarf follows Hermes v0.21.4 and v0.21.5&#x27;s move to one gateway serving every profile, reads the commands whose output changed in those releases correctly, shows how long a reply has been running, and fixes cron &quot;Run now&quot; killing any job longer than 30 seconds. Everything new is gated to the Hermes version that introduced it; nothing changes on a host you don&#x27;t upgrade.</p>
+<h2>Stop means stop</h2>
+<p>Hermes&#x27;s agent-client protocol accepts a cancel only as a one-way notification. Scarf sent it as a request that expects an answer, which the protocol library answers with &quot;method not found&quot; and ignores, and Scarf discarded that error. This was true on every Hermes version Scarf supports. Scarf now sends the notification Hermes expects, waits up to two seconds for Hermes to confirm the turn ended before closing the connection, and never shows a failure banner for a cancel you asked for (Stop or a voice barge-in). A failed start now cleans up after itself instead of leaving a half-started agent process behind, and a request sent after the connection dropped fails straight away instead of hanging.</p>
+<h2>Hermes v0.21.4 and v0.21.5</h2>
+<ul>
+  <li><strong>One gateway for every profile.</strong> From v0.21.4 Hermes serves all your profiles from the default profile&#x27;s gateway unless something prevents it, and an explicit <code>multiplex_profiles: false</code> is retired (v0.21.5 rewrites it to <code>true</code>). Settings → Profile Routes now says routing is on by default and lists the reasons Hermes can still refuse. The Gateway pane shows v0.21.5&#x27;s &quot;this gateway is standalone&quot; warning with the profiles left without a bot, the reason, and the fix command as copyable text.</li>
+  <li><strong>Parked profiles (v0.21.5).</strong> Stopping a profile that the main gateway serves now parks it rather than stopping a separate process. Scarf shows a Parked badge and reports Start, Stop and Restart correctly instead of &quot;could not confirm&quot;. Verified live against v0.21.5.</li>
+  <li><strong>Commands whose output changed.</strong> Kanban diagnostics stopped loading at all on v0.21.4 (a new summary row broke the decoder); a partial backup that Hermes kept now reads as a partial success rather than a failure; a skill blocked by the security scan reads as not installed; a deleted profile whose identity cleanup is still pending reads as deleted, with Hermes&#x27;s retry command kept on screen; <code>peer dm</code> replies that were queued or are still running no longer invite a resend that would deliver the message twice; cron incidents understand the new &quot;resolved&quot; state.</li>
+  <li><strong>Health → Optimize.</strong> Hermes now refuses to optimize the sessions database while any process has it open, and on a local host Scarf&#x27;s own read-only view always does. Scarf explains who holds it; when only Scarf does, a light confirmation runs it with <code>--force</code>, and when something else does (a gateway, another app) the confirmation spells out the risk.</li>
+  <li><strong>Search.</strong> Hermes v0.21.4 rebuilt its search index so every tool output is indexed only up to its first 8 KB. Scarf now detects that layout and searches the rest of long tool outputs directly, so a match deep inside a tool result isn&#x27;t silently lost. A search that fails now says so instead of showing &quot;No matches&quot;.</li>
+  <li><strong>Cron jobs follow the main model.</strong> Unpinned cron jobs now run on whatever <code>hermes model</code> is set to. The Mac cron editor gains <strong>Pin to the current main model</strong>; ScarfGo explains a blank model field.</li>
+  <li><strong>Catalog and settings.</strong> The keyless OpenCode Free provider is gone from v0.21.4 hosts (still offered on v0.20.5 through v0.21.3); <code>chatgpt</code> is accepted as an alias for the Codex provider; the new OpenAI-native web search backend is selectable; the compression threshold shows v0.21.4&#x27;s 256K default when you haven&#x27;t set one; WhatsApp gains the &quot;decline&quot; reply for unknown senders, with its message saved where Hermes reads it; MCP servers written as <code>enabled: 0</code> read as disabled on v0.21.5, like Hermes does.</li>
+</ul>
+<h2>A clock for running replies</h2>
+<p>The three grey dots under a running reply never actually animated, so they looked frozen. They are replaced by <strong>Working · 0:12</strong>, a live elapsed time on the Mac and on ScarfGo, which picks up the right start time when you open a chat that&#x27;s already mid-reply. It updates once a second without redrawing the conversation, and VoiceOver reads it as one element without re-announcing every second. (Thanks to the report in #145.)</p>
+<h2>Cron &quot;Run now&quot;</h2>
+<p>Since Hermes v0.18.0, <code>hermes cron run</code> runs the job to completion before it returns. Scarf gave it 30 seconds, so any agent job longer than that was killed partway through its model call and shown as failed. Scarf now waits as long as Hermes itself allows a run (30 minutes), shows &quot;Running…&quot; immediately, ignores a second click while the first is running, reports a paused or deleted job as &quot;didn&#x27;t run&quot; instead of &quot;Agent started&quot;, and, if it does stop waiting, says so without calling it a failure.</p>
+<h2>Chat and reconnects</h2>
+<ul>
+  <li>Switching to another chat while Scarf was reconnecting could put the old chat back on top of the new one. A reconnect now checks it&#x27;s still wanted at every step.</li>
+  <li>After a reconnect, &quot;Load earlier&quot; could repeat messages you&#x27;d already seen or skip a stretch of history. Fixed.</li>
+  <li>Sending a message while a reply is still streaming no longer drops the partial reply and its tool card.</li>
+  <li>Approval requests on v0.21.4+ no longer leave empty tool rows in the transcript.</li>
+  <li>On ScarfGo, returning from the background could leave a chat stuck on &quot;Reconnecting&quot;; it now resumes, and a turn from a chat you&#x27;ve left can no longer show its error in the new one.</li>
+</ul>
+<h2>Scarf never writes Hermes&#x27;s database</h2>
+<p>Scarf reads <code>state.db</code> read-only. When the database&#x27;s write-ahead log side files are missing, a read-only open fails, so Scarf falls back to a connection with writes switched off. SQLite still copies pending log changes into the database when the last connection closes, and in that fallback that connection could be Scarf&#x27;s. Scarf now turns that off, on the Mac and in the <code>sqlite3</code> command it runs on remote hosts, and refuses the fallback on any host where it can&#x27;t confirm the setting.</p>
+<h2>Honest results elsewhere</h2>
+<ul>
+  <li><strong>Doctor</strong> shows &quot;did not complete&quot; or &quot;timed out&quot; instead of a partial or empty report, stops counting error lines as passing checks, and has two minutes instead of one.</li>
+  <li><strong>Security audit</strong> only says &quot;Advisories found&quot; when it actually found some; a crash reads as a failure.</li>
+  <li><strong>Skills → Check for updates</strong> no longer says &quot;No updates available&quot; when the check failed, and keeps the list it had.</li>
+  <li><strong>Settings → Profile Routes</strong> no longer warns about a routing allowlist that Hermes stopped reading at v0.21.3.</li>
+  <li><strong>ScarfGo</strong> says &quot;sqlite3 is not installed on this server&quot; instead of a generic connection error (#141), and a session list that failed to load says so with Retry instead of &quot;No sessions yet&quot;.</li>
+  <li>The model picker opens on the right provider when your config uses an alias; MCP settings refresh when Scarf detects a Hermes upgrade; the MCP test result has a VoiceOver label; the peers message box is labelled &quot;Message&quot;, not &quot;Send&quot;.</li>
+  <li>A <code>compression.threshold_tokens</code> value like <code>nan</code> or <code>1e30</code> in config.yaml could crash Scarf while reading the file. Scarf now reads numbers exactly the way Hermes&#x27;s YAML parser does.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>ScarfCore holds about 3,760 tests and the Mac app target about 1,590. Every fix in this release has a test that fails without it, most built from Hermes&#x27;s exact output at the release tag.</li>
+  <li>The provider tables check clean against Hermes v0.21.5 (<code>check-hermes-tables.py</code>, 5 of 5 lanes).</li>
+  <li>Every new string is translated into all six supported languages.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight and the App Store; the iOS changes above ride its next build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.5. Parked profiles, the standalone warning and MCP numeric on/off need v0.21.5; the other Hermes-specific changes above need v0.21.4. Everything newer than your host&#x27;s version stays hidden.</li>
+  <li>If you run Hermes from a git checkout or fork whose <code>hermes --version</code> reads like <code>v0.21.4+1234.gabcdef</code>, Scarf treats it as v0.21.4 even if it contains newer code. That&#x27;s the safe direction; the official releases report their version exactly.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.4.0/Scarf-v3.4.0-Universal.zip"
+                 sparkle:edSignature="bJpbRicLR6Imyhvh/DpLNodk5OVRKsSSU+8HPDHjjDptnvBjJ1aez7KDhV4MabCgom+9rvgv40udUimLGzsNBQ=="
+                 length="34380443"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.3.0</title>
       <sparkle:version>72</sparkle:version>
       <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
