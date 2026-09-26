@@ -80,37 +80,7 @@ Scarf for macOS collects **anonymous usage statistics** (event names + fixed-voc
 - **Honest results** — reconnects no longer overwrite a newer chat or scramble "Load earlier"; Doctor, security audit and skills update checks stop reporting success when the command failed; Scarf can no longer write to Hermes's database on a fallback connection; a config value that could crash Scarf is read the way Hermes reads it.
 - Full notes: [releases/v3.4.0/RELEASE_NOTES.md](releases/v3.4.0/RELEASE_NOTES.md).
 
-## What's New in 3.3.0
-
-- **Voice conversation on Mac and ScarfGo** — a waveform button next to Send starts a two-way spoken conversation with Hermes, following the host's own `voice.voice_chat_mode`: *chained* (Hermes's default) is free, on-device speech-to-text with the reply read aloud by the host's TTS provider or the system voice (Hermes v0.20.1+); *GPT-Live* uses OpenAI's real-time voice model on the host's key (Hermes v0.21.3+, one-time privacy consent per device, running cost shown). Every request is still a normal Hermes turn. The chained listener cancels its own echo so it never hears Hermes's reply as your next question.
-- **Hermes Voice playback** — replies spoken through the connected server's configured text-to-speech provider (Settings → Voice → Playback Engine, Hermes v0.20.1+). **ScarfGo dictation** — hold the mic, on-device only. Thanks to [@danmarauda](https://github.com/danmarauda) for PR #143.
-- **Costs that tell the truth** — an unknown session cost shows a dash instead of "$0.00"; included costs show a genuine zero; the Dashboard's per-model breakdown says it reports all time.
-- **Chat windows clean up** — closing a window stops `hermes acp` and its SSH channel; config reads leave the main actor; the Kanban badge resets per chat and pauses in the background; the composer is named for VoiceOver, respects IME composition, and enforces the image cap.
-- **ScarfGo** — multi-byte text reassembled correctly across SSH packets; host scripts sent on stdin so they never appear in `ps`.
-- Full notes: [releases/v3.3.0/RELEASE_NOTES.md](releases/v3.3.0/RELEASE_NOTES.md).
-
-## What's New in 3.2.0
-
-- **Hermes v0.21.2** — every v0.21.1 surface a Mac client can use (paused cron create, failure delivery, dispatch diagnostics, Kanban Review exits and completion contracts, MCP device-code OAuth, credential-pool reorder, fast-mode tiers, Perplexity/Keenable web backends), all capability-gated; v0.21.2 verified at the tag and on a live host, with Backup Now passing `--keep 0` so Hermes's new prune never deletes a backup you kept.
-- **Settings that tell the truth** — the YAML reader was oracled against PyYAML across hundreds of thousands of documents and every disagreement on the keys Scarf reads is fixed; wrong defaults corrected; writers no longer emit YAML Hermes rejects or corrupt a config with a block scalar.
-- **Buttons that report what Hermes did** — every shelled verb is judged on its output with three honest states; Restore from backup works again.
-- **Gated to the version that shipped it** — twelve capability floors corrected in both directions; `/goal` and `/subgoal` no longer pretend to be commands.
-- **The app stops blocking itself** — backup, restore, logs, streaming spawns and shell probes off the cooperative pool and the main actor, with a sweep that keeps them off.
-- **A real UI release gate** — Smoke, Full and Live XCUITest plans, green on Hermes v0.21.1 and v0.21.2.
-- Full notes: [releases/v3.2.0/RELEASE_NOTES.md](releases/v3.2.0/RELEASE_NOTES.md).
-
-## What's New in 3.1.0
-
-- **A sidebar built around your projects** — projects live at the top of the sidebar in their own panel with folders, filtering, the full context menu, and a New Project button; the other sections collapse and expand, and Scarf remembers your arrangement.
-- **Project chats stop nagging** — flip "Auto-accept edits" in a project's Chat Settings and chats bound to that project apply edits without prompting (sensitive paths still ask, enforced by Hermes); or hit the approval dialog's new "Allow edits for this session" button. The setting is cryptographically bound to your machine, so an agent can't grant itself the bypass.
-- **Mini-apps can open links** — a new `open_url` permission hands links to your default browser: https-only, confirmed per host by name (Open once / Always allow), never without your click. The sandbox itself stays sealed.
-- **Projects that can't be destroyed** — atomic writes on every transport (iOS SFTP included), quarantine-and-refuse instead of overwrite on damage, rolling backups, a cross-process write lock, a Project Doctor that reconciles and repairs, and trust re-verified at time of use (uninstall containment, per-project keychain binding, signed mini-app grants).
-- **Agents get real tools** — the bundled scarf-projects MCP server covers the full project surface, including `project_set_config` with secrets routed straight to the Keychain; skills and slash commands now steer agents to tools instead of hand-editing JSON.
-- **Much faster while agents stream** — an unchanged watcher tick dropped from ~55–70 SSH round-trips to ~4; registry work moved fully off the main thread.
-- **Accessibility** — damage and repair announcements, severity spoken on doctor findings, Audio Graphs for charts, non-color status channels, and text that scales in dense widgets.
-- **Heads-up**: mini-apps re-ask for their permissions once after upgrading (grants are now signed); project keychain secrets migrate automatically on next read.
-
-Full notes: [v3.1.0](https://github.com/awizemann/scarf/releases/tag/v3.1.0) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
