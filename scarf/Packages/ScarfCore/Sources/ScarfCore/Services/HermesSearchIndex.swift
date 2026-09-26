@@ -32,8 +32,29 @@ public enum HermesFTSIndex {
     /// and only rows ABOVE it are prefix-truncated.
     ///
     /// Absent ⇒ the host never ran the bounded-tool migration ⇒ every
-    /// tool row is fully indexed and no fallback is warranted.
+    /// tool row is fully indexed and no fallback is warranted — UNLESS
+    /// `messages_fts` reads `alignedSourceViewName`, whose migration
+    /// deletes this key (see there).
     public static let toolFullContentHighWaterKey = "fts_tool_full_content_high_water"
+
+    /// The v0.21.4 (`v2026.9.21`, commit 42e97f3808) aligned FTS layout.
+    /// `messages_fts` becomes external-content over this view
+    /// (`content='messages_fts_src'`, `hermes_state_common.py:712-726`
+    /// @ v2026.9.21), which truncates EVERY `role='tool'` row to the
+    /// 8 KB prefix with no high-water exemption
+    /// (`_fts_indexed_content_sql`, `:275-278`). The realign rebuilds
+    /// the index once from the view and deletes
+    /// `toolFullContentHighWaterKey` in the same step
+    /// (`_DROP_RETIRED_TOOL_HIGH_WATER_SQL`, `hermes_state_schema.py:138`,
+    /// run at `:365`), so on such a DB the marker's absence means "every
+    /// tool row is truncated", the opposite of what it meant before.
+    ///
+    /// Detected the way Hermes detects it — the vtable's
+    /// `sqlite_master.sql` naming the view
+    /// (`_fts_index_is_misaligned_source`, `hermes_state_schema.py:283-293`).
+    /// A legacy inline (pre-v23) FTS install is skipped by that realign
+    /// and keeps its marker-based behaviour.
+    public static let alignedSourceViewName = "messages_fts_src"
 
     /// `state_meta` keys for a DEFERRED FTS rebuild. Contract, verbatim
     /// from `hermes_state_common.py:536-545`: `fts_rebuild_high_water`
@@ -82,7 +103,8 @@ public struct HermesSearchIndexStatus: Sendable, Equatable {
 
     /// The host bounds tool-row indexing to the first
     /// `HermesFTSIndex.toolContentPrefixChars` characters above this id.
-    /// `nil` on every host that never ran the v0.21.1 migration.
+    /// `nil` on every host that never ran the v0.21.1 migration; `0` on
+    /// the v0.21.4+ aligned layout, where every tool row is bounded.
     public var toolPrefixHighWater: Int?
 
     public init(

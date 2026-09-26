@@ -53,6 +53,11 @@ public final class IOSDashboardViewModel {
     /// the last load was healthy.
     public var lastError: String?
 
+    /// True when `lastError` is the host lacking the `sqlite3` CLI
+    /// (gh#141) — the connection itself worked, so the banner must not
+    /// call it a connection issue.
+    public private(set) var lastErrorIsMissingSQLite3 = false
+
     // MARK: - Loading
 
     /// Refresh the dashboard. Does a `dataService.refresh()` (close +
@@ -61,9 +66,11 @@ public final class IOSDashboardViewModel {
     public func load() async {
         isLoading = true
         lastError = nil
+        lastErrorIsMissingSQLite3 = false
 
         let opened = await dataService.refresh()
         if !opened {
+            lastErrorIsMissingSQLite3 = await dataService.lastOpenErrorKind == .sqlite3Missing
             lastError = await dataService.lastOpenError
                 ?? "Couldn't read the Hermes database — check that the server is reachable and that `~/.hermes/state.db` exists."
             isLoading = false
