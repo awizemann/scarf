@@ -228,6 +228,34 @@ import SQLite3
         #expect(!vm.messages.contains { $0.id == 0 }, "a streaming placeholder was left behind")
     }
 
+    /// P9 (t-d6384e2e item 4): the mid-turn finalize above locks a still-
+    /// OPEN tool call into a permanent message. Its later `tool_call_update`
+    /// must patch that message by callId — pre-fix it only looked in the
+    /// (now empty) streaming buffer, so the call kept no duration, no exit
+    /// code and the "{}" argument placeholder forever.
+    @Test @MainActor func lateUpdatePatchesACallFinalizedByAMidTurnSend() throws {
+        let vm = Self.engagedVM()
+        vm.handleACPEvent(Self.toolStart("tc-1"))
+        vm.addUserMessage(text: "/steer be brief")
+        vm.handleACPEvent(.toolCallUpdate(sessionId: "s", update: ACPToolCallUpdateEvent(
+            toolCallId: "tc-1", kind: "execute", status: "failed", content: "boom",
+            rawOutput: nil, rawInput: ["command": "ls"]
+        )))
+
+        let owner = try #require(vm.messages.first { msg in
+            msg.isAssistant && msg.toolCalls.contains { $0.callId == "tc-1" }
+        })
+        let call = try #require(owner.toolCalls.first { $0.callId == "tc-1" })
+        #expect(call.exitCode == 1)
+        #expect(call.duration != nil)
+        #expect(call.arguments == #"{"command":"ls"}"#)
+        // Still ahead of the steer message, and the result row still lands.
+        let ownerIdx = try #require(vm.messages.firstIndex { $0.id == owner.id })
+        let steerIdx = try #require(vm.messages.firstIndex { $0.content == "/steer be brief" })
+        #expect(ownerIdx < steerIdx)
+        #expect(vm.messages.contains { $0.role == "tool" && $0.toolCallId == "tc-1" })
+    }
+
     // MARK: - (4) open tool calls end with the turn
 
     /// A tool call left open when its turn ended (no turn-end flush below
