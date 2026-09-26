@@ -16,7 +16,10 @@ import ScarfDesign
 /// Rules Hermes would silently drop (no `platform`, no/invalid `profile`) are
 /// pushed below the ranked ones and flagged, because they never participate
 /// in matching. Routing as a whole is inert unless
-/// `gateway.multiplex_profiles` is on, so that prerequisite lives here too.
+/// `gateway.multiplex_profiles` is on, so that prerequisite lives here too —
+/// from v0.21.4 an unset (or retired `false`) key means "on by default,
+/// unless the host's startup check blocks it", so the section explains that
+/// instead of offering an Enable button.
 ///
 /// Writes go through `SettingsViewModel.saveProfileRoutes` → direct-YAML
 /// (`hermes config set` can't express a list of maps), which rewrites the
@@ -86,11 +89,25 @@ struct ProfileRoutesSection: View {
         .background(ScarfColor.backgroundTertiary.opacity(0.5))
     }
 
+    /// How `multiplex_profiles` reads on this host — exactly on/off below
+    /// v0.21.4, where it is the pre-existing `block.multiplexProfiles` test.
+    private var multiplexStatus: HermesProfileRoutes.MultiplexStatus {
+        block.multiplexStatus(capabilities: capabilities)
+    }
+
     @ViewBuilder
     private var editor: some View {
 
-            if !block.multiplexProfiles {
+            switch multiplexStatus {
+            case .off:
                 multiplexPrerequisite
+            case .defaultOn, .retiredOptOut:
+                multiplexDefaultNotice
+            case .on:
+                EmptyView()
+            }
+            if capabilities.hasGatewayStandaloneProfiles, block.gatewayStandalone {
+                standaloneNotice
             }
 
             ForEach(rankedRows, id: \.route.id) { row in
@@ -107,7 +124,11 @@ struct ProfileRoutesSection: View {
                     // otherwise a route just never runs, and that's already
                     // covered by `multiplexPrerequisite` above. `nil`
                     // allowlist (key absent) means "no warning" either way.
-                    allowlistWarning: (capabilities.isV0204OrLater && block.multiplexProfiles)
+                    // v0.21.4+: an unset/retired key is multiplexing by
+                    // default, so the allowlist is live there too; below the
+                    // floor `multiplexStatus != .off` is exactly the old
+                    // `block.multiplexProfiles` test.
+                    allowlistWarning: (capabilities.isV0204OrLater && multiplexStatus != .off)
                         ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
                         : nil,
                     onEdit: {
@@ -186,6 +207,69 @@ struct ProfileRoutesSection: View {
             Spacer()
             Button("Enable Multiplexing") { viewModel.setMultiplexProfiles(true) }
                 .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(ScarfColor.backgroundTertiary.opacity(0.5))
+    }
+
+    /// v0.21.4+ (``HermesCapabilities/hasMultiplexByDefault``): the key is
+    /// unset or an explicit `false`, and both now mean "multiplex by
+    /// default" (`hermes_cli/gateway_multiplex_mode.py:132-158` @
+    /// `v2026.9.21`). Deliberately NOT "always on": the gateway grants the
+    /// default only when `implicit_multiplex_blocker` (`:93-129`) finds
+    /// nothing, and otherwise boots standalone and says why in `hermes
+    /// gateway status`. No button: there is no off switch left to offer, and
+    /// writing an explicit `true` is not a harmless "enable" — `true` is never
+    /// second-guessed, so it would skip that very blocker check.
+    @ViewBuilder
+    private var multiplexDefaultNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            multiplexDefaultText
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(ScarfColor.backgroundTertiary.opacity(0.5))
+    }
+
+    /// Whole-sentence literals (not an interpolated `String`) so the inline
+    /// code spans render and each variant stays one localizable key.
+    private var multiplexDefaultText: Text {
+        if multiplexStatus != .retiredOptOut {
+            return Text("Profile multiplexing is on by default on this Hermes version: one host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason.")
+        }
+        // The retired `false` is ignored at v0.21.4 and rewritten to `true` by
+        // the gateway from v0.21.5 (`persist_resolved_default`, `:171-197`
+        // @ `v2026.9.24`) — in the DEFAULT profile's config.yaml, and never
+        // on a guard refusal (`:177-178`), hence the wording.
+        if capabilities.hasMultiplexOptOutRewrite {
+            return Text("`multiplex_profiles: false` is retired and no longer turns multiplexing off — Hermes ignores it, and once the gateway starts multiplexed it writes `true` into the default profile's config.yaml. One host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason.")
+        }
+        return Text("`multiplex_profiles: false` is retired and no longer turns multiplexing off — Hermes ignores it. One host gateway serves every profile, so routes run — unless its startup check keeps it standalone (only one profile, a profile still running its own gateway, a duplicate bot token). `hermes gateway status` names the reason.")
+    }
+
+    /// v0.21.5 (``HermesCapabilities/hasGatewayStandaloneProfiles``):
+    /// `gateway.standalone: true` keeps a NAMED profile's gateway out of the
+    /// host multiplexer — it serves only itself (`STANDALONE_PROFILE_REASON`,
+    /// `hermes_cli/gateway_multiplex_mode.py:29`, `:143-144` @ `v2026.9.24`)
+    /// — and Hermes calls it a temporary shim (`:31-39`). The default profile
+    /// ignores the key (`hermes_cli/profiles.py:976`), and this section cannot
+    /// tell which profile it is editing, so the copy says both.
+    @ViewBuilder
+    private var standaloneNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(ScarfColor.warning)
+            Text("This config sets `gateway.standalone: true`. On a named profile that keeps its gateway out of the host gateway — it serves only itself, so routes to other profiles don't run from it. The default profile ignores the key. Hermes treats it as a temporary compatibility shim.")
+                .scarfStyle(.caption)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)

@@ -1107,6 +1107,46 @@ public enum HermesCLIMarkers {
         "Service start is not applicable inside a Docker container.",
     ]
 
+    /// v0.21.5 parked-profile lifecycle (`hermes_cli/gateway_profile_lifecycle.py`
+    /// @ `v2026.9.24`). `gateway start|stop|restart` on a NAMED profile the
+    /// host multiplexer serves never touches a service manager: `profile_lifecycle`
+    /// (`:18-79`, hooked first in `_cmd_start`/`_cmd_stop`/`_cmd_restart`,
+    /// `hermes_cli/gateway.py:4764`, `:4799`, `:4911`) asks the host over its
+    /// control socket, prints one plain `print` line — no glyph — and returns,
+    /// so the run exits 0. Every line opens `Profile '{name}'`, so the name
+    /// sits between a fixed prefix and each clause below; the clauses are
+    /// matched with their leading `'` so a name can never supply them, and the
+    /// case is Hermes's own (`Profile`, capital P).
+    ///
+    /// Confirmed — the host acknowledged (`_confirmed`, `:8-9`):
+    /// - start: `Profile '{name}' served by the host gateway.` (`:44`)
+    /// - stop: `Profile '{name}' parked; its bots and cron are stopped. Start
+    ///   again with: hermes -p {name} gateway start` (`:62-63`)
+    /// - restart: `Profile '{name}' restarted by the host gateway.` (`:75`)
+    ///
+    /// No module, no lines, at `v2026.9.21` or older — so these can only ever
+    /// match a v0.21.5+ host and need no capability gate.
+    public static let gatewayProfileLifecyclePrefix = "Profile '"
+    public static let gatewayProfileServedClause = "' served by the host gateway."
+    public static let gatewayProfileParkedClause = "' parked; its bots and cron are stopped."
+    public static let gatewayProfileRestartedClause = "' restarted by the host gateway."
+
+    /// The same module's NOT-confirmed arms, each followed by `_failure`'s
+    /// reason (`:12-15`: the host's `error`, `host operation is still
+    /// pending`, or `host control socket did not answer`). The intent is
+    /// persisted and the host retries on its next rescan (the follow-up
+    /// lines at `:47`, `:66`, `:78`), so these are NEITHER a success nor a
+    /// refusal — they judge ``HermesCLIOutcome/Confidence/unconfirmed``
+    /// (C5: never read as success).
+    /// - start: `Profile '{name}' unparked, but serving was not confirmed: …` (`:46`)
+    /// - stop: `Profile '{name}' parked, but immediate stop was not confirmed: …` (`:65`)
+    /// - restart: `Profile '{name}' restart was not confirmed: …` (`:71`) and
+    ///   `Profile '{name}' stopped, but serving was not confirmed: …` (`:77`)
+    public static let gatewayProfileUnparkedUnconfirmedClause = "' unparked, but serving was not confirmed: "
+    public static let gatewayProfileParkedUnconfirmedClause = "' parked, but immediate stop was not confirmed: "
+    public static let gatewayProfileRestartUnconfirmedClause = "' restart was not confirmed: "
+    public static let gatewayProfileStoppedUnconfirmedClause = "' stopped, but serving was not confirmed: "
+
     // MARK: mcp remove / mcp test — hermes_cli/mcp_config.py
 
     /// `  ✓ Removed '<name>' from config` (`mcp_config.py:524` @ v2026.9.7),
@@ -1715,6 +1755,58 @@ public enum HermesGatewayServiceVerdict {
         localized: "Hermes is starting the gateway in the foreground on this host — Scarf can't confirm it from here."
     )
 
+    /// v0.21.5: the success notes for a named profile the host gateway
+    /// handled in-process (``HermesCLIMarkers/gatewayProfileLifecyclePrefix``).
+    /// The banner still claims the state ("Gateway stopped"); the note says
+    /// that only this profile moved and the host gateway itself stayed up.
+    public static let profileServedNote = String(
+        localized: "This profile is served by the host gateway again."
+    )
+    public static let profileParkedNote = String(
+        localized: "This profile is parked; the host gateway keeps serving the other profiles."
+    )
+    public static let profileRestartedNote = String(
+        localized: "The host gateway restarted this profile."
+    )
+
+    /// The v0.21.5 parked-profile arm. `nil` when the run printed none of
+    /// ``HermesCLIMarkers``' `gatewayProfile…` lines for this verb, which is
+    /// every run on an older host and every run through a service manager.
+    private static func profileLifecycleOutcome(
+        verb: Verb, lines: [String], exitCode: Int32
+    ) -> HermesCLIOutcome? {
+        // `profile_lifecycle` returns and the verb exits 0; a non-zero exit
+        // or a real refusal in the same run owns the verdict instead.
+        guard exitCode == 0, !sawServiceRefusal(lines) else { return nil }
+        let prefix = HermesCLIMarkers.gatewayProfileLifecyclePrefix
+        let (confirmed, unconfirmed, note): (String, [String], String) = switch verb {
+        case .start: (
+            HermesCLIMarkers.gatewayProfileServedClause,
+            [HermesCLIMarkers.gatewayProfileUnparkedUnconfirmedClause],
+            profileServedNote)
+        case .stop: (
+            HermesCLIMarkers.gatewayProfileParkedClause,
+            [HermesCLIMarkers.gatewayProfileParkedUnconfirmedClause],
+            profileParkedNote)
+        case .restart: (
+            HermesCLIMarkers.gatewayProfileRestartedClause,
+            [HermesCLIMarkers.gatewayProfileRestartUnconfirmedClause,
+             HermesCLIMarkers.gatewayProfileStoppedUnconfirmedClause],
+            profileRestartedNote)
+        }
+        let lifecycle = lines.filter { $0.hasPrefix(prefix) }
+        // Unconfirmed is checked FIRST: those arms print instead of the
+        // confirmed line, never beside it, and C5 wants the doubt to win if
+        // a future release ever printed both.
+        if let doubt = lifecycle.first(where: { line in unconfirmed.contains { line.contains($0) } }) {
+            return HermesCLIOutcome(succeeded: false, detail: doubt, warning: nil, confidence: .unconfirmed)
+        }
+        if lifecycle.contains(where: { $0.contains(confirmed) }) {
+            return HermesCLIOutcome(succeeded: true, detail: nil, warning: note)
+        }
+        return nil
+    }
+
     /// Did the run print one of the gateway service's own refusal lines?
     /// Shared by the foreground-restart arm and the "nothing was running"
     /// arm, both of which must never launder a genuine refusal.
@@ -1743,6 +1835,10 @@ public enum HermesGatewayServiceVerdict {
             successAnchored: true
         )
         let lines = HermesCLIVerdict.significantLines(output)
+        if !verdict.succeeded,
+           let lifecycle = profileLifecycleOutcome(verb: verb, lines: lines, exitCode: exitCode) {
+            return lifecycle
+        }
         if verb == .restart, !verdict.succeeded, !sawServiceRefusal(lines),
            lines.contains(where: {
                HermesCLIVerdict.unglyphed($0).hasPrefix(HermesCLIMarkers.gatewayForegroundStarting)

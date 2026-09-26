@@ -44,6 +44,15 @@ struct MessagingGatewayInfo {
     /// one; the file's `state` is only the fallback for the service-managed
     /// branches, which print neither marker.
     let isRunning: Bool
+    /// v0.21.5: `hermes gateway status` answered with the parked-profile early
+    /// return — `Profile '{name}': parked (hermes -p {name} gateway start)`
+    /// and nothing else (`hermes_cli/gateway_profile_lifecycle.py:82-88`,
+    /// hooked at `hermes_cli/gateway.py:5021-5023` @ `v2026.9.24`). The
+    /// profile is installed but deliberately NOT served, so it is not running
+    /// and not loaded, whatever a stale `gateway_state.json` still says.
+    /// Only ever set where ``HermesCapabilities/hasGatewayProfileParking``;
+    /// `false` everywhere else, so older hosts render exactly as before.
+    var isParked: Bool = false
 }
 
 struct PlatformInfo: Identifiable {
@@ -213,7 +222,7 @@ final class MessagingGatewayViewModel {
         // the main actor (C10); the commit hops back explicitly.
         loadTask?.cancel()
         loadTask = Task.detached { [weak self] in
-            let status = Self.fetchGatewayStatus(context: ctx, run: run)
+            let status = Self.fetchGatewayStatus(context: ctx, run: run, capabilities: caps)
             if Task.isCancelled { return }
             let pairing = Self.parsePairing(output: run(["pairing", "list"], Self.probeTimeout).output)
             if Task.isCancelled { return }
@@ -254,7 +263,8 @@ final class MessagingGatewayViewModel {
     /// it without bouncing back to MainActor.
     nonisolated private static func fetchGatewayStatus(
         context: ServerContext,
-        run: HermesCLIRunner
+        run: HermesCLIRunner,
+        capabilities: HermesCapabilities
     ) -> MessagingGatewayInfo {
         let stateJSON = context.readData(context.paths.gatewayStateJSON)
         var pid: Int?
@@ -284,6 +294,20 @@ final class MessagingGatewayViewModel {
         }
 
         let statusOutput = run(["gateway", "status"], probeTimeout).output
+        if isParked(statusOutput: statusOutput, capabilities: capabilities) {
+            // The parked early return prints no ✓/✗, so the fallbacks below
+            // would hand the stale file's `gateway_state`/pid straight back.
+            // Nothing from that file describes a parked profile — its bots are
+            // stopped (`gateway_profile_lifecycle.py:62`) — so the pid, exit
+            // reason, timestamps and per-platform states are all dropped
+            // rather than shown beside a "parked" badge.
+            return MessagingGatewayInfo(
+                pid: nil, state: "parked", exitReason: nil,
+                startTime: nil, updatedAt: nil,
+                platforms: [], isLoaded: false,
+                isServedByMultiplexer: false, isRunning: false, isParked: true
+            )
+        }
         let isLoaded = isServiceLoaded(pid: pid, statusOutput: statusOutput)
 
         return MessagingGatewayInfo(
@@ -293,6 +317,16 @@ final class MessagingGatewayViewModel {
             isServedByMultiplexer: isServedByMultiplexer(statusOutput: statusOutput),
             isRunning: isGatewayRunning(state: state, statusOutput: statusOutput)
         )
+    }
+
+    /// v0.21.5 parked verdict — see `MessagingGatewayInfo.isParked` and
+    /// ``HermesGatewayParkedStatus`` for why only a WHOLE-output parked line
+    /// counts (the default profile prints the same shape for its satellites
+    /// and then carries on with its own status). Gated so a pre-v0.21.5 host
+    /// can never take this branch, even on an output nobody expected.
+    nonisolated static func isParked(statusOutput: String, capabilities: HermesCapabilities) -> Bool {
+        capabilities.hasGatewayProfileParking
+            && HermesGatewayParkedStatus.parkedProfile(statusOutput: statusOutput) != nil
     }
 
     /// The v0.21.1 multiplexer marker printed by the FIRST branch of
