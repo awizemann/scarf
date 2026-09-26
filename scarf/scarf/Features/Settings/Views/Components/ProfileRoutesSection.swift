@@ -221,8 +221,11 @@ struct ProfileRoutesSection: View {
     /// default only when `implicit_multiplex_blocker` (`:93-129`) finds
     /// nothing, and otherwise boots standalone and says why in `hermes
     /// gateway status`. No button: there is no off switch left to offer, and
-    /// writing an explicit `true` is not a harmless "enable" — `true` is never
-    /// second-guessed, so it would skip that very blocker check.
+    /// writing an explicit `true` is not a harmless "enable" — `true` skips
+    /// `implicit_multiplex_blocker` entirely (`:143-145`), so it would skip
+    /// that very blocker check. (It is not beyond ALL guards: from v0.21.5
+    /// `standalone_launcher_decision` still keeps a `gateway.standalone: true`
+    /// named profile standalone first, `:240-242` @ `v2026.9.24`.)
     @ViewBuilder
     private var multiplexDefaultNotice: some View {
         HStack(spacing: 8) {

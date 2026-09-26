@@ -264,8 +264,12 @@ public struct HermesProfileRoutes: Sendable, Equatable {
     public enum MultiplexStatus: Sendable, Equatable {
         /// Routing runs: pre-v0.21.4 the key is truthy; from v0.21.4 it is
         /// set to something other than a boolish `false`, which the boot
-        /// verdict never second-guesses (`resolve_multiplex_mode`,
-        /// `gateway_multiplex_mode.py:143-144` @ `v2026.9.21`).
+        /// verdict takes without the `implicit_multiplex_blocker` check
+        /// (`resolve_multiplex_mode`, `gateway_multiplex_mode.py:143-144` @
+        /// `v2026.9.21`). From v0.21.5 the one exception is a named profile
+        /// with `gateway.standalone: true`, which `standalone_launcher_decision`
+        /// keeps standalone before the key is even read (`:240-242` @
+        /// `v2026.9.24`).
         case on
         /// Pre-v0.21.4 only: absent or falsy, so `_profile_name_for_source`
         /// returns before matching and every route is inert.
