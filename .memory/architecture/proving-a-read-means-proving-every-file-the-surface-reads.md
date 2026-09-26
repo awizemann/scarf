@@ -5,11 +5,11 @@ permalink: scarf/architecture/proving-a-read-means-proving-every-file-the-surfac
 tags: [platforms, config, guarded-write, resilience, dataloss]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift]
 source_paths_inferred: false
-source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 P33 (round-3 whole-surface audit). P22 detached the 15 platform setup forms and proved the `.env` half of their load with `HermesEnvService.loadProven()`. The config.yaml half stayed tolerant — `HermesFileService.loadConfig()` returns `.empty` for an unreadable file exactly as for an absent one, and `EmailSetupViewModel` read `readText(path) ?? ""`. The hole P22 existed to close was therefore still open through the other file: a blipped read renders a blank form over live values and `saveForm` publishes the blanks.

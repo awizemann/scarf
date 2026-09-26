@@ -5,9 +5,11 @@ permalink: scarf/architecture/acp-session-cancel-is-a-json-rpc-notification-the-
 tags: [acp, hermes, cancel]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ACPMessages.swift]
 source_paths_inferred: false
-source_sha: 495b264ffc4c8c44da89a3f8129a6c16ce0392a7
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 Wire contract of the acp Python lib Hermes pins (agent-client-protocol ==0.9.0 at v2026.9.14/v2026.9.24; >=0.8.1,<0.9 at the v0.6.0 floor v2026.3.30; both verified identical). Found in P7a (t-67f960a6) after Scarf's cancel had been request-shaped, and therefore inert, since it was written. Probe script: import acp.agent.router.build_agent_router + acp.connection.Connection over an in-memory StreamReader with a stub agent.

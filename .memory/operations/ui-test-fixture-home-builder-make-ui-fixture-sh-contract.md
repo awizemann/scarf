@@ -5,11 +5,11 @@ permalink: scarf/operations/ui-test-fixture-home-builder-make-ui-fixture-sh-cont
 tags: [testing, ui-tests, fixture, release-gate, hermes]
 source_paths: [scripts/ui-fixture/make-ui-fixture.sh, scarf/scarfUITests/UITestIsolation.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift]
 source_paths_inferred: false
-source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 `scripts/ui-fixture/make-ui-fixture.sh <dest-dir>` builds the seeded throwaway Hermes home the XCUITest release gate runs against (phase 1 of the UI release gate plan, 2026-09-08). `ScarfUITestCase.makeIsolatedHermesHome()` mints the same SHAPE but empty, so a section sweep against it only proves empty states render; this script adds real data by driving the installed `hermes` CLI with `HERMES_HOME` pointed at the fixture.

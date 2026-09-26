@@ -5,11 +5,11 @@ permalink: scarf/conventions/argparse-protects-positionals-only-user-text-needs-
 tags: [cli, argv, hermes, verification, cron, kanban]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesCLIOption.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanCreateRequest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanFilters.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetApplyPlan.swift, scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-11
 updated: 2026-09-11
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 Found in the round-4 whole-surface audit, fixed in P42. Scarf had spent several phases carefully placing `--` before the positionals of `cron create`, `kanban create`, `kanban comment` and friends — correct work that protected only half the argv. Every free-text OPTION value was still a separate token, and still aborted the verb.

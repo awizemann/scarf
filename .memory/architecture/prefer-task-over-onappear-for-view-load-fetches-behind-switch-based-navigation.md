@@ -14,9 +14,9 @@ reviewed_by: audit:claude-code (background)
 
 ## Observations
 - [rule] 🚨 Navigation here uses `@ViewBuilder switch` on a selected-section enum that DESTROYS and recreates subtrees per selection, so `.onAppear { load() }` re-fires multi-call remote fetches on every re-entry. Use `.task` (fires once per view instance, auto-cancels on disappear) OR cache the view model via `cachedVM()` in the coordinator. #rule
-- [pattern] `ProjectsView` now uses `.task` correctly (line 70). Many views are cached via `cachedVM()` in `ContentView.cachedVM()` — when a VM is cached, even `.onAppear` fires only once per cache miss (e.g., `ProjectsView` at line 125-128, `SettingsView` at line 166 — round-4 P39 added a capability assignment above the `viewModel.load()` in that same `.onAppear`). For true state persistence across switches without data loss, hoist the view or use caching. #pattern
-- [issue] `HealthView` (line 163 in ContentView) still uses `.onAppear { load() }` (HealthView:175) without VM caching — this causes redundant loads on every section re-entry. #issue
-- [history] 2026-09-04: ProjectsView migrated to `.task`; ContentView now caches view models for 7+ features via `cachedVM()` pattern. SettingsView (line 165) still uses `.onAppear` but is cached so it's mitigated. HealthView remains uncached. #history
+- [pattern] `ProjectsView` now uses `.task` correctly (line 70). Many views are cached via `cachedVM()` in `ContentView.cachedVM()` — when a VM is cached, even `.onAppear` fires only once per cache miss (e.g., `ProjectsView` at line 125-128, `SettingsView` at line 165 — it uses `.onAppear` at line 166 but is cached so re-entry does not re-load). For true state persistence across switches without data loss, hoist the view or use caching. #pattern
+- [issue] `HealthView` (line 163 in ContentView) still uses `.onAppear { load() }` (HealthView:201) without VM caching — this causes redundant loads on every section re-entry. #issue
+- [history] 2026-09-04: ProjectsView migrated to `.task`; ContentView now caches view models for 7+ features via `cachedVM()` pattern. SettingsView (line 165) still uses `.onAppear` but is cached so it's mitigated. HealthView remains uncached. 2026-09-26: HealthView UI expanded with session-optimization dialogs; core `.onAppear` load pattern unchanged. #history
 
 ## Relations
 - relates_to [[Scarf Architecture Rules]]

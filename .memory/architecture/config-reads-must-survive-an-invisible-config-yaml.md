@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/config-reads-must-survive-an-invisible-config-yaml
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-07-12
 updated: 2026-07-12
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 Docker-hosted Hermes keeps `~/.hermes` INSIDE the container; the host `hermes` is a wrapper (docker compose exec). Writes (`hermes config set`) always worked; every direct file read (SFTP/cat) failed → "config.yaml not found" Settings + the chat preflight "no models" sheet on every start. Fixed 2026-07-12, commit 5dc1c55.

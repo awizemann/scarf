@@ -3,12 +3,12 @@ title: Model Presets Feature
 type: note
 permalink: scarf/features/model-presets-feature
 tags: [models, presets, acp]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Core/Models/ProjectTemplate.swift, scarf/scarf/Features/Chat/Views/ChatModelBadge.swift, scarf/scarf/Features/Chat/Views/SessionInfoBar.swift, scarf/Scarf iOS/Projects/ProjectDetailView.swift, scarf/scarf/Features/Projects/ViewModels/FleetApplyViewModel.swift]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-05-29
 updated: 2026-09-12
-reviewed: 2026-09-19
+reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
 

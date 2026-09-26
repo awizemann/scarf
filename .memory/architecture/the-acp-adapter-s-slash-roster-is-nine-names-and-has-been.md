@@ -5,10 +5,10 @@ permalink: scarf/architecture/the-acp-adapter-s-slash-roster-is-nine-names-and-h
 tags: [hermes, acp, chat, capability-gating, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-10
 updated: 2026-09-13
-reviewed: 2026-09-21
+reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
 

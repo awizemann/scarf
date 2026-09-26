@@ -5,10 +5,10 @@ permalink: scarf/decisions/section-audit-remediation-2026-09
 tags: [security, miniapps, widgets, audit, decision]
 source_paths: [scarf/scarf/Features/Projects/Views/Widgets/WidgetPathResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppManifest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppPermission.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectHermesShadowDetector.swift, scarf/Packages/ScarfDesign/Sources/ScarfDesign/ScarfLinkPolicy.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/SQLValueInliner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesWebhookList.swift, scarf/scarf/Features/Webhooks/ViewModels/WebhooksViewModel.swift, scarf/scarf/Features/Plugins/ViewModels/PluginsViewModel.swift, scarf/Scarf iOS/Projects/Widgets/WebviewWidgetView.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-02
 updated: 2026-09-10
-reviewed: 2026-09-18
+reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
 

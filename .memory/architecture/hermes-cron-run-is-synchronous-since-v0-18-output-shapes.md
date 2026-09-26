@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-cron-run-is-synchronous-since-v0-18-output-
 tags: [hermes, cron, cli-contract]
 source_paths: [scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift]
 source_paths_inferred: false
-source_sha: fb61b90b14e0c54ce852609efcb482f6a38cb553
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 What `hermes cron run <id>` actually does per host generation, verified against tagged source (P7f, 2026-09-26). Scarf judges it in CronViewModel.runNowVerdict.

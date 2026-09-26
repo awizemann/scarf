@@ -5,11 +5,11 @@ permalink: scarf/conventions/driving-cron-and-kanban-from-xcuitest-what-actually
 tags: [testing, xcuitest, cron, kanban, gotcha]
 source_paths: [scarf/scarf/ContentView.swift, scarf/scarf/Features/Cron/Views/CronView.swift, scarf/scarf/Features/Kanban/Views/KanbanColumnView.swift]
 source_paths_inferred: false
-source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 Learned building the P2b write-path journeys (t-cd7d1c11, 2026-09-08), measured on this Mac against Hermes v0.21.0.

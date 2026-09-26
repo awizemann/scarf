@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-gateway-multiplex-by-default-and-parked-pro
 tags: [hermes, gateway, v0.21.5]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileRoutes.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Features/Settings/Views/Components/ProfileRoutesSection.swift]
 source_paths_inferred: false
-source_sha: a06dc2054fd23e1601c621f9a42ca9d37f7bf3dd
+source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-26
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified at v2026.9.21 / v2026.9.24 (hermes_cli/gateway_multiplex_mode.py, gateway_profile_lifecycle.py, profiles.py). Scarf reads these through HermesProfileRoutes.multiplexStatus(capabilities:), HermesGatewayParkedStatus and HermesGatewayServiceVerdict's profile-lifecycle arm.
