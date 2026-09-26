@@ -60,10 +60,28 @@ public final class IOSDashboardViewModel {
 
     // MARK: - Loading
 
+    /// The load currently running, if any. `.task` (on appear) and
+    /// `.refreshable` / Retry can fire together, and every load ends in
+    /// `dataService.close()` — so two interleaved loads closed the shared
+    /// service under each other's queries, and the loser's reads came back
+    /// empty. A load that arrives while one is in flight joins it instead.
+    private var inFlightLoad: Task<Void, Never>?
+
     /// Refresh the dashboard. Does a `dataService.refresh()` (close +
     /// reopen, forces a fresh Citadel snapshot on iOS) then reads the
-    /// visible bits.
+    /// visible bits. Concurrent calls coalesce onto the running load.
     public func load() async {
+        if let inFlightLoad {
+            await inFlightLoad.value
+            return
+        }
+        let task = Task { await performLoad() }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
+    }
+
+    private func performLoad() async {
         isLoading = true
         lastError = nil
         lastErrorIsMissingSQLite3 = false
@@ -79,8 +97,16 @@ public final class IOSDashboardViewModel {
 
         await ScarfMon.measureAsync(.sessionLoad, "ios.loadDashboard") {
             stats = await dataService.fetchStats()
-            recentSessions = await dataService.fetchSessions(limit: 5)
-            allSessions = await dataService.fetchSessions(limit: 25)
+            // Checked: a query that fails after a good open must raise the
+            // banner, not render as "No sessions yet".
+            do {
+                recentSessions = try await dataService.fetchSessionsChecked(limit: 5)
+                allSessions = try await dataService.fetchSessionsChecked(limit: 25)
+            } catch {
+                recentSessions = []
+                allSessions = []
+                lastError = error.localizedDescription
+            }
             sessionPreviews = await dataService.fetchSessionPreviews(limit: 25)
         }
         ScarfMon.event(.sessionLoad, "ios.allSessions.count", count: allSessions.count)
