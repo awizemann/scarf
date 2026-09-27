@@ -215,9 +215,10 @@ final class NousAuthFlow {
         }
         if exitCode == 0 {
             // Hermes claims success. Confirm by reading auth.json — the
-            // authoritative signal is that providers.nous has an access token
-            // AND active_provider flipped to nous. Anything short of that is
-            // a silent failure on the hermes side.
+            // authoritative signal is that providers.nous has an access
+            // token. Anything short of that is a silent failure on the
+            // hermes side. (`active_provider` is not part of it: sign-in is
+            // what the Tool Gateway keys on, T3-F2.)
             // C10, the third instance of this shape in the sign-in path
             // (P51 moved `start()`'s environment probe and
             // `AuxiliaryTab`/`ModelPickerSheet`'s reads): `loadState()` is a
@@ -228,11 +229,6 @@ final class NousAuthFlow {
             let sub = await OffPool.run { svc.loadState() }
             if sub.subscribed {
                 state = .success
-            } else if sub.present {
-                state = .failure(
-                    reason: "Signed in, but Nous isn't the active provider yet. Run `hermes model` and pick Nous Portal.",
-                    billingURL: nil
-                )
             } else {
                 state = .failure(
                     reason: "Sign-in finished without writing credentials. Try again, or run `hermes auth add nous` in a terminal to see full diagnostics.",

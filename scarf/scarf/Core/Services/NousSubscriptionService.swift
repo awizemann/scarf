@@ -11,20 +11,27 @@ nonisolated struct NousSubscriptionState: Sendable, Hashable {
     /// Mirrors the `nous_auth_present` field on
     /// `NousSubscriptionFeatures` in `hermes_cli/nous_subscription.py`.
     let present: Bool
-    /// True when the user's **active provider** is `nous`, i.e. they've not
-    /// just authed but selected it as the primary model provider. The Tool
-    /// Gateway only routes tools when this is true — auth alone isn't enough.
-    let providerIsNous: Bool
     /// Last update time for the auth record, if known. Useful in the Health
     /// view to tell the user when their subscription state was last refreshed.
     let updatedAt: Date?
 
-    nonisolated static let absent = NousSubscriptionState(present: false, providerIsNous: false, updatedAt: nil)
+    nonisolated static let absent = NousSubscriptionState(present: false, updatedAt: nil)
 
-    /// Overall subscription active for Tool Gateway routing. Both halves have
-    /// to line up: auth record present *and* `nous` is the active provider.
-    /// Mirrors `NousSubscriptionFeatures.subscribed` on the Python side.
-    var subscribed: Bool { present && providerIsNous }
+    /// Signed in to Nous Portal, which is all Scarf can see of the Tool
+    /// Gateway gate.
+    ///
+    /// Hermes routes a tool through the gateway when the Portal account is
+    /// signed in AND entitled (`tools/tool_backend_helpers.py:18-28` @
+    /// v2026.9.24). The inference provider is not part of that gate, and
+    /// never was (before v2026.4.16 the gate was an env flag). It only
+    /// decides whether Hermes offers and auto-applies the gateway defaults
+    /// (`hermes_cli/nous_subscription.py:494,557`); each tool's own
+    /// selection decides whether it routes. This used to also require auth.json's
+    /// `active_provider == "nous"`, so a user who signed in and then chose
+    /// another provider was told their tools would not route (T3-F2). The
+    /// entitlement is a live Portal lookup Scarf does not make, so the UI
+    /// says "signed in", not "entitled".
+    var subscribed: Bool { present }
 
     /// Days since the auth record was last touched (refreshed by Hermes
     /// or re-authed by the user). Hermes refreshes on every agent boot,
@@ -58,8 +65,8 @@ nonisolated struct NousSubscriptionState: Sendable, Hashable {
 ///
 /// The auth-record shape is defined by hermes-agent and is load-bearing. This
 /// service parses a small, stable subset and tolerates anything new Hermes
-/// adds — we only rely on `providers.nous` being a dict with `access_token`
-/// and `active_provider` being either `"nous"` or not.
+/// adds — we only rely on `providers.nous` being a dict with
+/// `access_token`.
 struct NousSubscriptionService: Sendable {
     private let logger = Logger(subsystem: "com.scarf", category: "NousSubscriptionService")
     let authJSONPath: String
@@ -116,9 +123,6 @@ struct NousSubscriptionService: Sendable {
             let token = nous?["access_token"] as? String
             let present = (token?.isEmpty == false)
 
-            let activeProvider = root["active_provider"] as? String
-            let providerIsNous = (activeProvider == "nous")
-
             let updatedAt: Date? = {
                 guard let raw = root["updated_at"] as? String else { return nil }
                 return ISO8601DateFormatter().date(from: raw)
@@ -126,7 +130,6 @@ struct NousSubscriptionService: Sendable {
 
             return NousSubscriptionState(
                 present: present,
-                providerIsNous: providerIsNous,
                 updatedAt: updatedAt
             )
         }

@@ -259,9 +259,12 @@ import Foundation
         #expect(transport(remoteHome: nil)
             .composedRemoteCommand(executable: "hermes", args: ["acp"])
             == "COLUMNS=400 \"hermes\" \"-p\" \"default\" \"acp\"")
+        // A custom root carries `HERMES_HOME=<root>` as well, so `-p default`
+        // resolves to it instead of the SSH user's `~/.hermes` (T6-F1). This
+        // used to assert no assignment, which pinned that bug.
         #expect(transport(remoteHome: "/opt/data")
             .composedRemoteCommand(executable: "/usr/local/bin/hermes", args: ["cron", "list"])
-            == "COLUMNS=400 \"/usr/local/bin/hermes\" \"-p\" \"default\" \"cron\" \"list\"")
+            == "COLUMNS=400 HERMES_HOME='/opt/data' \"/usr/local/bin/hermes\" \"-p\" \"default\" \"cron\" \"list\"")
         // Non-hermes executables, argv that already pins a profile, and the
         // bare version probe pass through untouched.
         #expect(transport(remoteHome: "~/.hermes")

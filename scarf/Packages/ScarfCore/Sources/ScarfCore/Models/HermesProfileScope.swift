@@ -264,13 +264,29 @@ public enum HermesProfileScope {
     }
 
     /// A shell `HERMES_HOME=... ` assignment (note the trailing space) that
-    /// scopes a `hermes` invocation to a named profile, or `""` for a
-    /// default/root home. This is Hermes' own per-invocation home mechanism;
-    /// for a `<root>/profiles/<name>` value the CLI trusts it and never
-    /// consults `active_profile` (verified against Hermes 0.16,
-    /// hermes_cli/main.py). A root value would NOT be trusted (Hermes still
-    /// reads `active_profile` for it), which is why a root home is pinned
-    /// with `-p default` instead — see ``pinnedRemoteArguments``.
+    /// scopes a `hermes` invocation to the window's home, or `""` for the
+    /// standard `~/.hermes` root. This is Hermes' own per-invocation home
+    /// mechanism:
+    /// - A `<root>/profiles/<name>` value is trusted as is; the CLI never
+    ///   consults `active_profile` for it (`hermes_cli/main.py:603-605` @
+    ///   v2026.9.24).
+    /// - A custom ROOT (`/home/hermes/.hermes`, `/opt/data`, anything but
+    ///   `~/.hermes`) is emitted too (T6-F1). On its own Hermes would still
+    ///   follow that root's `active_profile`, so it works together with the
+    ///   `-p default` from ``pinnedRemoteArguments``: `-p default` resolves
+    ///   to the root that `HERMES_HOME` names
+    ///   (`hermes_cli/profiles.py:2345-2369` @ v2026.9.24). Without the
+    ///   assignment `-p default` fell back to the SSH user's own
+    ///   `~/.hermes`, so CLI and chat worked on a different home from the
+    ///   one the window's file views read.
+    /// - `~/.hermes` itself gets nothing, as before: a host that exports its
+    ///   own `HERMES_HOME` to non-interactive shells (NixOS, Docker images)
+    ///   keeps it, and every other host resolves the same directory anyway.
+    ///
+    /// Older hosts: `HERMES_HOME` has named the home since before profiles
+    /// shipped, so a custom root is honoured there too. On 0.6–0.8 the
+    /// `-p default` alias ignored it (see ``profileFlag(_:)``), a gap this
+    /// assignment neither opens nor closes.
     ///
     /// The home is quoted for the remote shell exactly like
     /// `RemoteSQLiteBackend.quoteForRemoteShell`: a leading `~` becomes a
@@ -280,8 +296,18 @@ public enum HermesProfileScope {
     /// regex-validated, so the only free-form interpolated value is the
     /// user's own configured home — but we escape it regardless.
     public static func hermesHomeShellAssignment(forHome home: String) -> String {
-        guard isProfileHome(home) else { return "" }
-        return "HERMES_HOME=\(shellQuotePath(home)) "
+        guard needsHomeAssignment(home) else { return "" }
+        return "HERMES_HOME=\(shellQuotePath(trimmedBase(home))) "
+    }
+
+    /// Whether a REMOTE invocation for `home` must carry `HERMES_HOME`:
+    /// every home except the standard `~/.hermes` root (with or without a
+    /// trailing slash, or spelled `$HOME/.hermes`). See
+    /// ``hermesHomeShellAssignment(forHome:)``.
+    public static func needsHomeAssignment(_ home: String) -> Bool {
+        let base = trimmedBase(home)
+        guard !base.isEmpty else { return false }
+        return base != HermesPathSet.defaultRemoteHome && base != "$HOME/.hermes"
     }
 
     /// Quote a remote path for safe interpolation into a shell command.

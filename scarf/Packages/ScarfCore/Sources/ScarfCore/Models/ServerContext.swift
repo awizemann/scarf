@@ -399,8 +399,9 @@ public extension ServerContext {
     /// - assignments go through `env` (csh has no `VAR=value command`);
     /// - the PATH word closes its quote after `$PATH` (csh modifiers, fish
     ///   braces — ``HermesConfigReader/pathFallback``);
-    /// - the `HERMES_HOME=` pin for a named profile is already quoted for
-    ///   the remote shell; a root home gets `-p default` instead (S13-F1);
+    /// - the `HERMES_HOME=` pin (a named profile or a custom root) is
+    ///   already quoted for the remote shell; a root home also gets
+    ///   `-p default` (S13-F1, T6-F1);
     /// - the binary is ``HermesPathSet/hermesBinaryShellWord``: a path Test
     ///   Connection found stays one word, a typed wrapper stays words.
     ///

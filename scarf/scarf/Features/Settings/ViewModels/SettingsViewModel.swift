@@ -942,7 +942,6 @@ final class SettingsViewModel {
         )
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
-    func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }
 
     // MARK: - Auxiliary model sub-tasks
 

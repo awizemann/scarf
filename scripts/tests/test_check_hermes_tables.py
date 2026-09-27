@@ -352,7 +352,7 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
             self.fail(reason)
         code, text = self._run()
         self.assertEqual(code, 0, text)
-        self.assertIn("lanes=6/6", text)
+        self.assertIn("lanes=7/7", text)
         self.assertIn(f"tag {cht.HERMES_TARGET_TAG}", text)
 
 
@@ -523,6 +523,152 @@ class LaneSixCatchesDrift(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("[provider-env-vars] providerEnvVars entries", out)
         self.assertIn("GROQ_API_KEY", out)
+
+
+class LaneSevenManifestReader(unittest.TestCase):
+    """The YAML-subset reader lane 7 uses instead of PyYAML: every shape the
+    manifests use reads exactly, and anything else exits instead of reading
+    as an empty manifest."""
+
+    def test_the_manifest_shapes_read_exactly(self):
+        text = textwrap.dedent("""\
+            # comment
+            manifest_version: 1
+            name: asana
+            description: >-
+              Tasks, projects,
+              and goals.
+            transport:
+              type: http
+              url: https://mcp.asana.com/v2/mcp  # trailing comment
+            auth:
+              type: oauth
+              env:
+                - name: ASANA_CLIENT_ID
+                  prompt: "Client ID (a → b)"
+                  secret: false
+                - name: ASANA_CLIENT_SECRET
+                  prompt: 'Client secret'
+            tools:
+              default_enabled:
+                - one
+                - two
+            post_install: |
+              line one
+
+              line three
+            """)
+        m = cht.parse_manifest_yaml(text, "fixture")
+        self.assertEqual(m["name"], "asana")
+        self.assertEqual(m["manifest_version"], 1)
+        self.assertEqual(m["description"], "Tasks, projects, and goals.")
+        self.assertEqual(m["transport"], {"type": "http", "url": "https://mcp.asana.com/v2/mcp"})
+        self.assertEqual(m["auth"]["env"], [
+            {"name": "ASANA_CLIENT_ID", "prompt": "Client ID (a → b)", "secret": False},
+            {"name": "ASANA_CLIENT_SECRET", "prompt": "Client secret"},
+        ])
+        self.assertEqual(m["tools"]["default_enabled"], ["one", "two"])
+        self.assertEqual(m["post_install"], "line one\n\nline three\n")
+
+    def test_a_quoted_scalar_with_a_comment_reads(self):
+        m = cht.parse_manifest_yaml('url: "https://x/y"  # comment\nname: \'a # b\'\n', "fixture")
+        self.assertEqual(m, {"url": "https://x/y", "name": "a # b"})
+
+    def test_a_flow_collection_exits(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            cht.parse_manifest_yaml("name: x\ntools:\n  default_enabled: [a, b]\n", "fixture")
+
+    def test_a_line_it_cannot_read_exits(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            cht.parse_manifest_yaml("name: x\n? complex key\n", "fixture")
+
+    def test_every_manifest_at_the_target_tag_matches_pyyaml(self):
+        _require_target_checkout(self)
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML not installed; the cross-check needs it")
+        src = cht.HermesSource(HERMES_CHECKOUT, cht.HERMES_TARGET_TAG)
+        dirs = src.listdir(cht.OPTIONAL_MCPS_DIR)
+        self.assertGreater(len(dirs), 60)
+        for d in dirs:
+            text = src.read(f"{cht.OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+            if text is None:
+                continue
+            self.assertEqual(cht.parse_manifest_yaml(text, d), yaml.safe_load(text), d)
+
+
+class LaneSevenCatchesDrift(unittest.TestCase):
+    """End to end at the target tag: the pre-R18c roster (asana's retired
+    /sse endpoint and no install prompts, the retired n8n bridge) FAILs, and
+    so does a dropped tool name."""
+
+    def setUp(self):
+        _require_target_checkout(self)
+        self.real = cht.MCP_CATALOG_SWIFT
+        self.text = open(self.real).read()
+        self.addCleanup(setattr, cht, "MCP_CATALOG_SWIFT", self.real)
+
+    def _run_with(self, text):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.MCP_CATALOG_SWIFT = tmp.name
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            try:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue()
+
+    def test_the_current_roster_passes(self):
+        code, out = self._run_with(self.text)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("[mcp-catalog]", out)
+
+    def test_the_old_asana_entry_fails(self):
+        old = self.text.replace('url: "https://mcp.asana.com/v2/mcp",', 'url: "https://mcp.asana.com/sse",', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' url", out)
+
+    def test_a_missing_install_prompt_fails(self):
+        old = self.text.replace('.init(name: "ASANA_CLIENT_SECRET", prompt: "Asana MCP app Client secret"),', "", 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' env", out)
+
+    def test_the_retired_n8n_bridge_fails(self):
+        old = self.text.replace('name: "n8n-official",', 'name: "n8n",', 1)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("missing from OptionalMCPCatalog.entries: n8n-official", out)
+        self.assertIn("not in Hermes's catalog: n8n", out)
+
+    def test_a_wrong_secret_flag_fails(self):
+        old = self.text.replace('prompt: "Asana MCP app Client secret"),',
+                                'prompt: "Asana MCP app Client secret", isSecret: false),', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' env", out)
+
+    def test_a_secret_before_a_plain_prompt_fails(self):
+        manifest = {"auth": {"type": "oauth", "env": [
+            {"name": "TOKEN"}, {"name": "URL", "secret": False}]}}
+        self.assertEqual(cht.manifest_fields(manifest)["env"], ["TOKEN", "URL:plain"])
+
+    def test_a_dropped_tool_fails(self):
+        old = self.text.replace('"list_tables", "list_views", "query"', '"list_tables", "query"', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'motherduck' default_enabled", out)
 
 
 if __name__ == "__main__":

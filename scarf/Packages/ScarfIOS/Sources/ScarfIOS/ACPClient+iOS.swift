@@ -122,13 +122,14 @@ public extension ACPClient {
     ) -> String {
         // Scope the chat session to the selected profile's HERMES_HOME
         // (#120, Design B), so chat reads/writes the same profile the rest
-        // of the app shows. Empty for a default/root home. `home` already carries the profile-resolved
+        // of the app shows. Empty for the standard `~/.hermes` root; a custom
+        // root is named so `-p default` below resolves to it (T6-F1). `home` already carries the profile-resolved
         // remoteHome from ScarfGoTabRoot's effectiveConfig.
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
-        // A root home can't be pinned with `HERMES_HOME=` (Hermes ignores a
-        // root value and follows the sticky `active_profile`), so it gets
-        // `-p default` before `acp` instead (S13-F1). Empty for a named
-        // profile, which the assignment above already pins.
+        // A root home can't be pinned with `HERMES_HOME=` alone (Hermes
+        // follows that root's sticky `active_profile`), so it also gets
+        // `-p default` before `acp` (S13-F1). Empty for a named profile,
+        // which the assignment above already pins.
         let rootPin = HermesProfileScope.rootPinShellFragment(forHome: home)
         let cdPrefix: String
         if let projectCwd, !projectCwd.isEmpty {

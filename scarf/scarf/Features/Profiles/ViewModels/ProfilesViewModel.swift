@@ -112,7 +112,13 @@ final class ProfilesViewModel {
             await MainActor.run {
                 if result.exitCode == 0 {
                     HermesProfileResolver.invalidateCache()
-                    self.message = String(localized: "Active profile set to \(profile.name) — restart Scarf to refresh.")
+                    // A remote window is pinned to the profile it views, so a
+                    // restart would change nothing there (T6-F5). What it
+                    // does change is the profile that bare `hermes` runs on
+                    // the server itself use.
+                    self.message = self.context.isRemote
+                        ? String(localized: "\(profile.name) is now the server's active profile. This window keeps showing the profile it is viewing.")
+                        : String(localized: "Active profile set to \(profile.name) — restart Scarf to refresh.")
                 } else {
                     self.message = Self.failureMessage(result.output)
                 }

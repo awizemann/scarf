@@ -188,8 +188,14 @@ public struct MCPServerPreset: Identifiable, Sendable, Equatable {
             category: "Built-in",
             iconSystemName: "arrow.down.circle",
             transport: .stdio,
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-fetch"],
+            // The reference fetch server is the Python package
+            // `mcp-server-fetch` (PyPI), run through `uvx`; there is no npm
+            // `@modelcontextprotocol/server-fetch` (the registry answers 404),
+            // so the old `npx` preset could never be added (T4-F2). Hermes's
+            // own tests run it the same way (`tests/tools/test_osv_check.py`
+            // @ v2026.9.24).
+            command: "uvx",
+            args: ["mcp-server-fetch"],
             url: nil,
             auth: nil,
             requiredEnvKeys: [],

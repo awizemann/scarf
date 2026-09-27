@@ -807,14 +807,15 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // process-env assignment. Set unconditionally (not just when the
         // executable is hermes) because several callers run hermes INSIDE a
         // `/bin/sh -c "… hermes …"` script — the env propagates to the
-        // child hermes there too. It's empty for a default/root home, and
-        // harmless for non-hermes callers (`echo $HOME`), which ignore it.
+        // child hermes there too. It's empty for the standard `~/.hermes`
+        // root, set for a custom root (T6-F1), and harmless for non-hermes
+        // callers (`echo $HOME`), which ignore it.
         // Mirrors the file layer, which scopes via this same
         // `config.remoteHome`.
         //
-        // A root home is pinned by argv instead: Hermes ignores
-        // `HERMES_HOME=<root>` and follows the sticky `active_profile`, so a
-        // hermes argv gets `-p default` in front (S13-F1; see
+        // A root home is also pinned by argv: with only `HERMES_HOME=<root>`
+        // Hermes follows the sticky `active_profile`, so a hermes argv gets
+        // `-p default` in front (S13-F1; see
         // `HermesProfileScope.pinnedRemoteArguments`, the same rule as
         // `SSHTransport.composedRemoteCommand`). Script callers that run
         // hermes inside `/bin/sh -c` put `rootPinShellFragment` in their

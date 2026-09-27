@@ -8,6 +8,8 @@ import ScarfDesign
 /// auth; Scarf has no `hermes mcp install` equivalent, so this only saves
 /// the user from retyping the well-known endpoint/name, not a full install.
 struct OptionalMCPCatalogPickerView: View {
+    /// The roster for the connected host (`OptionalMCPCatalog.entries(for:)`).
+    let entries: [OptionalMCPCatalogEntry]
     let onSelect: (OptionalMCPCatalogEntry) -> Void
     let onCancel: () -> Void
 
@@ -22,7 +24,7 @@ struct OptionalMCPCatalogPickerView: View {
             .padding()
             Divider()
 
-            List(OptionalMCPCatalog.entries) { entry in
+            List(entries) { entry in
                 Button {
                     onSelect(entry)
                 } label: {
