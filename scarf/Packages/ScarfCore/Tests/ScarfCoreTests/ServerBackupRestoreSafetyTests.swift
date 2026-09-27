@@ -170,6 +170,58 @@ struct ServerBackupRestoreSafetyTests {
         #expect(!archived.contains { $0.hasPrefix("state.db-") })
     }
 
+    /// Freeze a live WAL database as a crashed or stopped Hermes leaves it:
+    /// copy `state.db` and its `-wal` (with frames) while the writer still
+    /// has them open, into `home`, with no process holding the copies.
+    /// `withWAL: false` leaves no sidecars at all (a cleanly stopped Hermes
+    /// on Linux, which deletes its WAL on close).
+    static func makeUnheldHome(_ home: URL, rows: Int, withWAL: Bool) throws {
+        let scratch = home.deletingLastPathComponent().appendingPathComponent("live-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let live = scratch.appendingPathComponent("state.db").path
+        let writer = try openWALWriter(live, rows: rows)
+        if !withWAL {
+            try exec(writer, "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+        try FileManager.default.copyItem(atPath: live, toPath: home.appendingPathComponent("state.db").path)
+        if withWAL {
+            try FileManager.default.copyItem(atPath: live + "-wal", toPath: home.appendingPathComponent("state.db-wal").path)
+        }
+        sqlite3_close(writer)
+        try? FileManager.default.removeItem(at: scratch)
+    }
+
+    @Test("a stopped Hermes's database (no sidecars, or WAL frames with no holder) snapshots without being written")
+    func backupOfUnheldDatabase() async throws {
+        for withWAL in [false, true] {
+            let root = try Self.scratch("unheld")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let home = root.appendingPathComponent(".hermes")
+            try Self.makeUnheldHome(home, rows: 250, withWAL: withWAL)
+            let db = home.appendingPathComponent("state.db")
+            let dbBefore = Self.bytes(db)
+            let walBefore = Self.bytes(URL(fileURLWithPath: db.path + "-wal"))
+
+            let result = try await Self.backUp(home: home, into: root)
+
+            // The last connection to close never checkpointed the WAL into
+            // state.db (charter C3), and the WAL itself is untouched.
+            #expect(Self.bytes(db) == dbBefore, "withWAL: \(withWAL)")
+            if withWAL {
+                #expect(Self.bytes(URL(fileURLWithPath: db.path + "-wal")) == walBefore)
+            }
+            let state = try #require(result.manifest.stateDB)
+            let unpacked = root.appendingPathComponent("unpacked")
+            try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
+            try await RemoteRestoreService.unzipArchive(at: result.archiveURL, into: unpacked)
+            try Self.untar(unpacked.appendingPathComponent(state.tarballPath), into: unpacked)
+            let snapshot = try Self.inspect(unpacked.appendingPathComponent("state.db").path)
+            #expect(snapshot.count == 250, "withWAL: \(withWAL), method: \(state.method)")
+            #expect(snapshot.integrity == "ok")
+        }
+    }
+
     @Test("a home with no state.db backs up without a snapshot entry")
     func backupWithoutStateDB() async throws {
         let root = try Self.scratch("nodb")
@@ -186,18 +238,32 @@ struct ServerBackupRestoreSafetyTests {
         let script = RemoteBackupService.snapshotScript(stateDB: "/h/state.db", snapshotDir: "/h/.snap")
         #expect(script.contains("sqlite3 -readonly"))
         #expect(script.contains("mode=ro"))
-        #expect(!script.lowercased().contains("checkpoint"))
+        // The only writable connection is gated on proving no_ckpt_on_close
+        // and runs query_only; nothing ever asks for a checkpoint.
+        #expect(!script.contains("wal_checkpoint"))
+        #expect(script.contains("PRAGMA query_only=1"))
+        #expect(script.contains("sqlite3 :memory: '.dbconfig no_ckpt_on_close on'"))
 
         let root = try Self.scratch("badsnap")
         defer { try? FileManager.default.removeItem(at: root) }
-        let result = try await LocalTransport().asyncRunProcess(
-            executable: "/bin/bash",
-            args: ["-lc", RemoteBackupService.snapshotScript(
-                stateDB: root.appendingPathComponent("missing/state.db").path,
-                snapshotDir: root.appendingPathComponent("snap").path)],
-            stdin: nil, timeout: 60)
-        #expect(result.exitCode != 0)
-        #expect(!result.stdoutString.contains("SCARF_SNAPSHOT_OK"))
+        func run(_ db: URL) async throws -> ProcessResult {
+            try await LocalTransport().asyncRunProcess(
+                executable: "/bin/bash",
+                args: ["-lc", RemoteBackupService.snapshotScript(
+                    stateDB: db.path, snapshotDir: root.appendingPathComponent("snap").path)],
+                stdin: nil, timeout: 60)
+        }
+        // No database: said so explicitly, never a silent success.
+        let absent = try await run(root.appendingPathComponent("missing/state.db"))
+        #expect(absent.exitCode == 0)
+        #expect(absent.stdoutString.contains("SCARF_SNAPSHOT_ABSENT"))
+        // A file no method can read: a loud failure.
+        let garbage = root.appendingPathComponent("state.db")
+        try Data(repeating: 0x41, count: 8192).write(to: garbage)
+        let broken = try await run(garbage)
+        #expect(broken.exitCode != 0)
+        #expect(!broken.stdoutString.contains("SCARF_SNAPSHOT_OK"))
+        #expect(Self.bytes(garbage) == Data(repeating: 0x41, count: 8192))
     }
 
     // MARK: - S14-F1 / S14-F3: restore
@@ -244,6 +310,9 @@ struct ServerBackupRestoreSafetyTests {
         // The old sidecars were removed BEFORE anything opened the new file.
         #expect(!FileManager.default.fileExists(atPath: db + "-wal"))
         #expect(!FileManager.default.fileExists(atPath: db + "-shm"))
+        // Owner-only, as Hermes keeps it.
+        let mode = try FileManager.default.attributesOfItem(atPath: db)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
         let restored = try Self.inspect(db)
         #expect(restored.count == 321)
         #expect(restored.integrity == "ok")
@@ -252,6 +321,33 @@ struct ServerBackupRestoreSafetyTests {
         #expect(!FileManager.default.fileExists(atPath: target.deletingLastPathComponent().appendingPathComponent(".hermes").path))
         #expect(try FileManager.default.contentsOfDirectory(atPath: target.path)
             .allSatisfy { !$0.hasPrefix(RemoteRestoreService.stagingDirPrefix) })
+    }
+
+    @Test("an archive without a database leaves the target's state.db and its WAL alone")
+    func restoreWithoutDatabaseKeepsTargetWAL() async throws {
+        let root = try Self.scratch("nodb-restore")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("src/.hermes")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("model: new\n".utf8).write(to: source.appendingPathComponent("config.yaml"))
+        let backup = try await Self.backUp(home: source, into: root)
+        #expect(backup.manifest.stateDB == nil)
+
+        // Target: a stopped Hermes whose newest sessions are still in its WAL.
+        let target = root.appendingPathComponent("dst/.hermes")
+        try Self.makeUnheldHome(target, rows: 77, withWAL: true)
+        let db = target.appendingPathComponent("state.db").path
+        let dbBefore = Self.bytes(URL(fileURLWithPath: db))
+        let walBefore = Self.bytes(URL(fileURLWithPath: db + "-wal"))
+
+        let service = RemoteRestoreService(context: .local(home: target))
+        let inspection = try await service.inspect(archiveURL: backup.archiveURL)
+        _ = try await service.run(inspection: inspection, options: .init(targetProjectsRoot: root.path), progress: { _ in })
+
+        #expect(Self.bytes(URL(fileURLWithPath: db)) == dbBefore)
+        #expect(Self.bytes(URL(fileURLWithPath: db + "-wal")) == walBefore, "the WAL holds committed sessions")
+        #expect(try Self.inspect(db).count == 77)
+        #expect(try String(contentsOf: target.appendingPathComponent("config.yaml"), encoding: .utf8) == "model: new\n")
     }
 
     @Test("restore refuses, and changes nothing, while another process holds state.db")
@@ -341,6 +437,20 @@ struct ServerBackupRestoreSafetyTests {
         let restored = try Self.inspect(db)
         #expect(restored.count == 42)
         #expect(restored.integrity == "ok")
+    }
+
+    @Test("a v1 home tarball without a database lifts to nil, not an error")
+    func liftLegacyWithoutDatabase() async throws {
+        let root = try Self.scratch("lift")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stage = root.appendingPathComponent("stage/.hermes")
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: stage.appendingPathComponent("SOUL.md"))
+        let tarball = root.appendingPathComponent("h.tar.gz")
+        try Self.run("/usr/bin/tar", ["-czf", tarball.path, "-C", stage.deletingLastPathComponent().path, ".hermes"])
+        let lifted = try await RemoteRestoreService.liftLegacyStateDB(
+            from: tarball, member: ".hermes/state.db", workDir: root)
+        #expect(lifted == nil)
     }
 
     @Test("an archive from a newer schema is refused before anything is written")
