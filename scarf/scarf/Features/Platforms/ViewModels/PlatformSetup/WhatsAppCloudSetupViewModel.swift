@@ -63,7 +63,17 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
     var apiVersion: String = "v20.0"
     // DM allowlist
     var dmPolicy: String = "open"
-    var allowFrom: String = ""
+    var allowFrom: String = "" {
+        didSet {
+            // Nothing names a policy, so the adapter derives it from the
+            // allowlist; keep the picker showing what Hermes will enforce
+            // until the user picks one.
+            if dmPolicyFollowsAllowlist, dmPolicy == loadedDMPolicy {
+                dmPolicy = Self.derivedPolicy(allowFrom: allowFrom, allowAll: allowAllOptIn)
+                loadedDMPolicy = dmPolicy
+            }
+        }
+    }
 
     var message: String?
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
@@ -83,6 +93,23 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
     /// Whether config.yaml carries `dm_policy`, and what the form showed.
     private var dmPolicyInConfig = false
     private var loadedDMPolicy = "open"
+    /// True when no config key or env var names a DM policy, so Hermes
+    /// derives it from the allowlist.
+    private var dmPolicyFollowsAllowlist = true
+    private var allowAllOptIn = false
+    /// The config `allow_from` is a YAML list: `hermes config set` refuses a
+    /// plain string over a list (`_refuse_container_type_mismatch`,
+    /// `hermes_cli/config.py:3316-3335` @ v2026.9.24), so it is written back
+    /// as a list literal.
+    private var allowFromIsList = false
+    /// config.yaml carries `platforms.whatsapp_cloud.enabled`.
+    private var enabledKeyInConfig = false
+
+    /// `dm_policy` default when nothing names one
+    /// (`gateway/platforms/whatsapp_cloud.py:186-190` @ v2026.9.24).
+    static func derivedPolicy(allowFrom: String, allowAll: Bool) -> String {
+        !allowFrom.trimmingCharacters(in: .whitespaces).isEmpty && !allowAll ? "allowlist" : "open"
+    }
 
     static let phoneEnv = "WHATSAPP_CLOUD_PHONE_NUMBER_ID"
     static let tokenEnv = "WHATSAPP_CLOUD_ACCESS_TOKEN"
@@ -128,30 +155,52 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
         let version = cred("WHATSAPP_CLOUD_API_VERSION", present("api_version") ? cfg?.apiVersion : nil)
         apiVersion = version.isEmpty ? "v20.0" : version
 
+        enabledKeyInConfig = parsed?.values["platforms.whatsapp_cloud.enabled"] != nil
+        // Set before `allowFrom`, whose observer reads it.
+        dmPolicyFollowsAllowlist = false
         if present("allow_from") || present("allowFrom") {
             allowlistEnvKey = nil
             let list = parsed?.lists["platforms.whatsapp_cloud.extra.allow_from"]
                 ?? parsed?.lists["platforms.whatsapp_cloud.extra.allowFrom"]
-            allowFrom = list?.joined(separator: ",")
-                ?? (present("allow_from") ? cfg?.allowFrom ?? ""
-                    : HermesYAML.stripYAMLQuotes(parsed?.values["platforms.whatsapp_cloud.extra.allowFrom"] ?? ""))
+            let scalar = HermesYAML.stripYAMLQuotes(
+                parsed?.values["platforms.whatsapp_cloud.extra.allow_from"]
+                    ?? parsed?.values["platforms.whatsapp_cloud.extra.allowFrom"] ?? "")
+            if let list {
+                allowFromIsList = true
+                allowFrom = list.map(HermesYAML.stripYAMLQuotes).joined(separator: ",")
+            } else if scalar.hasPrefix("[") {
+                // Flow style: `allow_from: ["123", "456"]` or `[]`.
+                allowFromIsList = true
+                allowFrom = scalar.dropFirst().dropLast()
+                    .split(separator: ",")
+                    .map { HermesYAML.stripYAMLQuotes($0.trimmingCharacters(in: .whitespaces)) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ",")
+            } else {
+                allowFromIsList = false
+                allowFrom = scalar
+            }
         } else if !envValue(Self.allowFromEnv).isEmpty {
+            allowFromIsList = false
             allowlistEnvKey = Self.allowFromEnv
             allowFrom = envValue(Self.allowFromEnv)
         } else {
+            allowFromIsList = false
             allowlistEnvKey = Self.allowedUsersEnv
             allowFrom = envValue(Self.allowedUsersEnv)
         }
 
+        // `extra.get("dm_policy") or env… or default` — an EMPTY config value
+        // falls through like an absent one.
         dmPolicyInConfig = present("dm_policy")
+        let configPolicy = dmPolicyInConfig ? (cfg?.dmPolicy ?? "") : ""
         let envPolicy = [envValue("WHATSAPP_CLOUD_DM_POLICY"), envValue("WHATSAPP_DM_POLICY")]
             .first { !$0.isEmpty }
-        let allowAll = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_CLOUD_ALLOW_ALL_USERS"])
-        let defaultPolicy = !allowFrom.trimmingCharacters(in: .whitespaces).isEmpty && !allowAll
-            ? "allowlist" : "open"
-        let policy = (dmPolicyInConfig ? cfg?.dmPolicy : nil) ?? envPolicy ?? defaultPolicy
-        dmPolicy = policy.lowercased()
+        allowAllOptIn = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_CLOUD_ALLOW_ALL_USERS"])
+        let named = configPolicy.isEmpty ? envPolicy : configPolicy
+        dmPolicy = (named ?? Self.derivedPolicy(allowFrom: allowFrom, allowAll: allowAllOptIn)).lowercased()
         loadedDMPolicy = dmPolicy
+        dmPolicyFollowsAllowlist = named == nil
     }
 
     func save() {
@@ -172,6 +221,14 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
         // form does not show, and an explicit `false` beats `.env` credentials.
         if configured {
             config["platforms.whatsapp_cloud.enabled"] = "true"
+        } else if enabledKeyInConfig,
+                  phoneNumberID.trimmingCharacters(in: .whitespaces).isEmpty,
+                  accessToken.trimmingCharacters(in: .whitespaces).isEmpty {
+            // The user cleared BOTH required fields — and the form shows both
+            // files, so nothing is left anywhere. Turn off the switch a
+            // previous save turned on, or the gateway starts a credential-less
+            // adapter that goes fatal. Only over a key that already exists.
+            config["platforms.whatsapp_cloud.enabled"] = "false"
         }
         if credentialsInConfig {
             // Legacy layout: leave the block in config.yaml. These cross argv
@@ -198,6 +255,13 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
         // `allow_from` key is already there (presence wins in Hermes).
         if let envKey = allowlistEnvKey {
             env[envKey] = allowFrom
+        } else if allowFromIsList {
+            let items = allowFrom.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .map { "\"" + $0.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+            config["platforms.whatsapp_cloud.extra.allow_from"] = "[" + items.joined(separator: ", ") + "]"
         } else {
             config["platforms.whatsapp_cloud.extra.allow_from"] = allowFrom
         }

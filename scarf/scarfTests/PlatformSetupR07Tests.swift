@@ -170,6 +170,75 @@ struct PlatformSetupR07Tests {
         #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.dm_policy"] == "open")
     }
 
+    /// `hermes config set` refuses a plain string over an existing list
+    /// (`hermes_cli/config.py:3316-3335` @ v2026.9.24 — checked against the
+    /// real CLI), so a list-form allowlist goes back as a list literal.
+    @Test func aListFormAllowlistIsWrittenBackAsAList() async {
+        let ctx = Self.scratchContext(config: """
+        platforms:
+          whatsapp_cloud:
+            extra:
+              allow_from:
+                - "15551111111"
+                - '15552222222'
+        """)
+        let vm = WhatsAppCloudSetupViewModel(context: ctx, cliRunner: CLILog().runner())
+        vm.load()
+        await Self.until(timeout: 10) { !vm.isLoading }
+        #expect(vm.allowFrom == "15551111111,15552222222")
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.allow_from"]
+                == #"["15551111111", "15552222222"]"#)
+        vm.allowFrom = ""
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.allow_from"] == "[]")
+    }
+
+    @Test func aFlowStyleEmptyListStaysAList() async {
+        let ctx = Self.scratchContext(
+            config: "platforms:\n  whatsapp_cloud:\n    extra:\n      allow_from: []\n")
+        let vm = WhatsAppCloudSetupViewModel(context: ctx, cliRunner: CLILog().runner())
+        vm.load()
+        await Self.until(timeout: 10) { !vm.isLoading }
+        #expect(vm.allowFrom.isEmpty)
+        vm.allowFrom = "15553333333"
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.allow_from"] == #"["15553333333"]"#)
+    }
+
+    /// Clearing both required fields turns off a switch a previous save
+    /// turned on — otherwise the gateway starts a credential-less adapter.
+    @Test func clearingBothRequiredFieldsTurnsAnExistingSwitchOff() async {
+        let ctx = Self.scratchContext(
+            env: "WHATSAPP_CLOUD_PHONE_NUMBER_ID=1\nWHATSAPP_CLOUD_ACCESS_TOKEN=t\n",
+            config: "platforms:\n  whatsapp_cloud:\n    enabled: true\n")
+        let vm = WhatsAppCloudSetupViewModel(context: ctx, cliRunner: CLILog().runner())
+        vm.load()
+        await Self.until(timeout: 10) { !vm.isLoading }
+        vm.phoneNumberID = ""
+        vm.accessToken = ""
+        let plan = vm.savePlan()
+        #expect(plan.config["platforms.whatsapp_cloud.enabled"] == "false")
+        #expect(plan.env["WHATSAPP_CLOUD_ACCESS_TOKEN"] == "")
+        // Clearing only one of them is a half-filled form: no disable.
+        vm.phoneNumberID = "1"
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.enabled"] == nil)
+    }
+
+    /// With no policy named anywhere, the picker follows the allowlist the
+    /// way the adapter's default does, until the user picks one.
+    @Test func anUntouchedPolicyFollowsTheAllowlist() async {
+        let ctx = Self.scratchContext()
+        let vm = WhatsAppCloudSetupViewModel(context: ctx, cliRunner: CLILog().runner())
+        vm.load()
+        await Self.until(timeout: 10) { !vm.isLoading }
+        #expect(vm.dmPolicy == "open")
+        vm.allowFrom = "15551234567"
+        #expect(vm.dmPolicy == "allowlist")
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.dm_policy"] == nil)
+        vm.dmPolicy = "open"
+        vm.allowFrom = "15551234567,15557654321"
+        #expect(vm.dmPolicy == "open", "a policy the user picked was overridden")
+        #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.dm_policy"] == "open")
+    }
+
     // MARK: - S07-F4 Webhook
 
     @Test func enablingWebhooksWritesTheConfigKeyTheCLIChecks() async {
