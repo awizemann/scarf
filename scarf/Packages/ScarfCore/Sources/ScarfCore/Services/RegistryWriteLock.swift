@@ -339,7 +339,10 @@ public struct RegistryWriteLock: Sendable {
         guard let hermesFlockURL else { return nil }
         let fd = hermesFlockURL.withUnsafeFileSystemRepresentation { rep -> Int32 in
             guard let rep else { return -1 }
-            return open(rep, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
+            // O_CLOEXEC: a process Scarf spawns during the hold must not
+            // inherit the descriptor, or the flock would outlive the hold
+            // and leave Hermes's next memory write blocked on it.
+            return open(rep, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         }
         guard fd >= 0 else {
             #if canImport(os)
@@ -352,7 +355,20 @@ public struct RegistryWriteLock: Sendable {
         _ = fchmod(fd, 0o600)
         let deadline = Date().addingTimeInterval(acquireTimeout)
         while flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            guard errno == EWOULDBLOCK || errno == EINTR, Date() < deadline else {
+            let err = errno
+            guard err == EWOULDBLOCK || err == EINTR else {
+                // Not contention: this filesystem can't flock (some network
+                // homes). Hermes can't either, so there is nothing to
+                // interoperate with; Scarf's own lock still holds.
+                #if canImport(os)
+                Self.logger.warning(
+                    "flock on Hermes's lock at \(hermesFlockURL.path, privacy: .public) failed (errno \(err)); proceeding with Scarf's lock only"
+                )
+                #endif
+                close(fd)
+                return nil
+            }
+            guard Date() < deadline else {
                 close(fd)
                 throw ProjectRegistryError.hermesBusy(path: path, label: label)
             }
