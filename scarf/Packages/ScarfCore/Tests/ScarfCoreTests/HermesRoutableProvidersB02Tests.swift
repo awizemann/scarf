@@ -58,9 +58,9 @@ struct HermesRoutableProvidersB02Tests {
     }
 
     /// The table was derived at v2026.9.21 and v2026.9.24 only (identical
-    /// there); below that — and for an undetected host — the roster is the
-    /// full catalog, as before.
-    @Test func olderAndUndetectedHostsKeepTheFullRoster() throws {
+    /// there), so v0.21.4 filters; below that — and for an undetected host —
+    /// the roster is the full catalog, as before.
+    @Test func rosterFilterStartsAtV0214() throws {
         let (svc, tmp) = try Self.catalog()
         defer { try? FileManager.default.removeItem(at: tmp) }
         #expect(Set(svc.loadProviders(capabilities: Self.v0214).map(\.providerID)).contains("anthropic"))
@@ -141,7 +141,7 @@ struct HermesRoutableProvidersB02Tests {
             base_url: https://api.mistral.ai/v1
             key_env: MISTRAL_API_KEY
         """)
-        #expect(keyed.hasNamedCustomProviders)
+        #expect(keyed.namedCustomProviders == ["mistral"])
         #expect(ModelPreflight.unroutableProvider(keyed, capabilities: Self.v0215) == nil)
 
         let legacy = HermesConfig(yaml: """
@@ -152,7 +152,7 @@ struct HermesRoutableProvidersB02Tests {
           - name: groq
             base_url: https://api.groq.com/openai/v1
         """)
-        #expect(legacy.hasNamedCustomProviders)
+        #expect(legacy.hasUnreadCustomProviders)
         #expect(ModelPreflight.unroutableProvider(legacy, capabilities: Self.v0215) == nil)
 
         let flow = HermesConfig(yaml: """
@@ -160,10 +160,10 @@ struct HermesRoutableProvidersB02Tests {
           provider: groq
         providers: {groq: {base_url: "https://api.groq.com/openai/v1"}}
         """)
-        #expect(flow.hasNamedCustomProviders)
+        #expect(flow.hasUnreadCustomProviders)
         // Hermes's own default, `providers: {}`, is not a named provider.
         let emptyDefault = HermesConfig(yaml: "model:\n  provider: groq\nproviders: {}\ncustom_providers: []\n")
-        #expect(!emptyDefault.hasNamedCustomProviders)
+        #expect(!emptyDefault.hasUnreadCustomProviders && emptyDefault.namedCustomProviders.isEmpty)
         #expect(ModelPreflight.unroutableProvider(emptyDefault, capabilities: Self.v0215) == "groq")
 
         // An unrelated `tts.providers.*` block is not a named provider.
@@ -176,8 +176,48 @@ struct HermesRoutableProvidersB02Tests {
             say:
               command: say
         """)
-        #expect(!tts.hasNamedCustomProviders)
+        #expect(!tts.hasUnreadCustomProviders && tts.namedCustomProviders.isEmpty)
         #expect(ModelPreflight.unroutableProvider(tts, capabilities: Self.v0215) == "groq")
+    }
+
+    /// Per-provider knobs under `providers:` (a timeout for a built-in) are
+    /// not custom endpoints; they must not silence the warning for a
+    /// DIFFERENT, unroutable provider (review finding). An entry matched by
+    /// its `name:` field does.
+    @Test func onlyAMatchingCustomEndpointSilencesTheWarning() {
+        let knobs = HermesConfig(yaml: """
+        model:
+          provider: mistral
+          default: mistral-large-latest
+        providers:
+          anthropic:
+            request_timeout_seconds: 120
+          lab:
+            base_url: http://10.0.0.5:8000/v1
+        """)
+        #expect(knobs.namedCustomProviders == ["lab"])
+        #expect(ModelPreflight.unroutableProvider(knobs, capabilities: Self.v0215) == "mistral")
+
+        let byName = HermesConfig(yaml: """
+        model:
+          provider: my lab
+          default: x
+        providers:
+          lab:
+            name: My Lab
+            base_url: http://10.0.0.5:8000/v1
+        """)
+        #expect(byName.namedCustomProviders == ["lab", "my-lab"])
+        #expect(ModelPreflight.unroutableProvider(byName, capabilities: Self.v0215) == nil)
+
+        let inlineEntry = HermesConfig(yaml: """
+        model:
+          provider: groq
+        providers:
+          groq: {base_url: "https://api.groq.com/openai/v1"}
+        """)
+        #expect(inlineEntry.namedCustomProviders.contains("groq"))
+        #expect(ModelPreflight.unroutableProvider(inlineEntry, capabilities: Self.v0215) == nil)
     }
 
     // MARK: - S06-F4 DeepSeek retired ids

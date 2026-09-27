@@ -1101,7 +1101,8 @@ public extension HermesConfig {
             // `'llama3:8b': high` reads back as `llama3:8b`.
             reasoningOverrides: maps["agent.reasoning_overrides"] ?? [:],
             excludedProviders: lists["model_catalog.excluded_providers"] ?? [],
-            hasNamedCustomProviders: Self.hasNamedCustomProviders(
+            namedCustomProviders: Self.namedCustomProviders(values: values, maps: maps),
+            hasUnreadCustomProviders: Self.hasUnreadCustomProviders(
                 yaml: yaml, values: values, lists: lists, maps: maps
             ),
             // `approvals.smart_policy` (v0.20+, config_defaults.py:2053) —
@@ -1151,29 +1152,49 @@ public extension HermesConfig {
         )
     }
 
-    /// Whether any `providers.<name>` or `custom_providers` content was
-    /// parsed. Deliberately loose (any child counts): it only silences a
-    /// warning, so a false "yes" costs nothing and a false "no" would warn
-    /// about a provider Hermes can in fact route.
-    private static func hasNamedCustomProviders(
+    /// See ``HermesConfig/namedCustomProviders``. Reads block form
+    /// (`providers.<name>.base_url`) and per-entry flow form
+    /// (`providers:\n  <name>: {base_url: …}`).
+    private static func namedCustomProviders(
+        values: [String: String], maps: [String: [String: String]]
+    ) -> Set<String> {
+        func norm(_ raw: String) -> String {
+            HermesYAML.normalizedScalar(raw).trimmingCharacters(in: .whitespaces)
+                .lowercased().replacingOccurrences(of: " ", with: "-")
+        }
+        let urlFields: Set<String> = ["api", "url", "base_url"]
+        var entries: [String: [String: String]] = [:]
+        for (key, value) in values where key.hasPrefix("providers.") {
+            let parts = key.split(separator: ".", maxSplits: 2).map(String.init)
+            guard parts.count == 3 else { continue }
+            entries[parts[1], default: [:]][parts[2]] = value
+        }
+        for (key, map) in maps where key.hasPrefix("providers.") {
+            let name = String(key.dropFirst("providers.".count))
+            guard !name.contains(".") else { continue }
+            entries[name, default: [:]].merge(map) { current, _ in current }
+        }
+        var names: Set<String> = []
+        for (key, fields) in entries
+        where fields.contains(where: { urlFields.contains($0.key) && !norm($0.value).isEmpty }) {
+            names.insert(norm(key))
+            if let display = fields["name"], !norm(display).isEmpty { names.insert(norm(display)) }
+        }
+        return names
+    }
+
+    /// See ``HermesConfig/hasUnreadCustomProviders``. Hermes's own default,
+    /// `providers: {}` / `custom_providers: []`, is not a custom provider.
+    private static func hasUnreadCustomProviders(
         yaml: String,
         values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
     ) -> Bool {
-        // A child of either block (`providers.x.base_url`), or a non-empty
-        // list/map AT either key. The bare key alone is not enough: Hermes's
-        // own default is `providers: {}`.
-        func child(_ key: String) -> Bool {
-            key.hasPrefix("providers.") || key.hasPrefix("custom_providers.")
-        }
-        func atOrUnder(_ key: String) -> Bool {
-            key == "providers" || key == "custom_providers" || child(key)
-        }
-        if values.keys.contains(where: child) { return true }
-        if lists.contains(where: { atOrUnder($0.key) && !$0.value.isEmpty }) { return true }
-        if maps.contains(where: { atOrUnder($0.key) && !$0.value.isEmpty }) { return true }
-        // A nested flow form (`providers: {x: {base_url: …}}`) reaches the
-        // flat parse as an empty map, indistinguishable from that default —
-        // so read that one top-level line from the raw text.
+        if values.keys.contains(where: { $0.hasPrefix("custom_providers.") }) { return true }
+        if let legacy = lists["custom_providers"], !legacy.isEmpty { return true }
+        if let legacy = maps["custom_providers"], !legacy.isEmpty { return true }
+        // A whole map in flow form (`providers: {x: {base_url: …}}`) reaches
+        // the flat parse as an empty map, indistinguishable from the default
+        // — so read that one top-level line from the raw text.
         for line in yaml.split(whereSeparator: \.isNewline) {
             guard let colon = line.firstIndex(of: ":") else { continue }
             let key = line[..<colon]

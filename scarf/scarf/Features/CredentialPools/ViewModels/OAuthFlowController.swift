@@ -153,6 +153,7 @@ final class OAuthFlowController {
 
         // Pass --no-browser so hermes doesn't try (and potentially fail) to
         // launch the browser itself — we do it explicitly with the button.
+        // Anthropic's login ignores the flag; see `selfOpeningProviders`.
         var args = ["auth", "add", provider, "--type", "oauth", "--no-browser"]
         let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
         if !trimmedLabel.isEmpty {

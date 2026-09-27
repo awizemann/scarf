@@ -76,14 +76,17 @@ public enum ModelPreflight: Sendable {
     /// into an error, or onto some other provider. Nil — no warning — when
     /// the provider is unset, when the host is not one
     /// ``HermesRoutableProviders`` applies to (older or undetected), and
-    /// when config.yaml defines any named custom provider (Hermes may route
-    /// the name through it). A warning, not a block: a user plugin on the
+    /// when config.yaml defines a custom endpoint under that name, or has
+    /// custom-provider entries Scarf can't read (Hermes may route the name
+    /// through them). A warning, not a block: a user plugin on the
     /// host can register names Scarf can't see.
     public static func unroutableProvider(
         _ config: HermesConfig, capabilities: HermesCapabilities
     ) -> String? {
         let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !isUnset(provider), !config.hasNamedCustomProviders,
+        guard !isUnset(provider), !config.hasUnreadCustomProviders,
+              !config.namedCustomProviders.contains(
+                  provider.lowercased().replacingOccurrences(of: " ", with: "-")),
               HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
         else { return nil }
         return provider
