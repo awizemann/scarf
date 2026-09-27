@@ -72,15 +72,15 @@ struct ServerBackupScopeR18aTests {
             .split(separator: "\n").map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "/")) })
 
         for rel in Self.excluded {
-            #expect(!listing.contains(".hermes/" + rel), "\(rel) shipped")
+            #expect(!listing.contains("./" + rel), "\(rel) shipped")
         }
         for top in ["hermes-agent", "node", "models", "runtimes", "browser-profile", "browser-profiles",
                     "browser_profiles", "backups", "state-snapshots", "checkpoints"] {
-            #expect(!listing.contains { $0 == ".hermes/" + top || $0.hasPrefix(".hermes/" + top + "/") },
+            #expect(!listing.contains { $0 == "./" + top || $0.hasPrefix("./" + top + "/") },
                     "\(top)/ shipped")
         }
         for rel in Self.kept {
-            #expect(listing.contains(".hermes/" + rel), "\(rel) missing: \(listing.sorted())")
+            #expect(listing.contains("./" + rel), "\(rel) missing: \(listing.sorted())")
         }
         let dbs = try #require(backup.manifest.databases)
         #expect(Set(dbs.entries.map(\.path)) == ["state.db", "profiles/work/state.db"],
@@ -133,11 +133,11 @@ struct ServerBackupScopeR18aTests {
     func extractPatternsAreDepthEnumerated() {
         let command = RemoteRestoreService.hermesExtractCommand(
             hermesHome: "/h", archiveLeaf: ".hermes", databases: ["profiles/work/state.db"])
-        #expect(command.contains("--exclude='.hermes/*.db-wal'"))
-        #expect(command.contains("--exclude='.hermes/*/*/*.db-wal'"))
-        #expect(command.contains("--exclude='.hermes/*/*/*/node_modules'"))
-        #expect(command.contains("--exclude='.hermes/hermes-agent'"))
-        #expect(command.contains("--exclude='.hermes/profiles/work/models'"))
+        #expect(command.contains("--exclude=\"$scarf_a\"'.hermes/*.db-wal'"))
+        #expect(command.contains("--exclude=\"$scarf_a\"'.hermes/*/*/*.db-wal'"))
+        #expect(command.contains("--exclude=\"$scarf_a\"'.hermes/*/*/*/node_modules'"))
+        #expect(command.contains("--exclude=\"$scarf_a\"'.hermes/hermes-agent'"))
+        #expect(command.contains("--exclude=\"$scarf_a\"'.hermes/profiles/work/models'"))
         // Never a wildcard for a root-scoped tree: `*` crosses `/` in GNU
         // tar and bsdtar and would reach a skill's own models/.
         #expect(!command.contains("--exclude='node_modules'"), "never a bare any-depth name")
@@ -163,9 +163,10 @@ struct ServerBackupScopeR18aTests {
             .appendingPathComponent(backup.manifest.hermes.tarballPath)
         let listing = Set(try Helpers.capture("/usr/bin/tar", ["-tzf", tarball.path])
             .split(separator: "\n").map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "/")) })
-        #expect(listing.contains("backups/config.yaml"), "\(listing.sorted())")
-        #expect(listing.contains("backups/skills/a/SKILL.md"))
-        #expect(!listing.contains("backups/skills/a/backups/old.zip"))
+        // R19: members are `./…` whatever the home is called.
+        #expect(listing.contains("./config.yaml"), "\(listing.sorted())")
+        #expect(listing.contains("./skills/a/SKILL.md"))
+        #expect(!listing.contains("./skills/a/backups/old.zip"))
         #expect(!RemoteBackupService.hermesExcludes(leaf: "backups", options: .safeDefault, databases: [])
             .contains("backups"), "never a bare any-depth name")
     }

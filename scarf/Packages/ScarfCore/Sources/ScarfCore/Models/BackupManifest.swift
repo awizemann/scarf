@@ -165,12 +165,24 @@ public struct BackupManifest: Codable, Sendable, Equatable {
         /// extracting; corruption surfaces as a single bad path
         /// rather than a half-extracted home.
         public var tarballSHA256: String
+        /// The tarball's top-level member: ``dotMemberRoot`` (`./…`,
+        /// archived from inside the home) from R19 on; absent in older
+        /// archives, whose members are `<home's own directory name>/…`.
+        /// Restore re-roots an older tarball before extracting it, so its
+        /// root-only excludes can be anchored.
+        public var memberRoot: String?
 
-        public init(homePath: String, tarballPath: String, tarballSize: Int64, tarballSHA256: String) {
+        public static let dotMemberRoot = "."
+
+        public init(
+            homePath: String, tarballPath: String, tarballSize: Int64, tarballSHA256: String,
+            memberRoot: String? = nil
+        ) {
             self.homePath = homePath
             self.tarballPath = tarballPath
             self.tarballSize = tarballSize
             self.tarballSHA256 = tarballSHA256
+            self.memberRoot = memberRoot
         }
     }
 

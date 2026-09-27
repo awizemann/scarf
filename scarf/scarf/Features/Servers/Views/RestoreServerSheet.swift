@@ -225,6 +225,22 @@ struct RestoreServerSheet: View {
                     }
                 }
             }
+            if !result.databasesSkipped.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Databases left as they were")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("This backup is older than Scarf's current backup scope and lists databases inside folders Hermes's own backup leaves out (old backups, caches, runtime downloads). They were not restored.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(result.databasesSkipped, id: \.self) { path in
+                        Text(verbatim: path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
             Text("Re-authenticate AI providers and any MCP servers from Settings if those weren't included in the backup.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

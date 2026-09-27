@@ -180,7 +180,8 @@ struct ServerBackupRestoreSafetyTests {
         #expect(snapshot.count == 500, "rows that were only in the WAL must be in the snapshot")
         #expect(snapshot.integrity == "ok")
         // The home tarball carries neither the live database nor its sidecars.
-        let archived = try FileManager.default.contentsOfDirectory(atPath: homeOut.appendingPathComponent(".hermes").path)
+        // (R19: members are `./…`, so the home's contents land at the top.)
+        let archived = try FileManager.default.contentsOfDirectory(atPath: homeOut.path)
         #expect(archived.contains("config.yaml"))
         #expect(!archived.contains("state.db"))
         #expect(!archived.contains { $0.hasPrefix("state.db-") })
@@ -412,7 +413,7 @@ struct ServerBackupRestoreSafetyTests {
         #expect(Set(dbs.entries.map(\.path)) == ["state.db", "odd [1].db"], "the retired-WAL image is not snapshotted")
         let listing = try Self.capture("/usr/bin/tar", ["-tzf", Self.unzipped(backup.archiveURL, in: root)
             .appendingPathComponent(backup.manifest.hermes.tarballPath).path])
-        #expect(listing.contains(".hermes/plug.db/notes.txt"), "a directory named *.db is kept")
+        #expect(listing.contains("./plug.db/notes.txt"), "a directory named *.db is kept")
         #expect(!listing.contains("retired-wal"), "retired-WAL captures are left out whole, as hermes backup does")
         #expect(!listing.split(separator: "\n").contains { $0.hasSuffix("state.db") || $0.hasSuffix("odd [1].db") })
 
@@ -800,15 +801,15 @@ struct ServerBackupRestoreSafetyTests {
                     "\(secret) shipped: \(off.sorted())")
         }
         // Everything else in the profiles still ships.
-        for kept in [".hermes/config.yaml", ".hermes/profiles/work/config.yaml",
-                     ".hermes/profiles/work/skills/notes/SKILL.md", ".hermes/profiles/my team [2]/SOUL.md",
-                     ".hermes/profiles/work/skills/notes/logs/keep.md"] {
+        for kept in ["./config.yaml", "./profiles/work/config.yaml",
+                     "./profiles/work/skills/notes/SKILL.md", "./profiles/my team [2]/SOUL.md",
+                     "./profiles/work/skills/notes/logs/keep.md"] {
             #expect(off.contains(kept), "\(kept) missing: \(off.sorted())")
         }
 
         // Auth on: every home's auth.json ships; tokens and runtime state still don't.
         let on = try await listing(.init(includeAuth: true, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false), "on.scarfbackup")
-        for kept in [".hermes/auth.json", ".hermes/profiles/work/auth.json", ".hermes/profiles/my team [2]/auth.json"] {
+        for kept in ["./auth.json", "./profiles/work/auth.json", "./profiles/my team [2]/auth.json"] {
             #expect(on.contains(kept), "\(kept) missing: \(on.sorted())")
         }
         #expect(!on.contains { $0.contains("mcp-tokens") || $0.hasSuffix("gateway_state.json") }, "\(on.sorted())")

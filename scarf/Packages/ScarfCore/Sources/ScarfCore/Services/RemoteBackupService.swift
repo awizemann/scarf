@@ -271,7 +271,6 @@ public final class RemoteBackupService: @unchecked Sendable {
         // It always runs, whatever preflight saw: the script finds the
         // databases itself, so a probe that missed one can't produce a
         // "successful" backup without it.
-        let hermesLeaf = (preflight.hermesHomePath as NSString).lastPathComponent
         var databases: BackupManifest.DatabaseSnapshots?
         try Task.checkCancellation()
         progress(.snapshottingDB)
@@ -333,19 +332,17 @@ public final class RemoteBackupService: @unchecked Sendable {
         await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
 
         // Stage 2: Hermes home tarball, WITHOUT the live state.db (the
-        // snapshot above stands in for it) or its sidecars. The home's
-        // own directory name is archived, so a server whose Hermes home
-        // isn't called `.hermes` backs up too.
+        // snapshot above stands in for it) or its sidecars. Archived from
+        // INSIDE the home (`-C <home> .`), so every member is `./…` and a
+        // root-only exclude can be anchored at the home's root (see
+        // ``homeTarCommand(home:excludes:)``); the manifest records that
+        // layout (`memberRoot`).
         try Task.checkCancellation()
         let hermesTarball = workDir.appendingPathComponent("hermes.tar.gz")
         let hermesExcludes = Self.hermesExcludes(
-            leaf: hermesLeaf, options: options, databases: snapshotted, profiles: profileNames,
-            cacheEntries: cacheEntries)
-        let hermesTarCmd = Self.tarCommand(
-            workDir: preflight.hermesHomePath.deletingLastPathComponent_String(),
-            target: hermesLeaf,
-            excludes: hermesExcludes
-        )
+            leaf: BackupManifest.HermesTree.dotMemberRoot, options: options, databases: snapshotted,
+            profiles: profileNames, cacheEntries: cacheEntries)
+        let hermesTarCmd = Self.homeTarCommand(home: preflight.hermesHomePath, excludes: hermesExcludes)
         let hermesHash = try await streamToFile(
             transport: transport,
             command: hermesTarCmd,
@@ -405,7 +402,8 @@ public final class RemoteBackupService: @unchecked Sendable {
                 homePath: preflight.hermesHomePath,
                 tarballPath: BackupArchiveLayout.hermesTarballPath,
                 tarballSize: hermesSize,
-                tarballSHA256: hermesHash
+                tarballSHA256: hermesHash,
+                memberRoot: BackupManifest.HermesTree.dotMemberRoot
             ),
             projects: projectEntries,
             options: BackupManifest.Options(
@@ -547,6 +545,46 @@ public final class RemoteBackupService: @unchecked Sendable {
         return parts.joined(separator: " ") + "; " + tarExitFilter
     }
 
+    /// The home tarball: `tar -czf - <excludes> -C <home> .`, so every
+    /// member is `./…`.
+    ///
+    /// **Why not `-C <parent> <leaf>`.** Tar matches an exclude pattern
+    /// UNANCHORED — GNU tar and BusyBox after any `/` in the member name,
+    /// bsdtar at the start of any path element — so a root-only pattern
+    /// such as `<leaf>/models` also matched `<leaf>/skills/ml/<leaf>/models`
+    /// whenever the home's own name recurred below it (the official Docker
+    /// home `/opt/data` and a skill's `data/models/`), and the backup
+    /// silently dropped the user's files. Hermes matches those trees at the
+    /// home's root only (`_in_excluded_root_dir`, `backup.py:84-93` @
+    /// v2026.9.24).
+    ///
+    /// `./models` can't recur: no suffix after a `/` starts with `./`, which
+    /// anchors it on GNU tar and BusyBox. bsdtar (libarchive `pathmatch`)
+    /// skips a leading `./` in both the pattern and the name, so there the
+    /// pattern is anchored with libarchive's leading `^` instead — which the
+    /// other two would read literally, hence the flavour probe. Checked with
+    /// GNU tar 1.35, BusyBox tar 1.37 and bsdtar 3.5.3.
+    static func homeTarCommand(home: String, excludes: [String]) -> String {
+        "\(bsdtarAnchorProbe) tar -czf - \(anchoredExcludes(excludes, root: BackupManifest.HermesTree.dotMemberRoot)) -C \(shellQuote(home)) .; " + tarExitFilter
+    }
+
+    /// Sets `scarf_a` to libarchive's start anchor `^` when `tar` is bsdtar,
+    /// and to nothing otherwise. `tar --version`'s output goes to grep,
+    /// never into an archive stream on stdout; BusyBox's `--version` fails
+    /// quietly.
+    static let bsdtarAnchorProbe = "scarf_a=; if tar --version 2>/dev/null | grep -q bsdtar; then scarf_a='^'; fi;"
+
+    /// `--exclude=` arguments; a pattern that starts at the archive's root
+    /// (`<root>/…`) carries `$scarf_a` in front (see ``bsdtarAnchorProbe``).
+    static func anchoredExcludes(_ patterns: [String], root: String) -> String {
+        let prefix = HermesDatabaseScripts.globEscape(root) + "/"
+        return patterns.map { pattern in
+            pattern.hasPrefix(prefix)
+                ? "--exclude=\"$scarf_a\"\(shellQuote(pattern))"
+                : "--exclude=\(shellQuote(pattern))"
+        }.joined(separator: " ")
+    }
+
     /// See ``tarCommand(workDir:target:excludes:)``.
     static let tarExitFilter =
         "scarf_rc=$?; if [ \"$scarf_rc\" -eq 1 ] && tar --version 2>/dev/null | grep -q 'GNU tar'; then exit 0; fi; exit \"$scarf_rc\""
@@ -563,9 +601,10 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// everything in it. The sidecar patterns are unanchored, so they reach
     /// every subdirectory under both GNU tar and bsdtar.
     ///
-    /// `leaf` is the home's own directory name: `.hermes` for a default
-    /// install, something else for a server whose Hermes home was
-    /// configured elsewhere.
+    /// `leaf` is the archive's top-level member: `.` for the home tarball
+    /// since R19 (``homeTarCommand(home:excludes:)``), which is what
+    /// anchors the root-only patterns; an older archive's was the home's own
+    /// directory name.
     ///
     /// Every named profile is a Hermes home of its own, under
     /// `profiles/<name>/`, with its own `auth.json`, `mcp-tokens/` and
@@ -682,11 +721,10 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// Exclude patterns for names Hermes skips at any depth BELOW the home:
     /// `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, ….
     ///
-    /// Never the bare name. Tar is run as `-C <parent> <leaf>`, and every tar
-    /// also tries an unanchored pattern against the home's own directory, so
-    /// a home whose directory is called `backups` or `venv` would archive
-    /// nothing (Hermes matches home-relative paths, where the home's own
-    /// name never appears).
+    /// Never the bare name: tar tries an unanchored pattern against every
+    /// member, so when tar ran as `-C <parent> <leaf>` a home whose directory
+    /// is called `backups` or `venv` archived nothing (Hermes matches
+    /// home-relative paths, where the home's own name never appears).
     ///
     /// The per-depth forms are for BusyBox tar: its `*` never crosses `/`
     /// when creating an archive, and when EXTRACTING it anchors a pattern at
@@ -751,6 +789,27 @@ public final class RemoteBackupService: @unchecked Sendable {
                 .map { dir + "/" + HermesDatabaseScripts.globEscape($0) }
         }
         return paths
+    }
+
+    /// True when `hermes backup` leaves a home-relative path out: a
+    /// directory component in ``hermesAnyDepthExcludedDirs`` at any depth,
+    /// `hermes-agent` as the first component, or a runtime tree / non-kept
+    /// `cache/` entry at the root of the home or of `profiles/<name>/`
+    /// (`_should_exclude` and `_in_excluded_root_dir`, `backup.py:84-93`,
+    /// `:270-279` @ v2026.9.24).
+    ///
+    /// Only the tree rules — the per-file names and suffixes are not
+    /// databases. Restore uses it on an older archive's database list, which
+    /// predates these excludes (``RemoteRestoreService``).
+    static func isInTreeHermesBackupLeavesOut(_ relativePath: String) -> Bool {
+        let parts = relativePath.split(separator: "/").map(String.init)
+        guard !parts.isEmpty else { return false }
+        if parts.contains(where: { hermesAnyDepthExcludedDirs.contains($0) }) { return true }
+        if parts[0] == "hermes-agent" { return true }
+        let home = parts.count >= 3 && parts[0] == "profiles" ? Array(parts.dropFirst(2)) : parts
+        guard let top = home.first else { return false }
+        if hermesHomeRootExcludedDirs.contains(top) { return true }
+        return top == "cache" && home.count >= 2 && !hermesKeptCacheEntries.contains(home[1])
     }
 
     /// `name` at the root of the Hermes home and at the root of each
