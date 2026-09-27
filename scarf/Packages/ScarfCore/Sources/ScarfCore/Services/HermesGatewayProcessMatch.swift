@@ -29,7 +29,8 @@ import Foundation
 ///    the gateway's PID and, on the stop fallback, sent SIGTERM. Hermes skips
 ///    osascript explicitly (`gateway/status.py:523`). Here the pattern is
 ///    anchored at the start of the command line and allows no `-`-led
-///    argument before `-m hermes_cli.main` (or before the `hermes` script), so
+///    argument before `-m hermes_cli.main` (or before the `hermes` script)
+///    other than Python's argument-less switches, so
 ///    `osascript -e …` and `python -m hermes_cli.stderr_timestamp …` can't
 ///    match while `…/python -m hermes_cli.main …` and `…/python …/bin/hermes
 ///    …` still do, including paths with spaces.
@@ -40,8 +41,10 @@ public enum HermesGatewayProcessMatch {
 
     private static let ws = "[[:space:]]"
     /// From the start of the command line: any run of arguments none of
-    /// which begins with `-`.
-    private static let plainArgs = "([^[:space:]]|[[:space:]]+[^-[:space:]])*"
+    /// which begins with `-`, except Python's argument-less switches
+    /// (`python -u -m …`, `python -I …/bin/hermes …`). `-e` (osascript),
+    /// `-c` and `-m` are not among them, which is what keeps the wrappers out.
+    private static let plainArgs = "([^[:space:]]|[[:space:]]+[^-[:space:]]|[[:space:]]+-[BEIOSbdiqsuv])*"
 
     private static func flag(_ name: String) -> String {
         "\(ws)+(-p|--profile)(\(ws)+|=)\(name)"

@@ -185,6 +185,10 @@ struct GatewayPlatformsR07Tests {
         #expect(Self.ereMatches(p, "hermes gateway run"))
         #expect(Self.ereMatches(p, "/Users/u/Library/Application Support/hermes/venv/bin/python -m hermes_cli.main gateway run"))
         #expect(Self.ereMatches(p, "hermes -p default gateway run"))
+        // Python's argument-less switches before `-m` / the script.
+        #expect(Self.ereMatches(p, "/usr/bin/python3 -u -m hermes_cli.main gateway run"))
+        #expect(Self.ereMatches(p, "/usr/bin/python3 -I -B /home/u/.local/bin/hermes gateway run"))
+        #expect(!Self.ereMatches(p, "/usr/bin/python3 -c import x -m hermes_cli.main gateway run"))
         // Not the gateway: other verbs, other profiles, lookalikes.
         #expect(!Self.ereMatches(p, "\(Self.py) -m hermes_cli.main gateway status"))
         #expect(!Self.ereMatches(p, "hermes acp"))

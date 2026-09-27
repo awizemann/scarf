@@ -79,7 +79,13 @@ struct WebhooksView: View {
         isLoading = true
         defer { isLoading = false }
         let ctx = context
-        let result = await Self.runHermesList(context: ctx)
+        guard let result = await Self.runHermesList(context: ctx) else {
+            // The command never ran (SSH down, timeout) — not "no webhooks".
+            self.notEnabled = false
+            self.webhooks = []
+            self.lastError = "Couldn't run hermes webhook list on this server"
+            return
+        }
         // The shared Mac parser (S07-F5): `webhook list` indents EVERY line
         // (`  ◆ name`, `    URL: …`), which the old private parser here —
         // opening a record only on an unindented line — never matched, so
@@ -102,7 +108,7 @@ struct WebhooksView: View {
         }
     }
 
-    nonisolated private static func runHermesList(context: ServerContext) async -> String {
+    nonisolated private static func runHermesList(context: ServerContext) async -> String? {
         let transport = context.makeTransport()
         do {
             let r = try await transport.asyncRunProcess(
@@ -113,7 +119,7 @@ struct WebhooksView: View {
             )
             return r.stdoutString + r.stderrString
         } catch {
-            return ""
+            return nil
         }
     }
 

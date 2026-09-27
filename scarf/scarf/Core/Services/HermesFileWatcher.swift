@@ -98,7 +98,13 @@ final class HermesFileWatcher {
     /// and mtime polling (remote).
     private var watchedCorePaths: [String] {
         let paths = context.paths
-        return [
+        // A named profile the default multiplexer serves has no
+        // gateway_state.json of its own; its platform states live in the
+        // ROOT home's record (S07-F2), so that file drives its refreshes.
+        let rootGatewayState: [String] = HermesProfileScope.isProfileHome(paths.home)
+            ? [HermesProfileScope.rootHome(forHome: paths.home) + "/gateway_state.json"]
+            : []
+        return rootGatewayState + [
             paths.stateDB,
             paths.stateDB + "-wal",
             paths.configYAML,
