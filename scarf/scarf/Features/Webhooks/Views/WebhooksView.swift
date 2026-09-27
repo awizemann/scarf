@@ -107,7 +107,11 @@ struct WebhooksView: View {
                 .foregroundStyle(.orange)
             Text("Webhook platform not enabled")
                 .font(.title3.bold())
-            Text("Hermes needs a global webhook secret and port before subscriptions can receive traffic. Run the gateway setup wizard or edit ~/.hermes/config.yaml manually.")
+            // `hermes webhook` checks only config.yaml's `platforms.webhook.enabled`
+            // (`hermes_cli/webhook.py:54-55` @ v2026.9.24). `hermes gateway setup`
+            // writes only `WEBHOOK_ENABLED` to `.env`, so it can't unlock this
+            // tab; Platforms → Webhook writes both (S07-F4).
+            Text("Turn on Webhook in Platforms → Webhook, which sets platforms.webhook.enabled in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

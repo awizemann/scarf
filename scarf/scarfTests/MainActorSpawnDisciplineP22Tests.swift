@@ -97,8 +97,8 @@ struct MainActorSpawnDisciplineP22Tests {
     /// here as a spawn on the main thread.
     @Test func everyPlatformSetupFormSavesOffTheMainActor() async {
         // One representative per config-writing shape: env+config (Discord,
-        // Slack), env+config with a token migration (Ntfy), and config-only
-        // (WhatsApp Cloud). Every form routes through the same
+        // Slack), env+config with a token migration (Ntfy), and WhatsApp Cloud
+        // (env credentials + one config key). Every form routes through the same
         // `PlatformSetupForm.commitSave`, so one left behind would show up
         // here as a spawn on the main thread.
         let ctx = Self.scratchContext()
@@ -111,6 +111,11 @@ struct MainActorSpawnDisciplineP22Tests {
         let ntfy = NtfySetupViewModel(context: ctx, cliRunner: ntfyLog.runner())
         let cloudLog = CLILog()
         let cloud = WhatsAppCloudSetupViewModel(context: ctx, cliRunner: cloudLog.runner())
+        // R07: WhatsApp Cloud's credentials go to `.env` now and a blank form
+        // writes no config at all, so give it the required pair — that makes
+        // it write `platforms.whatsapp_cloud.enabled`, the spawn this checks.
+        cloud.phoneNumberID = "1234567890"
+        cloud.accessToken = "token"
 
         discord.save(); slack.save(); ntfy.save(); cloud.save()
 
