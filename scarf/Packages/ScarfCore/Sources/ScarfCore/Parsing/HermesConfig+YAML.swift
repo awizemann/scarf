@@ -989,7 +989,6 @@ public extension HermesConfig {
             // absent key is the normal, expected state and must still read as
             // enabled. Only an explicit `false` turns it off.
             interimAssistantMessages: boolTrueDefault("display.interim_assistant_messages"),
-            honchoInitOnSessionStart: boolish("honcho.initOnSessionStart", default: false),
             timezone: str("timezone"),
             userProfileEnabled: boolTrueDefault("memory.user_profile_enabled"),
             toolUseEnforcement: strEnum("agent.tool_use_enforcement", default: "auto"),

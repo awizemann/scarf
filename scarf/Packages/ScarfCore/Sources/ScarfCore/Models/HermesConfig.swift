@@ -1764,7 +1764,6 @@ public struct HermesConfig: Sendable {
     public var toolLoopNonInteractiveHardStop: Bool
     public var contextEngine: String
     public var interimAssistantMessages: Bool
-    public var honchoInitOnSessionStart: Bool
 
     // Phase 1 additions
     public var timezone: String
@@ -2014,7 +2013,6 @@ public struct HermesConfig: Sendable {
         forceIPv4: Bool,
         contextEngine: String,
         interimAssistantMessages: Bool,
-        honchoInitOnSessionStart: Bool,
         timezone: String,
         userProfileEnabled: Bool,
         toolUseEnforcement: String,
@@ -2114,7 +2112,6 @@ public struct HermesConfig: Sendable {
         self.forceIPv4 = forceIPv4
         self.contextEngine = contextEngine
         self.interimAssistantMessages = interimAssistantMessages
-        self.honchoInitOnSessionStart = honchoInitOnSessionStart
         self.timezone = timezone
         self.userProfileEnabled = userProfileEnabled
         self.toolUseEnforcement = toolUseEnforcement
@@ -2197,7 +2194,6 @@ public struct HermesConfig: Sendable {
         forceIPv4: false,
         contextEngine: "compressor",
         interimAssistantMessages: true,
-        honchoInitOnSessionStart: false,
         timezone: "",
         userProfileEnabled: true,
         toolUseEnforcement: "auto",
