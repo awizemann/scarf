@@ -345,11 +345,6 @@ public final class RichChatViewModel {
     public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
-        // Quick-commands load happens in `reset()`, which every chat-start
-        // path calls before the user can interact (iOS: ChatController.start;
-        // Mac: ChatViewModel.startNewSession/resumeSession/continueLastSession).
-        // Calling it here too caused two parallel SFTP reads of config.yaml
-        // on iOS chat startup.
     }
 
 
