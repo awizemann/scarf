@@ -1866,7 +1866,10 @@ final class ChatController {
             .map(escapeShellArg)
             .map { "'\($0)'" }
             .joined(separator: " ")
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
+        // `-p default` for a root home: the transport can't see a hermes
+        // argv inside `sh -c`, so the script carries the pin itself (S13-F1).
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(pin)\(argv)"
         do {
             let result = try await ctx.makeTransport().asyncRunProcess(
                 executable: "/bin/sh",

@@ -109,10 +109,14 @@ struct MemoryListView: View {
         // The assignment leads, as it must: `sh` reads a command line's
         // leading `VAR=value` pairs left to right, and the first token that
         // is not an assignment becomes the command.
+        //
+        // `-p default` for a root home: the transport can't see a hermes
+        // argv inside `sh -c`, so the script carries the pin itself (S13-F1).
+        let ctx = context
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
         let script = "COLUMNS=\(LocalTransport.wideColumns) "
             + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" "
-            + "\(hermes) \(HermesMemoryResetVerdict.argv.joined(separator: " "))"
-        let ctx = context
+            + "\(hermes) \(pin)\(HermesMemoryResetVerdict.argv.joined(separator: " "))"
         do {
             // Round-6 decision 11: the `async` seam, so the wait is a
             // SUSPENSION rather than a cooperative-pool thread blocked on a

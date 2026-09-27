@@ -806,13 +806,23 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // process-env assignment. Set unconditionally (not just when the
         // executable is hermes) because several callers run hermes INSIDE a
         // `/bin/sh -c "… hermes …"` script — the env propagates to the
-        // child hermes there too. It's empty for a default/root home, so
-        // legacy active_profile behavior is preserved and pre-profile hosts
-        // are unaffected; and it's harmless for the lone non-hermes caller
-        // (`echo $HOME`), which ignores it. Mirrors the file layer, which
-        // scopes via this same `config.remoteHome`.
-        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
-            forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
+        // child hermes there too. It's empty for a default/root home, and
+        // harmless for non-hermes callers (`echo $HOME`), which ignore it.
+        // Mirrors the file layer, which scopes via this same
+        // `config.remoteHome`.
+        //
+        // A root home is pinned by argv instead: Hermes ignores
+        // `HERMES_HOME=<root>` and follows the sticky `active_profile`, so a
+        // hermes argv gets `-p default` in front (S13-F1; see
+        // `HermesProfileScope.pinnedRemoteArguments`, the same rule as
+        // `SSHTransport.composedRemoteCommand`). Script callers that run
+        // hermes inside `/bin/sh -c` put `rootPinShellFragment` in their
+        // script text themselves.
+        let home = config.remoteHome ?? HermesPathSet.defaultRemoteHome
+        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+        let args = HermesProfileScope.pinnedRemoteArguments(
+            executable: executable, args: args, home: home,
+            configuredBinary: config.hermesBinaryHint)
         // `COLUMNS` rides the same assignment prefix as `PATH` and
         // `HERMES_HOME` (P54, round-6). Citadel's raw exec channel is not a
         // TTY and forwards none of the client's environment, so the remote

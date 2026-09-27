@@ -1,4 +1,6 @@
+import Foundation
 import Testing
+import ScarfCore
 @testable import scarf
 
 /// Coverage for `ProfilesViewModel.parseProfileList` across both the
@@ -32,8 +34,8 @@ struct ProfilesViewModelParsingTests {
 
          Profile                    Model                        Gateway      Alias        Distribution
          ───────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-         ◆Production (default)    deepseek/deepseek-v4-flash   running      —            —
-          Staging Box (gateway)   —                            stopped      —            —
+         ◆Production (default) deepseek/deepseek-v4-flash   running      —            —
+          Staging Box (gateway) —                            stopped      —            —
           scarfbox-smoke          deepseek/deepseek-v4-pro     stopped      —            —
 
         """
@@ -88,7 +90,7 @@ struct ProfilesViewModelParsingTests {
 
          Profile                             Model                        Gateway      Alias        Distribution
          ────────────────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-         ◆My (test) profile (myid)         deepseek/deepseek-v4-flash   running      —            —
+         ◆My (test) profile (myid) deepseek/deepseek-v4-flash   running      —            —
 
         """
         let (profiles, active) = ProfilesViewModel.parseProfileList(output)
@@ -121,10 +123,116 @@ struct ProfilesViewModelParsingTests {
 
          Profile                             Model                        Gateway      Alias        Distribution
          ────────────────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-          My (test) profile (myid)         grok-4 (beta)                stopped      —            —
+          My (test) profile (myid) grok-4 (beta)                stopped      —            —
 
         """
         let (profiles, active) = ProfilesViewModel.parseProfileList(output)
         #expect(profiles.map(\.name) == ["myid"])
+    }
+    // MARK: - Server's active profile on remote (S13-F3)
+
+    /// Remotely every `profile list` is pinned to the window's profile, so
+    /// the `◆` marks the viewed profile. The badge must come from the
+    /// root's `active_profile` file instead.
+    @Test("remote: the active badge comes from active_profile, not the marker")
+    func remoteActiveComesFromTheStickyFile() {
+        let parsed = [HermesProfile(name: "default", isActive: false, path: ""),
+                      HermesProfile(name: "work", isActive: true, path: ""),
+                      HermesProfile(name: "coder", isActive: false, path: "")]
+        let (profiles, active) = ProfilesViewModel.resolveActive(
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .contents("coder\n"))
+        #expect(active == "coder")
+        #expect(profiles.filter(\.isActive).map(\.name) == ["coder"])
+
+        // No file (or an empty one) means default, as it does to Hermes.
+        let (noFile, noFileActive) = ProfilesViewModel.resolveActive(
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .missing)
+        #expect(noFileActive == "default")
+        #expect(noFile.filter(\.isActive).map(\.name) == ["default"])
+
+        // A failed read badges nothing rather than guessing.
+        let (unknown, unknownActive) = ProfilesViewModel.resolveActive(
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .unreadable)
+        #expect(unknownActive == nil)
+        #expect(unknown.filter(\.isActive).isEmpty)
+    }
+
+    /// The remote read is one `cat`, so "no file" (server on default) and
+    /// "couldn't read" stay distinct.
+    @Test("remote active_profile read: contents, missing and failure are told apart")
+    func hostActiveReadIsClassified() {
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 0, stdout: "coder\n", stderr: "")
+                == .contents("coder\n"))
+        #expect(ProfilesViewModel.classifyHostActiveRead(
+            exitCode: 1, stdout: "", stderr: "cat: /root/.hermes/active_profile: No such file or directory")
+                == .missing)
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 255, stdout: "", stderr: "ssh: connect to host box: Connection refused")
+                == .unreadable)
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 1, stdout: "", stderr: "cat: active_profile: Permission denied")
+                == .unreadable)
+    }
+
+    @Test("local: the marker is kept (an unpinned local run marks the sticky profile)")
+    func localKeepsTheMarker() {
+        let parsed = [HermesProfile(name: "default", isActive: false, path: ""),
+                      HermesProfile(name: "work", isActive: true, path: "")]
+        let (profiles, active) = ProfilesViewModel.resolveActive(
+            parsed: parsed, markedActive: "work", isRemote: false, hostActiveFile: .contents("ignored"))
+        #expect(active == "work")
+        #expect(profiles == parsed)
+    }
+
+    // MARK: - Failed `profile list` (S13-F6)
+
+    final class Script: @unchecked Sendable {
+        private let lock = NSLock()
+        private var results: [(String, Int32)]
+        init(_ results: [(String, Int32)]) { self.results = results }
+        func next() -> (String, Int32) {
+            lock.lock(); defer { lock.unlock() }
+            return results.count > 1 ? results.removeFirst() : results[0]
+        }
+    }
+
+    private static func settle(_ condition: () -> Bool) async {
+        for _ in 0..<400 {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        Issue.record("timed out")
+    }
+
+    static let table = """
+
+     Profile          Model                        Gateway      Alias        Distribution
+     ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
+     ◆default         —                            stopped      —            —
+      coder           —                            stopped      coder        —
+
+    """
+
+    @Test("a failed profile list keeps the last list and reports why, instead of 'No Profiles'")
+    @MainActor
+    func failedListKeepsPreviousAndReportsError() async {
+        let script = Script([(Self.table, 0), ("bash: line 1: hermes: command not found", 127)])
+        let vm = ProfilesViewModel(context: .local, cliRunner: { _, _ in script.next() })
+        vm.load()
+        await Self.settle { !vm.isLoading && vm.profiles.count == 2 }
+        #expect(vm.loadError == nil)
+
+        vm.load()
+        await Self.settle { !vm.isLoading && vm.loadError != nil }
+        #expect(vm.profiles.map(\.name) == ["default", "coder"], "previous list kept")
+        #expect(vm.loadError == "Failed: bash: line 1: hermes: command not found")
+    }
+
+    @Test("a failed first load leaves an error, not an empty success")
+    @MainActor
+    func failedFirstLoadIsAnError() async {
+        let vm = ProfilesViewModel(context: .local, cliRunner: { _, _ in ("", -1) })
+        vm.load()
+        await Self.settle { !vm.isLoading && vm.loadError != nil }
+        #expect(vm.profiles.isEmpty)
+        #expect(vm.loadError == "Failed (no output).")
     }
 }

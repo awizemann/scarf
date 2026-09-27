@@ -46,19 +46,26 @@ extension ACPClient {
     /// transport uses (`tools/bot_mode_dm.py:32` — `hermes -p <name> chat
     /// …`), so the argv Scarf writes is the argv Hermes documents.
     ///
-    /// Two guards ride on `HermesProfileScope.normalize`:
-    /// - the name is re-validated against Hermes' own
-    ///   `^[a-z0-9][a-z0-9_-]{0,63}$`, so a malformed value never reaches
-    ///   the command line. Hermes rejects such values too (main.py:606-615,
-    ///   dropping the flag and falling back to `active_profile`) — which is
-    ///   exactly the silent wrong-profile outcome to avoid: better to launch
-    ///   unpinned by our own decision than to think we pinned and not have.
-    /// - `"default"` normalizes to `nil` and emits no flag at all, because
-    ///   the default profile IS the root home and `-p default` is a no-op
-    ///   Hermes special-cases anyway.
+    /// - `nil` (an ordinary chat, not a bot) emits no flag: the window's
+    ///   own scope decides. Locally that is the host's `active_profile`,
+    ///   which is also where the window reads its files; remotely
+    ///   `SSHTransport` adds the pin (`HERMES_HOME=` for a named profile,
+    ///   `-p default` for the root).
+    /// - A bot name is re-validated against Hermes' own
+    ///   `^[a-z0-9][a-z0-9_-]{0,63}$` (``HermesProfileScope/isValidName(_:)``)
+    ///   so a malformed value never reaches the command line; it launches
+    ///   unpinned by our own decision rather than pinned to the wrong
+    ///   profile.
+    /// - `"default"` IS pinned, as `-p default` (S13-F2). It is not a no-op:
+    ///   without any `-p`, Hermes follows the sticky `active_profile`
+    ///   (`hermes_cli/main.py:607-619` @ v2026.9.24), so the default bot's
+    ///   ACP process would run in another profile than the root home its
+    ///   Bot Chat lives in, and `session/load` would miss. `-p default`
+    ///   resolves to the root (`hermes_cli/profiles.py:2366-2369`).
     nonisolated static func acpArguments(profile: String?) -> [String] {
-        guard let name = HermesProfileScope.normalize(profile) else { return ["acp"] }
-        return ["-p", name, "acp"]
+        guard let raw = profile?.trimmingCharacters(in: .whitespacesAndNewlines),
+              HermesProfileScope.isValidName(raw) else { return ["acp"] }
+        return HermesProfileScope.profileFlag(raw) + ["acp"]
     }
 
     /// Build the channel — spawn `hermes acp` (local) or `ssh host --

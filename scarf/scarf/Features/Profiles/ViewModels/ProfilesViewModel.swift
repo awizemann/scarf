@@ -34,21 +34,52 @@ final class ProfilesViewModel {
 
 
     var profiles: [HermesProfile] = []
-    var activeName: String = "default"
+    /// The server's active profile, or `nil` when it couldn't be read
+    /// (remote only: the `active_profile` read failed), in which case no
+    /// row is badged rather than guessing.
+    var activeName: String? = "default"
     var isLoading = false
     var message: String?
     var detailOutput: String = ""
 
+    /// Why the last `profile list` failed, or `nil`. Shown in place of the
+    /// "No Profiles" empty state (S13-F6): a successful run always prints at
+    /// least the default row (`hermes_cli/profile_cmd.py:103-127`), so an
+    /// empty list after a failed spawn means "couldn't ask", not "none".
+    var loadError: String?
+
     func load() {
         isLoading = true
+        let context = context
         Task.detached { [cliRunner] in
             let result = await OffPool.run {
                 cliRunner(["profile", "list"], 20)
             }
-            let (parsed, active) = Self.parseProfileList(result.output)
+            guard result.exitCode == 0 else {
+                // Keep the previous list; say why it didn't refresh.
+                await MainActor.run {
+                    self.isLoading = false
+                    self.loadError = Self.failureMessage(result.output)
+                }
+                return
+            }
+            let (parsed, marked) = Self.parseProfileList(result.output)
+            // Remote: the server's active profile lives in the root's
+            // `active_profile` file (see `resolveActive`). A missing file
+            // means "default", as it does to Hermes; a failed read means
+            // "unknown".
+            let hostActiveFile: HostActiveFile = context.isRemote
+                ? await OffPool.run {
+                    Self.readHostActiveFile(context: context)
+                }
+                : .missing
+            let (profiles, active) = Self.resolveActive(
+                parsed: parsed, markedActive: marked,
+                isRemote: context.isRemote, hostActiveFile: hostActiveFile)
             await MainActor.run {
                 self.isLoading = false
-                self.profiles = parsed
+                self.loadError = nil
+                self.profiles = profiles
                 self.activeName = active
             }
         }
@@ -319,98 +350,70 @@ final class ProfilesViewModel {
         }
     }
 
-    /// Parse `hermes profile list` output. Hermes emits a box-drawn Rich table:
-    ///
-    ///     Profile         Model    Gateway    Alias
-    ///     ─────────────── ──────── ────────── ─────
-    ///     ◆default        —        running    —
-    ///     experimental    gpt-4    stopped    hermes-exp
-    ///
-    /// Active profiles are prefixed with `◆` (U+25C6). Columns are separated by
-    /// whitespace; there are no vertical bars. We ignore box-drawing lines and
-    /// the header row, then extract the name from column 0 of each data row.
-    ///
-    /// As of Hermes 0.20.5, the Profile column is rendered via
-    /// `format_profile_label(name, display_name)` (hermes_cli/profiles.py):
-    /// `f"{display_name} ({name})"` when a display name is set and differs
-    /// from the canonical name, else the bare canonical name unchanged
-    /// (byte-for-byte the pre-0.20.5 rendering). Note the display name comes
-    /// *first* and the canonical id is the parenthesized part — the opposite
-    /// order of a naive "name (extra)" read. Display names are free-form
-    /// presentation text (any Unicode, including spaces/parens, up to 64
-    /// chars) and are never argv-safe, whereas canonical profile ids are
-    /// validated against `^[a-z0-9][a-z0-9_-]{0,63}$` (profiles.py
-    /// `_PROFILE_ID_RE`) and can never themselves contain a space or a
-    /// paren — so a parenthesized id-shaped token in the row is unambiguous.
-    /// The row itself is printed as `f"{marker}{name:<15} {model:<28} {gw:<12}
-    /// {alias:<12} {dist}"` (main.py) — fixed-width fields separated by a
-    /// single literal space, so a field shorter than its width leaves a run
-    /// of 2+ spaces before the next field while the label itself (a display
-    /// name) may still contain single spaces that survive. We therefore
-    /// split the row on runs of 2+ spaces to isolate field 0 (the Profile
-    /// label) *before* searching for a `(canonical-id)` group — searching
-    /// the whole line would also match an id-shaped parenthetical that
-    /// happens to appear in the Model column (e.g. `gpt-4o (preview)`).
-    /// Within field 0 we take the *last* such group, since the display name
-    /// itself may contain an id-shaped parenthetical (e.g. "My (test)
-    /// profile (myid)"); when no group is present in field 0 we fall back to
-    /// its first whitespace token — field 0's bare canonical name, matching
-    /// pre-0.20.5 hosts where no display-name suffix is ever rendered.
-    nonisolated private static let profileIDParenPattern =
-        try! NSRegularExpression(pattern: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)")
-
+    /// Parse `hermes profile list` output into rows plus the `◆`-marked
+    /// name. The parsing itself lives in ScarfCore (`HermesProfileList`) so
+    /// ScarfGo uses the same rules (S13-F4). The marker is the process's own
+    /// profile, which is the server's active profile only for an unpinned
+    /// local run — see ``resolveActive(parsed:markedActive:isRemote:hostActiveFile:)``.
     nonisolated static func parseProfileList(_ output: String) -> (profiles: [HermesProfile], active: String) {
-        var results: [HermesProfile] = []
-        var active = "default"
-        var sawHeader = false
+        let rows = HermesProfileList.parse(output)
+        let active = rows.last(where: \.isMarked)?.id ?? HermesProfileScope.defaultProfileName
+        return (rows.map { HermesProfile(name: $0.id, isActive: $0.isMarked, path: "") }, active)
+    }
 
-        for raw in output.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { continue }
-            // Box-drawing separator rows: contain only ─ (U+2500) and whitespace.
-            if line.unicodeScalars.allSatisfy({ $0.value == 0x2500 || $0.properties.isWhitespace }) { continue }
-            // Header row (first non-empty, non-separator line in the table).
-            if !sawHeader && line.lowercased().contains("profile") && line.lowercased().contains("gateway") {
-                sawHeader = true
-                continue
-            }
-            // Data row. Strip active marker first.
-            var working = line
-            var isActive = false
-            if working.hasPrefix("◆") {
-                isActive = true
-                working = String(working.dropFirst()).trimmingCharacters(in: .whitespaces)
-            } else if working.hasPrefix("*") {
-                isActive = true
-                working = String(working.dropFirst()).trimmingCharacters(in: .whitespaces)
-            }
-            // Isolate field 0 (the Profile label) by splitting on runs of 2+
-            // spaces — the fixed-width column padding — so a paren group in
-            // a later column (e.g. the Model field) can't be mistaken for
-            // the canonical id.
-            let fields = working.components(separatedBy: "  ")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            guard let field0 = fields.first else { continue }
-            var nameStr: String?
-            let nsField0 = field0 as NSString
-            let matches = Self.profileIDParenPattern.matches(
-                in: field0, range: NSRange(location: 0, length: nsField0.length))
-            if let lastMatch = matches.last {
-                nameStr = nsField0.substring(with: lastMatch.range(at: 1))
-            } else {
-                let tokens = field0.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-                nameStr = tokens.first
-            }
-            guard let name = nameStr else { continue }
-            // Reject rows whose extracted name is something like "Tip:" or a localized
-            // label — real profile names/ids are lowercase alphanumeric with - or _.
-            // \A…\z, not ^…$: ICU's $ matches before a trailing newline
-            // (SEC-L1), and this name becomes a `hermes -p` argument.
-            guard name.range(of: "\\A[a-zA-Z0-9_-]+\\z", options: .regularExpression) != nil else { continue }
-            if isActive { active = name }
-            results.append(HermesProfile(name: name, isActive: isActive, path: ""))
+    /// The server's active profile for the list (S13-F3).
+    ///
+    /// Locally, `profile list` runs unpinned, so Hermes re-homes to the
+    /// sticky `active_profile` and the `◆` marker names it: keep the parse
+    /// as is. Remotely, every hermes call is pinned to the window's profile
+    /// (`HERMES_HOME=` for a named one, `-p default` for the root), and the
+    /// marker follows the process's home (`get_active_profile_name`,
+    /// `hermes_cli/profiles.py:1941-1955` @ v2026.9.24), so it always marks
+    /// the VIEWED profile. There the answer comes from `<root>/active_profile`
+    /// (`hostActiveFile`; absent = default, unreadable = no badge), the way
+    /// ScarfGo does it.
+    nonisolated static func resolveActive(
+        parsed: [HermesProfile],
+        markedActive: String,
+        isRemote: Bool,
+        hostActiveFile: HostActiveFile
+    ) -> (profiles: [HermesProfile], active: String?) {
+        guard isRemote else { return (parsed, markedActive) }
+        let active: String?
+        switch hostActiveFile {
+        case .missing: active = HermesProfileList.activeProfile(fromFileContents: nil)
+        case .contents(let text): active = HermesProfileList.activeProfile(fromFileContents: text)
+        // Don't assert what we don't know: the marker would name the viewed
+        // profile, and "default" would be a guess.
+        case .unreadable: active = nil
         }
-        return (results, active)
+        return (parsed.map { HermesProfile(name: $0.name, isActive: $0.name == active, path: $0.path) }, active)
+    }
+
+    /// Read the remote `<root>/active_profile` with one `cat`, so a missing
+    /// file (the server is on default) can be told apart from a failed read.
+    /// `ServerContext.readText` can't: its `fileExists` check reports a
+    /// transport failure as "no file", which would badge `default` on a guess.
+    nonisolated static func readHostActiveFile(context: ServerContext) -> HostActiveFile {
+        let path = HermesProfileScope.rootHome(forHome: context.paths.home) + "/active_profile"
+        guard let result = try? context.makeTransport().runProcess(
+            executable: "cat", args: [path], stdin: nil, timeout: 15) else { return .unreadable }
+        return classifyHostActiveRead(exitCode: result.exitCode, stdout: result.stdoutString, stderr: result.stderrString)
+    }
+
+    /// `cat`'s outcome → ``HostActiveFile``. Pure for tests.
+    nonisolated static func classifyHostActiveRead(exitCode: Int32, stdout: String, stderr: String) -> HostActiveFile {
+        if exitCode == 0 { return .contents(stdout) }
+        if stderr.contains("No such file or directory") { return .missing }
+        return .unreadable
+    }
+
+    /// What reading `<root>/active_profile` produced.
+    enum HostActiveFile: Sendable, Equatable {
+        /// No file: the server is on the default profile.
+        case missing
+        case contents(String)
+        /// The read failed; the server's active profile is unknown.
+        case unreadable
     }
 }

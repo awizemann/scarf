@@ -319,4 +319,60 @@ import Foundation
         #expect(ctx.paths.stateDB == "~/.hermes/state.db")
         #expect(ctx.paths.memoriesDir == "~/.hermes/memories")
     }
+    // MARK: - Process-layer pinning (S13-F1 / S13-F2)
+
+    @Test func profileFlagAlwaysEmitsAFlag() {
+        #expect(HermesProfileScope.profileFlag("scout") == ["-p", "scout"])
+        #expect(HermesProfileScope.profileFlag(" scout ") == ["-p", "scout"])
+        #expect(HermesProfileScope.profileFlag("default") == ["-p", "default"])
+        #expect(HermesProfileScope.profileFlag(nil) == ["-p", "default"])
+        #expect(HermesProfileScope.profileFlag("") == ["-p", "default"])
+    }
+
+    @Test func rootHomeHermesArgvGetsDefaultPin() {
+        for home in ["~/.hermes", "/opt/data", "/root/.hermes/", "~"] {
+            #expect(HermesProfileScope.pinnedRemoteArguments(
+                executable: "hermes", args: ["cron", "list"], home: home)
+                == ["-p", "default", "cron", "list"], "\(home)")
+        }
+        // Full path whose last component is hermes.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "~/.local/bin/hermes", args: ["acp"], home: "~/.hermes")
+            == ["-p", "default", "acp"])
+        // A configured binary hint with another name counts as hermes too.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/usr/local/bin/hermes-wrapper", args: ["acp"], home: "~/.hermes",
+            configuredBinary: "/usr/local/bin/hermes-wrapper")
+            == ["-p", "default", "acp"])
+    }
+
+    @Test func pinIsSkippedWhereItDoesNotBelong() {
+        // Named-profile home: HERMES_HOME already pins it.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["acp"], home: "~/.hermes/profiles/work") == ["acp"])
+        // Not hermes.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/bin/sh", args: ["-c", "hermes acp"], home: "~/.hermes") == ["-c", "hermes acp"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/usr/bin/hermes-agent", args: ["acp"], home: "~/.hermes") == ["acp"])
+        // Already pinned by the caller (a bot) — never a second flag.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["-p", "scout", "acp"], home: "~/.hermes") == ["-p", "scout", "acp"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["--profile", "scout", "acp"], home: "~/.hermes")
+            == ["--profile", "scout", "acp"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["--profile=scout", "acp"], home: "~/.hermes") == ["--profile=scout", "acp"])
+        // Bare version probes keep Hermes' fast path.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["--version"], home: "~/.hermes") == ["--version"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["-V"], home: "~/.hermes") == ["-V"])
+    }
+
+    @Test func rootPinShellFragmentMatchesTheArgvRule() {
+        #expect(HermesProfileScope.rootPinShellFragment(forHome: "~/.hermes") == "-p default ")
+        #expect(HermesProfileScope.rootPinShellFragment(forHome: "/opt/data") == "-p default ")
+        #expect(HermesProfileScope.rootPinShellFragment(forHome: "~/.hermes/profiles/work") == "")
+    }
 }

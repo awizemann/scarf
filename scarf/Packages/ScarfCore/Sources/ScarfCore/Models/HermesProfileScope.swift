@@ -143,13 +143,104 @@ public enum HermesProfileScope {
         return normalize(String(trimmed[trimmed.index(after: nameSlash)...]))
     }
 
+    // MARK: - Process-layer pinning (`-p`)
+
+    /// The argv prefix that pins a `hermes` invocation to `name`. Always
+    /// present: a named profile gives `-p <name>`, and `nil`/empty/`"default"`
+    /// gives `-p default`.
+    ///
+    /// Passing `-p default` is not redundant. Without any `-p`, Hermes reads
+    /// the sticky `<root>/active_profile` file and re-homes the process to
+    /// that profile (`hermes_cli/main.py:607-619` @ v2026.9.24). With
+    /// `-p default` it resolves to the root home instead
+    /// (`hermes_cli/profiles.py:2366-2369` @ v2026.9.24), which is what a
+    /// caller that reads the root home's files needs. Hermes' own Bot Mode
+    /// transport passes the flag the same way (`tools/bot_mode_dm.py:282`).
+    ///
+    /// Invalid names also map to `-p default`, so callers must validate a
+    /// user-supplied name first (``isValidName(_:)``) when a bad name should
+    /// be an error rather than the root profile.
+    ///
+    /// Floor: `-p`/`--profile` and the `default` alias both shipped with
+    /// profiles in v2026.3.30 (0.6.0), which is Scarf's supported minimum,
+    /// so there is no capability gate. Known, accepted gap: before
+    /// v2026.4.13 (0.6–0.8) `default` resolved to a hard-coded `~/.hermes`
+    /// (`hermes_cli/profiles.py:89-91,119-123` @ v2026.3.30), so on those
+    /// hosts a Docker-style custom root (`HERMES_HOME=/opt/data`) is
+    /// re-homed to `~/.hermes` by the remote root pin. Profiles themselves
+    /// were broken on such hosts until then (Hermes #7170).
+    public static func profileFlag(_ name: String?) -> [String] {
+        ["-p", normalize(name) ?? defaultProfileName]
+    }
+
+    /// Whether `args` already begins with a profile flag (`-p x`,
+    /// `--profile x` or `--profile=x`), so a transport must not add another.
+    static func startsWithProfileFlag(_ args: [String]) -> Bool {
+        guard let first = args.first else { return false }
+        return first == "-p" || first == "--profile" || first.hasPrefix("--profile=")
+    }
+
+    /// Whether `executable` is the `hermes` CLI: the configured binary, or
+    /// any path whose last component is `hermes`.
+    static func isHermesExecutable(_ executable: String, configuredBinary: String?) -> Bool {
+        if let configuredBinary, !configuredBinary.isEmpty, executable == configuredBinary { return true }
+        return (executable as NSString).lastPathComponent == "hermes"
+    }
+
+    /// The argv a REMOTE transport should run for `executable args` when
+    /// the context's Hermes home is `home`.
+    ///
+    /// A named-profile home is already pinned by the `HERMES_HOME=`
+    /// assignment (``hermesHomeShellAssignment(forHome:)``), so its args are
+    /// returned unchanged. A root home cannot be pinned that way: Hermes only
+    /// trusts `HERMES_HOME` when its parent directory is `profiles`
+    /// (`hermes_cli/main.py:603-605` @ v2026.9.24), so `HERMES_HOME=<root>`
+    /// still follows `active_profile`. For a root home we therefore put
+    /// `-p default` in front of the hermes args, unless:
+    /// - the executable isn't hermes (`/bin/sh`, `rm`, …);
+    /// - the args already start with a profile flag (a bot's `-p <bot>`);
+    /// - the args are a bare version probe (`--version`/`-V`), which is the
+    ///   same for every profile and would otherwise lose Hermes' fast path
+    ///   (`hermes_cli/_startup_fast.py:86-89,226-240` @ v2026.9.24).
+    ///
+    /// The flag goes first so Hermes' pre-argparse scan
+    /// (`_scan_profile_flag`, `hermes_cli/main.py:484-524`) finds it before
+    /// any subcommand option; the scan strips it from `sys.argv`, so every
+    /// verb sees the same argv as before.
+    ///
+    /// Callers that run hermes inside a `/bin/sh -c` script can't be seen
+    /// here; they add ``rootPinShellFragment(forHome:)`` to their script.
+    public static func pinnedRemoteArguments(
+        executable: String,
+        args: [String],
+        home: String,
+        configuredBinary: String? = nil
+    ) -> [String] {
+        guard !isProfileHome(home),
+              isHermesExecutable(executable, configuredBinary: configuredBinary),
+              !startsWithProfileFlag(args),
+              args != ["--version"], args != ["-V"]
+        else { return args }
+        return profileFlag(nil) + args
+    }
+
+    /// Shell text (`"-p default "`, note the trailing space) to put right
+    /// after `hermes` in a `/bin/sh -c` script run against a REMOTE root
+    /// home, or `""` for a named-profile home (already pinned by
+    /// `HERMES_HOME=`). The script-text twin of
+    /// ``pinnedRemoteArguments(executable:args:home:configuredBinary:)``.
+    public static func rootPinShellFragment(forHome home: String) -> String {
+        isProfileHome(home) ? "" : profileFlag(nil).joined(separator: " ") + " "
+    }
+
     /// A shell `HERMES_HOME=... ` assignment (note the trailing space) that
     /// scopes a `hermes` invocation to a named profile, or `""` for a
-    /// default/root home — leaving legacy `active_profile` resolution
-    /// untouched (and avoiding any behavior change for users who don't use
-    /// profiles). This is Hermes' own per-invocation home mechanism; for a
-    /// `<root>/profiles/<name>` value the CLI trusts it and never consults
-    /// `active_profile` (verified against Hermes 0.16, hermes_cli/main.py).
+    /// default/root home. This is Hermes' own per-invocation home mechanism;
+    /// for a `<root>/profiles/<name>` value the CLI trusts it and never
+    /// consults `active_profile` (verified against Hermes 0.16,
+    /// hermes_cli/main.py). A root value would NOT be trusted (Hermes still
+    /// reads `active_profile` for it), which is why a root home is pinned
+    /// with `-p default` instead — see ``pinnedRemoteArguments``.
     ///
     /// The home is quoted for the remote shell exactly like
     /// `RemoteSQLiteBackend.quoteForRemoteShell`: a leading `~` becomes a
