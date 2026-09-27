@@ -56,6 +56,13 @@ import ScarfCore
             /// @ v2026.9.21; frame is `acp.RequestError(...).to_error_obj()`
             /// verbatim, `data: null` included).
             case busyOnSetModel(sessionId: String)
+            /// Like `happy`, but `session/load` first streams a replay of
+            /// the stored history (an agent message, a thought, a tool
+            /// call and its update) as `session/update` notifications and
+            /// only then answers — Hermes's order (`acp_adapter/server.py`
+            /// `:579-589` awaits `_history_replay_updates` before the load
+            /// response @ v2026.9.24). S02-F3.
+            case replayOnLoad(sessionId: String)
         }
 
         nonisolated let incoming: AsyncThrowingStream<String, Error>
@@ -112,6 +119,24 @@ import ScarfCore
                 default: // initialize, session/cancel, session/set_model, …
                     reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
                 }
+            case .replayOnLoad(let sessionId):
+                switch method {
+                case "session/new", "session/load":
+                    if method == "session/load" {
+                        let loaded = (obj["params"] as? [String: Any])?["sessionId"] as? String ?? sessionId
+                        for update in Self.replayUpdates {
+                            reply(["jsonrpc": "2.0", "method": "session/update",
+                                   "params": ["sessionId": loaded, "update": update] as [String: Any]])
+                        }
+                    }
+                    reply(["jsonrpc": "2.0", "id": id,
+                           "result": ["sessionId": sessionId,
+                                      "modes": ["currentModeId": "default"]]])
+                case "session/prompt":
+                    break
+                default:
+                    reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
+                }
             case .loadNotRestorable(let sessionId):
                 switch method {
                 case "session/load":
@@ -129,6 +154,21 @@ import ScarfCore
                 }
             }
         }
+
+        /// The history `replayOnLoad` streams inside `session/load`.
+        static let replayUpdates: [[String: Any]] = [
+            ["sessionUpdate": "agent_message_chunk",
+             "content": ["type": "text", "text": "REPLAYED OLD REPLY"]],
+            ["sessionUpdate": "agent_thought_chunk",
+             "content": ["type": "text", "text": "REPLAYED OLD THOUGHT"]],
+            ["sessionUpdate": "tool_call", "toolCallId": "replayed-tool-1",
+             "title": "terminal: ls", "kind": "execute", "status": "pending"],
+            ["sessionUpdate": "tool_call_update", "toolCallId": "replayed-tool-1",
+             "status": "completed",
+             "content": [["type": "content", "content": ["type": "text", "text": "a.txt"]]]],
+            ["sessionUpdate": "agent_message_chunk",
+             "content": ["type": "text", "text": "REPLAYED SECOND REPLY"]],
+        ]
 
         private func reply(_ obj: [String: Any]) {
             guard let data = try? JSONSerialization.data(withJSONObject: obj),
@@ -333,6 +373,47 @@ import ScarfCore
         let stopped = await Self.waitUntil { await ch.closed }
         #expect(stopped, "auto-start catch path leaked the client (channel never closed)")
         #expect(vm.isStartingSession == false)
+    }
+
+    /// S02-F3: typing after the connection was lost goes through
+    /// `autoStartACPAndSend`, which echoes the message and then
+    /// `session/load`s the same session. Hermes replays the whole stored
+    /// history inside that load; pre-fix the echo had already opened the
+    /// replay gate, so the old reply, thought and tool card painted as new
+    /// content after the user's bubble (and the new reply's chunks then
+    /// appended onto the replayed text).
+    @Test @MainActor func autoStartResumeDropsTheLoadReplay() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let ch = ScriptedACPChannel(behavior: .replayOnLoad(sessionId: "sess-old"))
+        vm.acpClientFactory = { ctx, _ in
+            ACPClient(context: ctx) { _ in ch }
+        }
+        // The state after an exhausted reconnect ladder: a session id is
+        // still attached, but there is no client.
+        vm.richChatViewModel.setSessionId("sess-old")
+
+        vm.sendText("new question") // no acpClient → auto-start + session/load
+
+        let promptSent = await Self.waitUntil { await ch.sentMethods.contains("session/prompt") }
+        #expect(promptSent)
+        let methods = await ch.sentMethods
+        #expect(methods.contains("session/load"), "auto-start didn't resume the attached session")
+        // Let any late streaming flush land before looking.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        let rich = vm.richChatViewModel
+        let leaked = rich.messages.filter {
+            $0.content.contains("REPLAYED")
+                || ($0.reasoning ?? "").contains("REPLAYED")
+                || $0.toolCalls.contains { $0.callId == "replayed-tool-1" }
+        }
+        #expect(leaked.isEmpty, "session/load replay painted as new content: \(leaked.map(\.content))")
+        #expect(rich.messages.filter(\.isUser).map(\.content) == ["new question"])
+        // The prompt itself still opened the gate: the live turn is
+        // accepted and the working indicator is up.
+        #expect(rich.isAgentWorking)
     }
 
     // MARK: - (b) Mid-turn teardown hygiene

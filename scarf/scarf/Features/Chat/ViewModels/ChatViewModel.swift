@@ -324,6 +324,12 @@ final class ChatViewModel {
     // ACP state
     private var acpClient: ACPClient?
     private var acpEventTask: Task<Void, Never>?
+    /// Events the current event loop has handed to the transcript. Paired
+    /// with `ACPClient.eventsEmitted` so a send path can wait until every
+    /// event that preceded an RPC response has been handled
+    /// (`awaitEventLoopDrain`). Reset whenever a loop starts, because the
+    /// client's count starts at zero with each new client.
+    private var acpEventsHandled = 0
     private var healthMonitorTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var isHandlingDisconnect = false
@@ -1205,6 +1211,13 @@ final class ChatViewModel {
         armStartWatchdog(intent: intent)
         // Show the user message immediately
         richChatViewModel.addUserMessage(text: text)
+        // …but keep the replay gate shut until the prompt is actually
+        // sent. The echo opens it, and the `session/load` below streams
+        // the session's whole stored history as live updates before it
+        // returns — with the gate open, that history painted as new
+        // content after this bubble (S02-F3). `sendViaACP` reopens it
+        // with `markPromptSent` once the load's replay has drained.
+        richChatViewModel.closeReplayGate()
 
         Task { @MainActor in
             let sessionToResume = richChatViewModel.sessionId
@@ -1296,6 +1309,13 @@ final class ChatViewModel {
                 // 500 ms debounce. An explicit call here keeps the
                 // "type → see new chat in the list" feedback prompt.
                 await loadRecentSessions()
+                guard startStillCurrent(intent, client: client) else { return }
+
+                // Hermes sends the whole replay before the load response,
+                // but the event loop may not have handled all of it yet.
+                // Wait until it has, so no replayed chunk lands after
+                // `sendViaACP` reopens the gate below.
+                await awaitEventLoopDrain(client: client)
                 guard startStillCurrent(intent, client: client) else { return }
 
                 // Now send the queued prompt. The optimistic echo was
@@ -2184,6 +2204,7 @@ final class ChatViewModel {
     }
 
     private func startACPEventLoop(client: ACPClient) {
+        acpEventsHandled = 0
         acpEventTask = Task { @MainActor [weak self] in
             let eventStream = await client.events
             for await event in eventStream {
@@ -2201,6 +2222,7 @@ final class ChatViewModel {
                 ScarfMon.measure(.chatStream, "mac.handleACPEvent") {
                     self?.richChatViewModel.handleACPEvent(event)
                 }
+                self?.acpEventsHandled += 1
                 // Don't overwrite a phase-typed acpStatus with the
                 // ACP-side "Connected" string mid-stream; we promote
                 // to ready/agentWorking from the call sites that own
@@ -2212,6 +2234,24 @@ final class ChatViewModel {
             if !Task.isCancelled {
                 self?.handleConnectionDied()
             }
+        }
+    }
+
+    /// Wait until the event loop has handled every event `client` had
+    /// emitted when this was called. `ACPClient` handles incoming lines
+    /// one at a time, so a count read right after an RPC returns covers
+    /// every notification sent before that response (see
+    /// `ACPClient.eventsEmitted`). Bounded: a wedged loop must not hold
+    /// the send forever, and a client that is no longer the live one
+    /// ends the wait.
+    private func awaitEventLoopDrain(client: ACPClient, timeoutSeconds: TimeInterval = 5) async {
+        let target = await client.eventsEmitted
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while acpEventsHandled < target,
+              acpClient === client,
+              Date() < deadline,
+              !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
