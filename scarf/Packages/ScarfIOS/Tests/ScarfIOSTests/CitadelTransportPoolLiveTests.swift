@@ -55,12 +55,12 @@ private func liveTransport(_ id: ServerID, _ config: SSHConfig, _ bundle: SSHKey
 /// ~/.hermes is never touched (the transport only injects HERMES_HOME for
 /// profile paths, so we set it ourselves).
 private func liveConfigSet(_ key: String, _ value: String, home: String) -> String {
-    "HERMES_HOME=\(home) PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" hermes config set '\(key)' '\(value)'"
+    "HERMES_HOME=\(home) PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" hermes config set '\(key)' '\(value)'"
 }
 
 private func liveHermes(_ args: String, home: String? = nil) -> String {
     let h = home.map { "HERMES_HOME=\($0) " } ?? ""
-    return "\(h)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" hermes \(args)"
+    return "\(h)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" hermes \(args)"
 }
 
 private final class FailCounter: @unchecked Sendable {
