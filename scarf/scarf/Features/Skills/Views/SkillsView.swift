@@ -260,7 +260,9 @@ struct SkillsView: View {
             }
         )) {
             ForEach(viewModel.filteredCategories) { category in
-                Section(category.name) {
+                // Flat skills (`skills/<name>/`, the hub default) have no
+                // category folder; give their group a heading anyway.
+                Section(category.name.isEmpty ? String(localized: "Uncategorized") : category.name) {
                     ForEach(category.skills) { skill in
                         skillRow(skill)
                             .tag(skill.id)
@@ -326,7 +328,9 @@ struct SkillsView: View {
                     Text(skill.name)
                         .font(.title2.bold())
                     HStack {
-                        Label(skill.category, systemImage: "folder")
+                        if !skill.category.isEmpty {
+                            Label(skill.category, systemImage: "folder")
+                        }
                         Label("\(skill.files.count) files", systemImage: "doc")
                         if !skill.requiredConfig.isEmpty {
                             Label("\(skill.requiredConfig.count) required config", systemImage: "gearshape")
@@ -466,7 +470,7 @@ struct SkillsView: View {
                                 )
                             Button("Uninstall", role: .destructive) {
                                 // The CLI's positional is the BARE skill
-                                // name; `skill.id` is `<category>/<name>`,
+                                // name; `skill.id` is the path below skills/,
                                 // which `skills uninstall` rejects — and it
                                 // rejects with exit 0 (t-ec6d2e6d).
                                 viewModel.uninstallHubSkill(skill.name)

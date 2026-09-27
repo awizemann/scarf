@@ -91,6 +91,11 @@ public struct HermesPathSet: Sendable, Hashable {
     /// `~/.hermes/skills/.curator_state`. Carries last-run metadata,
     /// run count, pause flag, and the path to the most recent report.
     public nonisolated var curatorStateFile: String { home + "/skills/.curator_state" }
+    /// Per-skill usage + provenance sidecar the curator reads and writes,
+    /// keyed by skill name. Curator pins live here as `"pinned": true` on
+    /// each record — not in `.curator_state` (`tools/skill_usage.py:50-51,
+    /// 345-350` @ v2026.9.24).
+    public nonisolated var skillsUsageFile: String { home + "/skills/.usage.json" }
     public nonisolated var scarfDir: String { home + "/scarf" }
     public nonisolated var projectsRegistry: String { scarfDir + "/projects.json" }
 
@@ -143,6 +148,19 @@ public struct HermesPathSet: Sendable, Hashable {
             user + "/.hermes/bin/hermes"   // Some self-install layouts
         ]
     }()
+
+    /// True when a "Hermes binary" override is a shell fragment rather than
+    /// one path — `docker compose exec hermes hermes`, `env FOO=1 hermes`.
+    /// The Add Server sheet promises anything `/bin/sh -c "<value> …"` can
+    /// run, so remote transports emit such a value as shell words, exactly
+    /// as the user typed it, instead of quoting it as one command name
+    /// (S15-F3). A single path with a space in it has to be quoted by the
+    /// user in that case, the same as in a terminal.
+    public nonisolated static func binaryHintIsShellFragment(_ hint: String?) -> Bool {
+        guard let hint else { return false }
+        return hint.trimmingCharacters(in: .whitespaces)
+            .contains(where: { $0 == " " || $0 == "\t" })
+    }
 
     /// Resolved path to the `hermes` executable for this installation.
     ///

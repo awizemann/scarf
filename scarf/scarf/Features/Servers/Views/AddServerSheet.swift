@@ -130,6 +130,13 @@ struct AddServerSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    // A wrapper runs as typed, so the environment Scarf sets
+                    // for a profile (`HERMES_HOME=`) reaches the wrapper,
+                    // not the Hermes inside the container.
+                    Text("With a container wrapper such as `docker compose exec`, the environment Scarf sets on the host doesn't reach Hermes inside the container, so viewing a named profile from Scarf won't switch the container's Hermes to it. Use the container's default profile with a wrapper.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 6)
             }

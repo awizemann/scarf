@@ -94,8 +94,26 @@ struct CitadelTransportColumnsP54Tests {
         let code = Self.codeOnly(try Self.source("Sources/ScarfIOS/CitadelServerTransport.swift"))
         let body = try Self.asyncRunProcessBody(code)
         let pin = try #require(body.range(of: "let args = HermesProfileScope.pinnedRemoteArguments("))
-        let join = try #require(body.range(of: "Self.shellJoin([executable] + args)"))
+        // S15-F3: the join goes through `commandLine`, which keeps a
+        // wrapper "Hermes binary" as shell words (behaviour-tested below).
+        let join = try #require(body.range(
+            of: "Self.commandLine(executable: executable, args: args, binaryHint: config.hermesBinaryHint)"))
         #expect(pin.lowerBound < join.lowerBound)
         #expect(body.contains("configuredBinary: config.hermesBinaryHint"))
+    }
+
+    /// S15-F3: a wrapper hint is emitted as words; everything else is
+    /// quoted by `shellJoin` exactly as before.
+    @Test func aWrapperBinaryHintIsJoinedAsShellWords() {
+        let hint = "docker compose exec hermes hermes"
+        #expect(CitadelServerTransport.commandLine(
+            executable: hint, args: ["-p", "default", "cron", "list"], binaryHint: hint)
+            == "docker compose exec hermes hermes -p default cron list")
+        #expect(CitadelServerTransport.commandLine(
+            executable: "hermes", args: ["config", "set", "a b"], binaryHint: nil)
+            == CitadelServerTransport.shellJoin(["hermes", "config", "set", "a b"]))
+        // A single-word hint goes through `shellJoin` like any argument.
+        #expect(CitadelServerTransport.commandLine(
+            executable: "/opt/hermes", args: ["acp"], binaryHint: "/opt/hermes") == "/opt/hermes acp")
     }
 }

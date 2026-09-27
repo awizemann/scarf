@@ -87,7 +87,7 @@ final class RemoteDiagnosticsViewModel {
             case .sqlite3CanOpenStateDB:
                 return "sqlite3 exists but can't open state.db. Could be a permission issue, a corrupt DB, or a version skew."
             case .hermesBinaryNonLogin:
-                return "Scarf's runtime calls use non-login SSH shells (no .bashrc). If `hermes` only appears here via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`."
+                return "Scarf's runtime calls use non-login SSH shells (no .bashrc), with `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `~/.hermes/bin` added to PATH. If `hermes` lives somewhere else and only appears via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`, or set the hermes binary path in Manage Servers."
             case .hermesBinaryLogin:
                 return "hermes couldn't be located even after sourcing login rc files. Install path is non-standard — set the hermes binary path manually in Manage Servers."
             case .pgrepAvailable:
@@ -288,11 +288,12 @@ final class RemoteDiagnosticsViewModel {
             fi
         fi
 
-        # Non-login PATH probe for `hermes` runs in the bare shell BEFORE
-        # sourcing rc files — that semantic ("is hermes on the un-enriched
-        # PATH the SSH session inherits?") is meaningful and we don't
-        # want to muddle it.
-        hpath=$(command -v hermes 2>/dev/null)
+        # Non-login PATH probe for `hermes` runs BEFORE sourcing rc files,
+        # with the same install dirs Scarf's SSH transport appends to every
+        # remote command (`HermesConfigReader.pathFallback`, S15-F1) — so it
+        # answers "will Scarf's runtime calls find hermes?", and a stock
+        # `~/.local/bin` install passes.
+        hpath=$(PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin"; command -v hermes 2>/dev/null)
         if [ -n "$hpath" ]; then
             emit hermesBinaryNonLogin PASS "$hpath"
         else

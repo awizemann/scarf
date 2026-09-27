@@ -371,15 +371,24 @@ public struct FileStat: Sendable, Hashable {
     public let size: Int64
     public let mtime: Date
     public let isDirectory: Bool
+    /// The path itself is a symbolic link. Local and SSH `stat` describe
+    /// the link, not its target, so a link to a directory reports
+    /// `isDirectory == false`; a caller that wants to follow links (the
+    /// skills walk, which mirrors Hermes's `os.walk(followlinks=True)`)
+    /// needs to know to look again. Always `false` from a transport whose
+    /// stat already follows links (SFTP STAT on iOS).
+    public let isSymbolicLink: Bool
 
     public init(
         size: Int64,
         mtime: Date,
-        isDirectory: Bool
+        isDirectory: Bool,
+        isSymbolicLink: Bool = false
     ) {
         self.size = size
         self.mtime = mtime
         self.isDirectory = isDirectory
+        self.isSymbolicLink = isSymbolicLink
     }
 }
 

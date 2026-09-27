@@ -44,8 +44,8 @@ public struct HermesSkill: Identifiable, Sendable {
     public let enabled: Bool
     /// `true` when the skill is pinned via `hermes curator pin <name>`.
     /// Pinned skills are protected from auto-archive / consolidation.
-    /// Read from `CuratorViewModel.status.pinnedNames`; defaults to
-    /// `false` when curator state is unavailable.
+    /// Read from the `pinned` field of the skill's record in
+    /// `skills/.usage.json`; `false` when the host has no curator sidecar.
     public let pinned: Bool
 
     public init(
