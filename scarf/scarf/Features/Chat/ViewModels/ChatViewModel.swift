@@ -1430,6 +1430,9 @@ final class ChatViewModel {
         )
         let wireText = idleQueueText
             ?? richChatViewModel.expandIfProjectScoped(text, context: context)
+        // Reconcile the echo against what Hermes will store for THIS wire
+        // text (S02-F1), not the typed text.
+        richChatViewModel.notePromptWire(displayText: text, wireText: wireText, imageCount: images.count)
 
         // Non-interruptive slash commands keep the "Agent working…"
         // indicator off and surface a transient toast confirming the

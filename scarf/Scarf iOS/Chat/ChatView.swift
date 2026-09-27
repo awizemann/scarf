@@ -2198,6 +2198,13 @@ final class ChatController {
         // Hermes receives the expanded prompt template body. ACP
         // commands keep going to Hermes as typed. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
+        // Reconcile the echo against what Hermes will store for THIS wire
+        // text (S02-F1), not the typed text or the image-only placeholder.
+        vm.notePromptWire(
+            displayText: text.isEmpty ? "[image attached]" : text,
+            wireText: wireText,
+            imageCount: images.count
+        )
         await startPrompt(
             client: client,
             sessionId: sessionId,
