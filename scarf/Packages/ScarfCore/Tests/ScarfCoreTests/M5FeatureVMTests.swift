@@ -462,6 +462,8 @@ import Foundation
         public let contextID: ServerID = UUID()
         public let isRemote: Bool = true
         private let lines: [String]
+        /// The argv of the last `streamLines` call (the remote follow).
+        private(set) var lastStreamArgs: [String]?
 
         init(lines: [String]) { self.lines = lines }
 
@@ -484,7 +486,8 @@ import Foundation
         }
         #endif
         func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
-            AsyncThrowingStream { continuation in
+            lastStreamArgs = args
+            return AsyncThrowingStream { continuation in
                 Task {
                     for line in lines {
                         continuation.yield(line)
@@ -534,6 +537,22 @@ import Foundation
         #expect(entries[1].level == .warning)
         #expect(entries[2].level == .error)
         #expect(entries[2].message == "boom")
+    }
+
+    /// S14-F6: the follow must start at the end of the file. It used to be
+    /// `tail -n 200 -F`, whose first 200 lines repeated the window
+    /// `readLastLines` had just shown.
+    @Test @MainActor func hermesLogServiceRemoteFollowStartsAtTheEnd() async throws {
+        let scripted = ScriptedTransport(lines: [])
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = { _, _, _ in scripted }
+
+        let ctx = ServerContext(id: UUID(), displayName: "t", kind: .ssh(SSHConfig(host: "h")))
+        let service = HermesLogService(context: ctx)
+        await service.openLog(path: "/fake/agent.log")
+        defer { Task { await service.closeLog() } }
+        #expect(scripted.lastStreamArgs == ["-n", "0", "-F", "/fake/agent.log"])
     }
 
     @Test @MainActor func hermesLogServiceReadLastLinesUsesOneShotTail() async throws {

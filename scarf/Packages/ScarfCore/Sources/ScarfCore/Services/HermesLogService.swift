@@ -96,7 +96,7 @@ public actor HermesLogService {
             // owns the lifecycle and our pump Task pulls lines off it.
             let stream = transport.streamLines(
                 executable: "/usr/bin/tail",
-                args: ["-n", String(QueryDefaults.logLineLimit), "-F", path]
+                args: Self.remoteFollowArgs(path: path)
             )
             remoteTailTask = Task { [weak self] in
                 do {
@@ -114,6 +114,15 @@ public actor HermesLogService {
         } else {
             localHandle = FileHandle(forReadingAtPath: path)
         }
+    }
+
+    /// The remote follow starts at the END of the file (`-n 0`). The window
+    /// before it comes from ``readLastLines(count:)``'s one-shot `tail -n`;
+    /// starting the follow with `-n 200` as well delivered those 200 lines a
+    /// second time on the first poll (S14-F6). `-F` keeps following across
+    /// Hermes's rename-based rotation.
+    static func remoteFollowArgs(path: String) -> [String] {
+        ["-n", "0", "-F", path]
     }
 
     public func closeLog() {
@@ -214,12 +223,60 @@ public actor HermesLogService {
             remoteTailBuffer.removeAll(keepingCapacity: true)
             return batch
         }
-        guard let handle = localHandle else { return [] }
+        guard let path = currentPath else { return [] }
+        guard let handle = localHandle else {
+            // The log didn't exist when the pane opened; follow it from its
+            // first line once it does.
+            localHandle = FileHandle(forReadingAtPath: path)
+            return localHandle.map { readAvailable(from: $0) } ?? []
+        }
+        var entries = readAvailable(from: handle)
+        switch Self.localFollowChange(handle: handle, path: path) {
+        case .none:
+            break
+        case .rotated:
+            // Hermes rotates by rename (`RotatingFileHandler`,
+            // `hermes_logging.py:21-35` @ v2026.9.24): the handle still
+            // points at `agent.log.1`, which gets no more lines. Whatever it
+            // had is drained above; follow the new file from its start.
+            try? handle.close()
+            localHandle = FileHandle(forReadingAtPath: path)
+            if let fresh = localHandle { entries += readAvailable(from: fresh) }
+        case .truncated:
+            // Same file, cut short under us: everything in it is new.
+            try? handle.seek(toOffset: 0)
+            entries += readAvailable(from: handle)
+        }
+        return entries
+    }
+
+    private func readAvailable(from handle: FileHandle) -> [LogEntry] {
         let data = handle.availableData
         guard !data.isEmpty else { return [] }
         let chunk = String(data: data, encoding: .utf8) ?? ""
         let lines = chunk.components(separatedBy: "\n").filter { !$0.isEmpty }
         return lines.map { parseLine($0) }
+    }
+
+    enum LocalFollowChange: Equatable {
+        case none
+        /// The path now names a different file (renamed away, new file
+        /// created in its place).
+        case rotated
+        /// Same file, now shorter than where we are reading.
+        case truncated
+    }
+
+    /// Compare the open handle with what the path names now. A missing path
+    /// (mid-rotation) is `.none`: keep the handle until the new file exists.
+    static func localFollowChange(handle: FileHandle, path: String) -> LocalFollowChange {
+        var open = Foundation.stat()
+        var current = Foundation.stat()
+        guard fstat(handle.fileDescriptor, &open) == 0,
+              stat(path, &current) == 0 else { return .none }
+        if open.st_ino != current.st_ino || open.st_dev != current.st_dev { return .rotated }
+        if let offset = try? handle.offset(), UInt64(max(0, current.st_size)) < offset { return .truncated }
+        return .none
     }
 
     public func seekToEnd() {
