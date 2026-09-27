@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-08-03
-updated: 2026-09-11
+updated: 2026-09-27
 reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
@@ -34,5 +34,6 @@ reviewed_by: audit:claude-code (background)
 
 
 - [done] Phase 3 leftovers run shipped 2026-08-12 (commits 0bdbf90..75456b4 on main, orchestrated sub-agent phases P1–P3d + two audit passes; plan: documents/hermes-leftovers-2026-08-12-plan.md): browser provider key corrected to `browser.cloud_provider` (browser.backend was NEVER a valid Hermes key — pure Scarf invention; cloud_provider dates to v0.4.0, ungated), single cached+persisted version probe (HermesVersionCache, keyed by connection fingerprint, 10-min TTL, failed probes never memoized), title_generation block, per-task reasoning_effort (v0.19 gate), approvals.smart_policy (v0.20), secrets.command.* + bitwarden.encrypted_cache + telemetry.shared_metrics + database.* (all v0.20), STT/TTS knob expansion (per-key v0.19/v0.20 floors; tts.xai.text_normalization and global tts.speed DROPPED — absent from released v2026.8.3, audit note had guessed wrong), gateway.profile_routes list editor (v0.19 gate, lossless direct-YAML writer). Remaining backlog in t-1cc0a505 (import-agent, sync, parked items) + audit follow-ups t-9634ae74 and the profile_routes edge-case task. #done
-- [learning] `hermes config set key ""` writes an empty scalar — it does NOT unset. Whether that is safe depends on the key: harmless when Hermes's own default is "" (reasoning_effort, smart_policy, title_generation.language), harmful when presence changes behavior (browser.cloud_provider: "" → forced local mode). True unset needs `hermes config unset` — v0.19+ only (hasConfigUnset). Check config_defaults.py per key before offering an empty picker row. #convention
+- [learning] `hermes config set key ""` writes an empty scalar — it does NOT unset. Whether that is safe depends on the key: harmless when Hermes's own default is "" (smart_policy, title_generation.language), harmful when presence changes behavior (browser.cloud_provider: "" → forced local mode). True unset needs `hermes config unset` — v0.19+ only (hasConfigUnset). Check config_defaults.py per key before offering an empty picker row. #convention
+- [gotcha] `reasoning_effort` defaulting to `""` is true only for `auxiliary.*` tasks and `delegation.reasoning_effort` (both default `""` in config_defaults.py, so `config set … none` is preserved as the literal string "none" — string-typed keys are never coerced). `agent.reasoning_effort` has NO entry in DEFAULT_CONFIG at all, so on v0.21.1+ `hermes config set agent.reasoning_effort none` is auto-coerced to a real `null` by `_coerce_config_set_value`'s scalar-word table (`hermes_cli/config.py:3248-3260` @ v2026.9.24) — a different result from the auxiliary/delegation keys. See the v0.21.1 R03 correction for the UI-facing consequence. #convention #correction
 - [learning] Phase agents running only ScarfCore `swift test` miss the macOS app test target (scarfTests, e.g. the SettingsWriteReadParityTests write/read gate) — orchestrated runs must also run `xcodebuild test -only-testing:scarfTests`. #convention

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantS
 source_paths_inferred: false
 source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-27
 reviewed: 2026-09-19
 reviewed_by: claude-fable-5-1
 ---
@@ -41,3 +41,9 @@ Measured 2026-09-18 while making feat/voice pass the Mac suite (t-30667749), wit
 - relates_to [[Fast test-iteration commands (swift test vs xcodebuild)]]
 - relates_to [[Integrity is not authenticity: agent-writable Scarf sidecars need a Keychain-held MAC]]
 - relates_to [[XCUITest runs must be serialized on one Mac: parallel agents cannot each drive Scarf]]
+
+
+## Test-host "Restarting after unexpected exit" with no crash report (R17, 2026-09-27)
+
+- [gotcha] A scarfTests host that dies with no .ips report and no failure attributed to the test is usually NOT a product crash: unified log (`/usr/bin/log show --start … | grep <host pid>`) showed `[com.apple.dt.xctest] Exiting due to IDE disconnection` → exit(74), after xcodebuild logged `Lost connection to testmanagerd`. The per-user testmanagerd had exited and respawned ~20 s earlier while ANOTHER project's `xcodebuild test` (Herald/Orchestric) ran concurrently. Check `pgrep -f "xcodebuild.* test"` (any project, not only Scarf) before and during a gate run; the gate log's victim test (GatewayAndPluginsVerdictP40c) passed alone and in four full runs #testing #xcodebuild
+- [fact] Since R17 the unit-test host (`Analytics.isSyntheticHost`) skips the launch bootstraps that write the real `~/.hermes` (skills, slash commands, env mirror, projects MCP registration); XCUITest app launches still run them #testing

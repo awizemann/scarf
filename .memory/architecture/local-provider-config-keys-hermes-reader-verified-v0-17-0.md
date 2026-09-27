@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelCon
 source_paths_inferred: false
 source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-13
-updated: 2026-09-21
+updated: 2026-09-26
 reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
@@ -28,7 +28,8 @@ Reader-verified 2026-07-13 against the LIVE local Hermes install: **Hermes Agent
 - [fact] Bonus runtime behavior: Hermes JIT-loads the model — `ensure_lmstudio_model_loaded` (hermes_cli/models.py:2993+) probes the server and POSTs `/api/v1/models/load` with a target context length, invoked from agent init (agent/agent_init.py:1560). Model id must match the LM Studio `key`/`id`.
 
 ## (c) `local` / vllm / llama.cpp
-- [fact] See constraint above: vllm/llamacpp are runtime-aliased to `custom` (auth.py:1563-1564) and follow EXACTLY the bare-ollama path — same keys (`model.base_url` required, same trust gate, same "no-key-required"), no assumed endpoint of their own. `local` as a provider string is only a display label ("Local endpoint", providers.py:372) and a catalog alias target; at request time it errors.
+- [fact] See constraint above: vllm/llamacpp are runtime-aliased to `custom` (auth.py:1563-1564) and follow EXACTLY the bare-ollama path — same keys (`model.base_url` required, same trust gate, same "no-key-required"), no assumed endpoint of their own. **True through v2026.8.31 only for llamacpp** — see the v0.21.1 correction below.
+- [correction] **From v2026.9.7 (0.21.1) `model.provider: llamacpp` IGNORES `model.base_url`.** `_resolve_named_custom_runtime` sends a llama.cpp alias with no *explicit* base_url to Hermes's managed local runtime (`hermes_cli/runtime_provider_custom.py:537-540` @ v2026.9.24 → `_resolve_llamacpp_runtime` `:427-452`: supervised server, else a probe of `127.0.0.1:8080`, else ValueError "The local model server is turned off…"); config's `model.base_url` never counts as explicit (ACP passes none). Reproduced at v2026.9.24 against a scratch HERMES_HOME: `llamacpp` + `base_url :8081` raises, `vllm`/`custom` + the same base_url resolve to it. Scarf's llama.cpp row therefore writes `model.provider: custom` on v0.21.1+ (`LocalModelProvider.configProviderID(capabilities:)`, flag `llamaCppProviderIgnoresBaseURL`); older/undetected hosts still write `llamacpp`. A re-opened picker shows such a save under "Custom endpoint". (S06-F2, R03.) #llamacpp #v0.21.1 `local` as a provider string is only a display label ("Local endpoint", providers.py:372) and a catalog alias target; at request time it errors.
 
 ## (d) `custom` with explicit base_url + `custom:<name>` scoped providers
 - [fact] Bare form (config.yaml): `model: {provider: custom, base_url: <url>, default: <model>, api_key?: <inline>, api_mode?: <valid mode>}`. Reader: `_get_model_config` (runtime_provider.py:198-217) → `_resolve_openrouter_runtime` (:923-1060). `model.model` is accepted as alias for `model.default` (:203-205). If `model.default` is empty AND base_url is loopback, Hermes auto-detects a single loaded model via GET `<base_url>/v1/models` (:206-213, `_auto_detect_local_model` :175-195; same in cli.py:3571-3577).

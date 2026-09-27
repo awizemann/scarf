@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWrite
 source_paths_inferred: false
 source_sha: b114f72fcfbabf7abe398123c841957874af59eb
 created: 2026-09-04
-updated: 2026-09-07
+updated: 2026-09-26
 reviewed: 2026-09-14
 reviewed_by: audit:claude-code (background)
 ---
@@ -53,6 +53,7 @@ t-07e909e0, from the P8 audit (DI H4/H5/M4/M5, SEC M5). The lock was correct abo
 ## GW-F3 — the lock is no longer registry-only
 
 - [decision] (GW-F3, DI H4) The same lock now serializes the hand-authored TEXT files too, not just the JSON registry and sidecars. `GuardedTextFile(context:label:)` derives a `RegistryWriteLock` per protected path and takes it around the WHOLE read-modify-write; the type name is now historical — read it as "Scarf's one advisory write lock". Locked paths: `config.yaml`, `.env`, `MEMORY.md`, `USER.md`. Deliberately NOT locked: per-project `AGENTS.md`, per-skill `SKILL.md`, a bot's `profile.yaml` #guarded-write
+- [gotcha] (S14-F5, R05) For LOCAL `MEMORY.md`/`USER.md`, `<name>.lock` is HERMES's persistent flock file (`tools/memory_tool_store.py:168-205` @ v2026.9.24: `O_RDWR|O_CREAT`, `flock(LOCK_EX)`, never deleted). Scarf's O_EXCL lock for those two files is therefore `.<name>.scarf-lock`, and the outermost hold ALSO takes Hermes's flock on `<name>.lock` (O_CLOEXEC, 0600, never unlinked; contention past the budget throws `ProjectRegistryError.hermesBusy`, a non-contention flock error proceeds with Scarf's lock only). Never break or delete `<name>.lock` as stale. Remote targets are unchanged (no flock over SSH) #interop
 - [fact] (GW-F3) New API: `RegistryWriteLock.withAcquireTimeout(_:)` returns the same lock with a different wait bound. Exactly one caller — `SettingsViewModel.saveDirectYAML`, which is still synchronous on the main actor — passes 2s so a contended save reports `registryBusy` instead of freezing the UI for the 60s remote default (charter C10). Remove the override when PERF H2 / t-26bf60b8 moves that frame off-main #concurrency
 - [gotcha] (GW-F3) No path in the app nests a text lock inside a registry lock or vice versa, and that is load-bearing: the template installer takes MEMORY.md's lock in `appendMemoryIfNeeded` and the registry's in `registerProject` SEQUENTIALLY, and the uninstaller strips the memory block before it takes the registry lock. Keep them sequential — two different lock files acquired in inconsistent order across paths is a classic deadlock, and the reentrancy that saves same-lock nesting does nothing for it #concurrency
 - [gotcha] (GW-F3) The reentrancy is THREAD-LOCAL, which is why an async adopter must run the entire read-modify-write inside ONE `Task.detached`. `KanbanToolsetEnabler`'s two-detached-tasks shape (load in one, write in the other) could not hold a lock at all and was collapsed into a single `applyPlan` #concurrency

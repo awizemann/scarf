@@ -31,4 +31,4 @@ Researched (2026-06) from the then-vendored Hermes source at `~/Developer/ScarfB
 ## Relations
 - relates_to [[Phase-1 Milestone 1: First-Class Project Object — implementation decisions]]
 - relates_to [[Multi-Server Architecture (Scarf 2.0+)]]
-- relates_to [[Project-Scoped Chat and AGENTS.md Context]]
+- relates_to [[project-scoped-chat-and-agents-md-context]]

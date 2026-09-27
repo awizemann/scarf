@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformS
 source_paths_inferred: false
 source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-09-10
-updated: 2026-09-12
+updated: 2026-09-26
 reviewed: 2026-09-12
 reviewed_by: claude-opus-5
 ---
@@ -69,3 +69,14 @@ Round-5, P51. Three corrections to how far "writes the WHOLE block explicitly" r
   fifteen per-form checks are fifteen chances to miss the sixteenth. It is a VISIBILITY guard —
   these keys go out through `hermes config set`, so HERMES emits them with PyYAML and the file
   stays loadable; the damage is a value the user cannot see and Hermes never matches
+
+
+
+## R07 — a resolved default that SHADOWS another source is not written (2026-09-26)
+
+Hermes v0.21.5 audit, S07-F3/F4. The "write the whole block, resolved defaults included" posture stops where a written key would OVERRIDE a value that lives somewhere the form did not use to show. WhatsApp Cloud wrote `enabled: false`, `dm_policy: open` and `allow_from: ""` on every Save and broke setups made by Hermes's own `hermes whatsapp-cloud` wizard, which keeps everything in `.env`.
+
+- [invariant] **A key that shadows another source is written only when it is already there or the user changed it.** At v2026.9.24: an explicit `platforms.<x>.enabled: false` beats env credentials (`gateway/config_env.py:182-207`); a config `allow_from` wins by PRESENCE, even empty, over `WHATSAPP_CLOUD_ALLOW_FROM`/`_ALLOWED_USERS` (`gateway/platforms/whatsapp_common.py:113-128`); a written `dm_policy` replaces the adapter's allowlist-derived default (`gateway/platforms/whatsapp_cloud.py:186-190`). `WhatsAppCloudSetupViewModel` writes `enabled: true` when the form holds the required pair, `false` only over an existing key when BOTH required fields are cleared, and `allow_from`/`dm_policy` only where they already live (or on a user change) #platforms #config
+- [fact] **WhatsApp Cloud creds are an env bridge, gated on the PAIR.** `WHATSAPP_CLOUD_PHONE_NUMBER_ID` + `_ACCESS_TOKEN` must both be in `.env` for ANY `WHATSAPP_CLOUD_*` value to apply; then env overrides the config copies (`gateway/config_env.py:523-533`, `_Cred` at `:231-249`). Same bridge since the platform shipped (v2026.6.19, `gateway/config.py`). So the form writes new credentials to `.env` (off argv), but keeps a legacy config-held pair in config — moving part of it would strand the rest #platforms
+- [gotcha] **`hermes config set` refuses a plain string over an existing YAML list** (`_refuse_container_type_mismatch`, `hermes_cli/config.py:3316-3335` @ v2026.9.24, verified with the real CLI). A form that reads a list-form key must write it back as a list literal (`["a", "b"]`, `[]`) #config
+- [gotcha] **Webhook: the gateway listens on `WEBHOOK_ENABLED` (env), but every `hermes webhook` verb checks ONLY `platforms.webhook.enabled` in config.yaml** (`hermes_cli/webhook.py:54-55,105-107`, same since v2026.3.30). `hermes gateway setup` writes only the env flag. `WebhookSetupViewModel` writes both, and `false` only over an existing key #platforms

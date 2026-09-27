@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogS
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -24,6 +24,18 @@ Scarf's v0.21.4 (v2026.9.21) + v0.21.5 (v2026.9.24) parity cycle, branch `feat/h
 - [decision] `hermes doctor` completion = one of `_print_summary`'s three lines (`All checks passed!` / `Found N issue(s) to address:` / `Fixed N issue(s).`, doctor.py:142-163@v2026.9.24, wording identical at every tag since v2026.3.12). Parsed sections + exit 1 is NOT completion (the DOCTOR_CHECKS loop is unguarded). `runHermesCLI`'s `-1` is timeout only when the last line is `Command timed out after Ns.`. #health
 - [decision] `peer run` keeps its `--idempotency-key` only when the run may exist: Scarf's own timeout or the CLI's `Could not reach peer '…'` arm (where the POST's own urllib timeout lands). HTTP rejections drop it — a kept key after a 409 `idempotency_key_conflict` (fingerprint = body incl. Bot Chat session_id) would 409 forever. #peers
 - [gotcha] iOS ChatController: `.active` must skip only when a reconnect ladder is RUNNING (`reconnectTask != nil`); `pauseInBackground` leaves `.reconnecting` with no ladder, which stranded every background round-trip. #ios
+
+## R18c fixes (2026-09-27)
+- [decision] Honcho "Eager Init" toggle REMOVED: Hermes reads `initOnSessionStart` only from the honcho.json host block (`plugins/memory/honcho/client.py:108-118,323` @ v2026.9.24, since d9f53dba4c), never config.yaml; Scarf's write was inert. Hermes's dashboard edits the block. #honcho
+- [decision] Nous `/v1/models` bearer = `providers.nous.agent_key` (fallback `access_token`; separate opaque key before v2026.5.28), skipped when `agent_key_expires_at`/`expires_at`/JWT `exp` is within 60 s (key lives ~1 h, Hermes renews before each run); `inference_base_url` honoured when https. Scarf never refreshes (would rotate the refresh token under Hermes). #nous
+- [decision] `TransportError.classifySSHFailure`: generic "permission denied"/"authentication failed"/unreachable phrases count only at exit 255; ssh-only forms (`Permission denied (publickey|password|…`, host-key banners, `ssh: `, `Connection closed by … port 22`) at any exit (legacy `scp -O` exits 1). A remote `cat`'s own Permission denied is `.commandFailed`. #transport
+- [decision] Fetch MCP preset = `uvx mcp-server-fetch` (npm `@modelcontextprotocol/server-fetch` is a 404); its description says the Hermes host needs uv (R19). #mcp
+
+## R19 fixes (2026-09-27)
+- [decision] Parked named profile: `gateway status` early-returns with only the parked line (`gateway_profile_lifecycle.py:82-88`, `gateway.py:5020-5023` @ v2026.9.24) and `gateway restart` for a parked profile the host doesn't serve falls through (`:52-55`) to `run_gateway` in the foreground. Scarf refuses restart there (stop+start allowed — its start unparks). When the home's profile name is known, only a parked line naming it counts. #gateway
+- [decision] v0.21.4+ external-supervisor restart drains (60 s floor, `_get_restart_exit_wait_budget`) then waits 15 s for a new PID; Platforms/MCP restart now waits 60 s and a timeout on that path is "still restarting" (.unconfirmed); `✓ Gateway relaunched by its supervisor` is a success marker. #gateway
+
+
 
 ## Relations
 - relates_to [[Hermes v0.21 Compatibility Decisions]]

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-09-01
-updated: 2026-09-10
+updated: 2026-09-26
 reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
@@ -29,6 +29,7 @@ Removal flags use INVERSE semantics (`true` = still show it) and differ delibera
 
 - [gotcha] `auxiliary.web_extract.*` was deleted at v2026.8.27 (0.20.6), NOT v0.21 as the release notes imply — present at v2026.8.19, gone at v2026.8.27 with a tombstone comment in config_defaults.py; hence hasWebExtractAux uses a v0.20.6 floor #verification
 - [decision] Removing a config key upstream never means dropping its PARSE — HermesConfig+YAML keeps reading auxiliary.web_extract because pre-v0.20.6 hosts still use it; only the UI row is capability-gated, so older hosts render byte-identically #capability-gating
+- [gotcha] Same class, missed for 16 releases: `auxiliary.session_search.*` was deleted at v2026.5.28 (0.15.0, hermes-agent abf1af5401; present at v2026.5.16 `hermes_cli/config.py:875`, tombstone at v2026.9.24 `config_defaults.py:737-738,754-756`), yet the Auxiliary tab kept an unconditional "Session Search" row writing a key nothing reads while `config set` exits 0. Fixed in R03 (S05-F1): `hasSessionSearchAux` (inverse, unknown hides), row re-inserted after Compression on older hosts via `AuxiliaryTab.tasks(capabilities:)`, and Health's aux-on-Nous list drops it too. When a Hermes release audit sees a tombstone comment in config_defaults.py, grep Scarf for every writer of that key. #capability-gating #S05-F1
 - [gotcha] `agent.gateway_turn_lease_timeout` default flipped 1800 -> 5 at v0.21.0, so it parses to the 0 key-absent sentinel and resolves via displayGatewayTurnLeaseTimeout(capabilities:) — same pattern as displayMaxTurns; a stepper floor/step of 60 could not express 5 and silently snapped a v0.21 host's default up 12x #config
 - [gotcha] v0.21's phantom-sibling guard raises a bare ValueError from _set_nested that `hermes config set` does NOT catch (its handler only catches RuntimeError), so config-write failures reach Scarf as a raw Python traceback — error extraction must skip traceback frames and strip the exception-class label #settings
 - [fact] `display.interim_assistant_messages` absent-on-disk still means TRUE: the v14->15 migration that materialised it was deleted at v2026.8.27 because runtime merging supplies the schema default without a write, so absence is now the expected state #config

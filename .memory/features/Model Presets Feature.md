@@ -26,7 +26,7 @@ reviewed_by: audit:claude-code (background)
 
 ## Relations
 - uses_capability [[Hermes Capability Gating Pattern]]
-- relates_to [[Project-Scoped Chat and AGENTS.md Context]]
+- relates_to [[project-scoped-chat-and-agents-md-context]]
 
 
 ## t-3b855719: the actor was serializing nothing

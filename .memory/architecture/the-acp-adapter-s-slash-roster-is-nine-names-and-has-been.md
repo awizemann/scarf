@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatVie
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-10
-updated: 2026-09-13
+updated: 2026-09-26
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -45,3 +45,6 @@ Nothing else has ever been an ACP name. `yolo`, `codex-runtime`/`codex_runtime`,
 
 - [fact] **P55 dropped the `/goal` and `/subgoal` optimistic mirrors** (round-6 decision 3, 2026-09-13). Both ARE real Hermes commands — `/goal` in the TUI/gateway from `hermes_cli/commands.py:103` @ v2026.5.7 and `/subgoal` from v2026.5.16 — which is why the pill survived five audit rounds; but neither has ever been in the ACP table at ANY tag (`_SLASH_COMMANDS` `acp_adapter/server.py:163-173` @ v2026.5.7, `_COMMANDS` `acp_adapter/commands.py:44-66` @ v2026.9.7 — nine names each, and NOT the same nine: `compact` at v2026.5.7 is `compress` by v2026.9.7. Neither roster ever carried `goal` or `subgoal`, which is the claim that matters here; "the same nine names" was a P55 overstatement corrected in P55b), so over ACP the text was always an ordinary prompt. Gone: `RichChatViewModel.activeGoal`/`activeSubgoals`/`recordActiveGoal`/`recordSubgoal*`/`parseGoalArgument`/`parseSubgoalArgument`/`truncatedToastGoal`, the `HermesActiveGoal` model, the `SessionInfoBar` pill (+ `truncatedGoal`/`goalTooltip`/`onClearGoal`), the iOS `goalChip` + `supportsActiveGoal`, and both `case` arms on Mac and iOS. In their place `RichChatViewModel.acpUnhandledSlashNotice(name:)` — capability-free, because no host version answers differently — fires from the `default:` arm alongside P44's `subFloorSlashNotice`. `TODO(WS-2-Q7)` and `TODO(WS-2-Q1)` are resolved by deletion. A real door needs a new floor at the tag that adds the name to the ACP table: `t-e9c464a9` #acp #capability-gating
 - [gotcha] **"It is a real Hermes command" is not the question — "is it on the ACP table" is.** The `/goal` mirror outlived four audits because every check confirmed the verb exists in Hermes (it does, from 0.13) and none asked which SURFACE Scarf speaks to. For a chat feature the roster that matters is `acp_adapter/`'s alone, and for a CLI feature it is argparse's; a command that is real in the TUI is still an ordinary prompt over ACP #acp #verification
+
+
+- [decision] `quick_commands` are NOT a chat slash-menu source (Alan, R09 / S03-F1, 2026-09-26): the ACP adapter never reads them (no lookup in `_COMMANDS`, unknown name → None → the literal `/name` goes to the model, acp_adapter/commands.py:53-80,103-104; server.py:827-837 @ v2026.9.24). Only cli.py:1219-1233, gateway/run_inbound.py:812,1033 and tui_gateway/methods_tools.py:551 run them. `HermesSlashCommand.Source.quickCommand`, `RichChatViewModel.quickCommands/loadQuickCommands` and the "user" menu pill were removed (Mac + iOS); the Quick Commands page stays and says where they run #quick-commands

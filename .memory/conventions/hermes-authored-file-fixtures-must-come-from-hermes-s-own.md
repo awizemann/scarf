@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotProfi
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-26
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -17,6 +17,9 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] PyYAML emission traits that have each caused a shipped Scarf bug: 80-column line folding (bot_peers note forging a sibling key), flow-style {} for empty mappings (profile.yaml ui_meta refusal blocking bot creation, 2026-09-02), liberal input shapes on re-read (cron jobs.json ID-keyed map, W7). A line-oriented writer or indentation-based parser must be tested against all three traits #pyyaml
 - [convention] A refuse-rather-than-guess writer guard must enumerate the shapes Hermes's OWN tooling produces as safe-to-handle before refusing — refusing Hermes's default output means the feature is broken on every fresh install while all hand-fixture tests stay green #guards
 - [fact] Cheap fixture recipe: python3 -c "import yaml; print(yaml.safe_dump(obj, sort_keys=False))" mirrors atomic_yaml_write; several remediation tests (F5 PyYAML round-trips) already shell out to real PyYAML — that pattern is the bar for any new parser/writer of Hermes files #testing
+
+- [gotcha] Same for CLI table output: hand-typed `hermes profile list` fixtures put 2+ spaces after display-name labels that overflow the 15-column Profile field, which Hermes never prints (it uses one space), and so hid a parser bug where a model like `gpt-4o (preview)` was read as the profile id (R02, 2026-09-26). Capture fixtures from the venv's `hermes` against a scratch HOME. #fixtures
+
 
 ## Relations
 - relates_to [[Hermes Bot Mode Profile Storage Format]]

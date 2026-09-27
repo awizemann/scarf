@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Fe
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-26
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -16,7 +16,7 @@ P33 (round-3 whole-surface audit). P22 detached the 15 platform setup forms and 
 
 This is the per-writer disease that `GuardedTextFile` exists to end, one layer up and on the READ side: the proof got applied to whichever FILE somebody happened to audit.
 
-`whatsapp_cloud` was the worst case because it is config-only: access token, app secret and verify token all live in config.yaml, so one failed read plus one Save wrote ten empty `config set` pairs and `enabled: false`.
+`whatsapp_cloud` was the worst case because the form was config-only then: access token, app secret and verify token all lived in config.yaml, so one failed read plus one Save wrote ten empty `config set` pairs and `enabled: false`. (R07 made it read `.env` + config.yaml and write new credentials to `.env`; it now needs BOTH halves proven, which `loadSnapshot(includeRawConfigText:)` does.)
 
 ## Observations
 - [invariant] A surface that reads N files and publishes a rewrite must prove all N; proving one is the per-writer disease moved to the read side #guarded-write

@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatVie
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-02
-updated: 2026-09-26
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -14,7 +14,9 @@ reviewed_by: audit:claude-code (background)
 ## Observations
 - [architecture] MessageGroup.transcriptItems(coalesceText:) partitions assistant messages into text bubbles and ChatActivitySegment runs; presentation-only, storage untouched #chat-transcript
 - [architecture] RichChatViewModel.liveActivityStatus drives the in-turn spinner text; setter is equality-guarded so chunk-rate events never invalidate the transcript #perf
-- [decision] tool_call_update rawInput backfills "{}" placeholder arguments in handleToolCallComplete; argumentsSummary never renders the raw "{}" token #acp
+- [fact] Hermes sends `rawInput` ONLY for unknown/plugin tools and never on `tool_call_update` (acp_adapter/tools.py:797-835 @ v2026.9.24; built-ins have had raw_input=None since at least v2026.7.7.2). A live built-in call is stored with arguments "{}"; its label is `HermesToolCall.livePreview` (non-Codable) = first `locations[].path`, else the title preview (`build_tool_title` "<name>: <preview>"). `argumentsSummary` falls back to it; DB-hydrated calls carry real arguments and livePreview nil. The update-side rawInput backfill in handleToolCallComplete stays but no tag feeds it (R09 / S02-F2) #acp
+- [decision] ActivityBubble "×N" collapse key = functionName + arguments + livePreview — without livePreview, reads of a.swift/b.swift/c.swift (all "{}") collapsed into one card (R09 / S02-F2) #chat-transcript
+- [fact] Streamed replies are segmented by Hermes `messageId` (agent_message_chunk / agent_thought_chunk, shared allocator, events.py:185-236 @ v2026.9.24): RichChatViewModel.startNewReplyIfIdChanged finalizes the streaming bubble when a chunk's id differs from `streamingReplyId`. Slash/absorbed status replies ("⏩ Steer queued…", "Queued for the next turn…") carry NO id, so they become their own bubble. Normal tool rounds are unaffected (the tool completion already finalized); hosts without ids compare nil==nil (C1). Plugin `response_transformed` resends (the whole rewritten text as one chunk under `message_ids.last()`, server.py:971-981) REPLACE since R16b when recognisable: the id belongs to a reply finalized this turn (`finalizedReplyMessageIds`), or the chunk restates the whole still-streaming reply (≥ 24 chars). A rewrite of an open reply that doesn't restate it still appends until reload #acp
 - [convention] any new input to MessageGroupView's rendering must be added to its Equatable == or settled groups short-circuit past the change #perf
 
 ## Relations
@@ -32,5 +34,5 @@ reviewed_by: audit:claude-code (background)
 - [fact] loadEarlier loops up to maxEarlierPageFetches pages until pageHasRenderableContent (user/visible-text/tools/reasoning/"(empty)") or table exhaustion — a junk page can never strand the spinner or produce a no-op click #paging
 
 
-- [gotcha] Hermes >= v0.21.4 (v2026.9.21) sends a bare tool_call_update with NO prior tool_call start to close the synthetic tool call inside session/request_permission (ids perm-check-N / edit-approval-N, acp_adapter/permissions.py:113). RichChatViewModel.handleToolCallComplete only honours updates for ids in openToolCallIds (inserted at start, removed on first update) — never key this on streamingToolCalls, which every finalize empties while parallel calls are still open. Ungated: <= v0.21.3 every update had a start #acp
+- [gotcha] Hermes >= v0.21.4 (v2026.9.21) sends a bare tool_call_update with NO prior tool_call start to close the synthetic tool call inside session/request_permission (ids perm-check-N / edit-approval-N, acp_adapter/permissions.py:113). RichChatViewModel.handleToolCallComplete only honours updates for ids in openToolCallIds (inserted at start, removed on first update) — never key this on streamingToolCalls, which every finalize empties while parallel calls are still open. Ungated: <= v0.21.3 every update had a start. R18b (t-486aed3f): the dropped close is not ignored for the permission queue — `PendingPermission.toolCallId` keeps the request's id and `closePermissionHermesSettled` pops a request STILL queued when its close arrives (Hermes timed out and denied; Scarf pops answered requests before sending the reply, Mac and iOS), with a transientHint when status != completed. User answers go through `resolvePermission(requestId:answeredWith:)`, which remembers allow/deny per toolCallId, so a `failed` close for an ALLOW (the answer reached Hermes after it had stopped waiting) also raises a hint. Only reached for ids with no start, so a real tool completion never pops a request #acp
 - [fact] RichChatViewModel.workingSince (set/cleared by isAgentWorking's didSet) is the whole-turn clock for the "Working · 0:12" indicator (#145); currentTurnStart is NOT — every per-tool finalize clears it. The 1 Hz tick lives in WorkingElapsedIndicator's own TimelineView (Mac) / AgentThinkingRow (iOS) so the transcript never re-renders on the clock #perf

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: e1e77724e4056341f29165bef3a5874528ee4174
 created: 2026-09-08
-updated: 2026-09-26
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -1340,7 +1340,7 @@ Commits `eac1efa3`, `5dbc2f0e`, `2b6e2960` on `fix/whole-surface-audit-r2`.
 ## Whole-surface remediation — P27 (`scripts/check-hermes-tables.py` hardening)
 
 - [decision] **A table-diff lane has exactly two honest outcomes for a missing input: SKIP or ERROR — never "empty, therefore nothing to compare."** `parse_models_dev_map` returned `{}` both when `agent/models_dev.py` was absent (benign: pre-v0.21 tag) and when `PROVIDER_TO_MODELS_DEV` was present but no longer an `ast.Dict` (a shape change — the exact v0.21.1 `ALIASES` dict-comprehension trap, one table over). Those are now distinct: absent FILE → `None` → SKIP; present-but-unparseable, renamed, or zero-literal-entries → `sys.exit`. The discriminator is the same one Scarf uses everywhere for absent-vs-unreadable. #ops
-- [decision] **A skipped lane is not a pass.** Lanes 3/4 need `~/.hermes/models_dev_cache.json`; they used to WARN and the script still printed `OK` and exited 0, so on any fresh machine two of five lanes were silently off behind a green verdict. Skips now print `SKIPPED lane N: <reason>` and exit **2**; the verdict line carries `lanes=N/5`, so `lanes=5/5` is the only result that means the tables were actually checked. `--allow-skip` accepts a partial run — it is an escape hatch for a deliberately-partial host, not a way to clear a release gate. #ops
+- [decision] **A skipped lane is not a pass.** Lanes 3/4 need `~/.hermes/models_dev_cache.json`; they used to WARN and the script still printed `OK` and exited 0, so on any fresh machine two of five lanes were silently off behind a green verdict. Skips now print `SKIPPED lane N: <reason>` and exit **2**; the verdict line carries `lanes=N/5`, so `lanes=5/5` is the only result that means the tables were actually checked (six lanes since R08 of the v0.21.5 audit: the gate is now `lanes=6/6`). `--allow-skip` accepts a partial run — it is an escape hatch for a deliberately-partial host, not a way to clear a release gate. #ops
 - [decision] **The script reads Hermes at a TAG by default (`git -C <checkout> show <tag>:<path>`), not the working tree.** A doc comment saying "check the checkout out at the target tag first" is not a guard: the round-2 reviewer's tree was `v2026.9.7-385-g9e6c4100cb` and the script printed OK regardless. `--worktree` opts back in for local work and prints `git describe --dirty` so the run is at least self-describing. Generalizes: any script that judges Scarf against Hermes should take the revision as an argument and read through `git show`, never through the checkout's mutable state. #ops
 - [decision] `HERMES_TARGET_TAG` in `scripts/check-hermes-tables.py` is the ONE machine-readable place this repo records the Hermes tag Scarf targets, and the `--tag` default. Nothing else was usable: `HermesCapabilities.swift` records per-flag floors but no single current target, README.md's "Current target" line was stale by two releases (said v0.20.4 while the target was v0.21.1), and the memory/wiki record is a managed tier a script must not grep. Bump it with the capability floors. #ops
 - [fact] Listing a directory at a tag is `git ls-tree --name-only <tag>:<dir>` (entries come back bare, directories with a trailing `/` to strip) — the lane-4 plugin walk needed it, and there is no `git show` equivalent. #ops
@@ -1665,7 +1665,7 @@ Commits `0e64b7fe` (proven config read), `30616b14` (`saveDirectYAML` on the cha
 
 **What was wrong.** P22 detached the 15 platform setup forms and proved the `.env` half of their load (`HermesEnvService.loadProven`). The config.yaml half stayed tolerant: `HermesFileService.loadConfig()` returns `.empty` for a file that is there and unreadable exactly as it does for one that is absent, and `EmailSetupViewModel` read `readText(path) ?? ""` for the same reason. So the hole P22 existed to close was still wide open through the other door — a blipped read renders a blank form over live values and `PlatformSetupHelpers.saveForm` publishes those blanks.
 
-`whatsapp_cloud` is the worst case because it is CONFIG-ONLY: access token, app secret and verify token all live in config.yaml, so one failed read plus one Save issued ten `hermes config set` pairs including `extra.access_token ""` and `enabled false`, with no message. `SignalSetupViewModel` and `EmailSetupViewModel` are the same shape with the credentials split across both files.
+`whatsapp_cloud` is the worst case because it is CONFIG-ONLY (true of Scarf's form at the time, not of Hermes — the gateway also reads `WHATSAPP_CLOUD_*` from `.env`; the form reads and writes `.env` since R07/S07-F3): access token, app secret and verify token all live in config.yaml, so one failed read plus one Save issued ten `hermes config set` pairs including `extra.access_token ""` and `enabled false`, with no message. `SignalSetupViewModel` and `EmailSetupViewModel` are the same shape with the credentials split across both files.
 
 Separately, `SettingsViewModel.saveDirectYAML` never joined `writeChain` although `runConfigMigrate` does — and the three direct-YAML writers (`agent.reasoning_overrides`, `model_catalog.excluded_providers`, `profile_routes`) are the most damaging thing that can interleave, because each is a read-modify-write of the WHOLE file.
 
@@ -2137,7 +2137,14 @@ All thirteen fixed in one commit.
   which runs the gateway in the FOREGROUND — the run ends at Scarf's own CLI timeout.
   `_restart_all` (`:6003-6016`) has the same shape. Neither "restarted" nor "failed" is true, so
   `gatewayForegroundStarting` maps it to `.unconfirmed` carrying its own note. Per the product call,
-  nothing claims "restarted" without a confirmation line
+  nothing claims "restarted" without a confirmation line. **Superseded in part by R18a (T5-F1):** Scarf's
+  timeout KILLS that foreground gateway, so Restart took a hand-run gateway down for good. Scarf now
+  never sends `gateway restart` (nor Health's / the menu bar's stop+start) on the no-service branch of
+  `gateway status`; see `HermesGatewayRestartGuard` (s6 containers and v0.21.4+ `--external-supervisor`
+  gateways still restart). R19: a v0.21.5 parked named profile (status prints only `Profile '<name>': parked (…)`)
+  is refused for `gateway restart` too (it falls through `profile_lifecycle` to the foreground run); a supervised
+  hand-back that hits Scarf's timeout (last line `Command timed out after`) is `.unconfirmed` "still restarting";
+  the menu bar relabels Restart "(running manually)"/"(status unknown)" instead of silently doing nothing
 - [fact] **`gateway restart` on Windows has no restart line at all.** `gateway_windows.restart()`
   (`hermes_cli/gateway_windows.py:1380-1399`) is `stop()`, an absence wait, then `start()` (`:1225`),
   so the run ends on `✓ Gateway started via {via} (PID: …)` (`:971`) or `✓ Gateway already running
@@ -5175,6 +5182,26 @@ the three doc-only decisions) and `a275f59a` (round-6 decision 3 — the `/goal`
 - **`off` in `disableAliases`.** `parse_reasoning_effort`'s set is `{"none","false","disabled"}`
   at **v2026.7.7** (`hermes_constants.py:816`) and **v2026.9.7** (`:885`) — `off` in neither,
   nor in `VALID_REASONING_EFFORTS`.
+- **R03 / S05-F2 correction — `config set … none` is null from v0.21.1.** The round-6 analysis
+  above covered YAML spellings only, not the CLI's own coercion. hermes-agent 5d4b97939e (first
+  released v2026.9.7) added `'none': None` to `_SCALAR_WORDS` (`hermes_cli/config.py:3303` @
+  v2026.9.7, `:3245` @ v2026.9.24), and `_coerce_config_set_value` applies it to any key whose
+  `DEFAULT_CONFIG` default is not a string — `agent.reasoning_effort` has no default at all. So
+  `hermes config set agent.reasoning_effort none` writes an EMPTY scalar, which
+  `parse_reasoning_effort` reads as "use the default": the picker's "none" did not disable
+  reasoning. Scarf now sends `false` on v0.21.1+ (`HermesReasoningEffort.configSetValue`, flag
+  `configSetCoercesNoneToNull`) — stored as YAML `False`, which disables at every tag with the
+  alias set (verified at v2026.9.24 against a scratch HERMES_HOME) — and keeps sending `none`
+  below it (pre-v0.18.1 `parse_reasoning_effort(False)` short-circuits to the default). The
+  Agent picker shows any stored disabling spelling as "none" (`agentPickerSelection`). The
+  `auxiliary.<task>.reasoning_effort` keys default to `""`, so `none` stays a string there.
+  Checked (R03): every aux task that gets an effort picker on a v0.21.1+ host (vision,
+  compression, skills_hub, approval, mcp, curator, title_generation) keeps `none` as a string
+  (`_aux()` defaults `""` from v2026.9.7). Tasks with NO default (web_extract, session_search,
+  flush_memories, summarization, memory_query_rewrite) WOULD coerce it to null, but Scarf shows
+  their rows only below the coercion floor, and "Other tasks in config.yaml" has no effort
+  picker. A future effort picker on a non-defaulted aux key must go through
+  `HermesReasoningEffort.configSetValue`.
 - **`/goal` and `/subgoal`.** Real TUI/gateway commands (`hermes_cli/commands.py:103` @
   v2026.5.7 — **P55b correction**: `:113` is that `CommandDef`'s line at v2026.9.7, not at
   the floor tag; `/subgoal` from v2026.5.16) and on the ACP table at **no tag**:

@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift]
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-06-28
-updated: 2026-09-10
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -29,9 +29,13 @@ Opening a project chat spawns `hermes acp` with cwd = the project dir (shipped i
 
 ## Finalized release-note line — SHIPPED in v2.15.0 (t-cea43144)
 
-**Status (shipped v2.15.0, 2026-06-28):** FINAL and **chat-only**, reconciled with t-0b850b5b (shipped option (b) — mini-app agents deliberately do NOT load project context). The chat context-loading commits `b421280` ("load project AGENTS.md in ACP chats — spawn hermes acp with cwd=project") and `5538e30` ("project cwd for resume/reconnect/auto-start chats") shipped in **v2.15.0** ("Projects grow up"), the first cut after v2.13.0, and this awareness line shipped with them — folded into the security/awareness framing of the release notes (v2.15.0 verbatim: "treat a project's context files like its code — only open chats in projects you trust (mini-apps deliberately do **not** load them)") rather than a plain feature bullet that would drop the trust caution. Board task **t-cea43144** is closed. Original verbatim line below.
+**Status (shipped v2.15.0, 2026-06-28):** FINAL and originally scoped **chat-only**, reconciled with t-0b850b5b (shipped option (b) — mini-app agents deliberately do NOT load project context). **This premise is now corrected below (R12/S12-F6): mini-app agents DO load project context.** The chat context-loading commits `b421280` ("load project AGENTS.md in ACP chats — spawn hermes acp with cwd=project") and `5538e30` ("project cwd for resume/reconnect/auto-start chats") shipped in **v2.15.0** ("Projects grow up"), the first cut after v2.13.0, and this awareness line shipped with them — folded into the security/awareness framing of the release notes (v2.15.0 verbatim: "treat a project's context files like its code — only open chats in projects you trust (mini-apps deliberately do **not** load them)") rather than a plain feature bullet that would drop the trust caution. Board task **t-cea43144** is closed. Original verbatim line below.
 
-### Scope: chats only — does NOT need to expand to mini-apps (t-0b850b5b, 2026-06-28)
+### ⚠️ CORRECTION (R12 / S12-F6, 2026-09-26): mini-app agents DO load project context
+
+The premise of the section below is false at Hermes v2026.9.24 (0.21.5). Hermes pins the ACP **session** cwd for every turn (`acp_adapter/server.py:759-770` → `gateway/session_context.py:143` → `agent/runtime_cwd.py:84-110`) and builds the context-files prompt from it (`agent/system_prompt.py:708-719` → `agent/prompt_builder.py:1733-1752`). `MiniAppAgentSession` opens `session/new` with `cwd: projectRoot`, so the project's AGENTS.md / CLAUDE.md / .cursorrules / .hermes.md ARE injected into the mini-app agent; the `hermes acp` PROCESS cwd no longer decides it. **Alan's decision (R12): keep the mini-app session in the project folder** (it gets the same project context a chat does). What bounds an untrusted, web-driven mini-app is the sensitive `prompt` grant, every permission request auto-denied, Hermes's context-file injection scan, and the 8/60s rate limit. The code comment in `MiniAppAgentSession.swift`, the Mini-Apps and Chat wiki pages, the wiki release-notes index and `releases/v2.15.0/RELEASE_NOTES.md` were corrected. The "(mini-apps deliberately do not load them)" clause in the shipped v2.15.0 line was wrong.
+
+### Scope: chats only — does NOT need to expand to mini-apps (t-0b850b5b, 2026-06-28) — SUPERSEDED by the correction above
 
 The release-note line above covers **chats only**. It does **not** need to mention mini-app agent sessions, because mini-app agents deliberately do **not** load project context.
 
@@ -49,7 +53,8 @@ Revisit a first-open trust affordance (persisted per project id, mirroring the m
 - [decision] Ship a release-note awareness line for v-next; do NOT add a first-open "trust this project's context?" gate — keep the trust affordance ticketed as a future escalation #projects
 - [fact] Opening a project chat spawns hermes acp with cwd=project dir, so Hermes auto-loads that project's AGENTS.md/CLAUDE.md/.cursorrules from the PROCESS cwd into the system prompt — an untrusted repo's hostile context file becomes a prompt-injection vector #hermes-context-files
 - [constraint] Context files are DATA injected into the prompt, not capabilities — categorically different from agent-generated mini-apps, which DO get a per-(projectId,miniAppId) permission gate #projects
-- [fact] MiniAppAgentSession spawns hermes acp with NO projectCwd, so mini-app agents deliberately do NOT load project context; the awareness line is chats-only and need not expand to mini-apps #mini-apps
+- [decision] CORRECTED (R12/S12-F6): mini-app agents DO load project context files — Hermes builds them from the ACP SESSION cwd (projectRoot), not the process cwd (acp_adapter/server.py:759-770, agent/system_prompt.py:708-719 @ v2026.9.24); Alan kept the session in the project folder, so the trust statement covers mini-apps too #mini-apps
+- [fact] Also, a project chat loads context files from the SESSION cwd pinned per turn; the process cwd=project spawn is redundant at 0.21.5 #hermes-context-files
 - [done] The awareness line SHIPPED in v2.15.0 (2026-06-28), folded into the security/awareness framing of the release notes ("treat a project's context files like its code — only open chats in projects you trust; mini-apps deliberately do not load them"); board task t-cea43144 closed #release-notes
 
 ## Relations

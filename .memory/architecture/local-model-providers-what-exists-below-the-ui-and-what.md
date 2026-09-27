@@ -6,7 +6,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogS
 source_paths_inferred: false
 source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-07-13
-updated: 2026-07-13
+updated: 2026-09-27
 reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
@@ -20,7 +20,8 @@ Investigation 2026-07-13 (pre-design for the local/remote model toggle). Source-
 - [fact] The hidden working path: ModelPickerSheet's "Custom…" mode (ModelPickerSheet.swift:63,246,487) takes free-form provider+model IDs — typing provider `ollama` works end-to-end today; nothing surfaces or documents it. #ui
 - [fact] Fail-safes already in place for local: `validateModel` treats any model ID as provisionally valid for overlay-only providers with no models; ModelPreflight mismatch banner skips `custom`/`custom:*` (Hermes is_aggregator providers.py:492, never-second-guess rule #48305 — see [[Aggregator providers must skip the model/provider mismatch preflight]]). AuthType `.virtual` (moa precedent) renders "No credentials needed". The validation now also respects capabilities so that removed providers fail gracefully on newer Hermes versions. #failsafe
 - [constraint] Do NOT add `custom`/`local` to `overlayOnlyProviders` to surface them: scripts/check-hermes-tables.py lane 3 FAILS for any Scarf overlay key not in Hermes HERMES_OVERLAYS. Local surfacing must be a UI-level grouping, not new provider-table entries. #constraint
-- [fact] base_url: config parser knows `auxiliary.<task>.base_url` (HermesConfig+YAML.swift:249,265,344,766); LM Studio default `http://127.0.0.1:1234/v1` with `LM_BASE_URL` env override baked into the (dormant) overlay. A PRIMARY-model base_url editor needs Hermes-reader verification first — per the v0.18 gotcha, `hermes config set` accepts any key with zero validation (how web_tools.* stayed dead for five cycles). #gotcha
+- [fact] base_url: config parser knows `auxiliary.<task>.base_url` (HermesConfig+YAML.swift:249,265,344,766); LM Studio default `http://127.0.0.1:1234/v1` with `LM_BASE_URL` env override baked into the (dormant) overlay.
+- [gotcha] From v0.21.1 (v2026.9.7) `model.provider: llamacpp` IGNORES `model.base_url` at runtime (`runtime_provider_custom.py:537-540` @ v2026.9.24) — Scarf writes `model.provider: custom` for its llama.cpp row on v0.21.1+ instead. See [[Local provider config keys — Hermes reader-verified (v0.17.0)]] for the full mechanism. #llamacpp #v0.21.1 A PRIMARY-model base_url editor needs Hermes-reader verification first — per the v0.18 gotcha, `hermes config set` accepts any key with zero validation (how web_tools.* stayed dead for five cycles). #gotcha
 - [fact] "Local" in Scarf's multi-server world means local to the HERMES HOST, not the Mac — an Ollama on a remote server is reachable via the existing transport (e.g. `ollama list` / GET :11434/api/tags through runProcess) for live model enumeration. #design
 - [fact] HermesProxy is NOT a local-model path — it attaches upstream OAuth credentials (nous adapter); unrelated. Model entry points inventory (12 surfaces): Settings General ModelPickerRow, Auxiliary per-task, chat preflight sheet, mismatch banner, chat model badge/preset switcher (ACP session/set_model), Proxy picker, Credential Pools, platform setup, ModelPresetsView, project manifest binding, iOS read-only, SessionInfoBar chip. #inventory
 

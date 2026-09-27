@@ -43,4 +43,4 @@ ScarfCore 775/775; new `ProjectContextBlockManagedTests` (cron filter/format, co
 
 ## Relations
 - (no relation: the planned "ScarfGo iOS does not load project context (process cwd gap)" note was never written; the gap it named is closed by this note's iOS renderer)
-- relates_to [[scarf/features/project-scoped-chat-and-agents.md-context]]
+- relates_to [[scarf/architecture/project-scoped-chat-and-agents-md-context]]
