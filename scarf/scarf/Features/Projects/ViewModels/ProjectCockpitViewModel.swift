@@ -256,7 +256,11 @@ final class ProjectCockpitViewModel {
         let context = self.context
         let project = self.project
 
-        let result = await Task.detached(priority: .userInitiated) { () -> Loaded in
+        // A thread of its own, not `Task.detached`: every read below is a
+        // blocking transport call (an SSH round trip on a remote), and a
+        // detached task would park a cooperative-pool thread for all of them
+        // (charter C10, P52).
+        let result = await OffPool.run { () -> Loaded in
             let store = ProjectStore(context: context)
             // Load-or-derive. A freshly-derived record is persisted so
             // opening the cockpit lazily migrates this project to the
@@ -342,7 +346,7 @@ final class ProjectCockpitViewModel {
                 needsUpgrade: needsUpgrade,
                 health: health
             )
-        }.value
+        }
 
         scarfProject = result.project
         contextBlock = result.block

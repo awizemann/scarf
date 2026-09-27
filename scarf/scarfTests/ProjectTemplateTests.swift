@@ -1295,7 +1295,14 @@ struct ProjectTemplateConfigInstallTests {
         // wasn't part of v1), no config, no cron, one skill.
         #expect(inspection.manifest.id == "awizemann/template-author")
         #expect(inspection.manifest.name == "Scarf Template Author")
-        #expect(inspection.manifest.version == "1.0.0")
+        // The bundle is rebuilt from `staging/` whenever the skill it ships
+        // changes, with a version bump (1.0.1 after R17). Pin the bundle to
+        // its own staging manifest rather than to a literal, so the check
+        // is "the bundle was rebuilt", not "nobody bumped it".
+        let staged = URL(fileURLWithPath: bundle).deletingLastPathComponent()
+            .appendingPathComponent("staging/template.json")
+        let stagedManifest = try JSONSerialization.jsonObject(with: Data(contentsOf: staged)) as? [String: Any]
+        #expect(inspection.manifest.version == stagedManifest?["version"] as? String)
         #expect(inspection.manifest.schemaVersion == 2)
         #expect(inspection.manifest.contents.dashboard)
         #expect(inspection.manifest.contents.agentsMd)

@@ -72,11 +72,16 @@ public extension ACPClient {
         }
         let client = try await openSSHClient(config: sshConfig, key: key)
 
-        let command = buildACPCommand(
-            hermesBinary: context.paths.hermesBinary,
+        // Through `/bin/sh -c`: the PATH/HERMES_HOME assignment prefix is
+        // sh syntax, and the exec string is read by the user's LOGIN shell,
+        // which may be csh/tcsh (see `CitadelServerTransport.viaPOSIXShell`).
+        // The binary is its shell word, so a probed path with a space stays
+        // one word. `exec` inside the sh keeps stdio binary-clean.
+        let command = CitadelServerTransport.viaPOSIXShell(buildACPCommand(
+            hermesBinary: context.paths.hermesBinaryShellWord,
             home: context.paths.home,
             projectCwd: projectCwd
-        )
+        ))
 
         return try await SSHExecACPChannel(
             client: client,

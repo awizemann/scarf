@@ -249,6 +249,15 @@ public final class HermesVersionCache: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Answer `context` with `caps` until invalidated, in memory only —
+    /// nothing is persisted. Test hook for code that reads `.shared`
+    /// synchronously (`capabilitiesSync`) against a fake host.
+    public func primeForTesting(_ caps: HermesCapabilities, for context: ServerContext) {
+        lock.lock()
+        fresh[Self.key(for: context)] = (caps, Date())
+        lock.unlock()
+    }
+
     /// Forget everything, in memory only. Test hook.
     public func invalidateAll() {
         lock.lock()

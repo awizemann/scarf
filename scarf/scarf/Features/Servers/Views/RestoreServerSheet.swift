@@ -132,7 +132,7 @@ struct RestoreServerSheet: View {
                 Toggle(isOn: $viewModel.pauseCronJobs) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pause cron jobs after restore").font(.callout)
-                        Text("Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.")
+                        Text("Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

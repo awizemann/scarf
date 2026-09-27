@@ -86,10 +86,11 @@ struct CitadelExecChannelP48bTests {
     @Test("both execs go through the single drain")
     func bothExecsShareTheDrain() throws {
         let code = Self.codeOnly(try Self.transportSource())
-        #expect(code.contains("runExec(cmd, stdin: stdin, timeout: timeout, midStream: .typedError)"))
+        // R17: both commands are wrapped in `/bin/sh -c` on the way in.
+        #expect(code.contains("runExec(Self.viaPOSIXShell(cmd), stdin: stdin, timeout: timeout, midStream: .typedError)"))
         // `asyncRunProcessImpl`'s exec now forwards its own `stdin` too
         // (t-c7a7b1d4) — `runProcess`/`asyncRunProcess` no longer reject a
         // non-nil `stdin`, they plumb it through this same call.
-        #expect(code.contains("runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)"))
+        #expect(code.contains("runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)"))
     }
 }

@@ -290,7 +290,8 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func runScript(_ cmd: String, stdin: Data? = nil, timeout: TimeInterval) async throws -> ProcessResult {
         do {
-            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .typedError)
+            // Same login-shell rule as `asyncRunProcess` (`viaPOSIXShell`).
+            return try await runExec(Self.viaPOSIXShell(cmd), stdin: stdin, timeout: timeout, midStream: .typedError)
         } catch let start as ExecStartFailure {
             throw TransportError.other(
                 message: "Failed to start exec stream: \(start.underlying.localizedDescription)")
@@ -853,6 +854,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + hermesHome
             + Self.commandLine(executable: executable, args: args, fragment: config.hermesBinaryHintFragment)
+        let wrapped = Self.viaPOSIXShell(cmd)
         // Citadel's `executeCommand` discards captured output when the
         // remote exits non-zero (it throws `CommandFailed` and the
         // accumulated ByteBuffer is lost). That breaks legitimate cases
@@ -869,7 +871,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // moved both execs onto `withExec` so the ceiling also CLOSES the
         // channel instead of abandoning it; see `runExec`.
         do {
-            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)
+            return try await runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)
         } catch let start as ExecStartFailure {
             return ProcessResult(
                 exitCode: -1,
@@ -892,6 +894,24 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         ([executable] + args).map { token in
             token == fragment ? token : shellJoin([token])
         }.joined(separator: " ")
+    }
+
+    /// `cmd` as ONE `/bin/sh -c` word.
+    ///
+    /// An SSH exec hands its string to the remote user's LOGIN shell, which
+    /// is not always POSIX. The commands built here lean on sh syntax —
+    /// `VAR=value command` prefixes and `$PATH:` inside double quotes — and
+    /// csh/tcsh reject both ("Bad : modifier in $", "Command not found"), so
+    /// on a csh user's host every call failed. The Mac's SSHTransport has
+    /// always wrapped its command in `sh -c '…'` for the same reason, and
+    /// the environment the outer shell set up is inherited.
+    ///
+    /// Not a complete cure for csh/tcsh: they still apply history expansion
+    /// to `!` and reject a newline inside the single-quoted word, so an argv
+    /// carrying either (a prompt, a title) still fails on a csh login shell.
+    /// The Mac's SSHTransport has the same limit.
+    nonisolated static func viaPOSIXShell(_ cmd: String) -> String {
+        "/bin/sh -c " + shellJoin([cmd])
     }
 
     /// Minimal shell-argument joiner. Handles spaces + quotes; sufficient

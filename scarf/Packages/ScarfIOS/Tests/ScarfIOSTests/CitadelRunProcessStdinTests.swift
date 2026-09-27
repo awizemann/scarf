@@ -58,6 +58,6 @@ struct CitadelRunProcessStdinTests {
     func privateWorkerForwardsStdinToRunExec() throws {
         let code = Self.codeOnly(try Self.transportSource())
         #expect(code.contains(
-            "try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)"))
+            "try await runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)"))
     }
 }

@@ -42,7 +42,7 @@ struct CitadelTransportColumnsP54Tests {
     /// small; slicing from the `func` to the `runExec` call is exact.
     private static func asyncRunProcessBody(_ code: String) throws -> String {
         let start = try #require(code.range(of: "private func asyncRunProcessImpl("))
-        let end = try #require(code.range(of: "runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)",
+        let end = try #require(code.range(of: "runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)",
                                           range: start.upperBound..<code.endIndex))
         return String(code[start.lowerBound..<end.upperBound])
     }

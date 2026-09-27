@@ -200,6 +200,7 @@ final class BotConversationViewModel {
     private func resolveAndConnect(thenSend pendingText: String? = nil) {
         generation += 1
         let intent = generation
+        if pendingText != nil { unsentMessage = nil }
         phase = .resolving
         work?.cancel()
         let ctx = context
@@ -233,6 +234,8 @@ final class BotConversationViewModel {
                     if bound, let pendingText, self.generation == intent {
                         // Already counted as sent when it was intercepted.
                         self.chat.sendText(pendingText, images: [], recordAnalytics: false)
+                    } else if self.generation == intent {
+                        self.keepUnsent(pendingText)
                     }
                 } else {
                     // CLI/gateway-born session — the normal case for every
@@ -247,6 +250,8 @@ final class BotConversationViewModel {
                     await self.connectViaCLITransport(found, intent: intent)
                     if let pendingText, self.generation == intent, case .live = self.phase {
                         self.deliverViaCLI(pendingText)
+                    } else if self.generation == intent {
+                        self.keepUnsent(pendingText)
                     }
                 }
             } else {
@@ -255,8 +260,20 @@ final class BotConversationViewModel {
                 self.chat.sendRouter = nil
                 self.chat.autoStartInterceptor = nil
                 self.phase = .noConversationYet
+                self.keepUnsent(pendingText)
             }
         }
+    }
+
+    /// A message typed after the connection dropped, which the reopen did
+    /// not deliver (the Bot Chat is gone, or could not be verified). The
+    /// composer already cleared it and no bubble was added, so without this
+    /// it simply vanished. Shown with the failure until the next send.
+    private(set) var unsentMessage: String?
+
+    private func keepUnsent(_ text: String?) {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        unsentMessage = text
     }
 
     // MARK: - CLI transport (non-ACP-born Bot Chats)
@@ -453,6 +470,7 @@ final class BotConversationViewModel {
     func send(_ text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
+        unsentMessage = nil
         switch phase {
         case .live:
             chat.sendText(text)

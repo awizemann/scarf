@@ -79,6 +79,13 @@ public actor ACPClient {
     private let channelFactory: ChannelFactory
 
     private var nextRequestId = 1
+    /// The last queued channel write. Each request/notification write
+    /// waits for this one before it goes out, so lines reach Hermes in the
+    /// order they were issued. Writes used to run as independent detached
+    /// tasks, and two prompts sent back to back (the held sends released
+    /// after an autostart's `session/load`) could land in either order.
+    /// Carries the write's error, `nil` on success.
+    private var writeTail: Task<Error?, Never>?
     private var pendingRequests: [Int: CheckedContinuation<AnyCodable?, Error>] = [:]
     private var readTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
@@ -383,6 +390,8 @@ public actor ACPClient {
         stderrTask = nil
         keepaliveTask?.cancel()
         keepaliveTask = nil
+        // A restart writes to a new channel; nothing there waits on the old one.
+        writeTail = nil
         eventContinuation?.finish()
         eventContinuation = nil
         _eventStream = nil
@@ -454,6 +463,21 @@ public actor ACPClient {
     }
 
     public func loadSession(cwd: String, sessionId: String) async throws -> String {
+        try await loadSessionWithProvenance(cwd: cwd, sessionId: sessionId).sessionId
+    }
+
+    /// ``loadSession(cwd:sessionId:)``, also returning the response's
+    /// `_meta.hermes.sessionProvenance` (`_session_response_fields`,
+    /// acp_adapter/server.py:597-602 @ v2026.9.24): `currentHermesSessionId`
+    /// is the internal row the agent was restored under. On v2026.9.24 a
+    /// fresh `hermes acp` restores under the requested id (`_restore`,
+    /// acp_adapter/session.py:444-446), so it names that same id and callers
+    /// see nothing new; they follow a differing head defensively. `nil` on
+    /// hosts without the extension (C1) and whenever Hermes could not build
+    /// it (it is best-effort).
+    public func loadSessionWithProvenance(
+        cwd: String, sessionId: String
+    ) async throws -> (sessionId: String, provenance: ACPSessionProvenance?) {
         statusMessage = "Loading session \(sessionId.prefix(12))..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
@@ -501,7 +525,7 @@ public actor ACPClient {
         #if canImport(os)
         logger.info("Loaded ACP session: \(loadedId)")
         #endif
-        return loadedId
+        return (loadedId, ACPSessionProvenance(meta: dict["_meta"]))
     }
 
     // NOTE: There is deliberately NO `session/resume` wrapper here
@@ -852,18 +876,34 @@ public actor ACPClient {
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             pendingRequests[requestId] = continuation
 
-            // Write in a detached task so the actor can process incoming
-            // response messages while we're awaiting the send. The
-            // continuation is already stored; the response arrives via
-            // the read loop.
+            // Write off the actor so it can process incoming response
+            // messages while we're awaiting the send, but in issue order
+            // (`enqueueWrite`). The continuation is already stored; the
+            // response arrives via the read loop.
+            let write = enqueueWrite(line, on: ch)
             Task.detached { [weak self] in
-                do {
-                    try await ch.send(line)
-                } catch {
+                if await write.value != nil {
                     await self?.handleWriteFailedForRequest(id: requestId)
                 }
             }
         }
+    }
+
+    /// Queue `line` behind every write issued before it and return the
+    /// write's task (its value is the send error, `nil` on success).
+    private func enqueueWrite(_ line: String, on ch: any ACPChannel) -> Task<Error?, Never> {
+        let previous = writeTail
+        let write = Task.detached { () -> Error? in
+            _ = await previous?.value
+            do {
+                try await ch.send(line)
+                return nil
+            } catch {
+                return error
+            }
+        }
+        writeTail = write
+        return write
     }
 
     /// Write a JSON-RPC notification (no `id`, no reply). Awaits the write
@@ -885,9 +925,9 @@ public actor ACPClient {
         #if canImport(os)
         logger.debug("Sending notification: \(method)")
         #endif
-        do {
-            try await ch.send(line)
-        } catch {
+        // Behind any request still being written: a `session/cancel` must
+        // not overtake the prompt it cancels.
+        if await enqueueWrite(line, on: ch).value != nil {
             let terminated = await disconnectedError()
             await handleWriteFailed()
             throw terminated
@@ -915,9 +955,7 @@ public actor ACPClient {
               let data = try? JSONSerialization.data(withJSONObject: dict),
               let line = String(data: data, encoding: .utf8)
         else { return }
-        do {
-            try await ch.send(line)
-        } catch {
+        if await enqueueWrite(line, on: ch).value != nil {
             await handleWriteFailed()
         }
     }

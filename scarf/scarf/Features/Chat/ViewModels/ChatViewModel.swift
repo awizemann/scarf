@@ -42,7 +42,9 @@ final class ChatViewModel {
         // context that's a SSH `test -e` round-trip on every streaming
         // chunk, which manifests as the chat screen flashing or going
         // blank during prompts.
-        Task.detached(priority: .userInitiated) { [context] in
+        // The probe is a transport call (an SSH `test -e` on a remote), so
+        // it gets a thread of its own, not a cooperative-pool one (C10).
+        Task { [weak self, context] in
             // #100 — use the PATH-aware probe, not a raw fileExists. For a
             // remote server with no binaryHint, `paths.hermesBinary` is the
             // bare name "hermes"; `fileExists` would `test -e hermes` in the
@@ -50,10 +52,8 @@ final class ChatViewModel {
             // resolves it and the ACP login-shell launch works fine. The
             // helper presumes bare names resolvable and defers the real
             // check to launch (whose failure path surfaces a clear hint).
-            let exists = context.hermesBinaryProbablyResolvable()
-            await MainActor.run { [weak self] in
-                self?.hermesBinaryExists = exists
-            }
+            let exists = await OffPool.run { context.hermesBinaryProbablyResolvable() }
+            self?.hermesBinaryExists = exists
         }
         // Cross-feature seam (t-5f1d9008): react when the Sessions tab
         // deletes the session this window's chat is attached to. Same
@@ -652,13 +652,11 @@ final class ChatViewModel {
     /// debounced `scheduleCredentialPreflightRefresh()`, never this directly.
     func refreshCredentialPreflight() {
         let svc = fileService
-        Task.detached { [weak self] in
+        Task { [weak self] in
             // `hasAnyAICredential` reads over the transport and, under a named
             // profile, may probe the host version — a thread of its own (C10).
             let missing = await OffPool.run { !svc.hasAnyAICredential() }
-            await MainActor.run { [weak self] in
-                self?.missingCredentials = missing
-            }
+            self?.missingCredentials = missing
         }
     }
 
@@ -701,11 +699,13 @@ final class ChatViewModel {
         let svc = fileService
         let ctx = context
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            let config = svc.loadConfig()
+        // Each read (config, then the provider roster) on a thread of its
+        // own; the decisions and the publish on the main actor (C10).
+        Task { [weak self] in
+            let config = await OffPool.run { svc.loadConfig() }
             var mismatch = ModelPreflight.detectMismatch(config, capabilities: capabilities)
             if mismatch != nil {
-                var known = await MainActor.run { [weak self] in self?.knownProviderIDs }
+                var known = self?.knownProviderIDs
                 if known == nil {
                     // Only trust the roster when the models.dev catalog
                     // actually loaded — an overlay-only result (fresh
@@ -714,11 +714,13 @@ final class ChatViewModel {
                     // Empty set = "catalog unavailable", cached so the
                     // (possibly SSH-backed) read isn't retried every
                     // refresh.
-                    let infos = ModelCatalogService(context: ctx).loadProviders(capabilities: capabilities)
-                    let loaded = infos.contains(where: { !$0.isOverlay })
-                        ? Set(infos.map(\.providerID))
-                        : Set()
-                    await MainActor.run { [weak self] in self?.knownProviderIDs = loaded }
+                    let loaded = await OffPool.run { () -> Set<String> in
+                        let infos = ModelCatalogService(context: ctx).loadProviders(capabilities: capabilities)
+                        return infos.contains(where: { !$0.isOverlay })
+                            ? Set(infos.map(\.providerID))
+                            : Set()
+                    }
+                    self?.knownProviderIDs = loaded
                     known = loaded
                 }
                 if let known, !known.isEmpty {
@@ -733,13 +735,11 @@ final class ChatViewModel {
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
-            await MainActor.run { [weak self] in
-                self?.modelProviderMismatch = resolvedMismatch
-                self?.llamaCppBaseURLIgnored = llamaIgnored
-                self?.approvalMode = mode
-                self?.voiceChatModeRaw = voiceChatMode
-                self?.voiceTTSProviderRaw = ttsProvider
-            }
+            self?.modelProviderMismatch = resolvedMismatch
+            self?.llamaCppBaseURLIgnored = llamaIgnored
+            self?.approvalMode = mode
+            self?.voiceChatModeRaw = voiceChatMode
+            self?.voiceTTSProviderRaw = ttsProvider
         }
     }
 
@@ -752,28 +752,30 @@ final class ChatViewModel {
     func alignProviderToModelPrefix(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // We pass the bare model so config.yaml ends up with a
-            // clean (provider-prefix-free) model name alongside the
-            // matching provider — matches what `confirmModelPreflight`
-            // writes for a fresh setup.
-            //
-            // Routed through the write plan, NOT `setModelAndProvider`
-            // (t-9657430b): aligning is a provider SWITCH, so the
-            // clear-on-switch rule applies — switching away from e.g.
-            // provider=ollama must scrub the stale local-managed keys
-            // (model.base_url/api_key/api_mode/context_length) that
-            // would otherwise redirect the new provider (GH #27132
-            // class). Config is re-read so already-unset keys are
-            // skipped: a never-local user keeps the classic two-op
-            // write (T4 parity).
-            let ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: mismatch.bareModel,
-                provider: mismatch.prefixProvider,
-                current: svc.loadConfig(),
-                capabilities: capabilities
-            )
-            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // We pass the bare model so config.yaml ends up with a
+                // clean (provider-prefix-free) model name alongside the
+                // matching provider — matches what `confirmModelPreflight`
+                // writes for a fresh setup.
+                //
+                // Routed through the write plan, NOT `setModelAndProvider`
+                // (t-9657430b): aligning is a provider SWITCH, so the
+                // clear-on-switch rule applies — switching away from e.g.
+                // provider=ollama must scrub the stale local-managed keys
+                // (model.base_url/api_key/api_mode/context_length) that
+                // would otherwise redirect the new provider (GH #27132
+                // class). Config is re-read so already-unset keys are
+                // skipped: a never-local user keeps the classic two-op
+                // write (T4 parity).
+                let ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: mismatch.bareModel,
+                    provider: mismatch.prefixProvider,
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
+                )
+                return !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // A one-click banner fix is a `repaired` preflight outcome —
@@ -832,22 +834,24 @@ final class ChatViewModel {
     func stripPrefixFromModelDefault(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // Same plan seam as `alignProviderToModelPrefix`, but this
-            // action KEEPS the active provider — the plan sees
-            // provider == currentProvider and emits no clears, so a
-            // hand-maintained model.base_url (or a live local setup)
-            // survives, exactly the old `setModelAndProvider`
-            // semantics. Pinned by
-            // `bannerStripPrefixKeepsProviderAndNeverClears` in
-            // LocalModelConfigPlanTests.
-            let ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: mismatch.bareModel,
-                provider: mismatch.activeProvider,
-                current: svc.loadConfig(),
-                capabilities: capabilities
-            )
-            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // Same plan seam as `alignProviderToModelPrefix`, but this
+                // action KEEPS the active provider — the plan sees
+                // provider == currentProvider and emits no clears, so a
+                // hand-maintained model.base_url (or a live local setup)
+                // survives, exactly the old `setModelAndProvider`
+                // semantics. Pinned by
+                // `bannerStripPrefixKeepsProviderAndNeverClears` in
+                // LocalModelConfigPlanTests.
+                let ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: mismatch.bareModel,
+                    provider: mismatch.activeProvider,
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
+                )
+                return !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 Analytics.record(.modelPreflightResult(outcome: .repairedOrFailed(ok)))
@@ -916,9 +920,10 @@ final class ChatViewModel {
     private func recoverRemoteTransportAfterFailure() async {
         let ctx = context
         guard ctx.isRemote else { return }
-        await Task.detached(priority: .utility) {
+        // Spawns `ssh -O check/exit` and waits on them: a thread of its own.
+        await OffPool.run {
             _ = (ctx.makeTransport() as? SSHTransport)?.recoverControlMasterIfDead()
-        }.value
+        }
     }
 
     // MARK: - Start watchdog + supersede (t-5451bd1b)
@@ -1217,6 +1222,11 @@ final class ChatViewModel {
                 if holdSendIfReplayPending(client: client, text: text, images: images) { return }
                 sendViaACP(client: client, text: text, images: images)
             } else {
+                // The reconnect ladder is bringing this session back: hold
+                // the send for the client it installs. Auto-starting here
+                // spawned a second `hermes acp` racing the ladder for the
+                // same session.
+                if holdSendDuringReconnect(text: text, images: images) { return }
                 // A conversation that must not be auto-started blind (Bot
                 // Chat) re-resolves itself first.
                 if let autoStartInterceptor, autoStartInterceptor(text, images) { return }
@@ -1247,10 +1257,41 @@ final class ChatViewModel {
     private var heldSends: [(text: String, images: [ChatImageAttachment])] = []
     @ObservationIgnored
     private weak var heldSendsClient: ACPClient?
+    /// True while the reconnect ladder runs with no client installed yet:
+    /// sends typed then are held for the client it installs.
+    @ObservationIgnored
+    private var holdingForReconnect = false
 
     private func beginHoldingSends(for client: ACPClient) {
-        heldSends = []
+        // The ladder's client inherits what was typed while it ran.
+        if !holdingForReconnect { heldSends = [] }
+        holdingForReconnect = false
         heldSendsClient = client
+    }
+
+    /// Hold `text` while the reconnect ladder runs. True when held.
+    private func holdSendDuringReconnect(text: String, images: [ChatImageAttachment]) -> Bool {
+        guard holdingForReconnect else { return false }
+        richChatViewModel.addUserMessage(text: text)
+        richChatViewModel.closeReplayGate()
+        heldSends.append((text, images))
+        return true
+    }
+
+    /// The ladder ended without a client (exhausted, or torn down): what
+    /// was held will never go out. `announce` is false for a deliberate
+    /// teardown, whose transcript is being replaced anyway.
+    private func dropReconnectHeldSends(announce: Bool) {
+        guard holdingForReconnect else { return }
+        holdingForReconnect = false
+        let dropped = heldSends.count
+        heldSends = []
+        if announce && dropped > 0 {
+            richChatViewModel.transientHint = String(
+                localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
+            )
+            scheduleHintClear()
+        }
     }
 
     /// Hold `text` if `client`'s replay has not drained yet. True when held.
@@ -1371,10 +1412,13 @@ final class ChatViewModel {
                 hasActiveProcess = true
 
                 let resolvedSessionId: String
+                var loadedHead: String?
                 if let existing = sessionToResume {
                     acpStatus = ACPPhase.loadingSession
                     do {
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: existing)
+                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: existing)
+                        resolvedSessionId = loaded.sessionId
+                        loadedHead = loaded.provenance?.currentHermesSessionId
                     } catch {
                         guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(existing) not found in ACP, creating new session")
@@ -1404,6 +1448,7 @@ final class ChatViewModel {
                 }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
+                noteLoadedHead(loadedHead)
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
                 disarmStartWatchdog()
@@ -2129,8 +2174,11 @@ final class ChatViewModel {
                 let resolvedSessionId: String
                 if let sessionId {
                     acpStatus = ACPPhase.loadingSession
+                    var loadedHead: String?
                     do {
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                        resolvedSessionId = loaded.sessionId
+                        loadedHead = loaded.provenance?.currentHermesSessionId
                     } catch {
                         guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(sessionId) not found in ACP, creating new session with history")
@@ -2156,10 +2204,13 @@ final class ChatViewModel {
                     // A rotated compression chain is listed under its tip;
                     // load the whole lineage as one transcript (R11
                     // carry-over), as Hermes does.
+                    // …extended by the head `session/load` reported when the
+                    // chain rotated past what the list knew.
                     await richChatViewModel.loadSessionHistory(
                         sessionId: sessionId,
                         acpSessionId: resolvedSessionId,
-                        lineage: transcriptLineage(for: sessionId)
+                        lineage: RichChatViewModel.lineage(
+                            transcriptLineage(for: sessionId), for: sessionId, addingLoadedHead: loadedHead)
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                 } else {
@@ -2444,6 +2495,12 @@ final class ChatViewModel {
     private func attemptReconnect(sessionId: String) {
         reconnectTask?.cancel()
         clearACPErrorState()
+        // Sends from here until the ladder installs a client are held for
+        // it. Sends already held for the client that just died (its load
+        // replay never drained) are carried: the ladder reloads the same
+        // session, so they go out on its client instead of vanishing.
+        heldSendsClient = nil
+        holdingForReconnect = true
 
         reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2509,7 +2566,8 @@ final class ChatViewModel {
                     // loses all conversation context. Keep in sync with the
                     // iOS ladder (Scarf iOS/Chat/ChatView.swift,
                     // attemptReconnect).
-                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: a sidebar
                     // click / delete / leaving the chat runs `stopACP`,
@@ -2519,6 +2577,10 @@ final class ChatViewModel {
                     // the dead session's client and transcript over the
                     // one the user moved to, so stop ours and bow out.
                     guard !Task.isCancelled, self.acpClient == nil else {
+                        // Another path installed a client without tearing
+                        // this ladder down: the held sends were typed for
+                        // this session's client, which will not come.
+                        if !Task.isCancelled { dropReconnectHeldSends(announce: true) }
                         await client.stop()
                         return
                     }
@@ -2530,6 +2592,9 @@ final class ChatViewModel {
                     beginHoldingSends(for: client)
                     self.hasActiveProcess = true
                     richChatViewModel.setSessionId(resolvedSessionId)
+                    // A load naming an uncovered head (defensive; see
+                    // `noteLoadedHead`): reconcile that head too.
+                    noteLoadedHead(loaded.provenance?.currentHermesSessionId)
 
                     // Reconcile in-memory messages with what Hermes persisted to DB
                     await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
@@ -2578,6 +2643,7 @@ final class ChatViewModel {
             // `acpClient` is nil (`canHostVoiceTurns`).
             guard !Task.isCancelled else { return }
             showConnectionFailure()
+            dropReconnectHeldSends(announce: true)
             isHandlingDisconnect = false
         }
     }
@@ -2598,6 +2664,7 @@ final class ChatViewModel {
         disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
+        dropReconnectHeldSends(announce: false)
         // Capture BEFORE cancelling the prompt task. Keyed off
         // ChatViewModel-owned turn state — NOT `richChatViewModel` —
         // because in the session-switch paths `reset()` already wiped
@@ -2724,39 +2791,40 @@ final class ChatViewModel {
         // Picks the `model.provider` a local row writes (llama.cpp →
         // `custom` on v0.21.1+, S06-F2).
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // Both branches route through the shared write plan (T4
-            // audit): local picks carry keys `setModelAndProvider` can't
-            // write (base_url et al.), and remote picks must scrub any
-            // stale local-managed keys when the provider changes — a
-            // provider=ollama config reached via preflight (e.g. its
-            // model.default got emptied) would otherwise keep its
-            // base_url into the new cloud provider. For a config with no
-            // local keys the remote ops are exactly the classic
-            // [set provider, set model] pair.
-            //
-            // Either overload may REFUSE with an empty plan (a switch
-            // to a local provider with no sourceable base_url —
-            // shouldn't be reachable through the picker, which
-            // requires the base URL, but belt-and-braces): that's a
-            // failed save, surfaced below.
-            let ok: Bool
-            if let local {
-                let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
-                ok = !ops.isEmpty && apply(ops)
-            } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
-                // Parity with setModelAndProvider's guard: the preflight
-                // must persist BOTH keys, so an empty provider is a
-                // failed save, not a model-only write.
-                ok = false
-            } else {
-                let ops = LocalModelConfigPlan.operations(
-                    selectingRemoteModel: model,
-                    provider: provider,
-                    current: svc.loadConfig(),
-                    capabilities: capabilities
-                )
-                ok = !ops.isEmpty && apply(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // Both branches route through the shared write plan (T4
+                // audit): local picks carry keys `setModelAndProvider` can't
+                // write (base_url et al.), and remote picks must scrub any
+                // stale local-managed keys when the provider changes — a
+                // provider=ollama config reached via preflight (e.g. its
+                // model.default got emptied) would otherwise keep its
+                // base_url into the new cloud provider. For a config with no
+                // local keys the remote ops are exactly the classic
+                // [set provider, set model] pair.
+                //
+                // Either overload may REFUSE with an empty plan (a switch
+                // to a local provider with no sourceable base_url —
+                // shouldn't be reachable through the picker, which
+                // requires the base URL, but belt-and-braces): that's a
+                // failed save, surfaced below.
+                if let local {
+                    let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
+                    return !ops.isEmpty && apply(ops)
+                } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // Parity with setModelAndProvider's guard: the preflight
+                    // must persist BOTH keys, so an empty provider is a
+                    // failed save, not a model-only write.
+                    return false
+                } else {
+                    let ops = LocalModelConfigPlan.operations(
+                        selectingRemoteModel: model,
+                        provider: provider,
+                        current: svc.loadConfig(),
+                        capabilities: capabilities
+                    )
+                    return !ops.isEmpty && apply(ops)
+                }
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -3199,6 +3267,24 @@ final class ChatViewModel {
         tearDownDeletedActiveSession()
     }
 
+    /// A `session/load` answered with an internal head this transcript does
+    /// not cover (`ACPSessionProvenance`): follow it like a live rotation —
+    /// the transcript spans it, id lookups on the new tip find the chain,
+    /// and the sidebar relists it under that tip. Nil or covered: no-op.
+    ///
+    /// Defensive on v2026.9.24: a fresh `hermes acp` restores the agent
+    /// under the id it was asked for (`_restore`,
+    /// acp_adapter/session.py:444-446), so the load reports that same id and
+    /// this never fires. It is here so a Hermes that restores a chain's live
+    /// head is followed rather than silently dropped.
+    func noteLoadedHead(_ head: String?) {
+        guard let head, richChatViewModel.sessionId != nil,
+              !richChatViewModel.transcriptCovers(head) else { return }
+        richChatViewModel.noteSessionRotation(to: head)
+        SessionLineageIndex.shared.record(server: context.id, lineage: richChatViewModel.transcriptSessionIds)
+        scheduleSessionsRefresh()
+    }
+
     /// The compression chain `sessionId` belongs to (root first), from the
     /// sidebar row that lists it or from any list Scarf has loaded this
     /// launch (`SessionLineageIndex`); empty for an ordinary session.
@@ -3629,10 +3715,18 @@ extension ChatViewModel: VoiceTurnHost {
               let sessionId = richChatViewModel.sessionId else {
             throw VoiceTurnSubmitError.noSession
         }
-        if isBusyWithNonVoiceTurn {
+        // The session's `session/load` replay has not drained yet (an
+        // autostart or reconnect just installed this client), or typed
+        // sends are held behind it. Sending now would open the replay gate
+        // (`markPromptSent`) mid-replay and jump the held sends, so answer
+        // busy like a typed turn in flight does.
+        let replayPending = heldSendsClient === client
+        if isBusyWithNonVoiceTurn || replayPending {
             busyVoiceRequestIDs.append(request.id)
             if busyVoiceRequestIDs.count > 8 { busyVoiceRequestIDs.removeFirst(busyVoiceRequestIDs.count - 8) }
-            richChatViewModel.transientHint = String(localized: "Live Voice didn't interrupt your typed request. Ask again when it's finished.")
+            richChatViewModel.transientHint = replayPending
+                ? String(localized: "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.")
+                : String(localized: "Live Voice didn't interrupt your typed request. Ask again when it's finished.")
             scheduleHintClear()
             return
         }
