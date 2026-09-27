@@ -243,7 +243,14 @@ public enum ACPEvent: @unchecked Sendable {
     case permissionRequest(sessionId: String, requestId: Int, request: ACPPermissionRequestEvent)
     case promptComplete(sessionId: String, response: ACPPromptResult)
     case availableCommands(sessionId: String, commands: [[String: Any]])
-    case sessionInfoUpdate(sessionId: String, title: String?, updatedAt: String?)
+    /// `provenance` is Hermes's `_meta.hermes.sessionProvenance` (absent
+    /// on hosts without it, and best-effort on hosts with it).
+    case sessionInfoUpdate(
+        sessionId: String,
+        title: String?,
+        updatedAt: String?,
+        provenance: ACPSessionProvenance? = nil
+    )
     case connectionLost(reason: String)
     case unknown(sessionId: String, type: String)
 
@@ -260,7 +267,7 @@ public enum ACPEvent: @unchecked Sendable {
              let .toolCallUpdate(sid, _),
              let .promptComplete(sid, _),
              let .availableCommands(sid, _),
-             let .sessionInfoUpdate(sid, _, _),
+             let .sessionInfoUpdate(sid, _, _, _),
              let .unknown(sid, _):
             return sid
         case let .permissionRequest(sid, _, _):
@@ -442,6 +449,54 @@ public struct ACPPromptResult: Sendable {
     }
 }
 
+// MARK: - Session provenance
+
+/// Hermes's ACP session provenance (`_meta.hermes.sessionProvenance`,
+/// `build_session_provenance`, acp_adapter/provenance.py @ v2026.9.24).
+///
+/// The ACP session id stays the client's stable handle, but a compression
+/// split in rotation mode moves Hermes's INTERNAL session to a new
+/// continuation row: from then on the turns are stored under
+/// `currentHermesSessionId`. Hermes announces it with a
+/// `session_info_update` after the turn that rotated (`_finish_turn`,
+/// acp_adapter/server.py:952-962), carrying `previousHermesSessionId` and
+/// `reason: "compression"`. Hosts without the extension send no `_meta`,
+/// and nothing changes for them.
+public struct ACPSessionProvenance: Sendable, Equatable {
+    public let currentHermesSessionId: String
+    public let rootHermesSessionId: String?
+    public let previousHermesSessionId: String?
+    public let reason: String?
+
+    public init(
+        currentHermesSessionId: String,
+        rootHermesSessionId: String? = nil,
+        previousHermesSessionId: String? = nil,
+        reason: String? = nil
+    ) {
+        self.currentHermesSessionId = currentHermesSessionId
+        self.rootHermesSessionId = rootHermesSessionId
+        self.previousHermesSessionId = previousHermesSessionId
+        self.reason = reason
+    }
+
+    /// Parse the update's `_meta`; nil when there is no provenance or it
+    /// lacks the current id.
+    nonisolated init?(meta: Any?) {
+        guard let meta = meta as? [String: Any],
+              let hermes = meta["hermes"] as? [String: Any],
+              let provenance = hermes["sessionProvenance"] as? [String: Any],
+              let current = provenance["currentHermesSessionId"] as? String,
+              !current.isEmpty else { return nil }
+        self.init(
+            currentHermesSessionId: current,
+            rootHermesSessionId: provenance["rootHermesSessionId"] as? String,
+            previousHermesSessionId: provenance["previousHermesSessionId"] as? String,
+            reason: provenance["reason"] as? String
+        )
+    }
+}
+
 // MARK: - Event Parsing
 
 public enum ACPEventParser {
@@ -511,7 +566,12 @@ public enum ACPEventParser {
         case "session_info_update":
             let title = update["title"] as? String
             let updatedAt = update["updatedAt"] as? String
-            return .sessionInfoUpdate(sessionId: sessionId, title: title, updatedAt: updatedAt)
+            return .sessionInfoUpdate(
+                sessionId: sessionId,
+                title: title,
+                updatedAt: updatedAt,
+                provenance: ACPSessionProvenance(meta: update["_meta"])
+            )
 
         default:
             return .unknown(sessionId: sessionId, type: updateType)

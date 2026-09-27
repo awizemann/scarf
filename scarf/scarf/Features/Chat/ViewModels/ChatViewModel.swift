@@ -2054,9 +2054,13 @@ final class ChatViewModel {
                     // on a remote and the pane looked engageable while
                     // the SQLite query was still pending. v2.8.
                     acpStatus = ACPPhase.loadingHistory
+                    // A rotated compression chain is listed under its tip;
+                    // load the whole lineage as one transcript (R11
+                    // carry-over), as Hermes does.
                     await richChatViewModel.loadSessionHistory(
                         sessionId: sessionId,
-                        acpSessionId: resolvedSessionId
+                        acpSessionId: resolvedSessionId,
+                        lineage: transcriptLineage(for: sessionId)
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                 } else {
@@ -2216,11 +2220,33 @@ final class ChatViewModel {
                 // apply the new title to the sidebar caches here — the same
                 // in-place mutation `renameSession` performs, minus the CLI
                 // call (Hermes already persisted the change).
-                if case let .sessionInfoUpdate(sessionId, title, _) = event {
+                //
+                // The same update carries Hermes's session provenance: a
+                // compression rotation moved the conversation's turns to a
+                // new continuation row (acp_adapter/server.py:952-962 @
+                // v2026.9.24). The transcript follows it (RichChatViewModel);
+                // here the sidebar reloads so the chain is listed under its
+                // new tip, which `isAttached(to:)` matches by lineage.
+                var rotated = false
+                if case let .sessionInfoUpdate(sessionId, title, _, provenance) = event {
                     self?.applySessionTitleUpdate(sessionId: sessionId, title: title)
+                    if let current = provenance?.currentHermesSessionId,
+                       let rich = self?.richChatViewModel,
+                       rich.sessionId == sessionId, !rich.transcriptCovers(current) {
+                        rotated = true
+                    }
                 }
                 ScarfMon.measure(.chatStream, "mac.handleACPEvent") {
                     self?.richChatViewModel.handleACPEvent(event)
+                }
+                if rotated, let self {
+                    // Attribution is keyed by the root; let id lookups on
+                    // the new tip find it before the next list load does.
+                    SessionLineageIndex.shared.record(
+                        server: self.context.id,
+                        lineage: self.richChatViewModel.transcriptSessionIds
+                    )
+                    self.scheduleSessionsRefresh()
                 }
                 self?.acpEventsHandled += 1
                 // Don't overwrite a phase-typed acpStatus with the
@@ -2891,10 +2917,14 @@ final class ChatViewModel {
     private func applySessionTitleUpdate(sessionId: String, title: String?) {
         guard let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return }
-        if let idx = recentSessions.firstIndex(where: { $0.id == sessionId }) {
+        // `covers`: the update is keyed by the ACP id, an older segment of
+        // a chain the sidebar lists under its tip after a rotation (R14-2).
+        if let idx = recentSessions.firstIndex(where: { $0.covers(sessionId) }) {
             recentSessions[idx] = recentSessions[idx].withTitle(trimmed)
+            sessionPreviews[recentSessions[idx].id] = trimmed
+        } else {
+            sessionPreviews[sessionId] = trimmed
         }
-        sessionPreviews[sessionId] = trimmed
     }
 
     /// Delete a session via `hermes sessions delete --yes` (server-side
@@ -3015,6 +3045,26 @@ final class ChatViewModel {
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)
         tearDownDeletedActiveSession()
+    }
+
+    /// The compression chain `sessionId` belongs to (root first), from the
+    /// sidebar row that lists it or from any list Scarf has loaded this
+    /// launch (`SessionLineageIndex`); empty for an ordinary session.
+    func transcriptLineage(for sessionId: String) -> [String] {
+        if let row = recentSessions.first(where: { $0.covers(sessionId) }), row.lineageIds.count > 1 {
+            return row.lineageIds
+        }
+        return SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionId)
+    }
+
+    /// Whether this window's chat is attached to `session`'s conversation.
+    /// Matches on the whole lineage (R14-2): a chain is listed under its
+    /// TIP while the live chat keeps the ACP id it started with, which is
+    /// an older segment once Hermes rotated mid-chat.
+    func isAttached(to session: HermesSession) -> Bool {
+        guard let attached = richChatViewModel.sessionId else { return false }
+        return session.covers(attached)
+            || richChatViewModel.transcriptSessionIds.contains(where: session.covers)
     }
 
     func previewFor(_ session: HermesSession) -> String {

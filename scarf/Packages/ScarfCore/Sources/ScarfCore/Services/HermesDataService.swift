@@ -782,6 +782,22 @@ public actor HermesDataService {
         limit: Int,
         before: Int? = nil
     ) async -> MessageFetchOutcome {
+        await fetchMessagesOutcome(sessionIds: [sessionId], limit: limit, before: before)
+    }
+
+    /// `fetchMessagesOutcome` across several sessions — a rotated
+    /// compression chain (`HermesSession.lineageIds`), whose turns are
+    /// spread over the root and every continuation. Hermes shows such a
+    /// conversation as one transcript spanning the whole lineage
+    /// (`get_resume_conversations`, hermes_state_messages.py:1273-1293 @
+    /// v2026.9.24). Message ids are global and monotonic, so ordering by id
+    /// interleaves the segments correctly. One id runs the single-session
+    /// SQL unchanged.
+    public func fetchMessagesOutcome(
+        sessionIds: [String],
+        limit: Int,
+        before: Int? = nil
+    ) async -> MessageFetchOutcome {
         await ScarfMon.measureAsync(.sessionLoad, "mac.fetchMessages") {
             // Use the lite column set — excludes reasoning_content which
             // can be 20+ KB per message on thinking-model sessions and
@@ -789,15 +805,17 @@ public actor HermesDataService {
             // sessions over 420ms-RTT remote links. The inspector pane
             // calls `fetchReasoningContent(for:)` to lazy-load when the
             // user opens a message's disclosure.
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return MessageFetchOutcome(messages: [], transportError: nil) }
             let sql: String
             let params: [SQLValue]
             let activeClause = transcriptVisibleClause
             if let before {
-                sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ? AND id < ?\(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(before)), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql) AND id < ?\(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(before)), .integer(Int64(limit))]
             } else {
-                sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ?\(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql)\(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(limit))]
             }
             do {
                 let rows = try await backend.query(sql, params: params)
@@ -819,30 +837,21 @@ public actor HermesDataService {
         }
     }
 
-    /// The newest `limit` transcript rows across several sessions, oldest
-    /// first — for a rotated compression chain listed as one row
-    /// (`HermesSession.lineageIds`), whose turns are spread over the root
-    /// and every continuation. Hermes shows such a conversation as one
-    /// transcript spanning the whole lineage (`get_resume_conversations`,
-    /// hermes_state_messages.py:1273-1293 @ v2026.9.24). Message ids are
-    /// global and monotonic, so ordering by id interleaves the segments
-    /// correctly. Same row filter as `fetchMessagesOutcome`. A single id
-    /// is exactly `fetchMessages(sessionId:limit:)`.
-    public func fetchMessages(sessionIds: [String], limit: Int) async -> [HermesMessage] {
-        let ids = sessionIds.filter { !$0.isEmpty }
-        guard ids.count > 1 else {
-            guard let only = ids.first else { return [] }
-            return await fetchMessages(sessionId: only, limit: limit)
-        }
+    /// `session_id = ?` for one id — the single-session SQL, byte for
+    /// byte — or `session_id IN (?, …)` for a compression lineage. Empty
+    /// ids are dropped; no ids gives no params (callers return empty).
+    static func sessionIdPredicate(_ sessionIds: [String]) -> (sql: String, params: [SQLValue]) {
+        var seen = Set<String>()
+        let ids = sessionIds.filter { !$0.isEmpty && seen.insert($0).inserted }
+        if ids.count == 1 { return ("session_id = ?", [.text(ids[0])]) }
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
-        let sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id IN (\(placeholders))\(transcriptVisibleClause) ORDER BY id DESC LIMIT ?"
-        do {
-            let rows = try await backend.query(sql, params: ids.map { .text($0) } + [.integer(Int64(limit))])
-            return rows.map { messageFromRow($0) }.reversed()
-        } catch {
-            Self.logger.warning("fetchMessages(sessionIds:) failed: \(error.localizedDescription, privacy: .public)")
-            return []
-        }
+        return ("session_id IN (\(placeholders))", ids.map { .text($0) })
+    }
+
+    /// The newest `limit` transcript rows across several sessions, oldest
+    /// first — see `fetchMessagesOutcome(sessionIds:limit:before:)`.
+    public func fetchMessages(sessionIds: [String], limit: Int, before: Int? = nil) async -> [HermesMessage] {
+        await fetchMessagesOutcome(sessionIds: sessionIds, limit: limit, before: before).messages
     }
 
     /// Phase 1 of the v2.8 two-phase chat loader. Fetches user +
@@ -864,16 +873,29 @@ public actor HermesDataService {
         limit: Int,
         before: Int? = nil
     ) async -> MessageFetchOutcome {
+        await fetchSkeletonMessages(sessionIds: [sessionId], limit: limit, before: before)
+    }
+
+    /// `fetchSkeletonMessages` across a compression lineage (see
+    /// `fetchMessagesOutcome(sessionIds:limit:before:)`). One id runs the
+    /// single-session SQL unchanged.
+    public func fetchSkeletonMessages(
+        sessionIds: [String],
+        limit: Int,
+        before: Int? = nil
+    ) async -> MessageFetchOutcome {
         await ScarfMon.measureAsync(.sessionLoad, "mac.fetchSkeletonMessages") {
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return MessageFetchOutcome(messages: [], transportError: nil) }
             let sql: String
             let params: [SQLValue]
             let activeClause = transcriptVisibleClause
             if let before {
-                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE session_id = ? AND role IN ('user','assistant') AND id < ? \(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(before)), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE \(owner.sql) AND role IN ('user','assistant') AND id < ? \(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(before)), .integer(Int64(limit))]
             } else {
-                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE session_id = ? AND role IN ('user','assistant') \(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE \(owner.sql) AND role IN ('user','assistant') \(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(limit))]
             }
             do {
                 let rows = try await backend.query(sql, params: params)
@@ -1066,11 +1088,23 @@ public actor HermesDataService {
         maxId: Int,
         limit: Int = 50
     ) async -> [HermesMessage] {
+        await fetchToolResultsInRange(sessionIds: [sessionId], minId: minId, maxId: maxId, limit: limit)
+    }
+
+    /// `fetchToolResultsInRange` across a compression lineage. One id runs
+    /// the single-session SQL unchanged.
+    public func fetchToolResultsInRange(
+        sessionIds: [String],
+        minId: Int,
+        maxId: Int,
+        limit: Int = 50
+    ) async -> [HermesMessage] {
         await ScarfMon.measureAsync(.sessionLoad, "mac.hydrateToolResults") {
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return [] }
             let activeClause = transcriptVisibleClause
-            let sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ? AND role = 'tool' AND id >= ? AND id <= ? \(activeClause) ORDER BY id DESC LIMIT ?"
-            let params: [SQLValue] = [
-                .text(sessionId),
+            let sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql) AND role = 'tool' AND id >= ? AND id <= ? \(activeClause) ORDER BY id DESC LIMIT ?"
+            let params: [SQLValue] = owner.params + [
                 .integer(Int64(minId)),
                 .integer(Int64(maxId)),
                 .integer(Int64(limit))
@@ -1668,9 +1702,16 @@ public actor HermesDataService {
     }
 
     public func fetchMessageFingerprint(sessionId: String) async -> MessageFingerprint {
-        let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE session_id = ?"
+        await fetchMessageFingerprint(sessionIds: [sessionId])
+    }
+
+    /// `fetchMessageFingerprint` across a compression lineage.
+    public func fetchMessageFingerprint(sessionIds: [String]) async -> MessageFingerprint {
+        let owner = Self.sessionIdPredicate(sessionIds)
+        guard !owner.params.isEmpty else { return .empty }
+        let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE \(owner.sql)"
         do {
-            let rows = try await backend.query(sql, params: [.text(sessionId)])
+            let rows = try await backend.query(sql, params: owner.params)
             guard let row = rows.first else { return .empty }
             return MessageFingerprint(
                 count: row.int(at: 0),

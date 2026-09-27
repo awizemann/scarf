@@ -39,6 +39,15 @@ public final class SessionLineageIndex: @unchecked Sendable {
         }
     }
 
+    /// The whole chain `sessionID` belongs to, root first, tip last — or
+    /// empty when Scarf has not listed a chain containing it. The chat pane
+    /// loads a resumed chain's transcript across all of it.
+    public func lineage(server: ServerID, sessionID: String) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return chains[Self.key(server, sessionID)] ?? []
+    }
+
     /// The other ids of the chain `sessionID` belongs to, nearest first
     /// (walking from `sessionID` back toward the root, then any later
     /// segments). Empty when Scarf has not listed a chain containing it.

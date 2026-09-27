@@ -44,8 +44,11 @@ struct ChatSessionListPane: View {
                             session: session,
                             preview: chatViewModel.previewFor(session),
                             projectName: chatViewModel.projectName(for: session),
-                            isActive: session.id == richChat.sessionId,
-                            isLive: session.id == richChat.sessionId && richChat.isAgentWorking,
+                            // By lineage (R14-2): after a mid-chat
+                            // compression rotation the row is listed under
+                            // the new tip while the chat keeps its ACP id.
+                            isActive: chatViewModel.isAttached(to: session),
+                            isLive: chatViewModel.isAttached(to: session) && richChat.isAgentWorking,
                             onSelect: { chatViewModel.resumeSession(session.id) }
                         )
                         .contextMenu {
