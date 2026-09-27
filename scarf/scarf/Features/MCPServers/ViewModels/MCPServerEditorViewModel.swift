@@ -434,6 +434,10 @@ final class MCPServerEditorViewModel {
         let includeIsExplicit = include.isEmpty
             ? (server.toolsIncludeIsExplicit && server.toolsInclude.isEmpty)
             : true
+        // An include list the user did not touch is kept exactly as written
+        // (`include: []`, a blank item): what those mean depends on the
+        // Hermes version (v0.20.6 changed `[]`), so Scarf does not respell it.
+        let preserveInclude = include == server.toolsInclude
         let parallelDraft = parallelToolCallsDraft
         let originalParallel = server.supportsParallelToolCalls
         // v0.15 — mTLS drafts. Resolve empty strings to nil so an untouched /
@@ -492,7 +496,8 @@ final class MCPServerEditorViewModel {
                     exclude: exclude,
                     resources: resources,
                     prompts: prompts,
-                    includeIsExplicit: includeIsExplicit
+                    includeIsExplicit: includeIsExplicit,
+                    preserveInclude: preserveInclude
                 ) { ok = false }
                 if case .set(let value) = timeoutChange,
                    !service.setMCPServerTimeout(name: name, key: .timeout, seconds: value) {

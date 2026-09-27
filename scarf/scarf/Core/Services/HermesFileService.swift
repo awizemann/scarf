@@ -717,7 +717,10 @@ struct HermesFileService: Sendable {
             case .notInCatalog:
                 break  // An older catalog: write the entry ourselves.
             case .unconfirmed:
-                if loadMCPServers().contains(where: { $0.name == name && $0.auth == "oauth" }) {
+                // Only a NEW entry proves anything: a pre-existing one (an
+                // overwrite) is what the run was replacing.
+                if !exists,
+                   loadMCPServers().contains(where: { $0.name == name && $0.auth == "oauth" }) {
                     return (0, result.output, true)
                 }
                 return (1, result.output, false)
@@ -1333,11 +1336,13 @@ struct HermesFileService: Sendable {
         exclude: [String],
         resources: Bool,
         prompts: Bool,
-        includeIsExplicit: Bool = false
+        includeIsExplicit: Bool = false,
+        preserveInclude: Bool = false
     ) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertToolsBlock(
-                include: include, includeIsExplicit: includeIsExplicit, exclude: exclude,
+                include: include, includeIsExplicit: includeIsExplicit,
+                preserveInclude: preserveInclude, exclude: exclude,
                 resources: resources, prompts: prompts, in: &entryLines
             )
         }
@@ -1737,12 +1742,14 @@ struct HermesFileService: Sendable {
                     continue
                 }
                 subSection = nil
-                if trimmed.hasSuffix(":") {
-                    subSection = Self.unquote(String(trimmed.dropLast()))
-                    continue
-                }
                 if let (key, value) = keyValue(trimmed) {
-                    fields[key] = value
+                    // An empty value (after any `# comment`) opens a nested
+                    // block: `tools:` and `tools:   # filters` alike.
+                    if value.isEmpty {
+                        subSection = key
+                    } else {
+                        fields[key] = value
+                    }
                 }
                 continue
             }
@@ -2606,18 +2613,29 @@ struct HermesFileService: Sendable {
     nonisolated private static func replaceOrInsertToolsBlock(
         include: [String],
         includeIsExplicit: Bool = false,
+        preserveInclude: Bool = false,
         exclude: [String],
         resources: Bool,
         prompts: Bool,
         in lines: inout [String]
     ) {
+        // The header: `tools:` at indent 4, however the key is spelled
+        // (quoted, trailing comment). Only an EMPTY value opens a block; a
+        // flow value is left alone by `unpatchableReason`'s callers' shape.
+        func isToolsHeader(_ line: String) -> Bool {
+            guard line.prefix(while: { $0 == " " }).count == 4 else { return false }
+            guard let span = HermesYAML.blockKeySpan(in: trimYAMLLine(line)) else { return false }
+            let key = unquote(String(span.key).trimmingCharacters(in: .whitespaces))
+            let value = stripInlineComment(String(span.afterColon).trimmingCharacters(in: .whitespaces))
+            return key == "tools" && value.isEmpty
+        }
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
             let trimmed = Self.trimYAMLLine(line)
-            if indent == 4 && trimmed == "tools:" {
+            if headerIndex == nil, isToolsHeader(line) {
                 headerIndex = index
                 continue
             }
@@ -2633,28 +2651,41 @@ struct HermesFileService: Sendable {
             }
         }
 
-        var newLines: [String] = ["    tools:"]
-        if !include.isEmpty {
-            newLines.append("      include:")
-            for tool in include { newLines.append("        - \(yamlScalar(tool))") }
-        } else if includeIsExplicit {
-            newLines.append("      include: []")
+        // What survives from the old block, and the indent its children
+        // use. New lines are written at that SAME indent: a block whose
+        // children sit at 8 with Scarf's lines at 6 is a YAML error for the
+        // whole file.
+        let end = removeEnd ?? lines.count
+        let old: (kept: [String], trailing: [String], childIndent: Int?) = headerIndex.map {
+            unmodelledToolsChildren(
+                Array(lines[($0 + 1)..<end]),
+                alsoKeep: preserveInclude ? ["include"] : []
+            )
+        } ?? ([], [], nil)
+        let pad = String(repeating: " ", count: old.childIndent ?? 6)
+
+        var newLines: [String] = [headerIndex.map { lines[$0] } ?? "    tools:"]
+        if !preserveInclude {
+            if !include.isEmpty {
+                newLines.append("\(pad)include:")
+                for tool in include { newLines.append("\(pad)  - \(yamlScalar(tool))") }
+            } else if includeIsExplicit {
+                newLines.append("\(pad)include: []")
+            }
         }
         if !exclude.isEmpty {
-            newLines.append("      exclude:")
-            for tool in exclude { newLines.append("        - \(yamlScalar(tool))") }
+            newLines.append("\(pad)exclude:")
+            for tool in exclude { newLines.append("\(pad)  - \(yamlScalar(tool))") }
         }
-        newLines.append("      resources: \(resources ? "true" : "false")")
-        newLines.append("      prompts: \(prompts ? "true" : "false")")
+        newLines.append("\(pad)resources: \(resources ? "true" : "false")")
+        newLines.append("\(pad)prompts: \(prompts ? "true" : "false")")
+        // Every child key Scarf does not model (a future Hermes key, a
+        // user's own note), and `include` when the caller left it alone,
+        // with their nested lines, after the ones it rewrites.
+        newLines.append(contentsOf: old.kept)
+        newLines.append(contentsOf: old.trailing)
 
         if let headerIndex {
-            let end = removeEnd ?? lines.count
-            // Keep every child key Scarf does not model (a future Hermes
-            // key, a user's own note), with its nested lines, after the
-            // four it rewrites.
-            newLines.append(contentsOf: unmodelledToolsChildren(
-                Array(lines[(headerIndex + 1)..<end])
-            ))
             lines.replaceSubrange(headerIndex..<end, with: newLines)
         } else {
             var insertAt = lines.count
@@ -2671,19 +2702,24 @@ struct HermesFileService: Sendable {
         }
     }
 
-    /// The lines of a `tools:` block's children other than `include`,
-    /// `exclude`, `resources` and `prompts`, each with everything nested
-    /// under it, in file order. The child indent is taken from the first
-    /// key, so an indentless list (`- x` at the key's own indent) stays
-    /// with the key above it. Comments and blank lines go with the key
-    /// below them.
-    nonisolated static func unmodelledToolsChildren(_ body: [String]) -> [String] {
-        let modelled: Set<String> = ["include", "exclude", "resources", "prompts"]
+    /// Splits a `tools:` block's body (the lines under its header) into:
+    /// - `kept`: the children other than `include`, `exclude`, `resources`
+    ///   and `prompts` (plus any in `alsoKeep`), each with everything nested
+    ///   under it and the comments directly above it, in file order;
+    /// - `trailing`: comment lines after the last child, which describe
+    ///   whatever follows the block (blank lines are dropped);
+    /// - `childIndent`: the indent of the first child key, `nil` when the
+    ///   block has none. An indentless list (`- x` at that indent) stays
+    ///   with the key above it.
+    nonisolated static func unmodelledToolsChildren(
+        _ body: [String],
+        alsoKeep: Set<String> = []
+    ) -> (kept: [String], trailing: [String], childIndent: Int?) {
+        let modelled: Set<String> = Set(["include", "exclude", "resources", "prompts"])
+            .subtracting(alsoKeep)
         var childIndent: Int?
         var keep = true
         var kept: [String] = []
-        // Comments and blank lines describe the key BELOW them, so they wait
-        // for it and share its fate. Ones at the very end are dropped.
         var pending: [String] = []
         for line in body {
             let trimmed = trimYAMLLine(line)
@@ -2703,7 +2739,8 @@ struct HermesFileService: Sendable {
             if keep { kept.append(contentsOf: pending); kept.append(line) }
             pending = []
         }
-        return kept
+        let trailing = pending.filter { !trimYAMLLine($0).isEmpty }
+        return (kept, trailing, childIndent)
     }
 
     /// Emit one MCP scalar VALUE — a thin forwarder over

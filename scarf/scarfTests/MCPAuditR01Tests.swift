@@ -301,6 +301,82 @@ enum HermesReference {
         #expect(tools?["include"] == nil)
     }
 
+    /// Children at indent 8 stay at indent 8: Scarf's own lines follow the
+    /// block's indent, so the result still parses (review R01: mixing 6
+    /// and 8 made the whole file unreadable to PyYAML).
+    @Test func toolsRewriteFollowsTheBlocksOwnIndent() throws { try toolsIndent8Body(checkHermes: false) }
+
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func toolsRewriteFollowsTheBlocksOwnIndentInHermes() throws { try toolsIndent8Body(checkHermes: true) }
+
+    private func toolsIndent8Body(checkHermes: Bool) throws {
+        let yaml = """
+        mcp_servers:
+          gh:
+            url: https://example.com/mcp
+            tools:   # filters
+                include:
+                  - a
+                future: 1
+            enabled: true
+        """
+        let (home, service) = try Self.home(with: yaml)
+        defer { home.cleanup() }
+        #expect(service.updateMCPToolFilters(
+            name: "gh", include: ["b"], exclude: [], resources: true, prompts: false))
+        let after = try Self.read(home)
+        #expect(after.contains("""
+            tools:   # filters
+                include:
+                  - b
+                resources: true
+                prompts: false
+                future: 1
+            enabled: true
+        """))
+        let server = try #require(service.loadMCPServers().first)
+        #expect(server.toolsInclude == ["b"])
+        #expect(server.promptsEnabled == false)
+
+        guard checkHermes else { return }
+        let code = """
+        import json
+        from hermes_cli.mcp_config import _get_mcp_servers
+        print(json.dumps(_get_mcp_servers()["gh"]["tools"]))
+        """
+        let tools = try HermesReference.json(code, home: home.path) as? [String: Any]
+        #expect(tools?["include"] as? [String] == ["b"])
+        #expect(tools?["future"] as? Int == 1)
+        #expect(tools?["prompts"] as? Bool == false)
+    }
+
+    /// An include list the user left alone is kept byte-for-byte, because
+    /// its meaning depends on the Hermes version: a blank item registers
+    /// nothing everywhere, `[]` only from v0.20.6.
+    @Test @MainActor func untouchedIncludeIsKeptVerbatimOnAnExcludeEdit() async throws {
+        let yaml = """
+        mcp_servers:
+          gh:
+            url: https://example.com/mcp
+            tools:
+              include:
+              - ''
+              # after the block
+            enabled: true
+        """
+        let (home, service) = try Self.home(with: yaml)
+        defer { home.cleanup() }
+        let editor = MCPServerEditorViewModel(
+            server: try #require(service.loadMCPServers().first), context: home.context)
+        editor.excludeDraft = "delete_repo"
+        let ok = await withCheckedContinuation { cont in editor.save { cont.resume(returning: $0) } }
+        #expect(ok)
+        let after = try Self.read(home)
+        #expect(after.contains("      include:\n      - ''\n"))
+        #expect(after.contains("      exclude:\n        - delete_repo\n"))
+        #expect(after.contains("      # after the block\n    enabled: true"))
+    }
+
     /// The editor no longer rewrites the tools block on every save: changing
     /// only a timeout leaves a hand-written block byte-for-byte alone.
     @Test @MainActor func editorSaveLeavesUntouchedToolFiltersAlone() async throws {
