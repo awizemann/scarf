@@ -225,12 +225,23 @@ import SQLite3
     /// it instead of doubling it.
     @Test @MainActor func restatingRewriteReplacesTheStreamingReply() {
         let vm = Self.engaged()
-        vm.handleACPEvent(Self.chunk("Hello ", id: "m1"))
-        vm.handleACPEvent(Self.chunk("world", id: "m1"))
-        vm.handleACPEvent(Self.chunk("Hello world\n\n[footer]", id: "m1"))
+        vm.handleACPEvent(Self.chunk("Here is the answer ", id: "m1"))
+        vm.handleACPEvent(Self.chunk("you asked for.", id: "m1"))
+        vm.handleACPEvent(Self.chunk("Here is the answer you asked for.\n\n[footer]", id: "m1"))
         vm.handleACPEvent(.promptComplete(sessionId: "s", response: ACPPromptResult(
             stopReason: "end_turn", inputTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedReadTokens: 0)))
-        #expect(Self.assistantTexts(vm) == ["Hello world\n\n[footer]"])
+        #expect(Self.assistantTexts(vm) == ["Here is the answer you asked for.\n\n[footer]"])
+    }
+
+    /// A short reply so far is never taken for a restatement: "*" then
+    /// "**Note" is two real deltas.
+    @Test @MainActor func shortReplyPrefixIsNotARewrite() {
+        let vm = Self.engaged()
+        vm.handleACPEvent(Self.chunk("*", id: "m1"))
+        vm.handleACPEvent(Self.chunk("**Note", id: "m1"))
+        vm.handleACPEvent(.promptComplete(sessionId: "s", response: ACPPromptResult(
+            stopReason: "end_turn", inputTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedReadTokens: 0)))
+        #expect(Self.assistantTexts(vm) == ["***Note"])
     }
 
     /// The rewrite of a reply a tool round already finalized replaces that

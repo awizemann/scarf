@@ -2558,13 +2558,18 @@ public final class RichChatViewModel {
     ///   round or a thought ended it): only the rewrite reuses a closed id;
     /// - the id is the reply still streaming and the chunk restates all of
     ///   its text so far (a plugin that appends or wraps a footer). A real
-    ///   delta never repeats the whole reply before it.
+    ///   delta never repeats the whole reply before it — once the reply is
+    ///   long enough that a delta can't start with it by chance (a reply of
+    ///   "*" or "1" followed by "**Note" or "10" would otherwise lose text).
     /// A rewrite of a still-open reply that does not restate it cannot be
     /// told apart from a delta and still appends; the stored row (and so
     /// the next load) has the rewritten text.
+    /// Shortest streamed reply the restating-prefix rule applies to.
+    static let rewriteRestateMinimumLength = 24
+
     private func replaceWithRewrittenReply(messageId: String, text: String) -> Bool {
         if messageId == streamingReplyId,
-           !streamingAssistantText.isEmpty,
+           streamingAssistantText.count >= Self.rewriteRestateMinimumLength,
            text.count > streamingAssistantText.count,
            text.hasPrefix(streamingAssistantText) {
             streamingAssistantText = text

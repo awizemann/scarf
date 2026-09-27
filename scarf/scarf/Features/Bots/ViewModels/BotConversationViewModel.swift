@@ -231,7 +231,8 @@ final class BotConversationViewModel {
                     self.chat.resumeSession(found.liveId, origin: .bots)
                     let bound = await self.verifyCanonicalBinding(expected: found.liveId, intent: intent)
                     if bound, let pendingText, self.generation == intent {
-                        self.chat.sendText(pendingText)
+                        // Already counted as sent when it was intercepted.
+                        self.chat.sendText(pendingText, images: [], recordAnalytics: false)
                     }
                 } else {
                     // CLI/gateway-born session — the normal case for every
@@ -364,14 +365,21 @@ final class BotConversationViewModel {
     /// when it failed (and the conversation was torn down).
     @discardableResult
     private func verifyCanonicalBinding(expected: String, intent: Int) async -> Bool {
-        // `richChatViewModel.sessionId` is assigned exactly once per start,
-        // at the moment ACP reaches ready. Poll for it rather than racing
-        // it; `ChatViewModel`'s own 90s-per-stage watchdog owns the
-        // never-ready case, so this only needs to outlast it.
+        // Poll `richChatViewModel.sessionId` rather than racing the start;
+        // `ChatViewModel`'s own 90s-per-stage watchdog owns the never-ready
+        // case, so this only needs to outlast it. A matching id is only
+        // accepted once the start has FINISHED: `loadSessionHistory` names
+        // the requested id before a `session/load` fallback re-points the
+        // transcript at the new session, so a mid-start match can be the
+        // very drift this guards against (R16b review).
         for _ in 0..<1_000 {
             if Task.isCancelled || generation != intent { return false }
             if let bound = chat.richChatViewModel.sessionId {
-                guard bound != expected else { return true }
+                if bound == expected {
+                    if !chat.isStartingSession && chat.isACPConnected { return true }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    continue
+                }
                 chat.stopACP()
                 canonical = nil
                 delivery = nil

@@ -697,6 +697,11 @@ final class SessionsViewModel {
                 self.deleteError = outcome.deleted.isEmpty
                     ? "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
                     : "Deleted \(outcome.deleted.count) of \(ids.count) linked segments on \(ctx.displayName); the rest couldn't be deleted (hermes sessions delete exited \(failed.exitCode))."
+                if !outcome.deleted.isEmpty {
+                    // The rest of the chain is still there, now listed
+                    // under a new tip: reload so it shows.
+                    Task { await self.load() }
+                }
             }
             self.showDeleteConfirmation = false
             self.deleteSessionId = nil

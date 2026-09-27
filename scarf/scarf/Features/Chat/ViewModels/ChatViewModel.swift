@@ -1181,7 +1181,12 @@ final class ChatViewModel {
     /// Terminal mode silently drops attachments — there's no way to
     /// pipe binary content through the TTY. Surface a one-shot warning
     /// so the user knows.
-    func sendText(_ text: String, images: [ChatImageAttachment], inputMode: ChatInputMode = .typed) {
+    func sendText(
+        _ text: String,
+        images: [ChatImageAttachment],
+        inputMode: ChatInputMode = .typed,
+        recordAnalytics: Bool = true
+    ) {
         // The `message_sent` emission site for typed and composer sends, and
         // deliberately the outermost one: `sendText` is reachable only from
         // user actions (the composer, the compress sheet, the goal pill's
@@ -1194,7 +1199,11 @@ final class ChatViewModel {
         //
         // Nothing derived from `text` is recorded: not its length, not its
         // first character, not whether it looked like a slash command.
-        Analytics.record(.messageSent(hasAttachment: !images.isEmpty, inputMode: inputMode))
+        // `recordAnalytics: false` only for a send the user already made
+        // once and an owner is re-delivering (Bot Chat's re-resolve).
+        if recordAnalytics {
+            Analytics.record(.messageSent(hasAttachment: !images.isEmpty, inputMode: inputMode))
+        }
         // Alternate-transport hook (Bot Chat CLI delivery). Checked after
         // the analytics emission — it is still a user-sent message — and
         // before any ACP path, because for a routed conversation the ACP
@@ -1253,14 +1262,37 @@ final class ChatViewModel {
 
     /// Stop holding for `client` and send what was held, in order. A no-op
     /// when another client has taken over (its path owns the sends).
-    private func releaseHeldSends(for client: ACPClient) {
+    /// `turnAlreadyRunning`: the path just sent a prompt of its own
+    /// (autostart), so every held send lands mid-turn; otherwise the first
+    /// one starts a turn and the rest land mid-turn. Passed explicitly
+    /// because the held echoes already set `isAgentWorking`, which
+    /// `sendViaACP` would otherwise read (`/queue`, `/steer` depend on it).
+    private func releaseHeldSends(for client: ACPClient, turnAlreadyRunning: Bool) {
         guard heldSendsClient === client else { return }
         let sends = heldSends
         heldSends = []
         heldSendsClient = nil
         guard acpClient === client else { return }
-        for send in sends {
-            sendViaACP(client: client, text: send.text, images: send.images, localEchoAlreadyAdded: true)
+        for (index, send) in sends.enumerated() {
+            sendViaACP(
+                client: client, text: send.text, images: send.images, localEchoAlreadyAdded: true,
+                turnInFlight: turnAlreadyRunning || index > 0
+            )
+        }
+    }
+
+    /// The start path that held sends failed or was superseded: they will
+    /// never go out. Their echoes stay in the transcript, so say so.
+    private func dropHeldSends(for client: ACPClient) {
+        guard heldSendsClient === client else { return }
+        let dropped = heldSends.count
+        heldSends = []
+        heldSendsClient = nil
+        if dropped > 0 {
+            richChatViewModel.transientHint = String(
+                localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
+            )
+            scheduleHintClear()
         }
     }
 
@@ -1394,11 +1426,12 @@ final class ChatViewModel {
                 // appended above (before session setup), so suppress
                 // the second one explicitly.
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
-                releaseHeldSends(for: client)
+                releaseHeldSends(for: client, turnAlreadyRunning: true)
             } catch {
                 // Superseded start (a newer click, or the watchdog):
                 // the newer path owns the shared state — just make
                 // sure this attempt's spawn doesn't leak.
+                dropHeldSends(for: client)
                 guard startStillCurrent(intent, client: client) else { return }
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
@@ -1428,7 +1461,8 @@ final class ChatViewModel {
         client: ACPClient,
         text: String,
         images: [ChatImageAttachment] = [],
-        localEchoAlreadyAdded: Bool = false
+        localEchoAlreadyAdded: Bool = false,
+        turnInFlight: Bool? = nil
     ) {
         ScarfMon.event(.chatStream, "mac.sendViaACP", count: 1, bytes: text.utf8.count)
 
@@ -1441,7 +1475,9 @@ final class ChatViewModel {
         // the project-wizard kickoff) are fresh sessions with nothing
         // running, so they read as idle rather than inheriting their own
         // echo.
-        let wasAgentWorking = richChatViewModel.isAgentWorking && !localEchoAlreadyAdded
+        // `turnInFlight` overrides it for held sends (`releaseHeldSends`),
+        // whose echoes were made before the turn they join had started.
+        let wasAgentWorking = turnInFlight ?? (richChatViewModel.isAgentWorking && !localEchoAlreadyAdded)
 
         // Client-side slash intercept. Hermes ACP doesn't intercept
         // `/new` server-side — sending it as a prompt routes to the
@@ -2526,7 +2562,7 @@ final class ChatViewModel {
                     // handled (and dropped by the gate `setSessionId`
                     // closed) before any held send opens the gate.
                     await awaitEventLoopDrain(client: client)
-                    releaseHeldSends(for: client)
+                    releaseHeldSends(for: client, turnAlreadyRunning: false)
                     return
                 } catch {
                     logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
@@ -3056,7 +3092,8 @@ final class ChatViewModel {
         }
         if outcome.failed != nil {
             // Some segments went, the rest are still there (and chained):
-            // the list will show the conversation again, shorter. Say so.
+            // reload so the list shows the shorter conversation, and say so.
+            scheduleSessionsRefresh()
             richChatViewModel.transientHint = String(
                 localized: "Deleted \(outcome.deleted.count) of \(ids.count) linked segments — the rest couldn't be deleted."
             )
