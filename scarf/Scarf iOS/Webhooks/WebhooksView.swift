@@ -83,7 +83,7 @@ struct WebhooksView: View {
             // The command never ran (SSH down, timeout) — not "no webhooks".
             self.notEnabled = false
             self.webhooks = []
-            self.lastError = "Couldn't run hermes webhook list on this server"
+            self.lastError = String(localized: "Couldn't run hermes webhook list on this server")
             return
         }
         // The shared Mac parser (S07-F5): `webhook list` indents EVERY line
@@ -104,7 +104,7 @@ struct WebhooksView: View {
             // state — say so rather than show a silent empty list.
             self.notEnabled = false
             self.webhooks = []
-            self.lastError = "Couldn't parse webhook list output"
+            self.lastError = String(localized: "Couldn't parse webhook list output")
         }
     }
 
