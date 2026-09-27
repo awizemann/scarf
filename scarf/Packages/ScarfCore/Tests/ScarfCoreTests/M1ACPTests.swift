@@ -491,7 +491,10 @@ import Foundation
     /// R17: the load response's `_meta.hermes.sessionProvenance` is read.
     /// The `_meta` below is what `session_provenance_meta` built for a
     /// chain rotated once (root → tip), run from the v2026.9.24 tree's
-    /// `acp_adapter/provenance.py` against a two-row fake db.
+    /// `acp_adapter/provenance.py` against a two-row fake db. NOTE: a real
+    /// v2026.9.24 `session/load` of "root" reports current == "root" (the
+    /// agent is restored under the requested id, session.py:444-446); this
+    /// pins the parse and the defensive follow, not a shape that host sends.
     @Test @MainActor func loadSessionReturnsTheLoadedHeadFromProvenance() async throws {
         let (client, mock, startTask) = await buildClientWithMock()
         try await waitFor { await mock.sent.count >= 1 }

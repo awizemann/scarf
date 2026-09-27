@@ -935,13 +935,12 @@ final class SessionsViewModel {
         )
         let runner = sessionExportRunner
         let ctx = context
-        Task { [weak self] in
+        Task { [self] in
             // The CLI run and the file write block for the whole transfer:
             // a thread of their own, not a cooperative-pool one (C10).
             let outcome = await OffPool.run {
                 Self.writeExport(result: runner(ctx, args), to: url, format: format)
             }
-            guard let self else { return }
             self.exportMessage = outcome.message
             guard outcome.succeeded else { return }
             let banner = outcome.message
@@ -964,11 +963,10 @@ final class SessionsViewModel {
         )
         let runner = sessionExportRunner
         let ctx = context
-        Task { [weak self] in
+        Task { [self] in
             // A CLI run for the whole export: a thread of its own (C10).
             let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
-            guard let self else { return }
             if outcome.succeeded {
                 let banner = "Exported to \(url.path)"
                 self.exportMessage = banner

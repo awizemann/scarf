@@ -2496,8 +2496,9 @@ final class ChatViewModel {
         reconnectTask?.cancel()
         clearACPErrorState()
         // Sends from here until the ladder installs a client are held for
-        // it. A held send from the client that just died is not carried.
-        if !holdingForReconnect { heldSends = [] }
+        // it. Sends already held for the client that just died (its load
+        // replay never drained) are carried: the ladder reloads the same
+        // session, so they go out on its client instead of vanishing.
         heldSendsClient = nil
         holdingForReconnect = true
 
@@ -2591,7 +2592,8 @@ final class ChatViewModel {
                     beginHoldingSends(for: client)
                     self.hasActiveProcess = true
                     richChatViewModel.setSessionId(resolvedSessionId)
-                    // A rotation while disconnected: reconcile the new head too.
+                    // A load naming an uncovered head (defensive; see
+                    // `noteLoadedHead`): reconcile that head too.
                     noteLoadedHead(loaded.provenance?.currentHermesSessionId)
 
                     // Reconcile in-memory messages with what Hermes persisted to DB
@@ -3265,14 +3267,16 @@ final class ChatViewModel {
         tearDownDeletedActiveSession()
     }
 
-    /// The compression chain `sessionId` belongs to (root first), from the
-    /// sidebar row that lists it or from any list Scarf has loaded this
-    /// launch (`SessionLineageIndex`); empty for an ordinary session.
     /// A `session/load` answered with an internal head this transcript does
-    /// not cover: the chain rotated while no client was attached
-    /// (`ACPSessionProvenance`). Follow it like a live rotation — the
-    /// transcript spans it, id lookups on the new tip find the chain, and
-    /// the sidebar relists it under that tip. Nil or covered: no-op.
+    /// not cover (`ACPSessionProvenance`): follow it like a live rotation —
+    /// the transcript spans it, id lookups on the new tip find the chain,
+    /// and the sidebar relists it under that tip. Nil or covered: no-op.
+    ///
+    /// Defensive on v2026.9.24: a fresh `hermes acp` restores the agent
+    /// under the id it was asked for (`_restore`,
+    /// acp_adapter/session.py:444-446), so the load reports that same id and
+    /// this never fires. It is here so a Hermes that restores a chain's live
+    /// head is followed rather than silently dropped.
     func noteLoadedHead(_ head: String?) {
         guard let head, richChatViewModel.sessionId != nil,
               !richChatViewModel.transcriptCovers(head) else { return }
@@ -3281,6 +3285,9 @@ final class ChatViewModel {
         scheduleSessionsRefresh()
     }
 
+    /// The compression chain `sessionId` belongs to (root first), from the
+    /// sidebar row that lists it or from any list Scarf has loaded this
+    /// launch (`SessionLineageIndex`); empty for an ordinary session.
     func transcriptLineage(for sessionId: String) -> [String] {
         if let row = recentSessions.first(where: { $0.covers(sessionId) }), row.lineageIds.count > 1 {
             return row.lineageIds

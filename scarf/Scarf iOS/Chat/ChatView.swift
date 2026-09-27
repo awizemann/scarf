@@ -2840,9 +2840,10 @@ final class ChatController {
                         await client?.recentStderr ?? ""
                     }
                     vm.setSessionId(resolvedSessionId)
-                    // The chain rotated while disconnected (the load's
-                    // `sessionProvenance` names a head the transcript does
-                    // not cover): span it, so the reconcile reads it too.
+                    // Defensive: a load whose `sessionProvenance` names a head
+                    // the transcript does not cover is spanned, so the
+                    // reconcile reads it too. v2026.9.24 reports the
+                    // requested id here (acp_adapter/session.py:444-446).
                     if let head = loaded.provenance?.currentHermesSessionId {
                         vm.noteSessionRotation(to: head)
                         SessionLineageIndex.shared.record(server: context.id, lineage: vm.transcriptSessionIds)

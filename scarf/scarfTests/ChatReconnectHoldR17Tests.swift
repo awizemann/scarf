@@ -73,6 +73,44 @@ import ScarfCore
         vm.stopACP()
     }
 
+    /// The autostart's client dies while a second send is held behind its
+    /// undrained load: the reconnect ladder reloads the same session and the
+    /// held send goes out on its client instead of vanishing (review
+    /// follow-up; the ladder used to clear the hold).
+    @Test @MainActor func aSendHeldForADyingClientIsCarriedIntoTheLadder() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let dying = Gated()
+        let calls = Lifecycle.CallCounter()
+        let reconnects = GatedRecorder()
+        vm.acpClientFactory = { ctx, _ in
+            if calls.next() == 1 { return ACPClient(context: ctx) { _ in dying } }
+            let ch = Gated()
+            reconnects.record(ch)
+            return ACPClient(context: ctx) { _ in ch }
+        }
+        vm.richChatViewModel.setSessionId("sess-old")
+
+        vm.sendText("first")
+        #expect(await Lifecycle.waitUntil { await dying.hasPendingLoad })
+        vm.sendText("second") // held behind the undrained load
+        await dying.close()   // the process dies: event stream ends → ladder
+
+        let loading = await Lifecycle.waitUntil(timeoutSeconds: 10) {
+            guard let ch = reconnects.all.first else { return false }
+            return await ch.hasPendingLoad
+        }
+        #expect(loading, "the reconnect ladder never reached session/load")
+        let ch = try #require(reconnects.all.first)
+        await ch.releaseLoad()
+        let sent = await Lifecycle.waitUntil(timeoutSeconds: 10) {
+            await ch.promptTexts.contains("second")
+        }
+        #expect(sent, "the send held for the dying client was dropped")
+        vm.stopACP()
+    }
+
     @Test @MainActor func aVoiceTurnDuringAnUndrainedReplayAnswersBusy() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
@@ -149,8 +187,10 @@ import ScarfCore
         }
     }
 
-    /// A chain that rotated while the chat was disconnected: the reconnect's
-    /// `session/load` names the new head, and the transcript follows it.
+    /// The defensive follow: a load that names a head the transcript does not
+    /// cover is followed. v2026.9.24 does not send this at load (it restores
+    /// under the requested id, acp_adapter/session.py:444-446); the test pins
+    /// that Scarf would follow rather than drop it.
     @Test @MainActor func aReconnectFollowsTheHeadTheLoadReports() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }

@@ -903,9 +903,13 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// `VAR=value command` prefixes and `$PATH:` inside double quotes — and
     /// csh/tcsh reject both ("Bad : modifier in $", "Command not found"), so
     /// on a csh user's host every call failed. The Mac's SSHTransport has
-    /// always wrapped its command in `sh -c '…'` for the same reason. The
-    /// single-quoted word means the same thing to sh, bash, zsh, csh, tcsh
-    /// and fish, and the environment the outer shell set up is inherited.
+    /// always wrapped its command in `sh -c '…'` for the same reason, and
+    /// the environment the outer shell set up is inherited.
+    ///
+    /// Not a complete cure for csh/tcsh: they still apply history expansion
+    /// to `!` and reject a newline inside the single-quoted word, so an argv
+    /// carrying either (a prompt, a title) still fails on a csh login shell.
+    /// The Mac's SSHTransport has the same limit.
     nonisolated static func viaPOSIXShell(_ cmd: String) -> String {
         "/bin/sh -c " + shellJoin([cmd])
     }
