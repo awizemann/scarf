@@ -67,12 +67,37 @@ public enum HermesProviderCredentials {
         "GH_TOKEN": "copilot", "GITHUB_TOKEN": "copilot", "HF_TOKEN": "huggingface",
     ]
 
+    /// The `_PROVIDER_ALIASES` rows (`hermes_cli/auth.py:1300-1335` @
+    /// v2026.9.24) whose target this file compares against: the owners in
+    /// ``providerScopedVars``, ``keylessProviders``, and `custom`. Hermes
+    /// resolves `model.provider` the same way — `strip().lower()`, then this
+    /// table (`resolve_provider`, `auth.py:1500-1501`) — so `provider: github`
+    /// IS Copilot and a `GITHUB_TOKEN` counts for it. Aliases that land on
+    /// other providers are left out on purpose: nothing here compares them.
+    /// Plugin-declared aliases are not modelled.
+    static let providerAliases: [String: String] = [
+        "github": "copilot", "github-copilot": "copilot",
+        "github-models": "copilot", "github-model": "copilot",
+        "github-copilot-acp": "copilot-acp", "copilot-acp-agent": "copilot-acp",
+        "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
+        "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock", "amazon": "bedrock",
+        "lm-studio": "lmstudio", "lm_studio": "lmstudio",
+        "ollama": "custom", "vllm": "custom", "llamacpp": "custom",
+        "llama.cpp": "custom", "llama-cpp": "custom",
+    ]
+
+    /// `provider` as Hermes resolves it, for the comparisons in this file.
+    static func canonicalProvider(_ provider: String?) -> String? {
+        guard let id = provider?.trimmingCharacters(in: .whitespaces).lowercased() else { return nil }
+        return providerAliases[id] ?? id
+    }
+
     /// Whether `key` counts as a configured provider for a main model whose
     /// provider is `provider` (see ``providerScopedVars``).
     static func counts(_ key: String, provider: String?) -> Bool {
         guard providerEnvVarSet.contains(key) else { return false }
         guard let owner = providerScopedVars[key] else { return true }
-        return provider?.trimmingCharacters(in: .whitespaces).lowercased() == owner
+        return canonicalProvider(provider) == owner
     }
 
     /// True when `env` holds a non-empty value for any provider var.
@@ -115,7 +140,7 @@ public enum HermesProviderCredentials {
     /// @ v2026.9.24), so treating it as keyless would hide the hint for an
     /// OpenRouter or DeepSeek user whose key is actually missing.
     public static func modelUsesKeylessEndpoint(provider: String, baseURL: String) -> Bool {
-        let id = provider.trimmingCharacters(in: .whitespaces).lowercased()
+        let id = canonicalProvider(provider) ?? ""
         let url = baseURL.trimmingCharacters(in: .whitespaces)
         if keylessProviders.contains(id) || id.hasPrefix("custom:") { return true }
         if id == "custom" && !url.isEmpty { return true }
