@@ -320,6 +320,35 @@ import Foundation
             _ = try await RemoteRestoreService(context: .local)
                 .pauseAllCronJobs(transport: fake, hermesHome: home)
         }
+        // The root home's jobs are still paused before the error surfaces.
+        let rootData = try #require(fake.contents(home + "/cron/jobs.json"))
+        let root = try #require(try JSONSerialization.jsonObject(with: rootData) as? [String: Any])
+        #expect((root["jobs"] as? [[String: Any]])?.first?["enabled"] as? Bool == false)
+    }
+
+    /// One bad `jobs.json` doesn't stop the others being paused; the error
+    /// names it. A bare-list file (a shape Hermes loads and rewrites
+    /// wrapped, `cron/jobs.py:1374-1376`) is paused and written wrapped.
+    @Test func cronPauseTriesEveryHomeAndHandlesABareList() async throws {
+        let home = "/home/u/.hermes"
+        let fake = FakeTransport(files: [
+            home + "/cron/jobs.json": Data(#"[{"id":"r","enabled":true}]"#.utf8),
+            home + "/profiles/a/cron/jobs.json": Data("not json".utf8),
+            home + "/profiles/b/cron/jobs.json": Data(#"{"jobs":[{"id":"b","enabled":true}]}"#.utf8),
+        ])
+        do {
+            _ = try await RemoteRestoreService(context: .local).pauseAllCronJobs(transport: fake, hermesHome: home)
+            Issue.record("a jobs.json that can't be parsed must fail the pause")
+        } catch {
+            #expect(error.localizedDescription.contains("profiles/a/cron/jobs.json"), "\(error.localizedDescription)")
+            #expect(error.localizedDescription.contains("Paused 2"), "\(error.localizedDescription)")
+        }
+        for path in [home + "/cron/jobs.json", home + "/profiles/b/cron/jobs.json"] {
+            let data = try #require(fake.contents(path))
+            let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any], "\(path) written as an object")
+            let jobs = try #require(root["jobs"] as? [[String: Any]])
+            #expect(jobs.allSatisfy { $0["enabled"] as? Bool == false }, "\(path)")
+        }
     }
 
     @Test func cronRunnableMatchesHermes() {

@@ -889,11 +889,35 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// directory that is there but can't be listed throws for the same
     /// reason.
     func pauseAllCronJobs(transport: any ServerTransport, hermesHome: String) async throws -> Int {
-        var homes = [hermesHome]
-        homes += try Self.profileHomes(transport: transport, hermesHome: hermesHome)
+        // Every home is tried, root first, whatever fails on the way: one
+        // unreadable file must not leave the homes after it armed. Then
+        // one error names every file whose jobs may still be armed.
         var total = 0
+        var failures: [String] = []
+        func record(_ error: Error) {
+            if case RestoreError.remoteCommandFailed(let message) = error {
+                failures.append(message)
+            } else {
+                failures.append(error.localizedDescription)
+            }
+        }
+        var homes = [hermesHome]
+        do {
+            homes += try Self.profileHomes(transport: transport, hermesHome: hermesHome)
+        } catch {
+            record(error)
+        }
         for home in homes {
-            total += try Self.pauseCronJobs(transport: transport, jobsPath: home + "/cron/jobs.json")
+            do {
+                total += try Self.pauseCronJobs(transport: transport, jobsPath: home + "/cron/jobs.json")
+            } catch {
+                record(error)
+            }
+        }
+        guard failures.isEmpty else {
+            throw RestoreError.remoteCommandFailed(
+                "Paused \(total) cron job(s), but these may still be armed: " + failures.joined(separator: " ")
+            )
         }
         return total
     }
@@ -929,7 +953,10 @@ public final class RemoteRestoreService: @unchecked Sendable {
             transport: transport,
             path: jobsPath,
             label: "Cron pause",
-            sortKeys: false
+            sortKeys: false,
+            // A bare list is a shape Hermes loads and rewrites wrapped
+            // (`cron/jobs.py:1374-1376`); write it back the same way.
+            wrapTopLevelArrayAs: "jobs"
         ) { root in
             var count = 0
             func pause(_ job: inout [String: Any]) {
@@ -998,6 +1025,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         path: String,
         label: String,
         sortKeys: Bool,
+        wrapTopLevelArrayAs arrayKey: String? = nil,
         mutate: (inout [String: Any]) -> Int?
     ) throws -> Int? {
         var read = try? transport.readFile(path)
@@ -1013,7 +1041,15 @@ public final class RemoteRestoreService: @unchecked Sendable {
         guard let data = read, !data.isEmpty else {
             throw RestoreError.remoteCommandFailed("\(label) failed: \(path) is empty.")
         }
-        guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        let parsed = try? JSONSerialization.jsonObject(with: data)
+        var root: [String: Any]
+        if let object = parsed as? [String: Any] {
+            root = object
+        } else if let arrayKey, let array = parsed as? [Any] {
+            // A file that is a bare list, when its owner accepts that shape
+            // and writes it back wrapped (Hermes's `jobs.json`).
+            root = [arrayKey: array]
+        } else {
             throw RestoreError.remoteCommandFailed("\(label) failed: \(path) is not a JSON object.")
         }
         guard let changed = mutate(&root) else { return nil }
