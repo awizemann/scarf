@@ -1790,53 +1790,26 @@ final class ChatViewModel {
         sessionId: String,
         projectPath: String
     ) async {
-        let reader = ProjectModelPresetReader(context: context)
-        guard let idString = reader.presetID(forProjectPath: projectPath),
-              let presetID = UUID(uuidString: idString)
-        else {
-            currentModelPreset = nil
-            return
-        }
-
-        let service = ModelPresetService.shared(for: context)
-        let preset: ModelPreset?
-        do {
-            preset = try await service.get(id: presetID)
-        } catch {
-            logger.warning("couldn't load model preset \(idString): \(error.localizedDescription)")
-            currentModelPreset = nil
-            return
-        }
-
-        guard let preset else {
-            logger.info("project '\(projectPath)' references deleted preset \(idString) — falling back to global default")
-            currentModelPreset = nil
-            return
-        }
-
-        // No capability gate: ACP `session/set_model` is defined in the
-        // adapter at every tag Scarf supports (`acp_adapter/server.py:482` @
-        // v2026.3.30 = 0.6.0, the supported floor; `:466` @ v2026.3.17, the
-        // earliest adapter tag; `:929` @ v2026.9.7). P49 / round-5 decision 9.
-        do {
-            // Pass providerID so the RPC uses Hermes's
-            // `<provider>:<model>` colon-encoded wire format. Without
-            // it, less-obvious model IDs (e.g. `inclusionai/ring-2.6-1t`)
-            // fall into `detect_provider_for_model` which infers wrong
-            // — see issue #97. Empty `providerID` (older presets that
-            // pre-date the providerID field) falls back to bare-model
-            // wire shape.
-            let providerHint = preset.providerID.isEmpty ? nil : preset.providerID
-            try await client.setSessionModel(
-                sessionId: sessionId,
-                modelID: preset.modelID,
-                providerID: providerHint
-            )
-            currentModelPreset = preset
-            logger.info("applied model preset '\(preset.name)' (\(preset.modelID), provider: \(providerHint ?? "auto")) to session \(sessionId)")
-        } catch {
-            logger.warning("session/set_model failed for preset '\(preset.name)': \(error.localizedDescription) — session stays on config.yaml default")
-            currentModelPreset = nil
+        // Shared with ScarfGo (S11-F3). The manifest read inside runs off
+        // the MainActor — it is transport I/O on a remote host (C10).
+        let outcome = await ProjectModelPresetApplier.apply(
+            client: client,
+            sessionId: sessionId,
+            projectPath: projectPath,
+            context: context
+        )
+        currentModelPreset = outcome.appliedPreset
+        switch outcome {
+        case .noBinding:
+            break
+        case .presetMissing(let id):
+            logger.info("project '\(projectPath)' references deleted preset \(id) — falling back to global default")
+        case .storeUnreadable(let message):
+            logger.warning("couldn't load the project's model preset: \(message)")
+        case .applied(let preset):
+            logger.info("applied model preset '\(preset.name)' (\(preset.modelID), provider: \(preset.providerID.isEmpty ? "auto" : preset.providerID)) to session \(sessionId)")
+        case .rejected(let preset, let message):
+            logger.warning("session/set_model failed for preset '\(preset.name)': \(message) — session stays on config.yaml default")
         }
     }
 

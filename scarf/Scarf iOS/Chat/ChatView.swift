@@ -2990,6 +2990,33 @@ final class ChatController {
         }
     }
 
+    /// Apply the project's bound model preset to the session just opened,
+    /// through the same ScarfCore path the Mac uses (S11-F3: ScarfGo
+    /// never called `session/set_model`, so a project chat ran on the
+    /// config.yaml default while the project screen showed the preset).
+    /// Non-fatal: when Hermes refuses the preset the chat says so and
+    /// stays on the default model.
+    private func applyProjectModelPreset(client: ACPClient, sessionId: String, projectPath: String) async {
+        let outcome = await ProjectModelPresetApplier.apply(
+            client: client,
+            sessionId: sessionId,
+            projectPath: projectPath,
+            context: context
+        )
+        switch outcome {
+        case .noBinding, .applied:
+            break
+        case .presetMissing(let id):
+            Self.logger.info("project references deleted model preset \(id, privacy: .public) — using the default model")
+        case .storeUnreadable(let message):
+            Self.logger.warning("couldn't read the project's model preset: \(message, privacy: .public)")
+        case .rejected(let preset, let message):
+            Self.logger.warning("session/set_model failed for preset \(preset.name, privacy: .public): \(message, privacy: .public)")
+            vm.transientHint = String(localized: "Couldn't switch to model preset \u{201C}\(preset.name)\u{201D} — this chat uses the default model.")
+            scheduleTransientHintClear(snapshot: vm.transientHint)
+        }
+    }
+
     /// Inline variant of `start()` that accepts a cwd + attribution
     /// hooks. The default `start()` delegates to this with nil project
     /// fields, so the ACP code path stays single-sourced.
@@ -3033,6 +3060,11 @@ final class ChatController {
                 cwd = await context.resolvedUserHome()
             }
             let sessionId = try await client.newSession(cwd: cwd)
+            // The project's bound model preset, before the composer
+            // unlocks — the Mac does the same (S11-F3).
+            if let projectPath {
+                await applyProjectModelPreset(client: client, sessionId: sessionId, projectPath: projectPath)
+            }
             vm.setSessionId(sessionId)
             loadDraft()
             state = .ready
@@ -3184,6 +3216,9 @@ final class ChatController {
                 resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
             } catch {
                 resolvedID = try await client.newSession(cwd: cwd)
+            }
+            if let projectPath = resolved?.path {
+                await applyProjectModelPreset(client: client, sessionId: resolvedID, projectPath: projectPath)
             }
             vm.setSessionId(resolvedID)
             loadDraft()
