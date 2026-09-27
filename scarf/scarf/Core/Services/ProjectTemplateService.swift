@@ -25,6 +25,11 @@ struct ProjectTemplateService: Sendable {
     nonisolated static let unzipTimeout: TimeInterval = 120
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateService")
 
+    /// Manifest `schemaVersion`s this build can install. Must stay in step
+    /// with `SUPPORTED_SCHEMA_VERSIONS` in `tools/build-catalog.py` and with
+    /// the highest version `ProjectTemplateExporter` writes.
+    nonisolated static let supportedSchemaVersions: ClosedRange<Int> = 1...3
+
     let context: ServerContext
 
     nonisolated init(context: ServerContext = .local) {
@@ -60,10 +65,12 @@ struct ProjectTemplateService: Sendable {
         }
 
         // schemaVersion 1 is the original v2.2 bundle; 2 adds the
-        // optional `config` block. Both are valid. Newer versions get
-        // refused so the installer never silently misinterprets a
-        // future-shape bundle.
-        guard manifest.schemaVersion == 1 || manifest.schemaVersion == 2 else {
+        // optional `config` block; 3 adds project slash commands, which
+        // `ProjectTemplateExporter` writes whenever a project has any and
+        // `tools/build-catalog.py` accepts. All three are valid. Newer
+        // versions get refused so the installer never silently
+        // misinterprets a future-shape bundle.
+        guard Self.supportedSchemaVersions.contains(manifest.schemaVersion) else {
             throw ProjectTemplateError.unsupportedSchemaVersion(manifest.schemaVersion)
         }
 
@@ -287,6 +294,16 @@ struct ProjectTemplateService: Sendable {
         "<!-- scarf-template:\(templateId):end -->"
     }
 
+    /// Hermes's MEMORY.md entry separator: `ENTRY_DELIMITER = "\n§\n"`
+    /// (`tools/memory_tool_store.py:23` @ v2026.9.24). The file is a list of
+    /// entries joined by it; `remove`/`replace` act on whole entries.
+    nonisolated static let memoryEntryDelimiter = "\n§\n"
+
+    /// The template's memory text as ONE Hermes memory entry: the begin
+    /// marker line, the body, the end marker — no surrounding whitespace,
+    /// because Hermes strips every entry and treats a file whose bytes don't
+    /// round-trip through that as externally edited
+    /// (`_detect_external_drift`, `tools/memory_tool_store.py:530-538`).
     nonisolated static func wrapMemoryBlock(
         templateId: String,
         templateVersion: String,
@@ -294,7 +311,21 @@ struct ProjectTemplateService: Sendable {
     ) -> String {
         let begin = memoryBlockBeginMarker(templateId: templateId)
         let end = memoryBlockEndMarker(templateId: templateId)
-        return "\n\n\(begin) v\(templateVersion)\n\(body)\n\(end)\n"
+        return "\(begin) v\(templateVersion)\n\(body)\n\(end)"
+    }
+
+    /// `existing` MEMORY.md text with `entry` added as its own entry, the way
+    /// Hermes's own `add` writes it (`ENTRY_DELIMITER.join(entries)`,
+    /// `tools/memory_tool_store.py:520-527`). Before this the block was glued
+    /// to the last entry with a blank line, so Hermes read "the user's last
+    /// fact + the template block" as one entry: removing or rewriting either
+    /// one took the other with it, and a threat-scan hit on the block hid the
+    /// user's fact too. Trailing whitespace on the existing text is dropped
+    /// (Hermes strips it on its next write anyway); nothing else changes.
+    nonisolated static func appendingMemoryEntry(_ entry: String, to existing: String) -> String {
+        var head = Substring(existing)
+        while let last = head.last, last.isWhitespace { head = head.dropLast() }
+        return head.isEmpty ? entry : String(head) + memoryEntryDelimiter + entry
     }
 
     // MARK: - Private

@@ -208,9 +208,9 @@ public enum SkillsScanner: Sendable {
     /// Two shapes, matching what the guards actually produce: the one-deep
     /// `<name>.bak`, and the quarantine copy `<name>.corrupt-<stamp>` —
     /// which is an INFIX, not a suffix, because the stamp (and an optional
-    /// `-<uuid8>` collision tiebreaker) follows it. `internal` so the scan
-    /// tests can pin both shapes without going through a filesystem.
-    static func isGuardArtifact(_ name: String) -> Bool {
+    /// `-<uuid8>` collision tiebreaker) follows it. `public` so the
+    /// template exporter skips the same files when it copies a skill tree.
+    public static func isGuardArtifact(_ name: String) -> Bool {
         name.hasSuffix(".bak") || name.contains(".corrupt-")
     }
 

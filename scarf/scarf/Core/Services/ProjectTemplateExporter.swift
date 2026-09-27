@@ -177,7 +177,12 @@ struct ProjectTemplateExporter: Sendable {
                     throw ProjectTemplateError.conflictingFile(targetDir)
                 }
                 try FileManager.default.createDirectory(atPath: targetDir, withIntermediateDirectories: true)
-                for file in skill.files {
+                // The whole skill tree, not just its top level: hub and
+                // authored skills ship `references/`, `scripts/`,
+                // `templates/` and `assets/` folders beside SKILL.md, and
+                // `skill.files` lists those folders by name only — reading
+                // one as a file failed the export outright.
+                for file in try Self.skillFileTree(at: skill.path, transport: transport) {
                     try copyFromHermes(skill.path + "/" + file, to: targetDir + "/" + file, transport: transport)
                 }
             }
@@ -230,7 +235,7 @@ struct ProjectTemplateExporter: Sendable {
         // metadata; the values in `config.json` are the current user's
         // secrets or personal settings.
         let forwardedSchema: TemplateConfigSchema? = try Self.readCachedSchema(
-            from: plan.projectDir
+            from: plan.projectDir, transport: transport
         )
 
         // Bump schemaVersion based on the most-recent feature carried
@@ -309,16 +314,85 @@ struct ProjectTemplateExporter: Sendable {
     /// `.scarf/config.json` are intentionally ignored — an exported
     /// bundle carries the schema's shape, never the current user's
     /// configured values.
-    nonisolated private static func readCachedSchema(from projectDir: String) throws -> TemplateConfigSchema? {
+    ///
+    /// Through the transport like every other read here: the project can
+    /// live on an SSH host, where a `FileManager` check of the same path
+    /// looks at the Mac's disk, finds nothing, and quietly exports the
+    /// bundle without its configuration form. An absent manifest is `nil`
+    /// (a project that never had a schema); one that exists but can't be
+    /// read or decoded fails the export instead of dropping the schema.
+    nonisolated static func readCachedSchema(
+        from projectDir: String,
+        transport: any ServerTransport
+    ) throws -> TemplateConfigSchema? {
         let manifestPath = projectDir + "/.scarf/manifest.json"
-        guard FileManager.default.fileExists(atPath: manifestPath) else { return nil }
-        let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
+        let data: Data
+        do {
+            data = try transport.readFile(manifestPath)
+        } catch {
+            if !transport.fileExists(manifestPath) { return nil }
+            throw error
+        }
+        guard data.count <= ProjectStore.maxJSONBytes else {
+            throw ProjectTemplateError.manifestParseFailed(
+                ".scarf/manifest.json is \(data.count) bytes, over the \(ProjectStore.maxJSONBytes)-byte cap"
+            )
+        }
         // Use a bespoke decode rather than ProjectTemplateManifest so
         // this helper stays resilient if the manifest shape evolves
         // incompatibly in a future release.
         struct OnlyConfig: Decodable { let config: TemplateConfigSchema? }
         let onlyConfig = try JSONDecoder().decode(OnlyConfig.self, from: data)
         return onlyConfig.config
+    }
+
+    /// Deepest folder level a skill export descends to. Hermes follows
+    /// symlinks inside skills, so a link loop would otherwise recurse
+    /// forever (over SSH, one round trip per level).
+    nonisolated static let maxSkillTreeDepth = 12
+
+    /// Every regular file under a skill directory, as paths relative to it,
+    /// sorted. Dotfiles and the guarded writers' `.bak` / `.corrupt-`
+    /// artifacts are skipped at every level, the same filter
+    /// `SkillsScanner` applies to the top level. A symlink is followed:
+    /// one that reads as a file is a file, otherwise it is listed as a
+    /// folder (reading first, because `ls` over SSH "lists" a plain file).
+    nonisolated static func skillFileTree(
+        at root: String,
+        transport: any ServerTransport
+    ) throws -> [String] {
+        var out: [String] = []
+        func walk(_ relative: String, depth: Int) throws {
+            let dir = relative.isEmpty ? root : root + "/" + relative
+            let entries = try transport.listDirectory(dir)
+                .filter { !$0.hasPrefix(".") && !SkillsScanner.isGuardArtifact($0) }
+                .sorted()
+            for entry in entries {
+                let rel = relative.isEmpty ? entry : relative + "/" + entry
+                let full = root + "/" + rel
+                let info = transport.stat(full)
+                let isDirectory: Bool
+                if info?.isDirectory == true {
+                    isDirectory = true
+                } else if info?.isSymbolicLink == true {
+                    isDirectory = (try? transport.readFile(full)) == nil
+                        && (try? transport.listDirectory(full)) != nil
+                } else {
+                    isDirectory = false
+                }
+                if isDirectory {
+                    guard depth < maxSkillTreeDepth else {
+                        logger.warning("skill export stopped descending at \(full, privacy: .public): deeper than \(maxSkillTreeDepth) levels")
+                        continue
+                    }
+                    try walk(rel, depth: depth + 1)
+                } else {
+                    out.append(rel)
+                }
+            }
+        }
+        try walk("", depth: 0)
+        return out
     }
 
     /// Convert a live cron job (with runtime state) into the spec the
