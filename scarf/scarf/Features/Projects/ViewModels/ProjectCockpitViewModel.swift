@@ -294,12 +294,10 @@ final class ProjectCockpitViewModel {
             // Cron: jobs tagged for this project.
             let tmpl = Self.readTemplateInfo(context: context, projectPath: project.path)
             let allJobs = HermesFileService(context: context).loadCronJobs()
-            let projPrefix = "[proj:\(sp.id.uuidString)]"
-            let tmplPrefix = tmpl.map { "[tmpl:\($0.id)]" }
             let jobs = allJobs.filter { job in
-                if job.name.hasPrefix(projPrefix) { return true }
-                if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return true }
-                return false
+                ProjectCronAttribution.isAttributed(
+                    jobName: job.name, projectID: sp.id, templateId: tmpl?.id
+                )
             }
 
             // Memory: the project's MEMORY.md block, when it owns one.
