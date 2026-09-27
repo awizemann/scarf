@@ -161,13 +161,10 @@ public struct ProjectLifecycleService: Sendable {
 
     private nonisolated func attributed(_ jobs: [HermesCronJob], to entry: ProjectEntry) -> [HermesCronJob] {
         guard !jobs.isEmpty else { return [] }
-        let projPrefix = "[proj:\(projectID(for: entry).uuidString)]"
+        let id = projectID(for: entry)
         let templateId = ProjectStore(context: context).templateInfo(projectPath: entry.path)?.id
-        let tmplPrefix = templateId.map { "[tmpl:\($0)]" }
         return jobs.filter { job in
-            if job.name.hasPrefix(projPrefix) { return true }
-            if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return true }
-            return false
+            ProjectCronAttribution.isAttributed(jobName: job.name, projectID: id, templateId: templateId)
         }
     }
 

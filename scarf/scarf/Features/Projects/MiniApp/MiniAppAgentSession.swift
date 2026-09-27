@@ -11,29 +11,26 @@ import os
 /// conversations. The session is reachable only after the user grants the
 /// (sensitive) `prompt` permission.
 ///
-/// **Two different cwds — don't conflate them.** Hermes reads a project's
-/// context files (AGENTS.md / CLAUDE.md / .cursorrules) from the `hermes
-/// acp` PROCESS cwd, but resolves tool directories against the ACP SESSION
-/// cwd:
-/// - PROCESS cwd: the default `clientFactory` builds the client via
-///   `ACPClient.forMacApp(context:)` with NO `projectCwd`, so `hermes acp`
-///   inherits its spawner's default cwd (Scarf's own cwd locally; the
-///   remote login dir over SSH) — NOT `projectRoot`. The project's
-///   AGENTS.md/CLAUDE.md/.cursorrules are therefore **not** loaded into
-///   this agent. This is deliberate (see below), unlike chat sessions
-///   which DO spawn with `projectCwd` (t-565f8d45 / t-24594c4a).
-/// - SESSION cwd: `newSession(cwd: projectRoot)` — so the agent's TOOL
-///   directories resolve under the project root.
+/// **Project context IS loaded (kept on purpose).** The session runs in the
+/// project folder — `newSession(cwd: projectRoot)` — so its tools resolve
+/// paths there, AND Hermes loads the project's context files
+/// (AGENTS.md, CLAUDE.md, .cursorrules, .hermes.md) into this agent's
+/// system prompt from that same session cwd. Hermes pins the ACP session
+/// cwd for every turn (`acp_adapter/server.py:759-770` @ v2026.9.24) and
+/// builds the prompt from it (`agent/system_prompt.py:708-719` →
+/// `agent/prompt_builder.py:1733-1752`); the `hermes acp` PROCESS cwd no
+/// longer decides it. An earlier version of this comment (t-0b850b5b)
+/// claimed that leaving the process cwd off the project kept those files
+/// out; that does not hold at v2026.9.24. Alan's decision (R12 / S12-F6):
+/// keep the session in the project folder, so the mini-app agent sees the
+/// same project context a chat does. What limits an untrusted, web-driven
+/// mini-app is the rest of this type: the sensitive `prompt` grant, every
+/// permission request auto-denied (`cancelPermission` below), Hermes's own
+/// context-file injection scan, and the rate limit.
 ///
-/// **Why no project context here (trust).** A mini-app runs untrusted /
-/// agent-generated web content that drives this agent via `scarf.prompt`,
-/// unsupervised (permission requests auto-denied, no human watching each
-/// turn). Auto-injecting a project's context files into that agent is a
-/// bigger prompt-injection surface than an interactive chat the user
-/// explicitly opened, for no benefit any mini-app needs today — so we keep
-/// the process cwd off the project. Decided in t-0b850b5b; grounded in
-/// t-42db11e9 (chats = user-chosen, trusted enough for context-file
-/// injection; mini-apps = the gated, less-trusted surface).
+/// The default `clientFactory` still spawns `hermes acp` without a
+/// `projectCwd` (Scarf's cwd locally, the login dir over SSH). That no
+/// longer changes what the agent reads; it is left as is.
 ///
 /// **Request/response.** `prompt(_:)` sends the text and resolves with the
 /// agent's full reply, accumulated from the streamed `messageChunk` events
@@ -52,12 +49,9 @@ actor MiniAppAgentSession {
     /// client wired to an in-memory channel; production defaults to the
     /// `ProcessACPChannel`-backed `forMacApp` factory.
     ///
-    /// NOTE: the default deliberately omits `projectCwd:` — do NOT add it
-    /// reflexively to "match chats." That would move the `hermes acp`
-    /// process cwd onto the project and load its AGENTS.md/.cursorrules into
-    /// this untrusted, web-driven agent (see the type doc + t-0b850b5b /
-    /// t-42db11e9). Tool dirs already resolve to the project via the
-    /// session cwd (`newSession(cwd: projectRoot)`).
+    /// The default omits `projectCwd:`; the session cwd, not the process
+    /// cwd, decides where tools run and which context files load (see the
+    /// type doc).
     private let clientFactory: @Sendable (ServerContext) -> ACPClient
     private let rateLimiter = MiniAppRateLimiter(maxEvents: 8, windowSeconds: 60)
     private var promptHistory: [Date] = []

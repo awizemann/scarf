@@ -26,8 +26,12 @@ struct ProjectTemplateInstaller: Sendable {
         try createProjectFiles(plan: plan)
         try createSkillsFiles(plan: plan)
         try appendMemoryIfNeeded(plan: plan)
-        let cronJobNames = try createCronJobs(plan: plan)
-        let entry = try registerProject(plan: plan)
+        // Minted before the cron jobs so each job's name can carry it
+        // (`ProjectCronAttribution`): the template tag alone is shared by
+        // every project installed from the same template.
+        let projectID = UUID()
+        let cronJobNames = try createCronJobs(plan: plan, projectID: projectID)
+        let entry = try registerProject(plan: plan, projectID: projectID)
         try writeLockFile(plan: plan, cronJobNames: cronJobNames)
 
         // Write the canonical .scarf/project.json now that all facets exist
@@ -231,7 +235,7 @@ struct ProjectTemplateInstaller: Sendable {
             .withLock(plan.memoryPath) {
                 let inspection = Self.inspectMemory(at: plan.memoryPath, transport: transport)
                 let existing = try Self.memoryText(of: inspection, at: plan.memoryPath)
-                let combined = existing + appendix
+                let combined = ProjectTemplateService.appendingMemoryEntry(appendix, to: existing)
                 guard let data = combined.data(using: .utf8) else {
                     throw ProjectTemplateError.requiredFileMissing("memory/append.md (non-UTF8)")
                 }
@@ -285,8 +289,11 @@ struct ProjectTemplateInstaller: Sendable {
     /// paused immediately afterwards. Returns the list of resolved job
     /// names, which is what the lock file records — we don't know the job
     /// ids without parsing the create output, but the name is enough to
-    /// find + remove them later.
-    nonisolated private func createCronJobs(plan: TemplateInstallPlan) throws -> [String] {
+    /// find + remove them later. Each name carries the new project's tag
+    /// after the template tag, which also makes it unique to this install.
+    nonisolated private func createCronJobs(
+        plan: TemplateInstallPlan, projectID: UUID
+    ) throws -> [String] {
         guard !plan.cronJobs.isEmpty else { return [] }
 
         var createdNames: [String] = []
@@ -310,6 +317,9 @@ struct ProjectTemplateInstaller: Sendable {
             : Set(HermesFileService(context: context).loadCronJobs().map(\.id))
 
         for job in plan.cronJobs {
+            let name = ProjectCronAttribution.templateJobName(
+                job.name, templateId: plan.manifest.id, projectID: projectID
+            )
             // ONE builder for every cron-create argv (M3): the capability
             // gates and the `--` end-of-options marker live in
             // `FleetApplyPlan.cronCreateArgs`, not in each call site.
@@ -317,7 +327,7 @@ struct ProjectTemplateInstaller: Sendable {
             // first: Hermes doesn't set a CWD for cron runs, so any relative
             // path in the prompt would resolve against the agent's own dir.
             let (args, droppedDeliverAll) = FleetApplyPlan.cronCreateArgs(
-                name: job.name,
+                name: name,
                 deliver: job.deliver,
                 repeatCount: job.repeatCount,
                 skills: job.skills ?? [],
@@ -337,7 +347,7 @@ struct ProjectTemplateInstaller: Sendable {
             guard exit == 0 else {
                 throw ProjectTemplateError.cronCreateFailed(job: job.name, output: output)
             }
-            createdNames.append(job.name)
+            createdNames.append(name)
         }
 
         // Diff the current job set against the snapshot we took before
@@ -370,18 +380,20 @@ struct ProjectTemplateInstaller: Sendable {
     /// a local stand-in) refuses instead of clobbering. Synchronous
     /// throughout: the lock's reentrancy is thread-local and must not span
     /// a suspension.
-    nonisolated private func registerProject(plan: TemplateInstallPlan) throws -> ProjectEntry {
+    nonisolated private func registerProject(
+        plan: TemplateInstallPlan, projectID: UUID
+    ) throws -> ProjectEntry {
         let service = ProjectDashboardService(context: context)
         guard let lock = RegistryWriteLock(context: context) else {
-            return try registerProjectLocked(plan: plan, service: service)
+            return try registerProjectLocked(plan: plan, projectID: projectID, service: service)
         }
         return try lock.withLock(path: context.paths.projectsRegistry) {
-            try registerProjectLocked(plan: plan, service: service)
+            try registerProjectLocked(plan: plan, projectID: projectID, service: service)
         }
     }
 
     nonisolated private func registerProjectLocked(
-        plan: TemplateInstallPlan, service: ProjectDashboardService
+        plan: TemplateInstallPlan, projectID: UUID, service: ProjectDashboardService
     ) throws -> ProjectEntry {
         let loaded = service.loadRegistryDetailed()
         var registry = loaded.registry
@@ -390,7 +402,7 @@ struct ProjectTemplateInstaller: Sendable {
         // waiting on lazy migration — fleet/portfolio only groups projects
         // whose id somebody actually asserted. The canonical `project.json`
         // is written after the lock file lands (see install()).
-        let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: UUID())
+        let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: projectID)
         registry.projects.append(entry)
         // Must throw on failure — silent failure here used to make the
         // installer return a valid entry while the registry on disk

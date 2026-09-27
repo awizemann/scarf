@@ -312,8 +312,14 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     let cronJobsToRemove: [(id: String, name: String)]
     /// Names recorded in the lock that we couldn't find in the current cron
     /// list (user-deleted, renamed, etc.). Shown in the sheet; skipped on
-    /// uninstall.
+    /// uninstall. Only ever filled from a cron list that was actually read.
     let cronJobsAlreadyGone: [String]
+    /// Names recorded in the lock whose job the plan could not pin down:
+    /// `jobs.json` exists but couldn't be read or decoded, or more than one
+    /// live job carries the name and none of them is clearly this
+    /// project's. NOT "already gone" — the job may well still be scheduled.
+    /// The uninstall looks again and reports any it still can't remove.
+    var cronJobsUnverified: [String] = []
 
     /// `true` if MEMORY.md still contains the template's begin/end markers
     /// and those bytes will be stripped on uninstall. `false` means no
@@ -358,6 +364,18 @@ nonisolated struct TemplateUninstallPlan: Sendable {
             + (memoryBlockPresent ? 1 : 0)
             + 1 // registry entry
     }
+}
+
+/// What an uninstall that ran to the end could not do. The uninstall keeps
+/// going past a failed step (a stray cron job is better than a stray cron
+/// job AND the files and secrets it pairs with), so "it didn't throw" is not
+/// "everything was removed" — these are the leftovers the success screen
+/// must name.
+struct TemplateUninstallOutcome: Sendable, Equatable {
+    /// One plain sentence per leftover, e.g. a cron job still scheduled.
+    var leftovers: [String] = []
+
+    nonisolated var isComplete: Bool { leftovers.isEmpty }
 }
 
 // MARK: - Errors

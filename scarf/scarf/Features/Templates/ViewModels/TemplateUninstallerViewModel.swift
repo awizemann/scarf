@@ -36,6 +36,11 @@ final class TemplateUninstallerViewModel {
         /// Project dir — echoed back so the success view can show the
         /// user where the orphan files now live.
         let projectDir: String
+        /// What the uninstall ran past but could not do — a cron job
+        /// `hermes cron remove` refused, a list it couldn't read. Empty on
+        /// a clean removal; otherwise the success view says "removed,
+        /// except: …" instead of claiming everything is gone.
+        var leftovers: [String] = []
     }
 
     let context: ServerContext
@@ -81,15 +86,17 @@ final class TemplateUninstallerViewModel {
         // Capture the preservation shape before executing — the plan
         // itself gets nil'd on success and we want the banner to show
         // whatever was true at the moment of removal.
-        let outcome = PreservedOutcome(
+        let preserved = PreservedOutcome(
             projectDirRemoved: plan.projectDirBecomesEmpty,
             preservedPaths: plan.extraProjectEntries,
             projectDir: plan.project.path
         )
         Task.detached { [weak self] in
             do {
-                try uninstaller.uninstall(plan: plan)
-                await MainActor.run { [weak self] in
+                let result = try uninstaller.uninstall(plan: plan)
+                var outcome = preserved
+                outcome.leftovers = result.leftovers
+                await MainActor.run { [weak self, outcome] in
                     guard let self else { return }
                     self.preservedOutcome = outcome
                     self.stage = .succeeded(removed: plan.project)

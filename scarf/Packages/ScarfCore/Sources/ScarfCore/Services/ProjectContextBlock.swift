@@ -407,13 +407,11 @@ public enum ProjectContextBlock {
         projectId: UUID,
         templateId: String?
     ) -> [String] {
-        let projPrefix = "[proj:\(projectId.uuidString)]"
-        let tmplPrefix = templateId.map { "[tmpl:\($0)]" }
         return jobs
             .filter { job in
-                if job.name.hasPrefix(projPrefix) { return true }
-                if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return true }
-                return false
+                ProjectCronAttribution.isAttributed(
+                    jobName: job.name, projectID: projectId, templateId: templateId
+                )
             }
             .map { job in
                 let scheduleDesc = job.schedule.display

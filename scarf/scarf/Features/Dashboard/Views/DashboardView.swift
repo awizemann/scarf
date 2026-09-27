@@ -27,9 +27,6 @@ struct DashboardView: View {
                     if let err = viewModel.lastReadError {
                         readErrorBanner(err)
                     }
-                    if !viewModel.hermesShadows.isEmpty {
-                        hermesShadowBanner(viewModel.hermesShadows)
-                    }
                     statusRow
                     statsSection
                     if !viewModel.modelUsage.isEmpty {
@@ -136,97 +133,6 @@ struct DashboardView: View {
     }
 
     // MARK: - Hermes shadow banner
-
-    /// One row per project that carries its own `<project>/.hermes/`
-    /// directory. Hermes' CLI binds to that as `$HERMES_HOME` when run
-    /// from inside, which silently shadows the user's global setup —
-    /// `hermes auth add nous` lands in the project, not in `~/.hermes/`,
-    /// and Scarf's global probes show "missing provider" until consolidated.
-    private func hermesShadowBanner(_ shadows: [ProjectHermesShadowDetector.Shadow]) -> some View {
-        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-            HStack(alignment: .top, spacing: ScarfSpace.s2) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(ScarfColor.warning)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Project-local Hermes home shadowing global setup")
-                        .scarfStyle(.bodyEmph)
-                        .foregroundStyle(ScarfColor.foregroundPrimary)
-                    Text("These projects carry their own `.hermes/` directory. Hermes' CLI uses the closest one as `$HERMES_HOME` when run from inside the project, so credentials and config written there don't show up in your global Hermes setup. Consolidate to clear this warning.")
-                        .scarfStyle(.footnote)
-                        .foregroundStyle(ScarfColor.foregroundMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-            }
-            ForEach(shadows) { shadow in
-                shadowRow(shadow)
-            }
-        }
-        .padding(ScarfSpace.s3)
-        .background(
-            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                        .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
-                )
-        )
-    }
-
-    private func shadowRow(_ shadow: ProjectHermesShadowDetector.Shadow) -> some View {
-        HStack(alignment: .top, spacing: ScarfSpace.s2) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(shadow.projectName)
-                    .scarfStyle(.bodyEmph)
-                Text(shadow.shadowPath)
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
-                    .textSelection(.enabled)
-                HStack(spacing: 6) {
-                    if shadow.hasAuthJSON {
-                        Text("auth.json present")
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(ScarfColor.warning.opacity(0.20))
-                            .clipShape(Capsule())
-                    }
-                    if shadow.hasStateDB {
-                        Text("state.db present")
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(ScarfColor.warning.opacity(0.20))
-                            .clipShape(Capsule())
-                    }
-                }
-            }
-            Spacer()
-            Button("Copy fix command") {
-                Task { @MainActor in
-                    let home = await viewModel.context.resolvedUserHome() + "/.hermes"
-                    if let cmd = ProjectHermesShadowDetector.consolidationCommand(
-                        for: shadow,
-                        hermesHome: home
-                    ) {
-                        let pb = NSPasteboard.general
-                        pb.clearContents()
-                        pb.setString(cmd, forType: .string)
-                    }
-                }
-            }
-            .buttonStyle(ScarfSecondaryButton())
-            .controlSize(.small)
-            .help(shadow.hasAuthJSON
-                  ? "Copies a one-liner that adds this project's auth.json to your global ~/.hermes/ only if you don't already have one (an existing global auth.json is never overwritten), then renames the shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so it stops binding — the project's copy stays readable in that backup folder. Run it on the remote, then refresh the Dashboard."
-                  : "Copies a one-liner that renames this project's shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so Hermes' CLI stops binding to it as $HERMES_HOME. Run it on the remote, then refresh the Dashboard.")
-        }
-        .padding(ScarfSpace.s2)
-        .background(
-            RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.06))
-        )
-    }
 
     // MARK: - Status row
 
