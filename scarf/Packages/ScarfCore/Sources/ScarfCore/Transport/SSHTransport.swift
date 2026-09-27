@@ -607,7 +607,12 @@ public struct SSHTransport: ServerTransport {
         let mtimeSecs = TimeInterval(parts[1]) ?? 0
         let typeStr = parts.count == 3 ? parts[2].lowercased() : ""
         let isDir = typeStr.contains("directory")
-        return FileStat(size: size, mtime: Date(timeIntervalSince1970: mtimeSecs), isDirectory: isDir)
+        // GNU `%F` says "symbolic link", BSD `%HT` "Symbolic Link".
+        let isLink = typeStr.contains("symbolic link")
+        return FileStat(
+            size: size, mtime: Date(timeIntervalSince1970: mtimeSecs),
+            isDirectory: isDir, isSymbolicLink: isLink
+        )
     }
 
     public func listDirectory(_ path: String) throws -> [String] {

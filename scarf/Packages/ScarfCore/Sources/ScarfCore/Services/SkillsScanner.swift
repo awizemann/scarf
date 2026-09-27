@@ -35,7 +35,10 @@ import os
 /// name (the lock-file / CLI name). `category` is everything between
 /// `skills/` and the skill directory — the same thing `--category` means
 /// at install time and what `skills update` derives from the install path
-/// (`skills_hub.py:889-892`) — and is empty for a flat skill.
+/// (`skills_hub.py:889-892`) — and is empty for a flat skill. (Hermes's
+/// own `skills list` shows only the first segment, `_get_category_from_path`
+/// at `tools/skills_tool.py:126-137`; the full path is kept here on purpose
+/// so a deep skill's folder is visible and the groups don't merge.)
 ///
 /// Synchronous + transport-backed: callers running on the MainActor
 /// should wrap in `Task.detached` (the iOS pattern) since SFTP `stat` /
@@ -98,7 +101,17 @@ public enum SkillsScanner: Sendable {
             let stats = transport.statAll(paths) ?? Dictionary(
                 uniqueKeysWithValues: paths.compactMap { p in transport.stat(p).map { (p, $0) } }
             )
-            let isDir: (String) -> Bool = { stats[dir + "/" + $0]?.isDirectory == true }
+            // Hermes walks with `followlinks=True`, and real hosts symlink
+            // skills in (`skills/swiftdata -> ../../.agents/skills/swiftdata`).
+            // Local and SSH stat describe the link, so a link is followed by
+            // listing it — which resolves on both — and only links pay that
+            // extra round trip.
+            let isDir: (String) -> Bool = { entry in
+                guard let info = stats[dir + "/" + entry] else { return false }
+                if info.isDirectory { return true }
+                return info.isSymbolicLink
+                    && (try? transport.listDirectory(dir + "/" + entry)) != nil
+            }
             let hasSkillMD = entries.contains { $0 == "SKILL.md" && !isDir($0) }
 
             if hasSkillMD, let name = relative.last {

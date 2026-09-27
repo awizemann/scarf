@@ -109,7 +109,8 @@ struct PluginsView: View {
                 args: ["plugins", "list", "--json"],
                 stdin: nil,
                 timeout: 45
-            ), let entries = HermesPluginList.parseJSON(result.stdoutString) {
+            ), result.exitCode == 0,
+               let entries = HermesPluginList.parseJSON(result.stdoutString) {
                 rows = entries.map { entry in
                     PluginRow(
                         name: entry.name,
@@ -142,7 +143,9 @@ struct PluginsView: View {
     }
 
     private struct PluginRow: Identifiable, Sendable {
-        var id: String { name + "|" + path }
+        // Names can repeat in the `--json` roster (a user plugin and a
+        // bundled one), and that path carries no directory to tell them apart.
+        let id = UUID()
         let name: String
         let version: String
         let source: String

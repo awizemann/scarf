@@ -226,8 +226,12 @@ public struct LocalTransport: ServerTransport {
         }
         let size = (attrs[.size] as? Int64) ?? Int64((attrs[.size] as? Int) ?? 0)
         let mtime = (attrs[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
-        let isDir = (attrs[.type] as? FileAttributeType) == .typeDirectory
-        return FileStat(size: size, mtime: mtime, isDirectory: isDir)
+        let type = attrs[.type] as? FileAttributeType
+        return FileStat(
+            size: size, mtime: mtime,
+            isDirectory: type == .typeDirectory,
+            isSymbolicLink: type == .typeSymbolicLink
+        )
     }
 
     public func listDirectory(_ path: String) throws -> [String] {

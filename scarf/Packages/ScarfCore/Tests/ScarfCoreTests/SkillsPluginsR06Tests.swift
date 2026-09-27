@@ -127,6 +127,54 @@ struct SkillsPluginsR06Tests {
         #expect(Self.scan(home).map(\.id) == ["_org/acme/deploy"])
     }
 
+    /// Hermes walks with `followlinks=True`; real hosts symlink skills in
+    /// from another tree. LocalTransport's stat describes the link itself,
+    /// so the walk has to follow it on its own.
+    @Test("symlinked skills and symlinked category folders are followed")
+    func symlinksAreFollowed() throws {
+        let home = try Self.scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.put("elsewhere/swiftdata/SKILL.md", in: home, Self.skillMD("swiftdata"))
+        try Self.put("elsewhere/pack/alpha/SKILL.md", in: home, Self.skillMD("alpha"))
+        try Self.put("skills/real/SKILL.md", in: home, Self.skillMD("real"))
+        // A link to a plain file is still a file.
+        try Self.put("elsewhere/notes.md", in: home)
+        let fm = FileManager.default
+        try fm.createSymbolicLink(atPath: home.path + "/skills/swiftdata",
+                                  withDestinationPath: "../elsewhere/swiftdata")
+        try fm.createSymbolicLink(atPath: home.path + "/skills/pack",
+                                  withDestinationPath: "../elsewhere/pack")
+        try fm.createSymbolicLink(atPath: home.path + "/skills/real/notes.md",
+                                  withDestinationPath: "../../elsewhere/notes.md")
+
+        let skills = Self.scan(home)
+        #expect(skills.map(\.id).sorted() == ["pack/alpha", "real", "swiftdata"])
+        #expect(skills.first { $0.id == "real" }?.files == ["SKILL.md", "notes.md"])
+    }
+
+    @Test("a symlink loop ends at the depth cap instead of spinning")
+    func symlinkLoopTerminates() throws {
+        let home = try Self.scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.put("skills/cat/leaf/SKILL.md", in: home, Self.skillMD("leaf"))
+        try FileManager.default.createSymbolicLink(
+            atPath: home.path + "/skills/cat/again", withDestinationPath: ".")
+        let skills = Self.scan(home)
+        #expect(skills.contains { $0.id == "cat/leaf" })
+        #expect(skills.allSatisfy { $0.id.split(separator: "/").count <= SkillsScanner.maxDepth })
+    }
+
+    @Test("SSH stat replies mark a symbolic link as one")
+    func sshStatReportsSymlinks() throws {
+        let marker = SSHTransport.statAllMarker
+        let stdout = "\(marker)1 30 1700000000 symbolic link\n\(marker)2 4096 1700000000 directory\n"
+        let parsed = try #require(SSHTransport.parseStatAllReply(stdout, paths: ["/l", "/d"]))
+        #expect(parsed["/l"]?.isSymbolicLink == true)
+        #expect(parsed["/l"]?.isDirectory == false)
+        #expect(parsed["/d"]?.isSymbolicLink == false)
+        #expect(parsed["/d"]?.isDirectory == true)
+    }
+
     @Test("guard artifacts stay out of a flat skill's files")
     func guardArtifactsFlat() throws {
         let home = try Self.scratchHome()
