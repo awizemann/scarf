@@ -16,6 +16,7 @@ struct MCPServerDetailView: View {
     var onSignIn: () -> Void = {}
 
     @State private var showDeleteConfirm = false
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
         ScrollView {
@@ -245,11 +246,13 @@ struct MCPServerDetailView: View {
         )
     }
 
-    /// `include: []` is a whitelist of nothing: Hermes registers no tools
-    /// from this server, which is the opposite of "(all)".
+    /// `include: []` is a whitelist of nothing from Hermes v0.20.6: Hermes
+    /// registers no tools from this server, the opposite of "(all)". Older
+    /// hosts ignored an empty include, so there it still reads "(all)".
     private var includeSummary: String {
         if !server.toolsInclude.isEmpty { return server.toolsInclude.joined(separator: ", ") }
-        return server.toolsIncludeIsExplicit
+        let emptyIsWhitelist = capabilitiesStore?.capabilities.hasMCPEmptyIncludeWhitelist == true
+        return server.toolsIncludeIsExplicit && emptyIsWhitelist
             ? String(localized: "(none — no tools registered)")
             : String(localized: "(all)")
     }

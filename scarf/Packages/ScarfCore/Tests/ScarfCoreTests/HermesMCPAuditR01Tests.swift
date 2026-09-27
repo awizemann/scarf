@@ -80,6 +80,13 @@ import Foundation
         #expect(!HermesCapabilities.empty.hasMCPOAuthAddNeedsDirectWrite)
     }
 
+    /// `include: []` became "register nothing" at v0.20.6; before that an
+    /// empty include was ignored (`if include_set:`).
+    @Test func emptyIncludeWhitelistFloorIsV0206() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").hasMCPEmptyIncludeWhitelist)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasMCPEmptyIncludeWhitelist)
+    }
+
     // MARK: S09-F3 — float timeouts
 
     @Test func secondsFormatKeepsWholeNumbersIntegral() {
@@ -125,5 +132,18 @@ import Foundation
         for ct in [1.0, 30, 45.5, 60, 300] {
             #expect(HermesMCPTestVerdict.timeout(connectTimeout: ct) > max(1, ct) + 10)
         }
+    }
+
+    // MARK: Linear preset
+
+    /// The preset points where Hermes's own catalog manifest does, so the
+    /// preset and "Browse Catalog… → linear" create the same server.
+    @Test func linearPresetMatchesTheCatalogEndpoint() throws {
+        let preset = try #require(MCPServerPreset.gallery.first { $0.id == "linear" })
+        let entry = try #require(OptionalMCPCatalog.entries.first { $0.name == "linear" })
+        #expect(preset.url == "https://mcp.linear.app/mcp")
+        #expect(preset.url == entry.url)
+        #expect(preset.transport == .http)
+        #expect(preset.auth == "oauth")
     }
 }

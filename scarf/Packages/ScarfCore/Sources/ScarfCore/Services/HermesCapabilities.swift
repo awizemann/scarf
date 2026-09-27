@@ -966,6 +966,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// catalog` lines at every tag since.
     public var hasMCPOAuthAddNeedsDirectWrite: Bool { atLeastSemver(0, 17, 0) }
 
+    /// `tools.include: []` is a whitelist of NOTHING. From v0.20.6
+    /// (v2026.8.27) `_make_tool_filter` treats any list/string include as
+    /// active (`include_active = isinstance(include_raw, …)`); through
+    /// v0.20.5 it tested `if include_set:`, so an empty include meant "all
+    /// tools, minus exclude" (`tools/mcp_tool.py:6789` @ v2026.8.19). Gates
+    /// only how Scarf DESCRIBES such an entry; the file is never rewritten
+    /// by it.
+    public var hasMCPEmptyIncludeWhitelist: Bool { atLeastSemver(0, 20, 6) }
+
     // MARK: v0.18 (v2026.7.1) flags
     //
     // v0.18's client-relevant surface is deliberately thin: the

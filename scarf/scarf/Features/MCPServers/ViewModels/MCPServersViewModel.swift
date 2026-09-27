@@ -326,6 +326,7 @@ final class MCPServersViewModel {
             return base
         }()
         let isOAuthDirect = preset.auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
             let addResult: (exitCode: Int32, output: String)
             switch preset.transport {
@@ -346,7 +347,7 @@ final class MCPServersViewModel {
                     fileService: fileService, name: name, url: preset.url ?? "",
                     sse: false, catalogIdentifier: nil,
                     defaultEnabledTools: [], defaultExcludedTools: [],
-                    overwriteConfirmed: overwriteConfirmed
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
                 )
             case .http:
                 addResult = fileService.addMCPServerHTTP(
@@ -405,12 +406,14 @@ final class MCPServersViewModel {
         catalogIdentifier: String?,
         defaultEnabledTools: [String],
         defaultExcludedTools: [String],
-        overwriteConfirmed: Bool
+        overwriteConfirmed: Bool,
+        capabilities: HermesCapabilities
     ) -> (exitCode: Int32, output: String) {
         let result = fileService.addMCPServerOAuth(
             name: name, url: url, sse: sse,
             catalogIdentifier: catalogIdentifier,
-            overwriteConfirmed: overwriteConfirmed
+            overwriteConfirmed: overwriteConfirmed,
+            capabilities: capabilities
         )
         // `mcp install` already applied the manifest's own tool defaults.
         if result.exitCode == 0, !result.installedViaCatalog {
@@ -496,6 +499,7 @@ final class MCPServersViewModel {
         let fileService = self.fileService
         let isOAuthDirect = transport == .http
             && auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
             let result: (exitCode: Int32, output: String)
             switch transport {
@@ -505,7 +509,7 @@ final class MCPServersViewModel {
                     catalogIdentifier: catalogIdentifier,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
-                    overwriteConfirmed: overwriteConfirmed
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
                 )
             case .stdio:
                 result = fileService.addMCPServerStdio(
@@ -577,6 +581,7 @@ final class MCPServersViewModel {
         }
         let fileService = self.fileService
         let isOAuthDirect = auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
             let result = isOAuthDirect
                 ? Self.runOAuthAdd(
@@ -584,7 +589,7 @@ final class MCPServersViewModel {
                     catalogIdentifier: nil,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
-                    overwriteConfirmed: overwriteConfirmed
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
                 )
                 : fileService.addMCPServerSSE(
                     name: name, url: url,

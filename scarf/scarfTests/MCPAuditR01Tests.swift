@@ -90,7 +90,14 @@ enum HermesReference {
     /// The P0: Scarf writes a blocklist, Scarf reads it back, Hermes reads
     /// the same file the same way. Before the fix the read-back put
     /// `delete_repo` in the INCLUDE list and lost `resources: false`.
-    @Test func blocklistRoundTripsThroughScarfAndHermes() throws {
+    @Test func blocklistRoundTripsThroughScarfAndHermes() throws { try blocklistRoundTripsThroughScarfAndHermesBody(checkHermes: false) }
+
+    /// The Hermes half: runs the tagged reference's own parser. Shown as
+    /// skipped, not passed, on a machine without the reference.
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func blocklistRoundTripsThroughScarfAndHermesInHermes() throws { try blocklistRoundTripsThroughScarfAndHermesBody(checkHermes: true) }
+
+    private func blocklistRoundTripsThroughScarfAndHermesBody(checkHermes: Bool) throws {
         let (home, service) = try Self.home(with: Self.baseYAML)
         defer { home.cleanup() }
         #expect(service.updateMCPToolFilters(
@@ -105,7 +112,7 @@ enum HermesReference {
         // No bare `include:` line is written any more.
         #expect(!(try Self.read(home)).contains("include:"))
 
-        guard HermesReference.available else { return }
+        guard checkHermes else { return }
         let verdict = try HermesReference.toolFilterVerdict(
             home: home.path, probeTools: ["delete_repo", "read_file", "list_issues"])
         #expect(verdict["gh"]?["registers"] as? [String] == ["read_file", "list_issues"])
@@ -116,7 +123,14 @@ enum HermesReference {
     /// The layout Scarf's OLD writer produced — bare `include:` followed by
     /// the exclude list and the two switches — must now read correctly,
     /// because that is what is already sitting in users' config files.
-    @Test func legacyScarfLayoutReadsAsTheBlocklistHermesSees() throws {
+    @Test func legacyScarfLayoutReadsAsTheBlocklistHermesSees() throws { try legacyScarfLayoutReadsAsTheBlocklistHermesSeesBody(checkHermes: false) }
+
+    /// The Hermes half: runs the tagged reference's own parser. Shown as
+    /// skipped, not passed, on a machine without the reference.
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func legacyScarfLayoutReadsAsTheBlocklistHermesSeesInHermes() throws { try legacyScarfLayoutReadsAsTheBlocklistHermesSeesBody(checkHermes: true) }
+
+    private func legacyScarfLayoutReadsAsTheBlocklistHermesSeesBody(checkHermes: Bool) throws {
         let yaml = """
         mcp_servers:
           gh:
@@ -138,7 +152,7 @@ enum HermesReference {
         #expect(server.resourcesEnabled == false)
         #expect(server.promptsEnabled == false)
 
-        guard HermesReference.available else { return }
+        guard checkHermes else { return }
         let verdict = try HermesReference.toolFilterVerdict(
             home: home.path, probeTools: ["delete_repo", "admin_x", "read_file"])
         #expect(verdict["gh"]?["registers"] as? [String] == ["read_file"])
@@ -147,7 +161,14 @@ enum HermesReference {
     /// Every spelling Hermes itself writes or accepts: PyYAML's indentless
     /// lists, IndentDumper's indented ones, flow lists, `[]`, null and a
     /// bare string (`_normalize_name_filter` takes a str as one entry).
-    @Test func includeAndExcludeSpellingsMatchNormalizeNameFilter() throws {
+    @Test func includeAndExcludeSpellingsMatchNormalizeNameFilter() throws { try includeAndExcludeSpellingsMatchNormalizeNameFilterBody(checkHermes: false) }
+
+    /// The Hermes half: runs the tagged reference's own parser. Shown as
+    /// skipped, not passed, on a machine without the reference.
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func includeAndExcludeSpellingsMatchNormalizeNameFilterInHermes() throws { try includeAndExcludeSpellingsMatchNormalizeNameFilterBody(checkHermes: true) }
+
+    private func includeAndExcludeSpellingsMatchNormalizeNameFilterBody(checkHermes: Bool) throws {
         let yaml = """
         mcp_servers:
           indentless:
@@ -181,7 +202,7 @@ enum HermesReference {
         #expect(servers["nulls"]?.toolsExclude == ["single_tool"])
         #expect(servers["nulls"]?.resourcesEnabled == false)
 
-        guard HermesReference.available else { return }
+        guard checkHermes else { return }
         let verdict = try HermesReference.toolFilterVerdict(
             home: home.path, probeTools: ["a", "c", "single_tool", "z"])
         #expect(verdict["indentless"]?["registers"] as? [String] == ["a"])
@@ -201,6 +222,83 @@ enum HermesReference {
         let server = try #require(service.loadMCPServers().first)
         #expect(server.toolsIncludeIsExplicit)
         #expect(server.toolsInclude.isEmpty)
+    }
+
+    /// Keys under `tools:` that Scarf does not model survive a rewrite,
+    /// with their nested lines, and the modelled four are still replaced.
+    @Test func toolsRewriteKeepsUnmodelledChildKeys() throws { try toolsRewriteKeepsUnmodelledChildKeysBody(checkHermes: false) }
+
+    /// The Hermes half: runs the tagged reference's own parser. Shown as
+    /// skipped, not passed, on a machine without the reference.
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func toolsRewriteKeepsUnmodelledChildKeysInHermes() throws { try toolsRewriteKeepsUnmodelledChildKeysBody(checkHermes: true) }
+
+    private func toolsRewriteKeepsUnmodelledChildKeysBody(checkHermes: Bool) throws {
+        let yaml = """
+        mcp_servers:
+          gh:
+            url: https://example.com/mcp
+            tools:
+              include:
+              - old_a
+              # keep this note
+              future_flag: true
+              future_list:
+              - x
+              - y
+              exclude: [old_b]
+              future_map:
+                deep: 1
+              resources: true
+            enabled: true
+        """
+        let (home, service) = try Self.home(with: yaml)
+        defer { home.cleanup() }
+        #expect(service.updateMCPToolFilters(
+            name: "gh", include: [], exclude: ["delete_repo"], resources: false, prompts: true))
+        let after = try Self.read(home)
+        #expect(after.contains("""
+            tools:
+              exclude:
+                - delete_repo
+              resources: false
+              prompts: true
+              # keep this note
+              future_flag: true
+              future_list:
+              - x
+              - y
+              future_map:
+                deep: 1
+            enabled: true
+        """))
+        #expect(!after.contains("old_a"))
+        #expect(!after.contains("old_b"))
+
+        // Scarf reads the new filters and ignores the unmodelled keys.
+        let server = try #require(service.loadMCPServers().first)
+        #expect(server.toolsInclude.isEmpty)
+        #expect(server.toolsExclude == ["delete_repo"])
+        #expect(server.resourcesEnabled == false)
+        #expect(server.enabled)
+
+        // A second rewrite is stable.
+        #expect(service.updateMCPToolFilters(
+            name: "gh", include: [], exclude: ["delete_repo"], resources: false, prompts: true))
+        #expect(try Self.read(home) == after)
+
+        guard checkHermes else { return }
+        let code = """
+        import json
+        from hermes_cli.mcp_config import _get_mcp_servers
+        print(json.dumps(_get_mcp_servers()["gh"]["tools"]))
+        """
+        let tools = try HermesReference.json(code, home: home.path) as? [String: Any]
+        #expect(tools?["exclude"] as? [String] == ["delete_repo"])
+        #expect(tools?["future_flag"] as? Bool == true)
+        #expect(tools?["future_list"] as? [String] == ["x", "y"])
+        #expect((tools?["future_map"] as? [String: Any])?["deep"] as? Int == 1)
+        #expect(tools?["include"] == nil)
     }
 
     /// The editor no longer rewrites the tools block on every save: changing
@@ -328,6 +426,56 @@ enum HermesReference {
         #expect(refuses("mcp_servers:\n\ta:\n\t\turl: x\n"))              // tabs
         #expect(refuses("mcp_servers:\n  n:\n    url: x\n"))              // exists, no overwrite
         #expect(refuses("model: x\n", replacing: true))                   // nothing to replace
+        // Review R01: a duplicated entry name, with or without an entry in
+        // between, is refused rather than guessed at (this used to build an
+        // inverted range and trap).
+        #expect(refuses("mcp_servers:\n  n:\n    url: a\n  m:\n    url: b\n  n:\n    url: c\n", replacing: true))
+        #expect(refuses("mcp_servers:\n  n:\n    url: a\n  n:\n    url: c\n", replacing: true))
+        // A block key spelled any other way, or twice, would make a second
+        // block that hides the first from Hermes.
+        #expect(refuses("\"mcp_servers\":\n  a:\n    url: x\n"))
+        #expect(refuses("\u{FEFF}mcp_servers:\n  a:\n    url: x\n"))
+        #expect(refuses("mcp_servers:\n  a:\n    url: x\nmcp_servers:\n  b:\n    url: y\n"))
+    }
+
+    /// Review R01: a managed install refuses config writes in `save_config`;
+    /// the direct write checks the same marker and writes nothing.
+    @Test func oauthAddRefusesAManagedInstall() throws {
+        let (home, service) = try Self.home(with: Self.baseYAML + "\n")
+        defer { home.cleanup() }
+        try Data().write(to: URL(fileURLWithPath: home.context.paths.managedMarker))
+        let before = try Self.read(home)
+        let result = service.addMCPServerOAuth(
+            name: "linear", url: "https://mcp.linear.app/mcp", sse: false,
+            catalogIdentifier: nil,
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)"))
+        #expect(result.exitCode != 0)
+        #expect(try Self.read(home) == before)
+    }
+
+    /// Review R01: a blank include item keeps whitelist mode but names no
+    /// tool, so an untouched editor sees no change and writes nothing.
+    @Test @MainActor func blankIncludeItemIsNotATool() throws {
+        let yaml = """
+        mcp_servers:
+          a:
+            command: x
+            tools:
+              include:
+              -
+          b:
+            command: x
+            tools:
+              include: ''
+        """
+        let (home, service) = try Self.home(with: yaml)
+        defer { home.cleanup() }
+        for server in service.loadMCPServers() {
+            #expect(server.toolsInclude.isEmpty)
+            #expect(server.toolsIncludeIsExplicit)
+            let editor = MCPServerEditorViewModel(server: server, context: home.context)
+            #expect(!editor.toolFiltersChanged)
+        }
     }
 
     @Test func oauthEntryReplacesAnExistingEntryWholesale() throws {
@@ -350,7 +498,14 @@ enum HermesReference {
     /// Scarf writes it, Scarf reads it, and Hermes loads it as the same
     /// entry `mcp add --auth oauth` would have saved, with no security
     /// warnings.
-    @Test func oauthEntryRoundTripsThroughScarfAndHermes() throws {
+    @Test func oauthEntryRoundTripsThroughScarfAndHermes() throws { try oauthEntryRoundTripsThroughScarfAndHermesBody(checkHermes: false) }
+
+    /// The Hermes half: runs the tagged reference's own parser. Shown as
+    /// skipped, not passed, on a machine without the reference.
+    @Test(.enabled(if: HermesReference.available, "needs ~/.hermes/hermes-agent-v0215/.venv"))
+    func oauthEntryRoundTripsThroughScarfAndHermesInHermes() throws { try oauthEntryRoundTripsThroughScarfAndHermesBody(checkHermes: true) }
+
+    private func oauthEntryRoundTripsThroughScarfAndHermesBody(checkHermes: Bool) throws {
         let (home, service) = try Self.home(with: Self.baseYAML + "\n")
         defer { home.cleanup() }
         let result = service.writeMCPServerOAuthEntry(
@@ -364,7 +519,7 @@ enum HermesReference {
         #expect(linear.url == "https://mcp.linear.app/sse")
         #expect(linear.enabled)
 
-        guard HermesReference.available else { return }
+        guard checkHermes else { return }
         let code = """
         import json
         from hermes_cli.mcp_config import _get_mcp_servers

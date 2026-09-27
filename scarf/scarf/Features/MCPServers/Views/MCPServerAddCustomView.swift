@@ -155,7 +155,9 @@ struct MCPServerAddCustomView: View {
         }
         pendingDefaultExcludedTools = entry.defaultExcludedTools
         pendingDefaultEnabledTools = entry.defaultEnabledTools
-        appliedCatalogEntryName = entry.name
+        // Only OAuth entries go through `mcp install`; an API-key entry
+        // switched to OAuth in the form is a custom OAuth server.
+        appliedCatalogEntryName = entry.authKind == .oauth ? entry.name : nil
         appliedCatalogIdentity = currentIdentity
     }
 
@@ -292,7 +294,7 @@ struct MCPServerAddCustomView: View {
                 apiKey: apiKey,
                 defaultEnabledTools: pendingDefaultEnabledTools,
                 defaultExcludedTools: pendingDefaultExcludedTools,
-                catalogIdentifier: appliedCatalogEntryName
+                catalogIdentifier: auth == "oauth" ? appliedCatalogEntryName : nil
             )
         case .sse:
             viewModel.addCustomSSE(
