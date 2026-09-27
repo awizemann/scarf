@@ -180,17 +180,17 @@ import ScarfCore
         """
         let sections = HealthViewModel.parseOutputStatic(doctor)
         let python = try Self.section(sections, "Python Environment")
-        #expect(python.checks.map(\.status) == [.ok, .warning])
+        try #require(python.checks.map(\.status) == [.ok, .warning])
         #expect(python.checks[1].detail?.contains("SQLite source id") == true)
         let config = try Self.section(sections, "Configuration Files")
-        #expect(config.checks.count == 1)
+        try #require(config.checks.count == 1)
         #expect(config.checks[0].status == .error)
         #expect(config.checks[0].detail?.contains("Run 'hermes setup'") == true)
         let tools = try Self.section(sections, "External Tools")
-        #expect(tools.checks.count == 1)
+        try #require(tools.checks.count == 1)
         #expect(tools.checks[0].detail?.contains("npx playwright install") == true)
         let connectivity = try Self.section(sections, "API Connectivity")
-        #expect(connectivity.checks.map(\.status) == [.ok, .warning])
+        try #require(connectivity.checks.map(\.status) == [.ok, .warning])
         #expect(connectivity.checks[0].label.hasPrefix("IPv6 route"))
     }
 
