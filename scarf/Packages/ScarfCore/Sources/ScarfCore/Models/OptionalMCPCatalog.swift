@@ -4,12 +4,13 @@ import Foundation
 /// (`optional-mcps/<name>/manifest.yaml` in hermes-agent). Hermes's own
 /// catalog grew from 6 to 20 entries in v0.20.4 (blender was removed), and
 /// to 65 entries in v0.21.0.
-/// Scarf has no `hermes mcp install` equivalent — this roster feeds a
-/// minimal picker in the add-server flow that prefills
-/// `MCPServerAddCustomView`'s fields; installing local (stdio git-clone)
-/// entries like `n8n` still requires the user to fill in the command
-/// themselves after prefill, since Scarf doesn't run the catalog's
-/// `install:` bootstrap steps.
+/// This roster feeds a minimal picker in the add-server flow that prefills
+/// `MCPServerAddCustomView`'s fields. An OAuth entry left unedited is
+/// installed with `hermes mcp install <name>` on Hermes v0.17+ (S09-F2,
+/// `HermesCapabilities.hasMCPOAuthAddNeedsDirectWrite`); every other entry
+/// is added through `hermes mcp add` from the prefilled form. Local (stdio
+/// git-clone) entries like `n8n` still need the command filled in by hand,
+/// since Scarf doesn't run the catalog's `install:` bootstrap steps.
 public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     /// How the catalog entry authenticates. Mirrors the manifest's `auth.type`.
     public enum AuthKind: String, Sendable, Equatable {
