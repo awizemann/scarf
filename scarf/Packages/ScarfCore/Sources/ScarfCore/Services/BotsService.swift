@@ -393,7 +393,13 @@ public struct BotsService: Sendable {
             case .create(let name, let cloneFrom, _, _, _):
                 return [name] + (cloneFrom.map { [$0] } ?? [])
             case .delete(let name): return [name]
-            case .rename(let from, let to): return [from, to]
+            case .rename(let from, let to):
+                // Renaming `default` sets a free-text display name, not a
+                // profile id (`rename_profile`, `hermes_cli/profiles.py:2255-2260`
+                // @ `v2026.9.24`), so `to` is not a name that must address a
+                // profile: "Assistant Prime" is a valid target there.
+                if from == HermesProfileScope.defaultProfileName { return [from] }
+                return [from, to]
             }
         }
     }

@@ -1776,6 +1776,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// identical to the last release.
     public var hasBotChatCreationCLI: Bool { isV0205OrLater }
 
+    /// `hermes profile rename default <text>` sets the default profile's
+    /// display name (free text, at most 64 characters) and keeps the id
+    /// `default` — `rename_profile` @ `v2026.8.19` onward
+    /// (`hermes_cli/profiles.py:2255-2260` @ `v2026.9.24`). At `v2026.8.18`
+    /// (0.20.4) the same call raises "Cannot rename the default profile."
+    public var hasDefaultProfileDisplayNameRename: Bool { isV0205OrLater }
+
     // MARK: v0.21 (v2026.8.31) flags
     //
     // v0.21 ("Pantheon") is an additive cycle. Note the intermediate

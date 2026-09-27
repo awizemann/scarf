@@ -1199,6 +1199,10 @@ final class BotsViewModel: OutcomeMessageHosting {
     /// is not checked as a profile id, the selection stays on `default`, and
     /// nothing keyed by the profile name is dropped: no directory moved.
     private func renameDefaultDisplayName(to displayName: String) {
+        guard capabilities.hasDefaultProfileDisplayNameRename else {
+            errorMessage = String(localized: "This Hermes version can't rename the default profile. Setting its display name needs Hermes v0.20.5 or newer.")
+            return
+        }
         guard !displayName.isEmpty else {
             errorMessage = String(localized: "Display name can't be empty.")
             return
