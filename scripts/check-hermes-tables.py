@@ -56,6 +56,16 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      This is the chat's "No AI provider credentials" hint (S15-F4). FAILs
      both ways; a table whose shape changed exits; a plugin registration it
      can't read statically is a WARN, like lane 4.
+  7. OptionalMCPCatalog.entries  <->  optional-mcps/*/manifest.yaml. Scarf's
+     "Browse Catalog…" roster is a hand-copied snapshot of Hermes's catalog;
+     every entry's name, description, transport type and url, auth type,
+     install-time `auth.env` names (Scarf's `installPrompts`) and
+     `tools.default_enabled`/`default_excluded` must match its manifest,
+     and the two name sets must be equal. FAILs both ways (a missing entry
+     hides a catalog server; a stale one offers an install that fails —
+     T4-F1: asana's retired endpoint, n8n's retired bridge). The manifests
+     are read with a small YAML-subset reader (no PyYAML dependency); a
+     manifest it can't read is a hard error, not a skip.
 
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
@@ -99,6 +109,9 @@ CREDENTIALS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift")
 LOCAL_PROVIDERS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift")
+MCP_CATALOG_SWIFT = os.path.join(
+    REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift")
+OPTIONAL_MCPS_DIR = "optional-mcps"
 DEFAULT_HERMES = os.environ.get(
     "HERMES_SRC", os.path.expanduser("~/.hermes/hermes-agent"))
 MODELS_DEV_CACHE = os.path.expanduser("~/.hermes/models_dev_cache.json")
@@ -604,6 +617,196 @@ def parse_provider_env_vars(src):
     return env_vars, builtin_ids, warn_plugins
 
 
+def parse_manifest_yaml(text, where):
+    """The subset of YAML the optional-mcps manifests use, as nested dicts/lists.
+
+    Block mappings, block sequences (of scalars or of mappings), `>`/`|`
+    block scalars (with `-`/`+` chomping), plain / single- / double-quoted
+    scalars, `true`/`false`/integers, and full-line or ` #` comments. Anything
+    else (flow `[...]`/`{...}` collections, anchors, tags) exits: a manifest
+    this cannot read must not pass as an empty one.
+    """
+    lines = text.splitlines()
+
+    def strip_comment(value):
+        if value[:1] in ("'", '"'):
+            return value
+        cut = re.search(r"\s#", value)
+        return value[:cut.start()].rstrip() if cut else value
+
+    def scalar(raw):
+        raw = strip_comment(raw.strip())
+        if raw == "":
+            return None
+        if raw[0] in "[{&*!|>":
+            sys.exit(f"error: {where}: unsupported YAML construct {raw!r} — teach lane 7")
+        if raw[0] == '"':
+            return json.loads(raw)
+        if raw[0] == "'":
+            return raw[1:-1].replace("''", "'")
+        if raw in ("true", "false"):
+            return raw == "true"
+        if re.fullmatch(r"-?\d+", raw):
+            return int(raw)
+        return raw
+
+    items = []  # (indent, text) of significant lines, keeping block scalars raw
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        items.append((indent, line.strip(), i))
+        i += 1
+
+    def block_scalar(style, start_index, parent_indent):
+        body, j = [], start_index + 1
+        while j < len(lines):
+            ln = lines[j]
+            if ln.strip() and len(ln) - len(ln.lstrip(" ")) <= parent_indent:
+                break
+            body.append(ln)
+            j += 1
+        while body and not body[-1].strip():
+            body.pop()
+        pad = min((len(b) - len(b.lstrip(" ")) for b in body if b.strip()), default=0)
+        body = [b[pad:] for b in body]
+        if style.startswith(">"):
+            text_ = " ".join(b.strip() for b in body if b.strip())
+        else:
+            text_ = "\n".join(body)
+        return text_ if style.endswith("-") else text_ + "\n"
+
+    pos = 0
+
+    def parse_node(indent):
+        nonlocal pos
+        if pos >= len(items):
+            return None
+        if items[pos][1].startswith("- ") or items[pos][1] == "-":
+            return parse_seq(items[pos][0])
+        return parse_map(items[pos][0])
+
+    def parse_value(rest, own_indent, line_index):
+        """The value after `key:` or `- `; `rest` is the text after the colon/dash."""
+        nonlocal pos
+        rest = strip_comment(rest.strip())
+        if rest in (">", ">-", ">+", "|", "|-", "|+"):
+            end_line = line_index
+            value = block_scalar(rest, line_index, own_indent)
+            # Skip the items that belonged to the block scalar.
+            while pos < len(items) and items[pos][0] > own_indent:
+                pos += 1
+            return value
+        if rest == "":
+            if pos < len(items) and (items[pos][0] > own_indent
+                                     or (items[pos][0] == own_indent and items[pos][1].startswith("- "))):
+                return parse_node(items[pos][0])
+            return None
+        return scalar(rest)
+
+    def parse_map(indent):
+        nonlocal pos
+        out = {}
+        while pos < len(items) and items[pos][0] == indent and not items[pos][1].startswith("- "):
+            _, text_, line_index = items[pos]
+            m = re.match(r"^([A-Za-z0-9_.-]+):(?:\s+(.*))?$", text_)
+            if not m:
+                sys.exit(f"error: {where}:{line_index + 1}: can't read {text_!r} — teach lane 7")
+            pos += 1
+            out[m.group(1)] = parse_value(m.group(2) or "", indent, line_index)
+        return out
+
+    def parse_seq(indent):
+        nonlocal pos
+        out = []
+        while pos < len(items) and items[pos][0] == indent and (items[pos][1].startswith("- ") or items[pos][1] == "-"):
+            _, text_, line_index = items[pos]
+            rest = text_[1:].lstrip()
+            if re.match(r"^[A-Za-z0-9_.-]+:(\s|$)", rest):
+                # A mapping item: re-read this line as a key at the dash's content column.
+                col = indent + (len(text_) - len(rest))
+                items[pos] = (col, rest, line_index)
+                out.append(parse_map(col))
+            else:
+                pos += 1
+                out.append(parse_value(rest, indent, line_index))
+        return out
+
+    result = parse_node(0)
+    if pos != len(items):
+        sys.exit(f"error: {where}:{items[pos][2] + 1}: unexpected indentation — teach lane 7")
+    return result or {}
+
+
+def parse_optional_mcps(src):
+    """{name: manifest-dict} for every optional-mcps/<dir>/manifest.yaml."""
+    out = {}
+    for d in src.listdir(OPTIONAL_MCPS_DIR):
+        text = src.read(f"{OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+        if text is None:
+            continue  # README or a helper file, not an entry
+        manifest = parse_manifest_yaml(text, f"{OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+        name = manifest.get("name")
+        if not isinstance(name, str) or not name:
+            sys.exit(f"error: {OPTIONAL_MCPS_DIR}/{d}/manifest.yaml has no name at {src.mode}")
+        out[name] = manifest
+    return out
+
+
+def manifest_fields(m):
+    """The fields lane 7 compares, from one manifest."""
+    transport = m.get("transport") or {}
+    auth = m.get("auth") or {}
+    tools = m.get("tools") or {}
+    return {
+        "description": " ".join(str(m.get("description") or "").split()),
+        "transport": transport.get("type"),
+        "url": transport.get("url"),
+        "auth": auth.get("type"),
+        "env": [e.get("name") for e in (auth.get("env") or [])],
+        "default_enabled": list(tools.get("default_enabled") or []),
+        "default_excluded": list(tools.get("default_excluded") or []),
+    }
+
+
+def swift_catalog_entries():
+    """{name: fields} for OptionalMCPCatalog.entries, in lane 7's shape."""
+    block = "\n".join(swift_block(MCP_CATALOG_SWIFT, "public static let entries",
+                                  close_pattern=r"^    \]\s*$"))
+    chunks = block.split("OptionalMCPCatalogEntry(")[1:]
+    if not chunks:
+        sys.exit(f"error: no entries parsed from OptionalMCPCatalog.entries in {MCP_CATALOG_SWIFT}")
+    out = {}
+
+    def strings(pattern, chunk):
+        m = re.search(pattern + r"\s*\[(.*?)\]", chunk, re.S)
+        return re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1)) if m else []
+
+    for chunk in chunks:
+        name = re.search(r'name:\s*"([^"]+)"', chunk)
+        if not name:
+            sys.exit(f"error: an OptionalMCPCatalog entry has no name: {chunk[:80]!r}")
+        desc = re.search(r'description:\s*"((?:[^"\\]|\\.)*)"', chunk)
+        transport = re.search(r"transport:\s*\.(\w+)", chunk)
+        auth = re.search(r"authKind:\s*\.(\w+)", chunk)
+        url = re.search(r'url:\s*(nil|"([^"]*)")', chunk)
+        auth_map = {"oauth": "oauth", "apiKey": "api_key", "none": "none"}
+        out[name.group(1)] = {
+            "description": json.loads('"' + desc.group(1) + '"') if desc else "",
+            "transport": transport.group(1) if transport else None,
+            "url": url.group(2) if url and url.group(1) != "nil" else None,
+            "auth": auth_map.get(auth.group(1)) if auth else None,
+            "env": re.findall(r'\.init\(name:\s*"([^"]+)"', chunk)
+                   or strings(r"requiredEnvVars:", chunk),
+            "default_enabled": strings(r"defaultEnabledTools:", chunk),
+            "default_excluded": strings(r"defaultExcludedTools:", chunk),
+        }
+    return out
+
+
 def swift_block(path, header, close_pattern=r"^\s*\]\s*$"):
     """Return the source lines between a declaration header and its closing bracket.
 
@@ -838,6 +1041,28 @@ def main(argv=None):
             f"[provider-env-vars] {len(env_warn_plugins)} plugin(s) skipped (registration "
             f"not readable statically): {', '.join(sorted(env_warn_plugins))}")
 
+    # Lane 7: OptionalMCPCatalog.entries <-> optional-mcps/*/manifest.yaml
+    manifests = parse_optional_mcps(src)
+    swift_catalog = swift_catalog_entries()
+    if not manifests:
+        skipped.append(f"lane 7 (mcp-catalog): no {OPTIONAL_MCPS_DIR}/ at {src.mode} "
+                       f"— pre-catalog Hermes")
+    else:
+        check("mcp-catalog", swift_catalog, manifests,
+              "catalog entries missing from OptionalMCPCatalog.entries",
+              "OptionalMCPCatalog.entries not in Hermes's catalog")
+        for name in sorted(set(swift_catalog) & set(manifests)):
+            want = manifest_fields(manifests[name])
+            got = swift_catalog[name]
+            # A `${VAR}` url is filled from an install prompt; Scarf stores nil.
+            if isinstance(want["url"], str) and re.fullmatch(r"\$\{[A-Z0-9_]+\}", want["url"]):
+                want["url"] = None
+            for field in ("description", "transport", "url", "auth", "env",
+                          "default_enabled", "default_excluded"):
+                if got[field] != want[field]:
+                    failures.append(f"[mcp-catalog] '{name}' {field}: Scarf {got[field]!r} "
+                                    f"but the manifest says {want[field]!r}")
+
     for w in warnings:
         print(f"WARN  {w}")
     for s_ in skipped:
@@ -846,7 +1071,7 @@ def main(argv=None):
         print(f"FAIL  {f}")
     counts = (f"aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
               f"overlays={len(swift_overlays)} env-vars={len(swift_env_vars)} "
-              f"lanes={6 - len(skipped)}/6")
+              f"mcp-catalog={len(swift_catalog)} lanes={7 - len(skipped)}/7")
     if failures:
         print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against "
               f"{PROVIDERS_PY} at {src.mode}")

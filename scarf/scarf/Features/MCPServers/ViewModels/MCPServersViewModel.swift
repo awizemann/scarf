@@ -404,6 +404,7 @@ final class MCPServersViewModel {
         url: String,
         sse: Bool,
         catalogIdentifier: String?,
+        catalogInstallInput: String? = nil,
         defaultEnabledTools: [String],
         defaultExcludedTools: [String],
         overwriteConfirmed: Bool,
@@ -412,6 +413,7 @@ final class MCPServersViewModel {
         let result = fileService.addMCPServerOAuth(
             name: name, url: url, sse: sse,
             catalogIdentifier: catalogIdentifier,
+            catalogInstallInput: catalogInstallInput,
             overwriteConfirmed: overwriteConfirmed,
             capabilities: capabilities
         )
@@ -481,6 +483,7 @@ final class MCPServersViewModel {
         defaultEnabledTools: [String] = [],
         defaultExcludedTools: [String] = [],
         catalogIdentifier: String? = nil,
+        catalogInstallInput: String? = nil,
         overwriteConfirmed: Bool = false
     ) {
         if !overwriteConfirmed, serverNameIsTaken(name) {
@@ -491,6 +494,7 @@ final class MCPServersViewModel {
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
                     catalogIdentifier: catalogIdentifier,
+                    catalogInstallInput: catalogInstallInput,
                     overwriteConfirmed: true
                 )
             }
@@ -507,6 +511,7 @@ final class MCPServersViewModel {
                 result = Self.runOAuthAdd(
                     fileService: fileService, name: name, url: url, sse: false,
                     catalogIdentifier: catalogIdentifier,
+                    catalogInstallInput: catalogInstallInput,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
                     overwriteConfirmed: overwriteConfirmed, capabilities: caps

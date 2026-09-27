@@ -725,6 +725,7 @@ struct HermesFileService: Sendable {
         url: String,
         sse: Bool,
         catalogIdentifier: String?,
+        catalogInstallInput: String? = nil,
         overwriteConfirmed: Bool = false,
         capabilities: HermesCapabilities = .empty
     ) -> (exitCode: Int32, output: String, installedViaCatalog: Bool) {
@@ -742,9 +743,13 @@ struct HermesFileService: Sendable {
             // (default 300 s). So the budget sits above that, and a run that
             // did not print its success line is re-checked on disk: an
             // OAuth entry that is now there IS the install.
+            // `catalogInstallInput` answers the manifest's `auth.env`
+            // prompts (asana, n8n-official), one line each; without it
+            // those installs fail on an empty answer (T4-F1).
             let result = runHermesCLI(
                 args: HermesMCPInstallVerdict.argv(identifier: identifier),
-                timeout: 360
+                timeout: 360,
+                stdinInput: catalogInstallInput
             )
             switch HermesMCPInstallVerdict.judge(
                 output: result.output, exitCode: result.exitCode, identifier: identifier
@@ -752,7 +757,12 @@ struct HermesFileService: Sendable {
             case .installed:
                 return (0, result.output, true)
             case .notInCatalog:
-                break  // An older catalog: write the entry ourselves.
+                // An older catalog: write the entry ourselves — unless the
+                // entry's endpoint only exists as an install prompt
+                // (n8n-official), which leaves nothing to write.
+                if url.trimmingCharacters(in: .whitespaces).isEmpty {
+                    return (1, result.output, false)
+                }
             case .unconfirmed:
                 // Only a NEW entry proves anything: a pre-existing one (an
                 // overwrite) is what the run was replacing.

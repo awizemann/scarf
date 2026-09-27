@@ -36,6 +36,17 @@ struct MCPServerAddCustomView: View {
     /// client block comes with it. Cleared with the other catalog state
     /// once the user retargets the form.
     @State private var appliedCatalogEntryName: String?
+    /// The applied OAuth catalog entry, for its install-time questions
+    /// (`installPrompts`, the manifest's `auth.env`), answered in the form
+    /// and fed to `hermes mcp install` on stdin (T4-F1).
+    @State private var appliedCatalogEntry: OptionalMCPCatalogEntry?
+    /// Answers to ``catalogInstallPrompts``, keyed by env-var name. May hold
+    /// a secret (asana's client secret): cleared on submit and whenever the
+    /// catalog state is.
+    @State private var catalogInstallValues: [String: String] = [:]
+    /// The applied entry has no fixed endpoint (n8n-official: its URL is one
+    /// of the install answers), so the URL field may stay empty.
+    @State private var catalogURLFromPrompt = false
 
     /// `.sse` is a v0.13+ surface; pre-v0.13 hosts only see stdio + http.
     /// Iterating `MCPTransport.allCases` directly would render the SSE
@@ -55,8 +66,9 @@ struct MCPServerAddCustomView: View {
                 Text("Add Custom MCP Server")
                     .scarfStyle(.headline)
                 Spacer()
-                // The roster is a verbatim v0.21.0 snapshot (65 entries, up
-                // from 20 in v0.20.4; blender stays removed). Offering it on
+                // The roster is a verbatim snapshot (65 entries at v0.21.5,
+                // up from 20 in v0.20.4; blender stays removed), picked per
+                // host by `OptionalMCPCatalog.entries(for:)`. Offering it on
                 // an older host would advertise entries that host's
                 // `hermes mcp install` has never heard of, so it follows the
                 // branch's gating convention and only appears on v0.20.4+.
@@ -107,6 +119,7 @@ struct MCPServerAddCustomView: View {
                     case .sse:
                         sseSection
                     }
+                    catalogInstallSection
                     Text("Env vars, headers, and tool filters can be edited after the server is added.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -116,7 +129,9 @@ struct MCPServerAddCustomView: View {
         }
         .frame(minWidth: 560, minHeight: 500)
         .sheet(isPresented: $showCatalog) {
-            OptionalMCPCatalogPickerView { entry in
+            OptionalMCPCatalogPickerView(
+                entries: OptionalMCPCatalog.entries(for: capabilitiesStore?.capabilities ?? .empty)
+            ) { entry in
                 applyCatalogEntry(entry)
                 showCatalog = false
             } onCancel: {
@@ -158,7 +173,21 @@ struct MCPServerAddCustomView: View {
         // Only OAuth entries go through `mcp install`; an API-key entry
         // switched to OAuth in the form is a custom OAuth server.
         appliedCatalogEntryName = entry.authKind == .oauth ? entry.name : nil
+        appliedCatalogEntry = entry.authKind == .oauth ? entry : nil
+        catalogInstallValues = [:]
+        catalogURLFromPrompt = entry.url == nil && !catalogInstallPrompts.isEmpty
+        if catalogURLFromPrompt { self.url = "" }
         appliedCatalogIdentity = currentIdentity
+    }
+
+    /// The catalog install is still what "Add" will run: an OAuth entry was
+    /// applied, the form still describes it, and OAuth is still selected.
+    private var catalogInstallActive: Bool {
+        appliedCatalogEntryName != nil && auth == "oauth" && transport == .http
+    }
+
+    private var catalogInstallPrompts: [OptionalMCPCatalogEntry.InstallPrompt] {
+        appliedCatalogEntry?.installPrompts ?? []
     }
 
     /// Identity of the server the pending tool lists describe, captured
@@ -185,6 +214,47 @@ struct MCPServerAddCustomView: View {
         pendingDefaultEnabledTools = []
         appliedCatalogEntryName = nil
         appliedCatalogIdentity = nil
+        appliedCatalogEntry = nil
+        catalogInstallValues = [:]
+        catalogURLFromPrompt = false
+    }
+
+    /// The install-time questions of the applied catalog entry. Hermes asks
+    /// them on stdin during `hermes mcp install`; Scarf asks them here and
+    /// passes the answers along.
+    @ViewBuilder
+    private var catalogInstallSection: some View {
+        if catalogInstallActive, !catalogInstallPrompts.isEmpty {
+            sectionBox(title: String(localized: "Install settings")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(catalogInstallPrompts) { prompt in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(prompt.prompt).font(.caption.bold())
+                            Group {
+                                if prompt.isSecret {
+                                    SecureField(prompt.name, text: installBinding(prompt.name))
+                                } else {
+                                    TextField(prompt.name, text: installBinding(prompt.name))
+                                }
+                            }
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .accessibilityLabel(prompt.prompt)
+                        }
+                    }
+                    Text("Hermes asks for these when it installs this catalog entry. Secrets go to the profile's `.env`; other values are written into config.yaml.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func installBinding(_ name: String) -> Binding<String> {
+        Binding(
+            get: { catalogInstallValues[name] ?? "" },
+            set: { catalogInstallValues[name] = $0 }
+        )
     }
 
     private var stdioSection: some View {
@@ -220,6 +290,11 @@ struct MCPServerAddCustomView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                         .accessibilityLabel("URL")
+                    if catalogInstallActive, catalogURLFromPrompt {
+                        Text("Leave this empty: this catalog entry asks for its server URL under Install settings.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Auth").font(.caption.bold())
@@ -269,6 +344,10 @@ struct MCPServerAddCustomView: View {
         case .stdio:
             return !command.trimmingCharacters(in: .whitespaces).isEmpty
         case .http:
+            if catalogInstallActive, let entry = appliedCatalogEntry, !entry.installPrompts.isEmpty {
+                guard entry.installValuesComplete(catalogInstallValues) else { return false }
+                if catalogURLFromPrompt { return true }
+            }
             return !url.trimmingCharacters(in: .whitespaces).isEmpty
         case .sse:
             return !url.trimmingCharacters(in: .whitespaces).isEmpty
@@ -294,7 +373,9 @@ struct MCPServerAddCustomView: View {
                 apiKey: apiKey,
                 defaultEnabledTools: pendingDefaultEnabledTools,
                 defaultExcludedTools: pendingDefaultExcludedTools,
-                catalogIdentifier: auth == "oauth" ? appliedCatalogEntryName : nil
+                catalogIdentifier: auth == "oauth" ? appliedCatalogEntryName : nil,
+                catalogInstallInput: catalogInstallActive
+                    ? appliedCatalogEntry?.installStdin(values: catalogInstallValues) : nil
             )
         case .sse:
             viewModel.addCustomSSE(
