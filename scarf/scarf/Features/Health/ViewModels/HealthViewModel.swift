@@ -435,18 +435,14 @@ final class HealthViewModel {
         var checks: [HealthCheck] = []
 
         let subscriptionCheck: HealthCheck = {
+            // Sign-in is what Scarf can see; Hermes also checks the plan's
+            // entitlement, and ignores which inference provider is active
+            // (T3-F2, `tools/tool_backend_helpers.py:18-28` @ v2026.9.24).
             if subscription.subscribed {
                 return HealthCheck(
-                    label: "Nous Portal subscription active",
+                    label: "Signed in to Nous Portal",
                     status: .ok,
-                    detail: "Tool requests route through the Nous Portal gateway."
-                )
-            }
-            if subscription.present {
-                return HealthCheck(
-                    label: "Signed in, but Nous isn't the active provider",
-                    status: .warning,
-                    detail: "Open Settings → General and pick Nous Portal to route tools through the gateway."
+                    detail: "Tools your Nous plan covers can route through the Tool Gateway, whichever provider runs the model."
                 )
             }
             return HealthCheck(

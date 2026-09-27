@@ -151,33 +151,32 @@ import ScarfCore
         #expect(state.subscribed == false)
     }
 
-    @Test func subscriptionPresentButInactiveWhenOtherProviderActive() throws {
-        let path = try writeAuthFixture("""
-        {
-          "version": 1,
-          "providers": { "nous": { "access_token": "tok-12345" } },
-          "active_provider": "anthropic"
+    /// T3-F2: the Tool Gateway keys on Portal sign-in (plus an entitlement
+    /// Scarf cannot see), never on the active provider
+    /// (`tools/tool_backend_helpers.py:18-28` @ v2026.9.24). This used to
+    /// expect `subscribed == false` here, which pinned the wrong rule.
+    @Test func signedInCountsWhateverProviderIsActive() throws {
+        for active in ["\"anthropic\"", "null", "\"nous\""] {
+            let path = try writeAuthFixture("""
+            {
+              "version": 1,
+              "providers": { "nous": { "access_token": "tok-12345" } },
+              "active_provider": \(active)
+            }
+            """)
+            let state = NousSubscriptionService(path: path).loadState()
+            #expect(state.present == true, "active_provider \(active)")
+            #expect(state.subscribed == true, "active_provider \(active)")
         }
-        """)
-        let state = NousSubscriptionService(path: path).loadState()
-        #expect(state.present == true)
-        #expect(state.providerIsNous == false)
-        #expect(state.subscribed == false,
-                "Auth alone isn't enough — the Tool Gateway only routes when Nous is the active provider")
     }
 
-    @Test func subscriptionActiveWhenAuthAndActiveProviderLineUp() throws {
+    /// `active_provider: nous` without a token is not a sign-in.
+    @Test func activeProviderAloneIsNotASignIn() throws {
         let path = try writeAuthFixture("""
-        {
-          "version": 1,
-          "providers": { "nous": { "access_token": "tok-12345" } },
-          "active_provider": "nous"
-        }
+        { "version": 1, "providers": {}, "active_provider": "nous" }
         """)
         let state = NousSubscriptionService(path: path).loadState()
-        #expect(state.present == true)
-        #expect(state.providerIsNous == true)
-        #expect(state.subscribed == true)
+        #expect(state.subscribed == false)
     }
 
     @Test func subscriptionAbsentWhenTokenEmpty() throws {

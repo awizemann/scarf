@@ -651,11 +651,10 @@ struct ModelPickerSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: subscription.subscribed ? "checkmark.circle.fill" : "exclamationmark.circle")
                     .foregroundStyle(subscription.subscribed ? Color.green : Color.secondary)
+                // Signed in is the gate Scarf can see; the provider picked
+                // here does not change tool routing (T3-F2).
                 if subscription.subscribed {
-                    Text("Subscription active — active provider is Nous.")
-                } else if subscription.present {
-                    Text("Signed in to Nous, but another provider is active.")
-                        .foregroundStyle(.secondary)
+                    Text("Signed in to Nous Portal.")
                 } else {
                     Text("Not signed in yet.")
                         .foregroundStyle(.secondary)
