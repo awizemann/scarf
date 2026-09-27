@@ -188,11 +188,11 @@ struct ProfilesView: View {
                 .split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .last { !$0.isEmpty }
-            self.lastError = detail.map { "`hermes profile list` failed: \($0.prefix(200))" }
-                ?? "`hermes profile list` failed (exit \(output.exitCode))."
+            self.lastError = detail.map { String(localized: "`hermes profile list` failed: \(String($0.prefix(200)))") }
+                ?? String(localized: "`hermes profile list` failed (exit \(Int(output.exitCode))).")
         } else {
             // Transport threw — keep any last-known list and surface the error.
-            self.lastError = "Couldn't reach `hermes profile list` on this server."
+            self.lastError = String(localized: "Couldn't reach `hermes profile list` on this server.")
         }
     }
 

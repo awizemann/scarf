@@ -50,6 +50,46 @@
         }
       }
     },
+    "%@ couldn't be read, so the template's memory entry may still be in it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ konnte nicht gelesen werden, daher ist der Speichereintrag der Vorlage möglicherweise noch darin enthalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer %@, así que es posible que la entrada de memoria de la plantilla siga ahí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de lire %@ ; l’entrée de mémoire du modèle s’y trouve peut-être encore."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を読み取れなかったため、テンプレートのメモリエントリがまだ残っている可能性があります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler %@, então a entrada de memória do template talvez ainda esteja nele."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取 %@,因此模板的记忆条目可能仍在其中。"
+          }
+        }
+      }
+    },
     "%@ has its Bot Chat open, so the message went into that chat and will be answered there. The reply can't come back here — don't resend." : {
       "localizations" : {
         "de" : {
@@ -86,6 +126,247 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 已打开其 Bot Chat,因此消息已进入该聊天并将在那里得到回复。回复无法返回到这里 — 请勿重新发送。"
+          }
+        }
+      }
+    },
+    "%@ — couldn't be matched to a scheduled job; Scarf will try again and tell you if it's still there" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — konnte keinem geplanten Job zugeordnet werden; Scarf versucht es erneut und meldet sich, falls er noch da ist"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — no se pudo asociar a una tarea programada; Scarf lo intentará de nuevo y te avisará si sigue ahí"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — n’a pas pu être associé à une tâche planifiée ; Scarf réessaiera et vous préviendra s’il est toujours là"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — スケジュール済みのジョブと照合できませんでした。Scarf が再試行し、まだ残っている場合はお知らせします"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — não foi possível associar a uma tarefa agendada; o Scarf tentará novamente e avisará se ela ainda estiver lá"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — 无法与已计划的任务匹配;Scarf 会重试,如果它仍然存在会通知你"
+          }
+        }
+      }
+    },
+    "%@ — not checked" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — nicht geprüft"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — no comprobado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — non vérifié"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — 未確認"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — não verificado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — 未检查"
+          }
+        }
+      }
+    },
+    "%lld of this project's cron jobs are paused. Resume them from the Cron tab if you want them running." : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %lld is the number of paused jobs.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Cron-Jobs dieses Projekts sind pausiert. Setze sie im Tab „Cron“ fort, wenn sie laufen sollen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld tareas cron de este proyecto están en pausa. Reanúdalas desde la pestaña Cron si quieres que se ejecuten."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld tâches cron de ce projet sont en pause. Reprenez-les depuis l’onglet Cron si vous voulez qu’elles s’exécutent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロジェクトの cron ジョブのうち %lld 件が一時停止中です。実行したい場合は Cron タブから再開してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld tarefas cron deste projeto estão pausadas. Retome-as na aba Cron se quiser que sejam executadas."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目有 %lld 个定时任务已暂停。如需运行,请在 Cron 标签页中继续它们。"
+          }
+        }
+      }
+    },
+    "(none — no tools registered)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(keine — keine Tools registriert)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(ninguna — no hay herramientas registradas)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(aucun — aucun outil enregistré)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "（なし — ツールは登録されていません）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(nenhuma — nenhuma ferramenta registrada)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "（无 — 未注册任何工具）"
+          }
+        }
+      }
+    },
+    "`hermes profile list` failed (exit %lld)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` ist fehlgeschlagen (Exit-Code %lld)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` falló (código de salida %lld)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` a échoué (code de sortie %lld)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` が失敗しました (終了コード %lld)。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` falhou (código de saída %lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` 失败(退出码 %lld)。"
+          }
+        }
+      }
+    },
+    "`hermes profile list` failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` ist fehlgeschlagen: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` falló: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` a échoué : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` が失敗しました: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` falhou: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` 失败:%@"
           }
         }
       }
@@ -166,6 +447,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "`multiplex_profiles: false` 已停用,不再关闭多路复用 — Hermes 会忽略它。一个主机 Gateway 服务所有配置,因此路由会运行 — 除非其启动检查使其保持独立运行(只有一个配置、某个配置仍在运行自己的 Gateway、机器人令牌重复)。`hermes gateway status` 会说明原因。"
+          }
+        }
+      }
+    },
+    "A saved secret for this template couldn't be deleted from the Keychain (%@)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein gespeichertes Keychain-Secret dieser Vorlage konnte nicht gelöscht werden (%@)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo eliminar del llavero un secreto guardado de esta plantilla (%@)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un secret enregistré pour ce modèle n’a pas pu être supprimé du trousseau (%@)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このテンプレートの保存済みシークレットをキーチェーンから削除できませんでした (%@)。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível excluir do Keychain um segredo salvo deste modelo (%@)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法从钥匙串中删除此模板已保存的密钥(%@)。"
+          }
+        }
+      }
+    },
+    "After you approve, the browser tab can’t reach Hermes on the remote host and fails to load. Copy that tab’s full address and paste it here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach deiner Freigabe kann der Browser-Tab Hermes auf dem Remote-Host nicht erreichen und lädt nicht. Kopiere die vollständige Adresse dieses Tabs und füge sie hier ein."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Después de aprobar, la pestaña del navegador no puede llegar a Hermes en el host remoto y no carga. Copia la dirección completa de esa pestaña y pégala aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Après votre approbation, l’onglet du navigateur ne peut pas joindre Hermes sur l’hôte distant et ne se charge pas. Copiez l’adresse complète de cet onglet et collez-la ici."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "承認後、ブラウザタブはリモートホスト上の Hermes に到達できず、読み込みに失敗します。そのタブのアドレスをすべてコピーして、ここに貼り付けてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Depois que você aprovar, a aba do navegador não consegue alcançar o Hermes no host remoto e não carrega. Copie o endereço completo dessa aba e cole aqui."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "批准后,浏览器标签页无法访问远程主机上的 Hermes,会加载失败。请复制该标签页的完整地址并粘贴到这里。"
           }
         }
       }
@@ -332,6 +693,246 @@
         }
       }
     },
+    "Applies to Hermes CLI, TUI and messaging-gateway sessions. Scarf chats don't use it — Hermes doesn't apply a personality over ACP." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gilt für Sitzungen in der Hermes-CLI, der TUI und den Messaging-Gateways. Scarf-Chats verwenden sie nicht — Hermes wendet über ACP keine Persönlichkeit an."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se aplica a las sesiones de la CLI y la TUI de Hermes y de los gateways de mensajería. Los chats de Scarf no la usan — Hermes no aplica una personalidad a través de ACP."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S’applique aux sessions de la CLI et de la TUI de Hermes et des gateways de messagerie. Les chats Scarf ne l’utilisent pas — Hermes n’applique pas de personnalité via ACP."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の CLI、TUI、メッセージング Gateway のセッションに適用されます。Scarf のチャットでは使われません — Hermes は ACP 経由ではパーソナリティを適用しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplica-se às sessões da CLI e da TUI do Hermes e dos gateways de mensagens. Os chats do Scarf não a usam — o Hermes não aplica uma personalidade via ACP."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于 Hermes CLI、TUI 和消息 Gateway 会话。Scarf 聊天不使用它 — Hermes 不会通过 ACP 应用人格。"
+          }
+        }
+      }
+    },
+    "Applies to Hermes CLI, TUI and messaging-gateway sessions. Scarf chats don't use it — Hermes doesn't apply a personality over ACP. To shape Scarf chats, edit SOUL.md below." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gilt für Sitzungen in der Hermes-CLI, der TUI und den Messaging-Gateways. Scarf-Chats verwenden sie nicht — Hermes wendet über ACP keine Persönlichkeit an. Um Scarf-Chats zu prägen, bearbeite unten SOUL.md."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se aplica a las sesiones de la CLI y la TUI de Hermes y de los gateways de mensajería. Los chats de Scarf no la usan — Hermes no aplica una personalidad a través de ACP. Para dar forma a los chats de Scarf, edita SOUL.md abajo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "S’applique aux sessions de la CLI et de la TUI de Hermes et des gateways de messagerie. Les chats Scarf ne l’utilisent pas — Hermes n’applique pas de personnalité via ACP. Pour façonner les chats Scarf, modifiez SOUL.md ci-dessous."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の CLI、TUI、メッセージング Gateway のセッションに適用されます。Scarf のチャットでは使われません — Hermes は ACP 経由ではパーソナリティを適用しません。Scarf のチャットを調整するには、下の SOUL.md を編集してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplica-se às sessões da CLI e da TUI do Hermes e dos gateways de mensagens. Os chats do Scarf não a usam — o Hermes não aplica uma personalidade via ACP. Para moldar os chats do Scarf, edite o SOUL.md abaixo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于 Hermes CLI、TUI 和消息 Gateway 会话。Scarf 聊天不使用它 — Hermes 不会通过 ACP 应用人格。要调整 Scarf 聊天,请编辑下方的 SOUL.md。"
+          }
+        }
+      }
+    },
+    "Approvals are off — dangerous commands run without asking. Change Approval Mode in Settings → Agent." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigaben sind aus — gefährliche Befehle laufen ohne Nachfrage. Ändere den Freigabemodus in Einstellungen → Agent."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las aprobaciones están desactivadas — los comandos peligrosos se ejecutan sin preguntar. Cambia el modo de aprobación en Ajustes → Agent."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les approbations sont désactivées — les commandes dangereuses s’exécutent sans demander. Changez le mode d’approbation dans Réglages → Agent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "承認がオフです — 危険なコマンドが確認なしで実行されます。設定 → Agent で承認モードを変更してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As aprovações estão desativadas — comandos perigosos são executados sem perguntar. Mude o modo de aprovação em Configurações → Agent."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "审批已关闭 — 危险命令将不经询问直接运行。请在设置 → Agent 中更改审批模式。"
+          }
+        }
+      }
+    },
+    "can't be snapshotted: install sqlite3 on the server" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kein Snapshot möglich: installiere sqlite3 auf dem Server"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no se puede crear una instantánea: instala sqlite3 en el servidor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "instantané impossible : installez sqlite3 sur le serveur"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スナップショットを作成できません: サーバーに sqlite3 をインストールしてください"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "não é possível criar snapshot: instale o sqlite3 no servidor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建快照:请在服务器上安装 sqlite3"
+          }
+        }
+      }
+    },
+    "Clone config, .env, SOUL.md from the viewed profile" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "config, .env, SOUL.md aus dem angezeigten Profil klonen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clonar config, .env, SOUL.md del perfil que estás viendo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloner config, .env, SOUL.md depuis le profil affiché"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表示中のプロファイルから config、.env、SOUL.md を複製"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clonar config, .env, SOUL.md do perfil exibido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从当前查看的配置克隆 config、.env、SOUL.md"
+          }
+        }
+      }
+    },
+    "COMPLETED" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ABGESCHLOSSEN"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "COMPLETADA"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TERMINÉE"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CONCLUÍDA"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成"
+          }
+        }
+      }
+    },
     "Completion contract set at create time: local-only, OWNER/REPO for publication, or a PR URL whose CI gates completion. Read-only — Hermes has no update verb." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -369,6 +970,286 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "创建时设置的完成约定：仅本地、用于发布的 OWNER/REPO，或由 CI 把关完成状态的 PR 链接。只读——Hermes 没有更新命令。"
+          }
+        }
+      }
+    },
+    "Couldn't confirm the cron job “%@” was removed. Check the Cron list and remove it there if it's still scheduled." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konnte nicht bestätigen, dass der Cron-Job „%@“ entfernt wurde. Prüfe die Cron-Liste und entferne ihn dort, falls er noch geplant ist."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo confirmar que se quitara la tarea cron “%@”. Revisa la lista de Cron y quítala allí si sigue programada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de confirmer que la tâche cron « %@ » a été supprimée. Vérifiez la liste Cron et supprimez-la depuis celle-ci si elle est encore planifiée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron ジョブ「%@」が削除されたことを確認できませんでした。Cron リストを確認し、まだスケジュールされている場合はそこで削除してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível confirmar que a tarefa cron “%@” foi removida. Verifique a lista do Cron e remova-a lá se ainda estiver agendada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法确认定时任务“%@”已被移除。请检查 Cron 列表,如果它仍在计划中,请在那里移除。"
+          }
+        }
+      }
+    },
+    "Couldn't parse webhook list output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgabe der Webhook-Liste konnte nicht verarbeitet werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo analizar la salida de la lista de webhooks"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d’analyser la sortie de la liste des webhooks"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "webhook 一覧の出力を解析できませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível analisar a saída da lista de webhooks"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法解析 webhook 列表输出"
+          }
+        }
+      }
+    },
+    "Couldn't reach `hermes profile list` on this server." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`hermes profile list` war auf diesem Server nicht erreichbar."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo acceder a `hermes profile list` en este servidor."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d’atteindre `hermes profile list` sur ce serveur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーで `hermes profile list` に到達できませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível acessar `hermes profile list` neste servidor."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在此服务器上访问 `hermes profile list`。"
+          }
+        }
+      }
+    },
+    "Couldn't run hermes webhook list on this server" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hermes webhook list konnte auf diesem Server nicht ausgeführt werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo ejecutar hermes webhook list en este servidor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d’exécuter hermes webhook list sur ce serveur"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーで hermes webhook list を実行できませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível executar hermes webhook list neste servidor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在此服务器上运行 hermes webhook list"
+          }
+        }
+      }
+    },
+    "Couldn't switch to model preset “%@” — this chat uses the default model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konnte nicht zur Modellvorgabe „%@“ wechseln — dieser Chat nutzt das Standardmodell."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo cambiar al preajuste de modelo “%@” — este chat usa el modelo predeterminado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de passer au préréglage de modèle « %@ » — ce chat utilise le modèle par défaut."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルプリセット「%@」に切り替えられませんでした — このチャットはデフォルトのモデルを使用します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível mudar para a predefinição de modelo “%@” — este chat usa o modelo padrão."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法切换到模型预设“%@” — 此聊天使用默认模型。"
+          }
+        }
+      }
+    },
+    "Couldn’t Load Profiles" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Profile konnten nicht geladen werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudieron cargar los perfiles"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de charger les profils"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロファイルを読み込めませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível carregar os perfis"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载配置"
+          }
+        }
+      }
+    },
+    "Couldn’t pass the URL to hermes. The sign-in may already have ended." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die URL konnte nicht an hermes übergeben werden. Die Anmeldung ist möglicherweise bereits beendet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo pasar la URL a hermes. Puede que el inicio de sesión ya haya terminado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de transmettre l’URL à hermes. La connexion est peut-être déjà terminée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL を hermes に渡せませんでした。サインインはすでに終了している可能性があります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível passar a URL para o hermes. O login talvez já tenha terminado."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法将 URL 传递给 hermes。登录可能已经结束。"
           }
         }
       }
@@ -413,6 +1294,46 @@
         }
       }
     },
+    "e.g. productivity (leave empty for no category)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "z. B. productivity (leer lassen für keine Kategorie)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "p. ej. productivity (déjalo vacío para no usar categoría)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "par ex. productivity (laisser vide pour aucune catégorie)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "例: productivity(カテゴリなしにする場合は空欄)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ex.: productivity (deixe vazio para nenhuma categoria)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "例如 productivity(留空表示不分类)"
+          }
+        }
+      }
+    },
     "Empty uses Hermes's own default reply." : {
       "localizations" : {
         "de" : {
@@ -449,6 +1370,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "留空则使用 Hermes 自带的默认回复。"
+          }
+        }
+      }
+    },
+    "ERROR" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FEHLER"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ERROR"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ERREUR"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エラー"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ERRO"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误"
+          }
+        }
+      }
+    },
+    "Failed to write .env — nothing was changed in config.yaml" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env konnte nicht geschrieben werden — in config.yaml wurde nichts geändert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo escribir .env — no se cambió nada en config.yaml"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible d’écrire .env — rien n’a été modifié dans config.yaml"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env を書き込めませんでした — config.yaml は何も変更されていません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falha ao gravar o .env — nada foi alterado no config.yaml"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写入 .env 失败 — config.yaml 未做任何更改"
+          }
+        }
+      }
+    },
+    "Full copy of the viewed profile (all state)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vollständige Kopie des angezeigten Profils (gesamter Zustand)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copia completa del perfil que estás viendo (todo el estado)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copie complète du profil affiché (tout l’état)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表示中のプロファイルの完全コピー(すべての状態)"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cópia completa do perfil exibido (todo o estado)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前查看配置的完整副本(所有状态)"
+          }
+        }
+      }
+    },
+    "Hermes is running on this server (process %@ has a Hermes database open). Stop the Hermes gateway and close any Hermes chats there before restoring; the restore will refuse otherwise." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes läuft auf diesem Server (Prozess %@ hat eine Hermes-Datenbank geöffnet). Stoppe das Hermes-Gateway und schließe alle Hermes-Chats dort, bevor du wiederherstellst; andernfalls wird die Wiederherstellung verweigert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes se está ejecutando en este servidor (el proceso %@ tiene abierta una base de datos de Hermes). Detén el gateway de Hermes y cierra los chats de Hermes allí antes de restaurar; de lo contrario, se rechazará la restauración."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes est en cours d’exécution sur ce serveur (le processus %@ a une base de données Hermes ouverte). Arrêtez le gateway Hermes et fermez les chats Hermes sur ce serveur avant de restaurer ; sinon, la restauration sera refusée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーで Hermes が実行中です (プロセス %@ が Hermes のデータベースを開いています)。復元する前に Hermes Gateway を停止し、そこでの Hermes チャットをすべて閉じてください。そうしないと復元は拒否されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes está em execução neste servidor (o processo %@ está com um banco de dados do Hermes aberto). Pare o gateway do Hermes e feche os chats do Hermes lá antes de restaurar; caso contrário, a restauração será recusada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 正在此服务器上运行(进程 %@ 打开了一个 Hermes 数据库)。恢复前请停止 Hermes Gateway 并关闭那里的所有 Hermes 聊天,否则恢复将被拒绝。"
           }
         }
       }
@@ -533,6 +1614,130 @@
         }
       }
     },
+    "host time" : {
+      "comment" : "ScarfCore CronScheduleFormatter.hostZoneNote: hand-added, no Xcode extractor sees ScarfCore string literals. Shown in parentheses after a time-of-day cron phrase on a remote host whose zone Scarf can't see, e.g. \"Daily at 9 AM (host time)\".",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Host-Zeit"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hora del host"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "heure de l’hôte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホストの時刻"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "horário do host"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机时间"
+          }
+        }
+      }
+    },
+    "http://127.0.0.1:…/callback?code=…" : {
+
+    },
+    "If the browser tab fails to load after you approve, copy its full address and paste it here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wenn der Browser-Tab nach deiner Freigabe nicht lädt, kopiere seine vollständige Adresse und füge sie hier ein."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Si la pestaña del navegador no carga después de aprobar, copia su dirección completa y pégala aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Si l’onglet du navigateur ne se charge pas après votre approbation, copiez son adresse complète et collez-la ici."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "承認後にブラウザタブの読み込みに失敗した場合は、そのアドレスをすべてコピーして、ここに貼り付けてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se a aba do navegador não carregar depois que você aprovar, copie o endereço completo e cole aqui."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果批准后浏览器标签页加载失败,请复制其完整地址并粘贴到这里。"
+          }
+        }
+      }
+    },
+    "inherited from default profile" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vom Standardprofil geerbt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "heredado del perfil predeterminado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hérité du profil par défaut"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デフォルトプロファイルから継承"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "herdado do perfil padrão"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继承自默认配置"
+          }
+        }
+      }
+    },
     "Installed, but it could not be enabled: %@" : {
       "localizations" : {
         "de" : {
@@ -569,6 +1774,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已安装，但无法启用：%@"
+          }
+        }
+      }
+    },
+    "Later" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Später"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Más tarde"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus tard"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後で"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mais tarde"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍后"
+          }
+        }
+      }
+    },
+    "llama.cpp server address is ignored" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "llama.cpp-Serveradresse wird ignoriert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se ignora la dirección del servidor llama.cpp"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’adresse du serveur llama.cpp est ignorée"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "llama.cpp サーバーのアドレスは無視されます"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O endereço do servidor llama.cpp é ignorado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "llama.cpp 服务器地址被忽略"
           }
         }
       }
@@ -650,6 +1935,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 尚未回复,但消息可能已在其 Bot Chat 中 — 请到那里查看,而不要重新发送。"
+          }
+        }
+      }
+    },
+    "Not enabled" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht aktiviert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No activado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Non activé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効化されていません"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não ativado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未启用"
           }
         }
       }
@@ -1055,6 +2380,86 @@
         }
       }
     },
+    "PAUSED" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PAUSIERT"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EN PAUSA"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EN PAUSE"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時停止中"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PAUSADA"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Personality set to %@ for CLI, TUI and gateway sessions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persönlichkeit für CLI-, TUI- und Gateway-Sitzungen auf %@ gesetzt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalidad establecida en %@ para las sesiones de CLI, TUI y gateway"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personnalité définie sur %@ pour les sessions CLI, TUI et gateway"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CLI、TUI、Gateway セッションのパーソナリティを %@ に設定しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalidade definida como %@ para sessões de CLI, TUI e gateway"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已将 CLI、TUI 和 Gateway 会话的人格设为 %@"
+          }
+        }
+      }
+    },
     "Pin to the current main model" : {
       "localizations" : {
         "de" : {
@@ -1175,6 +2580,166 @@
         }
       }
     },
+    "read-only snapshot" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "schreibgeschützter Snapshot"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "instantánea de solo lectura"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "instantané en lecture seule"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み取り専用スナップショット"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "snapshot somente leitura"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读快照"
+          }
+        }
+      }
+    },
+    "Redirect URL" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redirect-URL"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL de redirección"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL de redirection"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リダイレクト URL"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL de redirecionamento"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重定向 URL"
+          }
+        }
+      }
+    },
+    "Remove this credential from the pool." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Anmeldedaten aus dem Pool entfernen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar esta credencial del grupo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer cet identifiant du pool."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この資格情報をプールから削除します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remover esta credencial do pool."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从凭证池中移除此凭证。"
+          }
+        }
+      }
+    },
+    "Removed, except:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entfernt, außer:"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminado, excepto:"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimé, sauf :"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除しました。ただし以下を除く:"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removido, exceto:"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移除,但以下各项除外:"
+          }
+        }
+      }
+    },
     "Runs `hermes sessions optimize --force` while other processes have the database open." : {
       "localizations" : {
         "de" : {
@@ -1211,6 +2776,449 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在其他进程打开数据库的情况下运行 `hermes sessions optimize --force`。"
+          }
+        }
+      }
+    },
+    "Runs hermes gateway setup on %@. It sets the webhook port and secret in .env; it does not unlock this tab." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Führt hermes gateway setup auf %@ aus. Es setzt Webhook-Port und -Secret in .env; diesen Tab schaltet es nicht frei."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ejecuta hermes gateway setup en %@. Configura el puerto y el secreto del webhook en .env; no desbloquea esta pestaña."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exécute hermes gateway setup sur %@. Cela définit le port et le secret du webhook dans .env ; cela ne déverrouille pas cet onglet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ で hermes gateway setup を実行します。.env に webhook のポートとシークレットを設定しますが、このタブのロックは解除しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Executa hermes gateway setup em %@. Define a porta e o segredo do webhook no .env; não desbloqueia esta aba."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上运行 hermes gateway setup。它会在 .env 中设置 webhook 端口和密钥,但不会解锁此标签页。"
+          }
+        }
+      }
+    },
+    "Saved “%@” with OAuth. Sign in to finish connecting it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ mit OAuth gespeichert. Melde dich an, um die Verbindung abzuschließen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se guardó “%@” con OAuth. Inicia sesión para terminar de conectarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » enregistré avec OAuth. Connectez-vous pour finaliser la connexion."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」を OAuth で保存しました。接続を完了するにはサインインしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” foi salvo com OAuth. Entre para concluir a conexão."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已使用 OAuth 保存“%@”。请登录以完成连接。"
+          }
+        }
+      }
+    },
+    "Scarf couldn't check whether Hermes is running on this server. Stop the Hermes gateway and any Hermes chats there before restoring." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte nicht prüfen, ob Hermes auf diesem Server läuft. Stoppe das Hermes-Gateway und alle Hermes-Chats dort, bevor du wiederherstellst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo comprobar si Hermes se está ejecutando en este servidor. Detén el gateway de Hermes y los chats de Hermes allí antes de restaurar."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu vérifier si Hermes est en cours d’exécution sur ce serveur. Arrêtez le gateway Hermes et les chats Hermes sur ce serveur avant de restaurer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf はこのサーバーで Hermes が実行中かどうかを確認できませんでした。復元する前に Hermes Gateway とそこでの Hermes チャットを停止してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu verificar se o Hermes está em execução neste servidor. Pare o gateway do Hermes e os chats do Hermes lá antes de restaurar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法检查 Hermes 是否正在此服务器上运行。恢复前请停止 Hermes Gateway 以及那里的所有 Hermes 聊天。"
+          }
+        }
+      }
+    },
+    "Scarf couldn't pause %lld job(s): %@. Pause them from the Cron tab." : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %lld is the job count, %@ a comma-separated list of job names.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte %lld Job(s) nicht pausieren: %@. Pausiere sie im Tab „Cron“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo pausar %lld tarea(s): %@. Páusalas desde la pestaña Cron."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu mettre en pause %lld tâche(s) : %@. Mettez-les en pause depuis l’onglet Cron."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は %lld 件のジョブを一時停止できませんでした: %@。Cron タブから一時停止してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu pausar %lld tarefa(s): %@. Pause-as na aba Cron."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法暂停 %lld 个任务:%@。请在 Cron 标签页中暂停它们。"
+          }
+        }
+      }
+    },
+    "Scarf couldn't read this server's cron jobs, so it paused none of them. Check them in the Cron tab." : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte die Cron-Jobs dieses Servers nicht lesen und hat daher keinen pausiert. Prüfe sie im Tab „Cron“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo leer las tareas cron de este servidor, así que no pausó ninguna. Revísalas en la pestaña Cron."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu lire les tâches cron de ce serveur et n’en a donc mis aucune en pause. Vérifiez-les dans l’onglet Cron."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf はこのサーバーの cron ジョブを読み取れなかったため、どれも一時停止していません。Cron タブで確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu ler as tarefas cron deste servidor, então não pausou nenhuma. Verifique-as na aba Cron."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法读取此服务器的定时任务,因此没有暂停任何任务。请在 Cron 标签页中检查它们。"
+          }
+        }
+      }
+    },
+    "Scarf couldn't resume %lld job(s): %@. Resume them from the Cron tab." : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %lld is the job count, %@ a comma-separated list of job names.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte %lld Job(s) nicht fortsetzen: %@. Setze sie im Tab „Cron“ fort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo reanudar %lld tarea(s): %@. Reanúdalas desde la pestaña Cron."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu reprendre %lld tâche(s) : %@. Reprenez-les depuis l’onglet Cron."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は %lld 件のジョブを再開できませんでした: %@。Cron タブから再開してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu retomar %lld tarefa(s): %@. Retome-as na aba Cron."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法继续 %lld 个任务:%@。请在 Cron 标签页中继续它们。"
+          }
+        }
+      }
+    },
+    "Scarf couldn’t add “%@” to config.yaml safely, so nothing was changed. Add it with `hermes mcp add %@ --url <url> --auth oauth` in a terminal on that host." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte „%@“ nicht sicher zu config.yaml hinzufügen, daher wurde nichts geändert. Füge es mit `hermes mcp add %@ --url <url> --auth oauth` in einem Terminal auf diesem Host hinzu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo añadir “%@” a config.yaml de forma segura, así que no se cambió nada. Añádelo con `hermes mcp add %@ --url <url> --auth oauth` en un terminal de ese host."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n’a pas pu ajouter « %@ » à config.yaml en toute sécurité ; rien n’a été modifié. Ajoutez-le avec `hermes mcp add %@ --url <url> --auth oauth` dans un terminal sur cet hôte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は「%@」を config.yaml に安全に追加できなかったため、何も変更していません。そのホストのターミナルで `hermes mcp add %@ --url <url> --auth oauth` を実行して追加してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu adicionar “%@” ao config.yaml com segurança, então nada foi alterado. Adicione-o com `hermes mcp add %@ --url <url> --auth oauth` em um terminal nesse host."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法安全地将“%@”添加到 config.yaml,因此未做任何更改。请在该主机的终端中使用 `hermes mcp add %@ --url <url> --auth oauth` 添加。"
+          }
+        }
+      }
+    },
+    "Set model.provider = custom and keep model.base_url and model.default." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setzt model.provider = custom und behält model.base_url und model.default bei."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Establece model.provider = custom y conserva model.base_url y model.default."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Définit model.provider = custom et conserve model.base_url et model.default."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "model.provider = custom に設定し、model.base_url と model.default はそのまま保持します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Define model.provider = custom e mantém model.base_url e model.default."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置 model.provider = custom,并保留 model.base_url 和 model.default。"
+          }
+        }
+      }
+    },
+    "Set Port & Secret in Terminal" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port & Secret im Terminal festlegen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configurar puerto y secreto en el terminal"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Définir le port et le secret dans le terminal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルでポートとシークレットを設定"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Definir porta e segredo no terminal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在终端中设置端口和密钥"
+          }
+        }
+      }
+    },
+    "Shell shortcuts you run as `/command_name` in the Hermes CLI, TUI and messaging gateways. Scarf chat doesn't run them." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shell-Shortcuts, die du in der Hermes-CLI, der TUI und den Messaging-Gateways als `/command_name` ausführst. Der Scarf-Chat führt sie nicht aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atajos de shell que ejecutas como `/command_name` en la CLI y la TUI de Hermes y en los gateways de mensajería. El chat de Scarf no los ejecuta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raccourcis shell que vous exécutez sous la forme `/command_name` dans la CLI et la TUI de Hermes et dans les gateways de messagerie. Le chat de Scarf ne les exécute pas."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の CLI、TUI、メッセージング Gateway で `/command_name` として実行するシェルショートカットです。Scarf のチャットでは実行されません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atalhos de shell que você executa como `/command_name` na CLI e na TUI do Hermes e nos gateways de mensagens. O chat do Scarf não os executa."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你在 Hermes CLI、TUI 和消息 Gateway 中以 `/command_name` 形式运行的 shell 快捷命令。Scarf 聊天不会运行它们。"
+          }
+        }
+      }
+    },
+    "Sign in to “%@”?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei „%@“ anmelden?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Iniciar sesión en “%@”?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se connecter à « %@ » ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」にサインインしますか?"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entrar em “%@”?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要登录“%@”吗?"
           }
         }
       }
@@ -1333,6 +3341,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请停止 Gateway 和其他 Hermes 应用,然后重试。"
+          }
+        }
+      }
+    },
+    "Switch to Custom endpoint" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu benutzerdefiniertem Endpunkt wechseln"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cambiar a endpoint personalizado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passer à un endpoint personnalisé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムエンドポイントに切り替え"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mudar para endpoint personalizado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到自定义端点"
+          }
+        }
+      }
+    },
+    "That doesn’t look like the redirect URL. Copy the whole address from the browser tab that failed to load; it contains “code=”." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das sieht nicht nach der Redirect-URL aus. Kopiere die vollständige Adresse aus dem Browser-Tab, der nicht geladen werden konnte; sie enthält „code=“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eso no parece la URL de redirección. Copia la dirección completa de la pestaña del navegador que no se pudo cargar; contiene “code=”."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cela ne ressemble pas à l’URL de redirection. Copiez l’adresse complète de l’onglet du navigateur qui n’a pas pu se charger ; elle contient « code= »."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リダイレクト URL ではないようです。読み込みに失敗したブラウザタブのアドレスをすべてコピーしてください。「code=」が含まれています。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isso não parece ser a URL de redirecionamento. Copie o endereço completo da aba do navegador que não carregou; ele contém “code=”."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这看起来不像重定向 URL。请从加载失败的浏览器标签页中复制完整地址,其中包含“code=”。"
           }
         }
       }
@@ -1460,6 +3548,46 @@
         }
       }
     },
+    "The cron job “%@” couldn't be removed and is still scheduled. Remove it from the Cron list." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Cron-Job „%@“ konnte nicht entfernt werden und ist noch geplant. Entferne ihn in der Cron-Liste."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo quitar la tarea cron “%@” y sigue programada. Quítala desde la lista de Cron."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La tâche cron « %@ » n’a pas pu être supprimée et est toujours planifiée. Supprimez-la depuis la liste Cron."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cron ジョブ「%@」を削除できず、まだスケジュールされています。Cron リストから削除してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível remover a tarefa cron “%@”, e ela ainda está agendada. Remova-a na lista do Cron."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法移除定时任务“%@”,它仍在计划中。请从 Cron 列表中移除它。"
+          }
+        }
+      }
+    },
     "The host gateway is not serving this profile — its bots and cron are stopped. Start serves it again without restarting the host gateway." : {
       "localizations" : {
         "de" : {
@@ -1581,6 +3709,86 @@
         }
       }
     },
+    "The template's memory entry couldn't be removed from %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Speichereintrag der Vorlage konnte nicht aus %@ entfernt werden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo quitar la entrada de memoria de la plantilla de %@."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’entrée de mémoire du modèle n’a pas pu être supprimée de %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テンプレートのメモリエントリを %@ から削除できませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível remover a entrada de memória do template de %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法从 %@ 中移除模板的记忆条目。"
+          }
+        }
+      }
+    },
+    "The template's skills folder couldn't be fully removed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Skills-Ordner der Vorlage konnte nicht vollständig entfernt werden: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo quitar por completo la carpeta de habilidades de la plantilla: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le dossier des compétences du modèle n’a pas pu être entièrement supprimé : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テンプレートのスキルフォルダを完全には削除できませんでした: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível remover totalmente a pasta de habilidades do template: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法完全移除模板的技能文件夹:%@"
+          }
+        }
+      }
+    },
     "There was no stored auth state for this provider." : {
       "localizations" : {
         "de" : {
@@ -1661,6 +3869,46 @@
         }
       }
     },
+    "These databases couldn't be copied safely and are not in this backup: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Datenbanken konnten nicht sicher kopiert werden und sind nicht in diesem Backup enthalten: %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estas bases de datos no se pudieron copiar de forma segura y no están en esta copia de seguridad: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ces bases de données n’ont pas pu être copiées en toute sécurité et ne figurent pas dans cette sauvegarde : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次のデータベースは安全にコピーできなかったため、このバックアップには含まれていません: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estes bancos de dados não puderam ser copiados com segurança e não estão neste backup: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下数据库无法安全复制,未包含在此备份中:%@"
+          }
+        }
+      }
+    },
     "This config sets `gateway.standalone: true`. On a named profile that keeps its gateway out of the host gateway — it serves only itself, so routes to other profiles don't run from it. The default profile ignores the key. Hermes treats it as a temporary compatibility shim." : {
       "localizations" : {
         "de" : {
@@ -1697,6 +3945,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此配置设置了 `gateway.standalone: true`。对于具名配置,这会使其 Gateway 不并入主机 Gateway — 它只服务自身,因此通往其他配置的路由不会从它运行。默认配置会忽略此键。Hermes 将其视为临时兼容措施。"
+          }
+        }
+      }
+    },
+    "This credential belongs to the default profile. Remove it there." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Anmeldedaten gehören zum Standardprofil. Entferne sie dort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta credencial pertenece al perfil predeterminado. Quítala allí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cet identifiant appartient au profil par défaut. Retirez-le dans ce profil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この資格情報はデフォルトプロファイルに属しています。そちらで削除してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta credencial pertence ao perfil padrão. Remova-a lá."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此凭证属于默认配置。请在那里移除它。"
+          }
+        }
+      }
+    },
+    "This Hermes install is managed by a package manager, which doesn’t allow config changes, so “%@” wasn’t added." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Installation wird von einem Paketmanager verwaltet, der keine Konfigurationsänderungen erlaubt, daher wurde „%@“ nicht hinzugefügt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalación de Hermes la gestiona un gestor de paquetes que no permite cambios de configuración, así que “%@” no se añadió."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette installation de Hermes est gérée par un gestionnaire de paquets qui n’autorise pas les modifications de configuration ; « %@ » n’a donc pas été ajouté."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Hermes はパッケージマネージャーで管理されており、設定の変更が許可されていないため、「%@」は追加されませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta instalação do Hermes é gerenciada por um gerenciador de pacotes, que não permite alterações de configuração, então “%@” não foi adicionado."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Hermes 安装由包管理器管理,不允许更改配置,因此未添加“%@”。"
           }
         }
       }
@@ -1821,6 +4149,46 @@
         }
       }
     },
+    "This profile has no credentials of its own for this provider, so Hermes uses the ones in the default profile's auth.json. Adding one here makes this profile use its own instead." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Profil hat keine eigenen Anmeldedaten für diesen Anbieter, daher nutzt Hermes die aus der auth.json des Standardprofils. Fügst du hier welche hinzu, verwendet dieses Profil stattdessen seine eigenen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil no tiene credenciales propias para este proveedor, así que Hermes usa las del auth.json del perfil predeterminado. Si añades una aquí, este perfil usará las suyas."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce profil n’a pas d’identifiants propres pour ce fournisseur ; Hermes utilise donc ceux du auth.json du profil par défaut. Si vous en ajoutez un ici, ce profil utilisera les siens."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロファイルにはこのプロバイダー用の独自の資格情報がないため、Hermes はデフォルトプロファイルの auth.json にあるものを使用します。ここで追加すると、このプロファイルは独自の資格情報を使うようになります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil não tem credenciais próprias para este provedor, então o Hermes usa as do auth.json do perfil padrão. Adicionar uma aqui faz este perfil usar as próprias."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配置没有该提供商自己的凭证,因此 Hermes 使用默认配置 auth.json 中的凭证。在此处添加后,此配置将改用自己的凭证。"
+          }
+        }
+      }
+    },
     "This profile is parked; the host gateway keeps serving the other profiles." : {
       "comment" : "Result of `hermes gateway stop` for one profile: the shared host gateway stops serving it but keeps running.",
       "localizations" : {
@@ -1899,6 +4267,206 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此配置已重新由主机 Gateway 服务。"
+          }
+        }
+      }
+    },
+    "This provider is signed in on the default profile. Remove it there." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Anbieter ist im Standardprofil angemeldet. Entferne ihn dort."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este proveedor tiene la sesión iniciada en el perfil predeterminado. Quítalo allí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce fournisseur est connecté sur le profil par défaut. Retirez-le dans ce profil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーはデフォルトプロファイルでサインインしています。そちらで削除してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este provedor está conectado no perfil padrão. Remova-o lá."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此提供商是在默认配置中登录的。请在那里移除它。"
+          }
+        }
+      }
+    },
+    "This version of Hermes ignores `model.base_url` for provider `llamacpp` and only connects to its own llama.cpp server or 127.0.0.1:8080. Switch to a custom endpoint to use the address in config.yaml." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Hermes-Version ignoriert `model.base_url` für den Anbieter `llamacpp` und verbindet sich nur mit ihrem eigenen llama.cpp-Server oder 127.0.0.1:8080. Wechsle zu einem benutzerdefinierten Endpunkt, um die Adresse aus config.yaml zu verwenden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta versión de Hermes ignora `model.base_url` para el proveedor `llamacpp` y solo se conecta a su propio servidor llama.cpp o a 127.0.0.1:8080. Cambia a un endpoint personalizado para usar la dirección de config.yaml."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette version de Hermes ignore `model.base_url` pour le fournisseur `llamacpp` et se connecte uniquement à son propre serveur llama.cpp ou à 127.0.0.1:8080. Passez à un endpoint personnalisé pour utiliser l’adresse de config.yaml."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このバージョンの Hermes はプロバイダー `llamacpp` の `model.base_url` を無視し、独自の llama.cpp サーバーまたは 127.0.0.1:8080 にのみ接続します。config.yaml のアドレスを使うには、カスタムエンドポイントに切り替えてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta versão do Hermes ignora `model.base_url` para o provedor `llamacpp` e só se conecta ao próprio servidor llama.cpp ou a 127.0.0.1:8080. Mude para um endpoint personalizado para usar o endereço do config.yaml."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本的 Hermes 会忽略提供商 `llamacpp` 的 `model.base_url`,只连接到它自己的 llama.cpp 服务器或 127.0.0.1:8080。要使用 config.yaml 中的地址,请切换到自定义端点。"
+          }
+        }
+      }
+    },
+    "Turn on Webhook in Platforms → Webhook, which sets platforms.webhook.enabled in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiviere Webhook unter Plattformen → Webhook; das setzt platforms.webhook.enabled in config.yaml. Die hermes-webhook-Befehle prüfen nur diesen Schlüssel, nicht WEBHOOK_ENABLED in .env."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activa Webhook en Plataformas → Webhook, lo que establece platforms.webhook.enabled en config.yaml. Los comandos hermes webhook solo comprueban esa clave, no WEBHOOK_ENABLED en .env."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activez Webhook dans Plateformes → Webhook, ce qui définit platforms.webhook.enabled dans config.yaml. Les commandes hermes webhook ne vérifient que cette clé, pas WEBHOOK_ENABLED dans .env."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プラットフォーム → Webhook で Webhook をオンにしてください。これにより config.yaml の platforms.webhook.enabled が設定されます。hermes webhook コマンドはこのキーのみを確認し、.env の WEBHOOK_ENABLED は確認しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ative o Webhook em Plataformas → Webhook, o que define platforms.webhook.enabled no config.yaml. Os comandos hermes webhook verificam apenas essa chave, não WEBHOOK_ENABLED no .env."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在平台 → Webhook 中开启 Webhook,这会在 config.yaml 中设置 platforms.webhook.enabled。hermes webhook 命令只检查该键,不检查 .env 中的 WEBHOOK_ENABLED。"
+          }
+        }
+      }
+    },
+    "Uncategorized" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ohne Kategorie"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin categoría"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sans catégorie"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分類"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem categoria"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分类"
+          }
+        }
+      }
+    },
+    "With a container wrapper such as `docker compose exec`, the environment Scarf sets on the host doesn't reach Hermes inside the container, so viewing a named profile from Scarf won't switch the container's Hermes to it. Use the container's default profile with a wrapper." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei einem Container-Wrapper wie `docker compose exec` erreicht die Umgebung, die Scarf auf dem Host setzt, Hermes im Container nicht. Das Anzeigen eines benannten Profils in Scarf schaltet Hermes im Container daher nicht darauf um. Nutze mit einem Wrapper das Standardprofil des Containers."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Con un wrapper de contenedor como `docker compose exec`, el entorno que Scarf define en el host no llega a Hermes dentro del contenedor, así que ver un perfil con nombre desde Scarf no cambiará el Hermes del contenedor a ese perfil. Usa el perfil predeterminado del contenedor con un wrapper."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avec un wrapper de conteneur comme `docker compose exec`, l’environnement que Scarf définit sur l’hôte n’atteint pas Hermes dans le conteneur ; afficher un profil nommé depuis Scarf ne basculera donc pas le Hermes du conteneur sur ce profil. Utilisez le profil par défaut du conteneur avec un wrapper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`docker compose exec` のようなコンテナラッパーを使う場合、Scarf がホストで設定する環境変数はコンテナ内の Hermes に届かないため、Scarf で名前付きプロファイルを表示してもコンテナの Hermes はそのプロファイルに切り替わりません。ラッパーを使う場合はコンテナのデフォルトプロファイルを使用してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Com um wrapper de contêiner como `docker compose exec`, o ambiente que o Scarf define no host não chega ao Hermes dentro do contêiner, então visualizar um perfil nomeado no Scarf não mudará o Hermes do contêiner para ele. Use o perfil padrão do contêiner com um wrapper."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 `docker compose exec` 等容器包装器时,Scarf 在主机上设置的环境不会传到容器内的 Hermes,因此在 Scarf 中查看命名配置不会让容器的 Hermes 切换到该配置。使用包装器时请使用容器的默认配置。"
           }
         }
       }
@@ -2164,6 +4732,210 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "· 已记住(探测不可用)"
+          }
+        }
+      }
+    },
+    "“%@” is archived, but its cron jobs may still be scheduled" : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the project name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist archiviert, aber seine Cron-Jobs sind möglicherweise noch geplant"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está archivado, pero puede que sus tareas cron sigan programadas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » est archivé, mais ses tâches cron sont peut-être encore planifiées"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」はアーカイブされましたが、cron ジョブがまだスケジュールされている可能性があります"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está arquivado, mas suas tarefas cron talvez ainda estejam agendadas"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已归档,但其定时任务可能仍在计划中"
+          }
+        }
+      }
+    },
+    "“%@” is archived, but some of its cron jobs are still scheduled" : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the project name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist archiviert, aber einige seiner Cron-Jobs sind noch geplant"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está archivado, pero algunas de sus tareas cron siguen programadas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » est archivé, mais certaines de ses tâches cron sont encore planifiées"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」はアーカイブされましたが、一部の cron ジョブがまだスケジュールされています"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está arquivado, mas algumas de suas tarefas cron ainda estão agendadas"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已归档,但其部分定时任务仍在计划中"
+          }
+        }
+      }
+    },
+    "“%@” is restored" : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the project name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist wiederhergestellt"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está restaurado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » est restauré"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」を復元しました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” foi restaurado"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已恢复"
+          }
+        }
+      }
+    },
+    "“%@” is restored, but some of its cron jobs are still paused" : {
+      "comment" : "ScarfCore ProjectsViewModel archive/restore cron notice: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the project name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist wiederhergestellt, aber einige seiner Cron-Jobs sind noch pausiert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” está restaurado, pero algunas de sus tareas cron siguen en pausa"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » est restauré, mais certaines de ses tâches cron sont encore en pause"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」を復元しましたが、一部の cron ジョブはまだ一時停止中です"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” foi restaurado, mas algumas de suas tarefas cron ainda estão pausadas"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已恢复,但其部分定时任务仍处于暂停状态"
+          }
+        }
+      }
+    },
+    "“%@” must be a number of seconds greater than zero, or empty for the default." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ muss eine Anzahl Sekunden größer als null sein oder leer für den Standardwert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” debe ser un número de segundos mayor que cero, o quedar vacío para usar el valor predeterminado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » doit être un nombre de secondes supérieur à zéro, ou vide pour la valeur par défaut."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」は 0 より大きい秒数にするか、デフォルトを使う場合は空欄にしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” deve ser um número de segundos maior que zero, ou ficar vazio para usar o padrão."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”必须是大于零的秒数,或留空以使用默认值。"
           }
         }
       }
@@ -5773,6 +8545,86 @@
         }
       }
     },
+    "“%@” was added with OAuth. Hermes can’t load its tools until you sign in. You can also sign in later from the server’s detail pane." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wurde mit OAuth hinzugefügt. Hermes kann seine Tools erst laden, wenn du dich anmeldest. Du kannst dich auch später im Detailbereich des Servers anmelden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” se añadió con OAuth. Hermes no puede cargar sus herramientas hasta que inicies sesión. También puedes iniciar sesión más tarde desde el panel de detalles del servidor."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » a été ajouté avec OAuth. Hermes ne peut pas charger ses outils tant que vous ne vous êtes pas connecté. Vous pouvez aussi vous connecter plus tard depuis le panneau de détails du serveur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」は OAuth で追加されました。サインインするまで Hermes はツールを読み込めません。サーバーの詳細パネルから後でサインインすることもできます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” foi adicionado com OAuth. O Hermes não consegue carregar as ferramentas dele até você entrar. Você também pode entrar mais tarde pelo painel de detalhes do servidor."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已通过 OAuth 添加。在你登录之前,Hermes 无法加载其工具。你也可以稍后在服务器详情面板中登录。"
+          }
+        }
+      }
+    },
+    "“%@” was added with OAuth. Run `hermes mcp login %@` on that host to sign in, then restart the gateway." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wurde mit OAuth hinzugefügt. Führe `hermes mcp login %@` auf diesem Host aus, um dich anzumelden, und starte dann das Gateway neu."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” se añadió con OAuth. Ejecuta `hermes mcp login %@` en ese host para iniciar sesión y luego reinicia el gateway."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » a été ajouté avec OAuth. Exécutez `hermes mcp login %@` sur cet hôte pour vous connecter, puis redémarrez le gateway."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」は OAuth で追加されました。そのホストで `hermes mcp login %@` を実行してサインインし、Gateway を再起動してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” foi adicionado com OAuth. Execute `hermes mcp login %@` nesse host para entrar e depois reinicie o gateway."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”已通过 OAuth 添加。请在该主机上运行 `hermes mcp login %@` 登录,然后重启 Gateway。"
+          }
+        }
+      }
+    },
     "•" : {
 
     },
@@ -8218,46 +11070,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "活跃人格"
-          }
-        }
-      }
-    },
-    "Active personality set to %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Aktive Persönlichkeit auf %@ gesetzt"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Personalidad activa establecida en %@"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Personnalité active définie sur %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アクティブなパーソナリティを %@ に設定しました"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Personalidade ativa definida como %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已将活动人格设为 %@"
           }
         }
       }
@@ -14686,46 +17498,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "认证"
-          }
-        }
-      }
-    },
-    "auth.json present" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json vorhanden"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json presente"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json présent"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json が存在します"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json presente"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "auth.json 存在"
           }
         }
       }
@@ -25724,46 +28496,6 @@
         }
       }
     },
-    "Copies a one-liner that adds this project's auth.json to your global ~/.hermes/ only if you don't already have one (an existing global auth.json is never overwritten), then renames the shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so it stops binding — the project's copy stays readable in that backup folder. Run it on the remote, then refresh the Dashboard." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kopiert einen Einzeiler, der die auth.json dieses Projekts nur dann in Ihr globales ~/.hermes/ übernimmt, wenn dort noch keine vorhanden ist (eine bestehende globale auth.json wird nie überschrieben), und benennt das Schatten-.hermes/ anschließend in .hermes.scarf-bak.<timestamp>/ um, damit es nicht mehr bindet — die Kopie des Projekts bleibt in diesem Sicherungsordner lesbar. Führen Sie ihn auf dem Remote-Host aus und aktualisieren Sie dann das Dashboard."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copia un comando de una línea que añade el auth.json de este proyecto a tu ~/.hermes/ global solo si aún no tienes uno (un auth.json global existente nunca se sobrescribe) y luego renombra el .hermes/ en sombra como .hermes.scarf-bak.<timestamp>/ para que deje de aplicarse; la copia del proyecto sigue siendo legible en esa carpeta de respaldo. Ejecútalo en el host remoto y después actualiza el panel."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copie une commande d'une ligne qui ajoute le auth.json de ce projet à votre ~/.hermes/ global uniquement si vous n'en avez pas déjà un (un auth.json global existant n'est jamais écrasé), puis renomme le .hermes/ fantôme en .hermes.scarf-bak.<timestamp>/ pour qu'il cesse de s'appliquer — la copie du projet reste lisible dans ce dossier de sauvegarde. Exécutez-la sur l'hôte distant, puis actualisez le tableau de bord."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このプロジェクトの auth.json を、グローバルな ~/.hermes/ にまだ存在しない場合にのみ追加するワンライナーをコピーします（既存のグローバル auth.json が上書きされることはありません）。その後、影の .hermes/ を .hermes.scarf-bak.<timestamp>/ にリネームしてバインドを解除します — プロジェクトのコピーはそのバックアップフォルダ内で引き続き読み取れます。リモートで実行してから、ダッシュボードを更新してください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copia um comando de uma linha que adiciona o auth.json deste projeto ao seu ~/.hermes/ global apenas se você ainda não tiver um (um auth.json global existente nunca é sobrescrito) e depois renomeia o .hermes/ sombra como .hermes.scarf-bak.<timestamp>/ para que ele pare de valer — a cópia do projeto continua legível nessa pasta de backup. Execute-o no host remoto e depois atualize o painel."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制一条单行命令：仅当你的全局 ~/.hermes/ 中尚无 auth.json 时，才将本项目的 auth.json 添加进去（已存在的全局 auth.json 绝不会被覆盖），然后把影子 .hermes/ 重命名为 .hermes.scarf-bak.<timestamp>/ 使其不再生效 — 项目的副本仍可在该备份文件夹中读取。请在远程主机上执行，然后刷新仪表板。"
-          }
-        }
-      }
-    },
     "Copies a one-liner that consolidates this project's auth.json into your global ~/.hermes/ and renames the shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so it stops binding. Run it on the remote, then refresh the Dashboard." : {
       "comment" : "A tooltip for the \"Copy fix command\" button.",
       "extractionState" : "stale",
@@ -25803,48 +28535,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制一条单行命令,将此项目的 auth.json 合并到你的全局 ~/.hermes/ 中,并将影子 .hermes/ 目录重命名为 .hermes.scarf-bak.<timestamp>/ 以停止绑定。请在远程运行它,然后刷新仪表盘。"
-          }
-        }
-      }
-    },
-    "Copies a one-liner that renames this project's shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so Hermes' CLI stops binding to it as $HERMES_HOME. Run it on the remote, then refresh the Dashboard." : {
-      "comment" : "A tooltip for the \"Copy fix command\" button.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kopiert einen Einzeiler, der das schattierte .hermes/ dieses Projekts als .hermes.scarf-bak.<timestamp>/ umbenennt, damit die CLI von Hermes nicht mehr als $HERMES_HOME daran bindet. Führe ihn auf dem Remote aus und aktualisiere dann das Dashboard."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copia una línea que renombra el .hermes/ oculto de este proyecto como .hermes.scarf-bak.<timestamp>/ para que la CLI de Hermes deje de vincularlo como $HERMES_HOME. Ejecútala en el remoto y luego actualiza el panel."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copie une commande d'une ligne qui renomme le .hermes/ fantôme de ce projet en .hermes.scarf-bak.<timestamp>/ pour que le CLI de Hermes cesse de s'y lier en tant que $HERMES_HOME. Exécutez-la sur le serveur distant, puis actualisez le tableau de bord."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このプロジェクトのシャドウ .hermes/ を .hermes.scarf-bak.<timestamp>/ にリネームし、Hermes の CLI が $HERMES_HOME としてバインドしないようにするワンライナーをコピーします。リモートで実行してから、ダッシュボードを更新してください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copia um comando único que renomeia o .hermes/ sombra deste projeto para .hermes.scarf-bak.<timestamp>/ para que a CLI do Hermes pare de vinculá-lo como $HERMES_HOME. Execute-o no servidor remoto e depois atualize o Painel."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制一条单行命令,将此项目的影子 .hermes/ 目录重命名为 .hermes.scarf-bak.<timestamp>/,以使 Hermes 的 CLI 不再将其绑定为 $HERMES_HOME。请在远程运行它,然后刷新仪表盘。"
           }
         }
       }
@@ -26169,48 +28859,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制错误详情"
-          }
-        }
-      }
-    },
-    "Copy fix command" : {
-      "comment" : "A button that copies a one-liner that consolidates a project's auth.json into your global ~/.hermes/.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fix-Befehl kopieren"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copiar comando de corrección"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copier la commande de correction"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "修正コマンドをコピー"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copiar comando de correção"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制修复命令"
           }
         }
       }
@@ -34630,46 +37278,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "例如 productivity"
-          }
-        }
-      }
-    },
-    "e.g. productivity (defaults to `local`)" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "z. B. productivity (Standard `local`)"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "p. ej. productivity (por defecto `local`)"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "par ex. productivity (par défaut `local`)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "例: productivity(デフォルトは `local`)"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ex.: productivity (o padrão é `local`)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "例如 productivity(默认为 `local`)"
           }
         }
       }
@@ -43450,46 +46058,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hermes 正在该主机上以前台方式启动网关，Scarf 无法在此确认。"
-          }
-        }
-      }
-    },
-    "Hermes needs a global webhook secret and port before subscriptions can receive traffic. Run the gateway setup wizard or edit ~/.hermes/config.yaml manually." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hermes braucht ein globales Webhook-Secret und einen Port, bevor Abonnements Traffic empfangen können. Starte den Gateway-Einrichtungsassistenten oder bearbeite ~/.hermes/config.yaml manuell."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hermes necesita un secreto y puerto globales de webhook antes de que las suscripciones reciban tráfico. Ejecuta el asistente de configuración del gateway o edita ~/.hermes/config.yaml manualmente."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hermes a besoin d'un secret webhook global et d'un port avant que les abonnements puissent recevoir du trafic. Lancez l'assistant de configuration du gateway ou éditez ~/.hermes/config.yaml manuellement."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "サブスクリプションがトラフィックを受信する前に、Hermes にはグローバルな webhook シークレットとポートが必要です。ゲートウェイセットアップウィザードを実行するか、~/.hermes/config.yaml を手動で編集してください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "O Hermes precisa de um segredo global de webhook e uma porta antes que assinaturas possam receber tráfego. Execute o assistente de configuração do gateway ou edite ~/.hermes/config.yaml manualmente."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "订阅接收流量前,Hermes 需要全局 webhook 密钥和端口。运行 gateway 设置向导或手动编辑 ~/.hermes/config.yaml。"
           }
         }
       }
@@ -74790,46 +77358,6 @@
         }
       }
     },
-    "Project-local Hermes home shadowing global setup" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Projektlokales Hermes-Home überschattet globale Einrichtung"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hermes home local del proyecto que oculta la configuración global"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Répertoire Hermes local au projet masquant la configuration globale"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "プロジェクトローカルの Hermes ホームがグローバル設定を覆っています"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Home do Hermes local ao projeto ofuscando a configuração global"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "遮蔽全局设置的项目本地 Hermes 主目录"
-          }
-        }
-      }
-    },
     "Project's current git branch" : {
       "comment" : "A tooltip for the git branch of the project.",
       "isCommentAutoGenerated" : true,
@@ -86307,46 +88835,6 @@
         }
       }
     },
-    "Run Setup in Terminal" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Einrichtung im Terminal ausführen"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ejecutar instalación en el terminal"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lancer l'installation dans le terminal"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ターミナルでセットアップを実行"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Executar instalação no terminal"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在终端中运行设置"
-          }
-        }
-      }
-    },
     "Run supply-chain audit" : {
       "comment" : "A button label that triggers a supply-chain audit.",
       "isCommentAutoGenerated" : true,
@@ -93124,46 +95612,6 @@
         }
       }
     },
-    "Shell shortcuts hermes exposes in chat as `/command_name`." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shell-Shortcuts, die hermes im Chat als `/command_name` verfügbar macht."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Atajos de shell que hermes expone en el chat como `/command_name`."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Raccourcis shell que hermes expose dans le chat sous la forme `/command_name`."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "hermes がチャット上で `/command_name` として公開するシェルショートカットです。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Atalhos de shell que o hermes expõe no chat como `/command_name`."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "hermes 在聊天中以 `/command_name` 形式暴露的 shell 快捷命令。"
-          }
-        }
-      }
-    },
     "Show" : {
       "localizations" : {
         "de" : {
@@ -98291,48 +100739,6 @@
         }
       }
     },
-    "state.db present" : {
-      "comment" : "A label indicating that a project has a state.db file.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db vorhanden"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db presente"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db présent"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db が存在します"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db presente"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "state.db 存在"
-          }
-        }
-      }
-    },
     "state.db readable" : {
       "localizations" : {
         "de" : {
@@ -102915,48 +105321,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这些列表字段必须直接在 config.yaml 中编辑。"
-          }
-        }
-      }
-    },
-    "These projects carry their own `.hermes/` directory. Hermes' CLI uses the closest one as `$HERMES_HOME` when run from inside the project, so credentials and config written there don't show up in your global Hermes setup. Consolidate to clear this warning." : {
-      "comment" : "A description of the warning that appears when a project's Hermes home shadows the user's global Hermes setup.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diese Projekte haben ein eigenes `.hermes/`-Verzeichnis. Hermes' CLI nutzt das nächstgelegene als `$HERMES_HOME`, wenn es innerhalb des Projekts ausgeführt wird, daher erscheinen dort geschriebene Anmeldedaten und Konfiguration nicht in deiner globalen Hermes-Einrichtung. Konsolidiere, um diese Warnung zu beheben."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Estos proyectos tienen su propio directorio `.hermes/`. El CLI de Hermes usa el más cercano como `$HERMES_HOME` cuando se ejecuta desde dentro del proyecto, así que las credenciales y la configuración escritas ahí no aparecen en tu configuración global de Hermes. Consolida para eliminar esta advertencia."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ces projets possèdent leur propre répertoire `.hermes/`. La CLI de Hermes utilise le plus proche comme `$HERMES_HOME` lorsqu'elle est exécutée depuis le projet, donc les identifiants et la configuration qui y sont écrits n'apparaissent pas dans votre configuration Hermes globale. Consolidez pour effacer cet avertissement."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "これらのプロジェクトは独自の `.hermes/` ディレクトリを持っています。プロジェクト内から実行すると、Hermes の CLI は最も近いものを `$HERMES_HOME` として使用するため、そこに書き込まれた資格情報や設定はグローバルな Hermes セットアップには反映されません。統合するとこの警告は消えます。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esses projetos possuem seu próprio diretório `.hermes/`. A CLI do Hermes usa o mais próximo como `$HERMES_HOME` quando executada de dentro do projeto, então credenciais e configuração gravadas ali não aparecem na sua configuração global do Hermes. Consolide para eliminar este aviso."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这些项目带有自己的 `.hermes/` 目录。当在项目内部运行时,Hermes 的 CLI 会使用最近的一个作为 `$HERMES_HOME`,因此写入其中的凭证和配置不会出现在你的全局 Hermes 设置中。合并以清除此警告。"
           }
         }
       }
@@ -111058,46 +113422,6 @@
         }
       }
     },
-    "user" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nutzer"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "usuario"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "utilisateur"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ユーザー"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "usuário"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用户"
-          }
-        }
-      }
-    },
     "User" : {
       "localizations" : {
         "de" : {
@@ -115748,46 +118072,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "YOLO"
-          }
-        }
-      }
-    },
-    "YOLO mode is on — dangerous commands run without approval. Toggle via `/yolo` or change approvals.mode in Settings → Agent." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YOLO-Modus ist an — gefährliche Befehle laufen ohne Genehmigung. Umschalten via `/yolo` oder approvals.mode in Einstellungen → Agent ändern."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "El modo YOLO está activado — los comandos peligrosos se ejecutan sin aprobación. Actívalo/desactívalo con `/yolo` o cambia approvals.mode en Configuración → Agente."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Le mode YOLO est activé — les commandes dangereuses s'exécutent sans approbation. Basculez via `/yolo` ou changez approvals.mode dans Réglages → Agent."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YOLO モードがオンです — 危険なコマンドが承認なしで実行されます。`/yolo` で切り替えるか、設定 → Agent で approvals.mode を変更してください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "O modo YOLO está ativado — comandos perigosos são executados sem aprovação. Alterne via `/yolo` ou mude approvals.mode em Configurações → Agent."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YOLO 模式已开启 — 危险命令无需批准即可运行。可通过 `/yolo` 切换,或在设置 → Agent 中更改 approvals.mode。"
           }
         }
       }
