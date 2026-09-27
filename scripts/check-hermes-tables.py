@@ -630,7 +630,12 @@ def parse_manifest_yaml(text, where):
 
     def strip_comment(value):
         if value[:1] in ("'", '"'):
-            return value
+            # A quoted scalar may be followed by ` # comment`; keep the quotes.
+            m = re.match(r'^("(?:[^"\\]|\\.)*"|'
+                         r"'(?:[^']|'')*')(\s+#.*)?\s*$", value)
+            if not m:
+                sys.exit(f"error: {where}: can't read the quoted scalar {value!r} — teach lane 7")
+            return m.group(1)
         cut = re.search(r"\s#", value)
         return value[:cut.start()].rstrip() if cut else value
 
@@ -756,6 +761,12 @@ def parse_optional_mcps(src):
     return out
 
 
+def env_signature(name, secret, required):
+    """One install prompt as lane 7 compares it: `NAME`, plus `:plain` for a
+    non-secret and `:optional` for a non-required one."""
+    return name + ("" if secret else ":plain") + ("" if required else ":optional")
+
+
 def manifest_fields(m):
     """The fields lane 7 compares, from one manifest."""
     transport = m.get("transport") or {}
@@ -766,7 +777,10 @@ def manifest_fields(m):
         "transport": transport.get("type"),
         "url": transport.get("url"),
         "auth": auth.get("type"),
-        "env": [e.get("name") for e in (auth.get("env") or [])],
+        # name, then "plain" for a non-secret and "optional" for a
+        # non-required one (Hermes defaults both flags to true).
+        "env": [env_signature(e.get("name"), e.get("secret", True), e.get("required", True))
+                for e in (auth.get("env") or [])],
         "default_enabled": list(tools.get("default_enabled") or []),
         "default_excluded": list(tools.get("default_excluded") or []),
     }
@@ -799,7 +813,9 @@ def swift_catalog_entries():
             "transport": transport.group(1) if transport else None,
             "url": url.group(2) if url and url.group(1) != "nil" else None,
             "auth": auth_map.get(auth.group(1)) if auth else None,
-            "env": re.findall(r'\.init\(name:\s*"([^"]+)"', chunk)
+            "env": [env_signature(m.group(1), "isSecret: false" not in seg, "isRequired: false" not in seg)
+                    for seg in chunk.split(".init(")[1:]
+                    for m in [re.match(r'\s*name:\s*"([^"]+)"', seg)] if m]
                    or strings(r"requiredEnvVars:", chunk),
             "default_enabled": strings(r"defaultEnabledTools:", chunk),
             "default_excluded": strings(r"defaultExcludedTools:", chunk),
@@ -1051,6 +1067,22 @@ def main(argv=None):
         check("mcp-catalog", swift_catalog, manifests,
               "catalog entries missing from OptionalMCPCatalog.entries",
               "OptionalMCPCatalog.entries not in Hermes's catalog")
+        for name in sorted(manifests):
+            # Scarf answers the prompts on stdin, one line each, and Hermes
+            # skips a SECRET it already has (mcp_catalog.py `_prompt_env_vars`).
+            # A secret before a plain prompt would then shift the later
+            # answers up one prompt — a secret could land in config.yaml.
+            env = manifest_fields(manifests[name])["env"]
+            secret_seen = False
+            for sig in env:
+                if ":plain" not in sig:
+                    secret_seen = True
+                elif secret_seen:
+                    failures.append(
+                        f"[mcp-catalog] '{name}' prompts for a secret before the plain "
+                        f"value {sig.split(':')[0]}: Scarf's stdin answers would shift "
+                        f"when that secret is already in .env — teach installRequest")
+                    break
         for name in sorted(set(swift_catalog) & set(manifests)):
             want = manifest_fields(manifests[name])
             got = swift_catalog[name]

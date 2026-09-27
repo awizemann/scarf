@@ -242,7 +242,7 @@ struct MCPServerAddCustomView: View {
                             .accessibilityLabel(prompt.prompt)
                         }
                     }
-                    Text("Hermes asks for these when it installs this catalog entry. Secrets go to the profile's `.env`; other values are written into config.yaml.")
+                    Text("Hermes asks for these when it installs this catalog entry. Secrets go to the profile's `.env`; other values are written into config.yaml. Leave a secret empty to keep the one already saved in `.env`.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -374,8 +374,8 @@ struct MCPServerAddCustomView: View {
                 defaultEnabledTools: pendingDefaultEnabledTools,
                 defaultExcludedTools: pendingDefaultExcludedTools,
                 catalogIdentifier: auth == "oauth" ? appliedCatalogEntryName : nil,
-                catalogInstallInput: catalogInstallActive
-                    ? appliedCatalogEntry?.installStdin(values: catalogInstallValues) : nil
+                catalogInstall: catalogInstallActive
+                    ? appliedCatalogEntry?.installRequest(values: catalogInstallValues) : nil
             )
         case .sse:
             viewModel.addCustomSSE(

@@ -85,10 +85,15 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     public var id: String { name }
 
     /// Whether `values` (keyed by env-var name) answer every required
-    /// prompt with something other than whitespace.
+    /// plain prompt with something other than whitespace.
+    ///
+    /// A secret may stay empty: Hermes does not ask for one the profile's
+    /// `.env` already holds (`mcp_catalog.py:484-487`), so a reinstall
+    /// needs none, and a first install without one fails in Hermes with
+    /// its own "is required" message, which Scarf shows.
     public func installValuesComplete(_ values: [String: String]) -> Bool {
         installPrompts.allSatisfy { prompt in
-            !prompt.isRequired
+            !prompt.isRequired || prompt.isSecret
                 || !(values[prompt.name] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -104,12 +109,23 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     /// its secret last, so a skipped prompt only leaves a spare line at the
     /// end, which nothing reads.
     public func installStdin(values: [String: String]) -> String? {
+        installRequest(values: values)?.stdin
+    }
+
+    /// ``installStdin(values:)`` plus the secrets the user typed a value
+    /// for, so the caller can say when Hermes kept an older one
+    /// (``CatalogInstallRequest/reusedSecretNote(in:)``).
+    public func installRequest(values: [String: String]) -> CatalogInstallRequest? {
         guard !installPrompts.isEmpty else { return nil }
-        return installPrompts.map { prompt -> String in
+        var supplied: [String] = []
+        let lines = installPrompts.map { prompt -> String in
             let raw = values[prompt.name] ?? ""
             let firstLine = raw.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-            return firstLine.trimmingCharacters(in: .whitespaces)
-        }.joined(separator: "\n") + "\n"
+            let answer = firstLine.trimmingCharacters(in: .whitespaces)
+            if prompt.isSecret, !answer.isEmpty { supplied.append(prompt.name) }
+            return answer
+        }
+        return CatalogInstallRequest(stdin: lines.joined(separator: "\n") + "\n", suppliedSecrets: supplied)
     }
 
     public init(
@@ -707,5 +723,30 @@ public enum OptionalMCPCatalog {
     /// snapshot on v0.21.4+, the v0.21.0 one below it.
     public static func entries(for capabilities: HermesCapabilities) -> [OptionalMCPCatalogEntry] {
         capabilities.isV0214OrLater ? entries : preV0214Entries
+    }
+}
+
+/// What Scarf hands `hermes mcp install` for an entry with install prompts.
+public struct CatalogInstallRequest: Sendable, Equatable {
+    /// One answer per prompt, in manifest order.
+    public let stdin: String
+    /// Secret prompts the user typed a value for.
+    public let suppliedSecrets: [String]
+
+    /// A `Note: …` line when Hermes kept a secret that was already in the
+    /// profile's `.env` instead of the value the user typed, or `nil`.
+    ///
+    /// Hermes does not ask for a secret it already has; it prints
+    /// `✓ <NAME> already set in .env` and moves on
+    /// (`hermes_cli/mcp_catalog.py:484-487` @ v2026.9.24), so a new secret
+    /// typed for a reinstall is dropped while the install still succeeds.
+    /// Same shape as the `mcp add` token note in `HermesFileService`.
+    public func reusedSecretNote(in output: String) -> String? {
+        let reused = suppliedSecrets.filter { output.contains("\($0) already set in .env") }
+        guard !reused.isEmpty else { return nil }
+        let names = reused.joined(separator: ", ")
+        return String(
+            localized: "Note: \(names) was already set in this profile's .env, so Hermes kept that value and ignored the one you entered. To replace it, edit that line in .env (or remove it and add the server again)."
+        )
     }
 }

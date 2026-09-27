@@ -143,6 +143,9 @@ import Foundation
         // A remote tool's own network error is not ssh's.
         #expect(kind(7, "curl: (7) Failed to connect to localhost port 8080: Connection refused") == "command_failed")
         #expect(kind(255, "ssh: Could not resolve hostname h: nodename nor servname provided") == "host_unreachable")
+        // Rust tools (uv, rg) print their own parenthesised form.
+        #expect(kind(2, "error: failed to open file: Permission denied (os error 13)") == "command_failed")
+        #expect(kind(1, "Connection closed by 10.0.0.2 port 22\nlost connection") == "host_unreachable")
     }
 
     // MARK: - T3-F3: Nous /models bearer
@@ -244,8 +247,11 @@ import Foundation
         let asana = try #require(OptionalMCPCatalog.entries.first { $0.name == "asana" })
         #expect(asana.installPrompts.map(\.name) == ["ASANA_CLIENT_ID", "ASANA_CLIENT_SECRET"])
         #expect(asana.installPrompts.map(\.isSecret) == [false, true])
-        #expect(!asana.installValuesComplete(["ASANA_CLIENT_ID": "id"]))
-        #expect(!asana.installValuesComplete(["ASANA_CLIENT_ID": "id", "ASANA_CLIENT_SECRET": "  "]))
+        // The plain value is required; a secret may be left for Hermes to
+        // reuse from .env (or to refuse with its own message).
+        #expect(!asana.installValuesComplete(["ASANA_CLIENT_SECRET": "s"]))
+        #expect(!asana.installValuesComplete(["ASANA_CLIENT_ID": "  ", "ASANA_CLIENT_SECRET": "s"]))
+        #expect(asana.installValuesComplete(["ASANA_CLIENT_ID": "id"]))
         let values = ["ASANA_CLIENT_ID": "  id-123 ", "ASANA_CLIENT_SECRET": "s3cret\nextra line"]
         #expect(asana.installValuesComplete(values))
         // Trimmed, and a pasted newline cannot push text into the next prompt.
@@ -259,6 +265,23 @@ import Foundation
         let linear = try #require(OptionalMCPCatalog.entries.first { $0.name == "linear" })
         #expect(linear.installStdin(values: [:]) == nil)
         #expect(linear.installValuesComplete([:]))
+    }
+
+    /// Hermes skips a secret it already has and says so; the typed value is
+    /// dropped while the install succeeds, so Scarf says so too. Output
+    /// line as `_prompt_env_vars` prints it (`mcp_catalog.py:486`).
+    @Test func aSecretHermesAlreadyHadIsReported() throws {
+        let asana = try #require(OptionalMCPCatalog.entries.first { $0.name == "asana" })
+        let typed = try #require(asana.installRequest(values: ["ASANA_CLIENT_ID": "id", "ASANA_CLIENT_SECRET": "new"]))
+        #expect(typed.suppliedSecrets == ["ASANA_CLIENT_SECRET"])
+        let output = "  Configure credentials:\n  ✓ ASANA_CLIENT_SECRET already set in .env\n  ✓ Installed 'asana' (enabled)."
+        let note = try #require(typed.reusedSecretNote(in: output))
+        #expect(note.hasPrefix("Note: ASANA_CLIENT_SECRET was already set"))
+        #expect(typed.reusedSecretNote(in: "  ✓ Installed 'asana' (enabled).") == nil)
+        // Nothing typed, nothing to report.
+        let blank = try #require(asana.installRequest(values: ["ASANA_CLIENT_ID": "id"]))
+        #expect(blank.suppliedSecrets.isEmpty)
+        #expect(blank.reusedSecretNote(in: output) == nil)
     }
 
     @Test func theFetchPresetRunsThePythonPackage() throws {

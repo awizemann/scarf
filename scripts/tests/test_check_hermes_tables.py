@@ -570,6 +570,10 @@ class LaneSevenManifestReader(unittest.TestCase):
         self.assertEqual(m["tools"]["default_enabled"], ["one", "two"])
         self.assertEqual(m["post_install"], "line one\n\nline three\n")
 
+    def test_a_quoted_scalar_with_a_comment_reads(self):
+        m = cht.parse_manifest_yaml('url: "https://x/y"  # comment\nname: \'a # b\'\n', "fixture")
+        self.assertEqual(m, {"url": "https://x/y", "name": "a # b"})
+
     def test_a_flow_collection_exits(self):
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
             cht.parse_manifest_yaml("name: x\ntools:\n  default_enabled: [a, b]\n", "fixture")
@@ -645,6 +649,19 @@ class LaneSevenCatchesDrift(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("missing from OptionalMCPCatalog.entries: n8n-official", out)
         self.assertIn("not in Hermes's catalog: n8n", out)
+
+    def test_a_wrong_secret_flag_fails(self):
+        old = self.text.replace('prompt: "Asana MCP app Client secret"),',
+                                'prompt: "Asana MCP app Client secret", isSecret: false),', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' env", out)
+
+    def test_a_secret_before_a_plain_prompt_fails(self):
+        manifest = {"auth": {"type": "oauth", "env": [
+            {"name": "TOKEN"}, {"name": "URL", "secret": False}]}}
+        self.assertEqual(cht.manifest_fields(manifest)["env"], ["TOKEN", "URL:plain"])
 
     def test_a_dropped_tool_fails(self):
         old = self.text.replace('"list_tables", "list_views", "query"', '"list_tables", "query"', 1)

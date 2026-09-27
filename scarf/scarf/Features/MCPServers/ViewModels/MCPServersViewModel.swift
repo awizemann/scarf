@@ -483,7 +483,7 @@ final class MCPServersViewModel {
         defaultEnabledTools: [String] = [],
         defaultExcludedTools: [String] = [],
         catalogIdentifier: String? = nil,
-        catalogInstallInput: String? = nil,
+        catalogInstall: CatalogInstallRequest? = nil,
         overwriteConfirmed: Bool = false
     ) {
         if !overwriteConfirmed, serverNameIsTaken(name) {
@@ -494,7 +494,7 @@ final class MCPServersViewModel {
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
                     catalogIdentifier: catalogIdentifier,
-                    catalogInstallInput: catalogInstallInput,
+                    catalogInstall: catalogInstall,
                     overwriteConfirmed: true
                 )
             }
@@ -511,7 +511,7 @@ final class MCPServersViewModel {
                 result = Self.runOAuthAdd(
                     fileService: fileService, name: name, url: url, sse: false,
                     catalogIdentifier: catalogIdentifier,
-                    catalogInstallInput: catalogInstallInput,
+                    catalogInstallInput: catalogInstall?.stdin,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
                     overwriteConfirmed: overwriteConfirmed, capabilities: caps
@@ -545,6 +545,11 @@ final class MCPServersViewModel {
                 if result.exitCode == 0, isOAuthDirect {
                     self.showAddCustom = false
                     self.finishOAuthAdd(name: name)
+                    // A reinstall whose secret Hermes already had keeps
+                    // the old one; say so rather than let it look applied.
+                    if let note = catalogInstall?.reusedSecretNote(in: result.output) {
+                        self.activeNotice = Self.addNotice(in: note)
+                    }
                 } else if result.exitCode == 0 {
                     self.activeNotice = Self.addNotice(in: result.output)
                     self.flashStatus("Added \(name)")
