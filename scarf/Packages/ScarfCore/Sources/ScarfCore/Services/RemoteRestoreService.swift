@@ -871,32 +871,116 @@ public final class RemoteRestoreService: @unchecked Sendable {
         }
     }
 
-    /// Set `enabled: false` on every cron job. Returns the count
-    /// flipped (0 if jobs.json is absent).
+    /// Pause every cron job in the restored home: the root home's and every
+    /// named profile's. Returns the total paused (0 when no home has a
+    /// `jobs.json`, or nothing in them could fire).
+    ///
+    /// Hermes cron is per-profile: a job authored in profile `coder` lives
+    /// in `profiles/coder/cron/jobs.json` and runs under that profile's
+    /// credentials (`cron/jobs.py:62-74` @ v2026.9.24), and the gateway
+    /// ticks every profile's store (`gateway/run.py:5672-5685`). Pausing only
+    /// the root file left every profile's restored jobs armed.
     ///
     /// Same rewrite as `reanchorProjectsRegistry`, and the same reason: a
     /// truncating write that failed used to be indistinguishable from one
     /// that worked, so a restore could report "12 cron jobs paused" — or
     /// "0", which reads as "nothing to pause" — while every restored job
-    /// stayed armed with the source host's credentials.
+    /// stayed armed with the source host's credentials. A profiles
+    /// directory that is there but can't be listed throws for the same
+    /// reason.
     func pauseAllCronJobs(transport: any ServerTransport, hermesHome: String) async throws -> Int {
-        let path = hermesHome + "/cron/jobs.json"
-        return try Self.mutateRemoteJSON(
+        var homes = [hermesHome]
+        homes += try Self.profileHomes(transport: transport, hermesHome: hermesHome)
+        var total = 0
+        for home in homes {
+            total += try Self.pauseCronJobs(transport: transport, jobsPath: home + "/cron/jobs.json")
+        }
+        return total
+    }
+
+    /// Every entry under `<home>/profiles`, as a path. Absent is a home with
+    /// no named profiles; present but unlistable (twice) throws. Entries that
+    /// aren't profile homes simply have no `cron/jobs.json`.
+    static func profileHomes(transport: any ServerTransport, hermesHome: String) throws -> [String] {
+        let dir = hermesHome + "/profiles"
+        var names = try? transport.listDirectory(dir)
+        if names == nil {
+            guard transport.stat(dir) != nil else { return [] }  // no profiles
+            names = try? transport.listDirectory(dir)
+            if names == nil {
+                throw RestoreError.remoteCommandFailed(
+                    "Cron pause failed: \(dir) exists but could not be listed, so its profiles' cron jobs may still be armed."
+                )
+            }
+        }
+        return (names ?? []).sorted().map { dir + "/" + $0 }
+    }
+
+    /// Pause, in one `jobs.json`, every job Hermes's scheduler could fire,
+    /// the way `hermes cron pause` does (`cron/jobs.py:2067-2077`):
+    /// `enabled: false` plus the `paused` state and `paused_at` marker, so
+    /// Hermes and Scarf both show it as paused. A job without an `enabled`
+    /// key is armed (Hermes defaults it to true, `cron/jobs.py:521-524`), so
+    /// it is paused and counted too. A completed or errored job keeps its
+    /// state; it only loses `enabled`.
+    static func pauseCronJobs(transport: any ServerTransport, jobsPath: String) throws -> Int {
+        let pausedAt = ISO8601DateFormatter().string(from: Date())
+        return try mutateRemoteJSON(
             transport: transport,
-            path: path,
+            path: jobsPath,
             label: "Cron pause",
             sortKeys: false
         ) { root in
-            guard var jobs = root["jobs"] as? [[String: Any]] else { return nil }
             var count = 0
-            for index in jobs.indices where (jobs[index]["enabled"] as? Bool) == true {
-                jobs[index]["enabled"] = false
+            func pause(_ job: inout [String: Any]) {
+                guard isRunnable(job) else { return }
+                job["enabled"] = false
+                let state = (job["state"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+                if state != "completed" && state != "error" {
+                    job["state"] = "paused"
+                    job["paused_at"] = pausedAt
+                    job["paused_reason"] = "Paused by Scarf after a server restore"
+                }
                 count += 1
             }
-            guard count > 0 else { return nil }
-            root["jobs"] = jobs
+            if var jobs = root["jobs"] as? [[String: Any]] {
+                for index in jobs.indices { pause(&jobs[index]) }
+                guard count > 0 else { return nil }
+                root["jobs"] = jobs
+            } else if var jobs = root["jobs"] as? [String: Any] {
+                // The id-keyed map Hermes also accepts (`cron/jobs.py:1358-1369`).
+                for key in jobs.keys {
+                    guard var job = jobs[key] as? [String: Any] else { continue }
+                    pause(&job)
+                    jobs[key] = job
+                }
+                guard count > 0 else { return nil }
+                root["jobs"] = jobs
+            } else {
+                return nil
+            }
             return count
         } ?? 0
+    }
+
+    /// Hermes's `is_job_runnable` (`cron/jobs.py:521-524` @ v2026.9.24):
+    /// `enabled` (true when absent, Python truthiness otherwise) and no
+    /// pause marker (`state == "paused"` or a truthy `paused_at`).
+    static func isRunnable(_ job: [String: Any]) -> Bool {
+        func truthy(_ value: Any?) -> Bool {
+            switch value {
+            case nil, is NSNull: return false
+            case let b as Bool: return b
+            case let n as NSNumber: return n.doubleValue != 0
+            case let s as String: return !s.isEmpty
+            case let a as [Any]: return !a.isEmpty
+            case let d as [String: Any]: return !d.isEmpty
+            default: return true
+            }
+        }
+        let enabled = job.keys.contains("enabled") ? truthy(job["enabled"]) : true
+        let state = (job["state"] as? String)?.trimmingCharacters(in: .whitespaces)
+        return enabled && state != "paused" && !truthy(job["paused_at"])
     }
 
     /// Read a JSON file on the target, hand its object graph to `mutate`,
