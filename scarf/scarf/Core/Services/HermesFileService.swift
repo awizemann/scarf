@@ -2982,7 +2982,10 @@ struct HermesFileService: Sendable {
             if result.exitCode == 0 {
                 return .success(HermesGatewayProcessMatch.firstPID(inPgrepOutput: result.stdoutString))
             } else if result.exitCode == 1 {
-                return .success(nil)   // genuinely not running
+                // Nothing on the command line — but a named profile's gateway
+                // started with `HERMES_HOME` in its environment has no `-p`
+                // flag to match. Its own `gateway.pid` still names it.
+                return .success(profile == nil ? nil : pidFromProfilePidFile(profile: profile))
             } else {
                 let err = TransportError.commandFailed(exitCode: result.exitCode, stderr: result.stderrString)
                 Self.logger.warning("pgrep failed (exit \(result.exitCode)): \(result.stderrString, privacy: .public)")
@@ -2992,6 +2995,23 @@ struct HermesFileService: Sendable {
             Self.logger.warning("pgrep transport error: \(error.localizedDescription, privacy: .public)")
             return .failure(error)
         }
+    }
+
+    /// The PID in this profile's own `gateway.pid`, accepted only when that
+    /// process is alive and its command line is a gateway this profile can
+    /// own (`ps -o command=`), so a stale file whose PID was reused by
+    /// something else is refused. Read-only; `nil` whenever anything is in
+    /// doubt (no file, `ps` unavailable, a different command line).
+    nonisolated private func pidFromProfilePidFile(profile: String?) -> pid_t? {
+        guard let data = readFileData(context.paths.home + "/gateway.pid"),
+              let pid = HermesGatewayProcessMatch.pid(fromPidFile: data, profile: profile),
+              let ps = try? transport.runProcess(
+                  executable: "/bin/ps", args: ["-p", String(pid), "-o", "command="],
+                  stdin: nil, timeout: 5),
+              ps.exitCode == 0
+        else { return nil }
+        let commandLine = ps.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HermesGatewayProcessMatch.commandLineIsGateway(commandLine, profile: profile) ? pid : nil
     }
 
     /// Does the ROOT home's `gateway_state.json` list `profile` in

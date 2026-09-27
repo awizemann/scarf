@@ -76,6 +76,52 @@ public enum HermesGatewayProcessMatch {
         return forms.joined(separator: "|")
     }
 
+    // MARK: - `gateway.pid` fallback
+
+    /// The PID a `<HERMES_HOME>/gateway.pid` names, if the record is usable
+    /// for `profile`.
+    ///
+    /// Hermes writes `{"pid", "kind": "hermes-gateway", "argv", "start_time",
+    /// "hermes_home"}` there (`_build_pid_record`, `gateway/status.py:677-684`
+    /// @ v2026.9.24; the same record since v2026.3.30), and its reader also
+    /// accepts a bare PID (`_read_pid_record`, `:752-753`, `bare_pid_ok`). A
+    /// record whose `kind` is not the gateway's, or whose `hermes_home` is not
+    /// this profile's home, is refused — a stale file must not lend the
+    /// profile somebody else's process.
+    public static func pid(fromPidFile data: Data, profile: String?) -> Int32? {
+        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let bare = Int32(text) { return bare > 0 ? bare : nil }
+        guard let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let kind = record["kind"] as? String, kind != "hermes-gateway" { return nil }
+        if let home = record["hermes_home"] as? String {
+            let recorded = HermesProfileScope.profileName(forHome: home)
+            if recorded != HermesProfileScope.normalize(profile) { return nil }
+        }
+        let pid = (record["pid"] as? NSNumber)?.int32Value ?? Int32((record["pid"] as? String) ?? "")
+        guard let pid, pid > 0 else { return nil }
+        return pid
+    }
+
+    /// Is `commandLine` (as `ps -o command=` prints it) a `gateway run` that
+    /// can belong to `profile`? For a named profile that is its own flagged
+    /// form OR the unflagged form — a gateway started with `HERMES_HOME`
+    /// set in its environment carries no `-p` at all, which is exactly why
+    /// `pgrep` cannot find it. Same anchored patterns, so the launchd
+    /// wrappers are refused here too.
+    public static func commandLineIsGateway(_ commandLine: String, profile: String?) -> Bool {
+        var patterns = [pgrepPattern(profile: profile)]
+        if HermesProfileScope.normalize(profile) != nil { patterns.append(pgrepPattern(profile: nil)) }
+        return patterns.contains { ereMatches($0, commandLine) }
+    }
+
+    /// POSIX `regcomp(REG_EXTENDED)` — the engine `pgrep -f` uses.
+    static func ereMatches(_ pattern: String, _ line: String) -> Bool {
+        var re = regex_t()
+        guard regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) == 0 else { return false }
+        defer { regfree(&re) }
+        return regexec(&re, line, 0, nil, 0) == 0
+    }
+
     /// The PID on the first non-empty line of `pgrep` output.
     public static func firstPID(inPgrepOutput output: String) -> Int32? {
         output.components(separatedBy: "\n")

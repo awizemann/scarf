@@ -221,6 +221,42 @@ struct GatewayPlatformsR07Tests {
         #expect(HermesGatewayProcessMatch.firstPID(inPgrepOutput: "") == nil)
     }
 
+    // MARK: - `gateway.pid` fallback (a named profile's gateway with no `-p`)
+
+    /// The record `_build_pid_record` writes (`gateway/status.py:677-684` @
+    /// v2026.9.24), key set checked against a live `~/.hermes/gateway.pid`.
+    static func pidRecord(pid: Int, home: String, kind: String = "hermes-gateway") -> Data {
+        Data(#"{"pid": \#(pid), "kind": "\#(kind)", "argv": ["/x/python", "-m", "hermes_cli.main", "gateway", "run"], "start_time": 1, "hermes_home": "\#(home)"}"#.utf8)
+    }
+
+    @Test func pidFileRecordIsReadForItsOwnProfileOnly() {
+        let work = Self.pidRecord(pid: 888, home: "/home/u/.hermes/profiles/work")
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: work, profile: "work") == 888)
+        // Another profile's (or the root's) record is not this profile's.
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: work, profile: "ops") == nil)
+        let root = Self.pidRecord(pid: 777, home: "/home/u/.hermes")
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: root, profile: "work") == nil)
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: root, profile: nil) == 777)
+        // Not a gateway record, garbage, a bare pid (Hermes accepts that too).
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: Self.pidRecord(pid: 5, home: "/home/u/.hermes/profiles/work", kind: "other"), profile: "work") == nil)
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: Data("nope".utf8), profile: "work") == nil)
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: Data("4321\n".utf8), profile: "work") == 4321)
+        #expect(HermesGatewayProcessMatch.pid(fromPidFile: Data("-1".utf8), profile: "work") == nil)
+    }
+
+    @Test func pidFileCommandLineCheckRefusesAStalePid() {
+        // A gateway started with HERMES_HOME in its environment: no `-p`.
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(Self.realGateway, profile: "work"))
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(
+            "\(Self.py) -m hermes_cli.main --profile work gateway run", profile: "work"))
+        // The PID now belongs to something else, or to a wrapper, or to
+        // another profile's flagged gateway.
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("/usr/bin/vim notes.txt", profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway(Self.osascriptWrapper, profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("hermes -p ops gateway run", profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("\(Self.py) -m hermes_cli.main gateway status", profile: "work"))
+    }
+
     #if os(macOS)
     /// The real `/usr/bin/pgrep`, against a process whose command line is a
     /// named-profile gateway's. `exec -a` sets argv[0] to the whole string,
