@@ -1,7 +1,7 @@
 ---
 name: scarf-template-author
 description: Scaffold a new Scarf project OR enrich an existing one after a Scarf "Upgrade Project" — dashboard, optional configuration schema, optional cron job, AGENTS.md, and (via the scarf-miniapp-author skill) a starter mini-app — from a short conversational interview. Output is immediately usable locally and cleanly exportable as a .scarftemplate bundle.
-version: 2.0.1
+version: 2.0.2
 author: Alan Wizemann
 license: MIT
 metadata:
@@ -405,8 +405,8 @@ The agent runs `curl` via the terminal tool; the shell expands the env vars from
 ### Gotchas
 
 - **Hermes does not set a CWD when firing cron jobs.** Relative paths in the prompt resolve against wherever the Hermes process happens to be running, not the project. Always use `{{PROJECT_DIR}}` in the prompt — the installer substitutes the absolute path at install time. This is THE most common template-author mistake.
-- **Cron jobs created by the installer start paused.** Their name is auto-prefixed with `[tmpl:<template-id>]`. The user enables them from Scarf's Cron sidebar when ready.
-- **Registering a cron job for a user's local (non-exported) project:** run `hermes cron create --name "<descriptive name>" "<schedule>" "<prompt>"` directly, substituting the absolute `<project>` path for `{{PROJECT_DIR}}` yourself. Then `hermes cron pause <id>` so it doesn't run until the user opts in.
+- **Cron jobs created by the installer start paused.** Their name is auto-prefixed with `[tmpl:<template-id>] [proj:<project-id>]`, which ties each job to the one project it was installed into. The user enables them from Scarf's Cron sidebar when ready.
+- **Registering a cron job for a user's local (non-exported) project:** run `hermes cron create --name "[proj:<project id>] <descriptive name>" --workdir "<project>" "<schedule>" "<prompt>"` directly, taking the `[proj:<id>]` prefix from the project's AGENTS.md block and substituting the absolute `<project>` path for `{{PROJECT_DIR}}` yourself. Scarf attributes jobs to a project only by that prefix. Then `hermes cron pause <id>` so it doesn't run until the user opts in.
 - **Hermes does not substitute env vars into prompt text.** `$VAR` references in the prompt body are passed through verbatim. Env vars only become visible when the agent invokes a tool (terminal, code_exec) that runs in a subprocess inheriting the cron process's environment — see the "Using secrets in cron prompts" section above.
 
 ### Schedule quick reference
@@ -502,14 +502,14 @@ User-facing. Keep it short:
 For a local non-exported project:
 
 ```bash
-hermes cron create --name "<descriptive name>" "<schedule>" "<prompt with absolute project dir substituted>"
+hermes cron create --name "[proj:<project id>] <descriptive name>" --workdir "<project>" "<schedule>" "<prompt with absolute project dir substituted>"
 # Then pause it so it doesn't fire until the user's ready:
 hermes cron pause <newly-created-job-id>
 ```
 
 Read the id back by parsing the create output, or from `hermes cron list`.
 
-For an exportable template (one you're staging in `templates/<author>/<name>/staging/`): just author `cron/jobs.json` — the installer registers + pauses at install time, and prefixes the name with `[tmpl:<id>]`.
+For an exportable template (one you're staging in `templates/<author>/<name>/staging/`): just author `cron/jobs.json` — the installer registers + pauses at install time, and prefixes the name with `[tmpl:<id>] [proj:<project-id>]`.
 
 ### Step 9 — add slash commands (if any fit)
 

@@ -168,7 +168,8 @@ struct ProjectTemplateUninstaller: Sendable {
         )
 
         // Memory block detection. The installer wraps its appendix between
-        // `<!-- scarf-template:<id>:begin -->` / `:end -->` markers; look
+        // `<!-- scarf-template:<key>:begin -->` / `:end -->` markers (key: a
+        // hash of the id; older installs spelled the id out); look
         // for the begin marker in the current MEMORY.md. If it's missing
         // (never installed, or removed by hand) we simply skip the memory
         // strip step.
@@ -201,17 +202,14 @@ struct ProjectTemplateUninstaller: Sendable {
                 // refusal instead of a hang.
                 let loaded = try guarded.load(memoryPath)
                 let text = loaded.text
-                let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(
-                    templateId: blockId
-                )
                 // BOTH markers, not just the begin one — since SEC-L5 an
                 // unbounded region is refused by `stripMemoryBlock`, so
                 // promising to remove it in the preview would be a lie the
-                // uninstall then quietly failed to keep.
-                let endMarker = ProjectTemplateService.memoryBlockEndMarker(
-                    templateId: blockId
-                )
-                if let begin = text.range(of: beginMarker) {
+                // uninstall then quietly failed to keep. Current or legacy
+                // form, whichever this install wrote.
+                if let (beginMarker, endMarker) = ProjectTemplateService.memoryBlockMarkers(
+                    in: text, templateId: blockId
+                ), let begin = text.range(of: beginMarker) {
                     memoryBlockPresent = text.range(
                         of: endMarker, range: begin.upperBound..<text.endIndex
                     ) != nil
@@ -1152,7 +1150,7 @@ struct ProjectTemplateUninstaller: Sendable {
         }
     }
 
-    /// Remove the `<!-- scarf-template:<id>:begin --> … :end -->` block
+    /// Remove the `<!-- scarf-template:<key>:begin --> … :end -->` block
     /// from MEMORY.md, preserving everything else.
     ///
     /// **A begin marker with no end marker strips NOTHING (P8 SEC-L5).**
@@ -1200,8 +1198,6 @@ struct ProjectTemplateUninstaller: Sendable {
         memoryPath: String,
         guarded: GuardedTextFile
     ) throws {
-        let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(templateId: blockId)
-        let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
         let loaded: GuardedTextFile.Loaded
         do {
             // The house cap (32 MB) — see the plan phase's read. An
@@ -1219,7 +1215,10 @@ struct ProjectTemplateUninstaller: Sendable {
             }
         }
         let text = loaded.text
-        guard let beginRange = text.range(of: beginMarker) else { return }
+        // The hashed markers, or the id-spelling ones an older Scarf wrote.
+        guard let (beginMarker, endMarker) = ProjectTemplateService.memoryBlockMarkers(
+            in: text, templateId: blockId
+        ), let beginRange = text.range(of: beginMarker) else { return }
 
         guard let endRange = text.range(
             of: endMarker, range: beginRange.upperBound..<text.endIndex

@@ -28,9 +28,16 @@ public enum CronScheduleFormatter {
     /// time (`hermes_time.py:3-5,83-106`). Without it an SSH host in UTC
     /// showed "Daily at 9 AM" for a job that fires at 2 AM on a Mac in PST.
     public static func humanReadable(from schedule: CronSchedule, zoneNote: String?) -> String {
-        let phrase = humanReadable(from: schedule)
-        guard let zoneNote, !zoneNote.isEmpty, namesTimeOfDay(schedule) else { return phrase }
-        return "\(phrase) (\(zoneNote))"
+        withZoneNote(humanReadable(from: schedule), for: schedule, zoneNote: zoneNote)
+    }
+
+    /// `text` (any rendering of `schedule`, such as the raw expression a row
+    /// shows) with the zone note appended when the schedule names a time of
+    /// day; otherwise `text` unchanged. The raw `0 9 * * *` is a wall-clock
+    /// time in the host's zone just as "Daily at 9 AM" is.
+    public static func withZoneNote(_ text: String, for schedule: CronSchedule, zoneNote: String?) -> String {
+        guard let zoneNote, !zoneNote.isEmpty, namesTimeOfDay(schedule) else { return text }
+        return "\(text) (\(zoneNote))"
     }
 
     /// The zone to name next to a time-of-day cron phrase, or `nil` when it

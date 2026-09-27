@@ -560,12 +560,17 @@ public final class ProjectsViewModel {
         // pass minted a FRESH random UUID: the renamed project silently
         // detached from its own record, its cron jobs, and its fleet siblings.
         // A rename changes the label; it must never change the identifier.
+        // `extra` is carried for the same reason: it holds keys Scarf's model
+        // doesn't declare, including the archive record of which cron jobs
+        // archiving paused (`archivePausedCronJobIds`), and dropping it
+        // meant unarchiving a renamed project resumed nothing.
         registry.projects[index] = ProjectEntry(
             name: trimmed,
             path: old.path,
             folder: old.folder,
             archived: old.archived,
-            uuid: old.uuid
+            uuid: old.uuid,
+            extra: old.extra
         )
         do {
             try await save(registry, expecting: loaded.baseline)

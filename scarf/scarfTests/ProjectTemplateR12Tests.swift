@@ -183,10 +183,23 @@ import ScarfCore
         func listDirectory(_ path: String) throws -> [String] { try inner.listDirectory(map(path)) }
         func createDirectory(_ path: String) throws { try inner.createDirectory(map(path)) }
         func removeFile(_ path: String) throws { try inner.removeFile(map(path)) }
+        /// Runs a shell script on this Mac with the pseudo-remote root
+        /// mapped in, and the local root (as given and as `realpath` spells
+        /// it) mapped back out of stdout — enough for the exporter's
+        /// symlink resolution to answer in remote paths.
         func runProcess(
             executable: String, args: [String], stdin: Data?, timeout: TimeInterval
         ) throws -> ProcessResult {
-            throw TransportError.fileIO(path: executable, underlying: "no processes in this test")
+            guard executable == "/bin/sh", args.first == "-c", args.count == 2 else {
+                throw TransportError.fileIO(path: executable, underlying: "no processes in this test")
+            }
+            let script = args[1].replacingOccurrences(of: remoteRoot, with: localRoot)
+            let result = try inner.runProcess(executable: executable, args: ["-c", script], stdin: stdin, timeout: timeout)
+            let real = (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var")).map { _ in "/private" + localRoot } ?? localRoot
+            let out = result.stdoutString
+                .replacingOccurrences(of: real, with: remoteRoot)
+                .replacingOccurrences(of: localRoot, with: remoteRoot)
+            return ProcessResult(exitCode: result.exitCode, stdout: Data(out.utf8), stderr: result.stderr)
         }
         func makeProcess(executable: String, args: [String]) -> Process { Process() }
         func makeProcess(executable: String, args: [String], cwd: String?) -> Process { Process() }
@@ -232,6 +245,10 @@ import ScarfCore
         }
     }
 
+    /// Links that stay inside the skill are followed (R12); a dangling one
+    /// is skipped. R16a X5 narrowed R12's "follow every link": links out of
+    /// the skill now refuse the export (next test), so the followed links
+    /// here point inside it.
     @Test func skillTreeWalksFoldersThroughTheTransportAndFollowsSymlinks() throws {
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
@@ -239,19 +256,64 @@ import ScarfCore
         let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
         try Self.write("x", to: scratch + "/skill/SKILL.md")
         try Self.write("x", to: scratch + "/skill/references/a.md")
-        try Self.write("x", to: scratch + "/shared/b.md")
         try Self.write("x", to: scratch + "/skill/notes.corrupt-20260101")
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/linked", withDestinationPath: scratch + "/shared"
+            atPath: scratch + "/skill/linked", withDestinationPath: scratch + "/skill/references"
         )
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/alias.md", withDestinationPath: scratch + "/shared/b.md"
+            atPath: scratch + "/skill/alias.md", withDestinationPath: "references/a.md"
         )
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/dangling.md", withDestinationPath: scratch + "/nowhere.md"
+            atPath: scratch + "/skill/dangling.md", withDestinationPath: scratch + "/skill/nowhere.md"
         )
         let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skill", transport: transport)
-        #expect(tree == ["SKILL.md", "alias.md", "linked/b.md", "references/a.md"])
+        #expect(tree == ["SKILL.md", "alias.md", "linked/a.md", "references/a.md"])
+    }
+
+    /// R16a X5: a link out of the skill (to a secrets file, or a folder
+    /// elsewhere) refuses the export instead of copying the target into a
+    /// bundle made for sharing.
+    @Test(arguments: ["file", "folder", "file-relative"])
+    func skillTreeRefusesLinksThatLeaveTheSkill(kind: String) throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let remoteRoot = "/nonexistent-remote-\(UUID().uuidString)"
+        let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
+        try Self.write("x", to: scratch + "/skill/SKILL.md")
+        try Self.write("OPENAI_API_KEY=not-a-real-key", to: scratch + "/home/.env")
+        try Self.write("x", to: scratch + "/shared/b.md")
+        let target = switch kind {
+        case "file": scratch + "/home/.env"
+        case "folder": scratch + "/shared"
+        default: "../home/.env"
+        }
+        try FileManager.default.createSymbolicLink(atPath: scratch + "/skill/config", withDestinationPath: target)
+        do {
+            let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skill", transport: transport)
+            Issue.record("exported \(tree)")
+        } catch ProjectTemplateError.unsafeSkillLink(let link, let why) {
+            #expect(link == "config")
+            #expect(why.contains("points outside the skill folder"), "\(why)")
+        }
+    }
+
+    /// A skill folder that is itself a link (a skill kept in a dev checkout)
+    /// still exports, links inside it included: containment is judged
+    /// against where the folder really is.
+    @Test func skillFolderThatIsItselfALinkStillExports() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let remoteRoot = "/nonexistent-remote-\(UUID().uuidString)"
+        let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
+        try Self.write("x", to: scratch + "/dev/skill/SKILL.md")
+        try Self.write("x", to: scratch + "/dev/skill/refs/a.md")
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch + "/dev/skill/alias.md", withDestinationPath: "refs/a.md")
+        try FileManager.default.createDirectory(atPath: scratch + "/skills", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch + "/skills/mine", withDestinationPath: scratch + "/dev/skill")
+        let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skills/mine", transport: transport)
+        #expect(tree == ["SKILL.md", "alias.md", "refs/a.md"])
     }
 
     // MARK: - S12-F3: the memory block is its own Hermes entry
@@ -269,23 +331,99 @@ import ScarfCore
     }
 
     static func installMemoryTemplate(
-        home: TempHermesHome, scratch: String
+        home: TempHermesHome, scratch: String, id: String = "tester/mem", parentName: String = "parent"
     ) async throws -> (entry: ProjectEntry, block: String) {
         var files = requiredFiles
         files["template.json"] = manifestJSON(
-            schemaVersion: 1, id: "tester/mem", extraContents: ", \"memory\": {\"append\": true}"
+            schemaVersion: 1, id: id, extraContents: ", \"memory\": {\"append\": true}"
         )
         files["memory/append.md"] = "Template fact one.\nTemplate fact two.\n"
         let path = try bundle(in: scratch, files)
         let service = ProjectTemplateService(context: home.context)
         let inspection = try await service.inspect(zipPath: path)
         defer { service.cleanupTempDir(inspection.unpackedDir) }
-        let parent = scratch + "/parent"
+        let parent = scratch + "/" + parentName
         try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
         let plan = try service.buildPlan(inspection: inspection, parentDir: parent)
         let entry = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
-        let block = "<!-- scarf-template:tester/mem:begin --> v1.0.0\nTemplate fact one.\nTemplate fact two.\n<!-- scarf-template:tester/mem:end -->"
+        let begin = ProjectTemplateService.memoryBlockBeginMarker(templateId: id)
+        let end = ProjectTemplateService.memoryBlockEndMarker(templateId: id)
+        let block = "\(begin) v1.0.0\nTemplate fact one.\nTemplate fact two.\n\(end)"
         return (entry, block)
+    }
+
+    // MARK: - R16a: memory markers Hermes's threat scan won't block
+
+    /// Hermes's `html_comment_injection` pattern (`tools/threat_patterns.py:31`
+    /// @ v2026.9.24, compiled case-insensitive). A MEMORY.md entry matching it
+    /// is replaced by a [BLOCKED] placeholder at load time.
+    static func hermesBlocks(_ text: String) -> Bool {
+        let pattern = #"<!--[^>]{0,512}(?:ignore|override|system|secret|hidden)[^>]{0,512}-->"#
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    @Test(arguments: ["acme/system-monitor", "x/Secret-Santa", "h/hidden-gems", "o/override-kit", "i/ignore-list", "tester/mem"])
+    func memoryMarkersNeverTripHermesThreatScan(id: String) {
+        let begin = ProjectTemplateService.memoryBlockBeginMarker(templateId: id)
+        let end = ProjectTemplateService.memoryBlockEndMarker(templateId: id)
+        #expect(!Self.hermesBlocks(begin + " v1.0.0\nfact\n" + end))
+        #expect(!begin.contains(id), "the marker carries a hash, never the id")
+        #expect(begin != ProjectTemplateService.memoryBlockBeginMarker(templateId: id + "x"))
+        // The premise: the legacy form is blocked for these ids.
+        if id != "tester/mem" {
+            #expect(Self.hermesBlocks(ProjectTemplateService.legacyMemoryBlockMarkers(templateId: id).begin))
+        }
+    }
+
+    @Test func templateWithAFlaggedWordInItsIdInstallsAnUnblockedEntry() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let (entry, block) = try await Self.installMemoryTemplate(
+            home: home, scratch: scratch, id: "tester/system-monitor")
+        let installed = try #require(Self.read(home.context.paths.memoryMD))
+        #expect(installed == block)
+        #expect(Self.hermesEntries(installed).entries.allSatisfy { !Self.hermesBlocks($0) })
+
+        let uninstaller = ProjectTemplateUninstaller(context: home.context, hermesRunner: { _ in ("", 0) })
+        let plan = try uninstaller.loadUninstallPlan(for: entry)
+        #expect(plan.memoryBlockPresent)
+        #expect(try uninstaller.uninstall(plan: plan).isComplete)
+        #expect(Self.read(home.context.paths.memoryMD) == "")
+    }
+
+    /// A block an older Scarf installed (markers spelling the id out) is
+    /// still found by the plan, stripped by uninstall, and still blocks a
+    /// second install of the same template.
+    @Test func legacyMarkersStillDetectedAndStripped() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let memoryPath = home.context.paths.memoryMD
+        try Self.write("User fact A.", to: memoryPath)
+        let (entry, block) = try await Self.installMemoryTemplate(home: home, scratch: scratch)
+        let legacy = ProjectTemplateService.legacyMemoryBlockMarkers(templateId: "tester/mem")
+        let legacyBlock = block
+            .replacingOccurrences(of: ProjectTemplateService.memoryBlockBeginMarker(templateId: "tester/mem"), with: legacy.begin)
+            .replacingOccurrences(of: ProjectTemplateService.memoryBlockEndMarker(templateId: "tester/mem"), with: legacy.end)
+        #expect(legacyBlock != block)
+        try Self.write("User fact A.\n§\n" + legacyBlock + "\n§\nUser fact B.", to: memoryPath)
+
+        do {
+            _ = try await Self.installMemoryTemplate(home: home, scratch: scratch, parentName: "second")
+            Issue.record("a second install must refuse while the legacy block is there")
+        } catch ProjectTemplateError.memoryBlockAlreadyExists(let id) {
+            #expect(id == "tester/mem")
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: home.context, hermesRunner: { _ in ("", 0) })
+        let plan = try uninstaller.loadUninstallPlan(for: entry)
+        #expect(plan.memoryBlockPresent)
+        _ = try uninstaller.uninstall(plan: plan)
+        #expect(Self.read(memoryPath) == "User fact A.\n§\nUser fact B.")
     }
 
     @Test func memoryBlockIsAddedAsItsOwnEntryAndUninstallRemovesExactlyThatEntry() async throws {

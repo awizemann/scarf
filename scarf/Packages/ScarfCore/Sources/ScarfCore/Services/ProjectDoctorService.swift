@@ -357,10 +357,14 @@ public struct ProjectDoctorService: Sendable {
             forProjectPath: row.path,
             hostKey: ProjectIdentity.hostKey(for: context)
         )
-        let prefix = "[proj:\(effectiveID.uuidString)]"
+        // Only jobs that name THIS project count, including a template
+        // install's `[tmpl:<id>] [proj:<uuid>] …`. A legacy `[tmpl:<id>] …`
+        // job with no project tag is shared by every install of that
+        // template, so running elsewhere says nothing about this path.
         let normalizedRoot = ProjectIdentity.normalizedPath(row.path)
         let strays = cronJobs.filter { job in
-            guard job.name.hasPrefix(prefix), let workdir = job.workdir, !workdir.isEmpty else { return false }
+            guard ProjectCronAttribution.namesProject(jobName: job.name, projectID: effectiveID),
+                  let workdir = job.workdir, !workdir.isEmpty else { return false }
             return ProjectIdentity.normalizedPath(workdir) != normalizedRoot
         }
         if !strays.isEmpty {

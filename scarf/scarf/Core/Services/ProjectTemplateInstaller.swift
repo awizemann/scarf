@@ -136,8 +136,9 @@ struct ProjectTemplateInstaller: Sendable {
                 of: Self.inspectMemory(at: plan.memoryPath, transport: transport),
                 at: plan.memoryPath
             )
-            let marker = ProjectTemplateService.memoryBlockBeginMarker(templateId: plan.manifest.id)
-            if existing.contains(marker) {
+            // Either marker form: a block an older Scarf installed is still
+            // this template's block.
+            if ProjectTemplateService.memoryBlockMarkers(in: existing, templateId: plan.manifest.id) != nil {
                 throw ProjectTemplateError.memoryBlockAlreadyExists(plan.manifest.id)
             }
         }

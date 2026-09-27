@@ -396,7 +396,10 @@ struct CronView: View {
                         .accessibilityHidden(true)
                 }
                 HStack(spacing: 10) {
-                    Text(job.schedule.expression ?? job.schedule.display ?? "—")
+                    // The raw expression is a time in the host's zone too (S08-F3).
+                    Text((job.schedule.expression ?? job.schedule.display).map {
+                        CronScheduleFormatter.withZoneNote($0, for: job.schedule, zoneNote: viewModel.scheduleZoneNote)
+                    } ?? "—")
                         .font(ScarfFont.monoSmall)
                         .foregroundStyle(ScarfColor.foregroundFaint)
                         .lineLimit(1)
@@ -521,7 +524,8 @@ struct CronView: View {
     private func rowAccessibilityValue(_ job: HermesCronJob) -> String {
         var parts: [String] = []
         if let schedule = job.schedule.expression ?? job.schedule.display, !schedule.isEmpty {
-            parts.append(schedule)
+            parts.append(CronScheduleFormatter.withZoneNote(
+                schedule, for: job.schedule, zoneNote: viewModel.scheduleZoneNote))
         }
         if let next = job.nextRunAt {
             parts.append(String(localized: "next \(CronScheduleFormatter.formatNextRun(iso: next))"))
@@ -748,7 +752,9 @@ struct CronView: View {
         HStack(spacing: ScarfSpace.s3) {
             statCard(label: "Schedule",
                      value: viewModel.schedulePhrase(for: job),
-                     sub: job.schedule.expression ?? job.schedule.display)
+                     sub: (job.schedule.expression ?? job.schedule.display).map {
+                         CronScheduleFormatter.withZoneNote($0, for: job.schedule, zoneNote: viewModel.scheduleZoneNote)
+                     })
             statCard(label: "Last run",
                      value: job.lastRunAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "—",
                      sub: job.lastError != nil ? "failed" : "ok")

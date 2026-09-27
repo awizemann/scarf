@@ -373,6 +373,40 @@ import Foundation
         }
     }
 
+    /// R16a X1: renaming an archived project must keep its archive record
+    /// (and any other unmodelled key). The rename rebuilt the row from the
+    /// model and dropped `extra`, so restoring afterwards resumed nothing.
+    @Test func renameWhileArchivedKeepsTheArchiveRecord() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            // An agent's own annotation on the row rides along too.
+            var registry = ProjectDashboardService(context: ctx).loadRegistry()
+            registry.projects[0].extra["agent_note"] = .string("keep me")
+            try ProjectDashboardService(context: ctx).saveRegistry(registry)
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(await vm.renameProject(try #require(vm.projects.first), to: "Alpha Renamed"))
+
+            let renamed = try #require(ProjectDashboardService(context: ctx).loadRegistry().projects.first)
+            #expect(renamed.name == "Alpha Renamed")
+            #expect(renamed.uuid == project.id)
+            #expect(renamed.archived)
+            #expect(renamed.archivePausedCronJobIDs == ["live"])
+            #expect(renamed.extra["agent_note"] == .string("keep me"))
+
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.calls == [["cron", "pause", "live"], ["cron", "resume", "live"]])
+            #expect(fake.job("live")?["enabled"] as? Bool == true)
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?.extra["agent_note"]
+                    == .string("keep me"))
+            #expect(vm.mutationError == nil)
+        }
+    }
+
     /// A pause that fails is shown, not swallowed: the job is still firing.
     @Test func archiveSurfacesAPauseFailure() async throws {
         try await Self.withTempHome { ctx, root in

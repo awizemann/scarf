@@ -57,13 +57,33 @@ import Foundation
             lock.withLock { files[path] != nil || files.keys.contains { $0.hasPrefix(path + "/") } }
         }
 
+        var failList = false
+
         func stat(_ path: String) -> FileStat? {
             if failStat { return nil }
-            guard let data = lock.withLock({ files[path] }) else { return nil }
+            guard let data = lock.withLock({ files[path] }) else {
+                // A directory exists while any file lives under it.
+                let isDir = lock.withLock { files.keys.contains { $0.hasPrefix(path + "/") } }
+                return isDir ? FileStat(size: 0, mtime: Date(), isDirectory: true) : nil
+            }
             return FileStat(size: Int64(data.count), mtime: Date(), isDirectory: false)
         }
 
-        func listDirectory(_ path: String) throws -> [String] { [] }
+        /// The immediate children of `path`, derived from the files under
+        /// it; absent (nothing under it) throws, as the real transports do.
+        func listDirectory(_ path: String) throws -> [String] {
+            if failList { throw TransportError.other(message: "connection reset") }
+            let children = lock.withLock {
+                Set(files.keys.compactMap { key -> String? in
+                    guard key.hasPrefix(path + "/") else { return nil }
+                    return key.dropFirst(path.count + 1).split(separator: "/").first.map(String.init)
+                })
+            }
+            guard !children.isEmpty else {
+                throw TransportError.fileIO(path: path, underlying: "No such file or directory")
+            }
+            return children.sorted()
+        }
         func createDirectory(_ path: String) throws {}
         func removeFile(_ path: String) throws { _ = lock.withLock { files.removeValue(forKey: path) } }
         func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
@@ -239,6 +259,106 @@ import Foundation
             _ = try await RemoteRestoreService(context: .local)
                 .pauseAllCronJobs(transport: fake, hermesHome: "/home/u/.hermes")
         }
+    }
+
+    /// R16a X2: Hermes cron is per-profile (`cron/jobs.py:62-74` @
+    /// v2026.9.24), so a restore must pause every profile's jobs, not only
+    /// the root home's, and report the true total. A job with no `enabled`
+    /// key is armed (Hermes defaults it to true) and is paused and counted.
+    @Test func cronPausePausesEveryProfileAndReportsTheTotal() async throws {
+        let home = "/home/u/.hermes"
+        let rootJobs = #"{"jobs":[{"id":"r1","enabled":true,"state":"scheduled"},{"id":"r2","enabled":false,"state":"paused"}]}"#
+        let workJobs = #"{"jobs":[{"id":"w1","enabled":true},{"id":"w2"},{"id":"w3","enabled":true,"state":"completed"}]}"#
+        // Id-keyed map shape, which Hermes also loads.
+        let mapJobs = #"{"jobs":{"m1":{"enabled":true,"state":"scheduled"},"m2":{"enabled":true,"paused_at":"2026-09-01T00:00:00+00:00"}}}"#
+        let fake = FakeTransport(files: [
+            home + "/cron/jobs.json": Data(rootJobs.utf8),
+            home + "/profiles/work/cron/jobs.json": Data(workJobs.utf8),
+            home + "/profiles/my team/cron/jobs.json": Data(mapJobs.utf8),
+            home + "/profiles/empty/config.yaml": Data("model: x\n".utf8),
+        ])
+        let paused = try await RemoteRestoreService(context: .local)
+            .pauseAllCronJobs(transport: fake, hermesHome: home)
+        #expect(paused == 1 + 3 + 1)
+
+        func jobs(_ path: String) throws -> [[String: Any]] {
+            let data = try #require(fake.contents(path))
+            let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            if let list = root["jobs"] as? [[String: Any]] { return list }
+            let map = try #require(root["jobs"] as? [String: [String: Any]])
+            return map.keys.sorted().map { map[$0]! }
+        }
+        for path in [home + "/cron/jobs.json", home + "/profiles/work/cron/jobs.json", home + "/profiles/my team/cron/jobs.json"] {
+            for job in try jobs(path) {
+                #expect(RemoteRestoreService.isRunnable(job) == false, "\(path): \(job)")
+            }
+        }
+        // A half-paused record (enabled but carrying a pause marker) can't
+        // fire in Hermes, so it is neither touched nor counted.
+        let map = try jobs(home + "/profiles/my team/cron/jobs.json")
+        #expect(map[0]["enabled"] as? Bool == false)
+        #expect(map[1]["enabled"] as? Bool == true)
+        let work = try jobs(home + "/profiles/work/cron/jobs.json")
+        // Marked the way `hermes cron pause` marks it, so both apps show "paused".
+        #expect(work[0]["state"] as? String == "paused")
+        #expect(work[0]["paused_at"] is String)
+        // A finished job keeps its terminal state.
+        #expect(work[2]["state"] as? String == "completed")
+        #expect(fake.contents(home + "/profiles/empty/cron/jobs.json") == nil, "no jobs file is created")
+    }
+
+    /// A profiles directory that is there but can't be listed must fail the
+    /// pause, not report a count that silently skipped every profile.
+    @Test func cronPauseThrowsWhenProfilesCannotBeListed() async throws {
+        let home = "/home/u/.hermes"
+        let fake = FakeTransport(files: [
+            home + "/cron/jobs.json": Data(#"{"jobs":[{"id":"1","enabled":true}]}"#.utf8),
+            home + "/profiles/work/cron/jobs.json": Data(#"{"jobs":[{"id":"w","enabled":true}]}"#.utf8),
+        ])
+        fake.failList = true
+        await #expect(throws: (any Error).self) {
+            _ = try await RemoteRestoreService(context: .local)
+                .pauseAllCronJobs(transport: fake, hermesHome: home)
+        }
+        // The root home's jobs are still paused before the error surfaces.
+        let rootData = try #require(fake.contents(home + "/cron/jobs.json"))
+        let root = try #require(try JSONSerialization.jsonObject(with: rootData) as? [String: Any])
+        #expect((root["jobs"] as? [[String: Any]])?.first?["enabled"] as? Bool == false)
+    }
+
+    /// One bad `jobs.json` doesn't stop the others being paused; the error
+    /// names it. A bare-list file (a shape Hermes loads and rewrites
+    /// wrapped, `cron/jobs.py:1374-1376`) is paused and written wrapped.
+    @Test func cronPauseTriesEveryHomeAndHandlesABareList() async throws {
+        let home = "/home/u/.hermes"
+        let fake = FakeTransport(files: [
+            home + "/cron/jobs.json": Data(#"[{"id":"r","enabled":true}]"#.utf8),
+            home + "/profiles/a/cron/jobs.json": Data("not json".utf8),
+            home + "/profiles/b/cron/jobs.json": Data(#"{"jobs":[{"id":"b","enabled":true}]}"#.utf8),
+        ])
+        do {
+            _ = try await RemoteRestoreService(context: .local).pauseAllCronJobs(transport: fake, hermesHome: home)
+            Issue.record("a jobs.json that can't be parsed must fail the pause")
+        } catch {
+            #expect(error.localizedDescription.contains("profiles/a/cron/jobs.json"), "\(error.localizedDescription)")
+            #expect(error.localizedDescription.contains("Paused 2"), "\(error.localizedDescription)")
+        }
+        for path in [home + "/cron/jobs.json", home + "/profiles/b/cron/jobs.json"] {
+            let data = try #require(fake.contents(path))
+            let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any], "\(path) written as an object")
+            let jobs = try #require(root["jobs"] as? [[String: Any]])
+            #expect(jobs.allSatisfy { $0["enabled"] as? Bool == false }, "\(path)")
+        }
+    }
+
+    @Test func cronRunnableMatchesHermes() {
+        #expect(RemoteRestoreService.isRunnable([:]))
+        #expect(RemoteRestoreService.isRunnable(["enabled": 1]))
+        #expect(!RemoteRestoreService.isRunnable(["enabled": 0]))
+        #expect(!RemoteRestoreService.isRunnable(["enabled": NSNull()]))
+        #expect(!RemoteRestoreService.isRunnable(["enabled": true, "state": "paused"]))
+        #expect(!RemoteRestoreService.isRunnable(["enabled": true, "paused_at": "x"]))
+        #expect(RemoteRestoreService.isRunnable(["enabled": true, "paused_at": ""]))
     }
 
     @Test func cronPauseReportsZeroWhenJobsFileIsAbsent() async throws {

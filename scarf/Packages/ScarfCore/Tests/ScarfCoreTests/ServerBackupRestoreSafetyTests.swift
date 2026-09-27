@@ -81,13 +81,17 @@ struct ServerBackupRestoreSafetyTests {
     static func bytes(_ url: URL) -> Data? { try? Data(contentsOf: url) }
 
     /// Back up `home` into `<dir>/out.scarfbackup` through the real service.
-    static func backUp(home: URL, into dir: URL) async throws -> RemoteBackupService.BackupResult {
+    static func backUp(
+        home: URL, into dir: URL,
+        options: BackupManifest.Options = .init(includeAuth: false, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false),
+        archiveName: String = "out.scarfbackup"
+    ) async throws -> RemoteBackupService.BackupResult {
         let service = RemoteBackupService(context: .local(home: home))
         let summary = try await service.preflight()
         return try await service.run(
             preflight: summary,
-            options: BackupManifest.Options(includeAuth: false, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false),
-            archiveURL: dir.appendingPathComponent("out.scarfbackup"),
+            options: options,
+            archiveURL: dir.appendingPathComponent(archiveName),
             progress: { _ in }
         )
     }
@@ -232,6 +236,36 @@ struct ServerBackupRestoreSafetyTests {
             #expect(snapshot.count == 250, "withWAL: \(withWAL), method: \(state.entries.map(\.method))")
             #expect(snapshot.integrity == "ok")
         }
+    }
+
+    /// R16a (documents a known, accepted effect): snapshotting a WAL-mode
+    /// database that a cleanly stopped Hermes left with no sidecars may
+    /// create an EMPTY `-wal` and a `-shm` beside it. The database's own
+    /// bytes don't change and the `-wal` holds no frames, so nothing was
+    /// written to the data (charter C3). Hermes's own `hermes backup` does
+    /// the same: `_safe_copy_db` opens the source `mode=ro` and
+    /// `sqlite3.backup()`s it (`hermes_cli/backup.py:332-369` @ v2026.9.24),
+    /// which on this Mac leaves `state.db-wal` (0 bytes) and `state.db-shm`.
+    @Test("a stopped database may gain an empty -wal and a -shm from the snapshot, and nothing else")
+    func snapshotOfStoppedDatabaseMayCreateEmptySidecars() async throws {
+        let root = try Self.scratch("sidecars")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        try Self.makeUnheldHome(home, rows: 40, withWAL: false)
+        let db = home.appendingPathComponent("state.db")
+        let wal = URL(fileURLWithPath: db.path + "-wal")
+        #expect(!FileManager.default.fileExists(atPath: wal.path), "fixture: no sidecars before")
+        let before = Self.bytes(db)
+
+        _ = try await Self.backUp(home: home, into: root)
+
+        #expect(Self.bytes(db) == before, "the database itself is never written")
+        if FileManager.default.fileExists(atPath: wal.path) {
+            #expect(Self.bytes(wal)?.isEmpty == true, "a -wal the snapshot created holds no frames")
+        }
+        // Those two sidecars are all it may leave: no snapshot directory, no copy.
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: home.path))
+        #expect(left.isSubset(of: ["state.db", "state.db-wal", "state.db-shm"]), "\(left.sorted())")
     }
 
     @Test("a home with no database backs up without a snapshot entry")
@@ -726,6 +760,60 @@ struct ServerBackupRestoreSafetyTests {
                 "\(result.stdoutString) \(result.stderrString)")
     }
 
+    /// R16a X3 (security): every named profile is a Hermes home with its
+    /// own credentials. "Include auth.json" off used to exclude only the
+    /// ROOT `auth.json` (and `mcp-tokens/`, `gateway_state.json` only at the
+    /// root), so each profile's credentials shipped in the archive. This
+    /// runs the real backup against a scratch home with profiles and reads
+    /// the actual tar listing.
+    @Test("with auth off, no profile's auth.json, MCP tokens or gateway state reaches the archive")
+    func profileCredentialsStayOut() async throws {
+        let root = try Self.scratch("profauth")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        let files = [
+            "config.yaml", "auth.json", "gateway_state.json", "mcp-tokens/linear.json",
+            "profiles/work/config.yaml", "profiles/work/auth.json", "profiles/work/gateway_state.json",
+            "profiles/work/mcp-tokens/linear.json", "profiles/work/mcp-tokens/linear.client.json",
+            "profiles/work/skills/notes/SKILL.md",
+            "profiles/my team [2]/auth.json", "profiles/my team [2]/SOUL.md",
+            "profiles/my team [2]/mcp-tokens/github.json",
+            "auth.json.corrupt", "profiles/work/auth.json.corrupt",
+            "logs/agent.log", "profiles/work/logs/agent.log", "profiles/work/skills/notes/logs/keep.md",
+        ]
+        for rel in files {
+            let url = home.appendingPathComponent(rel)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: url)
+        }
+        func listing(_ options: BackupManifest.Options, _ name: String) async throws -> Set<String> {
+            let result = try await Self.backUp(home: home, into: root, options: options, archiveName: name)
+            let tarball = try Self.unzipped(result.archiveURL, in: root)
+                .appendingPathComponent(result.manifest.hermes.tarballPath)
+            return Set(try Self.capture("/usr/bin/tar", ["-tzf", tarball.path])
+                .split(separator: "\n").map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "/")) })
+        }
+
+        let off = try await listing(.init(includeAuth: false, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false), "off.scarfbackup")
+        for secret in ["auth.json", "auth.json.corrupt", "gateway_state.json", "mcp-tokens", "linear.json", "github.json", "linear.client.json", "agent.log"] {
+            #expect(!off.contains { $0.hasSuffix("/" + secret) || $0.contains("/" + secret + "/") },
+                    "\(secret) shipped: \(off.sorted())")
+        }
+        // Everything else in the profiles still ships.
+        for kept in [".hermes/config.yaml", ".hermes/profiles/work/config.yaml",
+                     ".hermes/profiles/work/skills/notes/SKILL.md", ".hermes/profiles/my team [2]/SOUL.md",
+                     ".hermes/profiles/work/skills/notes/logs/keep.md"] {
+            #expect(off.contains(kept), "\(kept) missing: \(off.sorted())")
+        }
+
+        // Auth on: every home's auth.json ships; tokens and runtime state still don't.
+        let on = try await listing(.init(includeAuth: true, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false), "on.scarfbackup")
+        for kept in [".hermes/auth.json", ".hermes/profiles/work/auth.json", ".hermes/profiles/my team [2]/auth.json"] {
+            #expect(on.contains(kept), "\(kept) missing: \(on.sorted())")
+        }
+        #expect(!on.contains { $0.contains("mcp-tokens") || $0.hasSuffix("gateway_state.json") }, "\(on.sorted())")
+    }
+
     @Test("backup excludes follow the home's own directory name")
     func excludesUseLeaf() {
         let ex = RemoteBackupService.hermesExcludes(
@@ -738,7 +826,23 @@ struct ServerBackupRestoreSafetyTests {
         #expect(ex.contains("*.db-wal"))
         #expect(ex.contains("*.retired-wal-*"))
         #expect(ex.contains("hermes-data/auth.json"))
+        #expect(ex.contains("hermes-data/profiles/*/auth.json"), "every profile home has its own")
+        #expect(ex.contains("hermes-data/gateway_state.json"))
+        #expect(ex.contains("hermes-data/profiles/*/gateway_state.json"))
+        #expect(!ex.contains("hermes-data/mcp-tokens"), "includeMcpTokens is on in this case")
         #expect(!ex.contains { $0.hasPrefix(".hermes/") })
+        #expect(ex.contains("hermes-data/profiles/*/auth.json.corrupt"), "Hermes's copy of an unparseable store")
+        let tokensOff = RemoteBackupService.hermesExcludes(leaf: ".hermes", options: .safeDefault, databases: [])
+        #expect(tokensOff.contains(".hermes/mcp-tokens"))
+        #expect(tokensOff.contains(".hermes/profiles/*/mcp-tokens"))
+        #expect(RemoteBackupService.prunedDirs(options: .safeDefault).contains("profiles/*/mcp-tokens"),
+                "the snapshot pass prunes the same trees")
+        // Logs are named per profile: a `profiles/*/logs` wildcard would also
+        // drop a skill's own `logs` folder.
+        let logs = RemoteBackupService.prunedDirs(options: .safeDefault, profiles: ["work", "a [1]"])
+        #expect(logs.contains("profiles/work/logs"))
+        #expect(logs.contains("profiles/a \\[1\\]/logs"))
+        #expect(!logs.contains("profiles/*/logs"))
     }
 
     // MARK: - Process helpers
