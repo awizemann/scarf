@@ -47,11 +47,15 @@ struct RemoteSQLiteBackendPreflightTests {
         version: String = "3.45.1 2024-01-30 16:01:20",
         sessions: [String] = v0204SessionColumns,
         messages: [String] = v0204MessageColumns,
-        usageTableCount: Int? = 1
+        usageTableCount: Int? = 1,
+        json1Probe: Int? = nil
     ) -> String {
         var out = version + "\n" + tableInfo(sessions) + "\n" + tableInfo(messages)
         if let usageTableCount {
             out += "\n[{\"n\":\(usageTableCount)}]"
+        }
+        if let json1Probe {
+            out += "\n[{\"json1\":\(json1Probe)}]"
         }
         return out
     }
@@ -158,7 +162,75 @@ struct RemoteSQLiteBackendPreflightTests {
         }
     }
 
-    // MARK: - SQLite 3.37 (no JSON1) fallback
+    // MARK: - JSON1 detection (blind re-audit B01 / S04-sessions-data-F1)
+
+    /// Ubuntu 22.04 ships sqlite3 3.37.2 WITH JSON1 compiled in. The
+    /// version rule called that "no JSON1" and hid every reset child and
+    /// compression tip on such a host; the preflight's probe says yes.
+    @Test func probeEnablesChildSupportOnAPre338CLIWithJSON1() async throws {
+        let backend = Self.backend()
+        try await backend.parsePreflightOutput(
+            Self.preflight(version: "3.37.2 2022-01-06 13:25:41", json1Probe: 1)
+        )
+        #expect(await backend.hasListableChildSupport)
+    }
+
+    /// A build without JSON1 fails the probe (`|| echo '[{"json1":0}]'`),
+    /// whatever its version says.
+    @Test func failedProbeForcesRootsOnlyWhateverTheVersion() async throws {
+        let backend = Self.backend()
+        try await backend.parsePreflightOutput(
+            Self.preflight(version: "3.45.1 2024-01-30 16:01:20", json1Probe: 0)
+        )
+        #expect(await backend.hasHiddenColumn)
+        #expect(await backend.hasListableChildSupport == false)
+    }
+
+    @Test func probeResultParsing() {
+        #expect(RemoteSQLiteBackend.json1ProbeResult(#"[{"json1":1}]"#) == true)
+        #expect(RemoteSQLiteBackend.json1ProbeResult(#"[{"json1":0}]"#) == false)
+        #expect(RemoteSQLiteBackend.json1ProbeResult(nil) == nil)
+        #expect(RemoteSQLiteBackend.json1ProbeResult("[]") == nil)
+        #expect(RemoteSQLiteBackend.json1ProbeResult(#"[{"n":1}]"#) == nil)
+    }
+
+    /// Runs the probe line exactly as the preflight embeds it, through
+    /// `/bin/sh`: once against this Mac's sqlite3 (which has JSON1), once
+    /// with a `sqlite3` on PATH that fails the way a build without JSON1
+    /// does. The second must still exit 0 so the preflight's `set -e`
+    /// keeps going.
+    @Test func probeCommandAnswersThroughTheShell() throws {
+        func run(path: String?) throws -> (String, Int32) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", "set -e\n" + RemoteSQLiteBackend.json1ProbeCommand]
+            if let path { process.environment = ["PATH": path] }
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try process.run()
+            process.waitUntilExit()
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return (out, process.terminationStatus)
+        }
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sqlite3") else { return }
+        let (withJSON, okStatus) = try run(path: nil)
+        #expect(okStatus == 0)
+        #expect(RemoteSQLiteBackend.json1ProbeResult(withJSON.trimmingCharacters(in: .whitespacesAndNewlines)) == true)
+
+        let bin = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-b01-nojson-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bin) }
+        let fake = bin.appendingPathComponent("sqlite3")
+        try "#!/bin/sh\necho 'Parse error: no such function: json_valid' >&2\nexit 1\n"
+            .write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let (without, failStatus) = try run(path: bin.path + ":/bin:/usr/bin")
+        #expect(failStatus == 0)
+        #expect(RemoteSQLiteBackend.json1ProbeResult(without.trimmingCharacters(in: .whitespacesAndNewlines)) == false)
+    }
+
+    // MARK: - Output without the probe (version-rule fallback)
 
     @Test func sqlite337ForcesRootsOnlyDespiteFullSchema() async throws {
         let backend = Self.backend()
@@ -168,9 +240,10 @@ struct RemoteSQLiteBackendPreflightTests {
         // The schema is fully v0.20.4 …
         #expect(await backend.hasHiddenColumn)
         #expect(await backend.hasLastReadAtColumn)
-        // … but `json_extract` isn't compiled into the remote sqlite3, so
-        // the listable-child predicate would blow up with "no such
-        // function" and empty the session list. Roots-only instead.
+        // … but with no probe answer the version rule applies, and a
+        // pre-3.38 CLI may lack `json_extract`: the listable-child
+        // predicate would blow up with "no such function" and empty the
+        // session list. Roots-only instead.
         #expect(await backend.hasListableChildSupport == false)
     }
 
