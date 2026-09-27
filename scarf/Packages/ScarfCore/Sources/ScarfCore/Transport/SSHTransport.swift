@@ -701,38 +701,28 @@ public struct SSHTransport: ServerTransport {
         return cmd
     }
 
-    /// Where a remote command runs, which decides how `hermes` is found.
-    enum RemoteShell {
-        /// Plain `sh -c`: no profile or rc file is read, so PATH is the
-        /// bare system one.
-        case nonLogin
-        /// `bash -lc`: the user's login profile has already set PATH.
-        case login
-    }
-
-    /// ``composedRemoteCommand(executable:args:cwd:)`` with the PATH line
-    /// every remote hermes call needs in front.
+    /// ``composedRemoteCommand(executable:args:cwd:)`` with a PATH line in
+    /// front that lets every remote call find `hermes`.
     ///
     /// A non-login `sh -c` never sees `~/.local/bin`, where Hermes' own
     /// installer puts the command for a normal user, so a server saved
     /// without Test Connection (no binary hint) failed every one-shot CLI
     /// call with exit 127 while chat, in a login shell, worked (S15-F1).
-    /// It gets ``HermesConfigReader/pathPrelude`` — the same line iOS and
-    /// the Mac's config probes already use, so all of them find the same
-    /// `hermes`. A login shell gets ``HermesConfigReader/pathFallback``
-    /// instead: the user's PATH stays first, and the install directories
-    /// only matter when nothing on it is `hermes` (a remote Mac whose
-    /// Homebrew PATH lives in `.zprofile`, which bash doesn't read).
-    func remoteShellCommand(
-        executable: String, args: [String], cwd: String? = nil, shell: RemoteShell
-    ) -> String {
-        let path = shell == .nonLogin ? HermesConfigReader.pathPrelude : HermesConfigReader.pathFallback
-        return path + "; " + composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+    /// Login shells (`bash -lc`) miss `/opt/homebrew/bin` on a remote Mac,
+    /// whose Homebrew PATH lives in `.zprofile`.
+    ///
+    /// The install directories are APPENDED (``HermesConfigReader/pathFallback``),
+    /// so they only matter when nothing on the shell's own PATH is `hermes`:
+    /// a host where a lookup already worked keeps running the same binary,
+    /// and a non-hermes executable is found exactly as before.
+    func remoteShellCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+        HermesConfigReader.pathFallback + "; "
+            + composedRemoteCommand(executable: executable, args: args, cwd: cwd)
     }
 
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         // Wrap in `sh -c '<exe> <arg> <arg>'`.
-        let cmd = remoteShellCommand(executable: executable, args: args, shell: .nonLogin)
+        let cmd = remoteShellCommand(executable: executable, args: args)
         var sshArgv = sshArgs()
         sshArgv.append(hostSpec)
         sshArgv.append("sh")
@@ -755,7 +745,7 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        let cmd = remoteShellCommand(executable: executable, args: args, cwd: cwd, shell: .login)
+        let cmd = remoteShellCommand(executable: executable, args: args, cwd: cwd)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)
@@ -794,7 +784,7 @@ public struct SSHTransport: ServerTransport {
                 // `makeProcess` above. Streaming consumers (log tails)
                 // don't tolerate a missing-binary failure any better than
                 // ACP does.
-                let cmd = remoteShellCommand(executable: executable, args: args, shell: .login)
+                let cmd = remoteShellCommand(executable: executable, args: args)
                 var sshArgv = sshArgs()
                 sshArgv.insert("-T", at: 0)
                 sshArgv.append(hostSpec)

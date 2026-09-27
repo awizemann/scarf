@@ -55,18 +55,20 @@ import Foundation
 
     // MARK: - S15-F1
 
-    @Test func nonLoginCommandPutsTheInstallDirsFirst() {
-        let cmd = Self.transport().remoteShellCommand(
-            executable: "hermes", args: ["cron", "list"], shell: .nonLogin)
-        #expect(cmd == HermesConfigReader.pathPrelude + "; "
+    @Test func everyRemoteCommandAppendsTheInstallDirs() {
+        let cmd = Self.transport().remoteShellCommand(executable: "hermes", args: ["cron", "list"])
+        #expect(cmd == HermesConfigReader.pathFallback + "; "
             + "COLUMNS=400 \"hermes\" \"-p\" \"default\" \"cron\" \"list\"")
-        #expect(cmd.hasPrefix("PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\"; "))
+        #expect(cmd.hasPrefix("PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin\"; "))
+        // The PATH line goes before the `cd`, so it covers the whole line.
+        let withCwd = Self.transport().remoteShellCommand(executable: "hermes", args: ["acp"], cwd: "/srv/p")
+        #expect(withCwd.hasPrefix(HermesConfigReader.pathFallback + "; cd \"/srv/p\"; "))
     }
 
-    @Test func loginCommandOnlyAppendsTheInstallDirs() {
-        let cmd = Self.transport().remoteShellCommand(
-            executable: "hermes", args: ["acp"], cwd: "/srv/p", shell: .login)
-        #expect(cmd.hasPrefix("PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin\"; cd \"/srv/p\"; "))
+    /// `runProcess` hands the command to ssh single-quoted, and the remote
+    /// login shell runs `sh -c '<cmd>'`: two shells, like here.
+    private static func throughLoginShell(_ cmd: String) -> String {
+        "sh -c '" + cmd.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// The failure itself, then the fix: bare `hermes` in `~/.local/bin` is
@@ -79,17 +81,16 @@ import Foundation
         let bare = t.composedRemoteCommand(executable: "hermes", args: ["config", "show"])
         #expect(try Self.runNonLogin(bare, home: home).0 == 127)
 
-        let fixed = t.remoteShellCommand(executable: "hermes", args: ["config", "show"], shell: .nonLogin)
-        let (code, out) = try Self.runNonLogin(fixed, home: home)
+        let fixed = t.remoteShellCommand(executable: "hermes", args: ["config", "show"])
+        let (code, out) = try Self.runNonLogin(Self.throughLoginShell(fixed), home: home)
         #expect(code == 0)
         #expect(out.trimmingCharacters(in: .whitespacesAndNewlines) == "hermes -p default config show")
     }
 
-    /// Remote macOS: Homebrew's `/opt/homebrew/bin` is set up by `.zprofile`,
-    /// which `bash -lc` doesn't read. The login fallback finds the install
-    /// dirs only after the user's own PATH, so a `hermes` the user's PATH
-    /// already resolves keeps winning.
-    @Test func loginFallbackNeverShadowsTheUsersOwnHermes() throws {
+    /// The install dirs come AFTER the shell's own PATH, so a `hermes` that
+    /// already resolved (a venv, a root install in /usr/local/bin) keeps
+    /// winning; they only fill in when nothing else is found.
+    @Test func theFallbackNeverShadowsAHermesThatAlreadyResolved() throws {
         let home = try Self.homeWithScript(at: ".local/bin/hermes", name: "local-bin")
         defer { try? FileManager.default.removeItem(at: home) }
         let own = home.appendingPathComponent("venv/bin/hermes")
@@ -98,7 +99,7 @@ import Foundation
         try "#!/bin/sh\necho \"venv $*\"\n".write(to: own, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: own.path)
 
-        let cmd = Self.transport().remoteShellCommand(executable: "hermes", args: ["--version"], shell: .login)
+        let cmd = Self.transport().remoteShellCommand(executable: "hermes", args: ["--version"])
         let withOwn = "PATH=\"\(own.deletingLastPathComponent().path):$PATH\"; " + cmd
         #expect(try Self.runNonLogin(withOwn, home: home).1.hasPrefix("venv"))
         // …and with nothing on PATH the fallback still finds ~/.local/bin.
@@ -137,8 +138,8 @@ import Foundation
         defer { try? FileManager.default.removeItem(at: home) }
         let hint = home.path + "/bin/wrap exec hermes"
         let cmd = Self.transport(hint: hint, remoteHome: "~/.hermes/profiles/work")
-            .remoteShellCommand(executable: hint, args: ["cron", "list"], shell: .nonLogin)
-        let (code, out) = try Self.runNonLogin(cmd, home: home)
+            .remoteShellCommand(executable: hint, args: ["cron", "list"])
+        let (code, out) = try Self.runNonLogin(Self.throughLoginShell(cmd), home: home)
         #expect(code == 0)
         #expect(out.trimmingCharacters(in: .whitespacesAndNewlines) == "wrap exec hermes cron list")
     }

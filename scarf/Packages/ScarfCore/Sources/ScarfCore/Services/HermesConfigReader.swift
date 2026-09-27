@@ -29,11 +29,11 @@ public enum HermesConfigReader {
     public static let pathPrelude = "PATH=\"\(hermesInstallDirs):$PATH\""
 
     /// The same directories as ``pathPrelude``, added AFTER the existing
-    /// PATH instead of before it. Used for login shells (`bash -lc`), whose
-    /// PATH the user's profile already set up: this only helps when that
-    /// PATH has no `hermes` at all (a remote Mac whose Homebrew lives in
-    /// `.zprofile`, which bash never reads), and never changes a lookup
-    /// that already worked.
+    /// PATH instead of before it. The Mac's SSH transport puts this in front
+    /// of every remote command: it only helps when the shell's PATH has no
+    /// `hermes` at all (a non-login `sh -c` on a `~/.local/bin` install, or
+    /// a remote Mac whose Homebrew lives in `.zprofile`), and never changes
+    /// a lookup that already worked.
     public static let pathFallback = "PATH=\"$PATH:\(hermesInstallDirs)\""
 
     /// Where Hermes' installer and Homebrew put the `hermes` command, as a

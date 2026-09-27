@@ -144,13 +144,6 @@ public struct HermesPathSet: Sendable, Hashable {
         ]
     }()
 
-    /// Resolved path to the `hermes` executable for this installation.
-    ///
-    /// Local: returns the first executable candidate, falling back to the
-    /// pipx default so error messages still make sense on a fresh machine.
-    ///
-    /// Remote: returns `binaryHint` (populated at connect time) or bare
-    /// `"hermes"` as a last-resort default that relies on the remote `$PATH`.
     /// True when a "Hermes binary" override is a shell fragment rather than
     /// one path — `docker compose exec hermes hermes`, `env FOO=1 hermes`.
     /// The Add Server sheet promises anything `/bin/sh -c "<value> …"` can
@@ -164,6 +157,13 @@ public struct HermesPathSet: Sendable, Hashable {
             .contains(where: { $0 == " " || $0 == "\t" })
     }
 
+    /// Resolved path to the `hermes` executable for this installation.
+    ///
+    /// Local: returns the first executable candidate, falling back to the
+    /// pipx default so error messages still make sense on a fresh machine.
+    ///
+    /// Remote: returns `binaryHint` (populated at connect time) or bare
+    /// `"hermes"` as a last-resort default that relies on the remote `$PATH`.
     public nonisolated var hermesBinary: String {
         if isRemote {
             return binaryHint ?? "hermes"
