@@ -238,6 +238,36 @@ struct ServerBackupRestoreSafetyTests {
         }
     }
 
+    /// R16a (documents a known, accepted effect): snapshotting a WAL-mode
+    /// database that a cleanly stopped Hermes left with no sidecars may
+    /// create an EMPTY `-wal` and a `-shm` beside it. The database's own
+    /// bytes don't change and the `-wal` holds no frames, so nothing was
+    /// written to the data (charter C3). Hermes's own `hermes backup` does
+    /// the same: `_safe_copy_db` opens the source `mode=ro` and
+    /// `sqlite3.backup()`s it (`hermes_cli/backup.py:332-369` @ v2026.9.24),
+    /// which on this Mac leaves `state.db-wal` (0 bytes) and `state.db-shm`.
+    @Test("a stopped database may gain an empty -wal and a -shm from the snapshot, and nothing else")
+    func snapshotOfStoppedDatabaseMayCreateEmptySidecars() async throws {
+        let root = try Self.scratch("sidecars")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        try Self.makeUnheldHome(home, rows: 40, withWAL: false)
+        let db = home.appendingPathComponent("state.db")
+        let wal = URL(fileURLWithPath: db.path + "-wal")
+        #expect(!FileManager.default.fileExists(atPath: wal.path), "fixture: no sidecars before")
+        let before = Self.bytes(db)
+
+        _ = try await Self.backUp(home: home, into: root)
+
+        #expect(Self.bytes(db) == before, "the database itself is never written")
+        if FileManager.default.fileExists(atPath: wal.path) {
+            #expect(Self.bytes(wal)?.isEmpty == true, "a -wal the snapshot created holds no frames")
+        }
+        // Those two sidecars are all it may leave: no snapshot directory, no copy.
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: home.path))
+        #expect(left.isSubset(of: ["state.db", "state.db-wal", "state.db-shm"]), "\(left.sorted())")
+    }
+
     @Test("a home with no database backs up without a snapshot entry")
     func backupWithoutStateDB() async throws {
         let root = try Self.scratch("nodb")
