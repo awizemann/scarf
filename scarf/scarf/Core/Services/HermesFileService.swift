@@ -1202,6 +1202,78 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Replaces an existing stdio server's `args` list (or adds one).
+    ///
+    /// Same reason `setMCPServerCommand` exists: the registrar re-asserts
+    /// the bundled `scarf-projects` server's arguments on every launch, and
+    /// `hermes mcp add` has no verb for editing an entry in place — remove
+    /// and re-add would discard the user's tool filters, timeouts and env.
+    /// Written as a block list at indent 6 (the shape the reader above
+    /// parses), every item quoted through `yamlScalar`, and proven by the
+    /// read-back like the command re-point.
+    @discardableResult
+    nonisolated func setMCPServerArgs(name: String, args: [String]) -> Bool {
+        let rows = Self.argsRows(args)
+        return patchMCPServerField(name: name, expecting: rows) { entryLines in
+            Self.replaceOrInsertArgs(rows: rows, in: &entryLines)
+        }
+    }
+
+    /// The rows `setMCPServerArgs` writes: `args:` then one `- item` per
+    /// argument, or nothing at all for an empty list.
+    nonisolated static func argsRows(_ args: [String]) -> [String] {
+        guard !args.isEmpty else { return [] }
+        return ["    args:"] + args.map { "      - \(yamlScalar($0))" }
+    }
+
+    /// Swap the entry's `args` key — block list (items at indent 4 or 6) or
+    /// inline flow sequence — for `rows`, leaving every other key alone.
+    /// Absent → inserted right after `command:` (else after the header).
+    nonisolated private static func replaceOrInsertArgs(rows: [String], in lines: inout [String]) {
+        var start: Int?
+        var end = lines.count
+        for index in 1..<lines.count {
+            let line = lines[index]
+            let indent = line.prefix(while: { $0 == " " }).count
+            let trimmed = Self.trimYAMLLine(line)
+            if let _ = start {
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                // Items of the list: `- x` at the key's own indent (PyYAML's
+                // default) or deeper, and any continuation deeper than 4.
+                if indent >= 6 || (indent == 4 && trimmed.hasPrefix("- ")) { continue }
+                end = index
+                break
+            }
+            if indent == 4, trimmed == "args:" || trimmed.hasPrefix("args:") {
+                start = index
+                continue
+            }
+            if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") { break }
+        }
+        if let start {
+            // Keep trailing comments/blank lines that belong to the next key.
+            while end > start + 1 {
+                let trimmed = Self.trimYAMLLine(lines[end - 1])
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { end -= 1 } else { break }
+            }
+            lines.replaceSubrange(start..<end, with: rows)
+            return
+        }
+        guard !rows.isEmpty else { return }
+        var insertAt = 1
+        for index in 1..<lines.count {
+            let line = lines[index]
+            let indent = line.prefix(while: { $0 == " " }).count
+            let trimmed = Self.trimYAMLLine(line)
+            if indent == 4, trimmed.hasPrefix("command:") {
+                insertAt = index + 1
+                break
+            }
+            if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") { break }
+        }
+        lines.insert(contentsOf: rows, at: insertAt)
+    }
+
     /// Remove one MCP server, judged by what `hermes mcp remove` PRINTED.
     ///
     /// P40: `cmd_mcp_remove` is a `-> None` whose not-found arm prints

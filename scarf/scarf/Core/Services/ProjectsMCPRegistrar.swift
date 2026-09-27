@@ -22,6 +22,18 @@ import os
 /// launch, in place, so the user's own edits to the entry — tool filters,
 /// timeouts, env — survive; remove-and-re-add would discard them.
 ///
+/// **Pinned to the profile that owns the entry.** Registered with
+/// `--args --hermes-home <that profile's home>`. Hermes launches stdio MCP
+/// servers with a filtered environment — PATH/HOME/USER/LANG/LC_ALL/TERM/
+/// SHELL/TMPDIR and `XDG_*` only (`tools/mcp_tool_config.py:74,111-119` @
+/// v2026.9.24) — so `HERMES_HOME` never reaches the server, and without the
+/// argument it fell back to the sticky `active_profile`: a `hermes -p work`
+/// agent registering a project wrote into whichever profile happened to be
+/// active. Because `hermes profile create --clone` copies config.yaml
+/// (`hermes_cli/profiles.py:35`), a clone inherits its source's pin; the
+/// launch pass therefore also re-pins existing entries in the other local
+/// profiles (never adding one there).
+///
 /// **Local only.** An MCP server runs where the agent runs, and the
 /// bundled binary is a Mach-O for this Mac. SSH contexts are skipped
 /// entirely; remote hosts keep the skill-driven fallback.
@@ -188,9 +200,18 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
         case added(path: String)
         /// The entry existed with a stale `command`; re-pointed in place.
         case repointed(from: String, to: String)
+        /// The command was right but the `--hermes-home` pin was missing or
+        /// named another home; the args were rewritten in place.
+        case repinned(home: String)
         /// Already correct. The common case, and it writes nothing.
         case unchanged(path: String)
         case failed(String)
+    }
+
+    /// The arguments every registration carries: the home the entry's own
+    /// profile lives at. `main.swift` requires it absolute and existing.
+    static func registrationArgs(home: String) -> [String] {
+        ["--hermes-home", home]
     }
 
     /// Blocking transport + subprocess work. Callers run it off-main
@@ -215,6 +236,11 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
             return .skipped(reason)
         }
 
+        // Other local profiles first, and independently: their entries are
+        // repaired whatever happens to the active one below.
+        repinOtherProfiles(binaryPath: path)
+        let expectedArgs = Self.registrationArgs(home: context.paths.home)
+
         let fileService = HermesFileService(context: context)
         let existing = fileService.loadMCPServers().first { $0.name == Self.serverName }
 
@@ -232,10 +258,12 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
             // already ships and has verified against Hermes's argparse
             // (`hermes mcp add <name> --command <cmd>`, v0.21.0) — not a
             // second hand-written YAML entry writer.
+            // `--args` is `nargs=REMAINDER` (`hermes_cli/subcommands/mcp.py:34`
+            // @ v2026.9.24), so the pin rides through to the entry verbatim.
             let result = fileService.addMCPServerStdio(
                 name: Self.serverName,
                 command: path,
-                args: []
+                args: expectedArgs
             )
             guard result.exitCode == 0 else {
                 Self.logger.warning(
@@ -264,12 +292,34 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
                 "an MCP server named \(Self.serverName) already exists and is not a stdio server"
             )
         }
-        guard currentCommand != path else {
+        let argsPinned = existing.args == expectedArgs
+        guard currentCommand != path || !argsPinned else {
             unmanageableMarker.clear()
             return .unchanged(path: path)
         }
 
-        guard fileService.setMCPServerCommand(name: Self.serverName, command: path) else {
+        if currentCommand == path {
+            // Only the pin is wrong (an entry from an older Scarf, or one a
+            // profile clone copied from another home).
+            guard fileService.setMCPServerArgs(name: Self.serverName, args: expectedArgs),
+                  fileService.loadMCPServers().first(where: { $0.name == Self.serverName })?.args
+                    == expectedArgs
+            else {
+                unmanageableMarker.record(
+                    Self.configFingerprint(context: context, targetPath: path)
+                )
+                return .failed("could not pin \(Self.serverName) to \(context.paths.home)")
+            }
+            unmanageableMarker.clear()
+            Self.logger.info(
+                "pinned \(Self.serverName, privacy: .public) to \(self.context.paths.home, privacy: .public)"
+            )
+            return .repinned(home: context.paths.home)
+        }
+
+        guard fileService.setMCPServerCommand(name: Self.serverName, command: path),
+              argsPinned || fileService.setMCPServerArgs(name: Self.serverName, args: expectedArgs)
+        else {
             // The patcher refused (a shape it won't touch) or its read-back
             // failed and it restored the file. Either way the next launch
             // would refuse identically — mark it and stop asking.
@@ -281,8 +331,9 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
         // re-point that silently didn't happen leaves Hermes spawning a
         // binary that isn't there, and this is the ONE launch pass that
         // would have caught it.
-        let written = fileService.loadMCPServers().first { $0.name == Self.serverName }?.command
-        guard written == path else {
+        let writtenEntry = fileService.loadMCPServers().first { $0.name == Self.serverName }
+        let written = writtenEntry?.command
+        guard written == path, writtenEntry?.args == expectedArgs else {
             unmanageableMarker.record(
                 Self.configFingerprint(context: context, targetPath: path)
             )
@@ -296,5 +347,43 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
             "re-pointed \(Self.serverName, privacy: .public): \(currentCommand, privacy: .public) → \(path, privacy: .public)"
         )
         return .repointed(from: currentCommand, to: path)
+    }
+
+    /// Re-assert command and pin on the `scarf-projects` entries that
+    /// ALREADY exist in the other local profiles' configs. Never adds one —
+    /// which profiles get the server is decided by launching Scarf with that
+    /// profile active, exactly as before. Only an entry whose command is a
+    /// `scarf-projects-mcp` binary is touched, so a user's own server that
+    /// squats the name is left alone. Best effort: a profile we can't patch
+    /// is logged and skipped.
+    nonisolated func repinOtherProfiles(binaryPath: String) {
+        let activeHome = context.paths.home
+        let root = HermesProfileScope.rootHome(forHome: activeHome)
+        var names: [String?] = [nil]  // the root (default) profile
+        if let listed = try? FileManager.default.contentsOfDirectory(atPath: root + "/profiles") {
+            names += listed.sorted().filter { HermesProfileScope.isValidName($0) }.map { Optional($0) }
+        }
+        for name in names {
+            let profileContext = context.pinnedToProfile(name)
+            let home = profileContext.paths.home
+            guard home != activeHome,
+                  FileManager.default.fileExists(atPath: profileContext.paths.configYAML)
+            else { continue }
+            let service = HermesFileService(context: profileContext)
+            guard let entry = service.loadMCPServers().first(where: { $0.name == Self.serverName }),
+                  let command = entry.command,
+                  (command as NSString).lastPathComponent == Self.helperName
+            else { continue }
+            let args = Self.registrationArgs(home: home)
+            let commandOK = command == binaryPath
+                || service.setMCPServerCommand(name: Self.serverName, command: binaryPath)
+            let argsOK = entry.args == args
+                || service.setMCPServerArgs(name: Self.serverName, args: args)
+            if !(commandOK && argsOK) {
+                Self.logger.warning(
+                    "couldn't re-pin \(Self.serverName, privacy: .public) in \(profileContext.paths.configYAML, privacy: .public)"
+                )
+            }
+        }
     }
 }
