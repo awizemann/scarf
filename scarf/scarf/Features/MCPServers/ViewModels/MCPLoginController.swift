@@ -335,8 +335,8 @@ final class MCPLoginController {
 
     /// Kill the REMOTE `hermes mcp login` that the local SIGTERM does not.
     ///
-    /// `SSHTransport.makeProcess` builds `ssh -T … bash -lc '<cmd>'`
-    /// (`SSHTransport.swift:693-716`). `-T` allocates no pty, so terminating
+    /// `SSHTransport.makeProcess(executable:args:cwd:)` builds
+    /// `ssh -T … bash -lc '<cmd>'`. `-T` allocates no pty, so terminating
     /// the local `ssh` closes the channel but leaves the remote `hermes`
     /// running: it is in `_authorize`'s polling loop
     /// (`tools/mcp_oauth_device.py:132-144` at `v2026.9.7`), writes nothing
@@ -380,8 +380,8 @@ final class MCPLoginController {
     ///   escaped (`regexEscaped`).
     /// * **Away from the `bash -lc` wrapper**, for free, by that `$` anchor:
     ///   `SSHTransport.composedRemoteCommand` runs every token through
-    ///   `remotePathArg`, which double-quotes UNCONDITIONALLY
-    ///   (`SSHTransport.swift:303-322`), so the shell's own command line ends
+    ///   `SSHTransport.remotePathArg`, which double-quotes UNCONDITIONALLY,
+    ///   so the shell's own command line ends
     ///   `… "--" "github"` — a literal `"` after the name — while the
     ///   `hermes` it execs has had the quotes removed. Only the second one
     ///   matches. `MCPOAuthAndTransportP24Tests` pins that with the real
