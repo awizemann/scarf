@@ -451,6 +451,12 @@ class LaneSixProviderEnvVars(unittest.TestCase):
             self.assertNotIn(absent, vars_)
         self.assertEqual(warn, {"kimi"})
 
+    def test_a_profile_with_only_url_vars_keeps_them(self):
+        # `_api_key_env_fields`: `tuple(non-URL vars) or pp.env_vars`.
+        plugins = {"urlonly": 'p = ProviderProfile(name="urlonly", env_vars=("URLONLY_BASE_URL",))\nregister_provider(p)\n'}
+        vars_, _, _ = cht.parse_provider_env_vars(self._src(plugins=plugins))
+        self.assertIn("URLONLY_BASE_URL", vars_)
+
     def _exits(self, **kw):
         with self.assertRaises(SystemExit):
             cht.parse_provider_env_vars(self._src(**kw))
@@ -503,6 +509,13 @@ class LaneSixCatchesDrift(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("[provider-env-vars] Hermes provider env vars missing", out)
         self.assertIn("DEEPSEEK_API_KEY", out)
+
+    def test_a_missing_plugin_only_var_fails(self):
+        # FIREWORKS_API_KEY comes only from the fireworks plugin mirror.
+        self.assertIn('"FIREWORKS_API_KEY", ', self.text)
+        code, out = self._run_with(self.text.replace('"FIREWORKS_API_KEY", ', "", 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FIREWORKS_API_KEY", out)
 
     def test_an_extra_var_fails(self):
         code, out = self._run_with(self.text.replace(

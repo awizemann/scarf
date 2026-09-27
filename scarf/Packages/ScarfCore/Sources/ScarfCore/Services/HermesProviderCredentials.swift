@@ -25,8 +25,8 @@ public enum HermesProviderCredentials {
     ///
     /// `OPENAI_BASE_URL` is on the list on purpose: Hermes treats it alone as
     /// configured, because a local server (vLLM, llama.cpp) needs no key.
-    /// When a new Hermes release adds a provider, re-run the snippet and
-    /// update this list.
+    /// Lane 6 of `scripts/check-hermes-tables.py` diffs this list against
+    /// the tagged source and fails on drift; when it does, update the list.
     public static let providerEnvVars: [String] = [
         "ACTUAL_API_KEY", "AI_GATEWAY_API_KEY", "ALIBABA_CODING_PLAN_API_KEY",
         "ALIBABA_CODING_PLAN_CN_API_KEY", "ALIBABA_TOKEN_PLAN_API_KEY",
