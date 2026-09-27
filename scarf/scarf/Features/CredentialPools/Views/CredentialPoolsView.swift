@@ -707,6 +707,12 @@ private struct AddCredentialSheet: View {
     /// confirm sheet can show the user what's about to change. Nil
     /// when no swap is offered (already aligned, or user dismissed).
     @State private var pendingProviderSwap: PendingProviderSwap?
+    /// The provider switch is being written. Keeps the swap sheet up (and
+    /// its buttons off) until Hermes has answered.
+    @State private var providerSwapInFlight = false
+    /// Why the last "Switch to …" did not happen, shown in the swap sheet
+    /// (T3-F4: a refused write used to close the sheet as if it worked).
+    @State private var providerSwapError: String?
 
     /// Snapshot of the post-OAuth state used to render the
     /// "Switch active provider?" sheet. Frozen at the moment OAuth
@@ -1184,17 +1190,31 @@ private struct AddCredentialSheet: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
+            if let providerSwapError {
+                Label(providerSwapError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             HStack {
                 Button("Keep \(swap.currentProvider)") {
+                    providerSwapError = nil
                     pendingProviderSwap = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onDismiss() }
                 }
+                .disabled(providerSwapInFlight)
                 Spacer()
+                if providerSwapInFlight {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Switch to \(swap.newProvider)") {
                     let target = swap.newProvider
+                    let current = swap.currentProvider
                     let ctx = viewModel.context
                     let capabilities = capabilitiesStore?.capabilities ?? .empty
-                    pendingProviderSwap = nil
+                    providerSwapError = nil
+                    providerSwapInFlight = true
                     Task.detached {
                         let svc = HermesFileService(context: ctx)
                         // Empty model lets Hermes pick its own default
@@ -1217,13 +1237,31 @@ private struct AddCredentialSheet: View {
                             current: svc.loadConfig(),
                             capabilities: capabilities
                         )
-                        _ = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+                        // An empty plan (a local provider with no base URL)
+                        // or a refused `config set` leaves config.yaml on the
+                        // old provider: say so and keep the sheet up rather
+                        // than closing it as if the switch happened (T3-F4).
+                        let failure: String?
+                        if ops.isEmpty {
+                            failure = String(localized: "Scarf can't switch to \(target) from here. Choose \(target) and a model in the model picker instead.")
+                        } else if !svc.applyModelConfigPlan(ops) {
+                            failure = String(localized: "Hermes didn't save the switch, so config.yaml still uses \(current). Try the model picker, or run `hermes model` in a terminal.")
+                        } else {
+                            failure = nil
+                        }
                         await MainActor.run {
+                            providerSwapInFlight = false
+                            if let failure {
+                                providerSwapError = failure
+                                return
+                            }
+                            pendingProviderSwap = nil
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onDismiss() }
                         }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(providerSwapInFlight)
                 .keyboardShortcut(.defaultAction)
             }
         }
