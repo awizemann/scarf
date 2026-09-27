@@ -42,11 +42,11 @@ public enum CronScheduleFormatter {
     ///   Mac's zone, so `nil`; on a remote host Scarf can't see it, so
     ///   "host time".
     ///
-    /// `HERMES_TIMEZONE` in the gateway's environment outranks the config
-    /// key (`hermes_time.py:83-87`) and is invisible to Scarf; the config
-    /// key is the documented setting and the one Settings edits.
+    /// Pass the zone Hermes would resolve from its files: ``configuredZone(
+    /// envText:configTimezone:)``. A `HERMES_TIMEZONE` exported only in the
+    /// gateway's shell (not in `.env`) is invisible to Scarf.
     public static func hostZoneNote(
-        configTimezone: String?, isRemote: Bool, localZone: TimeZone = .current
+        configTimezone: String?, isRemote: Bool, localZone: TimeZone = .current, now: Date = Date()
     ) -> String? {
         let configured = configTimezone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Hermes falls back to server-local time for a name `ZoneInfo`
@@ -55,9 +55,44 @@ public enum CronScheduleFormatter {
         if !configured.isEmpty, let zone = TimeZone(identifier: configured) {
             // Compare zones, but show the name as the user wrote it:
             // Foundation reports "UTC" back as "GMT".
-            return zone.identifier == localZone.identifier ? nil : configured
+            return sameClock(zone, localZone, now: now) ? nil : configured
         }
         return isRemote ? String(localized: "host time") : nil
+    }
+
+    /// Whether two zones read the same wall clock through the coming year
+    /// (sampled each quarter, so both sides of any DST change) — aliases such
+    /// as `US/Pacific` and `America/Los_Angeles`, or `UTC` and `Etc/UTC`,
+    /// count as the same; Phoenix and Los Angeles do not.
+    nonisolated static func sameClock(_ a: TimeZone, _ b: TimeZone, now: Date) -> Bool {
+        if a.identifier == b.identifier { return true }
+        return (0..<4).allSatisfy { quarter in
+            let date = now.addingTimeInterval(Double(quarter) * 91 * 24 * 3600)
+            return a.secondsFromGMT(for: date) == b.secondsFromGMT(for: date)
+        }
+    }
+
+    /// The zone name Hermes resolves from its own files: `HERMES_TIMEZONE`
+    /// from `<home>/.env` first — Hermes loads that file over the process
+    /// environment at startup (`hermes_cli/env_loader.py:397-398`) and
+    /// `hermes config set HERMES_TIMEZONE …` writes it there — then config
+    /// `timezone` (`hermes_time.py:83-106` @ v2026.9.24).
+    public static func configuredZone(envText: String?, configTimezone: String?) -> String? {
+        if let envText {
+            for raw in envText.split(whereSeparator: \.isNewline) {
+                var line = raw.trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("export ") { line = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+                guard line.hasPrefix("HERMES_TIMEZONE"),
+                      let eq = line.firstIndex(of: "="),
+                      line[..<eq].trimmingCharacters(in: .whitespaces) == "HERMES_TIMEZONE"
+                else { continue }
+                let value = line[line.index(after: eq)...]
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                if !value.isEmpty { return value }
+            }
+        }
+        return configTimezone
     }
 
     /// Whether `schedule` is a cron expression whose hour field is fixed,

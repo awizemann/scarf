@@ -170,21 +170,29 @@ final class CronViewModel {
         let selectedID = selectedJob?.id
         loadGeneration += 1
         let generation = loadGeneration
-        // The zone note needs `config.yaml`: one more read (an SSH round
-        // trip on a remote), so only on the first load and on forced ones
+        // The zone note needs `.env` and `config.yaml`: two more reads (SSH round
+        // trips on a remote), so only on the first load and on forced ones
         // (after a mutation), not on every watcher tick.
-        let readZone = force || !hasResolvedZoneNote
-        hasResolvedZoneNote = true
-        let isRemote = context.isRemote
+        if force || !hasResolvedZoneNote {
+            hasResolvedZoneNote = true
+            let ctx = context
+            Task { [weak self] in
+                // Blocking reads: a thread of their own, not the pool (C10).
+                let note = await OffPool.run {
+                    CronScheduleFormatter.hostZoneNote(
+                        configTimezone: CronScheduleFormatter.configuredZone(
+                            envText: ctx.readText(ctx.paths.envFile),
+                            configTimezone: ctx.readText(ctx.paths.configYAML).map { HermesConfig(yaml: $0).timezone }),
+                        isRemote: ctx.isRemote)
+                }
+                self?.scheduleZoneNote = note
+            }
+        }
         Task.detached { [weak self] in
             // Three sync transport ops on remote — keep them off main.
             // v2.8: instrumented so we can see how many SSH RTTs the
             // Cron tab actually costs in captures.
             await ScarfMon.measureAsync(.diskIO, "cron.load") {
-                let zoneNote: String?? = readZone
-                    ? .some(CronScheduleFormatter.hostZoneNote(
-                        configTimezone: try? svc.loadConfigResult().get().timezone, isRemote: isRemote))
-                    : .none
                 let outcome = svc.loadCronJobsOutcome()
                 let jobs = outcome.jobs
                 let decodeFailed = outcome.decodeFailed
@@ -222,7 +230,6 @@ final class CronViewModel {
                     }
                     self.loadDecodeFailed = decodeFailed
                     self.availableSkills = skills
-                    if case .some(let note) = zoneNote { self.scheduleZoneNote = note }
                     // Only onto the selection this load was started for. A
                     // click that landed while the (remote) read was in flight
                     // owns `selectedJob` now; writing `refreshed` back would
@@ -522,10 +529,13 @@ final class CronViewModel {
     /// offering plain Resume and lets the CLI decide.
     var isV0181OrLater = false
 
-    /// Set by `CronView` from `hasCronRunSynchronous` (v0.18.0). Gates the
-    /// follow-up `hermes cron tick` after Run Now: only a host whose
-    /// `cron run` merely marks the job due needs it (see ``runNow(_:)``).
-    var hostRunsCronSynchronously = false
+    /// Set by `CronView` to "the version probe has answered AND the host is
+    /// below v0.18.0" (`!hasCronRunSynchronous`). Gates the follow-up
+    /// `hermes cron tick` after Run Now: only a host whose `cron run` merely
+    /// marks the job due needs it (see ``runNow(_:)``). Unknown means no
+    /// tick — the tick fires every due job, so guessing wrong that way is
+    /// the expensive direction.
+    var hostNeedsRunNowTick = false
 
     /// What Scarf may offer this job — the shared, cross-platform answer.
     /// `IOSCronViewModel.recoveryOffer(for:)` computes the same thing from
@@ -867,15 +877,16 @@ final class CronViewModel {
 
     /// Whether Run Now should follow `cron run` with `hermes cron tick`.
     ///
-    /// Only when the host is pre-v0.18 (`cron run` there only marks the job
-    /// due) AND the run came back as a plain "started". A refusal, a
-    /// failure or "already running" means nothing was marked due, so a tick
-    /// would only fire OTHER jobs. On v0.18+ never: the job already ran,
-    /// or (relay-fronted) the running gateway owns it.
+    /// Only when the host is known to be pre-v0.18 (`cron run` there only
+    /// marks the job due) AND the run came back as a plain "started". A
+    /// refusal, a failure or "already running" means nothing was marked
+    /// due, so a tick would only fire OTHER jobs. On v0.18+ never: the job
+    /// already ran, or (relay-fronted) the running gateway owns it. Any
+    /// `Ran now:` line proves a synchronous host whatever the flag says.
     nonisolated static func shouldTickAfterRunNow(
-        _ verdict: RunNowVerdict, hostRunsSynchronously: Bool
+        _ verdict: RunNowVerdict, output: String, hostNeedsTick: Bool
     ) -> Bool {
-        guard !hostRunsSynchronously else { return false }
+        guard hostNeedsTick, !output.contains("Ran now:") else { return false }
         if case .started = verdict { return true }
         return false
     }
@@ -928,7 +939,7 @@ final class CronViewModel {
         post(String(localized: "Running \"\(job.name)\"…"), outcome: .unconfirmed)
         let offer = recoveryOffer(for: job)
         let timeout = Self.runNowTimeout
-        let hostRunsSynchronously = hostRunsCronSynchronously
+        let hostNeedsTick = hostNeedsRunNowTick
         Task.detached { [mutationRunner, weak self] in
             // `OffPool.run`: a spawn that may block for the whole run gets a
             // thread of its own, not one of the cooperative pool's (C10).
@@ -946,7 +957,7 @@ final class CronViewModel {
                 self.load(force: true)
                 return verdict
             }
-            guard Self.shouldTickAfterRunNow(verdict, hostRunsSynchronously: hostRunsSynchronously) else {
+            guard Self.shouldTickAfterRunNow(verdict, output: runResult.output, hostNeedsTick: hostNeedsTick) else {
                 return
             }
             // A pre-v0.18 host only marked the job due, so force the tick

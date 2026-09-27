@@ -175,7 +175,7 @@ import ScarfCore
     /// `output`/`exit`, and return every call it saw once the run (and any
     /// tick) has settled.
     private static func runNowCalls(
-        output: String, exit: Int32, hostRunsSynchronously: Bool
+        output: String, exit: Int32, hostNeedsTick: Bool?
     ) async throws -> Calls {
         let home = try TempHermesHome()
         defer { home.cleanup() }
@@ -185,7 +185,9 @@ import ScarfCore
             if args.starts(with: ["cron", "run"]) { return (output, exit) }
             return ("", 0)
         })
-        vm.hostRunsCronSynchronously = hostRunsSynchronously
+        // `nil`: leave the view model as it is before the version probe
+        // answers.
+        if let hostNeedsTick { vm.hostNeedsRunNowTick = hostNeedsTick }
         vm.runNow(tickJob)
         await settle { !vm.isRunningNow(tickJob) }
         // The tick is sent 250 ms after the verdict; wait past that so an
@@ -202,7 +204,7 @@ import ScarfCore
     @Test func preV018StartedRunStillTicks() async throws {
         let calls = try await Self.runNowCalls(
             output: "Triggered job: Nightly (j1)\n  It will run on the next scheduler tick.\n",
-            exit: 0, hostRunsSynchronously: false)
+            exit: 0, hostNeedsTick: true)
         #expect(calls.all(["cron", "tick"]).count == 1)
         #expect(calls.all(["cron", "tick"]).first?.timeout == 300)
     }
@@ -211,7 +213,7 @@ import ScarfCore
     @Test func v018RanRunDoesNotTick() async throws {
         let calls = try await Self.runNowCalls(
             output: "Triggered job: Nightly (j1)\n  Ran now: succeeded.\n",
-            exit: 0, hostRunsSynchronously: true)
+            exit: 0, hostNeedsTick: false)
         #expect(calls.all(["cron", "run"]).count == 1)
         #expect(calls.all(["cron", "tick"]).isEmpty)
     }
@@ -221,7 +223,7 @@ import ScarfCore
     @Test func v018RelayForwardDoesNotTick() async throws {
         let calls = try await Self.runNowCalls(
             output: "Triggered job: j1 (j1)\n  It will run on the next scheduler tick.\n",
-            exit: 0, hostRunsSynchronously: true)
+            exit: 0, hostNeedsTick: false)
         #expect(calls.all(["cron", "tick"]).isEmpty)
     }
 
@@ -230,7 +232,7 @@ import ScarfCore
     @Test func failedRunDoesNotTickEvenOnAnOldHost() async throws {
         let calls = try await Self.runNowCalls(
             output: "Failed to run job: Job 'j1' not found\n",
-            exit: 1, hostRunsSynchronously: false)
+            exit: 1, hostNeedsTick: true)
         #expect(calls.all(["cron", "tick"]).isEmpty)
     }
 
@@ -238,11 +240,50 @@ import ScarfCore
         let verdicts: [CronViewModel.RunNowVerdict] = [
             .ran, .started, .refused("x"), .alreadyRunning("x"), .stillRunning, .failed("x"),
         ]
+        let startedLine = "Triggered job: N (j1)\n  It will run on the next scheduler tick.\n"
         for verdict in verdicts {
-            #expect(!CronViewModel.shouldTickAfterRunNow(verdict, hostRunsSynchronously: true), "\(verdict)")
-            #expect(CronViewModel.shouldTickAfterRunNow(verdict, hostRunsSynchronously: false)
+            #expect(!CronViewModel.shouldTickAfterRunNow(verdict, output: startedLine, hostNeedsTick: false), "\(verdict)")
+            #expect(CronViewModel.shouldTickAfterRunNow(verdict, output: startedLine, hostNeedsTick: true)
                     == (verdict == .started), "\(verdict)")
         }
+        // A `Ran now:` line proves a synchronous host, whatever the flag says.
+        #expect(!CronViewModel.shouldTickAfterRunNow(
+            .started, output: "Triggered job: N (j1)\n  Ran now: failed.\n", hostNeedsTick: true))
+    }
+
+    /// Before the version probe answers the view model is told nothing, and
+    /// an unknown host gets no tick (a v0.18+ host would fire every due job).
+    @Test func unprobedHostDoesNotTick() async throws {
+        let calls = try await Self.runNowCalls(
+            output: "Triggered job: j1 (j1)\n  It will run on the next scheduler tick.\n",
+            exit: 0, hostNeedsTick: nil)
+        #expect(calls.all(["cron", "run"]).count == 1)
+        #expect(calls.all(["cron", "tick"]).isEmpty)
+    }
+
+    // MARK: - S08-F3: the Mac rows name the host zone
+
+    /// `.env`'s HERMES_TIMEZONE outranks config `timezone`, as Hermes loads
+    /// it (`hermes_cli/env_loader.py:397-398`, `hermes_time.py:83-106`).
+    @Test func schedulePhraseNamesTheHostZoneFromEnvThenConfig() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        try "timezone: Pacific/Kiritimati\n".write(
+            to: home.url.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        let job = HermesCronJob(id: "j1", name: "N", prompt: "p", model: nil,
+                                schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
+                                enabled: true, state: "scheduled")
+
+        let vm = CronViewModel(context: home.context, mutationRunner: { _, _ in ("", 0) })
+        vm.load(force: true)
+        await Self.settle { vm.scheduleZoneNote != nil }
+        #expect(vm.schedulePhrase(for: job) == "Daily at 9 AM (Pacific/Kiritimati)")
+
+        try "export HERMES_TIMEZONE=\"Pacific/Chatham\"\n".write(
+            to: home.url.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+        vm.load(force: true)
+        await Self.settle { vm.scheduleZoneNote == "Pacific/Chatham" }
+        #expect(vm.schedulePhrase(for: job) == "Daily at 9 AM (Pacific/Chatham)")
     }
 
     // MARK: - (3) selection race

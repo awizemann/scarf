@@ -85,10 +85,12 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
     }
 
-    /// v0.18.0 — `cron run` runs the job itself, so Run Now must not
-    /// follow it with a `cron tick` that would fire every other due job.
-    private var hasCronRunSynchronous: Bool {
-        capabilitiesStore?.capabilities.hasCronRunSynchronous ?? false
+    /// Below v0.18.0 `cron run` only marks the job due, so Run Now follows
+    /// it with a `cron tick`. False until the version probe answers: the
+    /// tick fires every due job, so an unknown host doesn't get one.
+    private var needsCronRunNowTick: Bool {
+        guard let caps = capabilitiesStore?.capabilities, caps.detected else { return false }
+        return !caps.hasCronRunSynchronous
     }
 
     /// v0.20.6 — `--deliver bot-chat[:profile]`. Placeholder/hint only;
@@ -171,7 +173,7 @@ struct CronView: View {
             viewModel.isV021OrLater = hasCronRecoverableErrorResume
             viewModel.isV0181OrLater = hasCronPastOneShotResumeRefusal
             viewModel.isV0211OrLater = isV0211OrLater
-            viewModel.hostRunsCronSynchronously = hasCronRunSynchronous
+            viewModel.hostNeedsRunNowTick = needsCronRunNowTick
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
             // so they can't be deferred behind a disclosure the way RUN
@@ -194,7 +196,7 @@ struct CronView: View {
         .onChange(of: hasCronRecoverableErrorResume) { _, newValue in viewModel.isV021OrLater = newValue }
         .onChange(of: hasCronPastOneShotResumeRefusal) { _, newValue in viewModel.isV0181OrLater = newValue }
         .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
-        .onChange(of: hasCronRunSynchronous) { _, newValue in viewModel.hostRunsCronSynchronously = newValue }
+        .onChange(of: needsCronRunNowTick) { _, newValue in viewModel.hostNeedsRunNowTick = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {

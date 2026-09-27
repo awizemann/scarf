@@ -175,4 +175,21 @@ struct CronScheduleFormatterTests {
         // No note: byte-identical to the zone-less phrase.
         #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * *"), zoneNote: nil) == "Daily at 9 AM")
     }
+
+    @Test func zoneAliasesCountAsTheMacsZone() {
+        #expect(CronScheduleFormatter.hostZoneNote(configTimezone: "US/Pacific", isRemote: true, localZone: pst) == nil)
+        let utc = TimeZone(identifier: "UTC")!
+        #expect(CronScheduleFormatter.hostZoneNote(configTimezone: "Etc/UTC", isRemote: true, localZone: utc) == nil)
+        // Same offset today but a different DST rule is NOT the same clock.
+        #expect(CronScheduleFormatter.hostZoneNote(configTimezone: "America/Phoenix", isRemote: true, localZone: pst) != nil)
+    }
+
+    @Test func envHermesTimezoneOutranksConfig() {
+        #expect(CronScheduleFormatter.configuredZone(envText: "HERMES_TIMEZONE=Asia/Tokyo\n", configTimezone: "UTC") == "Asia/Tokyo")
+        #expect(CronScheduleFormatter.configuredZone(envText: "export HERMES_TIMEZONE='Asia/Tokyo'", configTimezone: nil) == "Asia/Tokyo")
+        #expect(CronScheduleFormatter.configuredZone(envText: "# HERMES_TIMEZONE=Asia/Tokyo\nOTHER=1", configTimezone: "UTC") == "UTC")
+        #expect(CronScheduleFormatter.configuredZone(envText: "HERMES_TIMEZONE=\n", configTimezone: "UTC") == "UTC")
+        #expect(CronScheduleFormatter.configuredZone(envText: "HERMES_TIMEZONE_X=Asia/Tokyo", configTimezone: nil) == nil)
+        #expect(CronScheduleFormatter.configuredZone(envText: nil, configTimezone: "UTC") == "UTC")
+    }
 }

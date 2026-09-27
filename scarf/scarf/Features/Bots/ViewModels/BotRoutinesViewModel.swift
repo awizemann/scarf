@@ -66,10 +66,10 @@ final class BotRoutinesViewModel {
         set { cron.isV0181OrLater = newValue }
     }
 
-    /// Mirror of `hasCronRunSynchronous` (v0.18.0), same shape.
-    var hostRunsCronSynchronously: Bool {
-        get { cron.hostRunsCronSynchronously }
-        set { cron.hostRunsCronSynchronously = newValue }
+    /// Mirror of `CronViewModel.hostNeedsRunNowTick`, same shape.
+    var hostNeedsRunNowTick: Bool {
+        get { cron.hostNeedsRunNowTick }
+        set { cron.hostNeedsRunNowTick = newValue }
     }
 
     /// This bot's routines, filtered from the FULL job list by the verified
