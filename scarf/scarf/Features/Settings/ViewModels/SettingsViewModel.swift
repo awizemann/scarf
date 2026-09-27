@@ -623,8 +623,9 @@ final class SettingsViewModel {
         Task.detached { [weak self] in
             // Capabilities decide which `model.provider` a local row writes
             // (llama.cpp → `custom` on v0.21.1+, S06-F2). Resolved here, off
-            // the main actor, because a cache miss probes the host (C10).
-            let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
+            // the main actor and the cooperative pool, because a cache miss
+            // probes the host (C10).
+            let caps = await OffPool.run { HermesVersionCache.shared.capabilitiesSync(for: ctx) }
             let ops: [LocalModelConfigPlan.Operation]
             if let local {
                 ops = LocalModelConfigPlan.operations(selecting: local, capabilities: caps)
@@ -717,10 +718,7 @@ final class SettingsViewModel {
     /// v0.21.1+ `config set` would store the bare word as null, i.e. "use the
     /// default", so it is sent as `false` there (S05-F2).
     func setReasoningEffort(_ value: String, capabilities: HermesCapabilities) {
-        setSetting(
-            "agent.reasoning_effort",
-            value: HermesReasoningEffort.configSetValue(for: value, capabilities: capabilities)
-        )
+        setSetting("agent.reasoning_effort", value: HermesReasoningEffort.configSetValue(for: value, capabilities: capabilities))
     }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     /// v0.21.1+ — length of the fast window the bounded `auto`/`cold` tiers

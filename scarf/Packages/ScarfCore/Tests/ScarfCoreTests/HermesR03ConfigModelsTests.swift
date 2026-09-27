@@ -328,19 +328,19 @@ import Testing
         #expect(ids(HermesHost.v021) == base)
     }
 
-    @Test func eachAdditionArrivesAtItsFloor() {
+    @Test func eachAdditionArrivesAtItsFloor() throws {
         let v0211 = ids(HermesHost.v0211)
         #expect(v0211.contains("muse-image-1.0"))
         #expect(!v0211.contains("openai/gpt-image-2.5/flare/text-to-image"))
 
         let v0212 = ids(HermesHost.caps("Hermes Agent v0.21.2 (2026.9.11)"))
-        let gpt2 = try! #require(v0212.firstIndex(of: "fal-ai/gpt-image-2"))
+        let gpt2 = try #require(v0212.firstIndex(of: "fal-ai/gpt-image-2"))
         #expect(v0212[gpt2 + 1] == "openai/gpt-image-2.5/flare/text-to-image")
         #expect(v0212[gpt2 + 2] == "openai/gpt-image-2.5/sunburst/text-to-image")
         #expect(!v0212.contains("fal-ai/kling-image/v3/text-to-image"))
 
         let v0215 = ids(HermesHost.caps("Hermes Agent v0.21.5 (2026.9.24)"))
-        let grok = try! #require(v0215.firstIndex(of: "xai/grok-imagine-image/v2.0/text-to-image"))
+        let grok = try #require(v0215.firstIndex(of: "xai/grok-imagine-image/v2.0/text-to-image"))
         #expect(v0215[grok + 1] == "fal-ai/kling-image/v3/text-to-image")
         #expect(v0215[grok + 2] == "meta/muse-image/text-to-image")
         #expect(v0215.count == Set(v0215).count, "no duplicate rows")

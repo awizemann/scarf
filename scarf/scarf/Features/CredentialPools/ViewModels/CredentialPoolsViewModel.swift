@@ -122,13 +122,14 @@ final class CredentialPoolsViewModel {
             // ROOT auth.json (S06-F3) — read what Hermes would actually use.
             // A default-profile home or an undetected host reads only its
             // own file, as before.
-            let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
-            let auth = HermesAuthFallback.load(
-                authJSONPath: ctx.paths.authJSON,
-                home: ctx.paths.home,
-                capabilities: caps,
-                transport: ctx.makeTransport()
-            )
+            let auth = await OffPool.run {
+                HermesAuthFallback.load(
+                    authJSONPath: ctx.paths.authJSON,
+                    home: ctx.paths.home,
+                    capabilities: HermesVersionCache.shared.capabilitiesSync(for: ctx),
+                    transport: ctx.makeTransport()
+                )
+            }
             let authData = auth.data
             let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
             let strategies = Self.parseStrategies(from: yaml)
