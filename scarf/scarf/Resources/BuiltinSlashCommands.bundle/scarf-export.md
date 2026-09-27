@@ -1,7 +1,7 @@
 ---
 name: scarf-export
 description: Prepare the active project for export as a .scarftemplate bundle
-version: 1.0.0
+version: 1.0.1
 ---
 
 The user wants to package the active Scarf project as a shareable `.scarftemplate` bundle. The active project's path is in the `<!-- scarf-project -->` AGENTS.md block; read it first.
@@ -14,8 +14,8 @@ A `.scarftemplate` bundle is a zip containing:
 - `dashboard.json` — copied to `<project>/.scarf/dashboard.json`
 - `instructions/…` — optional per-agent shims (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.github/copilot-instructions.md`)
 - `skills/<name>/…` — optional bundled skills
-- `cron/jobs.json` — optional pre-registered jobs (`[tmpl:<id>]` name prefix is auto-added on install; they install paused)
-- `memory/append.md` — optional MEMORY.md appendix between `<!-- scarf-template:<id>:begin/end -->` markers
+- `cron/jobs.json` — optional pre-registered jobs (`[tmpl:<id>] [proj:<project-id>]` name prefix is auto-added on install; they install paused)
+- `memory/append.md` — optional MEMORY.md appendix; Scarf adds it as its own memory entry between `<!-- scarf-template:<key>:begin/end -->` markers (the key is a hash of the template id)
 
 Do NOT bundle:
 - `config.yaml`, `auth.json`, session files, credentials
