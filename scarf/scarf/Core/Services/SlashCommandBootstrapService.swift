@@ -111,6 +111,15 @@ struct SlashCommandBootstrapService: Sendable {
         let isNew = remoteHomesDone.withLock { $0.insert(key).inserted }
         guard isNew else { return }
         let succeeded = await Task.detached(priority: .utility) { () -> Bool in
+            // Only into a Hermes home that exists: `mkdir -p` under a wrong
+            // `remoteHome` or a deleted profile would create a stray
+            // `profiles/<name>/` that older Hermes lists as a profile.
+            let transport = context.makeTransport()
+            guard transport.fileExists(context.paths.configYAML)
+                    || transport.fileExists(context.paths.stateDB) else {
+                logger.info("remote Hermes home not found; skipping the slash command bootstrap")
+                return false
+            }
             do {
                 try SlashCommandBootstrapService(context: context).ensureBundledCommandsInstalled()
                 return true

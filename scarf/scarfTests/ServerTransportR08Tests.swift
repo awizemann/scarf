@@ -33,7 +33,7 @@ import ScarfCore
     @Test func aProviderKeyScarfNeverListedCounts() throws {
         #expect(try Self.hasCredential(env: "DEEPSEEK_API_KEY=sk-live\n"))
         #expect(try Self.hasCredential(env: "export ZAI_API_KEY='k'\n"))
-        #expect(try Self.hasCredential(env: "HF_TOKEN=hf_real\n"))
+        #expect(try Self.hasCredential(env: "MINIMAX_API_KEY=mm-real\n"))
     }
 
     @Test func aKeylessLocalEndpointCounts() throws {
@@ -45,6 +45,26 @@ import ScarfCore
             """))
         #expect(try Self.hasCredential(config: "model:\n  default: qwen\n  provider: lmstudio\n"))
         #expect(try Self.hasCredential(env: "OPENAI_BASE_URL=http://127.0.0.1:8000/v1\n"))
+    }
+
+    /// Hermes' setup writes a public `model.base_url` for keyed providers;
+    /// that alone must not hide a missing key.
+    @Test func aPublicBaseURLWithoutAKeyIsStillMissing() throws {
+        #expect(try Self.hasCredential(config: """
+            model:
+              default: anthropic/claude-sonnet-4
+              provider: openrouter
+              base_url: https://openrouter.ai/api/v1
+            """) == false)
+    }
+
+    /// A GITHUB_TOKEN kept in `.env` for the GitHub tools is not a model
+    /// credential unless the model provider is Copilot.
+    @Test func aGitHubTokenCountsOnlyForCopilot() throws {
+        let anthropic = "model:\n  default: claude-sonnet-4\n  provider: anthropic\n"
+        let copilot = "model:\n  default: gpt-5\n  provider: copilot\n"
+        #expect(try Self.hasCredential(env: "GITHUB_TOKEN=ghp_real\n", config: anthropic) == false)
+        #expect(try Self.hasCredential(env: "GITHUB_TOKEN=ghp_real\n", config: copilot))
     }
 
     @Test func theProcessEnvironmentUsesTheSameTable() throws {
@@ -60,12 +80,14 @@ import ScarfCore
 
     /// Runs the probe script the way the fixed probe does — on `/bin/sh -s`
     /// stdin — in a throwaway `$HOME`, and returns its `HERMES:` line.
-    private static func probeHermesLine(hint: String?, home: URL) throws -> String {
+    private static func probeHermesLine(
+        hint: String?, home: URL, sh: String = "/bin/sh", loginShell: String = "/bin/sh"
+    ) throws -> String {
         let script = TestConnectionProbe.probeScript(config: SSHConfig(host: "box", hermesBinaryHint: hint))
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.executableURL = URL(fileURLWithPath: sh)
         proc.arguments = ["-s"]
-        proc.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+        proc.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "SHELL": loginShell]
         let input = Pipe(), output = Pipe()
         proc.standardInput = input
         proc.standardOutput = output
@@ -111,6 +133,27 @@ import ScarfCore
         try "#!/bin/sh\n".write(to: hermes, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hermes.path)
         #expect(try Self.probeHermesLine(hint: nil, home: home) == "HERMES:\(hermes.path)")
+    }
+
+    /// Ubuntu's `/bin/sh` is dash, and a `.zshrc` full of zsh syntax used
+    /// to be sourced into it, which ended the probe with no `HERMES:` line.
+    /// The probe now borrows the login shell's PATH instead: a `hermes`
+    /// that `.profile` puts on PATH is found, and the `.zshrc` is never read.
+    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/dash")))
+    func underDashTheLoginPathIsUsedAndZshSyntaxIsHarmless() throws {
+        let home = try Self.tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bin = home.appendingPathComponent("opt/tools")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let hermes = bin.appendingPathComponent("hermes")
+        try "#!/bin/sh\n".write(to: hermes, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hermes.path)
+        try "plugins=(git)\nprint -l ${(f)x}\nread answer\n"
+            .write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        try "echo welcome\nexport PATH=\"$HOME/opt/tools:$PATH\"\n"
+            .write(to: home.appendingPathComponent(".profile"), atomically: true, encoding: .utf8)
+        #expect(try Self.probeHermesLine(hint: nil, home: home, sh: "/bin/dash", loginShell: "/bin/bash")
+            == "HERMES:\(hermes.path)")
     }
 
     // MARK: - S03-F5: remote slash-command bootstrap
