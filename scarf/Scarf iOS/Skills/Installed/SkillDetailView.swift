@@ -26,7 +26,9 @@ struct SkillDetailView: View {
     var body: some View {
         List {
             Section("Location") {
-                LabeledContent("Category", value: skill.category)
+                if !skill.category.isEmpty {
+                    LabeledContent("Category", value: skill.category)
+                }
                 Text(skill.path)
                     .font(.caption.monospaced())
                     .foregroundStyle(ScarfColor.foregroundMuted)
@@ -280,7 +282,12 @@ struct SkillDetailView: View {
                 }
                 Menu {
                     Button(role: .destructive) {
-                        vm.uninstallHubSkill(skill.id)
+                        // The CLI's positional is the BARE skill name
+                        // (`tools/skills_hub_install.py:205-210`); `skill.id`
+                        // is the path below skills/, which `skills uninstall`
+                        // refuses — at exit 0. Same fix as the Mac
+                        // (t-ec6d2e6d).
+                        vm.uninstallHubSkill(skill)
                     } label: {
                         Label("Uninstall", systemImage: "trash")
                     }

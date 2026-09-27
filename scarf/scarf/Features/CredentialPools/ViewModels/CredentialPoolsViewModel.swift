@@ -50,6 +50,10 @@ struct HermesCredentialPool: Identifiable, Sendable {
     let provider: String
     let strategy: String        // "fill_first" | "round_robin" | "least_used" | "random"
     let credentials: [HermesCredential]
+    /// True when these entries come from the ROOT `auth.json` because the
+    /// current named profile has none for this provider — Hermes's own
+    /// per-provider fallback (`HermesAuthFallback`, S06-F3).
+    var inheritedFromRoot: Bool = false
 }
 
 /// OAuth-authed provider parsed from `auth.json.providers.<name>`. Distinct
@@ -65,6 +69,9 @@ struct HermesOAuthProvider: Identifiable, Sendable, Equatable {
     let expiresAt: Date?
     let portalURL: String?       // "portal_base_url" — Nous-specific but generic-shaped
     let updatedAt: Date?
+    /// True when this state comes from the ROOT `auth.json` (see
+    /// `HermesCredentialPool.inheritedFromRoot`).
+    var inheritedFromRoot: Bool = false
 }
 
 @Observable
@@ -111,7 +118,19 @@ final class CredentialPoolsViewModel {
         isLoading = true
         let ctx = context
         Task.detached { [weak self] in
-            let authData = ctx.readData(ctx.paths.authJSON)
+            // Under a named profile Hermes falls back, per provider, to the
+            // ROOT auth.json (S06-F3) — read what Hermes would actually use.
+            // A default-profile home or an undetected host reads only its
+            // own file, as before.
+            let auth = await OffPool.run {
+                HermesAuthFallback.load(
+                    authJSONPath: ctx.paths.authJSON,
+                    home: ctx.paths.home,
+                    capabilities: HermesVersionCache.shared.capabilitiesSync(for: ctx),
+                    transport: ctx.makeTransport()
+                )
+            }
+            let authData = auth.data
             let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
             let strategies = Self.parseStrategies(from: yaml)
 
@@ -119,6 +138,11 @@ final class CredentialPoolsViewModel {
             if let data = authData,
                let decoded = try? JSONDecoder().decode(AuthFile.self, from: data) {
                 decodedPools = Self.buildPools(from: decoded, strategies: strategies)
+                    .map { pool in
+                        var pool = pool
+                        pool.inheritedFromRoot = auth.inheritedPools.contains(pool.provider)
+                        return pool
+                    }
             } else {
                 decodedPools = []
             }
@@ -127,7 +151,11 @@ final class CredentialPoolsViewModel {
             // we parse via `JSONSerialization` instead of folding into the
             // strict `AuthFile` decoder. A malformed `providers` block is
             // a non-fatal shrug: empty list, no banner.
-            let oauth = Self.parseOAuthProviders(from: authData)
+            let oauth = Self.parseOAuthProviders(from: authData).map { provider in
+                var provider = provider
+                provider.inheritedFromRoot = auth.inheritedProviders.contains(provider.provider)
+                return provider
+            }
 
             await MainActor.run { [weak self] in
                 self?.pools = decodedPools

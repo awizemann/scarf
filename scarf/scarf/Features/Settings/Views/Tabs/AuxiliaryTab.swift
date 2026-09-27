@@ -55,27 +55,48 @@ struct AuxiliaryTab: View {
     // pointer). It is re-inserted right after `vision` — its historical
     // position, so pre-v0.20.6 hosts render exactly as before — when
     // `hasWebExtractAux` says the host still reads it.
-    private let baseTasks: [(key: String, title: LocalizedStringKey, icon: String)] = [
+    //
+    // `session_search` is NOT here either: its block was deleted upstream at
+    // v2026.5.28 (0.15.0) when session search stopped using an auxiliary
+    // LLM, and Hermes ignores leftover values (S05-F1). It goes back in right
+    // after `compression`, its historical position, when
+    // `hasSessionSearchAux` says the host still reads it. On newer hosts a
+    // leftover block still shows under "Other tasks in config.yaml".
+    private static let baseTasks: [(key: String, title: LocalizedStringKey, icon: String)] = [
         ("vision", "Vision", "eye"),
         ("compression", "Compression", "arrow.down.right.and.arrow.up.left.circle"),
-        ("session_search", "Session Search", "magnifyingglass"),
         ("skills_hub", "Skills Hub", "books.vertical"),
         ("approval", "Approval", "checkmark.seal"),
         ("mcp", "MCP", "puzzlepiece")
     ]
 
     private var tasks: [(key: String, title: LocalizedStringKey, icon: String)] {
+        Self.tasks(capabilities: capabilitiesStore?.capabilities)
+    }
+
+    /// The task rows for a host, in render order. Static so tests can pin
+    /// the per-version row list without a view host. `nil` capabilities
+    /// (not yet probed) render the base rows only, as before.
+    static func tasks(
+        capabilities: HermesCapabilities?
+    ) -> [(key: String, title: LocalizedStringKey, icon: String)] {
         var t = baseTasks
+        // Pre-v0.15.0 hosts only — restored right after Compression. Done
+        // BEFORE the web_extract insert below so the historical order
+        // (vision, web_extract, compression, session_search, …) comes back.
+        if capabilities?.hasSessionSearchAux ?? false {
+            t.insert(("session_search", "Session Search", "magnifyingglass"), at: 2)
+        }
         // Pre-v0.20.6 hosts only — restored at index 1 (right after Vision),
         // its position before the upstream block was deleted, so those hosts
         // render byte-identically to previous Scarf builds.
-        if capabilitiesStore?.capabilities.hasWebExtractAux ?? false {
+        if capabilities?.hasWebExtractAux ?? false {
             t.insert(("web_extract", "Web Extract", "doc.richtext"), at: 1)
         }
-        if capabilitiesStore?.capabilities.hasFlushMemoriesAux ?? false {
+        if capabilities?.hasFlushMemoriesAux ?? false {
             t.append(("flush_memories", "Flush Memories", "trash.slash"))
         }
-        if capabilitiesStore?.capabilities.hasCuratorAux ?? false {
+        if capabilities?.hasCuratorAux ?? false {
             t.append(("curator", "Curator", "sparkles"))
         }
         return t
@@ -399,13 +420,17 @@ struct AuxiliaryTab: View {
     @ViewBuilder
     private var imageGenRow: some View {
         let value = viewModel.config.imageGenModel
+        // S06-F7: rows later Hermes tags added, each at its own floor.
+        let models = ModelCatalogService.imageGenModels(
+            capabilities: capabilitiesStore?.capabilities ?? .empty
+        )
         Picker("Model", selection: Binding(
             get: { value },
             set: { viewModel.setImageGenModel($0) }
         )) {
             Text("Hermes default").tag("")
             Divider()
-            ForEach(ModelCatalogService.imageGenModels) { model in
+            ForEach(models) { model in
                 Text(model.display).tag(model.modelID)
             }
             // User has set a custom value not in the curated list;
@@ -413,7 +438,7 @@ struct AuxiliaryTab: View {
             // actual selection rather than collapsing to "Hermes
             // default".
             if !value.isEmpty
-                && !ModelCatalogService.imageGenModels.contains(where: { $0.modelID == value }) {
+                && !models.contains(where: { $0.modelID == value }) {
                 Divider()
                 Text(value + "  (custom)").tag(value)
             }

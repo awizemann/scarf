@@ -520,6 +520,44 @@ import Foundation
         }
     }
 
+    /// R16a X4: a template install names its jobs `[tmpl:<id>] [proj:<uuid>] …`;
+    /// the check only looked for a leading `[proj:]` and missed them. A
+    /// legacy template job with no project tag stays out: every install of
+    /// that template shares it.
+    @Test func flagsTemplateInstalledJobRunningElsewhereButNotLegacyTemplateJobs() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")
+            let project = ScarfProject(name: "Alpha", rootPath: dir)
+            try ProjectStore(context: ctx).save(project)
+            let named = ProjectCronAttribution.templateJobName(
+                "[tmpl:acme/digest] nightly", templateId: "acme/digest", projectID: project.id)
+            try Self.write("""
+            { "jobs": [ {
+              "id": "j1", "name": "\(named)",
+              "prompt": "go", "schedule": {"kind": "cron", "expr": "0 3 * * *"},
+              "enabled": true, "state": "idle", "workdir": "\(projectsRoot)/elsewhere"
+            }, {
+              "id": "j2", "name": "[tmpl:acme/digest] legacy",
+              "prompt": "go", "schedule": {"kind": "cron", "expr": "0 3 * * *"},
+              "enabled": true, "state": "idle", "workdir": "\(projectsRoot)/another-install"
+            } ] }
+            """, to: ctx.paths.cronJobsJSON)
+
+            let found = Self.findings(ctx, kind: .pathReuseSuspicion)
+            #expect(found.count == 1)
+            #expect(found.first?.detail.hasPrefix("1 scheduled job is") == true)
+        }
+    }
+
+    @Test func namesProjectMatchesOnlyTheProjectTag() {
+        let id = UUID()
+        #expect(ProjectCronAttribution.namesProject(jobName: "[proj:\(id.uuidString)] a", projectID: id))
+        #expect(ProjectCronAttribution.namesProject(jobName: "[tmpl:x/y] [proj:\(id.uuidString)] a", projectID: id))
+        #expect(!ProjectCronAttribution.namesProject(jobName: "[tmpl:x/y] a", projectID: id))
+        #expect(!ProjectCronAttribution.namesProject(jobName: "[tmpl:x/y] [proj:\(UUID().uuidString)] a", projectID: id))
+        #expect(!ProjectCronAttribution.namesProject(jobName: "nightly [proj:\(id.uuidString)]", projectID: id))
+    }
+
     @Test func doesNotFlagCronJobRunningInTheProjectItself() throws {
         try Self.withTempHome { ctx, projectsRoot in
             let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")

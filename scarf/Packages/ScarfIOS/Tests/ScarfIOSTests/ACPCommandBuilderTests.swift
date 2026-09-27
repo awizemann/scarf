@@ -24,13 +24,27 @@ import ScarfCore
 
     // MARK: - Quick chat (no project)
 
+    /// A root (default-profile) home is pinned with `-p default`, not
+    /// `HERMES_HOME=`: Hermes ignores a root `HERMES_HOME` and would follow
+    /// the host's sticky `active_profile` (S13-F1). Updated from the old
+    /// expectation of a bare `exec hermes acp`, which pinned that bug.
     @Test func quickChatHasNoCdAndNoProfileHome() {
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "~/.hermes", projectCwd: nil
+        )
+        #expect(cmd == "\(Self.pathPrefix) exec hermes -p default acp")
+        #expect(!cmd.contains("cd "))
+        #expect(!cmd.contains("HERMES_HOME="))
+    }
+
+    /// T6-F1: a custom root is named as well, so `-p default` resolves to it
+    /// rather than to the SSH user's own `~/.hermes`. This test used `/root`
+    /// as a stand-in for "no HERMES_HOME", which pinned that bug.
+    @Test func aCustomRootIsNamedNextToTheRootPin() {
         let cmd = ACPClient.buildACPCommand(
             hermesBinary: "hermes", home: "/root", projectCwd: nil
         )
-        #expect(cmd == "\(Self.pathPrefix) exec hermes acp")
-        #expect(!cmd.contains("cd "))
-        #expect(!cmd.contains("HERMES_HOME="))
+        #expect(cmd == "\(Self.pathPrefix) HERMES_HOME='/root' exec hermes -p default acp")
     }
 
     @Test func emptyProjectCwdIsTreatedAsNoProject() {
@@ -45,10 +59,10 @@ import ScarfCore
     @Test func projectChatCdsIntoProjectFirst() {
         let cmd = ACPClient.buildACPCommand(
             hermesBinary: "/usr/local/bin/hermes",
-            home: "/home/alan",
+            home: "~/.hermes",
             projectCwd: "/home/alan/projects/myapp"
         )
-        #expect(cmd == "cd '/home/alan/projects/myapp'; \(Self.pathPrefix) exec /usr/local/bin/hermes acp")
+        #expect(cmd == "cd '/home/alan/projects/myapp'; \(Self.pathPrefix) exec /usr/local/bin/hermes -p default acp")
     }
 
     @Test func projectPathWithSpacesIsQuoted() {
@@ -76,6 +90,16 @@ import ScarfCore
         )
         #expect(cmd.hasPrefix("cd '/srv/app'; "))
         #expect(cmd.contains("HERMES_HOME='/root/profiles/work' exec hermes acp"))
+        // Named profile: the assignment is the pin, so no `-p` is added.
+        #expect(!cmd.contains("-p default"))
+    }
+
+    @Test func defaultTildeHomeIsPinnedWithDashPDefault() {
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "~/.hermes", projectCwd: nil
+        )
+        #expect(cmd.hasSuffix("exec hermes -p default acp"))
+        #expect(!cmd.contains("HERMES_HOME="))
     }
 
     // MARK: - Injection: a hostile project path must stay inert

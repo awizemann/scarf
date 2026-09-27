@@ -118,6 +118,42 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s < SemVer(major: 0, minor: 12, patch: 0) // pre-v0.12 only
     }
 
+    /// Whether the host still reads the `auxiliary.session_search.*` block.
+    /// **Inverse semantics** — `true` means the Auxiliary tab's "Session
+    /// Search" row should still be shown.
+    ///
+    /// Session search stopped using an auxiliary LLM in hermes-agent commit
+    /// abf1af5401 (#27590), first released at v2026.5.28 (0.15.0): the block
+    /// is in `DEFAULT_CONFIG` at v2026.5.16 (0.14.0,
+    /// `hermes_cli/config.py:875`) and gone at v2026.5.28, which carries a
+    /// tombstone comment instead (`:1048-1050`). At v2026.9.24 the same
+    /// tombstone sits at `hermes_cli/config_defaults.py:737-738,754-756`
+    /// ("leftover blocks in user config are ignored"), and `config set` on
+    /// the key only warns that it is not recognised. Same shape and
+    /// unknown-version policy as `hasFlushMemoriesAux` / `hasWebExtractAux`.
+    public var hasSessionSearchAux: Bool {
+        guard let s = semver else { return false }        // unknown → hide
+        return s < SemVer(major: 0, minor: 15, patch: 0)  // pre-v0.15.0 only
+    }
+
+    /// Hermes strips ANY vendor prefix off the model id before sending it
+    /// for the GitHub Copilot providers, so `anthropic/claude-sonnet-4.6`
+    /// under `copilot` / `copilot-acp` works: `normalize_model_for_provider`
+    /// calls `normalize_copilot_model_id`, whose fallback drops one leading
+    /// `vendor/` (`hermes_cli/model_normalize.py:232-238` @ v2026.9.24).
+    /// That call first appears at v2026.4.23 (0.11.0, commit 29d5d36b14;
+    /// absent at v2026.4.16), and the main agent normalises every
+    /// non-aggregator model (`agent/agent_init.py:460-462`). Older and
+    /// undetected hosts keep the mismatch banner. See ``ModelPreflight``.
+    public var hasVendorPrefixStrippingForCopilot: Bool { atLeastSemver(0, 11, 0) }
+
+    /// Hermes strips `openai/` off the model id for `openai-codex`
+    /// (`_STRIP_VENDOR_ONLY_PROVIDERS`, `hermes_cli/model_normalize.py:242-246`
+    /// @ v2026.9.24), applied by the main agent. Both the strip and the
+    /// agent-side normalise call are present at v2026.4.13 (0.9.0) and absent
+    /// at v2026.4.8 (0.8.0). See ``ModelPreflight``.
+    public var hasOpenAIPrefixStrippingForCodex: Bool { atLeastSemver(0, 9, 0) }
+
     /// `auxiliary.curator` aux task is configurable (v0.12+).
     public var hasCuratorAux: Bool { atLeastSemver(0, 12, 0) }
 
@@ -196,6 +232,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and because a future tag could add the name
     /// to the ACP table — the follow-on P55 filed is `t-e9c464a9`.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
+
+    /// Under a named profile, `credential_pool.<provider>` falls back to the
+    /// ROOT `auth.json` when the profile has no entries for that provider
+    /// (hermes-agent 33bf5f6292, first released at v2026.5.7; absent at
+    /// v2026.4.30). `read_credential_pool`, `hermes_cli/auth.py:870-893` @
+    /// v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthPoolFallback: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes kanban` task board CLI.
     ///
@@ -664,8 +707,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasFileMutationVerifier: Bool { atLeastSemver(0, 14, 0) }
 
     /// Hermes surfaces a YOLO mode warning in its banner + status bar
-    /// when `agent.approval_mode = yolo` (v0.14+). Scarf mirrors with
-    /// a chat-header warning badge when the user's config opts in.
+    /// when approvals are off — `approvals.mode: off`, which YAML may also
+    /// hand over as boolean `false` (`_normalize_approval_mode` /
+    /// `_get_approval_mode`, `tools/approval_context.py:200-236` @
+    /// v2026.9.24) (v0.14+). Scarf mirrors with a chat-header warning badge
+    /// (`SessionInfoBar.showsApprovalsOffWarning`).
     public var hasYOLOWarning: Bool { atLeastSemver(0, 14, 0) }
 
     /// Alibaba Cloud display name has been renamed to "Qwen Cloud" in
@@ -697,6 +743,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     // modes. Catalog-sync changes (the `openai-api` overlay, Krea image
     // models, xAI retired-model aliases, Vercel removal) are unconditional
     // and carry no flag.
+
+    /// Under a named profile, `providers.<provider>` OAuth state (e.g. Nous)
+    /// falls back to the ROOT `auth.json` when the profile has none.
+    /// `_load_provider_state` reads the profile only at v2026.5.16 (0.14.0,
+    /// `hermes_cli/auth.py:1054-1059`) and falls back at v2026.5.28;
+    /// `auth.py:755-766` @ v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthProviderStateFallback: Bool { atLeastSemver(0, 15, 0) }
 
     /// Kanban tasks carry an originating ACP `session_id`, and
     /// `hermes kanban list --session <id>` filters by it (v0.15+). The
@@ -945,6 +998,35 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Telegram `rich_messages` (Bot API 10.1, default-on) + `status_indicator`
     /// (opt-in presence label) per-platform config keys (v0.17+).
     public var hasTelegramRichMessages: Bool { atLeastSemver(0, 17, 0) }
+
+    /// `hermes mcp add --auth oauth` cannot create an OAuth server without a
+    /// TTY (S09-F2), so Scarf creates those entries itself: a catalog entry
+    /// through `hermes mcp install <name>`, anything else by writing the
+    /// `url` + `auth: oauth` entry directly, followed by `hermes mcp login`.
+    ///
+    /// **Floor v0.17.0, source-verified by a tag walk.** From `v2026.6.19`
+    /// (0.17.0) `MCPOAuthManager.get_or_build_provider` RAISES
+    /// `OAuthNonInteractiveError` when stdin is not a TTY and no token is
+    /// cached (`tools/mcp_oauth_manager.py:427-434` @ v2026.6.19;
+    /// `:316-319` @ v2026.9.24). `_configure_http_auth` catches it, never
+    /// sets `auth: oauth`, the unauthenticated probe fails, and "Save config
+    /// anyway?" defaults to No, so nothing is saved. Through `v2026.6.5`
+    /// (0.16.0) the same check only logged a warning and the provider was
+    /// still built, so older hosts keep the `mcp add` path unchanged
+    /// (charter C1). `mcp install <identifier>` itself exists from
+    /// `v2026.5.28` (0.15.0, ``hasMCPCatalog``) and prints the same
+    /// `✓ Installed '<name>'` / `✗ install failed:` / `is not in the
+    /// catalog` lines at every tag since.
+    public var hasMCPOAuthAddNeedsDirectWrite: Bool { atLeastSemver(0, 17, 0) }
+
+    /// `tools.include: []` is a whitelist of NOTHING. From v0.20.6
+    /// (v2026.8.27) `_make_tool_filter` treats any list/string include as
+    /// active (`include_active = isinstance(include_raw, …)`); through
+    /// v0.20.5 it tested `if include_set:`, so an empty include meant "all
+    /// tools, minus exclude" (`tools/mcp_tool.py:6789` @ v2026.8.19). Gates
+    /// only how Scarf DESCRIBES such an entry; the file is never rewritten
+    /// by it.
+    public var hasMCPEmptyIncludeWhitelist: Bool { atLeastSemver(0, 20, 6) }
 
     // MARK: v0.18 (v2026.7.1) flags
     //
@@ -1788,6 +1870,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// as `hostRefusesPastOneShotResume`.
     public var hasCronPastOneShotResumeRefusal: Bool { isV0181OrLater }
 
+    /// Whether `hermes cron run <id>` runs the job itself before it returns,
+    /// instead of only marking it due for the next scheduler tick.
+    ///
+    /// First tag with `_execute_job_now` (`tools/cronjob_tools.py:604`) and
+    /// the `Ran now: …` line (`hermes_cli/cron.py:411`) is **`v2026.7.1`**
+    /// (0.18.0); at `v2026.6.19` (0.17) `_job_action` only prints "It will
+    /// run on the next scheduler tick." (`hermes_cli/cron.py:316`). Below the
+    /// floor Run Now needs a follow-up `hermes cron tick` to fire at all. At
+    /// or above it that tick would fire every OTHER due job as well
+    /// (`cron/scheduler_tick.py:62-107` @ `v2026.9.24`), so it must not be
+    /// sent.
+    public var hasCronRunSynchronous: Bool { isV018OrLater }
+
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
     /// message the bot then responds to (`hermes_cli/subcommands/cron.py:29`
@@ -1966,6 +2061,38 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `cron doctor`). Absent at v2026.8.31, where `plugins_cmd.py` has no
     /// `compat` verb at all, so an older host fails argparse.
     public var hasPluginsCompat: Bool { isV0211OrLater }
+
+    /// `hermes config set` coerces the word `none` (any case) to YAML null
+    /// for a key whose `DEFAULT_CONFIG` default is not a string — the
+    /// `_SCALAR_WORDS` table gained `'none': None` in hermes-agent commit
+    /// 5d4b97939e, first released at v2026.9.7 (`hermes_cli/config.py:3303`,
+    /// applied by `_coerce_config_set_value` at `:3306`; `:3245` at
+    /// v2026.9.24). Absent at v2026.8.31, where only true/false words are
+    /// coerced and `none` is stored as the string.
+    ///
+    /// It matters for `agent.reasoning_effort`, which has no default: from
+    /// this floor on, `config set agent.reasoning_effort none` stores null,
+    /// which `parse_reasoning_effort` reads as "use the default" rather than
+    /// "reasoning off". See
+    /// ``HermesReasoningEffort/configSetValue(for:capabilities:)``.
+    public var configSetCoercesNoneToNull: Bool { isV0211OrLater }
+
+    /// `model.provider: llamacpp` IGNORES `model.base_url`. From v2026.9.7
+    /// the llama.cpp aliases resolve to Hermes's managed local runtime
+    /// whenever no explicit base_url is passed in
+    /// (`hermes_cli/runtime_provider_custom.py:461` @ v2026.9.7, `:537-540`
+    /// @ v2026.9.24 → `_resolve_llamacpp_runtime` `:427-452`), which uses the
+    /// supervised server or a probe of `127.0.0.1:8080` only, and otherwise
+    /// raises "The local model server is turned off…". Config's
+    /// `model.base_url` never counts as explicit there (ACP passes none,
+    /// `acp_adapter/session.py:502-503`). Absent at v2026.8.31, where
+    /// llamacpp followed the generic custom path and honoured base_url.
+    ///
+    /// Reproduced at v2026.9.24 against a scratch HERMES_HOME:
+    /// `provider: llamacpp` + `base_url: http://127.0.0.1:8081/v1` raises,
+    /// while `provider: custom` with the same base_url resolves to it. See
+    /// ``LocalModelProvider/configProviderID(capabilities:)``.
+    public var llamaCppProviderIgnoresBaseURL: Bool { isV0211OrLater }
 
     /// `hermes cron create --paused [--paused-reason <text>]` — create a job
     /// already paused, instead of create-then-`cron pause` (v0.21.1+,
@@ -2340,6 +2467,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// timeout (see ``HermesPeerCLI/dmProcessTimeout(capabilities:)``): the
     /// output itself is recognised by its bytes, which no older host prints.
     public var hasPeerDMNoResendOutcomes: Bool { isV0214OrLater }
+
+    /// `hermes gateway restart` hands a gateway launched with
+    /// `gateway run --external-supervisor` (a custom launchd agent or
+    /// systemd unit Hermes did not install) back to its supervisor instead of
+    /// stopping it and running a replacement in the CLI's own foreground —
+    /// `hermes_cli/gateway.py:4904-4911` @ v2026.9.21
+    /// (`gateway_declares_external_supervisor`, `restart_externally_supervised_gateway`
+    /// in `hermes_cli/gateway_supervised_restart.py`). Absent at v2026.9.14,
+    /// where such a restart takes the foreground path like any hand-run
+    /// gateway. See ``HermesGatewayRestartGuard``.
+    public var hasSupervisedGatewayRestart: Bool { isV0214OrLater }
 
     // MARK: v0.21.5 (v2026.9.24) flags
     //

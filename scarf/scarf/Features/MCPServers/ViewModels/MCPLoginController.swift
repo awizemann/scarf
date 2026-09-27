@@ -56,6 +56,19 @@ final class MCPLoginController {
     private(set) var errorMessage: String?
 
     private var process: Process?
+    /// The login's stdin, for the browser flow's paste fallback (S09-F4).
+    ///
+    /// When the redirect cannot reach Hermes's loopback listener — always
+    /// the case on an SSH host, where it listens on the REMOTE 127.0.0.1 —
+    /// Hermes asks for the redirect URL to be pasted and reads ONE line from
+    /// stdin (`_paste_callback_reader`, `tools/mcp_oauth.py:706-740, 888-898`
+    /// @ v2026.9.24). With no stdin of its own the run could only wait out
+    /// `oauth.timeout`. The write end is non-blocking and SIGPIPE-free, so a
+    /// paste after Hermes exited is an error here, not a crash.
+    private var stdinPipe: Pipe?
+    /// True once a redirect line has been written. Hermes reads exactly one
+    /// line, so a second one would go nowhere.
+    private(set) var redirectPasteSubmitted = false
     /// The hop that resolves the login-shell environment before a LOCAL
     /// spawn (C10, round-6 P58). `enrichedEnvironment()` reads a `static let`
     /// whose initialiser is two `zsh` probes at 5 s + 3 s behind a
@@ -156,6 +169,12 @@ final class MCPLoginController {
         let outPipe = Pipe()
         proc.standardOutput = outPipe
         proc.standardError = outPipe
+        let inPipe = Pipe()
+        let inFD = inPipe.fileHandleForWriting.fileDescriptor
+        _ = fcntl(inFD, F_SETFL, fcntl(inFD, F_GETFL) | O_NONBLOCK)
+        _ = fcntl(inFD, F_SETNOSIGPIPE, 1)
+        proc.standardInput = inPipe
+        stdinPipe = inPipe
 
         // A read can land mid-codepoint: `availableData` is a byte count,
         // not a character boundary, and `String(data:encoding:.utf8)`
@@ -232,6 +251,7 @@ final class MCPLoginController {
                 // `readabilityHandler` keeps decoding this dead run's output
                 // for as long as the pipe is open.
                 outPipe.fileHandleForReading.readabilityHandler = nil
+                try? inPipe.fileHandleForWriting.close()
                 if spawnError == nil {
                     proc.terminationHandler = nil
                     proc.terminate()
@@ -240,6 +260,7 @@ final class MCPLoginController {
                 return
             }
             if let spawnError {
+                self.closeStdin()
                 self.isRunning = false
                 self.runningServer = nil
                 self.errorMessage = "Failed to start hermes: \(spawnError.localizedDescription)"
@@ -297,6 +318,8 @@ final class MCPLoginController {
         // run A's SIGTERM exit would land on run B and mark the retried
         // login failed.
         generation &+= 1
+        closeStdin()
+        redirectPasteSubmitted = false
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminationHandler = nil
         let wasRunning = process != nil
@@ -312,8 +335,8 @@ final class MCPLoginController {
 
     /// Kill the REMOTE `hermes mcp login` that the local SIGTERM does not.
     ///
-    /// `SSHTransport.makeProcess` builds `ssh -T … bash -lc '<cmd>'`
-    /// (`SSHTransport.swift:693-716`). `-T` allocates no pty, so terminating
+    /// `SSHTransport.makeProcess(executable:args:cwd:)` builds
+    /// `ssh -T … bash -lc '<cmd>'`. `-T` allocates no pty, so terminating
     /// the local `ssh` closes the channel but leaves the remote `hermes`
     /// running: it is in `_authorize`'s polling loop
     /// (`tools/mcp_oauth_device.py:132-144` at `v2026.9.7`), writes nothing
@@ -357,8 +380,8 @@ final class MCPLoginController {
     ///   escaped (`regexEscaped`).
     /// * **Away from the `bash -lc` wrapper**, for free, by that `$` anchor:
     ///   `SSHTransport.composedRemoteCommand` runs every token through
-    ///   `remotePathArg`, which double-quotes UNCONDITIONALLY
-    ///   (`SSHTransport.swift:303-322`), so the shell's own command line ends
+    ///   `SSHTransport.remotePathArg`, which double-quotes UNCONDITIONALLY,
+    ///   so the shell's own command line ends
     ///   `… "--" "github"` — a literal `"` after the name — while the
     ///   `hermes` it execs has had the quotes removed. Only the second one
     ///   matches. `MCPOAuthAndTransportP24Tests` pins that with the real
@@ -415,6 +438,62 @@ final class MCPLoginController {
             out.append(ch)
         }
         return out
+    }
+
+    /// The line Hermes prints when its paste reader is listening
+    /// (`tools/mcp_oauth.py:895` @ v2026.9.24; the same words since
+    /// v2026.6.19). Hermes prints it only when it actually started the
+    /// reader, so it — not the host version — decides whether the paste
+    /// field is offered.
+    nonisolated static let pastePromptMarker = "paste the redirect URL here"
+
+    /// Whether the sheet should offer the paste field right now.
+    var acceptsRedirectPaste: Bool {
+        isRunning && !redirectPasteSubmitted && stdinPipe != nil
+            && output.contains(Self.pastePromptMarker)
+    }
+
+    /// The one line to send for a pasted redirect, or `nil` when Hermes
+    /// would ignore it. Mirrors `_paste_callback_reader`: it needs a
+    /// `code=` or `error=` parameter, and it reads a single line, so an
+    /// embedded line break would split the paste. Refusing here keeps the
+    /// user's only paste for input Hermes will accept.
+    nonisolated static func redirectPasteLine(_ raw: String) -> String? {
+        let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, !line.contains(where: { $0.isNewline }) else { return nil }
+        guard line.contains("code=") || line.contains("error=") else { return nil }
+        return line
+    }
+
+    /// Sends a pasted redirect URL to the running login. Returns `false`
+    /// (with `errorMessage` set) when the text is not a redirect or the
+    /// login is no longer reading.
+    @discardableResult
+    func submitRedirect(_ raw: String) -> Bool {
+        guard let line = Self.redirectPasteLine(raw) else {
+            errorMessage = String(
+                localized: "That doesn’t look like the redirect URL. Copy the whole address from the browser tab that failed to load; it contains “code=”."
+            )
+            return false
+        }
+        guard let pipe = stdinPipe, isRunning, !redirectPasteSubmitted else { return false }
+        let bytes = Data((line + "\n").utf8)
+        let fd = pipe.fileHandleForWriting.fileDescriptor
+        let written = bytes.withUnsafeBytes { buf in
+            Darwin.write(fd, buf.baseAddress!, bytes.count)
+        }
+        guard written == bytes.count else {
+            errorMessage = String(localized: "Couldn’t pass the URL to hermes. The sign-in may already have ended.")
+            return false
+        }
+        redirectPasteSubmitted = true
+        errorMessage = nil
+        return true
+    }
+
+    private func closeStdin() {
+        try? stdinPipe?.fileHandleForWriting.close()
+        stdinPipe = nil
     }
 
     func openVerificationURL() {
@@ -495,6 +574,7 @@ final class MCPLoginController {
 
     private func finish(exitCode: Int32) {
         isRunning = false
+        closeStdin()
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         process = nil
         stdoutPipe = nil
@@ -503,7 +583,11 @@ final class MCPLoginController {
         runningServer = nil
         let outcome = Self.loginOutcome(exitCode: exitCode, output: output)
         succeeded = outcome.succeeded
-        if !outcome.succeeded, errorMessage == nil {
+        // A paste-validation message from mid-run is replaced by the
+        // verdict: it described a paste, not the login's outcome.
+        if outcome.succeeded {
+            errorMessage = nil
+        } else {
             // The CLI's own refusal line is the reason; the exit code alone
             // tells the user nothing actionable — and for the exit-0 failures
             // it is affirmatively misleading.

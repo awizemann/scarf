@@ -51,7 +51,7 @@ import Foundation
             "_meta":{"hermes":{"compactionSummary":true}}
         }}}
         """#
-        guard case let .messageChunk(sid, text, isSummary, containsSummary) = parse(json) else {
+        guard case let .messageChunk(sid, text, isSummary, containsSummary, _) = parse(json) else {
             Issue.record("expected .messageChunk")
             return
         }
@@ -69,7 +69,7 @@ import Foundation
             "_meta":{"hermes":{"containsCompactionSummary":true}}
         }}}
         """#
-        guard case let .messageChunk(_, _, isSummary, containsSummary) = parse(json) else {
+        guard case let .messageChunk(_, _, isSummary, containsSummary, _) = parse(json) else {
             Issue.record("expected .messageChunk")
             return
         }
@@ -86,7 +86,7 @@ import Foundation
             "content":{"text":"ordinary reply"}
         }}}
         """#
-        guard case let .messageChunk(_, text, isSummary, containsSummary) = parse(json) else {
+        guard case let .messageChunk(_, text, isSummary, containsSummary, _) = parse(json) else {
             Issue.record("expected .messageChunk")
             return
         }
@@ -112,7 +112,7 @@ import Foundation
             #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"text":"t"},"_meta":{"hermes":{"containsCompactionSummary":1}}}}}"#,
         ]
         for json in cases {
-            guard case let .messageChunk(_, text, isSummary, containsSummary) = parse(json) else {
+            guard case let .messageChunk(_, text, isSummary, containsSummary, _) = parse(json) else {
                 Issue.record("expected .messageChunk for fixture: \(json)")
                 continue
             }

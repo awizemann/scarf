@@ -56,7 +56,7 @@ final class RemoteDiagnosticsViewModel {
             case .sqlite3Installed:       return "sqlite3 binary installed on remote"
             case .sqlite3CanOpenStateDB:  return "sqlite3 can open state.db"
             case .hermesBinaryNonLogin:   return "hermes binary on non-login PATH"
-            case .hermesBinaryLogin:      return "hermes binary on login PATH (via rc files)"
+            case .hermesBinaryLogin:      return "hermes binary on login shell's PATH"
             case .pgrepAvailable:         return "pgrep available (for 'is Hermes running')"
             }
         }
@@ -83,13 +83,13 @@ final class RemoteDiagnosticsViewModel {
             case .stateDBReadable:
                 return "Scarf can't read `state.db` — Sessions, Activity, Dashboard stats all depend on this. Either (a) run Hermes as the SSH user, (b) `chmod a+r ~/.hermes/state.db`, or (c) configure Scarf to SSH as the Hermes user."
             case .sqlite3Installed:
-                return "Scarf pulls a snapshot of state.db via `sqlite3 .backup`, so sqlite3 must be installed on the remote AND visible to non-interactive SSH sessions. The probe sources `~/.zshenv` / `.zprofile` / `.bash_profile` / `.profile` and falls back to `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, and `/opt/local/bin` — if it's still not found, either install via your package manager (`sudo apt install sqlite3` / `sudo yum install sqlite` / `apk add sqlite`) or symlink the existing binary into a location the probe checks (e.g. `sudo ln -s /your/path/sqlite3 /usr/local/bin/sqlite3`)."
+                return "Scarf pulls a snapshot of state.db via `sqlite3 .backup`, so sqlite3 must be installed on the remote AND visible to non-interactive SSH sessions. The probe uses your login shell's PATH and falls back to `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, and `/opt/local/bin` — if it's still not found, either install via your package manager (`sudo apt install sqlite3` / `sudo yum install sqlite` / `apk add sqlite`) or symlink the existing binary into a location the probe checks (e.g. `sudo ln -s /your/path/sqlite3 /usr/local/bin/sqlite3`)."
             case .sqlite3CanOpenStateDB:
                 return "sqlite3 exists but can't open state.db. Could be a permission issue, a corrupt DB, or a version skew."
             case .hermesBinaryNonLogin:
-                return "Scarf's runtime calls use non-login SSH shells (no .bashrc). If `hermes` only appears here via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`."
+                return "Scarf's runtime calls use non-login SSH shells (no .bashrc), with `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `~/.hermes/bin` added to PATH. When this server has a saved Hermes binary, that is what this check looks for. If `hermes` lives somewhere else and only appears via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`, or set the Hermes binary in Manage Servers → this server → Edit."
             case .hermesBinaryLogin:
-                return "hermes couldn't be located even after sourcing login rc files. Install path is non-standard — set the hermes binary path manually in Manage Servers."
+                return "hermes couldn't be located on your login shell's PATH or in the standard install directories. If this server has a saved Hermes binary, check that it still exists; otherwise set the Hermes binary in Manage Servers → this server → Edit."
             case .pgrepAvailable:
                 return "pgrep not found on remote. Dashboard can't determine whether Hermes is running. Install procps: `apt install procps` (most distros have it by default)."
             }
@@ -142,7 +142,18 @@ final class RemoteDiagnosticsViewModel {
         startedAt = Date()
         finishedAt = nil
 
-        let script = Self.buildScript(hermesHome: context.paths.home)
+        let binaryHint: String?
+        let binaryHintIsPath: Bool
+        if case .ssh(let cfg) = context.kind {
+            binaryHint = cfg.hermesBinaryHint
+            binaryHintIsPath = cfg.hermesBinaryHintIsPath == true
+        } else {
+            binaryHint = nil
+            binaryHintIsPath = false
+        }
+        let script = Self.buildScript(
+            hermesHome: context.paths.home,
+            binaryHint: binaryHint, binaryHintIsPath: binaryHintIsPath)
         // Use the shared SSHScriptRunner so this view model and the
         // ConnectionStatusViewModel pill always agree on what the
         // remote sees (issue #44 — the prior local copies of the
@@ -210,7 +221,15 @@ final class RemoteDiagnosticsViewModel {
     /// Swift side can parse without regex surprises. Status is `PASS` or
     /// `FAIL`; detail is a single line (can be blank). `__END__` at the
     /// bottom lets us detect truncation.
-    private static func buildScript(hermesHome: String) -> String {
+    ///
+    /// `binaryHint` is the server's saved Hermes binary (T6-F4). When set,
+    /// the two hermes checks look for it, the way the runtime runs it: a
+    /// path Test Connection found (`binaryHintIsPath`) is one word, and a
+    /// typed command line (`docker compose exec hermes hermes`) is checked
+    /// by its first word. Without one they look for `hermes`, as before.
+    nonisolated static func buildScript(
+        hermesHome: String, binaryHint: String? = nil, binaryHintIsPath: Bool = false
+    ) -> String {
         // Shell-quote the home path — user may have typed `~/.hermes` which
         // we want the remote shell to expand, so we substitute `~/` with
         // `$HOME/` like `SSHTransport.remotePathArg` does.
@@ -223,10 +242,33 @@ final class RemoteDiagnosticsViewModel {
             // Absolute path — still quote in case of spaces.
             expanded = "\"\(hermesHome.replacingOccurrences(of: "\"", with: "\\\""))\""
         }
+        // Escaped for a double-quoted sh string, as TestConnectionProbe does.
+        let hint = (binaryHint ?? "").trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
 
         return #"""
         H=\#(expanded)
+        HINT="\#(hint)"
+        HINT_IS_PATH=\#(binaryHintIsPath ? "1" : "0")
         emit() { printf '%s|%s|%s\n' "$1" "$2" "$3"; }
+        # The word the runtime runs: the saved Hermes binary (its first
+        # word for a typed command line, all of it for a probed path),
+        # else plain `hermes`.
+        hermes_word() {
+            if [ -z "$HINT" ]; then printf '%s' hermes; return; fi
+            if [ "$HINT_IS_PATH" = 1 ]; then w="$HINT"; else w=$(printf '%s\n' "$HINT" | awk '{print $1}'); fi
+            case "$w" in
+                "~") w="$HOME" ;;
+                "~/"*) w="$HOME/${w#??}" ;;
+            esac
+            printf '%s' "$w"
+        }
+        hermes_what() {
+            if [ -n "$HINT" ]; then printf 'saved Hermes binary "%s"' "$HINT"; else printf '%s' hermes; fi
+        }
 
         emit connectivity PASS "(running in this shell)"
 
@@ -288,31 +330,33 @@ final class RemoteDiagnosticsViewModel {
             fi
         fi
 
-        # Non-login PATH probe for `hermes` runs in the bare shell BEFORE
-        # sourcing rc files — that semantic ("is hermes on the un-enriched
-        # PATH the SSH session inherits?") is meaningful and we don't
-        # want to muddle it.
-        hpath=$(command -v hermes 2>/dev/null)
+        # Non-login PATH probe for `hermes` runs BEFORE sourcing rc files,
+        # with the same install dirs Scarf's SSH transport appends to every
+        # remote command (`HermesConfigReader.pathFallback`, S15-F1) — so it
+        # answers "will Scarf's runtime calls find hermes?", and a stock
+        # `~/.local/bin` install passes.
+        hw=$(hermes_word)
+        hpath=$(PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin"; command -v "$hw" 2>/dev/null)
         if [ -n "$hpath" ]; then
             emit hermesBinaryNonLogin PASS "$hpath"
         else
-            emit hermesBinaryNonLogin FAIL "not on non-login PATH ($PATH)"
+            emit hermesBinaryNonLogin FAIL "$(hermes_what) not on non-login PATH ($PATH)"
         fi
 
-        # Source rc files (mirroring TestConnectionProbe) so subsequent
-        # probes see the user's full login PATH. sqlite3 / hermes-login
-        # detection happens AFTER this so installs in Homebrew /
-        # `/usr/local/bin` / pipx / etc. are findable on hosts where the
-        # non-login SSH session inherits a stripped PATH (issue #19,
-        # @cmalpass's case where sqlite3 was installed but probed as
-        # missing — the non-login shell didn't have Homebrew on PATH).
-        for rc in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.profile"; do
-            [ -f "$rc" ] && . "$rc" 2>/dev/null
-        done
+        # Borrow the login shell's PATH (the same line TestConnectionProbe
+        # uses) so the checks below see the user's full login PATH:
+        # sqlite3 / hermes-login detection happens AFTER this so installs
+        # in Homebrew / `/usr/local/bin` / pipx / etc. are findable on hosts
+        # where the non-login SSH session inherits a stripped PATH (issue
+        # #19). The rc files are NOT sourced into this sh any more: under
+        # dash one zsh-only line in them ended the whole script, and every
+        # check after it showed as FAILED (T6-F2).
+        \#(TestConnectionProbe.loginPathBorrow)
 
-        # Login-PATH `hermes` probe with hardcoded candidate fallback.
-        hpath2=$(command -v hermes 2>/dev/null)
-        if [ -z "$hpath2" ]; then
+        # Login-PATH `hermes` probe, with the install candidates as a
+        # fallback when no Hermes binary is saved.
+        hpath2=$(command -v "$hw" 2>/dev/null)
+        if [ -z "$hpath2" ] && [ -z "$HINT" ]; then
             for cand in "$HOME/.local/bin/hermes" "/opt/homebrew/bin/hermes" "/usr/local/bin/hermes" "$HOME/.hermes/bin/hermes"; do
                 if [ -x "$cand" ]; then hpath2="$cand"; break; fi
             done
@@ -320,7 +364,7 @@ final class RemoteDiagnosticsViewModel {
         if [ -n "$hpath2" ]; then
             emit hermesBinaryLogin PASS "$hpath2"
         else
-            emit hermesBinaryLogin FAIL "not found after sourcing rc files"
+            emit hermesBinaryLogin FAIL "$(hermes_what) not found on the login shell's PATH"
         fi
 
         # sqlite3 detection — also after sourcing rc files, with a

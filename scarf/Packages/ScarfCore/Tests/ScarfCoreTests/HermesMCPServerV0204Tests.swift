@@ -130,12 +130,15 @@ struct OptionalMCPCatalogTests {
         }
     }
 
-    /// n8n's manifest declares TWO required env vars — `N8N_BASE_URL`
-    /// (non-secret, defaulted) and `N8N_API_KEY` (secret). Modelling only
-    /// the key would leave a prefilled bridge pointing nowhere.
+    /// n8n's v0.21.0 manifest declares TWO required env vars —
+    /// `N8N_BASE_URL` (non-secret, defaulted) and `N8N_API_KEY` (secret).
+    /// Modelling only the key would leave a prefilled bridge pointing
+    /// nowhere. The bridge left the catalog at v0.21.4, so it now lives in
+    /// the pre-v0.21.4 roster only (T4-F1).
     @Test func n8nRequiresBothBaseURLAndAPIKey() {
-        let n8n = OptionalMCPCatalog.entries.first { $0.name == "n8n" }
+        let n8n = OptionalMCPCatalog.preV0214Entries.first { $0.name == "n8n" }
         #expect(n8n?.requiredEnvVars == ["N8N_BASE_URL", "N8N_API_KEY"])
+        #expect(!OptionalMCPCatalog.entries.contains { $0.name == "n8n" })
     }
 
     /// The three `/sse`-suffixed endpoints whose manifests declare
@@ -143,9 +146,11 @@ struct OptionalMCPCatalogTests {
     /// them; prefilling `.sse` would route Hermes to `sse_client`, a
     /// different protocol that also hard-fails with
     /// `strict_redirect_headers`.
+    /// (asana's moved to `/v2/mcp` at v0.21.4; its `/sse` form survives in
+    /// the pre-v0.21.4 roster.)
     @Test func httpManifestsWithSSEShapedURLsStayHTTP() {
         for name in ["asana", "paypal", "square"] {
-            let entry = OptionalMCPCatalog.entries.first { $0.name == name }
+            let entry = OptionalMCPCatalog.preV0214Entries.first { $0.name == name }
             #expect(entry?.transport == .http, "\(name) must mirror its manifest's transport.type (http)")
             #expect(entry?.url?.hasSuffix("/sse") == true, "\(name) fixture assumption: url still ends in /sse")
         }
@@ -194,8 +199,10 @@ struct OptionalMCPCatalogTests {
         #expect(figma?.description == "Official Figma remote MCP — design context, Code Connect, and write-to-canvas via https://mcp.figma.com/mcp (OAuth).")
     }
 
+    /// n8n-official is the exception: its manifest url is
+    /// `${N8N_MCP_SERVER_URL}`, answered by an install prompt.
     @Test func httpAndSSEEntriesCarryAURL() {
-        for entry in OptionalMCPCatalog.entries where entry.transport != .stdio {
+        for entry in OptionalMCPCatalog.entries where entry.transport != .stdio && entry.name != "n8n-official" {
             #expect(entry.url != nil && !(entry.url ?? "").isEmpty, "\(entry.name) is \(entry.transport.id) but has no url")
         }
     }

@@ -122,7 +122,11 @@ public struct MCPServerPreset: Identifiable, Sendable, Equatable {
             transport: .http,
             command: nil,
             args: [],
-            url: "https://mcp.linear.app/sse",
+            // Hermes's own catalog manifest (`optional-mcps/linear/manifest.yaml`,
+            // the same at every tag from v2026.5.28 to v2026.9.24): Streamable
+            // HTTP at `/mcp`. The old `/sse` URL only worked through Hermes's
+            // SSE fallback.
+            url: "https://mcp.linear.app/mcp",
             auth: "oauth",
             requiredEnvKeys: [],
             optionalEnvKeys: [],
@@ -180,12 +184,18 @@ public struct MCPServerPreset: Identifiable, Sendable, Equatable {
         MCPServerPreset(
             id: "fetch",
             displayName: "Fetch",
-            description: "Retrieve and convert web pages to markdown.",
+            description: "Retrieve and convert web pages to markdown. Runs with uvx, so the Hermes host needs uv installed.",
             category: "Built-in",
             iconSystemName: "arrow.down.circle",
             transport: .stdio,
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-fetch"],
+            // The reference fetch server is the Python package
+            // `mcp-server-fetch` (PyPI), run through `uvx`; there is no npm
+            // `@modelcontextprotocol/server-fetch` (the registry answers 404),
+            // so the old `npx` preset could never be added (T4-F2). Hermes's
+            // own tests run it the same way (`tests/tools/test_osv_check.py`
+            // @ v2026.9.24).
+            command: "uvx",
+            args: ["mcp-server-fetch"],
             url: nil,
             auth: nil,
             requiredEnvKeys: [],

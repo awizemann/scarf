@@ -836,9 +836,11 @@ public struct ModelCatalogService: Sendable {
     /// and the union is the set of values that mean something somewhere.
     /// `xai` and `deepinfra` never read the top-level key (scoped only) and
     /// `openrouter` takes any id verbatim (free-form field covers it).
-    /// meta-ai's `muse-image-1.0` is deliberately absent: that plugin is new
-    /// at v2026.9.7, and an ungated row here would change what a pre-target
-    /// host renders (C1).
+    /// meta-ai's `muse-image-1.0` is not in THIS list: that plugin is new at
+    /// v2026.9.7, and an ungated row here would change what a pre-target
+    /// host renders (C1). It, and the fal ids added after v2026.9.7, come in
+    /// through ``imageGenModels(capabilities:)``, which is what the picker
+    /// renders.
     public static let imageGenModels: [HermesImageGenModel] = [
         // Verbatim mirror of `FAL_MODELS` in
         // `hermes-agent/tools/image_generation_catalog.py` at v2026.9.7,
@@ -878,6 +880,49 @@ public struct ModelCatalogService: Sendable {
         .init(modelID: "gpt-image-2-low", display: "GPT Image 2 (Low)", providerHint: "openai"),
         .init(modelID: "gpt-image-2-high", display: "GPT Image 2 (High)", providerHint: "openai"),
     ]
+
+    /// The image-gen picker rows for a host: ``imageGenModels`` plus the ids
+    /// later tags added to catalogs that read the top-level `image_gen.model`
+    /// (S06-F7), each at its own floor so an older host renders exactly the
+    /// rows it did before (C1). Checked both ways with `git grep` on
+    /// `~/.hermes/hermes-agent`:
+    /// - `openai/gpt-image-2.5/{flare,sunburst}/text-to-image` (FAL_MODELS,
+    ///   generated at `tools/image_generation_catalog.py:161-183` @
+    ///   v2026.9.24): absent at v2026.9.7, present at v2026.9.11 (0.21.2).
+    ///   Inserted right after `fal-ai/gpt-image-2`, their catalog position.
+    /// - `fal-ai/kling-image/v3/text-to-image` and
+    ///   `meta/muse-image/text-to-image` (`:355,368` @ v2026.9.24): absent at
+    ///   v2026.9.11, present at v2026.9.14 (0.21.3). They end FAL_MODELS.
+    /// - `muse-image-1.0`, the meta-ai plugin's only model and default
+    ///   (`plugins/image_gen/meta-ai/__init__.py:40-48`). It reads
+    ///   `image_gen.model` through `resolve_static_model` (top-level
+    ///   included). The plugin is absent at v2026.8.31, present at v2026.9.7.
+    ///
+    /// Not added: xai's ids — that plugin reads only `image_gen.xai.model`
+    /// (`plugins/image_gen/xai/__init__.py:3,146`), never the top-level key.
+    /// OpenRouter reads the top-level key but sends any id verbatim, so its
+    /// models are reachable through the custom-ID field as before.
+    public static func imageGenModels(capabilities: HermesCapabilities) -> [HermesImageGenModel] {
+        var models = imageGenModels
+        if capabilities.isV0212OrLater,
+           let at = models.firstIndex(where: { $0.modelID == "fal-ai/gpt-image-2" }) {
+            models.insert(contentsOf: [
+                .init(modelID: "openai/gpt-image-2.5/flare/text-to-image", display: "GPT Image 2.5 Flare", providerHint: "fal"),
+                .init(modelID: "openai/gpt-image-2.5/sunburst/text-to-image", display: "GPT Image 2.5 Sunburst", providerHint: "fal"),
+            ], at: models.index(after: at))
+        }
+        if capabilities.isV0213OrLater,
+           let at = models.firstIndex(where: { $0.modelID == "xai/grok-imagine-image/v2.0/text-to-image" }) {
+            models.insert(contentsOf: [
+                .init(modelID: "fal-ai/kling-image/v3/text-to-image", display: "Kling Image v3", providerHint: "fal"),
+                .init(modelID: "meta/muse-image/text-to-image", display: "Meta Muse Image", providerHint: "fal"),
+            ], at: models.index(after: at))
+        }
+        if capabilities.isV0211OrLater {
+            models.append(.init(modelID: "muse-image-1.0", display: "Muse Image 1.0  (Meta API)", providerHint: "meta-ai"))
+        }
+        return models
+    }
 
     // MARK: - Hermes overlay providers
 

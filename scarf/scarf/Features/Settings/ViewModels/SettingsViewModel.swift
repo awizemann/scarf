@@ -617,23 +617,31 @@ final class SettingsViewModel {
     /// set` calls — blocking SSH round-trips on remote contexts that
     /// would beach-ball the MainActor (same rationale as `load`).
     func applyModelPickerSelection(model: String, provider: String, local: LocalModelSelection?) {
-        let ops: [LocalModelConfigPlan.Operation]
-        if let local {
-            ops = LocalModelConfigPlan.operations(selecting: local)
-        } else {
-            // The HermesConfig overload maps the current local-key
-            // values: a key that's already empty/absent is skipped
-            // rather than re-cleared, so a never-local user keeps the
-            // classic two-op write.
-            ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: model,
-                provider: provider,
-                current: config
-            )
-        }
-        guard !ops.isEmpty else { return }
         let svc = fileService
+        let ctx = context
+        let current = config
         Task.detached { [weak self] in
+            // Capabilities decide which `model.provider` a local row writes
+            // (llama.cpp → `custom` on v0.21.1+, S06-F2). Resolved here, off
+            // the main actor and the cooperative pool, because a cache miss
+            // probes the host (C10).
+            let caps = await OffPool.run { HermesVersionCache.shared.capabilitiesSync(for: ctx) }
+            let ops: [LocalModelConfigPlan.Operation]
+            if let local {
+                ops = LocalModelConfigPlan.operations(selecting: local, capabilities: caps)
+            } else {
+                // The HermesConfig overload maps the current local-key
+                // values: a key that's already empty/absent is skipped
+                // rather than re-cleared, so a never-local user keeps the
+                // classic two-op write.
+                ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: model,
+                    provider: provider,
+                    current: current,
+                    capabilities: caps
+                )
+            }
+            guard !ops.isEmpty else { return }
             let ok = svc.applyModelConfigPlan(ops)
             let cfg = svc.loadConfig()
             await MainActor.run { [weak self] in
@@ -705,7 +713,13 @@ final class SettingsViewModel {
     /// the provider's own default — so `agent.reasoning_effort: ''` and no key
     /// at all are the same thing to Hermes. That gives the user a way back out
     /// of a pinned level without needing `hermes config unset`.
-    func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
+    ///
+    /// "none" goes through `HermesReasoningEffort.configSetValue` — on
+    /// v0.21.1+ `config set` would store the bare word as null, i.e. "use the
+    /// default", so it is sent as `false` there (S05-F2).
+    func setReasoningEffort(_ value: String, capabilities: HermesCapabilities) {
+        setSetting("agent.reasoning_effort", value: HermesReasoningEffort.configSetValue(for: value, capabilities: capabilities))
+    }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     /// v0.21.1+ — length of the fast window the bounded `auto`/`cold` tiers
     /// open. Inert unless `agent.service_tier` is one of those.
@@ -928,7 +942,6 @@ final class SettingsViewModel {
         )
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
-    func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }
 
     // MARK: - Auxiliary model sub-tasks
 

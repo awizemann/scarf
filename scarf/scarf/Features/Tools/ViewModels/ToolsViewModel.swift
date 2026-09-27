@@ -159,9 +159,9 @@ final class ToolsViewModel {
 
         for platform in KnownPlatforms.all {
             if let pState = gatewayState?.platforms?[platform.name] {
-                if let err = pState.error, !err.isEmpty {
+                if let err = pState.errorText {
                     status[platform.name] = .error(err)
-                } else if pState.connected == true {
+                } else if pState.isConnected {
                     status[platform.name] = .connected
                 } else if configuredNames.contains(platform.name) || platform.name == "cli" {
                     status[platform.name] = .configured

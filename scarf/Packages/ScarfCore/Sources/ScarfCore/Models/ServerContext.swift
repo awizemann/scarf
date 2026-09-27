@@ -29,10 +29,24 @@ public struct SSHConfig: Sendable, Hashable, Codable {
     /// `nil` uses `~/projects` (unexpanded — remote shell resolves it).
     /// Created on first install if missing.
     public var projectsRoot: String?
-    /// Resolved remote path to the `hermes` binary. Populated by
-    /// `SSHTransport` after the first `command -v hermes` probe; cached here
-    /// so subsequent calls skip the round trip.
+    /// How to invoke `hermes` on the remote: either the path Test Connection
+    /// found (``hermesBinaryHintIsPath`` true) or the "Hermes binary" the
+    /// user typed in Add Server, which may be a whole command line
+    /// (`docker compose exec hermes hermes`). `nil` → bare `hermes` on the
+    /// remote PATH.
     public var hermesBinaryHint: String?
+    /// `true` when ``hermesBinaryHint`` is a path Test Connection found, so
+    /// it is always ONE shell word, even with a space in it
+    /// (`/Users/Jane Doe/.local/bin/hermes`). `nil`/`false` is a value the
+    /// user typed: a multi-word value is a shell fragment, emitted as the
+    /// words they typed (S15-F3).
+    ///
+    /// Optional so `servers.json` files written before this key existed
+    /// decode unchanged, and read the old way (whitespace = fragment). That
+    /// keeps every working wrapper working; a spaced probed path saved
+    /// before then was already failing (exit 127) and is repaired by adding
+    /// the server again with Test Connection.
+    public var hermesBinaryHintIsPath: Bool?
 
     public init(
         host: String,
@@ -41,7 +55,8 @@ public struct SSHConfig: Sendable, Hashable, Codable {
         identityFile: String? = nil,
         remoteHome: String? = nil,
         projectsRoot: String? = nil,
-        hermesBinaryHint: String? = nil
+        hermesBinaryHint: String? = nil,
+        hermesBinaryHintIsPath: Bool? = nil
     ) {
         self.host = host
         self.user = user
@@ -50,6 +65,15 @@ public struct SSHConfig: Sendable, Hashable, Codable {
         self.remoteHome = remoteHome
         self.projectsRoot = projectsRoot
         self.hermesBinaryHint = hermesBinaryHint
+        self.hermesBinaryHintIsPath = hermesBinaryHintIsPath
+    }
+
+    /// The hint when it is a user-typed shell fragment that must reach the
+    /// remote shell as the words typed, else `nil` (no hint, a single
+    /// word, or a probed path that has to be quoted as one word).
+    public var hermesBinaryHintFragment: String? {
+        HermesPathSet.binaryHintIsShellFragment(hermesBinaryHint, isPath: hermesBinaryHintIsPath == true)
+            ? hermesBinaryHint : nil
     }
 }
 
@@ -116,7 +140,8 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
             return HermesPathSet(
                 home: config.remoteHome ?? HermesPathSet.defaultRemoteHome,
                 isRemote: true,
-                binaryHint: config.hermesBinaryHint
+                binaryHint: config.hermesBinaryHint,
+                binaryHintIsPath: config.hermesBinaryHintIsPath == true
             )
         }
     }
@@ -260,12 +285,17 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
         let name = HermesProfileScope.normalize(profile)
         switch kind {
         case .local:
+            // Always frozen into `localHomeOverride`, even when the pin equals
+            // the home resolved right now. Without an override a local
+            // context re-resolves `~/.hermes/active_profile` on every access,
+            // so a bot pinned while the sticky profile happened to match
+            // followed it when `hermes profile use` later changed it: the
+            // default bot's reads moved to another profile while its ACP,
+            // launched with `-p default`, stayed on the root.
             let base = localHomeOverride ?? HermesPathSet.defaultLocalHome
             let root = HermesProfileScope.rootHome(forHome: base)
-            let pinned = HermesProfileScope.resolveHome(baseHome: root, profile: name)
-            guard pinned != base else { return self }
             var copy = self
-            copy.localHomeOverride = pinned
+            copy.localHomeOverride = HermesProfileScope.resolveHome(baseHome: root, profile: name)
             return copy
         case .ssh(var config):
             let base = config.remoteHome ?? HermesPathSet.defaultRemoteHome
@@ -351,6 +381,44 @@ private actor UserHomeCache {
         // rather than a local Mac path. The remote side will expand it if
         // passed through a shell; if not, failures are surfaced by ACP itself.
         return out.isEmpty ? "~" : out
+    }
+}
+
+// MARK: - Terminal launches over ssh
+
+public extension ServerContext {
+    /// The words to put after `ssh -t … host --` so the remote runs
+    /// `hermes <args>` for this window's host and profile, or `nil` for a
+    /// local context. Shared by the chat's embedded Terminal and the
+    /// Webhooks tab's `hermes gateway setup` Terminal.
+    ///
+    /// ssh joins these words with spaces and the user's LOGIN shell parses
+    /// the result directly — no `sh -c` in between, unlike the transport —
+    /// so every word must mean the same thing to sh, bash, zsh, dash AND
+    /// csh/tcsh:
+    /// - assignments go through `env` (csh has no `VAR=value command`);
+    /// - the PATH word closes its quote after `$PATH` (csh modifiers, fish
+    ///   braces — ``HermesConfigReader/pathFallback``);
+    /// - the `HERMES_HOME=` pin (a named profile or a custom root) is
+    ///   already quoted for the remote shell; a root home also gets
+    ///   `-p default` (S13-F1, T6-F1);
+    /// - the binary is ``HermesPathSet/hermesBinaryShellWord``: a path Test
+    ///   Connection found stays one word, a typed wrapper stays words.
+    ///
+    /// The args are appended as they are, as they always were; callers pass
+    /// fixed verbs and ids.
+    nonisolated func remoteLoginShellHermesWords(args: [String]) -> [String]? {
+        guard case .ssh(let cfg) = kind else { return nil }
+        let paths = self.paths
+        let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: paths.home)
+            .trimmingCharacters(in: .whitespaces)
+        var words = ["env", HermesConfigReader.pathFallback]
+        if !assignment.isEmpty { words.append(assignment) }
+        words.append(paths.hermesBinaryShellWord)
+        words += HermesProfileScope.pinnedRemoteArguments(
+            executable: paths.hermesBinary, args: args, home: paths.home,
+            configuredBinary: cfg.hermesBinaryHint)
+        return words
     }
 }
 
@@ -473,6 +541,11 @@ extension ServerContext {
     /// because the pre-flight gate was a literal `test -e hermes`.
     public nonisolated func hermesBinaryProbablyResolvable() -> Bool {
         let bin = paths.hermesBinary
+        // A wrapper override (`docker compose exec hermes hermes`) is a
+        // command line, not a file: testing it as a path always failed and
+        // showed "Hermes Not Found" for a setup that works (S15-F3).
+        // A path Test Connection found is a file even with a space in it.
+        if paths.hermesBinaryIsShellFragment { return true }
         if bin.contains("/") {
             return fileExists(bin)
         }

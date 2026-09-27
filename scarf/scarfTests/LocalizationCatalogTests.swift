@@ -260,6 +260,23 @@ struct LocalizationCatalogTests {
         // site is under `Scarf iOS`; "Retry" already had a Mac call site
         // before this sweep, so it needed no entry here.
         "Couldn't load sessions",
+        // R13 (Hermes v0.21.5 audit remediation i18n): the iOS cron row's
+        // effective-state badges, the plugins "Not enabled" badge, the
+        // model-preset switch hint, and the Webhooks/Profiles error labels.
+        // Every key below has its only extractable call site under
+        // `Scarf iOS` (the Mac cron widget also shows "PAUSED"/"COMPLETED",
+        // but as plain Strings the extractor never sees).
+        "Couldn't switch to model preset “%@” — this chat uses the default model.",
+        "PAUSED",
+        "COMPLETED",
+        "ERROR",
+        "Not enabled",
+        "Couldn't run hermes webhook list on this server",
+        "Couldn't parse webhook list output",
+        "`hermes profile list` failed: %@",
+        "`hermes profile list` failed (exit %lld).",
+        "Couldn't reach `hermes profile list` on this server.",
+        "The webhook platform isn't enabled on this server. Turn on Webhook in the Mac app's Platforms → Webhook, or set platforms.webhook.enabled: true in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env.",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
@@ -394,6 +411,7 @@ struct LocalizationCatalogTests {
         "discord",
         "hermes peer add spark --url http://spark.lan:8377 --key <API_SERVER_KEY>",
         "hermes profile show",
+        "http://127.0.0.1:…/callback?code=…",
         "https://...",
         "https://.../sse",
         "https://example.com/my.scarftemplate",

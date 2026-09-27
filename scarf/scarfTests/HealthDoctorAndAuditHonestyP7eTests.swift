@@ -31,6 +31,57 @@ import ScarfCore
         try #require(sections.count == 1)
         #expect(sections[0].title == "Configuration")
         #expect(!sections.contains { $0.title == "Doctor" })
+        // R18a (T7-F3): the numbered issue after the footer rule is not a
+        // third (passing) check of the last section.
+        #expect(sections[0].checks.map(\.label) == ["model", "api key"])
+        #expect(sections[0].checks.map(\.status) == [.ok, .warning])
+    }
+
+    /// R18a (T7-F3): `doctor`'s numbered remediation list — here printed by
+    /// the v2026.9.24 checkout's own `_print_summary` (`doctor.py:142-163`)
+    /// with two real issue strings — used to add each `N. Label: fix` line
+    /// with a colon in its first 30 characters as a green check inside the
+    /// still-open last section, inflating the passing count.
+    @Test func numberedIssueListAfterTheRuleIsNotParsedAsChecks() throws {
+        let output = """
+        ◆ Tool Availability
+        ✗ daytona (missing: daytona SDK)
+
+        ────────────────────────────────────────────────────────────
+          Found 2 issue(s) to address:
+
+          1. Install daytona SDK: pip install daytona
+          2. Repair the CA bundle: pip install --force-reinstall certifi
+
+          Tip: run 'hermes doctor --fix' to auto-fix what's possible.
+
+        """
+        let sections = HealthViewModel.doctorSections(output: output, exitCode: 1)
+        try #require(sections.count == 1)
+        #expect(sections[0].title == "Tool Availability")
+        #expect(sections[0].checks.count == 1)
+        #expect(sections[0].checks.first?.status == .error)
+        #expect(!sections[0].checks.contains { $0.status == .ok })
+    }
+
+    /// The `--fix` footer (`Fixed N issue(s). M issue(s) require manual
+    /// intervention.` then the same numbered list) is cut the same way, and
+    /// a ◆ header after a rule still opens a section.
+    @Test func fixFooterIsCutAndALaterSectionStillParses() throws {
+        let output = """
+        ◆ Configuration
+        ✓ model: gpt-5
+        ────────────────────────────────────────────────────────────
+          Fixed 1 issue(s). 1 issue(s) require manual intervention.
+
+          1. Install httpx: pip install httpx
+
+        ◆ Later
+        ✓ thing: fine
+        """
+        let sections = HealthViewModel.parseOutputStatic(output)
+        #expect(sections.map(\.title) == ["Configuration", "Later"])
+        #expect(sections.map(\.checks.count) == [1, 1])
     }
 
     /// The regression this item exists to fix: nothing crashed the DOCTOR_CHECKS

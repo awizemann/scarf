@@ -431,6 +431,16 @@ public final class ProjectsViewModel {
             fail("Couldn't add “\(name)”", reason: "A project with that name is already in the list.")
             return false
         }
+        // One folder, one row — the rule `project_register` and
+        // `ProjectStore.indexInRegistry` already hold, compared normalized
+        // so `/a/b` and `/a/b/` are the same folder. A second row at a path
+        // splits the project's identity and is the state the Doctor reports
+        // as `duplicatePath`.
+        let normalized = ProjectIdentity.normalizedPath(path)
+        if let existing = registry.projects.first(where: { ProjectIdentity.normalizedPath($0.path) == normalized }) {
+            fail("Couldn't add “\(name)”", reason: "That folder is already in the list as “\(existing.name)”.")
+            return false
+        }
         // Same policy `project_register` enforces, at the app's own door.
         // A root of `/` or `$HOME` makes every containment check downstream
         // vacuous, and the folder picker will happily hand over either.
@@ -560,12 +570,17 @@ public final class ProjectsViewModel {
         // pass minted a FRESH random UUID: the renamed project silently
         // detached from its own record, its cron jobs, and its fleet siblings.
         // A rename changes the label; it must never change the identifier.
+        // `extra` is carried for the same reason: it holds keys Scarf's model
+        // doesn't declare, including the archive record of which cron jobs
+        // archiving paused (`archivePausedCronJobIds`), and dropping it
+        // meant unarchiving a renamed project resumed nothing.
         registry.projects[index] = ProjectEntry(
             name: trimmed,
             path: old.path,
             folder: old.folder,
             archived: old.archived,
-            uuid: old.uuid
+            uuid: old.uuid,
+            extra: old.extra
         )
         do {
             try await save(registry, expecting: loaded.baseline)
@@ -624,12 +639,6 @@ public final class ProjectsViewModel {
     /// sidebar just hides it unless `showArchived` is on.
     @discardableResult
     public func archiveProject(_ project: ProjectEntry) async -> Bool {
-        // Clear the selection only if the archive actually persisted —
-        // otherwise the user loses their place to a write that didn't
-        // happen.
-        guard await mutateEntry(project, action: "archive “\(project.name)”", { $0.archived = true }) else {
-            return false
-        }
         // Archive is no longer an inert display bool. The watchers stop
         // (`dashboardPaths` / `projectScarfDirs` exclude archived rows) and
         // the project's scheduled jobs are paused — otherwise "archived"
@@ -641,18 +650,61 @@ public final class ProjectsViewModel {
         // would make a reversible action quietly lossy. Removal revokes;
         // archive pauses.
         //
-        // OFF THE MAIN ACTOR (charter C10). This spawns one `hermes cron
-        // pause` per job, each with a 30s timeout — on a wedged remote a
-        // project with six jobs would freeze the window for three minutes.
-        // Detached and fire-and-forget: the archive itself already
-        // committed, the pause is a best-effort follow-up, and nothing on
-        // screen is waiting for it.
-        let lifecycle = ProjectLifecycleService(context: context)
+        // Only the jobs that are running on schedule NOW are paused, and
+        // their ids are recorded on the registry row in the same write as
+        // `archived`, so restoring resumes exactly those. A job the user
+        // had already paused (or a template job created paused and never
+        // reviewed) stays paused through archive and restore.
+        //
+        // OFF THE MAIN ACTOR AND THE POOL (charter C10): the jobs.json read
+        // here and the `hermes cron pause` spawns below (each with a 30s
+        // timeout) block, so they run on `OffPool` threads of their own.
+        //
+        // A restore's resume still in flight would make a job look "not
+        // running" here and leave it out of the record; wait for it first.
+        await cronFollowUp?.value
+        let lifecycle = makeLifecycle(context)
         let target = project
-        Task.detached(priority: .utility) { lifecycle.setCronPaused(true, for: target) }
+        let runnable = await OffPool.run { lifecycle.runnableCronJobIDs(for: target) }
+        let toPause = runnable ?? []
+        // Clear the selection only if the archive actually persisted —
+        // otherwise the user loses their place to a write that didn't
+        // happen.
+        guard await mutateEntry(project, action: "archive “\(project.name)”", { entry in
+            // Archiving a row that is already archived (a stale menu, or
+            // another device) must not drop the ids an earlier archive
+            // recorded — those jobs are paused now, so they aren't in
+            // `toPause`.
+            let earlier = entry.archived ? (entry.archivePausedCronJobIDs ?? []) : []
+            entry.archived = true
+            entry.archivePausedCronJobIDs = earlier + toPause.filter { !earlier.contains($0) }
+        }) else {
+            return false
+        }
         if selectedProject?.name == project.name {
             selectedProject = nil
             setSelectedHasDashboard(false)
+        }
+        // The pause is a follow-up the archive doesn't wait on, but its
+        // failure is shown: a job Scarf couldn't pause keeps firing into a
+        // project the sidebar says is put away.
+        guard runnable != nil else {
+            fail(
+                String(localized: "“\(project.name)” is archived, but its cron jobs may still be scheduled"),
+                reason: String(localized: "Scarf couldn't read this server's cron jobs, so it paused none of them. Check them in the Cron tab.")
+            )
+            return true
+        }
+        if !toPause.isEmpty {
+            let name = project.name
+            cronFollowUp = Task { [weak self] in
+                let failed = await OffPool.run { lifecycle.pauseCronJobs(toPause) }
+                guard let self, !failed.isEmpty else { return }
+                self.fail(
+                    String(localized: "“\(name)” is archived, but some of its cron jobs are still scheduled"),
+                    reason: Self.cronFollowUpFailureReason(failed, verb: "pause")
+                )
+            }
         }
         return true
     }
@@ -660,16 +712,73 @@ public final class ProjectsViewModel {
     /// Restore an archived project to the default view.
     @discardableResult
     public func unarchiveProject(_ project: ProjectEntry) async -> Bool {
-        guard await mutateEntry(project, action: "restore “\(project.name)”", { $0.archived = false })
+        // Symmetric with `archiveProject`: resume the jobs archiving paused
+        // and nothing else. The record is read from (and cleared on) the
+        // row `mutateEntry` loads fresh, not the caller's possibly stale
+        // copy. A row archived by an older Scarf has no record, so nothing
+        // is resumed — resuming every attributed job is what switched on
+        // jobs the user had never enabled.
+        //
+        // Wait for an archive's pause still in flight: otherwise the resume
+        // below sees the job not yet paused, skips it, and the pause then
+        // lands on a restored project.
+        await cronFollowUp?.value
+        var record: [String]?
+        var restored: ProjectEntry?
+        guard await mutateEntry(project, action: "restore “\(project.name)”", { entry in
+            record = entry.archivePausedCronJobIDs
+            entry.archived = false
+            entry.archivePausedCronJobIDs = nil
+            restored = entry
+        })
         else { return false }
-        // Symmetric with `archiveProject`. Without this, archiving would be
-        // a one-way door wearing a toggle's clothes: the jobs would stay
-        // paused and the user would have no reason to look for them.
-        // Detached for the same reason `archiveProject` detaches — see there.
-        let lifecycle = ProjectLifecycleService(context: context)
-        let target = project
-        Task.detached(priority: .utility) { lifecycle.setCronPaused(false, for: target) }
+        if record == nil, let restored {
+            // No record: an older Scarf archived this. Resume nothing, but
+            // don't leave it silent — say how many of the project's jobs
+            // are paused so the user can decide.
+            let lifecycle = makeLifecycle(context)
+            let name = project.name
+            cronFollowUp = Task { [weak self] in
+                let paused = await OffPool.run { lifecycle.pausedCronJobIDs(for: restored) }
+                guard let self, !paused.isEmpty else { return }
+                self.fail(
+                    String(localized: "“\(name)” is restored"),
+                    reason: String(localized: "\(paused.count) of this project's cron jobs are paused. Resume them from the Cron tab if you want them running.")
+                )
+            }
+        }
+        let recorded = record ?? []
+        if !recorded.isEmpty {
+            // Off-pool for the same reason as in `archiveProject`.
+            let lifecycle = makeLifecycle(context)
+            let ids = recorded
+            let name = project.name
+            cronFollowUp = Task { [weak self] in
+                let failed = await OffPool.run { lifecycle.resumeArchivedCronJobs(ids) }
+                guard let self, !failed.isEmpty else { return }
+                self.fail(
+                    String(localized: "“\(name)” is restored, but some of its cron jobs are still paused"),
+                    reason: Self.cronFollowUpFailureReason(failed, verb: "resume")
+                )
+            }
+        }
         return true
+    }
+
+    /// Builds the lifecycle service archive/restore use. Tests swap in one
+    /// with a fake cron runner so no real `hermes` is spawned.
+    @ObservationIgnored var makeLifecycle: @Sendable (ServerContext) -> ProjectLifecycleService = {
+        ProjectLifecycleService(context: $0)
+    }
+
+    /// The last archive/restore cron follow-up, so tests can wait on it.
+    @ObservationIgnored private(set) var cronFollowUp: Task<Void, Never>?
+
+    nonisolated static func cronFollowUpFailureReason(_ ids: [String], verb: String) -> String {
+        let list = ids.joined(separator: ", ")
+        return verb == "pause"
+            ? String(localized: "Scarf couldn't pause \(ids.count) job(s): \(list). Pause them from the Cron tab.")
+            : String(localized: "Scarf couldn't resume \(ids.count) job(s): \(list). Resume them from the Cron tab.")
     }
 
     /// Distinct folder labels across the current project set, sorted

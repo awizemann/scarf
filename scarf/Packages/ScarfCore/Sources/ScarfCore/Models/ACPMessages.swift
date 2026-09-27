@@ -209,11 +209,21 @@ public enum ACPEvent: @unchecked Sendable {
     /// Both default `false` — absent `_meta`, or `_meta` from an older
     /// host or a live (non-replay) chunk, parses as "not a summary"
     /// with zero behavior change.
+    ///
+    /// `messageId` is Hermes's per-reply id (`AssistantMessageIdAllocator`,
+    /// `acp_adapter/events.py:185-236` @ v2026.9.24): streamed chunks of one
+    /// assistant reply share it and the next reply gets a fresh UUID. It is
+    /// ABSENT on the out-of-band text Hermes sends for slash commands and
+    /// absorbed mid-turn prompts ("Queued for the next turn…", "⏩ Steer
+    /// queued…", `server.py:827-843`), and on every chunk from a host that
+    /// predates the allocator. `RichChatViewModel` starts a new bubble when
+    /// it changes.
     case messageChunk(
         sessionId: String,
         text: String,
         isCompactionSummary: Bool = false,
-        containsCompactionSummary: Bool = false
+        containsCompactionSummary: Bool = false,
+        messageId: String? = nil
     )
     /// Same compaction-summary semantics as `.messageChunk`, but for
     /// `user_message_chunk` replay updates — the compressor sometimes
@@ -225,13 +235,22 @@ public enum ACPEvent: @unchecked Sendable {
         isCompactionSummary: Bool = false,
         containsCompactionSummary: Bool = false
     )
-    case thoughtChunk(sessionId: String, text: String)
+    /// `messageId` shares `.messageChunk`'s allocator: a reply's thoughts
+    /// and its text carry the same id.
+    case thoughtChunk(sessionId: String, text: String, messageId: String? = nil)
     case toolCallStart(sessionId: String, call: ACPToolCallEvent)
     case toolCallUpdate(sessionId: String, update: ACPToolCallUpdateEvent)
     case permissionRequest(sessionId: String, requestId: Int, request: ACPPermissionRequestEvent)
     case promptComplete(sessionId: String, response: ACPPromptResult)
     case availableCommands(sessionId: String, commands: [[String: Any]])
-    case sessionInfoUpdate(sessionId: String, title: String?, updatedAt: String?)
+    /// `provenance` is Hermes's `_meta.hermes.sessionProvenance` (absent
+    /// on hosts without it, and best-effort on hosts with it).
+    case sessionInfoUpdate(
+        sessionId: String,
+        title: String?,
+        updatedAt: String?,
+        provenance: ACPSessionProvenance? = nil
+    )
     case connectionLost(reason: String)
     case unknown(sessionId: String, type: String)
 
@@ -241,14 +260,14 @@ public enum ACPEvent: @unchecked Sendable {
     /// from a session the VM is no longer attached to.
     public var sessionId: String? {
         switch self {
-        case let .messageChunk(sid, _, _, _),
+        case let .messageChunk(sid, _, _, _, _),
              let .userMessageChunk(sid, _, _, _),
-             let .thoughtChunk(sid, _),
+             let .thoughtChunk(sid, _, _),
              let .toolCallStart(sid, _),
              let .toolCallUpdate(sid, _),
              let .promptComplete(sid, _),
              let .availableCommands(sid, _),
-             let .sessionInfoUpdate(sid, _, _),
+             let .sessionInfoUpdate(sid, _, _, _),
              let .unknown(sid, _):
             return sid
         case let .permissionRequest(sid, _, _):
@@ -269,8 +288,15 @@ public struct ACPToolCallEvent: @unchecked Sendable {
     public let kind: String
     public let status: String
     public let content: String
+    /// Tool arguments. Hermes sends `rawInput` ONLY for unknown/plugin
+    /// tools (`acp_adapter/tools.py:797-815` @ v2026.9.24, and every built-in
+    /// has had `raw_input=None` since at least v2026.7.7.2); for terminal,
+    /// read_file, patch, web_search and the other built-ins the target lives
+    /// in `title` and `locations` instead.
     public let rawInput: [String: Any]?
-
+    /// `locations[].path` in wire order (`extract_locations`,
+    /// `acp_adapter/tools.py:850-854` — the tool's `path` argument).
+    public let locationPaths: [String]
 
     public init(
         toolCallId: String,
@@ -278,7 +304,8 @@ public struct ACPToolCallEvent: @unchecked Sendable {
         kind: String,
         status: String,
         content: String,
-        rawInput: [String: Any]?
+        rawInput: [String: Any]?,
+        locationPaths: [String] = []
     ) {
         self.toolCallId = toolCallId
         self.title = title
@@ -286,6 +313,7 @@ public struct ACPToolCallEvent: @unchecked Sendable {
         self.status = status
         self.content = content
         self.rawInput = rawInput
+        self.locationPaths = locationPaths
     }
     public var functionName: String {
         // title format is "functionName: summary" or just "functionName"
@@ -307,6 +335,21 @@ public struct ACPToolCallEvent: @unchecked Sendable {
               let str = String(data: data, encoding: .utf8) else { return "{}" }
         return str
     }
+
+    /// A one-line label for a call that arrived without `rawInput`: the
+    /// first location path (the tool's full `path` argument — the same
+    /// value `HermesToolCall.argumentsSummary` shows once the call is
+    /// reloaded from state.db), else the title's preview
+    /// (`build_tool_title` → `"<name>: <preview>"`, the per-tool preview
+    /// the CLI/TUI render, `acp_adapter/tools.py:193-198` — the command for
+    /// `terminal`, the query for `web_search`). The path comes first because
+    /// read_file's preview is only the basename. Nil when the start event
+    /// carries neither.
+    public var livePreview: String? {
+        if let path = locationPaths.first(where: { !$0.isEmpty }) { return path }
+        let preview = argumentsSummary
+        return preview.isEmpty ? nil : preview
+    }
 }
 
 /// `@unchecked Sendable` for the same reason as `ACPToolCallEvent`:
@@ -319,10 +362,13 @@ public struct ACPToolCallUpdateEvent: @unchecked Sendable {
     public let content: String
     public let rawOutput: String?
     /// Tool-call arguments as carried on the `tool_call_update`
-    /// notification. Hermes sometimes omits `rawInput` on the initial
-    /// `tool_call` event and only populates it here — used to backfill
-    /// the stored call's `"{}"` placeholder. Defaulted so existing
-    /// call sites (and tests) compile unchanged.
+    /// notification. No Hermes tag sends this today —
+    /// `build_tool_complete` never sets `raw_input`
+    /// (`acp_adapter/tools.py:818-835` @ v2026.9.24) — so the live card's
+    /// label comes from the start event's title instead
+    /// (`ACPToolCallEvent.livePreview`). Kept as a backfill for the
+    /// stored call's `"{}"` placeholder should a host ever send it.
+    /// Defaulted so existing call sites (and tests) compile unchanged.
     public let rawInput: [String: Any]?
 
     public init(
@@ -356,15 +402,23 @@ public struct ACPPermissionRequestEvent: Sendable {
     public let toolCallTitle: String
     public let toolCallKind: String
     public let options: [(optionId: String, name: String)]
+    /// The request's own tool-call id (`perm-check-N` / `edit-approval-N`
+    /// on Hermes, acp_adapter/permissions.py:54-64 @ v2026.9.24). Hermes
+    /// closes that id with a `tool_call_update` once it has an answer —
+    /// including when it gave up waiting and denied the tool itself.
+    /// Empty when the request carried none.
+    public let toolCallId: String
 
     public init(
         toolCallTitle: String,
         toolCallKind: String,
-        options: [(optionId: String, name: String)]
+        options: [(optionId: String, name: String)],
+        toolCallId: String = ""
     ) {
         self.toolCallTitle = toolCallTitle
         self.toolCallKind = toolCallKind
         self.options = options
+        self.toolCallId = toolCallId
     }
 }
 
@@ -403,6 +457,54 @@ public struct ACPPromptResult: Sendable {
     }
 }
 
+// MARK: - Session provenance
+
+/// Hermes's ACP session provenance (`_meta.hermes.sessionProvenance`,
+/// `build_session_provenance`, acp_adapter/provenance.py @ v2026.9.24).
+///
+/// The ACP session id stays the client's stable handle, but a compression
+/// split in rotation mode moves Hermes's INTERNAL session to a new
+/// continuation row: from then on the turns are stored under
+/// `currentHermesSessionId`. Hermes announces it with a
+/// `session_info_update` after the turn that rotated (`_finish_turn`,
+/// acp_adapter/server.py:952-962), carrying `previousHermesSessionId` and
+/// `reason: "compression"`. Hosts without the extension send no `_meta`,
+/// and nothing changes for them.
+public struct ACPSessionProvenance: Sendable, Equatable {
+    public let currentHermesSessionId: String
+    public let rootHermesSessionId: String?
+    public let previousHermesSessionId: String?
+    public let reason: String?
+
+    public init(
+        currentHermesSessionId: String,
+        rootHermesSessionId: String? = nil,
+        previousHermesSessionId: String? = nil,
+        reason: String? = nil
+    ) {
+        self.currentHermesSessionId = currentHermesSessionId
+        self.rootHermesSessionId = rootHermesSessionId
+        self.previousHermesSessionId = previousHermesSessionId
+        self.reason = reason
+    }
+
+    /// Parse the update's `_meta`; nil when there is no provenance or it
+    /// lacks the current id.
+    nonisolated init?(meta: Any?) {
+        guard let meta = meta as? [String: Any],
+              let hermes = meta["hermes"] as? [String: Any],
+              let provenance = hermes["sessionProvenance"] as? [String: Any],
+              let current = provenance["currentHermesSessionId"] as? String,
+              !current.isEmpty else { return nil }
+        self.init(
+            currentHermesSessionId: current,
+            rootHermesSessionId: provenance["rootHermesSessionId"] as? String,
+            previousHermesSessionId: provenance["previousHermesSessionId"] as? String,
+            reason: provenance["reason"] as? String
+        )
+    }
+}
+
 // MARK: - Event Parsing
 
 public enum ACPEventParser {
@@ -423,7 +525,8 @@ public enum ACPEventParser {
                 sessionId: sessionId,
                 text: text,
                 isCompactionSummary: meta.isSummary,
-                containsCompactionSummary: meta.containsSummary
+                containsCompactionSummary: meta.containsSummary,
+                messageId: extractMessageId(from: update)
             )
 
         case "user_message_chunk":
@@ -438,7 +541,7 @@ public enum ACPEventParser {
 
         case "agent_thought_chunk":
             let text = extractContentText(from: update)
-            return .thoughtChunk(sessionId: sessionId, text: text)
+            return .thoughtChunk(sessionId: sessionId, text: text, messageId: extractMessageId(from: update))
 
         case "tool_call":
             let event = ACPToolCallEvent(
@@ -447,7 +550,9 @@ public enum ACPEventParser {
                 kind: update["kind"] as? String ?? "other",
                 status: update["status"] as? String ?? "pending",
                 content: extractContentArrayText(from: update),
-                rawInput: update["rawInput"] as? [String: Any]
+                rawInput: update["rawInput"] as? [String: Any],
+                locationPaths: (update["locations"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["path"] as? String }
             )
             return .toolCallStart(sessionId: sessionId, call: event)
 
@@ -469,7 +574,12 @@ public enum ACPEventParser {
         case "session_info_update":
             let title = update["title"] as? String
             let updatedAt = update["updatedAt"] as? String
-            return .sessionInfoUpdate(sessionId: sessionId, title: title, updatedAt: updatedAt)
+            return .sessionInfoUpdate(
+                sessionId: sessionId,
+                title: title,
+                updatedAt: updatedAt,
+                provenance: ACPSessionProvenance(meta: update["_meta"])
+            )
 
         default:
             return .unknown(sessionId: sessionId, type: updateType)
@@ -493,12 +603,20 @@ public enum ACPEventParser {
         let event = ACPPermissionRequestEvent(
             toolCallTitle: toolCall["title"] as? String ?? "",
             toolCallKind: toolCall["kind"] as? String ?? "other",
-            options: options
+            options: options,
+            toolCallId: toolCall["toolCallId"] as? String ?? ""
         )
         return .permissionRequest(sessionId: sessionId, requestId: requestId, request: event)
     }
 
     // MARK: - Content Extraction
+
+    /// `messageId` off a chunk update; nil when absent, not a string, or
+    /// empty (an empty id would read as "same reply" for every such chunk).
+    nonisolated private static func extractMessageId(from update: [String: Any]) -> String? {
+        guard let id = update["messageId"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
 
     nonisolated private static func extractContentText(from update: [String: Any]) -> String {
         if let content = update["content"] as? [String: Any],

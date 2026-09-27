@@ -11,7 +11,7 @@ all about the ways it used to say OK when it should not have:
   * lane 5 returning `{}` for a table that changed SHAPE (the v0.21.1 `ALIASES`
     dict-comprehension trap, one table over);
   * lanes 3 and 4 WARN-skipping on a machine with no models.dev cache while the
-    script still printed OK and exited 0 — two of five lanes silently off;
+    script still printed OK and exited 0 — two of the lanes silently off;
   * reading the hermes checkout's WORKING TREE, so the verdict described
     whatever someone had left checked out rather than the tag Scarf targets.
 """
@@ -97,6 +97,45 @@ class LaneFiveFailsClosed(unittest.TestCase):
         # Only the whole FILE being gone is benign (pre-v0.21 checkout); the
         # caller turns None into a SKIPPED lane.
         self.assertIsNone(cht.parse_models_dev_map(FakeSource({})))
+
+
+class LaneTwoModelNormalizeFailsClosed(unittest.TestCase):
+    """Lane 2's second source, `model_normalize._AGGREGATOR_PROVIDERS`.
+
+    Mirroring only providers.py `is_aggregator` missed `nous` (S06-F1), so the
+    lane now unions this set in — and it must fail closed exactly like the
+    other parsers: a reshaped table is an exit, never a silent empty set.
+    """
+
+    def _parse(self, text):
+        return cht.parse_normalize_aggregators(
+            FakeSource({cht.MODEL_NORMALIZE_PY: text}))
+
+    def test_annotated_frozenset_literal_parses(self):
+        self.assertEqual(
+            self._parse('_AGGREGATOR_PROVIDERS: frozenset[str] = frozenset({\n'
+                        '    "openrouter", "nous", "ai-gateway", "kilocode"})\n'),
+            {"openrouter", "nous", "ai-gateway", "kilocode"})
+
+    def test_plain_assignment_and_set_literal_parse(self):
+        # v2026.9.24's models_catalog_static.py spells a sibling set this way.
+        self.assertEqual(self._parse('_AGGREGATOR_PROVIDERS = {"nous"}\n'), {"nous"})
+
+    def test_absent_file_is_a_skip_not_an_error(self):
+        self.assertIsNone(cht.parse_normalize_aggregators(FakeSource({})))
+
+    def test_renamed_table_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self._parse('_AGGREGATORS: frozenset = frozenset({"nous"})\n')
+        self.assertIn("not a literal set", str(ctx.exception.code))
+
+    def test_nonliteral_set_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit):
+            self._parse('_AGGREGATOR_PROVIDERS = frozenset(_BASE | {"nous"})\n')
+
+    def test_empty_set_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit):
+            self._parse('_AGGREGATOR_PROVIDERS = frozenset()\n')
 
 
 class AliasesShapeFailsClosed(unittest.TestCase):
@@ -313,8 +352,323 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
             self.fail(reason)
         code, text = self._run()
         self.assertEqual(code, 0, text)
-        self.assertIn("lanes=5/5", text)
+        self.assertIn("lanes=7/7", text)
         self.assertIn(f"tag {cht.HERMES_TARGET_TAG}", text)
+
+
+class LaneTwoCatchesAMissingNous(unittest.TestCase):
+    """End to end at the target tag: a Swift set without `nous` must FAIL.
+
+    `nous` is only in `model_normalize._AGGREGATOR_PROVIDERS`, never marked
+    `is_aggregator` in providers.py — so this is the case the old lane
+    passed while every Nous user saw a false mismatch banner (S06-F1).
+    """
+
+    def setUp(self):
+        _require_target_checkout(self)
+        real = cht.PREFLIGHT_SWIFT
+        text = open(real).read()
+        self.assertIn('"nous",', text)
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text.replace('"nous",', "", 1))
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.PREFLIGHT_SWIFT = tmp.name
+        self.addCleanup(setattr, cht, "PREFLIGHT_SWIFT", real)
+
+    def test_missing_nous_fails_the_aggregator_lane(self):
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+        self.assertEqual(ctx.exception.code, 1, out.getvalue())
+        self.assertIn("[aggregators] Hermes aggregators missing", out.getvalue())
+        self.assertIn("nous", out.getvalue())
+
+
+class LaneSixProviderEnvVars(unittest.TestCase):
+    """`parse_provider_env_vars` rebuilds `_has_any_provider_configured`'s set
+    statically, and exits on any shape it can't read."""
+
+    MAIN = textwrap.dedent("""
+        def _has_any_provider_configured(*, strict_profile_scope=False):
+            provider_env_vars = {
+                "OPENROUTER_API_KEY",
+                "OPENAI_BASE_URL",
+            }
+            for pconfig in PROVIDER_REGISTRY.values():
+                pass
+    """)
+    AUTH = textwrap.dedent("""
+        _REGISTRY_ROWS: Tuple[Any, ...] = (
+            ProviderConfig("nous", "Nous", "oauth_device_code", inference_base_url="x"),
+            ("deepseek", "DeepSeek", "https://x", ("DEEPSEEK_API_KEY",), "DEEPSEEK_BASE_URL"),
+            ("bedrock", "AWS", "https://x", ("AWS_THING",), "BEDROCK_BASE_URL", "aws_sdk"),
+        )
+    """)
+    PLUG = '_REGISTRY_PLUGIN_SKIP = frozenset({"openrouter", "custom"})\n'
+
+    class DirSource(FakeSource):
+        def __init__(self, files, dirs):
+            super().__init__(files)
+            self.dirs = dirs
+
+        def listdir(self, relpath):
+            return self.dirs.get(relpath, [])
+
+    def _src(self, main=None, auth=None, plug=None, plugins=None):
+        files = {cht.MAIN_PY: self.MAIN if main is None else main,
+                 cht.AUTH_PY: self.AUTH if auth is None else auth,
+                 cht.AUTH_PLUGIN_PY: self.PLUG if plug is None else plug}
+        plugins = plugins or {}
+        for name, text in plugins.items():
+            files[f"plugins/model-providers/{name}/__init__.py"] = text
+        return self.DirSource(files, {"plugins/model-providers": sorted(plugins)})
+
+    def test_builtin_rows_and_literal_set(self):
+        vars_, ids, warn = cht.parse_provider_env_vars(self._src())
+        # aws_sdk rows are not counted; the literal set is.
+        self.assertEqual(vars_, {"OPENROUTER_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY"})
+        self.assertEqual(ids, {"nous", "deepseek", "bedrock"})
+        self.assertEqual(warn, set())
+
+    def test_plugin_mirroring_rules(self):
+        plugins = {
+            "fireworks": 'p = ProviderProfile(name="fireworks", env_vars=("FIREWORKS_API_KEY", "FIREWORKS_BASE_URL"))\nregister_provider(p)\n',
+            # Already a built-in row: never mirrored, even with new vars.
+            "deepseek": 'p = ProviderProfile(name="deepseek", env_vars=("OTHER_KEY",))\nregister_provider(p)\n',
+            # In _REGISTRY_PLUGIN_SKIP.
+            "openrouter": 'p = ProviderProfile(name="openrouter", env_vars=("OR_ONLY",))\nregister_provider(p)\n',
+            # Not api_key.
+            "oauthy": 'p = P(name="oauthy", auth_type="oauth_external", env_vars=("OAUTHY_KEY",))\nregister_provider(p)\n',
+            # Factory: reported, not guessed.
+            "kimi": 'k = _kimi("kimi", (), ("KIMI_API_KEY",), "x")\nregister_provider(k)\n',
+        }
+        vars_, _, warn = cht.parse_provider_env_vars(self._src(plugins=plugins))
+        self.assertIn("FIREWORKS_API_KEY", vars_)
+        self.assertNotIn("FIREWORKS_BASE_URL", vars_)
+        for absent in ("OTHER_KEY", "OR_ONLY", "OAUTHY_KEY"):
+            self.assertNotIn(absent, vars_)
+        self.assertEqual(warn, {"kimi"})
+
+    def test_a_profile_with_only_url_vars_keeps_them(self):
+        # `_api_key_env_fields`: `tuple(non-URL vars) or pp.env_vars`.
+        plugins = {"urlonly": 'p = ProviderProfile(name="urlonly", env_vars=("URLONLY_BASE_URL",))\nregister_provider(p)\n'}
+        vars_, _, _ = cht.parse_provider_env_vars(self._src(plugins=plugins))
+        self.assertIn("URLONLY_BASE_URL", vars_)
+
+    def _exits(self, **kw):
+        with self.assertRaises(SystemExit):
+            cht.parse_provider_env_vars(self._src(**kw))
+
+    def test_renamed_literal_set_exits(self):
+        self._exits(main=self.MAIN.replace("provider_env_vars", "provider_vars"))
+
+    def test_missing_function_exits(self):
+        self._exits(main="def something_else():\n    pass\n")
+
+    def test_unknown_row_shape_exits(self):
+        self._exits(auth="_REGISTRY_ROWS = (make_row('x'),)\n")
+
+    def test_nonliteral_key_tuple_exits(self):
+        self._exits(auth='_REGISTRY_ROWS = (("x", "X", "u", KEYS),)\n')
+
+    def test_missing_skip_set_exits(self):
+        self._exits(plug="SOMETHING = 1\n")
+
+    def test_missing_file_exits(self):
+        with self.assertRaises(SystemExit):
+            cht.parse_provider_env_vars(FakeSource({cht.MAIN_PY: self.MAIN}))
+
+
+class LaneSixCatchesDrift(unittest.TestCase):
+    """End to end at the target tag: dropping a var Hermes counts, or adding
+    one it doesn't, must FAIL the provider-env-vars lane."""
+
+    def setUp(self):
+        _require_target_checkout(self)
+        self.real = cht.CREDENTIALS_SWIFT
+        self.text = open(self.real).read()
+        self.addCleanup(setattr, cht, "CREDENTIALS_SWIFT", self.real)
+
+    def _run_with(self, text):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.CREDENTIALS_SWIFT = tmp.name
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+        return ctx.exception.code, out.getvalue()
+
+    def test_a_missing_var_fails(self):
+        self.assertIn('"DEEPSEEK_API_KEY", ', self.text)
+        code, out = self._run_with(self.text.replace('"DEEPSEEK_API_KEY", ', "", 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[provider-env-vars] Hermes provider env vars missing", out)
+        self.assertIn("DEEPSEEK_API_KEY", out)
+
+    def test_a_missing_plugin_only_var_fails(self):
+        # FIREWORKS_API_KEY comes only from the fireworks plugin mirror.
+        self.assertIn('"FIREWORKS_API_KEY", ', self.text)
+        code, out = self._run_with(self.text.replace('"FIREWORKS_API_KEY", ', "", 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FIREWORKS_API_KEY", out)
+
+    def test_an_extra_var_fails(self):
+        code, out = self._run_with(self.text.replace(
+            '"ACTUAL_API_KEY", ', '"ACTUAL_API_KEY", "GROQ_API_KEY", ', 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[provider-env-vars] providerEnvVars entries", out)
+        self.assertIn("GROQ_API_KEY", out)
+
+
+class LaneSevenManifestReader(unittest.TestCase):
+    """The YAML-subset reader lane 7 uses instead of PyYAML: every shape the
+    manifests use reads exactly, and anything else exits instead of reading
+    as an empty manifest."""
+
+    def test_the_manifest_shapes_read_exactly(self):
+        text = textwrap.dedent("""\
+            # comment
+            manifest_version: 1
+            name: asana
+            description: >-
+              Tasks, projects,
+              and goals.
+            transport:
+              type: http
+              url: https://mcp.asana.com/v2/mcp  # trailing comment
+            auth:
+              type: oauth
+              env:
+                - name: ASANA_CLIENT_ID
+                  prompt: "Client ID (a → b)"
+                  secret: false
+                - name: ASANA_CLIENT_SECRET
+                  prompt: 'Client secret'
+            tools:
+              default_enabled:
+                - one
+                - two
+            post_install: |
+              line one
+
+              line three
+            """)
+        m = cht.parse_manifest_yaml(text, "fixture")
+        self.assertEqual(m["name"], "asana")
+        self.assertEqual(m["manifest_version"], 1)
+        self.assertEqual(m["description"], "Tasks, projects, and goals.")
+        self.assertEqual(m["transport"], {"type": "http", "url": "https://mcp.asana.com/v2/mcp"})
+        self.assertEqual(m["auth"]["env"], [
+            {"name": "ASANA_CLIENT_ID", "prompt": "Client ID (a → b)", "secret": False},
+            {"name": "ASANA_CLIENT_SECRET", "prompt": "Client secret"},
+        ])
+        self.assertEqual(m["tools"]["default_enabled"], ["one", "two"])
+        self.assertEqual(m["post_install"], "line one\n\nline three\n")
+
+    def test_a_quoted_scalar_with_a_comment_reads(self):
+        m = cht.parse_manifest_yaml('url: "https://x/y"  # comment\nname: \'a # b\'\n', "fixture")
+        self.assertEqual(m, {"url": "https://x/y", "name": "a # b"})
+
+    def test_a_flow_collection_exits(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            cht.parse_manifest_yaml("name: x\ntools:\n  default_enabled: [a, b]\n", "fixture")
+
+    def test_a_line_it_cannot_read_exits(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            cht.parse_manifest_yaml("name: x\n? complex key\n", "fixture")
+
+    def test_every_manifest_at_the_target_tag_matches_pyyaml(self):
+        _require_target_checkout(self)
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML not installed; the cross-check needs it")
+        src = cht.HermesSource(HERMES_CHECKOUT, cht.HERMES_TARGET_TAG)
+        dirs = src.listdir(cht.OPTIONAL_MCPS_DIR)
+        self.assertGreater(len(dirs), 60)
+        for d in dirs:
+            text = src.read(f"{cht.OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+            if text is None:
+                continue
+            self.assertEqual(cht.parse_manifest_yaml(text, d), yaml.safe_load(text), d)
+
+
+class LaneSevenCatchesDrift(unittest.TestCase):
+    """End to end at the target tag: the pre-R18c roster (asana's retired
+    /sse endpoint and no install prompts, the retired n8n bridge) FAILs, and
+    so does a dropped tool name."""
+
+    def setUp(self):
+        _require_target_checkout(self)
+        self.real = cht.MCP_CATALOG_SWIFT
+        self.text = open(self.real).read()
+        self.addCleanup(setattr, cht, "MCP_CATALOG_SWIFT", self.real)
+
+    def _run_with(self, text):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.MCP_CATALOG_SWIFT = tmp.name
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            try:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue()
+
+    def test_the_current_roster_passes(self):
+        code, out = self._run_with(self.text)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("[mcp-catalog]", out)
+
+    def test_the_old_asana_entry_fails(self):
+        old = self.text.replace('url: "https://mcp.asana.com/v2/mcp",', 'url: "https://mcp.asana.com/sse",', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' url", out)
+
+    def test_a_missing_install_prompt_fails(self):
+        old = self.text.replace('.init(name: "ASANA_CLIENT_SECRET", prompt: "Asana MCP app Client secret"),', "", 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' env", out)
+
+    def test_the_retired_n8n_bridge_fails(self):
+        old = self.text.replace('name: "n8n-official",', 'name: "n8n",', 1)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("missing from OptionalMCPCatalog.entries: n8n-official", out)
+        self.assertIn("not in Hermes's catalog: n8n", out)
+
+    def test_a_wrong_secret_flag_fails(self):
+        old = self.text.replace('prompt: "Asana MCP app Client secret"),',
+                                'prompt: "Asana MCP app Client secret", isSecret: false),', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'asana' env", out)
+
+    def test_a_secret_before_a_plain_prompt_fails(self):
+        manifest = {"auth": {"type": "oauth", "env": [
+            {"name": "TOKEN"}, {"name": "URL", "secret": False}]}}
+        self.assertEqual(cht.manifest_fields(manifest)["env"], ["TOKEN", "URL:plain"])
+
+    def test_a_dropped_tool_fails(self):
+        old = self.text.replace('"list_tables", "list_views", "query"', '"list_tables", "query"', 1)
+        self.assertNotEqual(old, self.text)
+        code, out = self._run_with(old)
+        self.assertEqual(code, 1, out)
+        self.assertIn("'motherduck' default_enabled", out)
 
 
 if __name__ == "__main__":

@@ -249,8 +249,14 @@ struct SettingsView: View {
                 // Hermes asks it (`str(effort).strip()`) — a whitespace-only
                 // value is the absent key here too, and read raw it rendered
                 // as a blank value beside the label.
-                value: HermesReasoningEffort.pickerSelection(for: vm.config.reasoningEffort).isEmpty
-                    ? String(localized: "Hermes default") : vm.config.reasoningEffort
+                // S05-F2: a stored disable spelling (`false`, which the Mac
+                // writes for "none" on v0.21.1+) reads as "none" here too.
+                value: {
+                    let shown = HermesReasoningEffort.agentPickerSelection(
+                        for: vm.config.reasoningEffort, capabilities: caps
+                    )
+                    return shown.isEmpty ? String(localized: "Hermes default") : shown
+                }()
             )
             // Round-5 decision 17. The Mac renders this beside its picker
             // (`UnsupportedEffortNote`, `SettingsComponents.swift:395-415`);
@@ -307,7 +313,16 @@ struct SettingsView: View {
             LabeledContent("Skin", value: vm.config.display.skin)
             yesNoRow("Compact", vm.config.display.compact)
             yesNoRow("Inline diffs", vm.config.display.inlineDiffs)
-            LabeledContent("Personality", value: vm.config.personality)
+            // Same scope caveat as the Mac Settings row (S03-F2): Hermes
+            // applies `display.personality` only in the CLI, TUI and
+            // messaging gateway (`hermes_cli/personality.py:118-124` @
+            // v2026.9.24); the ACP adapter ScarfGo chats through ignores it.
+            VStack(alignment: .leading, spacing: 2) {
+                LabeledContent("Personality", value: vm.config.personality)
+                Text("Applies to Hermes CLI, TUI and messaging-gateway sessions. Scarf chats don't use it — Hermes doesn't apply a personality over ACP.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         chatScarfSection
     }

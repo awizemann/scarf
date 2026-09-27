@@ -241,7 +241,10 @@ struct ChatInspectorPane: View {
 
     private func argumentsSection(call: HermesToolCall) -> some View {
         section("ARGUMENTS") {
-            Text(formatJSON(call.arguments))
+            // A live built-in call arrives without arguments (Hermes sends
+            // `rawInput` only for unknown tools); show Hermes's own preview
+            // of it rather than a bare `{}`.
+            Text(call.hasNoArguments ? (call.livePreview ?? call.arguments) : formatJSON(call.arguments))
                 .font(ScarfFont.monoSmall)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .textSelection(.enabled)

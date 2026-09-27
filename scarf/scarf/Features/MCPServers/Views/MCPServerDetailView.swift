@@ -16,6 +16,7 @@ struct MCPServerDetailView: View {
     var onSignIn: () -> Void = {}
 
     @State private var showDeleteConfirm = false
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
         ScrollView {
@@ -245,12 +246,23 @@ struct MCPServerDetailView: View {
         )
     }
 
+    /// `include: []` is a whitelist of nothing from Hermes v0.20.6: Hermes
+    /// registers no tools from this server, the opposite of "(all)". Older
+    /// hosts ignored an empty include, so there it still reads "(all)".
+    private var includeSummary: String {
+        if !server.toolsInclude.isEmpty { return server.toolsInclude.joined(separator: ", ") }
+        let emptyIsWhitelist = capabilitiesStore?.capabilities.hasMCPEmptyIncludeWhitelist == true
+        return server.toolsIncludeIsExplicit && emptyIsWhitelist
+            ? String(localized: "(none — no tools registered)")
+            : String(localized: "(all)")
+    }
+
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Tool Filters")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Include", value: server.toolsInclude.isEmpty ? String(localized: "(all)") : server.toolsInclude.joined(separator: ", "))
+            summaryRow(label: "Include", value: includeSummary)
             summaryRow(label: "Exclude", value: server.toolsExclude.isEmpty ? "—" : server.toolsExclude.joined(separator: ", "))
             summaryRow(label: "Resources", value: server.resourcesEnabled ? String(localized: "enabled") : String(localized: "disabled"))
             summaryRow(label: "Prompts", value: server.promptsEnabled ? String(localized: "enabled") : String(localized: "disabled"))
@@ -272,8 +284,8 @@ struct MCPServerDetailView: View {
             Text("Timeouts")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Connect", value: server.connectTimeout.map { "\($0)s" } ?? String(localized: "default"))
-            summaryRow(label: "Call", value: server.timeout.map { "\($0)s" } ?? String(localized: "default"))
+            summaryRow(label: "Connect", value: server.connectTimeout.map { "\(HermesMCPServer.formatSeconds($0))s" } ?? String(localized: "default"))
+            summaryRow(label: "Call", value: server.timeout.map { "\(HermesMCPServer.formatSeconds($0))s" } ?? String(localized: "default"))
         }
         .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -108,15 +108,6 @@ public struct BotAgentConfigService: Sendable {
         context(forProfile: name).paths.soulMD
     }
 
-    /// The argv prefix that scopes an invocation to `name`. Always present.
-    static func profileFlag(_ name: String) -> [String] {
-        // `normalize` maps default/empty/invalid to nil; the flag still gets
-        // the literal `default`, which `resolve_profile_env` resolves to the
-        // ROOT home (`profiles.py:2513-2514`). Passing it beats omitting `-p`,
-        // which would let the host's sticky `active_profile` decide.
-        ["-p", HermesProfileScope.normalize(name) ?? HermesProfileScope.defaultProfileName]
-    }
-
     // MARK: - Reading
 
     /// Snapshot one bot's agent configuration from its own `config.yaml`.
@@ -565,7 +556,9 @@ public struct BotAgentConfigService: Sendable {
     /// which assert on it directly — an argv that silently loses its `-p` is
     /// the Phase B hazard, and it is worth pinning without a subprocess.
     public func argv(forProfile name: String, args: [String]) -> [String] {
-        Self.profileFlag(name) + args
+        // Always present, `-p default` included — see
+        // `HermesProfileScope.profileFlag`.
+        HermesProfileScope.profileFlag(name) + args
     }
 
     /// Spawn `hermes -p <bot> <args…>`.

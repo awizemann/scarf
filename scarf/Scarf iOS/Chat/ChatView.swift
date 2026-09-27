@@ -1624,6 +1624,9 @@ final class ChatController {
     var activeClient: ACPClient? { client }
     private var eventTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
+    /// When the user last answered a permission prompt. The stall
+    /// detector restarts its silence clock here (`ACPStallPolicy`).
+    private var lastPermissionAnsweredAt: Date?
     private var reconnectTask: Task<Void, Never>?
     private var isHandlingDisconnect = false
     private var pendingDraftSave: Task<Void, Never>?
@@ -1866,7 +1869,10 @@ final class ChatController {
             .map(escapeShellArg)
             .map { "'\($0)'" }
             .joined(separator: " ")
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
+        // `-p default` for a root home: the transport can't see a hermes
+        // argv inside `sh -c`, so the script carries the pin itself (S13-F1).
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(pin)\(argv)"
         do {
             let result = try await ctx.makeTransport().asyncRunProcess(
                 executable: "/bin/sh",
@@ -2192,10 +2198,16 @@ final class ChatController {
         }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);
-        // Hermes receives the expanded prompt template body. Other
-        // command sources (ACP, quick_commands) keep going to Hermes
-        // literally. v2.5.
+        // Hermes receives the expanded prompt template body. ACP
+        // commands keep going to Hermes as typed. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
+        // Reconcile the echo against what Hermes will store for THIS wire
+        // text (S02-F1), not the typed text or the image-only placeholder.
+        vm.notePromptWire(
+            displayText: text.isEmpty ? "[image attached]" : text,
+            wireText: wireText,
+            imageCount: images.count
+        )
         await startPrompt(
             client: client,
             sessionId: sessionId,
@@ -2521,18 +2533,6 @@ final class ChatController {
         }
     }
 
-    /// Threshold for read-side stall detection. When the agent is
-    /// actively working (streaming a turn, running a tool) but no byte
-    /// has arrived from the channel for this long, we declare the
-    /// channel dead and route into the reconnect path. Set conservatively
-    /// — Hermes streams thoughts/tools every <1s during normal work, but
-    /// a long-running tool call (a slow bash command, a remote fetch)
-    /// can legitimately hold a turn silent for tens of seconds. Tuned to
-    /// avoid false positives on routine work while still catching the
-    /// "Tailscale/iOS silently severed the TCP socket" symptom (TestFlight
-    /// feedback AObiv7, 2026-05-07) within a window the user will tolerate.
-    private static let stallDetectionSeconds: TimeInterval = 75
-
     /// 5-second heartbeat that catches dead channels which don't
     /// explicitly EOF the stream (e.g., a hung SSH socket waiting
     /// for the next chunk that never arrives). When `isHealthy`
@@ -2540,13 +2540,16 @@ final class ChatController {
     /// `startHealthMonitor`.
     ///
     /// Also detects a silent stall: when the VM thinks the agent is
-    /// working but no byte has arrived from the channel for
-    /// `stallDetectionSeconds`, treat the channel as dead. iOS over
-    /// Tailscale is the symptom — the SSH socket can sit idle for
-    /// minutes before the OS notices, and the user perceives this as
-    /// "streaming just stopped." We don't apply the stall threshold
-    /// when the agent is idle (no prompt in flight) because there's
-    /// genuinely nothing for the channel to send.
+    /// working but no byte has arrived from the channel for too long,
+    /// treat the channel as dead. iOS over Tailscale is the symptom — the
+    /// SSH socket can sit idle for minutes before the OS notices, and the
+    /// user perceives this as "streaming just stopped" (TestFlight
+    /// feedback AObiv7, 2026-05-07). `ACPStallPolicy` decides what "too
+    /// long" is: 75 s while a turn streams, and a much longer ceiling
+    /// while a tool call runs or a permission prompt waits for the user
+    /// (S01-F2), because Hermes is silent in both of those cases. No
+    /// threshold applies when the agent is idle — there's genuinely
+    /// nothing for the channel to send.
     private func startHealthMonitor(client: ACPClient) {
         healthMonitorTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -2560,7 +2563,13 @@ final class ChatController {
                 guard let self else { break }
                 if self.vm.isAgentWorking {
                     let idle = await client.secondsSinceLastIncoming
-                    if idle > Self.stallDetectionSeconds {
+                    if ACPStallPolicy.isStalled(
+                        idleSeconds: idle,
+                        secondsSincePermissionAnswered: self.lastPermissionAnsweredAt.map { Date().timeIntervalSince($0) },
+                        isAgentWorking: self.vm.isAgentWorking,
+                        permissionPending: self.vm.pendingPermission != nil,
+                        toolCallInFlight: self.vm.hasToolCallInFlight
+                    ) {
                         Self.logger.warning(
                             "ACP channel appears stalled — \(Int(idle))s since last byte while agent is working; routing to reconnect"
                         )
@@ -2809,7 +2818,8 @@ final class ChatController {
 
                     // load-only — see the doc comment above for why
                     // resume must never come back here.
-                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: "New
                     // chat", a resume or a project start (`stop()` cancels
@@ -2830,6 +2840,14 @@ final class ChatController {
                         await client?.recentStderr ?? ""
                     }
                     vm.setSessionId(resolvedSessionId)
+                    // Defensive: a load whose `sessionProvenance` names a head
+                    // the transcript does not cover is spanned, so the
+                    // reconcile reads it too. v2026.9.24 reports the
+                    // requested id here (acp_adapter/session.py:444-446).
+                    if let head = loaded.provenance?.currentHermesSessionId {
+                        vm.noteSessionRotation(to: head)
+                        SessionLineageIndex.shared.record(server: context.id, lineage: vm.transcriptSessionIds)
+                    }
                     // Clear any error banner left over from a send that
                     // failed because the channel was torn down by
                     // pauseInBackground (gh#108: user sends, app
@@ -2981,6 +2999,33 @@ final class ChatController {
         }
     }
 
+    /// Apply the project's bound model preset to the session just opened,
+    /// through the same ScarfCore path the Mac uses (S11-F3: ScarfGo
+    /// never called `session/set_model`, so a project chat ran on the
+    /// config.yaml default while the project screen showed the preset).
+    /// Non-fatal: when Hermes refuses the preset the chat says so and
+    /// stays on the default model.
+    private func applyProjectModelPreset(client: ACPClient, sessionId: String, projectPath: String) async {
+        let outcome = await ProjectModelPresetApplier.apply(
+            client: client,
+            sessionId: sessionId,
+            projectPath: projectPath,
+            context: context
+        )
+        switch outcome {
+        case .noBinding, .applied:
+            break
+        case .presetMissing(let id):
+            Self.logger.info("project references deleted model preset \(id, privacy: .public) — using the default model")
+        case .storeUnreadable(let message):
+            Self.logger.warning("couldn't read the project's model preset: \(message, privacy: .public)")
+        case .rejected(let preset, let message):
+            Self.logger.warning("session/set_model failed for preset \(preset.name, privacy: .public): \(message, privacy: .public)")
+            vm.transientHint = String(localized: "Couldn't switch to model preset \u{201C}\(preset.name)\u{201D} — this chat uses the default model.")
+            scheduleTransientHintClear(snapshot: vm.transientHint)
+        }
+    }
+
     /// Inline variant of `start()` that accepts a cwd + attribution
     /// hooks. The default `start()` delegates to this with nil project
     /// fields, so the ACP code path stays single-sourced.
@@ -3024,6 +3069,11 @@ final class ChatController {
                 cwd = await context.resolvedUserHome()
             }
             let sessionId = try await client.newSession(cwd: cwd)
+            // The project's bound model preset, before the composer
+            // unlocks — the Mac does the same (S11-F3).
+            if let projectPath {
+                await applyProjectModelPreset(client: client, sessionId: sessionId, projectPath: projectPath)
+            }
             vm.setSessionId(sessionId)
             loadDraft()
             state = .ready
@@ -3119,10 +3169,16 @@ final class ChatController {
             }
         }
 
-        // Refresh the project's AGENTS.md block before the spawn so a
-        // resumed project chat picks up cron/config changes made since the
-        // chat was created (Hermes re-reads context at every `hermes acp`
-        // boot). Project-attributed sessions only.
+        // Refresh the project's AGENTS.md block before the spawn.
+        // Project-attributed sessions only. This does NOT update what a
+        // resumed chat with history sees (S11-F4): Hermes reuses the
+        // system prompt it stored when the session began, and rebuilds
+        // it only when the model, provider or cwd no longer match
+        // (`agent/conversation_loop.py:681-730,815-838` @ v2026.9.24).
+        // It does reach the fresh session opened below when
+        // `session/load` can't restore this one, and it keeps the file
+        // current for the project's next new chat — cron, slash-command
+        // and project-name changes apply to new chats.
         if let resumePath = resolved?.path {
             await writeProjectContextBlock(projectPath: resumePath, projectName: resolved?.name ?? "")
         }
@@ -3171,10 +3227,16 @@ final class ChatController {
             // state.db below (via the original `sessionID`), so the user sees
             // the past content and can continue in a new context.
             let resolvedID: String
+            var loadedHead: String?
             do {
-                resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
+                let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionID)
+                resolvedID = loaded.sessionId
+                loadedHead = loaded.provenance?.currentHermesSessionId
             } catch {
                 resolvedID = try await client.newSession(cwd: cwd)
+            }
+            if let projectPath = resolved?.path {
+                await applyProjectModelPreset(client: client, sessionId: resolvedID, projectPath: projectPath)
             }
             vm.setSessionId(resolvedID)
             loadDraft()
@@ -3184,9 +3246,15 @@ final class ChatController {
             // `loadSessionHistory` refreshes the SQLite snapshot first
             // so we pick up messages Hermes wrote between the
             // Dashboard's last load and now.
+            // A rotated compression chain is listed under its tip; load
+            // the whole lineage as one transcript, as the Mac does (R11
+            // carry-over). Empty for an ordinary session.
             await vm.loadSessionHistory(
                 sessionId: sessionID,
-                acpSessionId: resolvedID == sessionID ? nil : resolvedID
+                acpSessionId: resolvedID == sessionID ? nil : resolvedID,
+                lineage: RichChatViewModel.lineage(
+                    SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
+                    for: sessionID, addingLoadedHead: loadedHead)
             )
             state = .ready
             lastActiveSessionID = resolvedID
@@ -3202,11 +3270,16 @@ final class ChatController {
     /// Called by `PermissionSheet`.
     func respondToPermission(requestId: Int, optionId: String) async {
         guard let client else { return }
-        await client.respondToPermission(requestId: requestId, optionId: optionId)
         // Pop by id, not "the head": a second request can arrive while
         // this sheet is open, and the head may no longer be the one the
-        // user just answered.
-        vm.resolvePermission(requestId: requestId)
+        // user just answered. Popped BEFORE the reply goes out, as on the
+        // Mac: Hermes closes the request's tool call once it has the
+        // answer, and a close that finds the request still queued is read
+        // as Hermes having given up waiting
+        // (`RichChatViewModel.closePermissionHermesSettled`).
+        vm.resolvePermission(requestId: requestId, answeredWith: optionId)
+        await client.respondToPermission(requestId: requestId, optionId: optionId)
+        lastPermissionAnsweredAt = Date()
     }
 }
 
@@ -3657,7 +3730,10 @@ private struct ToolCallCard: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(call.arguments)
+                // A live built-in call has no arguments on the wire (Hermes
+                // sends `rawInput` only for unknown tools) — show Hermes's
+                // own preview instead of a bare `{}`.
+                Text(call.hasNoArguments ? (call.livePreview ?? call.arguments) : call.arguments)
                     .font(.caption2.monospaced())
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .textSelection(.enabled)

@@ -152,6 +152,35 @@ import Foundation
         }
     }
 
+    /// S08-F3: iOS names the host's zone next to a time-of-day phrase,
+    /// read from the same `config.yaml` key Hermes reads (`timezone`,
+    /// `hermes_time.py:83-106` @ v2026.9.24).
+    @Test @MainActor func cronSchedulePhraseNamesTheConfiguredHostZone() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            try "model:\n  default: m\ntimezone: Pacific/Kiritimati\n".write(
+                to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.scheduleZoneNote == "Pacific/Kiritimati")
+            let job = HermesCronJob(id: "j1", name: "N", prompt: "p", model: nil,
+                                    schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
+                                    enabled: true, state: "scheduled")
+            #expect(vm.schedulePhrase(for: job) == "Daily at 9 AM (Pacific/Kiritimati)")
+        }
+    }
+
+    /// No `timezone` key on a remote host: Hermes uses the server's local
+    /// time, which the phone can't see.
+    @Test @MainActor func cronSchedulePhraseSaysHostTimeWithoutAConfiguredZone() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.scheduleZoneNote == "host time")
+        }
+    }
+
     @Test @MainActor func cronLoadsAndSortsJobs() async throws {
         try await withLocalTransportFactory { [self] in
             let (ctx, home) = try makeFakeHermes()
@@ -433,6 +462,8 @@ import Foundation
         public let contextID: ServerID = UUID()
         public let isRemote: Bool = true
         private let lines: [String]
+        /// The argv of the last `streamLines` call (the remote follow).
+        private(set) var lastStreamArgs: [String]?
 
         init(lines: [String]) { self.lines = lines }
 
@@ -455,7 +486,8 @@ import Foundation
         }
         #endif
         func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
-            AsyncThrowingStream { continuation in
+            lastStreamArgs = args
+            return AsyncThrowingStream { continuation in
                 Task {
                     for line in lines {
                         continuation.yield(line)
@@ -505,6 +537,22 @@ import Foundation
         #expect(entries[1].level == .warning)
         #expect(entries[2].level == .error)
         #expect(entries[2].message == "boom")
+    }
+
+    /// S14-F6: the follow must start at the end of the file. It used to be
+    /// `tail -n 200 -F`, whose first 200 lines repeated the window
+    /// `readLastLines` had just shown.
+    @Test @MainActor func hermesLogServiceRemoteFollowStartsAtTheEnd() async throws {
+        let scripted = ScriptedTransport(lines: [])
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = { _, _, _ in scripted }
+
+        let ctx = ServerContext(id: UUID(), displayName: "t", kind: .ssh(SSHConfig(host: "h")))
+        let service = HermesLogService(context: ctx)
+        await service.openLog(path: "/fake/agent.log")
+        defer { Task { await service.closeLog() } }
+        #expect(scripted.lastStreamArgs == ["-n", "0", "-F", "/fake/agent.log"])
     }
 
     @Test @MainActor func hermesLogServiceReadLastLinesUsesOneShotTail() async throws {

@@ -231,19 +231,38 @@ public final class SkillsViewModel {
         isLoading = false
     }
 
-    /// Read the curator's pinned-skills list from
-    /// `~/.hermes/skills/.curator_state` (JSON despite the lack of an
-    /// extension). Pre-v0.12 hosts won't have this file yet — return
-    /// an empty set so the pin badge stays hidden.
+    /// Names of the skills the curator has pinned.
+    ///
+    /// Hermes keeps a pin on the skill's own record in
+    /// `~/.hermes/skills/.usage.json` — a JSON object keyed by skill name
+    /// whose values carry `"pinned": true|false` (`tools/skill_usage.py:
+    /// 345-350,366-374`, `set_pinned` at `:568-574` @ v2026.9.24). This used
+    /// to read `pinned` / `pinned_skills` from `.curator_state`, a file that
+    /// only ever holds scheduler keys (`agent/curator.py:43-56`), so the
+    /// "Pinned by curator" badge could never appear (S10-F3). A host with
+    /// no curator has no sidecar and gets an empty set, as before.
     nonisolated static func readPinnedSkillNames(context: ServerContext) -> Set<String> {
-        guard let data = context.readData(context.paths.curatorStateFile),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let data = context.readData(context.paths.skillsUsageFile) else { return [] }
+        return parsePinnedSkillNames(data)
+    }
+
+    /// Pure half of `readPinnedSkillNames`, for the tests. Non-object
+    /// records are dropped the way `load_usage` drops them; only a literal
+    /// JSON `true` counts, matching `rec.get("pinned")` for the values
+    /// `set_pinned` writes (`bool(pinned)`).
+    nonisolated static func parsePinnedSkillNames(_ data: Data) -> Set<String> {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [] }
-        // Curator stores pins in either `pinned: [name, ...]` or
-        // `pinned_skills: [name, ...]` depending on Hermes version —
-        // accept both shapes so we don't break on a future rename.
-        let raw = (obj["pinned"] as? [String]) ?? (obj["pinned_skills"] as? [String]) ?? []
-        return Set(raw)
+        var pinned: Set<String> = []
+        for (name, value) in obj {
+            guard let record = value as? [String: Any],
+                  let flag = record["pinned"] as? NSNumber,
+                  CFGetTypeID(flag) == CFBooleanGetTypeID(),
+                  flag.boolValue
+            else { continue }
+            pinned.insert(name)
+        }
+        return pinned
     }
 
     /// Read the `skills.disabled:` array from `~/.hermes/config.yaml`.
@@ -718,7 +737,19 @@ public final class SkillsViewModel {
     /// skills.
     nonisolated static let updateAllArgs = ["skills", "update"]
 
-    public func uninstallHubSkill(_ identifier: String) {
+    /// The positional `hermes skills uninstall` takes: the BARE skill name
+    /// (`lock.get_installed(skill_name)`, `tools/skills_hub_install.py:205-210`
+    /// @ v2026.9.24). `skill.id` is the `<category>/<name>` path below
+    /// skills/, which the CLI refuses — at exit 0 (t-ec6d2e6d, S10-F2).
+    nonisolated static func uninstallIdentifier(for skill: HermesSkill) -> String {
+        skill.name
+    }
+
+    /// Uninstall a hub skill. Takes the skill, not a string, so no view can
+    /// hand the CLI the `<category>/<name>` id — iOS did exactly that after
+    /// the Mac was fixed (S10-F2).
+    public func uninstallHubSkill(_ skill: HermesSkill) {
+        let identifier = Self.uninstallIdentifier(for: skill)
         let bin = context.paths.hermesBinary
         let xport = transport
         Task { [weak self] in

@@ -223,6 +223,28 @@ public struct HermesMessage: Identifiable, Sendable {
     /// messages with empty `toolCalls`; the background hydrate splices
     /// the parsed values in without re-fetching the conversational
     /// columns.
+    /// Return a copy of this message with `content` replaced — a
+    /// plugin-rewritten reply Hermes re-sends under the streamed bubble's id.
+    public func withContent(_ newContent: String) -> HermesMessage {
+        HermesMessage(
+            id: id,
+            sessionId: sessionId,
+            role: role,
+            content: newContent,
+            toolCallId: toolCallId,
+            toolCalls: toolCalls,
+            toolName: toolName,
+            timestamp: timestamp,
+            tokenCount: tokenCount,
+            finishReason: finishReason,
+            reasoning: reasoning,
+            reasoningContent: reasoningContent,
+            reasoningContentAvailable: reasoningContentAvailable,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
+        )
+    }
+
     public func withToolCalls(_ newCalls: [HermesToolCall]) -> HermesMessage {
         HermesMessage(
             id: id,
@@ -254,6 +276,15 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     /// the real arguments — `RichChatViewModel.handleToolCallComplete`
     /// backfills them in place.
     public var arguments: String
+
+    /// One-line label for a LIVE call: the ACP `tool_call`'s first
+    /// location path, else Hermes's title preview (see
+    /// `ACPToolCallEvent.livePreview`). Built-in tools arrive without
+    /// `rawInput`, so `arguments` stays `"{}"` and this is the only thing
+    /// saying which file was read or which command ran. Nil for calls
+    /// loaded from `state.db` (those carry real arguments); never
+    /// persisted via Codable.
+    public var livePreview: String?
 
     /// Wall-clock duration of the tool call. Set on ACP `toolCallComplete`
     /// (or equivalent) by `RichChatViewModel`. Nil for sessions loaded
@@ -320,7 +351,8 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         arguments: String,
         duration: TimeInterval? = nil,
         exitCode: Int? = nil,
-        startedAt: Date? = nil
+        startedAt: Date? = nil,
+        livePreview: String? = nil
     ) {
         self.callId = callId
         self.functionName = functionName
@@ -328,6 +360,7 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         self.duration = duration
         self.exitCode = exitCode
         self.startedAt = startedAt
+        self.livePreview = livePreview
     }
 
     public init(from decoder: Decoder) throws {
@@ -349,6 +382,7 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         duration = nil
         exitCode = nil
         startedAt = nil
+        livePreview = nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -371,16 +405,24 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         }
     }
 
+    /// True when `arguments` carries nothing — the `"{}"` placeholder a
+    /// live built-in call is stored with (no `rawInput`), or empty.
+    public var hasNoArguments: Bool {
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "{}"
+    }
+
     public var argumentsSummary: String {
+        // A live built-in call has no arguments on the wire; Hermes's own
+        // title preview is the summary (see `livePreview`).
+        if hasNoArguments { return livePreview ?? "" }
         guard let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            // The literal "{}" placeholder (tool_call event without
-            // rawInput) must never leak into the UI as a raw token.
-            return arguments == "{}" ? "" : arguments
+            return arguments
         }
         // Empty argument object → nothing meaningful to summarize.
         // Without this the fallthrough below rendered the raw "{}".
-        if json.isEmpty { return "" }
+        if json.isEmpty { return livePreview ?? "" }
         if let command = json["command"] as? String {
             return command
         }

@@ -63,9 +63,14 @@ struct SessionsView: View {
                 activeFilterSummary
             }
             ScrollView {
-                sessionsTable
-                    .padding(.horizontal, ScarfSpace.s6)
-                    .padding(.vertical, ScarfSpace.s3)
+                VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+                    if let err = viewModel.loadError {
+                        StateReadErrorBanner(context: viewModel.context, message: err)
+                    }
+                    sessionsTable
+                }
+                .padding(.horizontal, ScarfSpace.s6)
+                .padding(.vertical, ScarfSpace.s3)
             }
         }
         .background(ScarfColor.backgroundPrimary)
@@ -103,7 +108,13 @@ struct SessionsView: View {
                 .disabled(viewModel.isDeleting)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently delete the session and all its messages.")
+            // A rotated compression chain is one row but several session
+            // rows; the delete removes every one (R14-3).
+            if viewModel.deleteSegmentCount > 1 {
+                Text("This conversation was compressed into \(viewModel.deleteSegmentCount) linked segments. Deleting it permanently deletes all \(viewModel.deleteSegmentCount) segments and their messages.")
+            } else {
+                Text("This will permanently delete the session and all its messages.")
+            }
         }
     }
 
@@ -409,11 +420,19 @@ struct SessionsView: View {
     }
 
     private var emptyState: some View {
-        Text("No sessions match this filter.")
-            .scarfStyle(.body)
-            .foregroundStyle(ScarfColor.foregroundMuted)
-            .frame(maxWidth: .infinity)
-            .padding(ScarfSpace.s10)
+        // With nothing loaded and a read error, "no sessions match" would
+        // be a claim about the data; the banner above says what happened.
+        Group {
+            if viewModel.loadError != nil && viewModel.sessions.isEmpty {
+                Text("Sessions couldn't be loaded.")
+            } else {
+                Text("No sessions match this filter.")
+            }
+        }
+        .scarfStyle(.body)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .frame(maxWidth: .infinity)
+        .padding(ScarfSpace.s10)
     }
 
     /// Hermes rebuilds `messages_fts` in chunks; while it does, MATCH
@@ -497,6 +516,7 @@ struct SessionsView: View {
             set: { presented in
                 if !presented {
                     viewModel.selectedSession = nil
+                    viewModel.selectedSessionListingNote = nil
                     viewModel.messages = []
                 }
             }
@@ -514,6 +534,7 @@ struct SessionsView: View {
                     Spacer()
                     Button("Done") {
                         viewModel.selectedSession = nil
+                        viewModel.selectedSessionListingNote = nil
                         viewModel.messages = []
                     }
                     .buttonStyle(ScarfGhostButton())
@@ -521,6 +542,14 @@ struct SessionsView: View {
                 }
                 .padding(.horizontal, ScarfSpace.s4)
                 .padding(.vertical, ScarfSpace.s2)
+                if let note = viewModel.selectedSessionListingNote {
+                    Label(note, systemImage: "archivebox")
+                        .scarfStyle(.footnote)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, ScarfSpace.s4)
+                        .padding(.bottom, ScarfSpace.s2)
+                }
                 Divider()
                 SessionDetailView(
                     session: session,

@@ -27,9 +27,12 @@ struct MemoryTab: View {
 
         SettingsSection(title: "External Provider", icon: "externaldrive.connected.to.line.below") {
             PickerRow(label: "Provider", selection: viewModel.config.memoryProvider, options: viewModel.memoryProviders) { viewModel.setMemoryProvider($0) }
-            if viewModel.config.memoryProvider == "honcho" {
-                ToggleRow(label: "Honcho Eager Init", isOn: viewModel.config.honchoInitOnSessionStart) { viewModel.setHonchoInitOnSessionStart($0) }
-            }
+            // No "Honcho Eager Init" toggle: Hermes reads `initOnSessionStart`
+            // only from the honcho.json host block
+            // (`plugins/memory/honcho/client.py:108-118,323` @ v2026.9.24),
+            // never from config.yaml, so the row Scarf had wrote a key nothing
+            // read (T3-F1). Hermes's own web dashboard edits that block
+            // (`hermes_cli/web_routers/memory_providers.py:310`).
             HStack {
                 Text("Setup")
                     .font(.caption)

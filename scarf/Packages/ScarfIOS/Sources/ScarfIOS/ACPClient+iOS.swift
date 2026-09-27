@@ -72,11 +72,16 @@ public extension ACPClient {
         }
         let client = try await openSSHClient(config: sshConfig, key: key)
 
-        let command = buildACPCommand(
-            hermesBinary: context.paths.hermesBinary,
+        // Through `/bin/sh -c`: the PATH/HERMES_HOME assignment prefix is
+        // sh syntax, and the exec string is read by the user's LOGIN shell,
+        // which may be csh/tcsh (see `CitadelServerTransport.viaPOSIXShell`).
+        // The binary is its shell word, so a probed path with a space stays
+        // one word. `exec` inside the sh keeps stdio binary-clean.
+        let command = CitadelServerTransport.viaPOSIXShell(buildACPCommand(
+            hermesBinary: context.paths.hermesBinaryShellWord,
             home: context.paths.home,
             projectCwd: projectCwd
-        )
+        ))
 
         return try await SSHExecACPChannel(
             client: client,
@@ -117,17 +122,22 @@ public extension ACPClient {
     ) -> String {
         // Scope the chat session to the selected profile's HERMES_HOME
         // (#120, Design B), so chat reads/writes the same profile the rest
-        // of the app shows. Empty for a default/root home → unchanged
-        // `exec hermes acp`. `home` already carries the profile-resolved
+        // of the app shows. Empty for the standard `~/.hermes` root; a custom
+        // root is named so `-p default` below resolves to it (T6-F1). `home` already carries the profile-resolved
         // remoteHome from ScarfGoTabRoot's effectiveConfig.
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+        // A root home can't be pinned with `HERMES_HOME=` alone (Hermes
+        // follows that root's sticky `active_profile`), so it also gets
+        // `-p default` before `acp` (S13-F1). Empty for a named profile,
+        // which the assignment above already pins.
+        let rootPin = HermesProfileScope.rootPinShellFragment(forHome: home)
         let cdPrefix: String
         if let projectCwd, !projectCwd.isEmpty {
             cdPrefix = "cd \(HermesProfileScope.shellQuotePath(projectCwd)); "
         } else {
             cdPrefix = ""
         }
-        return "\(cdPrefix)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) acp"
+        return "\(cdPrefix)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) \(rootPin)acp"
     }
 
     /// Shared SSH connect flow — used by ACPClient and

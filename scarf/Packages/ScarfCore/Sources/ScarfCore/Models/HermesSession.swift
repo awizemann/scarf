@@ -79,6 +79,18 @@ public struct HermesSession: Identifiable, Sendable {
     /// exactly the same per-row cost in `list_sessions_rich`.
     public let lastActive: Date?
 
+    /// Every session id of a rotated compression chain this row stands
+    /// for, root first and live tip last. Empty for an ordinary row.
+    ///
+    /// Hermes lists a rotated chain (`end_reason = 'compression'` on the
+    /// root, continuation rows hanging off it) as ONE row carrying the
+    /// tip's id and live fields, with the root's `started_at` kept for
+    /// ordering (`_project_compression_tips`,
+    /// hermes_state_sessions.py:1028-1065 @ v2026.9.24). Scarf does the
+    /// same in `HermesDataService`, and keeps the whole chain here so the
+    /// transcript can span every segment and a search hit or project
+    /// attribution recorded against the root still finds this row.
+    public let lineageIds: [String]
 
     public init(
         id: String,
@@ -108,7 +120,8 @@ public struct HermesSession: Identifiable, Sendable {
         lastActivityAt: Date? = nil,
         lastActivityDescription: String? = nil,
         lastReadAt: Date? = nil,
-        lastActive: Date? = nil
+        lastActive: Date? = nil,
+        lineageIds: [String] = []
     ) {
         self.id = id
         self.source = source
@@ -138,7 +151,77 @@ public struct HermesSession: Identifiable, Sendable {
         self.lastActivityDescription = lastActivityDescription
         self.lastReadAt = lastReadAt
         self.lastActive = lastActive
+        self.lineageIds = lineageIds
     }
+
+    /// The ids this row answers to: the whole compression chain when it
+    /// stands for one, otherwise just `id`.
+    public var allSessionIds: [String] { lineageIds.isEmpty ? [id] : lineageIds }
+
+    /// True when `sessionId` is this row or any segment of its chain.
+    public func covers(_ sessionId: String) -> Bool {
+        sessionId == id || lineageIds.contains(sessionId)
+    }
+
+    /// `labels` (session id → label: a project name, a preview) with each
+    /// compression-chain row also answering under its own `id` when only an
+    /// earlier segment of the chain has a label. Attribution is recorded
+    /// against the id a chat started with — usually the chain's root — so
+    /// without this a chain listed under its tip id loses its project.
+    public static func carryingLineageLabels(
+        _ labels: [String: String],
+        onto sessions: [HermesSession]
+    ) -> [String: String] {
+        var result = labels
+        for session in sessions where result[session.id] == nil {
+            if let label = session.lineageIds.lazy.compactMap({ labels[$0] }).first {
+                result[session.id] = label
+            }
+        }
+        return result
+    }
+
+    /// This root row projected onto the live tip of its compression chain,
+    /// mirroring Hermes's `_project_compression_tips`: the tip's id and
+    /// live fields (ended_at, end_reason, message and tool counts, title,
+    /// model, recency, read watermark) with the root's `started_at`,
+    /// source, pin and token/cost counters kept. A tip with no title
+    /// inherits the root's, as Hermes does for a rotation cut off before
+    /// the title was carried over.
+    public func projectedOntoCompressionTip(_ tip: HermesSession, lineage: [String]) -> HermesSession {
+        HermesSession(
+            id: tip.id,
+            source: source,
+            userId: userId,
+            model: tip.model,
+            title: tip.title ?? title,
+            parentSessionId: parentSessionId,
+            startedAt: startedAt,
+            endedAt: tip.endedAt,
+            endReason: tip.endReason,
+            messageCount: tip.messageCount,
+            toolCallCount: tip.toolCallCount,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens,
+            cacheWriteTokens: cacheWriteTokens,
+            estimatedCostUSD: estimatedCostUSD,
+            reasoningTokens: reasoningTokens,
+            actualCostUSD: actualCostUSD,
+            costStatus: costStatus,
+            billingProvider: billingProvider,
+            hasCostStatusColumn: hasCostStatusColumn,
+            apiCallCount: apiCallCount,
+            rewindCount: rewindCount,
+            pinned: pinned,
+            lastActivityAt: tip.lastActivityAt,
+            lastActivityDescription: tip.lastActivityDescription,
+            lastReadAt: tip.lastReadAt,
+            lastActive: tip.lastActive,
+            lineageIds: lineage
+        )
+    }
+
     public var isSubagent: Bool { parentSessionId != nil }
 
     /// Whether this conversation has activity the user hasn't seen.
@@ -236,7 +319,8 @@ public struct HermesSession: Identifiable, Sendable {
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,
             lastReadAt: lastReadAt,
-            lastActive: lastActive
+            lastActive: lastActive,
+            lineageIds: lineageIds
         )
     }
 }

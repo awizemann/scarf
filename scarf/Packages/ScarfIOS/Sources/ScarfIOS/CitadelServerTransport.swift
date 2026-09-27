@@ -284,13 +284,14 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// Same PATH guard `asyncRunProcess` uses, so `head` and `sh` resolve on
     /// hosts with a stripped exec PATH.
     nonisolated static func streamScriptCommand(byteCount: Int) -> String {
-        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + "head -c \(byteCount) | /bin/sh"
     }
 
     private func runScript(_ cmd: String, stdin: Data? = nil, timeout: TimeInterval) async throws -> ProcessResult {
         do {
-            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .typedError)
+            // Same login-shell rule as `asyncRunProcess` (`viaPOSIXShell`).
+            return try await runExec(Self.viaPOSIXShell(cmd), stdin: stdin, timeout: timeout, midStream: .typedError)
         } catch let start as ExecStartFailure {
             throw TransportError.other(
                 message: "Failed to start exec stream: \(start.underlying.localizedDescription)")
@@ -806,13 +807,24 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // process-env assignment. Set unconditionally (not just when the
         // executable is hermes) because several callers run hermes INSIDE a
         // `/bin/sh -c "… hermes …"` script — the env propagates to the
-        // child hermes there too. It's empty for a default/root home, so
-        // legacy active_profile behavior is preserved and pre-profile hosts
-        // are unaffected; and it's harmless for the lone non-hermes caller
-        // (`echo $HOME`), which ignores it. Mirrors the file layer, which
-        // scopes via this same `config.remoteHome`.
-        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
-            forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
+        // child hermes there too. It's empty for the standard `~/.hermes`
+        // root, set for a custom root (T6-F1), and harmless for non-hermes
+        // callers (`echo $HOME`), which ignore it.
+        // Mirrors the file layer, which scopes via this same
+        // `config.remoteHome`.
+        //
+        // A root home is also pinned by argv: with only `HERMES_HOME=<root>`
+        // Hermes follows the sticky `active_profile`, so a hermes argv gets
+        // `-p default` in front (S13-F1; see
+        // `HermesProfileScope.pinnedRemoteArguments`, the same rule as
+        // `SSHTransport.composedRemoteCommand`). Script callers that run
+        // hermes inside `/bin/sh -c` put `rootPinShellFragment` in their
+        // script text themselves.
+        let home = config.remoteHome ?? HermesPathSet.defaultRemoteHome
+        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+        let args = HermesProfileScope.pinnedRemoteArguments(
+            executable: executable, args: args, home: home,
+            configuredBinary: config.hermesBinaryHint)
         // `COLUMNS` rides the same assignment prefix as `PATH` and
         // `HERMES_HOME` (P54, round-6). Citadel's raw exec channel is not a
         // TTY and forwards none of the client's environment, so the remote
@@ -836,10 +848,14 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // scan), none of whose output is verdict-matched, and the Mac twin
         // (`SSHTransport.streamScript` → `SSHScriptRunner`) does not carry it
         // either. Parity is the point in both directions.
+        // The Mac's directories (`HermesConfigReader.hermesInstallDirs`),
+        // with `~/.hermes/bin` AFTER the host's PATH: it holds Hermes' own
+        // `uv`/`uvx`, which must not shadow the user's.
         let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
-            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + hermesHome
-            + Self.shellJoin([executable] + args)
+            + Self.commandLine(executable: executable, args: args, fragment: config.hermesBinaryHintFragment)
+        let wrapped = Self.viaPOSIXShell(cmd)
         // Citadel's `executeCommand` discards captured output when the
         // remote exits non-zero (it throws `CommandFailed` and the
         // accumulated ByteBuffer is lost). That breaks legitimate cases
@@ -856,7 +872,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // moved both execs onto `withExec` so the ceiling also CLOSES the
         // channel instead of abandoning it; see `runExec`.
         do {
-            return try await runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)
+            return try await runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)
         } catch let start as ExecStartFailure {
             return ProcessResult(
                 exitCode: -1,
@@ -867,6 +883,37 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     }
 
     // MARK: - Shell helpers
+
+    /// `shellJoin([executable] + args)`, except that a "Hermes binary"
+    /// override which is a shell fragment (`docker compose exec hermes
+    /// hermes`) goes in as the words the user typed rather than as one
+    /// quoted command name. Same rule as the Mac's
+    /// `SSHTransport.composedRemoteCommand` (S15-F3). `fragment` is
+    /// `SSHConfig.hermesBinaryHintFragment`: nil for a path Test Connection
+    /// found, which is quoted as one word even with a space in it.
+    nonisolated static func commandLine(executable: String, args: [String], fragment: String?) -> String {
+        ([executable] + args).map { token in
+            token == fragment ? token : shellJoin([token])
+        }.joined(separator: " ")
+    }
+
+    /// `cmd` as ONE `/bin/sh -c` word.
+    ///
+    /// An SSH exec hands its string to the remote user's LOGIN shell, which
+    /// is not always POSIX. The commands built here lean on sh syntax —
+    /// `VAR=value command` prefixes and `$PATH:` inside double quotes — and
+    /// csh/tcsh reject both ("Bad : modifier in $", "Command not found"), so
+    /// on a csh user's host every call failed. The Mac's SSHTransport has
+    /// always wrapped its command in `sh -c '…'` for the same reason, and
+    /// the environment the outer shell set up is inherited.
+    ///
+    /// Not a complete cure for csh/tcsh: they still apply history expansion
+    /// to `!` and reject a newline inside the single-quoted word, so an argv
+    /// carrying either (a prompt, a title) still fails on a csh login shell.
+    /// The Mac's SSHTransport has the same limit.
+    nonisolated static func viaPOSIXShell(_ cmd: String) -> String {
+        "/bin/sh -c " + shellJoin([cmd])
+    }
 
     /// Minimal shell-argument joiner. Handles spaces + quotes; sufficient
     /// for the commands we actually pass (`echo`, `stat`, `tail`, `sqlite3`).

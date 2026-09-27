@@ -97,8 +97,10 @@ struct BackupServerSheet: View {
                     let total: Int64 = summary.projects.compactMap { $0.sizeBytes }.reduce(0, +)
                     row(label: "Projects size", value: Self.formatBytes(total))
                 }
-                if !summary.sqliteAvailable {
-                    row(label: "WAL checkpoint", value: "skipped (sqlite3 not on remote PATH)")
+                if summary.snapshotUnavailable {
+                    row(label: "state.db", value: String(localized: "can't be snapshotted: install sqlite3 on the server"))
+                } else if summary.stateDBPresent {
+                    row(label: "state.db", value: String(localized: "read-only snapshot"))
                 }
             }
 
@@ -125,7 +127,7 @@ struct BackupServerSheet: View {
                 Toggle(isOn: $viewModel.includeAuth) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Include `auth.json`").font(.callout)
-                        Text("Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.")
+                        Text("Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -173,6 +175,15 @@ struct BackupServerSheet: View {
             row(label: "Size", value: Self.formatBytes(result.archiveSize))
             row(label: "Hermes version", value: result.manifest.source.hermesVersion ?? "(unknown)")
             row(label: "Projects", value: "\(result.manifest.projects.count)")
+            if let skipped = result.manifest.databases?.skipped, !skipped.isEmpty {
+                // Hermes's own backup reports the same case as incomplete.
+                Label {
+                    Text("These databases couldn't be copied safely and are not in this backup: \(skipped.joined(separator: ", "))")
+                        .font(.caption)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+            }
             HStack {
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([result.archiveURL])
@@ -213,6 +224,8 @@ struct BackupServerSheet: View {
                 Button("Back up…") { presentSavePanel(summary: summary) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    // A live state.db is never archived without a snapshot.
+                    .disabled(summary.snapshotUnavailable)
             case .failed:
                 Button("Try again") { Task { await viewModel.start() } }
                     .keyboardShortcut(.defaultAction)
@@ -258,7 +271,7 @@ struct BackupServerSheet: View {
     private func stepLabel(_ step: RemoteBackupService.Progress) -> String {
         switch step {
         case .preflight: return "Preparing…"
-        case .checkpointingDB: return "Checkpointing state.db…"
+        case .snapshottingDB: return "Snapshotting state.db…"
         case .archivingHermes: return "Archiving Hermes home…"
         case .archivingProject(let name, _): return "Archiving project: \(name)…"
         case .bundling: return "Bundling archive…"

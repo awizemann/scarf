@@ -48,7 +48,8 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// "Archiving Hermes home — 412 MB so far" without polling.
     public enum Progress: Sendable, Equatable {
         case preflight
-        case checkpointingDB
+        /// Taking a read-only `.backup` snapshot of `state.db` on the host.
+        case snapshottingDB
         case archivingHermes(bytesWritten: Int64)
         case archivingProject(name: String, bytesWritten: Int64)
         case bundling
@@ -60,6 +61,10 @@ public final class RemoteBackupService: @unchecked Sendable {
         case remoteCommandFailed(String)
         case localIO(String)
         case zipFailed(String)
+        /// `state.db` exists but no consistent read-only snapshot of it
+        /// could be taken. The backup stops rather than archiving a live
+        /// database file that could be torn or missing its WAL frames.
+        case snapshotFailed(String)
         case cancelled
 
         public var errorDescription: String? {
@@ -68,6 +73,7 @@ public final class RemoteBackupService: @unchecked Sendable {
             case .remoteCommandFailed(let m): return "Remote command failed during backup: \(m)"
             case .localIO(let m): return "Local file I/O failed during backup: \(m)"
             case .zipFailed(let m): return "Couldn't assemble the backup archive: \(m)"
+            case .snapshotFailed(let m): return "Couldn't take a consistent snapshot of state.db: \(m)"
             case .cancelled: return "Backup cancelled."
             }
         }
@@ -82,7 +88,22 @@ public final class RemoteBackupService: @unchecked Sendable {
         public var hermesHomePath: String
         public var hermesHomeBytes: Int64?
         public var projects: [ProjectSummary]
+        /// `sqlite3` is on the host's PATH. It takes the read-only
+        /// `state.db` snapshot; `python3` is the fallback.
         public var sqliteAvailable: Bool
+        /// `python3` is on the host's PATH (snapshot fallback when
+        /// `sqlite3` is missing or fails).
+        public var pythonAvailable: Bool = false
+        /// `<home>/state.db` exists on the host. When it does, the backup
+        /// needs a snapshot tool; when it doesn't, there is nothing to
+        /// snapshot.
+        public var stateDBPresent: Bool = false
+
+        /// True when the backup can't archive `state.db` safely: the file
+        /// exists but neither snapshot tool is available.
+        public var snapshotUnavailable: Bool {
+            stateDBPresent && !sqliteAvailable && !pythonAvailable
+        }
 
         public struct ProjectSummary: Sendable, Equatable {
             public var id: String
@@ -136,8 +157,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         )
         let hermesVersion: String? = {
             guard let r = versionResult, r.exitCode == 0 else { return nil }
-            let trimmed = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return Self.versionHeadline(r.stdoutString)
         }()
 
         // 3. Hermes home size + canonical path. `context.paths.home`
@@ -171,22 +191,31 @@ public final class RemoteBackupService: @unchecked Sendable {
             ))
         }
 
-        // 5. Is `sqlite3` on PATH? Drives the WAL-checkpoint toggle.
-        //    Missing → we still archive, just without quiescing.
-        let sqliteCheck = try? await transport.asyncRunProcess(
+        // 5. Snapshot tooling. `state.db` is archived from a read-only
+        //    `.backup` snapshot (charter C3: Scarf never writes state.db),
+        //    taken with `sqlite3` or, failing that, `python3`.
+        let toolCheck = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
-            args: ["-lc", "command -v sqlite3 >/dev/null 2>&1 && echo yes || echo no"],
+            args: ["-lc", Self.toolProbeScript(stateDB: hermesHome + "/state.db")],
             stdin: nil,
             timeout: 30
         )
-        let sqliteAvailable = sqliteCheck?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) == "yes"
+        let tools = Self.parseToolProbe(toolCheck?.stdoutString ?? "")
+        // No markers at all means the probe never ran; reading that as "no
+        // state.db, no tools" would plan a backup without the sessions.
+        guard tools.contains("probe") else {
+            throw BackupError.preflightFailed(
+                "couldn't check the server for state.db and sqlite3 (\(toolCheck.map { "exit \($0.exitCode)" } ?? "no response")).")
+        }
 
         return PreflightSummary(
             hermesVersion: hermesVersion,
             hermesHomePath: hermesHome,
             hermesHomeBytes: hermesSize,
             projects: projectSummaries,
-            sqliteAvailable: sqliteAvailable
+            sqliteAvailable: tools.contains("sqlite3"),
+            pythonAvailable: tools.contains("python3"),
+            stateDBPresent: tools.contains("statedb")
         )
     }
 
@@ -223,34 +252,97 @@ public final class RemoteBackupService: @unchecked Sendable {
         try Task.checkCancellation()
         progress(.preflight)
 
-        // Stage 1: WAL checkpoint (best effort). Build the state.db
-        // path from the already-expanded hermesHomePath rather than
-        // `context.paths.stateDB`, which can still carry a literal
-        // `~` for remotes that didn't pin `remoteHome` — sqlite3
-        // would fail to open the file and leave the WAL un-flushed.
-        var checkpointed = false
-        if options.checkpointedWAL && preflight.sqliteAvailable {
-            progress(.checkpointingDB)
-            let stateDB = preflight.hermesHomePath + "/state.db"
-            let cmd = "sqlite3 \(Self.shellQuote(stateDB)) 'PRAGMA wal_checkpoint(TRUNCATE);' || true"
-            let result = try? await transport.asyncRunProcess(
-                executable: "/bin/bash",
-                args: ["-lc", cmd],
-                stdin: nil,
-                timeout: 60
-            )
-            checkpointed = (result?.exitCode == 0)
+        // Stage 1: consistent snapshots of every `*.db` in the home
+        // (state.db, each profile's state.db, kanban.db, response_store.db,
+        // cron/executions.db, …), archived as their own tarball. This used
+        // to run `PRAGMA wal_checkpoint(TRUNCATE)` on the live state.db: a
+        // write to state.db (charter C3), and not a reliable one either.
+        // Under a busy gateway it checkpointed only partially, still exited
+        // 0, and the frames left in the (excluded) WAL were missing from
+        // the archive; every other database was tarred live. Each snapshot
+        // copies every committed page, WAL frames included, through a
+        // connection that cannot write the source
+        // (``HermesDatabaseScripts/snapshotFunction``), which is how
+        // `hermes backup` snapshots every `*.db`
+        // (`hermes_cli/backup.py:101-104`, `:590-610` @ v2026.9.24). The
+        // paths come from the already-expanded hermesHomePath, never
+        // `context.paths`, which can still carry a literal `~`.
+        //
+        // It always runs, whatever preflight saw: the script finds the
+        // databases itself, so a probe that missed one can't produce a
+        // "successful" backup without it.
+        var databases: BackupManifest.DatabaseSnapshots?
+        try Task.checkCancellation()
+        progress(.snapshottingDB)
+        guard !preflight.snapshotUnavailable else {
+            throw BackupError.snapshotFailed(
+                "neither sqlite3 nor python3 is available on the server. Install sqlite3 there and back up again.")
         }
+        let snapshotDir = preflight.hermesHomePath + "/" + HermesDatabaseScripts.snapshotDirPrefix + UUID().uuidString
+        // Named profiles, for the per-profile `logs` exclusion. Best effort:
+        // a listing that fails only means those logs ride along.
+        let profileNames = (try? transport.listDirectory(preflight.hermesHomePath + "/profiles")) ?? []
+        // What each home's `cache/` holds, so everything but the durable
+        // subdirectories Hermes keeps can be left out (see
+        // ``runtimeExcludedPaths(profiles:cacheEntries:)``). Best effort,
+        // like the profile listing: a cache that can't be listed rides along.
+        var cacheEntries: [String: [String]] = [:]
+        for dir in ["cache"] + Self.listableProfiles(profileNames).map({ "profiles/\($0)/cache" }) {
+            if let entries = try? transport.listDirectory(preflight.hermesHomePath + "/" + dir) {
+                cacheEntries[dir] = entries
+            }
+        }
+        var snapshotted: [String] = []
+        do {
+            let report = try await takeDatabaseSnapshots(
+                transport: transport,
+                home: preflight.hermesHomePath,
+                snapshotDir: snapshotDir,
+                options: options,
+                profiles: profileNames,
+                cacheEntries: cacheEntries,
+                timeout: Self.snapshotTimeout(homeBytes: preflight.hermesHomeBytes)
+            )
+            snapshotted = report.ok.map(\.path) + report.failed
+            let skipped = report.failed
+            if !report.ok.isEmpty {
+                try Task.checkCancellation()
+                let tarball = workDir.appendingPathComponent(BackupArchiveLayout.databasesTarballPath)
+                let hash = try await streamToFile(
+                    transport: transport,
+                    command: Self.tarCommand(workDir: snapshotDir, target: ".", excludes: []),
+                    destination: tarball
+                ) { _ in }
+                let size = (try? FileManager.default.attributesOfItem(atPath: tarball.path)[.size] as? Int64) ?? 0
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: BackupArchiveLayout.databasesTarballPath,
+                    tarballSize: size,
+                    tarballSHA256: hash,
+                    entries: report.ok.map { .init(path: $0.path, method: $0.method) },
+                    skipped: skipped
+                )
+            } else if !skipped.isEmpty {
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: "", tarballSize: 0, tarballSHA256: "", entries: [], skipped: skipped)
+            }
+        } catch {
+            await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
+            throw error
+        }
+        await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
 
-        // Stage 2: Hermes home tarball.
+        // Stage 2: Hermes home tarball, WITHOUT the live state.db (the
+        // snapshot above stands in for it) or its sidecars. Archived from
+        // INSIDE the home (`-C <home> .`), so every member is `./…` and a
+        // root-only exclude can be anchored at the home's root (see
+        // ``homeTarCommand(home:excludes:)``); the manifest records that
+        // layout (`memberRoot`).
         try Task.checkCancellation()
         let hermesTarball = workDir.appendingPathComponent("hermes.tar.gz")
-        let hermesExcludes = Self.hermesExcludes(options: options)
-        let hermesTarCmd = Self.tarCommand(
-            workDir: preflight.hermesHomePath.deletingLastPathComponent_String(),
-            target: ".hermes",
-            excludes: hermesExcludes
-        )
+        let hermesExcludes = Self.hermesExcludes(
+            leaf: BackupManifest.HermesTree.dotMemberRoot, options: options, databases: snapshotted,
+            profiles: profileNames, cacheEntries: cacheEntries)
+        let hermesTarCmd = Self.homeTarCommand(home: preflight.hermesHomePath, excludes: hermesExcludes)
         let hermesHash = try await streamToFile(
             transport: transport,
             command: hermesTarCmd,
@@ -310,15 +402,19 @@ public final class RemoteBackupService: @unchecked Sendable {
                 homePath: preflight.hermesHomePath,
                 tarballPath: BackupArchiveLayout.hermesTarballPath,
                 tarballSize: hermesSize,
-                tarballSHA256: hermesHash
+                tarballSHA256: hermesHash,
+                memberRoot: BackupManifest.HermesTree.dotMemberRoot
             ),
             projects: projectEntries,
             options: BackupManifest.Options(
                 includeAuth: options.includeAuth,
                 includeMcpTokens: options.includeMcpTokens,
                 includeLogs: options.includeLogs,
-                checkpointedWAL: checkpointed
-            )
+                // Nothing checkpoints the WAL any more (C3). How state.db
+                // was captured is recorded, truthfully, in `stateDB`.
+                checkpointedWAL: false
+            ),
+            databases: databases
         )
         let manifestData: Data
         do {
@@ -405,31 +501,414 @@ public final class RemoteBackupService: @unchecked Sendable {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// The version line out of `hermes --version`'s banner. The command
+    /// prints several lines — version, install directory, install method,
+    /// Python, OpenAI SDK and, when it checked, an update note
+    /// (`hermes_cli/_startup_fast.py:181-221` @ v2026.9.24) — and the whole
+    /// banner used to be stored as the manifest's version and shown as one
+    /// six-line row. The first `Hermes Agent …` line wins (it has led the
+    /// output since v2026.3.12); failing that, the first non-empty line, so
+    /// a login shell's own chatter before it is skipped. `nil` for nothing.
+    public static func versionHeadline(_ output: String) -> String? {
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return lines.first { $0.hasPrefix("Hermes Agent") } ?? lines.first
+    }
+
     // MARK: - Tar / shell helpers
 
-    private static func tarCommand(workDir: String, target: String, excludes: [String]) -> String {
+    /// The `tar -czf -` a backup stage streams, with the one exit status
+    /// that is not a failure mapped to 0.
+    ///
+    /// GNU tar exits 1 when a file changed while it was being read — `file
+    /// changed as we read it`, including a DIRECTORY whose entries changed,
+    /// which a running gateway causes at least once a minute by atomically
+    /// rewriting `gateway_state.json` in the home root
+    /// (`gateway/status.py:743-744` @ v2026.9.24). The archive is complete
+    /// and valid; `--warning=no-file-changed` only hides the message, the
+    /// status stays 1. Treating it as fatal made every backup of a Linux
+    /// host with a live gateway fail. Exit 2 (fatal: an unreadable file, a
+    /// write error) still fails.
+    ///
+    /// Only GNU tar's 1 means that. bsdtar (a Mac) and BusyBox tar exit 1
+    /// for real errors, such as a file they could not open, so there any
+    /// non-zero status still fails. `tar --version`'s output goes to grep,
+    /// never into the archive stream on stdout.
+    static func tarCommand(workDir: String, target: String, excludes: [String]) -> String {
         var parts: [String] = ["tar -czf -"]
         for ex in excludes {
             parts.append("--exclude=\(shellQuote(ex))")
         }
         parts.append("-C \(shellQuote(workDir))")
         parts.append(shellQuote(target))
-        return parts.joined(separator: " ")
+        return parts.joined(separator: " ") + "; " + tarExitFilter
     }
 
-    /// Always-on Hermes-tree exclusions, regardless of options:
-    /// SQLite WAL siblings (would carry mid-flight writes) and runtime
-    /// state files (`gateway_state.json`).
-    private static func hermesExcludes(options: BackupManifest.Options) -> [String] {
-        var excludes: [String] = [
-            ".hermes/state.db-wal",
-            ".hermes/state.db-shm",
-            ".hermes/gateway_state.json",
+    /// The home tarball: `tar -czf - <excludes> -C <home> .`, so every
+    /// member is `./…`.
+    ///
+    /// **Why not `-C <parent> <leaf>`.** Tar matches an exclude pattern
+    /// UNANCHORED — GNU tar and BusyBox after any `/` in the member name,
+    /// bsdtar at the start of any path element — so a root-only pattern
+    /// such as `<leaf>/models` also matched `<leaf>/skills/ml/<leaf>/models`
+    /// whenever the home's own name recurred below it (the official Docker
+    /// home `/opt/data` and a skill's `data/models/`), and the backup
+    /// silently dropped the user's files. Hermes matches those trees at the
+    /// home's root only (`_in_excluded_root_dir`, `backup.py:84-93` @
+    /// v2026.9.24).
+    ///
+    /// `./models` can't recur: no suffix after a `/` starts with `./`, which
+    /// anchors it on GNU tar and BusyBox. bsdtar (libarchive `pathmatch`)
+    /// skips a leading `./` in both the pattern and the name, so there the
+    /// pattern is anchored with libarchive's leading `^` instead — which the
+    /// other two would read literally, hence the flavour probe. Checked with
+    /// GNU tar 1.35, BusyBox tar 1.37 and bsdtar 3.5.3.
+    static func homeTarCommand(home: String, excludes: [String]) -> String {
+        "\(bsdtarAnchorProbe) tar -czf - \(anchoredExcludes(excludes, root: BackupManifest.HermesTree.dotMemberRoot)) -C \(shellQuote(home)) .; " + tarExitFilter
+    }
+
+    /// Sets `scarf_a` to libarchive's start anchor `^` when `tar` is bsdtar,
+    /// and to nothing otherwise. `tar --version`'s output goes to grep,
+    /// never into an archive stream on stdout; BusyBox's `--version` fails
+    /// quietly.
+    static let bsdtarAnchorProbe = "scarf_a=; if tar --version 2>/dev/null | grep -q bsdtar; then scarf_a='^'; fi;"
+
+    /// `--exclude=` arguments; a pattern that starts at the archive's root
+    /// (`<root>/…`) carries `$scarf_a` in front (see ``bsdtarAnchorProbe``).
+    static func anchoredExcludes(_ patterns: [String], root: String) -> String {
+        let prefix = HermesDatabaseScripts.globEscape(root) + "/"
+        return patterns.map { pattern in
+            pattern.hasPrefix(prefix)
+                ? "--exclude=\"$scarf_a\"\(shellQuote(pattern))"
+                : "--exclude=\(shellQuote(pattern))"
+        }.joined(separator: " ")
+    }
+
+    /// See ``tarCommand(workDir:target:excludes:)``.
+    static let tarExitFilter =
+        "scarf_rc=$?; if [ \"$scarf_rc\" -eq 1 ] && tar --version 2>/dev/null | grep -q 'GNU tar'; then exit 0; fi; exit \"$scarf_rc\""
+
+    /// Always-on Hermes-tree exclusions, regardless of options: each live
+    /// database the snapshot pass found (`databases`, home-relative: they
+    /// are archived from consistent snapshots, or listed as skipped), every
+    /// SQLite sidecar, Hermes's retired-WAL captures (left out whole, as
+    /// `hermes backup` does), Scarf's own snapshot and restore staging
+    /// directories, and runtime state files (`gateway_state.json`).
+    ///
+    /// The databases are excluded by their exact (glob-escaped) paths, not a
+    /// `*.db` pattern, which would also swallow a DIRECTORY named `x.db` and
+    /// everything in it. The sidecar patterns are unanchored, so they reach
+    /// every subdirectory under both GNU tar and bsdtar.
+    ///
+    /// `leaf` is the archive's top-level member: `.` for the home tarball
+    /// since R19 (``homeTarCommand(home:excludes:)``), which is what
+    /// anchors the root-only patterns; an older archive's was the home's own
+    /// directory name.
+    ///
+    /// Every named profile is a Hermes home of its own, under
+    /// `profiles/<name>/`, with its own `auth.json`, `mcp-tokens/` and
+    /// `gateway_state.json` (`hermes_cli/profiles.py:174-177`,
+    /// `hermes_cli/auth.py:481-482`, `tools/mcp_oauth.py:229-232`
+    /// @ v2026.9.24). So each credential and runtime-state exclusion is made
+    /// twice: once at the home's root and once as `profiles/*/…`. The `*`
+    /// crosses `/` in GNU tar and bsdtar exclude patterns (not in BusyBox
+    /// tar), so there the profile form also drops a file of that exact name
+    /// deeper inside a profile: over-excluding a stray `auth.json` is the
+    /// safe direction when the user asked for no credentials. `auth.json`
+    /// goes with the copy Hermes keeps of a store it couldn't parse,
+    /// `auth.json.corrupt` (`hermes_cli/auth.py:679`).
+    ///
+    /// `profiles` are the profile directory names found on the host, used
+    /// for exclusions that must NOT over-reach (see ``prunedDirs(options:profiles:)``).
+    ///
+    /// Everything `hermes backup` itself leaves out is left out too
+    /// (`hermes_cli/backup.py:46-81,106-118` @ v2026.9.24): the Hermes
+    /// codebase, dependency trees, caches, prior backups and snapshots,
+    /// runtime downloads, pid files and browser profiles — see
+    /// ``hermesAnyDepthExcludes``, ``anyDepthPatterns(leaf:names:)`` and
+    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``.
+    static func hermesExcludes(
+        leaf: String, options: BackupManifest.Options, databases: [String], profiles: [String] = [],
+        cacheEntries: [String: [String]] = [:]
+    ) -> [String] {
+        var excludes: [String] = databases.map { HermesDatabaseScripts.globEscape(leaf + "/" + $0) }
+        excludes += [
+            "*.db-wal",
+            "*.db-shm",
+            "*.db-journal",
+            HermesDatabaseScripts.retiredWALPattern,
+            "\(leaf)/\(HermesDatabaseScripts.snapshotDirPrefix)*",
+            "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
         ]
-        if !options.includeAuth { excludes.append(".hermes/auth.json") }
-        if !options.includeMcpTokens { excludes.append(".hermes/mcp-tokens") }
-        if !options.includeLogs { excludes.append(".hermes/logs") }
+        excludes += homeScoped("gateway_state.json").map { "\(leaf)/\($0)" }
+        excludes += anyDepthPatterns(leaf: leaf, names: hermesAnyDepthExcludes)
+        excludes += prunedDirs(options: options, profiles: profiles, cacheEntries: cacheEntries)
+            .map { "\(leaf)/\($0)" }
+        if !options.includeAuth {
+            excludes += (homeScoped("auth.json") + homeScoped("auth.json.corrupt")).map { "\(leaf)/\($0)" }
+        }
         return excludes
+    }
+
+    /// Home-relative paths the backup leaves out entirely, so their
+    /// databases (if any) are not snapshotted either. Each is listed for
+    /// the root home and for every profile home (see
+    /// ``hermesExcludes(leaf:options:databases:profiles:)``).
+    ///
+    /// `logs` is named per profile (`profiles/<name>/logs`, from the
+    /// directory listing), not as `profiles/*/logs`: that wildcard would
+    /// also drop a `logs` folder deep inside a profile's skills, which is
+    /// the user's data. A profile missed by the listing keeps its logs,
+    /// which only costs archive size.
+    ///
+    /// Also always the Hermes-managed trees ``runtimeExcludedPaths(profiles:cacheEntries:)``
+    /// names, whatever the options say.
+    static func prunedDirs(
+        options: BackupManifest.Options, profiles: [String] = [], cacheEntries: [String: [String]] = [:]
+    ) -> [String] {
+        var dirs: [String] = []
+        if !options.includeMcpTokens { dirs += homeScoped("mcp-tokens") }
+        if !options.includeLogs {
+            dirs.append("logs")
+            dirs += listableProfiles(profiles)
+                .map { "profiles/" + HermesDatabaseScripts.globEscape($0) + "/logs" }
+        }
+        dirs += runtimeExcludedPaths(profiles: profiles, cacheEntries: cacheEntries)
+        return dirs
+    }
+
+    /// Profile directory names that can be spliced into a path.
+    static func listableProfiles(_ profiles: [String]) -> [String] {
+        profiles.filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+    }
+
+    // MARK: - What `hermes backup` leaves out (hermes_cli/backup.py @ v2026.9.24)
+
+    /// `_EXCLUDED_DIRS` (`backup.py:52-69`) without `hermes-agent`, which
+    /// Hermes matches only at the home's root (see
+    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``). Hermes skips these
+    /// at ANY depth (`_should_exclude`, `:270-279`): prior backups and
+    /// state snapshots (each a full state.db copy), trajectory checkpoints,
+    /// dependency trees and tool caches, nested `.git`, and both browser
+    /// profile stores. `browser-profile/` holds copies of the user's real
+    /// browser Cookies and Login Data — a credential store Hermes says must
+    /// never enter an archive — so it is excluded whether or not the user
+    /// included `auth.json`.
+    static let hermesAnyDepthExcludedDirs = [
+        "__pycache__", ".git", "node_modules", "backups", "state-snapshots", "checkpoints",
+        "browser-profiles", "browser-profile", ".venv", "venv", "site-packages",
+        ".cache", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ]
+
+    /// `_EXCLUDED_NAMES` (`:108`: runtime lock and pid files), the `.pyc` /
+    /// `.pyo` half of `_EXCLUDED_SUFFIXES` (`:106`; the SQLite sidecars are
+    /// excluded above) and the updater's `state.db.pre-update-emergency-*`
+    /// backups (`_EXCLUDED_PREFIXES`, `:115-118`; the other prefix is the
+    /// retired-WAL capture, already excluded). Any depth, as in Hermes.
+    static let hermesAnyDepthExcludedFiles = [
+        ".backup.lock", "gateway.pid", "cron.pid", "*.pyc", "*.pyo", "state.db.pre-update-emergency-*",
+    ]
+
+    static var hermesAnyDepthExcludes: [String] { hermesAnyDepthExcludedDirs + hermesAnyDepthExcludedFiles }
+
+    /// How many directories below the home an any-depth pattern reaches on
+    /// BusyBox tar. Eight covers
+    /// `profiles/<name>/skills/<category>/<skill>/node_modules` with room to
+    /// spare; GNU tar and bsdtar reach every depth (see below).
+    static let anyDepthPatternDepth = 8
+
+    /// Exclude patterns for names Hermes skips at any depth BELOW the home:
+    /// `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, ….
+    ///
+    /// Never the bare name: tar tries an unanchored pattern against every
+    /// member, so when tar ran as `-C <parent> <leaf>` a home whose directory
+    /// is called `backups` or `venv` archived nothing (Hermes matches
+    /// home-relative paths, where the home's own name never appears).
+    ///
+    /// The per-depth forms are for BusyBox tar: its `*` never crosses `/`
+    /// when creating an archive, and when EXTRACTING it anchors a pattern at
+    /// the start of the member name and compares only as many components as
+    /// the pattern has (`find_list_entry2`), so a bare `x` never matched
+    /// below the top directory at all. GNU tar and bsdtar let `*` cross `/`,
+    /// so there `leaf/*/x` alone already reaches every depth; the extra forms
+    /// only repeat it, and are only ever built from names Hermes excludes at
+    /// any depth anyway.
+    static func anyDepthPatterns(leaf: String, names: [String]) -> [String] {
+        let top = HermesDatabaseScripts.globEscape(leaf)
+        return names.flatMap { name in
+            (0..<anyDepthPatternDepth).map { depth in
+                top + "/" + String(repeating: "*/", count: depth) + name
+            }
+        }
+    }
+
+    /// Hermes-managed runtime trees matched ONLY at the root of a home — the
+    /// root home and each `profiles/<name>/` — because a deeper directory of
+    /// the same name (a skill's `models/`) is user data
+    /// (`_in_excluded_root_dir`, `backup.py:84-93`): `LOCAL_RUNTIME_ROOT_DIRS`
+    /// (`models`, `runtimes`, `node` — GGUF weights, llama.cpp runtimes,
+    /// managed Node; `hermes_constants.py:210`) and `browser_profiles`
+    /// (the Browser Use CLI's Chromium profile, `:78-81`).
+    static let hermesHomeRootExcludedDirs = ["models", "runtimes", "node", "browser_profiles"]
+
+    /// The `cache/` subdirectories Hermes keeps (`_KEPT_CACHE_SUBDIRS`,
+    /// `:83`): media the gateway delivered or received and the citations
+    /// ledger, which nothing can rebuild. Everything else directly under a
+    /// home's `cache/` is regenerable and left out.
+    static let hermesKeptCacheEntries: Set<String> = [
+        "images", "audio", "videos", "documents", "screenshots", "citations",
+    ]
+
+    /// Home-relative paths of the Hermes-managed trees, each named exactly:
+    ///
+    /// - `hermes-agent` at the root only (`backup.py:46-47`, `:278`): the
+    ///   Hermes codebase, venv and `.git` included, which is where a default
+    ///   non-root install puts it (`scripts/install.sh:188`). Restoring it
+    ///   over another host overwrote that host's installed Hermes.
+    /// - ``hermesHomeRootExcludedDirs`` at the root and at each profile root.
+    /// - every entry of a home's `cache/` that is not one of
+    ///   ``hermesKeptCacheEntries`` (`cacheEntries` maps `cache` or
+    ///   `profiles/<name>/cache` to that directory's listing).
+    ///
+    /// Exact per-profile names, never a `profiles/*/…` wildcard: GNU tar and
+    /// bsdtar let `*` cross `/`, so the wildcard would also drop a skill's
+    /// own `models/` deep inside a profile.
+    static func runtimeExcludedPaths(profiles: [String], cacheEntries: [String: [String]]) -> [String] {
+        let homes = [""] + listableProfiles(profiles).map { "profiles/" + HermesDatabaseScripts.globEscape($0) + "/" }
+        var paths = ["hermes-agent"]
+        for home in homes {
+            paths += hermesHomeRootExcludedDirs.map { home + $0 }
+        }
+        for (cacheDir, entries) in cacheEntries.sorted(by: { $0.key < $1.key }) {
+            let dir = cacheDir.split(separator: "/").map { HermesDatabaseScripts.globEscape(String($0)) }
+                .joined(separator: "/")
+            paths += entries
+                .filter { !$0.isEmpty && !$0.contains("/") && !hermesKeptCacheEntries.contains($0) }
+                .sorted()
+                .map { dir + "/" + HermesDatabaseScripts.globEscape($0) }
+        }
+        return paths
+    }
+
+    /// True when `hermes backup` leaves a home-relative path out: a
+    /// directory component in ``hermesAnyDepthExcludedDirs`` at any depth,
+    /// `hermes-agent` as the first component, or a runtime tree / non-kept
+    /// `cache/` entry at the root of the home or of `profiles/<name>/`
+    /// (`_should_exclude` and `_in_excluded_root_dir`, `backup.py:84-93`,
+    /// `:270-279` @ v2026.9.24).
+    ///
+    /// Only the tree rules — the per-file names and suffixes are not
+    /// databases. Restore uses it on an older archive's database list, which
+    /// predates these excludes (``RemoteRestoreService``).
+    static func isInTreeHermesBackupLeavesOut(_ relativePath: String) -> Bool {
+        let parts = relativePath.split(separator: "/").map(String.init)
+        guard !parts.isEmpty else { return false }
+        if parts.contains(where: { hermesAnyDepthExcludedDirs.contains($0) }) { return true }
+        if parts[0] == "hermes-agent" { return true }
+        let home = parts.count >= 3 && parts[0] == "profiles" ? Array(parts.dropFirst(2)) : parts
+        guard let top = home.first else { return false }
+        if hermesHomeRootExcludedDirs.contains(top) { return true }
+        return top == "cache" && home.count >= 2 && !hermesKeptCacheEntries.contains(home[1])
+    }
+
+    /// `name` at the root of the Hermes home and at the root of each
+    /// profile home.
+    static func homeScoped(_ name: String) -> [String] {
+        [name, "profiles/*/\(name)"]
+    }
+
+    // MARK: - Database snapshots
+
+    /// Ceiling on the snapshot pass (charter C10). It copies every database
+    /// on the host in one pass, so it scales with the home's size (5 MB/s,
+    /// a slow disk), never below 15 minutes; an hour when the size is
+    /// unknown (`du -sb` is GNU-only).
+    static func snapshotTimeout(homeBytes: Int64?) -> TimeInterval {
+        guard let homeBytes else { return 3600 }
+        return max(900, TimeInterval(homeBytes) / 5_000_000)
+    }
+
+    /// Prints one `SCARF_TOOL:<name>` line per snapshot input that is
+    /// available on the host. Markers, because a login shell can print
+    /// its own noise to stdout.
+    static func toolProbeScript(stateDB: String) -> String {
+        [
+            "[ -f \(shellQuote(stateDB)) ] && echo SCARF_TOOL:statedb",
+            "command -v sqlite3 >/dev/null 2>&1 && echo SCARF_TOOL:sqlite3",
+            "command -v python3 >/dev/null 2>&1 && echo SCARF_TOOL:python3",
+            "echo SCARF_TOOL:probe",
+        ].joined(separator: "; ")
+    }
+
+    static func parseToolProbe(_ stdout: String) -> Set<String> {
+        Set(stdout.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("SCARF_TOOL:") else { return nil }
+            return String(trimmed.dropFirst("SCARF_TOOL:".count))
+        })
+    }
+
+    /// Snapshot every database under `home` into `snapshotDir`. The root
+    /// `state.db` is the one the backup cannot do without: if it exists and
+    /// could not be snapshotted, this throws. Any other database that could
+    /// not be snapshotted is reported back (and recorded in the manifest as
+    /// skipped), as `hermes backup` reports its own
+    /// (`hermes_cli/backup.py:723`).
+    private func takeDatabaseSnapshots(
+        transport: any ServerTransport,
+        home: String,
+        snapshotDir: String,
+        options: BackupManifest.Options,
+        profiles: [String],
+        cacheEntries: [String: [String]],
+        timeout: TimeInterval
+    ) async throws -> HermesDatabaseScripts.SnapshotReport {
+        let result: ProcessResult
+        do {
+            result = try await transport.asyncRunProcess(
+                executable: "/bin/bash",
+                args: ["-lc", HermesDatabaseScripts.snapshotAll(
+                    home: home, snapshotDir: snapshotDir,
+                    prunedDirs: Self.prunedDirs(options: options, profiles: profiles, cacheEntries: cacheEntries),
+                    prunedNames: Self.hermesAnyDepthExcludedDirs)],
+                stdin: nil,
+                timeout: timeout
+            )
+        } catch {
+            throw BackupError.snapshotFailed(error.localizedDescription)
+        }
+        let report = HermesDatabaseScripts.parseSnapshotReport(result.stdoutString)
+        let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.exitCode == 0, report.finished else {
+            throw BackupError.snapshotFailed(why.isEmpty ? "exit \(result.exitCode)" : why)
+        }
+        // The root state.db is the one database a backup can't do without:
+        // present means snapshotted, or the backup fails.
+        if report.rootStateDB, !report.ok.contains(where: { $0.path == "state.db" }) {
+            throw BackupError.snapshotFailed(why.isEmpty ? "no method could read state.db" : why)
+        }
+        // A database whose name can't be carried through the report can be
+        // neither snapshotted nor excluded, so it would ride along live.
+        // Refuse rather than archive it that way.
+        if report.unnameable > 0 {
+            throw BackupError.snapshotFailed(
+                "\(report.unnameable) database file(s) in the Hermes home have a tab or line break in their name. Rename them and back up again.")
+        }
+        return report
+    }
+
+    /// Best-effort removal of the snapshot directory. A leftover (a run
+    /// killed mid-way) is excluded from later backups by
+    /// ``hermesExcludes(leaf:options:databases:)`` and swept by the next run's
+    /// ``HermesDatabaseScripts/leftoverCleanup(home:)``.
+    private func removeSnapshotDir(transport: any ServerTransport, snapshotDir: String) async {
+        _ = try? await transport.asyncRunProcess(
+            executable: "/bin/bash",
+            args: ["-lc", "rm -rf \(Self.shellQuote(snapshotDir))"],
+            stdin: nil,
+            timeout: 60
+        )
     }
 
     /// Default project-tree exclusions: things that don't restore well
@@ -453,7 +932,7 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// Single-quote a path / argument for embedding in a `bash -lc`
     /// string. Uses POSIX-safe single quotes with escape for embedded
     /// quotes (`'` → `'\''`).
-    private static func shellQuote(_ s: String) -> String {
+    static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 

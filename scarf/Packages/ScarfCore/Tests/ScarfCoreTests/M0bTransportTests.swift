@@ -225,8 +225,9 @@ import Foundation
 
     /// `HERMES_HOME=` profile scoping in the composed remote command (#126):
     /// a profile-scoped `remoteHome` must scope every remote hermes
-    /// invocation (CLI and ACP spawn), a root home must add nothing, and the
-    /// assignment must directly prefix the executable (after any `cd`).
+    /// invocation (CLI and ACP spawn), a root home must add no assignment but
+    /// a `-p default` pin on hermes argv (S13-F1), and the assignment must
+    /// directly prefix the executable (after any `cd`).
     /// The Mac counterpart of `CitadelServerTransport`'s #120 injection.
     @Test func sshComposedCommandScopesHermesHomeToProfile() {
         func transport(remoteHome: String?) -> SSHTransport {
@@ -248,11 +249,35 @@ import Foundation
         #expect(docker.composedRemoteCommand(executable: "hermes", args: ["acp"])
             == "COLUMNS=400 HERMES_HOME='/opt/data/profiles/work' \"hermes\" \"acp\"")
 
-        // Root/default homes → no assignment (legacy active_profile behavior).
+        // Root/default homes → no assignment, but a `-p default` pin in
+        // front of the hermes args (S13-F1: Hermes ignores `HERMES_HOME=<root>`
+        // and would follow the host's sticky `active_profile`). This used to
+        // assert a bare `"hermes" "acp"`, which pinned that bug.
         #expect(transport(remoteHome: "~/.hermes")
-            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "COLUMNS=400 \"hermes\" \"acp\"")
+            .composedRemoteCommand(executable: "hermes", args: ["acp"])
+            == "COLUMNS=400 \"hermes\" \"-p\" \"default\" \"acp\"")
         #expect(transport(remoteHome: nil)
-            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "COLUMNS=400 \"hermes\" \"acp\"")
+            .composedRemoteCommand(executable: "hermes", args: ["acp"])
+            == "COLUMNS=400 \"hermes\" \"-p\" \"default\" \"acp\"")
+        // A custom root carries `HERMES_HOME=<root>` as well, so `-p default`
+        // resolves to it instead of the SSH user's `~/.hermes` (T6-F1). This
+        // used to assert no assignment, which pinned that bug.
+        #expect(transport(remoteHome: "/opt/data")
+            .composedRemoteCommand(executable: "/usr/local/bin/hermes", args: ["cron", "list"])
+            == "COLUMNS=400 HERMES_HOME='/opt/data' \"/usr/local/bin/hermes\" \"-p\" \"default\" \"cron\" \"list\"")
+        // Non-hermes executables, argv that already pins a profile, and the
+        // bare version probe pass through untouched.
+        #expect(transport(remoteHome: "~/.hermes")
+            .composedRemoteCommand(executable: "/bin/sh", args: ["-c", "echo $HOME"])
+            == "COLUMNS=400 \"/bin/sh\" \"-c\" \"echo \\$HOME\"")
+        #expect(transport(remoteHome: "~/.hermes")
+            .composedRemoteCommand(executable: "hermes", args: ["-p", "scout", "acp"])
+            == "COLUMNS=400 \"hermes\" \"-p\" \"scout\" \"acp\"")
+        #expect(transport(remoteHome: "~/.hermes")
+            .composedRemoteCommand(executable: "hermes", args: ["--version"])
+            == "COLUMNS=400 \"hermes\" \"--version\"")
+        // A named profile is pinned by HERMES_HOME alone — no `-p` added.
+        #expect(!scoped.composedRemoteCommand(executable: "hermes", args: ["acp"]).contains("-p"))
 
         // A project cwd prefixes the SCOPED command — env assignment stays
         // attached to the executable, not swallowed by the `cd`.

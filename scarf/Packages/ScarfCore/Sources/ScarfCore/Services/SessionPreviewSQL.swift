@@ -234,15 +234,33 @@ public enum SessionPreviewSQL {
     /// The schema-gated active-row filter, as a leading-` AND` fragment
     /// (empty when neither column exists). See the type doc for why
     /// Scarf filters where Hermes does not.
+    ///
+    /// `hasDisplayKindColumn` adds Hermes's `display_kind` exclusion: a
+    /// row tagged `'hidden'` is model-facing scaffolding the gateway never
+    /// paints, and Hermes's own preview skips it
+    /// (`_PREVIEW_ELIGIBLE_SQL`, hermes_state_common.py:113-114 @
+    /// v2026.9.24). It rides here rather than in `eligiblePredicate()` so
+    /// that expression stays diffable against Hermes's carrier logic; the
+    /// effect is the same because both sit inside the `MIN(id)` aggregate.
+    /// Pre-v0.19.1 hosts have no such column and get the old SQL.
     public static func activeClause(
         alias: String = "m",
         hasActiveColumn: Bool,
-        hasCompactedColumn: Bool
+        hasCompactedColumn: Bool,
+        hasDisplayKindColumn: Bool = false
     ) -> String {
-        guard hasActiveColumn else { return "" }
-        return hasCompactedColumn
+        let hidden = hasDisplayKindColumn ? displayVisibleClause(alias: alias) : ""
+        guard hasActiveColumn else { return hidden }
+        return (hasCompactedColumn
             ? " AND (\(alias).active = 1 OR \(alias).compacted = 1)"
-            : " AND \(alias).active = 1"
+            : " AND \(alias).active = 1") + hidden
+    }
+
+    /// ` AND COALESCE(<alias>.display_kind, '') <> 'hidden'` — Hermes's
+    /// spelling (hermes_state_search.py:150 @ v2026.9.24). Only emit it
+    /// when `messages.display_kind` exists.
+    public static func displayVisibleClause(alias: String = "m") -> String {
+        " AND COALESCE(\(alias).display_kind, '') <> 'hidden'"
     }
 
     /// Cheap pre-filter that lets an ordinary row skip the full
@@ -288,13 +306,14 @@ public enum SessionPreviewSQL {
     /// the next real turn.
     public static func firstEligibleUserRowSQL(
         hasActiveColumn: Bool,
-        hasCompactedColumn: Bool
+        hasCompactedColumn: Bool,
+        hasDisplayKindColumn: Bool = false
     ) -> String {
         """
         SELECT m.session_id, MIN(m.id) AS min_id
         FROM messages m
         WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
-        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
+        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn, hasDisplayKindColumn: hasDisplayKindColumn))
           AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
         GROUP BY m.session_id
         """
@@ -318,19 +337,21 @@ public enum SessionPreviewSQL {
     public static func firstEligibleUserRowSQL(
         sessionScoped: Bool,
         hasActiveColumn: Bool,
-        hasCompactedColumn: Bool
+        hasCompactedColumn: Bool,
+        hasDisplayKindColumn: Bool = false
     ) -> String {
         guard sessionScoped else {
             return firstEligibleUserRowSQL(
                 hasActiveColumn: hasActiveColumn,
-                hasCompactedColumn: hasCompactedColumn
+                hasCompactedColumn: hasCompactedColumn,
+                hasDisplayKindColumn: hasDisplayKindColumn
             )
         }
         return """
         SELECT m.session_id, MIN(m.id) AS min_id
         FROM messages m
         WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
-        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
+        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn, hasDisplayKindColumn: hasDisplayKindColumn))
           AND m.session_id = ?
           AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
         """
@@ -358,7 +379,8 @@ public enum SessionPreviewSQL {
     public static func firstEligibleUserRowSQL(
         sessionIdCount count: Int,
         hasActiveColumn: Bool,
-        hasCompactedColumn: Bool
+        hasCompactedColumn: Bool,
+        hasDisplayKindColumn: Bool = false
     ) -> String {
         precondition(count > 0, "firstEligibleUserRowSQL(sessionIdCount:) needs at least one id")
         let placeholders = Array(repeating: "?", count: count).joined(separator: ",")
@@ -366,7 +388,7 @@ public enum SessionPreviewSQL {
         SELECT m.session_id, MIN(m.id) AS min_id
         FROM messages m
         WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
-        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
+        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn, hasDisplayKindColumn: hasDisplayKindColumn))
           AND m.session_id IN (\(placeholders))
           AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
         GROUP BY m.session_id

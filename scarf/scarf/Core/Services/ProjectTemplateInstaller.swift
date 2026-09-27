@@ -26,8 +26,12 @@ struct ProjectTemplateInstaller: Sendable {
         try createProjectFiles(plan: plan)
         try createSkillsFiles(plan: plan)
         try appendMemoryIfNeeded(plan: plan)
-        let cronJobNames = try createCronJobs(plan: plan)
-        let entry = try registerProject(plan: plan)
+        // Minted before the cron jobs so each job's name can carry it
+        // (`ProjectCronAttribution`): the template tag alone is shared by
+        // every project installed from the same template.
+        let projectID = UUID()
+        let cronJobNames = try createCronJobs(plan: plan, projectID: projectID)
+        let entry = try registerProject(plan: plan, projectID: projectID)
         try writeLockFile(plan: plan, cronJobNames: cronJobNames)
 
         // Write the canonical .scarf/project.json now that all facets exist
@@ -111,6 +115,13 @@ struct ProjectTemplateInstaller: Sendable {
         if transport.fileExists(plan.projectDir) {
             throw ProjectTemplateError.projectDirExists(plan.projectDir)
         }
+        // A row whose folder is gone passes the check above. Refused here,
+        // before anything is written; `registerProjectLocked` re-checks
+        // under the registry lock.
+        try Self.refuseRegisteredPath(
+            plan.projectDir,
+            in: ProjectDashboardService(context: context).loadRegistry().projects
+        )
         for copy in plan.projectFiles where transport.fileExists(copy.destinationPath) {
             throw ProjectTemplateError.conflictingFile(copy.destinationPath)
         }
@@ -132,8 +143,9 @@ struct ProjectTemplateInstaller: Sendable {
                 of: Self.inspectMemory(at: plan.memoryPath, transport: transport),
                 at: plan.memoryPath
             )
-            let marker = ProjectTemplateService.memoryBlockBeginMarker(templateId: plan.manifest.id)
-            if existing.contains(marker) {
+            // Either marker form: a block an older Scarf installed is still
+            // this template's block.
+            if ProjectTemplateService.memoryBlockMarkers(in: existing, templateId: plan.manifest.id) != nil {
                 throw ProjectTemplateError.memoryBlockAlreadyExists(plan.manifest.id)
             }
         }
@@ -231,7 +243,7 @@ struct ProjectTemplateInstaller: Sendable {
             .withLock(plan.memoryPath) {
                 let inspection = Self.inspectMemory(at: plan.memoryPath, transport: transport)
                 let existing = try Self.memoryText(of: inspection, at: plan.memoryPath)
-                let combined = existing + appendix
+                let combined = ProjectTemplateService.appendingMemoryEntry(appendix, to: existing)
                 guard let data = combined.data(using: .utf8) else {
                     throw ProjectTemplateError.requiredFileMissing("memory/append.md (non-UTF8)")
                 }
@@ -285,11 +297,51 @@ struct ProjectTemplateInstaller: Sendable {
     /// paused immediately afterwards. Returns the list of resolved job
     /// names, which is what the lock file records — we don't know the job
     /// ids without parsing the create output, but the name is enough to
-    /// find + remove them later.
-    nonisolated private func createCronJobs(plan: TemplateInstallPlan) throws -> [String] {
+    /// find + remove them later. Each name carries the new project's tag
+    /// after the template tag, which also makes it unique to this install.
+    /// A cron job's skill references, pointed at where this install puts
+    /// the skills the bundle ships.
+    ///
+    /// Bundled skills land at `skills/templates/<slug>/<name>/`
+    /// (``ProjectTemplateService``), but a job's reference was the author's
+    /// own id — `creative/pixel-art` for a categorized skill, which is what
+    /// Scarf's cron editor stores. Hermes resolves a reference as a direct
+    /// path under the skills dir or as a directory/frontmatter name equal to
+    /// the WHOLE string (`tools/skills_tool.py:345-361` @ v2026.9.24), so
+    /// `creative/pixel-art` never found `templates/<slug>/pixel-art` and every
+    /// run went ahead without the skill ("could not be found",
+    /// `cron/scheduler_prompt.py:190-198`). A bare `pixel-art` would resolve
+    /// by directory name, but Hermes refuses a name two skills share
+    /// (`_collect_skill_candidates`), so the exact path is used.
+    ///
+    /// A bare name the bundle ships (what a current export writes) is always
+    /// rewritten. A `category/name` whose name the bundle ships — what an
+    /// older export wrote — is rewritten only when it does not resolve on
+    /// this host (`resolves`, a direct `<skills>/<ref>/SKILL.md`): a current
+    /// export keeps a reference to a hub or Hermes-bundled skill as it is,
+    /// and when that skill merely shares its name with one the bundle ships,
+    /// it exists here and must keep pointing at itself. Every other
+    /// reference is kept.
+    nonisolated static func installedSkillRefs(
+        _ refs: [String], bundled: [String], slug: String, resolves: (String) -> Bool = { _ in false }
+    ) -> [String] {
+        let shipped = Set(bundled)
+        return refs.map { ref in
+            let leaf = ref.split(separator: "/").last.map(String.init) ?? ref
+            guard shipped.contains(leaf) else { return ref }
+            if ref.contains("/"), resolves(ref) { return ref }
+            return "templates/\(slug)/\(leaf)"
+        }
+    }
+
+    nonisolated private func createCronJobs(
+        plan: TemplateInstallPlan, projectID: UUID
+    ) throws -> [String] {
         guard !plan.cronJobs.isEmpty else { return [] }
 
         var createdNames: [String] = []
+        let transport = context.makeTransport()
+        let skillsDir = context.paths.skillsDir
 
         // Probe the install host once: `--deliver all` is a v0.14+ value, and
         // forwarding it to an older host makes `hermes cron create` argparse-
@@ -310,6 +362,9 @@ struct ProjectTemplateInstaller: Sendable {
             : Set(HermesFileService(context: context).loadCronJobs().map(\.id))
 
         for job in plan.cronJobs {
+            let name = ProjectCronAttribution.templateJobName(
+                job.name, templateId: plan.manifest.id, projectID: projectID
+            )
             // ONE builder for every cron-create argv (M3): the capability
             // gates and the `--` end-of-options marker live in
             // `FleetApplyPlan.cronCreateArgs`, not in each call site.
@@ -317,10 +372,12 @@ struct ProjectTemplateInstaller: Sendable {
             // first: Hermes doesn't set a CWD for cron runs, so any relative
             // path in the prompt would resolve against the agent's own dir.
             let (args, droppedDeliverAll) = FleetApplyPlan.cronCreateArgs(
-                name: job.name,
+                name: name,
                 deliver: job.deliver,
                 repeatCount: job.repeatCount,
-                skills: job.skills ?? [],
+                skills: Self.installedSkillRefs(
+                    job.skills ?? [], bundled: plan.manifest.contents.skills ?? [], slug: plan.manifest.slug,
+                    resolves: { transport.fileExists(skillsDir + "/" + $0 + "/SKILL.md") }),
                 schedule: job.schedule,
                 prompt: job.prompt.flatMap { $0.isEmpty ? nil : Self.substituteCronTokens($0, plan: plan) },
                 caps: caps,
@@ -337,7 +394,7 @@ struct ProjectTemplateInstaller: Sendable {
             guard exit == 0 else {
                 throw ProjectTemplateError.cronCreateFailed(job: job.name, output: output)
             }
-            createdNames.append(job.name)
+            createdNames.append(name)
         }
 
         // Diff the current job set against the snapshot we took before
@@ -370,18 +427,20 @@ struct ProjectTemplateInstaller: Sendable {
     /// a local stand-in) refuses instead of clobbering. Synchronous
     /// throughout: the lock's reentrancy is thread-local and must not span
     /// a suspension.
-    nonisolated private func registerProject(plan: TemplateInstallPlan) throws -> ProjectEntry {
+    nonisolated private func registerProject(
+        plan: TemplateInstallPlan, projectID: UUID
+    ) throws -> ProjectEntry {
         let service = ProjectDashboardService(context: context)
         guard let lock = RegistryWriteLock(context: context) else {
-            return try registerProjectLocked(plan: plan, service: service)
+            return try registerProjectLocked(plan: plan, projectID: projectID, service: service)
         }
         return try lock.withLock(path: context.paths.projectsRegistry) {
-            try registerProjectLocked(plan: plan, service: service)
+            try registerProjectLocked(plan: plan, projectID: projectID, service: service)
         }
     }
 
     nonisolated private func registerProjectLocked(
-        plan: TemplateInstallPlan, service: ProjectDashboardService
+        plan: TemplateInstallPlan, projectID: UUID, service: ProjectDashboardService
     ) throws -> ProjectEntry {
         let loaded = service.loadRegistryDetailed()
         var registry = loaded.registry
@@ -390,7 +449,8 @@ struct ProjectTemplateInstaller: Sendable {
         // waiting on lazy migration — fleet/portfolio only groups projects
         // whose id somebody actually asserted. The canonical `project.json`
         // is written after the lock file lands (see install()).
-        let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: UUID())
+        try Self.refuseRegisteredPath(plan.projectDir, in: registry.projects)
+        let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: projectID)
         registry.projects.append(entry)
         // Must throw on failure — silent failure here used to make the
         // installer return a valid entry while the registry on disk
@@ -400,6 +460,15 @@ struct ProjectTemplateInstaller: Sendable {
         // user can see + address the underlying problem.
         try service.saveRegistry(registry, expecting: loaded.contentFingerprint)
         return entry
+    }
+
+    /// Throw when a registry row already claims `path`, compared
+    /// normalized — the rule `project_register` and `ProjectStore` hold.
+    nonisolated static func refuseRegisteredPath(_ path: String, in projects: [ProjectEntry]) throws {
+        let normalized = ProjectIdentity.normalizedPath(path)
+        if let existing = projects.first(where: { ProjectIdentity.normalizedPath($0.path) == normalized }) {
+            throw ProjectTemplateError.projectPathRegistered(path: path, name: existing.name)
+        }
     }
 
     // MARK: - Token substitution (install-time placeholder resolution)

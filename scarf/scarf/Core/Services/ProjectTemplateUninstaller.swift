@@ -23,13 +23,21 @@ struct ProjectTemplateUninstaller: Sendable {
     /// tests can prove the cleanup ran without minting items in the user's
     /// real login Keychain; production always gets the default.
     let keychain: ProjectConfigKeychain
+    /// Runs one `hermes` argv and returns (output, exit code). Injectable so
+    /// tests can make `cron remove` fail without spawning the real CLI
+    /// against the developer's Hermes home; production runs it through the
+    /// context (local process or SSH).
+    typealias HermesRunner = @Sendable ([String]) -> (output: String, exitCode: Int32)
+    let hermesRunner: HermesRunner?
 
     nonisolated init(
         context: ServerContext = .local,
-        keychain: ProjectConfigKeychain = ProjectConfigKeychain()
+        keychain: ProjectConfigKeychain = ProjectConfigKeychain(),
+        hermesRunner: HermesRunner? = nil
     ) {
         self.context = context
         self.keychain = keychain
+        self.hermesRunner = hermesRunner
     }
 
     // MARK: - Detection
@@ -150,20 +158,18 @@ struct ProjectTemplateUninstaller: Sendable {
 
         // Resolve cron job ids by matching lock names against the live
         // list. Names that no longer exist go into the already-gone bucket
-        // — the user likely removed them by hand.
-        let currentJobs = HermesFileService(context: context).loadCronJobs()
-        var cronToRemove: [(id: String, name: String)] = []
-        var cronGone: [String] = []
-        for name in lock.cronJobNames {
-            if let match = currentJobs.first(where: { $0.name == name }) {
-                cronToRemove.append((id: match.id, name: match.name))
-            } else {
-                cronGone.append(name)
-            }
-        }
+        // — the user likely removed them by hand. That conclusion needs a
+        // list we actually READ: an unreadable `jobs.json` (a dropped SSH
+        // round trip, a half-written file) used to come back as `[]` and
+        // file every job as "already gone", so the uninstall skipped jobs
+        // that were still scheduled.
+        let cron = resolveCronJobs(
+            names: lock.cronJobNames, project: project, templateId: lock.templateId, transport: transport
+        )
 
         // Memory block detection. The installer wraps its appendix between
-        // `<!-- scarf-template:<id>:begin -->` / `:end -->` markers; look
+        // `<!-- scarf-template:<key>:begin -->` / `:end -->` markers (key: a
+        // hash of the id; older installs spelled the id out); look
         // for the begin marker in the current MEMORY.md. If it's missing
         // (never installed, or removed by hand) we simply skip the memory
         // strip step.
@@ -196,17 +202,14 @@ struct ProjectTemplateUninstaller: Sendable {
                 // refusal instead of a hang.
                 let loaded = try guarded.load(memoryPath)
                 let text = loaded.text
-                let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(
-                    templateId: blockId
-                )
                 // BOTH markers, not just the begin one — since SEC-L5 an
                 // unbounded region is refused by `stripMemoryBlock`, so
                 // promising to remove it in the preview would be a lie the
-                // uninstall then quietly failed to keep.
-                let endMarker = ProjectTemplateService.memoryBlockEndMarker(
-                    templateId: blockId
-                )
-                if let begin = text.range(of: beginMarker) {
+                // uninstall then quietly failed to keep. Current or legacy
+                // form, whichever this install wrote.
+                if let (beginMarker, endMarker) = ProjectTemplateService.memoryBlockMarkers(
+                    in: text, templateId: blockId
+                ), let begin = text.range(of: beginMarker) {
                     memoryBlockPresent = text.range(
                         of: endMarker, range: begin.upperBound..<text.endIndex
                     ) != nil
@@ -293,12 +296,151 @@ struct ProjectTemplateUninstaller: Sendable {
             refusedEntries: refused,
             keychainItemsToDelete: keychainToDelete,
             skillsNamespaceDir: skillsDir,
-            cronJobsToRemove: cronToRemove,
-            cronJobsAlreadyGone: cronGone,
+            cronJobsToRemove: cron.toRemove,
+            cronJobsAlreadyGone: cron.gone,
+            cronJobsUnverified: cron.unverified,
             memoryBlockPresent: memoryBlockPresent,
             memoryPath: memoryPath,
             memoryUnreadable: memoryUnreadable
         )
+    }
+
+    /// Lock cron names matched against the live `jobs.json`.
+    struct CronResolution {
+        var toRemove: [(id: String, name: String)] = []
+        var gone: [String] = []
+        var unverified: [String] = []
+    }
+
+    /// Match each lock-recorded cron name to one live job id.
+    ///
+    /// - `jobs.json` present but unreadable → every name is `unverified`.
+    /// - No job carries the name → `gone` (removed or renamed by hand).
+    /// - A name carrying this project's tag (installs since R12) is unique
+    ///   to this install: one match → `toRemove`.
+    /// - A name from an older Scarf (`[tmpl:<id>] <name>`, no project tag) is
+    ///   shared by every install of the template, so even a SINGLE match may
+    ///   be another project's job (this one's was deleted by hand). Unless
+    ///   no other registered project was installed from the same template,
+    ///   narrow to the jobs that point at this project (the prompt Scarf
+    ///   filled in with `{{PROJECT_DIR}}`, or a `workdir` equal to the
+    ///   root); still not exactly one → `unverified`, never a guess.
+    nonisolated func resolveCronJobs(
+        names: [String],
+        project: ProjectEntry,
+        templateId: String,
+        transport: any ServerTransport
+    ) -> CronResolution {
+        var out = CronResolution()
+        guard !names.isEmpty else { return out }
+        guard let jobs = Self.readCronJobs(context: context, transport: transport) else {
+            out.unverified = names
+            return out
+        }
+        let root = ProjectIdentity.normalizedPath(project.path)
+        // Computed once, only if a legacy name needs it.
+        var sharedTemplate: Bool?
+        for name in names {
+            let matches = jobs.filter { $0.name == name }
+            if matches.isEmpty {
+                out.gone.append(name)
+                continue
+            }
+            let isLegacyShared = name.hasPrefix("[tmpl:") && !name.contains("] [proj:")
+            if !isLegacyShared, matches.count == 1 {
+                out.toRemove.append((id: matches[0].id, name: name))
+                continue
+            }
+            if isLegacyShared, matches.count == 1 {
+                if sharedTemplate == nil {
+                    sharedTemplate = Self.templateIsSharedWithAnotherProject(
+                        templateId: templateId, project: project, context: context
+                    )
+                }
+                if sharedTemplate == false {
+                    out.toRemove.append((id: matches[0].id, name: name))
+                    continue
+                }
+            }
+            let ours = matches.filter { job in
+                if let workdir = job.workdir, !workdir.isEmpty,
+                   ProjectIdentity.normalizedPath(workdir) == root { return true }
+                return Self.mentions(path: project.path, in: job.prompt)
+            }
+            if ours.count == 1 {
+                out.toRemove.append((id: ours[0].id, name: name))
+            } else {
+                Self.logger.error(
+                    "\(matches.count) cron job(s) named \(name, privacy: .public) and none is clearly this project's; leaving them for the user"
+                )
+                out.unverified.append(name)
+            }
+        }
+        return out
+    }
+
+    /// Does `text` name `path` as a whole path — `/x/foo` or `/x/foo/…`, but
+    /// not `/x/foo-bar`?
+    nonisolated static func mentions(path: String, in text: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: path, range: searchStart..<text.endIndex) {
+            guard range.upperBound < text.endIndex else { return true }
+            let next = text[range.upperBound]
+            if !(next.isLetter || next.isNumber || next == "-" || next == "_" || next == ".") {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    /// Is another registered project installed from the same template id?
+    /// Leans cautious: a registry we can't read counts as "yes", so a legacy
+    /// job is only removed on proof that no other install could own it.
+    nonisolated static func templateIsSharedWithAnotherProject(
+        templateId: String, project: ProjectEntry, context: ServerContext
+    ) -> Bool {
+        let store = ProjectStore(context: context)
+        let transport = context.makeTransport()
+        let loaded = ProjectDashboardService(context: context).loadRegistryDetailed()
+        if loaded.loss != nil { return true }
+        let me = ProjectIdentity.normalizedPath(project.path)
+        return loaded.registry.projects.contains { other in
+            guard ProjectIdentity.normalizedPath(other.path) != me else { return false }
+            // The cached manifest exists only for schemaful templates; the
+            // lock every template install writes is the general answer.
+            if store.templateInfo(projectPath: other.path)?.id == templateId { return true }
+            let lockPath = other.path + "/.scarf/template.lock.json"
+            guard let data = try? transport.readFile(lockPath),
+                  data.count <= ProjectStore.maxJSONBytes,
+                  let lock = try? JSONDecoder().decode(TemplateLock.self, from: data)
+            else { return false }
+            return lock.templateId == templateId
+        }
+    }
+
+    /// The live cron jobs, `[]` when the host has no `jobs.json`, `nil` when
+    /// it has one Scarf couldn't read or decode.
+    ///
+    /// "No file" has to be the far end's own answer (`isNoSuchFile`), not a
+    /// follow-up `fileExists`: over SSH a dropped connection makes
+    /// `fileExists` say false too, which would turn "couldn't ask" back into
+    /// "every job is already gone".
+    nonisolated static func readCronJobs(
+        context: ServerContext, transport: any ServerTransport
+    ) -> [HermesCronJob]? {
+        let data: Data
+        do {
+            data = try transport.readFile(context.paths.cronJobsJSON)
+        } catch let error as TransportError where error.isNoSuchFile {
+            return []
+        } catch {
+            return nil
+        }
+        guard data.count <= ProjectStore.maxJSONBytes,
+              let file = try? JSONDecoder().decode(CronJobsFile.self, from: data)
+        else { return nil }
+        return file.jobs
     }
 
     /// The field-key half of a ref's account (`<fieldKey>:<hash>`), split on
@@ -338,7 +480,8 @@ struct ProjectTemplateUninstaller: Sendable {
             keychainItemsToDelete: [],
             skillsNamespaceDir: nil,
             cronJobsToRemove: [],
-            cronJobsAlreadyGone: lock.cronJobNames,
+            cronJobsAlreadyGone: [],
+            cronJobsUnverified: lock.cronJobNames,
             memoryBlockPresent: false,
             memoryPath: context.paths.memoryMD,
             rootRefused: true
@@ -352,7 +495,14 @@ struct ProjectTemplateUninstaller: Sendable {
     /// file itself is only removed at the very end, so a mid-flight
     /// failure leaves enough breadcrumbs for the user to retry or finish
     /// by hand.
-    nonisolated func uninstall(plan: TemplateUninstallPlan) throws {
+    ///
+    /// The steps that DON'T throw (skills, cron, memory, Keychain) record
+    /// what they couldn't do in the returned outcome, so a run that
+    /// finishes is not reported as a clean removal while a cron job is
+    /// still scheduled.
+    @discardableResult
+    nonisolated func uninstall(plan: TemplateUninstallPlan) throws -> TemplateUninstallOutcome {
+        var outcome = TemplateUninstallOutcome()
         // TIME-OF-USE ROOT CHECK, again — the plan was built earlier and
         // `PathGuard` below derives every containment answer from
         // `plan.project.path`. The plan can sit on screen while the agent
@@ -464,17 +614,41 @@ struct ProjectTemplateUninstaller: Sendable {
                 Self.logger.warning(
                     "couldn't fully remove skills namespace dir \(skillsDir, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                outcome.leftovers.append(String(
+                    localized: "The template's skills folder couldn't be fully removed: \(skillsDir)"
+                ))
             }
         }
 
         // 3. Cron jobs via CLI — `hermes cron remove <id>`. A non-zero
-        // exit gets logged but doesn't abort the uninstall; leaving a
-        // stray cron job is better than leaving it AND the skills/memory
-        // state that was supposed to pair with it.
-        for job in plan.cronJobsToRemove {
-            let (output, exit) = context.runHermes(["cron", "remove", job.id])
+        // exit doesn't abort the uninstall (leaving a stray cron job is
+        // better than leaving it AND the skills/memory state that was
+        // supposed to pair with it), but it IS reported: `cron remove`
+        // exits 1 when it fails (`hermes_cli/cron.py:766-794`, forwarded
+        // by `main.py:3614-3617` @ v2026.9.24) and the job stays scheduled.
+        // Names the plan couldn't pin to a job get one more look first —
+        // the cron list may be readable now.
+        var cronJobs = plan.cronJobsToRemove
+        if !plan.cronJobsUnverified.isEmpty {
+            let retry = resolveCronJobs(
+                names: plan.cronJobsUnverified, project: plan.project,
+                templateId: plan.lock.templateId, transport: transport
+            )
+            cronJobs += retry.toRemove
+            for name in retry.unverified {
+                outcome.leftovers.append(String(
+                    localized: "Couldn't confirm the cron job “\(name)” was removed. Check the Cron list and remove it there if it's still scheduled."
+                ))
+            }
+        }
+        for job in cronJobs {
+            let args = ["cron", "remove", job.id]
+            let (output, exit) = hermesRunner?(args) ?? context.runHermes(args)
             if exit != 0 {
                 Self.logger.warning("failed to remove cron job \(job.id, privacy: .public) \(job.name, privacy: .public): \(output, privacy: .public)")
+                outcome.leftovers.append(String(
+                    localized: "The cron job “\(job.name)” couldn't be removed and is still scheduled. Remove it from the Cron list."
+                ))
             }
         }
 
@@ -496,6 +670,11 @@ struct ProjectTemplateUninstaller: Sendable {
         // there is nothing new to learn here — only steps to protect. Same
         // shape as `ProjectLifecycleService.cleanUpAfterRemoval`: the failing
         // step reports, the removal continues.
+        if plan.memoryUnreadable != nil, plan.lock.memoryBlockId != nil {
+            outcome.leftovers.append(String(
+                localized: "\(plan.memoryPath) couldn't be read, so the template's memory entry may still be in it."
+            ))
+        }
         if plan.memoryBlockPresent, let blockId = plan.lock.memoryBlockId {
             do {
                 try stripMemoryBlock(
@@ -505,6 +684,9 @@ struct ProjectTemplateUninstaller: Sendable {
                 Self.logger.warning(
                     "uninstall couldn't strip the template's block from \(plan.memoryPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                outcome.leftovers.append(String(
+                    localized: "The template's memory entry couldn't be removed from \(plan.memoryPath)."
+                ))
             }
         }
 
@@ -529,6 +711,9 @@ struct ProjectTemplateUninstaller: Sendable {
                 try keychain.delete(ref: ref)
             } catch {
                 Self.logger.warning("couldn't delete keychain item \(ref.uri, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                outcome.leftovers.append(String(
+                    localized: "A saved secret for this template couldn't be deleted from the Keychain (\(ref.account))."
+                ))
             }
         }
 
@@ -565,6 +750,7 @@ struct ProjectTemplateUninstaller: Sendable {
         ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: plan.project)
 
         Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
+        return outcome
     }
 
     /// Step 5's read-modify-write, run under the registry write lock by
@@ -964,7 +1150,7 @@ struct ProjectTemplateUninstaller: Sendable {
         }
     }
 
-    /// Remove the `<!-- scarf-template:<id>:begin --> … :end -->` block
+    /// Remove the `<!-- scarf-template:<key>:begin --> … :end -->` block
     /// from MEMORY.md, preserving everything else.
     ///
     /// **A begin marker with no end marker strips NOTHING (P8 SEC-L5).**
@@ -1012,8 +1198,6 @@ struct ProjectTemplateUninstaller: Sendable {
         memoryPath: String,
         guarded: GuardedTextFile
     ) throws {
-        let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(templateId: blockId)
-        let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
         let loaded: GuardedTextFile.Loaded
         do {
             // The house cap (32 MB) — see the plan phase's read. An
@@ -1031,7 +1215,10 @@ struct ProjectTemplateUninstaller: Sendable {
             }
         }
         let text = loaded.text
-        guard let beginRange = text.range(of: beginMarker) else { return }
+        // The hashed markers, or the id-spelling ones an older Scarf wrote.
+        guard let (beginMarker, endMarker) = ProjectTemplateService.memoryBlockMarkers(
+            in: text, templateId: blockId
+        ), let beginRange = text.range(of: beginMarker) else { return }
 
         guard let endRange = text.range(
             of: endMarker, range: beginRange.upperBound..<text.endIndex
@@ -1039,17 +1226,64 @@ struct ProjectTemplateUninstaller: Sendable {
             Self.logger.error("memory block for \(blockId, privacy: .public) at \(memoryPath, privacy: .public) has a begin marker but no end marker; refusing to strip anything (the region is unbounded — a human should close or remove the marker)")
             return
         }
-        // Include the end marker and one trailing newline if present.
+        let updated = Self.removingMemoryBlock(
+            from: text, begin: beginRange, end: endRange
+        )
+        try guarded.write(updated, to: memoryPath, after: loaded)
+    }
+
+    /// `text` with the marker-bounded block removed, together with the
+    /// separator that makes it its own entry — so the entries on either side
+    /// come back exactly as they were.
+    ///
+    /// Installs since the S12-F3 fix add the block as its own Hermes memory
+    /// entry (`ProjectTemplateService.appendingMemoryEntry`): the delimiter
+    /// `\n§\n` sits BEFORE it, or after it when it is the first entry (the
+    /// agent added entries later, or MEMORY.md was empty at install). Older
+    /// installs glued it to the previous entry with a blank line and ended it
+    /// with a newline; that shape is still stripped the old way, consuming
+    /// the one trailing newline and the one blank line the installer added,
+    /// so repeated install/uninstall cycles don't accumulate blank lines.
+    nonisolated static func removingMemoryBlock(
+        from text: String,
+        begin beginRange: Range<String.Index>,
+        end endRange: Range<String.Index>
+    ) -> String {
+        let delimiter = ProjectTemplateService.memoryEntryDelimiter
+        let before = String(text[..<beginRange.lowerBound])
+        let after = String(text[endRange.upperBound...])
+        // Where the block's entry starts: right after the last delimiter
+        // before it (only whitespace in between — Hermes strips each
+        // entry, so stray blank lines there are still the same entry), or
+        // at the top of the file.
+        var keptBefore: String?
+        if let r = before.range(of: delimiter, options: .backwards),
+           before[r.upperBound...].allSatisfy(\.isWhitespace) {
+            keptBefore = String(before[..<r.lowerBound])
+        } else if before.allSatisfy(\.isWhitespace) {
+            keptBefore = ""
+        }
+        if let keptBefore {
+            // Where it ends: the next delimiter (only whitespace before it),
+            // or the end of the file. Anything else is text an agent added
+            // inside the same entry — not the template's, so it stays, as
+            // an entry of its own.
+            let remainder: String
+            if let r = after.range(of: delimiter), after[..<r.lowerBound].allSatisfy(\.isWhitespace) {
+                remainder = String(after[r.upperBound...])
+            } else if after.allSatisfy(\.isWhitespace) {
+                return keptBefore
+            } else {
+                remainder = String(after.drop(while: \.isWhitespace))
+            }
+            return keptBefore.isEmpty ? remainder : keptBefore + delimiter + remainder
+        }
+        // Legacy shape: `…\n\n<block>\n`.
         var upper = endRange.upperBound
         if upper < text.endIndex, text[upper] == "\n" {
             upper = text.index(after: upper)
         }
-        let stripRange = beginRange.lowerBound..<upper
-
-        // Also consume one leading blank line that the installer inserts
-        // before the begin marker, so repeated install/uninstall cycles
-        // don't accumulate blank lines at the insertion site.
-        var lower = stripRange.lowerBound
+        var lower = beginRange.lowerBound
         if lower > text.startIndex {
             let prev = text.index(before: lower)
             if text[prev] == "\n", prev > text.startIndex {
@@ -1059,7 +1293,6 @@ struct ProjectTemplateUninstaller: Sendable {
                 }
             }
         }
-        let updated = text.replacingCharacters(in: lower..<stripRange.upperBound, with: "")
-        try guarded.write(updated, to: memoryPath, after: loaded)
+        return text.replacingCharacters(in: lower..<upper, with: "")
     }
 }

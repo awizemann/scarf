@@ -354,6 +354,9 @@ struct CredentialPoolsView: View {
                                     .foregroundStyle(.orange)
                             }
                             oauthExpiryBadge(provider)
+                            if provider.inheritedFromRoot {
+                                inheritedBadge
+                            }
                         }
                         HStack(spacing: 8) {
                             Text(provider.tokenTail.isEmpty ? "—" : provider.tokenTail)
@@ -392,7 +395,13 @@ struct CredentialPoolsView: View {
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderless)
-                    .help(Text("Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
+                    // S06-F3: logout in this profile only clears the
+                    // profile's own state, so an inherited provider cannot
+                    // be removed from here.
+                    .disabled(provider.inheritedFromRoot)
+                    .help(provider.inheritedFromRoot
+                          ? Text("This provider is signed in on the default profile. Remove it there.")
+                          : Text("Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -435,9 +444,28 @@ struct CredentialPoolsView: View {
         }
     }
 
+    /// S06-F3: shown on a pool or OAuth provider that Hermes reads from the
+    /// ROOT auth.json because this named profile has none of its own.
+    private var inheritedBadge: some View {
+        Text("inherited from default profile")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.quaternary)
+            .clipShape(Capsule())
+            .help(Text("This profile has no credentials of its own for this provider, so Hermes uses the ones in the default profile's auth.json. Adding one here makes this profile use its own instead."))
+    }
+
     @ViewBuilder
     private func poolSection(_ pool: HermesCredentialPool) -> some View {
         SettingsSection(title: LocalizedStringKey(pool.provider), icon: "key.horizontal") {
+            if pool.inheritedFromRoot {
+                HStack {
+                    inheritedBadge
+                    Spacer()
+                }
+            }
             PickerRow(label: "Rotation", selection: pool.strategy, options: viewModel.strategyOptions) { strategy in
                 viewModel.setStrategy(strategy, for: pool.provider)
             }
@@ -491,11 +519,24 @@ struct CredentialPoolsView: View {
                         }
                     }
                     Spacer()
-                    if supportsAuthPriority {
+                    // S06-F3: every action here writes the PROFILE's pool
+                    // from a root-fallback read, forking the root entries into
+                    // the profile (and Refresh Tokens could spend the root's
+                    // single-use refresh token). Hidden on inherited rows.
+                    if supportsAuthPriority && !pool.inheritedFromRoot {
                         credentialActionsMenu(pool: pool, cred: cred)
                     }
+                    // S06-F3: an inherited credential lives in the ROOT
+                    // auth.json. `hermes auth remove` run in this profile
+                    // never touches that file — it copies the remaining
+                    // root entries into the profile (or writes an empty list
+                    // Hermes then ignores), so the row would come back.
                     Button("Remove", role: .destructive) { pendingRemove = cred }
                         .controlSize(.small)
+                        .disabled(pool.inheritedFromRoot)
+                        .help(pool.inheritedFromRoot
+                              ? Text("This credential belongs to the default profile. Remove it there.")
+                              : Text("Remove this credential from the pool."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -505,7 +546,7 @@ struct CredentialPoolsView: View {
                 Spacer()
                 Button("Reset Cooldowns") { viewModel.resetProvider(pool.provider) }
                     .controlSize(.small)
-                    .disabled(viewModel.isMutating)
+                    .disabled(viewModel.isMutating || pool.inheritedFromRoot)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -666,6 +707,12 @@ private struct AddCredentialSheet: View {
     /// confirm sheet can show the user what's about to change. Nil
     /// when no swap is offered (already aligned, or user dismissed).
     @State private var pendingProviderSwap: PendingProviderSwap?
+    /// The provider switch is being written. Keeps the swap sheet up (and
+    /// its buttons off) until Hermes has answered.
+    @State private var providerSwapInFlight = false
+    /// Why the last "Switch to …" did not happen, shown in the swap sheet
+    /// (T3-F4: a refused write used to close the sheet as if it worked).
+    @State private var providerSwapError: String?
 
     /// Snapshot of the post-OAuth state used to render the
     /// "Switch active provider?" sheet. Frozen at the moment OAuth
@@ -1143,16 +1190,31 @@ private struct AddCredentialSheet: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
+            if let providerSwapError {
+                Label(providerSwapError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             HStack {
                 Button("Keep \(swap.currentProvider)") {
+                    providerSwapError = nil
                     pendingProviderSwap = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onDismiss() }
                 }
+                .disabled(providerSwapInFlight)
                 Spacer()
+                if providerSwapInFlight {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Switch to \(swap.newProvider)") {
                     let target = swap.newProvider
+                    let current = swap.currentProvider
                     let ctx = viewModel.context
-                    pendingProviderSwap = nil
+                    let capabilities = capabilitiesStore?.capabilities ?? .empty
+                    providerSwapError = nil
+                    providerSwapInFlight = true
                     Task.detached {
                         let svc = HermesFileService(context: ctx)
                         // Empty model lets Hermes pick its own default
@@ -1172,15 +1234,34 @@ private struct AddCredentialSheet: View {
                         let ops = LocalModelConfigPlan.operations(
                             selectingRemoteModel: "",
                             provider: target,
-                            current: svc.loadConfig()
+                            current: svc.loadConfig(),
+                            capabilities: capabilities
                         )
-                        _ = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+                        // An empty plan (a local provider with no base URL)
+                        // or a refused `config set` leaves config.yaml on the
+                        // old provider: say so and keep the sheet up rather
+                        // than closing it as if the switch happened (T3-F4).
+                        let failure: String?
+                        if ops.isEmpty {
+                            failure = String(localized: "Scarf can't switch to \(target) from here. Choose \(target) and a model in the model picker instead.")
+                        } else if !svc.applyModelConfigPlan(ops) {
+                            failure = String(localized: "Hermes didn't save the switch, so config.yaml still uses \(current). Try the model picker, or run `hermes model` in a terminal.")
+                        } else {
+                            failure = nil
+                        }
                         await MainActor.run {
+                            providerSwapInFlight = false
+                            if let failure {
+                                providerSwapError = failure
+                                return
+                            }
+                            pendingProviderSwap = nil
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onDismiss() }
                         }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(providerSwapInFlight)
                 .keyboardShortcut(.defaultAction)
             }
         }

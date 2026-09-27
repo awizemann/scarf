@@ -251,8 +251,10 @@ struct OffPoolDisciplineP52Tests {
     /// (`runHermesCLISplit(`, `runHermesSync(`, `capabilitiesSync(`),
     /// converted the three sites that were the plain
     /// `await Task.detached { … }.value` shape and baselined eleven more:
-    /// **44 hits across 32 keys** (P5b moved one Cron and one Peers site to `OffPool.run`;
-    /// P7f moved two more Cron sites and one more Peers site).
+    /// **42 hits across 31 keys** (P5b moved one Cron and one Peers site to `OffPool.run`;
+    /// P7f moved two more Cron sites and one more Peers site; R17 moved the
+    /// whole `ProjectCockpitViewModel` load body, which no longer awaits
+    /// inside, to `OffPool.run`).
     ///
     /// It is COUNTED so it cannot rot into a licence: one more
     /// `runHermesCLI(` in `CronViewModel` is a new offender even though the
@@ -298,17 +300,17 @@ struct OffPoolDisciplineP52Tests {
         // ViewModel sites; these eleven are the rest and belong to
         // `t-406d56d6`. None is the one-line shape: every one is a
         // multi-statement detached body that reads a file ALONGSIDE other
-        // work, and three of them (`CuratorViewModel`, `LogTailWidgetView`,
-        // `ProjectCockpitViewModel`) `await` inside that body, which
-        // `OffPool.run`'s synchronous closure cannot take. Splitting them is
-        // a refactor of the load, not a wrap, so it is a follow-up and not a
-        // line this phase could honestly claim to have tested.
+        // work, and two of them (`CuratorViewModel`, `LogTailWidgetView`)
+        // `await` inside that body, which `OffPool.run`'s synchronous
+        // closure cannot take. Splitting them is a refactor of the load, not
+        // a wrap, so it is a follow-up and not a line this phase could
+        // honestly claim to have tested. (`ProjectCockpitViewModel` was the
+        // third; its body no longer awaits, so R17 moved it whole.)
         "CredentialPoolsViewModel.swift:readText(": 1,
         "CuratorViewModel.swift:readText(": 1,
         "KanbanSummaryWidgetView.swift:readFile(": 1,
         "LogTailWidgetView.swift:readFile(": 1,
         "PersonalitiesViewModel.swift:readText(": 2,
-        "ProjectCockpitViewModel.swift:readText(": 2,
         "SettingsViewModel.swift:readText(": 3,
         "SkillsViewModel.swift:readText(": 1,
         // P60's three needles (`runHermesCLISplit(`, `runHermesSync(`,
@@ -711,8 +713,8 @@ struct OffPoolDisciplineP52Tests {
     }
 
     /// The baseline's own size, pinned (lesson 6: a number in a comment is a
-    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 44
-    /// hits across 32 keys; this is what re-measures it, so a phase that
+    /// claim nobody executes). The doc above ``pendingOffPoolSites`` says 42
+    /// hits across 31 keys; this is what re-measures it, so a phase that
     /// adds or clears an entry must restate the prose. The needle set's own
     /// size is pinned for the same reason. The vocabulary has been widened
     /// four times and the count is now 15: 2 (P52) → 7 (P58) → 8 (P58b's
@@ -720,8 +722,8 @@ struct OffPoolDisciplineP52Tests {
     /// this assertion is the only place the number is executed.
     @Test("the pending-site baseline is the size its documentation claims")
     func baselineSizeIsPinned() {
-        #expect(Self.pendingOffPoolSites.count == 32)
-        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 44)
+        #expect(Self.pendingOffPoolSites.count == 31)
+        #expect(Self.pendingOffPoolSites.values.reduce(0, +) == 42)
         #expect(Self.blockingNeedles.count == 15)
         #expect(Set(Self.blockingNeedles).count == 15, "a needle is listed twice")
     }

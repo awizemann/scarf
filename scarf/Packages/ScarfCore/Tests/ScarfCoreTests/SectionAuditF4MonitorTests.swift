@@ -53,8 +53,10 @@ import SQLite3
         //   oldRoot      listable but 30 days old   → 1000 msgs
         //   hiddenRoot   in-window but hidden       →  100 msgs
         //   subagent     in-window but a subagent run → 200 msgs
-        // 7-day + listable = 70. All-time + listable = 1070.
-        // Everything (the pre-fix query) = 1370.
+        // The session COUNT follows the list (listable rows only). The
+        // SUMS follow `hermes insights` — every row in the window (R11 /
+        // S04-F2): 7-day = 370, all-time = 1370. (The F4 package summed
+        // listable rows only — 70 / 1070 — which dropped subagent spend.)
         let schema = """
         CREATE TABLE sessions (
             id TEXT PRIMARY KEY, source TEXT, user_id TEXT, model TEXT, title TEXT,
@@ -140,20 +142,20 @@ import SQLite3
         let service = try await openService(home)
 
         let window = await service.fetchStats(since: now.addingTimeInterval(-7 * Self.day))
-        // recentRoot + recentBranch + recentReset — the three listable
-        // sessions started inside the window. branchParent/resetParent are
-        // listable but carry zero counters.
-        #expect(window.totalMessages == 70)
-        #expect(window.totalToolCalls == 7)
+        // Sums: every row started inside the window, subagent and hidden
+        // rows included (10 + 20 + 40 + 100 + 200); `oldRoot` is outside.
+        #expect(window.totalMessages == 370)
+        #expect(window.totalToolCalls == 37)
+        // Count: the five listable sessions started inside the window.
         #expect(window.totalSessions == 5)
 
         // The unbounded shape every existing caller still gets.
         let allTime = await service.fetchStats()
-        #expect(allTime.totalMessages == 1070)
+        #expect(allTime.totalMessages == 1370)
         await service.close()
     }
 
-    @Test("Stats count the same sessions the session list shows")
+    @Test("Stats count the sessions the list shows but sum every row's usage")
     func statsPopulationMatchesTheSessionList() async throws {
         let home = try makeFixtureHome()
         defer { cleanup(home) }
@@ -162,10 +164,11 @@ import SQLite3
         let listed = await service.fetchSessions(limit: 500)
         let stats = await service.fetchStats()
         #expect(stats.totalSessions == listed.count)
-        // The rows the list hides must not be in the totals: `hiddenRoot`
-        // (100) and `subagent` (200) would push 1070 to 1370.
-        #expect(stats.totalMessages == listed.reduce(0) { $0 + $1.messageCount })
         #expect(!listed.contains { $0.id == "hiddenRoot" || $0.id == "subagent" })
+        // The usage sums DO include the rows the list hides: `hiddenRoot`
+        // (100) and `subagent` (200) on top of the listed 1070, as
+        // `hermes insights` sums them (R11 / S04-F2).
+        #expect(stats.totalMessages == listed.reduce(0) { $0 + $1.messageCount } + 300)
         await service.close()
     }
 
@@ -178,11 +181,11 @@ import SQLite3
         let bounded = await service.dashboardSnapshot(
             statsSince: now.addingTimeInterval(-7 * Self.day)
         )
-        #expect(bounded.stats.totalMessages == 70)
+        #expect(bounded.stats.totalMessages == 370)
         #expect(bounded.queryError == nil)
 
         let unbounded = await service.dashboardSnapshot()
-        #expect(unbounded.stats.totalMessages == 1070)
+        #expect(unbounded.stats.totalMessages == 1370)
         await service.close()
     }
 
@@ -267,7 +270,7 @@ import SQLite3
 
     // MARK: - Insights
 
-    @Test("Insights aggregates and the Insights session list share one population")
+    @Test("Insights histogram follows the session list; usage counts follow every row")
     func insightsSnapshotUsesTheSessionListPopulation() async throws {
         let home = try makeFixtureHome()
         defer { cleanup(home) }
@@ -282,16 +285,15 @@ import SQLite3
         #expect(snapshot.startHours.values.reduce(0, +) == sessions.count)
         #expect(snapshot.daysOfWeek.values.reduce(0, +) == sessions.count)
 
-        // `subagent` and `hiddenRoot` each carry a user message; counting
-        // them here (the pre-fix `parent_session_id IS NULL` predicate did
-        // for `hiddenRoot`, and dropped `recentBranch`/`recentReset`) made
-        // the "messages you sent" card disagree with the session table.
         let listedIds = Set(sessions.map(\.id))
         #expect(listedIds.contains("recentBranch"))
         #expect(listedIds.contains("recentReset"))
         #expect(!listedIds.contains("hiddenRoot"))
         #expect(!listedIds.contains("subagent"))
-        #expect(snapshot.userMessageCount == 4)  // recentRoot, recentBranch, recentReset, oldRoot
+        // The user-message count is USAGE, so it counts every session row
+        // like `hermes insights` does (R11 / S04-F2): the four listable
+        // sessions' messages plus `subagent`'s and `hiddenRoot`'s.
+        #expect(snapshot.userMessageCount == 6)
         await service.close()
     }
 

@@ -90,69 +90,75 @@ struct ScarfApp: App {
             _ = HermesFileService.enrichedEnvironment()
         }
 
-        // Bootstrap built-in skills shipped inside the app bundle into
-        // `~/.hermes/skills/scarf/`. Today this is just
-        // `scarf-template-author`, which the "New Project from Scratch"
-        // wizard hands off to. The service is idempotent + version-gated;
-        // failures log and don't block launch — worst case is the wizard
-        // still works but the agent doesn't have the skill loaded for
-        // that session.
-        Task.detached(priority: .utility) {
-            do {
-                try SkillBootstrapService(context: .local).ensureBundledSkillsInstalled()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .skills))
+        // Everything below writes into the real `~/.hermes` (skills, slash
+        // commands, `.env`, the MCP registration). A unit-test host or a
+        // SwiftUI preview launches this same app, and must not touch the
+        // developer's Hermes home: tests plant their own scratch homes.
+        if !Analytics.isSyntheticHost {
+            // Bootstrap built-in skills shipped inside the app bundle into
+            // `~/.hermes/skills/scarf/`. Today this is just
+            // `scarf-template-author`, which the "New Project from Scratch"
+            // wizard hands off to. The service is idempotent + version-gated;
+            // failures log and don't block launch — worst case is the wizard
+            // still works but the agent doesn't have the skill loaded for
+            // that session.
+            Task.detached(priority: .utility) {
+                do {
+                    try SkillBootstrapService(context: .local).ensureBundledSkillsInstalled()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .skills))
+                }
             }
-        }
 
-        // Bootstrap global Scarf slash commands shipped inside the app
-        // bundle into `~/.hermes/scarf/slash-commands/`. These are the
-        // `/scarf-*` family that surfaces in EVERY chat (pre-session,
-        // global, project-scoped) so the user can drive Scarf-specific
-        // workflows without having to author per-project commands first.
-        // Same idempotent + version-gated pattern as
-        // `SkillBootstrapService`; failures log and don't block launch.
-        Task.detached(priority: .utility) {
-            do {
-                try SlashCommandBootstrapService(context: .local).ensureBundledCommandsInstalled()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .slashCommands))
+            // Bootstrap global Scarf slash commands shipped inside the app
+            // bundle into `~/.hermes/scarf/slash-commands/`. These are the
+            // `/scarf-*` family that surfaces in EVERY chat (pre-session,
+            // global, project-scoped) so the user can drive Scarf-specific
+            // workflows without having to author per-project commands first.
+            // Same idempotent + version-gated pattern as
+            // `SkillBootstrapService`; failures log and don't block launch.
+            Task.detached(priority: .utility) {
+                do {
+                    try SlashCommandBootstrapService(context: .local).ensureBundledCommandsInstalled()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .slashCommands))
+                }
             }
-        }
 
-        // Reconcile every registered project's secrets-env block in
-        // ~/.hermes/.env. Catches users upgrading from a pre-mirror
-        // Scarf version (existing projects' Keychain values weren't
-        // mirrored before) and any drift between the Keychain state
-        // and the env file. Idempotent — projects whose blocks are
-        // already current produce no write.
-        Task.detached(priority: .utility) {
-            do {
-                try KeychainEnvMirror(context: .local).reconcileAll()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .envMirror))
+            // Reconcile every registered project's secrets-env block in
+            // ~/.hermes/.env. Catches users upgrading from a pre-mirror
+            // Scarf version (existing projects' Keychain values weren't
+            // mirrored before) and any drift between the Keychain state
+            // and the env file. Idempotent — projects whose blocks are
+            // already current produce no write.
+            Task.detached(priority: .utility) {
+                do {
+                    try KeychainEnvMirror(context: .local).reconcileAll()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .envMirror))
+                }
             }
-        }
 
-        // Register the bundled `scarf-projects` MCP server into the local
-        // Hermes config, so agents get validated project CRUD instead of
-        // hand-appending rows to projects.json. Unconditional and
-        // untoggled — it is part of what Scarf is, not a preference. The
-        // `command` is re-asserted every launch so moving the app doesn't
-        // strand Hermes on a path that no longer exists; a launch where
-        // nothing moved writes nothing.
-        Task.detached(priority: .utility) {
-            let outcome = ProjectsMCPRegistrar(context: .local).ensureRegistered()
-            if case .failed(let reason) = outcome {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("projects MCP registration failed: \(reason, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .projectsMCP))
+            // Register the bundled `scarf-projects` MCP server into the local
+            // Hermes config, so agents get validated project CRUD instead of
+            // hand-appending rows to projects.json. Unconditional and
+            // untoggled — it is part of what Scarf is, not a preference. The
+            // `command` is re-asserted every launch so moving the app doesn't
+            // strand Hermes on a path that no longer exists; a launch where
+            // nothing moved writes nothing.
+            Task.detached(priority: .utility) {
+                let outcome = ProjectsMCPRegistrar(context: .local).ensureRegistered()
+                if case .failed(let reason) = outcome {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("projects MCP registration failed: \(reason, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .projectsMCP))
+                }
             }
         }
 
@@ -508,6 +514,12 @@ private struct ContextBoundRoot: View {
             // until first resize.
             .windowFrameAutosave("Scarf.Window.\(context.id)")
             .onAppear { fileWatcher.startWatching() }
+            // The `/scarf-*` commands are installed on this Mac at launch;
+            // a remote host gets them the first time a window connects to
+            // it (S03-F5). Off-main and once per host per app session.
+            .task(id: context.id) {
+                await SlashCommandBootstrapService.bootstrapRemoteIfNeeded(context: context)
+            }
             .onDisappear {
                 fileWatcher.stopWatching()
                 // Window close, or a server/profile switch rebuilding this
@@ -549,6 +561,32 @@ final class ServerLiveStatus: Identifiable {
 
     var hermesRunning = false
     var gatewayRunning = false
+
+    /// Why the menu's Restart can't restart this server, when the restart
+    /// guard said so. `nil` when it can (or nobody has asked yet).
+    var restartBlock: RestartBlock?
+
+    /// What the guard's stop + start refusal means for the menu.
+    enum RestartBlock: Equatable {
+        /// The gateway was started by hand: a stop would kill it and the
+        /// start couldn't bring it back. Restart is disabled.
+        case handRun
+        /// `gateway status` didn't answer, so nothing is sent blind.
+        case statusUnknown
+    }
+
+    /// The menu state for a ``HermesGatewayRestartGuard`` stop + start
+    /// verdict (`nil` = may restart).
+    nonisolated static func restartBlock(for refusal: HermesCLIOutcome?) -> RestartBlock? {
+        guard let refusal else { return nil }
+        return refusal.detail == HermesGatewayRestartGuard.statusUnreadableNote ? .statusUnknown : .handRun
+    }
+
+    /// One guard probe at a time.
+    private var restartProbeInFlight = false
+    /// When the guard was last asked, so a block is re-checked now and then
+    /// (the user may have installed the gateway as a service meanwhile).
+    private var lastRestartProbe: Date?
 
     /// When true (app not frontmost), the poll cadence is floored at 60s
     /// to cut background CPU + SSH round-trips against remotes (gh#102),
@@ -671,6 +709,17 @@ final class ServerLiveStatus: Identifiable {
 
     func restartHermes() {
         Task { [weak self, fileService, context] in
+            // A gateway run by hand would be stopped for good: the start
+            // below can't bring it back. Nothing is sent; the menu item
+            // relabels itself to say why (Health and the Gateway view give
+            // the full explanation).
+            let refusal = await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value
+            self?.restartBlock = Self.restartBlock(for: refusal)
+            if refusal != nil {
+                Analytics.record(.hermesControlAction(action: .restart, source: .menuBar, outcome: .init(.failed)))
+                self?.refresh()
+                return
+            }
             let stopped = await Task.detached { fileService.stopHermes() }.value
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let started = await Task.detached { Self.performStart(context) }.value
@@ -687,6 +736,25 @@ final class ServerLiveStatus: Identifiable {
 
     private func refresh() {
         Task { [weak self] in _ = await self?.pollOnce() }
+    }
+
+    /// Ask the restart guard once, when Hermes is seen starting, so the
+    /// menu's Restart already says whether it can run before anyone clicks
+    /// it. One `gateway status` spawn (plus `status` on the no-service
+    /// branch) per start, off the main actor with the CLI's timeout (C10).
+    private func probeRestartBlock() {
+        guard !restartProbeInFlight else { return }
+        restartProbeInFlight = true
+        lastRestartProbe = Date()
+        Task { [weak self, fileService] in
+            let refusal = await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value
+            guard let self else { return }
+            self.restartProbeInFlight = false
+            // Hermes stopped while the probe ran: the answer is stale.
+            guard self.hermesRunning else { return }
+            let block = Self.restartBlock(for: refusal)
+            if self.restartBlock != block { self.restartBlock = block }
+        }
     }
 
     /// Single probe used by both the polling loop (which needs the
@@ -730,6 +798,14 @@ final class ServerLiveStatus: Identifiable {
         // poll cycle.
         if hermesRunning != probe.running {
             hermesRunning = probe.running
+            if probe.running {
+                probeRestartBlock()
+            } else if restartBlock != nil {
+                restartBlock = nil
+            }
+        } else if probe.running, restartBlock != nil,
+                  let last = lastRestartProbe, Date().timeIntervalSince(last) > 120 {
+            probeRestartBlock()
         }
         if gatewayRunning != probe.gatewayRunning {
             gatewayRunning = probe.gatewayRunning
@@ -977,8 +1053,19 @@ struct MenuBarMenu: View {
                 .disabled(status.hermesRunning)
             Button("Stop Hermes") { status.stopHermes() }
                 .disabled(!status.hermesRunning)
-            Button("Restart Hermes") { status.restartHermes() }
-                .disabled(!status.hermesRunning)
+            // A gateway started by hand can't be restarted from here (the
+            // stop would kill it and the start can't bring it back), so the
+            // item says so instead of doing nothing when clicked.
+            Button {
+                status.restartHermes()
+            } label: {
+                switch status.restartBlock {
+                case .handRun: Text("Restart Hermes (running manually)")
+                case .statusUnknown: Text("Restart Hermes (status unknown)")
+                case nil: Text("Restart Hermes")
+                }
+            }
+            .disabled(!status.hermesRunning || status.restartBlock == .handRun)
         }
     }
 }

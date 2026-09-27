@@ -90,7 +90,10 @@ struct BotConversationView: View {
             )
 
         case .noConversationYet:
-            starter
+            VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+                unsentNote
+                starter
+            }
 
         case .creating:
             placeholder(
@@ -108,6 +111,7 @@ struct BotConversationView: View {
                     .scarfStyle(.body)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .textSelection(.enabled)
+                unsentNote
                 Button("Try Again") { viewModel.open() }
                     .buttonStyle(.borderedProminent)
             }
@@ -130,7 +134,7 @@ struct BotConversationView: View {
         // (`MessageGroupView`, `RichMessageBubble`, the composer) at the
         // bot's session instead of the window's main chat, which is
         // injected at the app root. `serverContext` re-points the
-        // composer's own reads — slash commands, quick commands — at the
+        // composer's own reads — slash commands — at the
         // BOT's profile home, so it can't offer the user's commands under
         // the bot's name.
         .environment(viewModel.chat)
@@ -142,6 +146,25 @@ struct BotConversationView: View {
         .environment(\.showsBotAttribution, true)
         .frame(height: paneHeight)
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
+    }
+
+    /// The message the reopen could not deliver, quoted so it can be
+    /// copied and sent again.
+    @ViewBuilder
+    private var unsentNote: some View {
+        if let unsent = viewModel.unsentMessage {
+            VStack(alignment: .leading, spacing: ScarfSpace.s1) {
+                Label("Your last message wasn’t sent", systemImage: "exclamationmark.bubble")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                Text(unsent)
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
     }
 
     @ViewBuilder

@@ -203,6 +203,7 @@ struct TemplateUninstallSheet: View {
         section(
             title: "Cron jobs",
             subtitle: plan.cronJobsToRemove.isEmpty && plan.cronJobsAlreadyGone.isEmpty
+                && plan.cronJobsUnverified.isEmpty
                 ? "none"
                 : nil
         ) {
@@ -226,6 +227,18 @@ struct TemplateUninstallSheet: View {
                             .foregroundStyle(.secondary)
                             .font(.caption)
                         Text("\(name) — already gone")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(plan.cronJobsUnverified, id: \.self) { name in
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(ScarfColor.warning)
+                            .font(.caption)
+                        Text(plan.rootRefused
+                             ? "\(name) — not checked"
+                             : "\(name) — couldn't be matched to a scheduled job; Scarf will try again and tell you if it's still there")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -339,6 +352,10 @@ struct TemplateUninstallSheet: View {
             Text("Removed \(removed.name)")
                 .font(.title2.bold())
 
+            if let outcome = viewModel.preservedOutcome, !outcome.leftovers.isEmpty {
+                leftoversBanner(outcome.leftovers)
+            }
+
             // Preserved-files banner. Only renders when the project dir
             // stayed and at least one file was left behind — that's the
             // case the user keeps getting surprised by ("I uninstalled
@@ -361,6 +378,35 @@ struct TemplateUninstallSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    /// What the uninstall couldn't do. Shown above everything else on the
+    /// success screen: a job still scheduled against a deleted project is
+    /// the one thing the user has to act on.
+    private func leftoversBanner(_ leftovers: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ScarfColor.warning)
+                Text("Removed, except:")
+                    .scarfStyle(.headline)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(leftovers.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(ScarfColor.warning.opacity(0.10))
+        )
+        .accessibilityElement(children: .combine)
     }
 
     /// Orange informational banner listing the files the uninstaller

@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """Diff Scarf's hand-mirrored Hermes provider tables against hermes_cli source.
 
-Scarf mirrors three tables out of hermes_cli/providers.py by hand; this script
+Scarf mirrors provider tables out of hermes_cli by hand; this script
 turns the "reconcile on every Hermes bump" chore into a mechanical gate:
 
   1. ModelCatalogService.providerAliases   <->  ALIASES
      (identity entries like "lmstudio": "lmstudio" are skipped on the Hermes
      side — Scarf deliberately omits them)
   2. ModelPreflight.aggregatorProviders    <->  HERMES_OVERLAYS entries with
-     is_aggregator=True
+     is_aggregator=True, UNION hermes_cli/model_normalize.py
+     _AGGREGATOR_PROVIDERS ("Providers whose APIs consume vendor/model
+     slugs") canonicalised through ALIASES. The second source is the one
+     that names `nous`, which providers.py does not mark is_aggregator —
+     mirroring providers.py alone is how Nous users got a false mismatch
+     banner (S06-F1). An absent model_normalize.py (pre-v2026.4.8) SKIPs;
+     a present one whose set can't be parsed exits.
   3. ModelCatalogService.overlayOnlyProviders keys
                                            <->  HERMES_OVERLAYS keys that are
      absent from the models.dev cache (~/.hermes/models_dev_cache.json).
@@ -40,6 +46,26 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      static CANONICAL_PROVIDERS slug is skipped (Hermes does not auto-append
      it), and reachability resolves through BOTH alias tables in either
      direction.
+  6. HermesProviderCredentials.providerEnvVars  <->  the env vars Hermes'
+     `_has_any_provider_configured` (hermes_cli/main.py) counts: its literal
+     `provider_env_vars` set, plus the `api_key_env_vars` of every `api_key`
+     row in hermes_cli/auth.py `_REGISTRY_ROWS`, plus what
+     `register_plugin_provider` (hermes_cli/auth_plugin_providers.py) mirrors
+     in from bundled plugins: api_key profiles whose name is neither a
+     built-in row nor in `_REGISTRY_PLUGIN_SKIP`, with `*_URL` vars dropped.
+     This is the chat's "No AI provider credentials" hint (S15-F4). FAILs
+     both ways; a table whose shape changed exits; a plugin registration it
+     can't read statically is a WARN, like lane 4.
+  7. OptionalMCPCatalog.entries  <->  optional-mcps/*/manifest.yaml. Scarf's
+     "Browse Catalog…" roster is a hand-copied snapshot of Hermes's catalog;
+     every entry's name, description, transport type and url, auth type,
+     install-time `auth.env` names (Scarf's `installPrompts`) and
+     `tools.default_enabled`/`default_excluded` must match its manifest,
+     and the two name sets must be equal. FAILs both ways (a missing entry
+     hides a catalog server; a stale one offers an install that fails —
+     T4-F1: asana's retired endpoint, n8n's retired bridge). The manifests
+     are read with a small YAML-subset reader (no PyYAML dependency); a
+     manifest it can't read is a hard error, not a skip.
 
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
@@ -79,8 +105,13 @@ CATALOG_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift")
 PREFLIGHT_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift")
+CREDENTIALS_SWIFT = os.path.join(
+    REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift")
 LOCAL_PROVIDERS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift")
+MCP_CATALOG_SWIFT = os.path.join(
+    REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift")
+OPTIONAL_MCPS_DIR = "optional-mcps"
 DEFAULT_HERMES = os.environ.get(
     "HERMES_SRC", os.path.expanduser("~/.hermes/hermes-agent"))
 MODELS_DEV_CACHE = os.path.expanduser("~/.hermes/models_dev_cache.json")
@@ -228,6 +259,44 @@ def parse_hermes(src):
         sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from "
                  f"{PROVIDERS_PY} at {src.mode}")
     return aliases, overlay_keys, aggregators
+
+
+MODEL_NORMALIZE_PY = "hermes_cli/model_normalize.py"
+
+
+def parse_normalize_aggregators(src):
+    """``_AGGREGATOR_PROVIDERS`` from hermes_cli/model_normalize.py — a
+    ``frozenset({...})`` literal (`:30-32` at v2026.9.24; `:60-65` at
+    v2026.4.8, where the file first appears).
+
+    Returns ``None`` when the file does not exist at this read (an older
+    Hermes: a SKIP, not a pass). FAILS CLOSED like `parse_hermes`: a file
+    that exists but whose set is renamed, reshaped or non-literal exits
+    rather than quietly checking against an empty set.
+    """
+    text = src.read(MODEL_NORMALIZE_PY)
+    if text is None:
+        return None
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.AnnAssign):
+            name, value = getattr(node.target, "id", ""), node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            name, value = getattr(node.targets[0], "id", ""), node.value
+        else:
+            continue
+        if name != "_AGGREGATOR_PROVIDERS":
+            continue
+        # frozenset({...}) / frozenset([...]) / a bare set literal.
+        if (isinstance(value, ast.Call) and getattr(value.func, "id", "") == "frozenset"
+                and len(value.args) == 1):
+            value = value.args[0]
+        if isinstance(value, (ast.Set, ast.List, ast.Tuple)) and value.elts and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return {e.value for e in value.elts}
+        break
+    sys.exit(f"error: _AGGREGATOR_PROVIDERS in {MODEL_NORMALIZE_PY} at {src.mode} "
+             f"is missing or not a literal set of strings — its shape changed and "
+             f"this script must be updated, not guessed past")
 
 
 MODELS_DEV_PY = "agent/models_dev.py"
@@ -412,6 +481,348 @@ def parse_static_catalog(src):
     return slugs, aliases
 
 
+AUTH_PY = "hermes_cli/auth.py"
+MAIN_PY = "hermes_cli/main.py"
+AUTH_PLUGIN_PY = "hermes_cli/auth_plugin_providers.py"
+
+
+def _str_tuple(node):
+    """A tuple/list/set literal of string constants as a list, else None."""
+    if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return None
+    out = []
+    for elt in node.elts:
+        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+            return None
+        out.append(elt.value)
+    return out
+
+
+def _find_assign(tree, name):
+    """Value node of the first `name = …` / `name: T = …` anywhere in `tree`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == name:
+            return node.value
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and getattr(node.targets[0], "id", "") == name):
+            return node.value
+    return None
+
+
+def parse_provider_env_vars(src):
+    """Lane 6: the env-var set `_has_any_provider_configured` checks.
+
+    Returns (vars, builtin_ids, warn_plugins). Static AST only. FAILS CLOSED:
+    a missing file, a renamed/reshaped `provider_env_vars` / `_REGISTRY_ROWS` /
+    `_REGISTRY_PLUGIN_SKIP`, or a registry row it can't read exits rather than
+    answering from a partial set.
+    """
+    main_text, auth_text, plug_text = (src.read(MAIN_PY), src.read(AUTH_PY),
+                                       src.read(AUTH_PLUGIN_PY))
+    for path, text in ((MAIN_PY, main_text), (AUTH_PY, auth_text),
+                       (AUTH_PLUGIN_PY, plug_text)):
+        if text is None:
+            sys.exit(f"error: {path} not found at {src.mode} — lane 6 needs it")
+
+    fn = next((n for n in ast.walk(ast.parse(main_text))
+               if isinstance(n, ast.FunctionDef) and n.name == "_has_any_provider_configured"),
+              None)
+    base = _str_tuple(_find_assign(fn, "provider_env_vars")) if fn else None
+    if not base:
+        sys.exit(f"error: `provider_env_vars` literal in _has_any_provider_configured "
+                 f"({MAIN_PY}) not found at {src.mode} — its shape changed")
+    env_vars = set(base)
+
+    rows = _find_assign(ast.parse(auth_text), "_REGISTRY_ROWS")
+    if not isinstance(rows, ast.Tuple) or not rows.elts:
+        sys.exit(f"error: `_REGISTRY_ROWS` tuple not found in {AUTH_PY} at {src.mode}")
+    builtin_ids = set()
+    for row in rows.elts:
+        if isinstance(row, ast.Tuple):
+            # _api_key_provider(id, name, base_url, api_key_env_vars[, url_var[, auth_type]])
+            if len(row.elts) < 4 or not isinstance(row.elts[0], ast.Constant):
+                sys.exit(f"error: unreadable _REGISTRY_ROWS tuple row in {AUTH_PY}")
+            pid, keys = row.elts[0].value, _str_tuple(row.elts[3])
+            auth = "api_key"
+            if len(row.elts) >= 6:
+                if not isinstance(row.elts[5], ast.Constant):
+                    sys.exit(f"error: non-literal auth_type for '{pid}' in {AUTH_PY}")
+                auth = row.elts[5].value
+        elif isinstance(row, ast.Call) and getattr(row.func, "id", "") == "ProviderConfig":
+            if len(row.args) < 3 or not all(isinstance(a, ast.Constant) for a in row.args[:3]):
+                sys.exit(f"error: unreadable ProviderConfig row in {AUTH_PY}")
+            pid, auth = row.args[0].value, row.args[2].value
+            kw = {k.arg: k.value for k in row.keywords}
+            keys = _str_tuple(kw["api_key_env_vars"]) if "api_key_env_vars" in kw else []
+        else:
+            sys.exit(f"error: unknown _REGISTRY_ROWS row shape in {AUTH_PY} at {src.mode}")
+        if keys is None:
+            sys.exit(f"error: non-literal api_key_env_vars for '{pid}' in {AUTH_PY}")
+        builtin_ids.add(pid)
+        if auth == "api_key":
+            env_vars |= set(keys)
+
+    skip_node = _find_assign(ast.parse(plug_text), "_REGISTRY_PLUGIN_SKIP")
+    skip = (_str_tuple(skip_node.args[0])
+            if isinstance(skip_node, ast.Call) and len(skip_node.args) == 1 else None)
+    if skip is None:
+        sys.exit(f"error: `_REGISTRY_PLUGIN_SKIP` frozenset literal not found in "
+                 f"{AUTH_PLUGIN_PY} at {src.mode}")
+
+    warn_plugins = set()
+    root = "plugins/model-providers"
+    for entry in src.listdir(root):
+        init = src.read(f"{root}/{entry}/__init__.py")
+        if init is None:
+            continue
+        try:
+            tree = ast.parse(init)
+        except SyntaxError:
+            warn_plugins.add(entry)
+            continue
+        assigned = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned[target.id] = node.value
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and node.args):
+                continue
+            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if fname != "register_provider":
+                continue
+            call = assigned.get(getattr(node.args[0], "id", None))
+            kw = {k.arg: k.value for k in call.keywords} if call else {}
+            name = kw.get("name")
+            if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                warn_plugins.add(entry)
+                continue
+            if name.value in builtin_ids or name.value in skip:
+                continue  # never mirrored (sync skips existing rows)
+            auth = kw.get("auth_type")
+            auth = auth.value if isinstance(auth, ast.Constant) else ("api_key" if auth is None else None)
+            if auth is None:
+                warn_plugins.add(entry)
+                continue
+            if auth != "api_key":
+                continue
+            profile_vars = _str_tuple(kw["env_vars"]) if "env_vars" in kw else []
+            if profile_vars is None:
+                warn_plugins.add(entry)
+                continue
+            # `_api_key_env_fields`: drop *_URL vars (keep all if nothing is left).
+            keys = [v for v in profile_vars if not v.endswith("_URL")] or profile_vars
+            env_vars |= set(keys)
+    return env_vars, builtin_ids, warn_plugins
+
+
+def parse_manifest_yaml(text, where):
+    """The subset of YAML the optional-mcps manifests use, as nested dicts/lists.
+
+    Block mappings, block sequences (of scalars or of mappings), `>`/`|`
+    block scalars (with `-`/`+` chomping), plain / single- / double-quoted
+    scalars, `true`/`false`/integers, and full-line or ` #` comments. Anything
+    else (flow `[...]`/`{...}` collections, anchors, tags) exits: a manifest
+    this cannot read must not pass as an empty one.
+    """
+    lines = text.splitlines()
+
+    def strip_comment(value):
+        if value[:1] in ("'", '"'):
+            # A quoted scalar may be followed by ` # comment`; keep the quotes.
+            m = re.match(r'^("(?:[^"\\]|\\.)*"|'
+                         r"'(?:[^']|'')*')(\s+#.*)?\s*$", value)
+            if not m:
+                sys.exit(f"error: {where}: can't read the quoted scalar {value!r} — teach lane 7")
+            return m.group(1)
+        cut = re.search(r"\s#", value)
+        return value[:cut.start()].rstrip() if cut else value
+
+    def scalar(raw):
+        raw = strip_comment(raw.strip())
+        if raw == "":
+            return None
+        if raw[0] in "[{&*!|>":
+            sys.exit(f"error: {where}: unsupported YAML construct {raw!r} — teach lane 7")
+        if raw[0] == '"':
+            return json.loads(raw)
+        if raw[0] == "'":
+            return raw[1:-1].replace("''", "'")
+        if raw in ("true", "false"):
+            return raw == "true"
+        if re.fullmatch(r"-?\d+", raw):
+            return int(raw)
+        return raw
+
+    items = []  # (indent, text) of significant lines, keeping block scalars raw
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        items.append((indent, line.strip(), i))
+        i += 1
+
+    def block_scalar(style, start_index, parent_indent):
+        body, j = [], start_index + 1
+        while j < len(lines):
+            ln = lines[j]
+            if ln.strip() and len(ln) - len(ln.lstrip(" ")) <= parent_indent:
+                break
+            body.append(ln)
+            j += 1
+        while body and not body[-1].strip():
+            body.pop()
+        pad = min((len(b) - len(b.lstrip(" ")) for b in body if b.strip()), default=0)
+        body = [b[pad:] for b in body]
+        if style.startswith(">"):
+            text_ = " ".join(b.strip() for b in body if b.strip())
+        else:
+            text_ = "\n".join(body)
+        return text_ if style.endswith("-") else text_ + "\n"
+
+    pos = 0
+
+    def parse_node(indent):
+        nonlocal pos
+        if pos >= len(items):
+            return None
+        if items[pos][1].startswith("- ") or items[pos][1] == "-":
+            return parse_seq(items[pos][0])
+        return parse_map(items[pos][0])
+
+    def parse_value(rest, own_indent, line_index):
+        """The value after `key:` or `- `; `rest` is the text after the colon/dash."""
+        nonlocal pos
+        rest = strip_comment(rest.strip())
+        if rest in (">", ">-", ">+", "|", "|-", "|+"):
+            end_line = line_index
+            value = block_scalar(rest, line_index, own_indent)
+            # Skip the items that belonged to the block scalar.
+            while pos < len(items) and items[pos][0] > own_indent:
+                pos += 1
+            return value
+        if rest == "":
+            if pos < len(items) and (items[pos][0] > own_indent
+                                     or (items[pos][0] == own_indent and items[pos][1].startswith("- "))):
+                return parse_node(items[pos][0])
+            return None
+        return scalar(rest)
+
+    def parse_map(indent):
+        nonlocal pos
+        out = {}
+        while pos < len(items) and items[pos][0] == indent and not items[pos][1].startswith("- "):
+            _, text_, line_index = items[pos]
+            m = re.match(r"^([A-Za-z0-9_.-]+):(?:\s+(.*))?$", text_)
+            if not m:
+                sys.exit(f"error: {where}:{line_index + 1}: can't read {text_!r} — teach lane 7")
+            pos += 1
+            out[m.group(1)] = parse_value(m.group(2) or "", indent, line_index)
+        return out
+
+    def parse_seq(indent):
+        nonlocal pos
+        out = []
+        while pos < len(items) and items[pos][0] == indent and (items[pos][1].startswith("- ") or items[pos][1] == "-"):
+            _, text_, line_index = items[pos]
+            rest = text_[1:].lstrip()
+            if re.match(r"^[A-Za-z0-9_.-]+:(\s|$)", rest):
+                # A mapping item: re-read this line as a key at the dash's content column.
+                col = indent + (len(text_) - len(rest))
+                items[pos] = (col, rest, line_index)
+                out.append(parse_map(col))
+            else:
+                pos += 1
+                out.append(parse_value(rest, indent, line_index))
+        return out
+
+    result = parse_node(0)
+    if pos != len(items):
+        sys.exit(f"error: {where}:{items[pos][2] + 1}: unexpected indentation — teach lane 7")
+    return result or {}
+
+
+def parse_optional_mcps(src):
+    """{name: manifest-dict} for every optional-mcps/<dir>/manifest.yaml."""
+    out = {}
+    for d in src.listdir(OPTIONAL_MCPS_DIR):
+        text = src.read(f"{OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+        if text is None:
+            continue  # README or a helper file, not an entry
+        manifest = parse_manifest_yaml(text, f"{OPTIONAL_MCPS_DIR}/{d}/manifest.yaml")
+        name = manifest.get("name")
+        if not isinstance(name, str) or not name:
+            sys.exit(f"error: {OPTIONAL_MCPS_DIR}/{d}/manifest.yaml has no name at {src.mode}")
+        out[name] = manifest
+    return out
+
+
+def env_signature(name, secret, required):
+    """One install prompt as lane 7 compares it: `NAME`, plus `:plain` for a
+    non-secret and `:optional` for a non-required one."""
+    return name + ("" if secret else ":plain") + ("" if required else ":optional")
+
+
+def manifest_fields(m):
+    """The fields lane 7 compares, from one manifest."""
+    transport = m.get("transport") or {}
+    auth = m.get("auth") or {}
+    tools = m.get("tools") or {}
+    return {
+        "description": " ".join(str(m.get("description") or "").split()),
+        "transport": transport.get("type"),
+        "url": transport.get("url"),
+        "auth": auth.get("type"),
+        # name, then "plain" for a non-secret and "optional" for a
+        # non-required one (Hermes defaults both flags to true).
+        "env": [env_signature(e.get("name"), e.get("secret", True), e.get("required", True))
+                for e in (auth.get("env") or [])],
+        "default_enabled": list(tools.get("default_enabled") or []),
+        "default_excluded": list(tools.get("default_excluded") or []),
+    }
+
+
+def swift_catalog_entries():
+    """{name: fields} for OptionalMCPCatalog.entries, in lane 7's shape."""
+    block = "\n".join(swift_block(MCP_CATALOG_SWIFT, "public static let entries",
+                                  close_pattern=r"^    \]\s*$"))
+    chunks = block.split("OptionalMCPCatalogEntry(")[1:]
+    if not chunks:
+        sys.exit(f"error: no entries parsed from OptionalMCPCatalog.entries in {MCP_CATALOG_SWIFT}")
+    out = {}
+
+    def strings(pattern, chunk):
+        m = re.search(pattern + r"\s*\[(.*?)\]", chunk, re.S)
+        return re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1)) if m else []
+
+    for chunk in chunks:
+        name = re.search(r'name:\s*"([^"]+)"', chunk)
+        if not name:
+            sys.exit(f"error: an OptionalMCPCatalog entry has no name: {chunk[:80]!r}")
+        desc = re.search(r'description:\s*"((?:[^"\\]|\\.)*)"', chunk)
+        transport = re.search(r"transport:\s*\.(\w+)", chunk)
+        auth = re.search(r"authKind:\s*\.(\w+)", chunk)
+        url = re.search(r'url:\s*(nil|"([^"]*)")', chunk)
+        auth_map = {"oauth": "oauth", "apiKey": "api_key", "none": "none"}
+        out[name.group(1)] = {
+            "description": json.loads('"' + desc.group(1) + '"') if desc else "",
+            "transport": transport.group(1) if transport else None,
+            "url": url.group(2) if url and url.group(1) != "nil" else None,
+            "auth": auth_map.get(auth.group(1)) if auth else None,
+            "env": [env_signature(m.group(1), "isSecret: false" not in seg, "isRequired: false" not in seg)
+                    for seg in chunk.split(".init(")[1:]
+                    for m in [re.match(r'\s*name:\s*"([^"]+)"', seg)] if m]
+                   or strings(r"requiredEnvVars:", chunk),
+            "default_enabled": strings(r"defaultEnabledTools:", chunk),
+            "default_excluded": strings(r"defaultExcludedTools:", chunk),
+        }
+    return out
+
+
 def swift_block(path, header, close_pattern=r"^\s*\]\s*$"):
     """Return the source lines between a declaration header and its closing bracket.
 
@@ -497,12 +908,25 @@ def main(argv=None):
         failures.append(f"[aliases] '{k}' maps to '{got}' in Swift but '{want}' in Hermes")
 
     # Lane 2: aggregatorProviders <-> is_aggregator=True overlays
+    #         UNION model_normalize._AGGREGATOR_PROVIDERS (canonicalised)
     swift_aggs = set(
         re.findall(r'"([^"]+)"',
                    "\n".join(swift_block(PREFLIGHT_SWIFT, "let aggregatorProviders"))))
-    check("aggregators", swift_aggs, aggregators,
+    normalize_aggs = parse_normalize_aggregators(src)
+    expected_aggs = set(aggregators)
+    if normalize_aggs is None:
+        skipped.append(f"lane 2 (aggregators, model_normalize half): "
+                       f"{MODEL_NORMALIZE_PY} does not exist at {src.mode}")
+    else:
+        # model_normalize spells them as Hermes's runtime provider ids
+        # (`ai-gateway`, `kilocode`); Swift's set is keyed on CANONICAL ids,
+        # so resolve through ALIASES first (ai-gateway -> vercel,
+        # kilocode -> kilo).
+        expected_aggs |= {aliases.get(p, p) for p in normalize_aggs}
+    check("aggregators", swift_aggs, expected_aggs,
           "Hermes aggregators missing from ModelPreflight.aggregatorProviders",
-          "aggregatorProviders entries Hermes doesn't mark is_aggregator")
+          "aggregatorProviders entries Hermes marks neither is_aggregator nor "
+          "lists in model_normalize._AGGREGATOR_PROVIDERS")
 
     # Plugin-registered providers are lane 4's subject, but lane 3 needs the set
     # too: `overlayOnlyProviders` deliberately mirrors them, and they are not
@@ -618,6 +1042,59 @@ def main(argv=None):
         skipped.append(f"lane 5 (models-dev): {MODELS_DEV_PY} does not exist at "
                        f"{src.mode} — pre-v0.21 Hermes")
 
+    # Lane 6: providerEnvVars <-> _has_any_provider_configured's env-var set
+    hermes_env_vars, _, env_warn_plugins = parse_provider_env_vars(src)
+    swift_env_vars = set(re.findall(
+        r'"([A-Z][A-Z0-9_]*)"',
+        "\n".join(swift_block(CREDENTIALS_SWIFT, "public static let providerEnvVars"))))
+    if not swift_env_vars:
+        sys.exit(f"error: no entries parsed from providerEnvVars in {CREDENTIALS_SWIFT}")
+    check("provider-env-vars", swift_env_vars, hermes_env_vars,
+          "Hermes provider env vars missing from HermesProviderCredentials.providerEnvVars",
+          "providerEnvVars entries Hermes' _has_any_provider_configured does not count")
+    if env_warn_plugins:
+        warnings.append(
+            f"[provider-env-vars] {len(env_warn_plugins)} plugin(s) skipped (registration "
+            f"not readable statically): {', '.join(sorted(env_warn_plugins))}")
+
+    # Lane 7: OptionalMCPCatalog.entries <-> optional-mcps/*/manifest.yaml
+    manifests = parse_optional_mcps(src)
+    swift_catalog = swift_catalog_entries()
+    if not manifests:
+        skipped.append(f"lane 7 (mcp-catalog): no {OPTIONAL_MCPS_DIR}/ at {src.mode} "
+                       f"— pre-catalog Hermes")
+    else:
+        check("mcp-catalog", swift_catalog, manifests,
+              "catalog entries missing from OptionalMCPCatalog.entries",
+              "OptionalMCPCatalog.entries not in Hermes's catalog")
+        for name in sorted(manifests):
+            # Scarf answers the prompts on stdin, one line each, and Hermes
+            # skips a SECRET it already has (mcp_catalog.py `_prompt_env_vars`).
+            # A secret before a plain prompt would then shift the later
+            # answers up one prompt — a secret could land in config.yaml.
+            env = manifest_fields(manifests[name])["env"]
+            secret_seen = False
+            for sig in env:
+                if ":plain" not in sig:
+                    secret_seen = True
+                elif secret_seen:
+                    failures.append(
+                        f"[mcp-catalog] '{name}' prompts for a secret before the plain "
+                        f"value {sig.split(':')[0]}: Scarf's stdin answers would shift "
+                        f"when that secret is already in .env — teach installRequest")
+                    break
+        for name in sorted(set(swift_catalog) & set(manifests)):
+            want = manifest_fields(manifests[name])
+            got = swift_catalog[name]
+            # A `${VAR}` url is filled from an install prompt; Scarf stores nil.
+            if isinstance(want["url"], str) and re.fullmatch(r"\$\{[A-Z0-9_]+\}", want["url"]):
+                want["url"] = None
+            for field in ("description", "transport", "url", "auth", "env",
+                          "default_enabled", "default_excluded"):
+                if got[field] != want[field]:
+                    failures.append(f"[mcp-catalog] '{name}' {field}: Scarf {got[field]!r} "
+                                    f"but the manifest says {want[field]!r}")
+
     for w in warnings:
         print(f"WARN  {w}")
     for s_ in skipped:
@@ -625,12 +1102,13 @@ def main(argv=None):
     for f in failures:
         print(f"FAIL  {f}")
     counts = (f"aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
-              f"overlays={len(swift_overlays)} lanes={5 - len(skipped)}/5")
+              f"overlays={len(swift_overlays)} env-vars={len(swift_env_vars)} "
+              f"mcp-catalog={len(swift_catalog)} lanes={7 - len(skipped)}/7")
     if failures:
         print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against "
               f"{PROVIDERS_PY} at {src.mode}")
         sys.exit(1)
-    # A skipped lane is NOT a pass. Two of five lanes silently disabled is how
+    # A skipped lane is NOT a pass. Two of six lanes silently disabled is how
     # an OK verdict becomes worthless on a fresh machine; say so and exit 2
     # unless the caller has explicitly accepted a partial run.
     if skipped and not args.allow_skip:

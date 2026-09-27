@@ -94,7 +94,9 @@ struct RestoreServerSheet: View {
                 Text("Source").font(.subheadline).bold().foregroundStyle(.secondary)
                 row(label: "Server", value: m.source.displayName)
                 row(label: "Host", value: m.source.host, mono: true)
-                row(label: "Hermes version", value: m.source.hermesVersion ?? "(unknown)")
+                // An archive made before R18a stored the whole multi-line
+                // `hermes --version` banner; show its version line only.
+                row(label: "Hermes version", value: m.source.hermesVersion.flatMap(RemoteBackupService.versionHeadline) ?? "(unknown)")
                 row(label: "Backup time", value: m.createdAt)
                 row(label: "Hermes size", value: ByteCountFormatter.string(fromByteCount: m.hermes.tarballSize, countStyle: .file))
                 row(label: "Projects", value: "\(m.projects.count)")
@@ -106,10 +108,12 @@ struct RestoreServerSheet: View {
                 if let v = inspection.targetHermesVersion {
                     row(label: "Hermes version", value: v)
                 }
-                if let h = inspection.targetHomeResolved {
-                    row(label: "Home", value: h, mono: true)
+                if let h = inspection.targetHermesHome ?? inspection.targetHomeResolved {
+                    row(label: "Hermes home", value: h, mono: true)
                 }
             }
+
+            holderWarning(inspection.stateDBHolders)
 
             if !m.projects.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -130,7 +134,7 @@ struct RestoreServerSheet: View {
                 Toggle(isOn: $viewModel.pauseCronJobs) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pause cron jobs after restore").font(.callout)
-                        Text("Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.")
+                        Text("Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -152,6 +156,30 @@ struct RestoreServerSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Restore refuses to replace a state.db that a running Hermes has
+    /// open (it re-checks when it runs); say so before the user commits.
+    @ViewBuilder
+    private func holderWarning(_ probe: RemoteRestoreService.DBHolderProbe?) -> some View {
+        switch probe {
+        case .held(let pids)?:
+            Label {
+                Text("Hermes is running on this server (process \(pids.map(String.init).joined(separator: ", ")) has a Hermes database open). Stop the Hermes gateway and close any Hermes chats there before restoring; the restore will refuse otherwise.")
+                    .font(.caption)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        case .unknown?:
+            Label {
+                Text("Scarf couldn't check whether Hermes is running on this server. Stop the Hermes gateway and any Hermes chats there before restoring.")
+                    .font(.caption)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        default:
+            EmptyView()
         }
     }
 
@@ -192,6 +220,22 @@ struct RestoreServerSheet: View {
                     Text("Restored to").font(.caption).foregroundStyle(.secondary)
                     ForEach(result.projectsRestored, id: \.targetPath) { p in
                         Text(verbatim: "\(p.name) → \(p.targetPath)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if !result.databasesSkipped.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Databases left as they were")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("This backup is older than Scarf's current backup scope and lists databases inside folders Hermes's own backup leaves out (old backups, caches, runtime downloads). They were not restored.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(result.databasesSkipped, id: \.self) { path in
+                        Text(verbatim: path)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }

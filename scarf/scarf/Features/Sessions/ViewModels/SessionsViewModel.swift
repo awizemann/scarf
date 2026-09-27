@@ -129,7 +129,7 @@ final class SessionsViewModel {
     /// contract (t-5f1d9008) doesn't spawn a real CLI process. Same
     /// seam shape as `ChatViewModel.sessionDeleteRunner` (t-01bd55ec).
     @ObservationIgnored
-    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
         ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
     }
 
@@ -150,6 +150,9 @@ final class SessionsViewModel {
     /// True while `load()` runs so the view can show a `.loadingOverlay`
     /// instead of a blank table on first open / refresh. (t-aud07)
     var isLoading = false
+    /// Why the last load couldn't read `state.db`, or nil when it could.
+    /// The list keeps its previous rows while this is set.
+    private(set) var loadError: String?
     var sessions: [HermesSession] = [] { didSet { recomputeFilteredSessions() } }
     var sessionPreviews: [String: String] = [:]
     var selectedSession: HermesSession?
@@ -189,6 +192,14 @@ final class SessionsViewModel {
     var renameError: String?
     var showDeleteConfirmation = false
     var deleteSessionId: String?
+    /// Every segment of the row being deleted, root first, when it is a
+    /// rotated compression chain (`HermesSession.lineageIds`); empty for
+    /// an ordinary session. `confirmDelete` deletes all of them (R14-3).
+    var deleteLineageIds: [String] = []
+
+    /// How many session rows the pending delete removes — the confirmation
+    /// dialog names it when a chain has more than one.
+    var deleteSegmentCount: Int { max(deleteLineageIds.count, 1) }
     /// Why the last delete attempt failed; `nil` when it succeeded or none
     /// has been made. Rendered as a banner in the page header — the
     /// confirmation dialog is already gone by the time the CLI answers,
@@ -371,7 +382,13 @@ final class SessionsViewModel {
         // open after load() so selectSession()/search() can query without
         // re-opening — cleanup() closes on disappear.
         let opened = await dataService.refresh()
-        guard opened else { return }
+        guard opened else {
+            // Say so, and keep what is already on screen: an empty list
+            // here rendered "No sessions match this filter" for a host
+            // that could not be read at all.
+            loadError = await dataService.reportableOpenError
+            return
+        }
         // v2.7: folded the two serial fetches into one batched round
         // trip via sessionListSnapshot. Pre-fix this paid the 420 ms
         // SSH RTT twice on every Sessions tab open (~840 ms minimum
@@ -383,6 +400,14 @@ final class SessionsViewModel {
         // subqueries bought for a value nothing on this screen reads. The
         // chat sidebar, which does badge unread, keeps it.
         let snapshot = await dataService.sessionListSnapshot(limit: 500, includeUnreadActivity: false)
+        if let failure = snapshot.queryError {
+            // A failed batch (an SSH drop on a watcher tick, a locked DB)
+            // must not wipe a list that loaded a moment ago. Keep the last
+            // good rows and raise the banner.
+            loadError = failure
+            return
+        }
+        loadError = nil
         sessions = snapshot.sessions
         sessionPreviews = snapshot.previews
 
@@ -391,19 +416,15 @@ final class SessionsViewModel {
         // absence of project labels is a cosmetic degradation, not a
         // data-loss problem (matches the iOS Dashboard pattern).
         let ctx = context
-        let bundle: (names: [String: String], projects: [ProjectEntry], dbSize: String) = await Task.detached {
+        // A thread of its own: every read here is a transport call (C10).
+        let bundle: (names: [String: String], projects: [ProjectEntry], dbSize: String) = await OffPool.run {
             let attribution = SessionAttributionService(context: ctx)
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
-            let pathToName = Dictionary(
-                uniqueKeysWithValues: registry.projects.map { ($0.path, $0.name) }
+            // First row wins at a shared path; see `projectNames`.
+            let names = SessionAttributionService.projectNames(
+                mappings: attribution.load().mappings,
+                projects: registry.projects
             )
-            let map = attribution.load().mappings
-            var names: [String: String] = [:]
-            for (sessionID, path) in map {
-                if let name = pathToName[path] {
-                    names[sessionID] = name
-                }
-            }
             // Fold the state.db stat() into this off-main batch so the file-
             // size display doesn't cost a synchronous SSH stat on the main
             // actor on every watcher tick during a stream (gh#102).
@@ -414,8 +435,10 @@ final class SessionsViewModel {
                 dbSize = "unknown"
             }
             return (names: names, projects: registry.projects, dbSize: dbSize)
-        }.value
-        sessionProjectNames = bundle.names
+        }
+        // A rotated compression chain is listed under its tip id; carry the
+        // root's project over so the row keeps its label and filter.
+        sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: sessions)
         allProjects = bundle.projects
 
         computeStats(dbSize: bundle.dbSize)
@@ -435,16 +458,53 @@ final class SessionsViewModel {
         await dataService.fetchReasoningContent(for: messageId)
     }
 
+    /// Shown in the detail sheet when the open session came from a search
+    /// hit the list doesn't include (see `selectSessionById`).
+    var selectedSessionListingNote: String?
+
     func selectSession(_ session: HermesSession) async {
+        selectedSessionListingNote = nil
         selectedSession = session
-        messages = await dataService.fetchMessages(sessionId: session.id, limit: HistoryPageSize.macSessionDetail)
-        subagentSessions = await dataService.fetchSubagentSessions(parentId: session.id)
+        // A rotated compression chain spans several session rows; show the
+        // whole conversation, as Hermes does, not just the tip's segment.
+        messages = await dataService.fetchMessages(
+            sessionIds: session.allSessionIds,
+            limit: HistoryPageSize.macSessionDetail
+        )
+        var subagents: [HermesSession] = []
+        for segment in session.allSessionIds {
+            subagents += await dataService.fetchSubagentSessions(parentId: segment)
+        }
+        subagentSessions = subagents
     }
 
     func selectSessionById(_ id: String) async {
-        if let session = sessions.first(where: { $0.id == id }) {
+        // `covers`: a search hit can land on any segment of a compression
+        // chain, while the list shows the chain under its tip id.
+        if let session = sessions.first(where: { $0.covers(id) }) {
             await selectSession(session)
+            return
         }
+        // Not in the loaded list: an archived session, a delegate
+        // subagent, a hidden row, or a conversation older than the 500
+        // rows loaded. Search finds all of them, so open the hit directly
+        // rather than doing nothing (R14-1), and say why the list doesn't
+        // show it.
+        guard let lookup = await dataService.fetchSessionForDetail(id: id) else { return }
+        await selectSession(lookup.session)
+        selectedSessionListingNote = Self.listingNote(isArchived: lookup.isArchived, isListed: lookup.isListed)
+    }
+
+    /// Why a session opened from a search hit is not in the list; nil when
+    /// the list would show it (it was just older than the rows loaded).
+    nonisolated static func listingNote(isArchived: Bool, isListed: Bool) -> String? {
+        if isArchived {
+            return String(localized: "Archived — session lists don't show this session.")
+        }
+        if !isListed {
+            return String(localized: "Not in the session list — this is a subagent run or a hidden session.")
+        }
+        return nil
     }
 
     func search() async {
@@ -592,6 +652,7 @@ final class SessionsViewModel {
 
     func beginDelete(_ session: HermesSession) {
         deleteSessionId = session.id
+        deleteLineageIds = session.lineageIds.count > 1 ? session.lineageIds : []
         showDeleteConfirmation = true
     }
 
@@ -611,39 +672,53 @@ final class SessionsViewModel {
         isDeleting = true
         let runner = sessionDeleteRunner
         let ctx = context
+        // A compression chain is one row but several session rows; delete
+        // them all, tip first (`SessionChainDelete`, R14-3).
+        let ids = SessionChainDelete.deletionOrder(lineage: deleteLineageIds, rowId: sessionId)
         inFlightDelete = Task { [weak self] in
-            // Detached: the delete CLI is a remote process spawn. The
-            // injected `sessionDeleteRunner` seam is preserved exactly —
+            // Off the main actor: the delete CLI is a remote process spawn
+            // (OffPool, P60 — a blocking wait, not cooperative-pool work).
+            // The injected `sessionDeleteRunner` seam is preserved exactly —
             // tests still stub it, they just await instead of returning.
-            let exitCode = await Task.detached { runner(ctx, sessionId) }.value
+            let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
             guard let self else { return }
             self.isDeleting = false
-            guard exitCode == 0 else {
+            let deleted = Set(outcome.deleted)
+            if !deleted.isEmpty {
+                self.sessions.removeAll { deleted.contains($0.id) }
+                if let selected = self.selectedSession?.id, deleted.contains(selected) {
+                    self.selectedSession = nil
+                    self.messages = []
+                }
+                self.computeStats()
+                for id in outcome.deleted {
+                    NotificationCenter.default.post(
+                        name: SessionDeletedSignal.name,
+                        object: nil,
+                        userInfo: [
+                            SessionDeletedSignal.sessionIdKey: id,
+                            SessionDeletedSignal.contextKey: ctx,
+                        ]
+                    )
+                }
+            }
+            if let failed = outcome.failed {
                 // Pre-fix this branch was an implicit no-op: the dialog
                 // dismissed, the row stayed, and nothing said why. The row
                 // staying put IS the correct outcome for a failed delete —
                 // it's the silence that made it read as a UI glitch.
-                self.deleteError = "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(exitCode))."
-                self.showDeleteConfirmation = false
-                self.deleteSessionId = nil
-                return
+                self.deleteError = outcome.deleted.isEmpty
+                    ? "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
+                    : "Deleted \(outcome.deleted.count) of \(ids.count) linked segments on \(ctx.displayName); the rest couldn't be deleted (hermes sessions delete exited \(failed.exitCode))."
+                if !outcome.deleted.isEmpty {
+                    // The rest of the chain is still there, now listed
+                    // under a new tip: reload so it shows.
+                    Task { await self.load() }
+                }
             }
-            self.sessions.removeAll { $0.id == sessionId }
-            if self.selectedSession?.id == sessionId {
-                self.selectedSession = nil
-                self.messages = []
-            }
-            self.computeStats()
-            NotificationCenter.default.post(
-                name: SessionDeletedSignal.name,
-                object: nil,
-                userInfo: [
-                    SessionDeletedSignal.sessionIdKey: sessionId,
-                    SessionDeletedSignal.contextKey: ctx,
-                ]
-            )
             self.showDeleteConfirmation = false
             self.deleteSessionId = nil
+            self.deleteLineageIds = []
         }
     }
 
@@ -860,9 +935,9 @@ final class SessionsViewModel {
     }
 
     /// Pipes the export out of the CLI and writes it to `url` on this Mac.
-    /// Detached because a remote export is an SSH round-trip streaming the
-    /// whole payload — running it inline would block the main actor for its
-    /// full duration.
+    /// Off the main actor because a remote export is an SSH round-trip
+    /// streaming the whole payload — running it inline would block the main
+    /// actor for its full duration.
     func performExport(to url: URL, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) {
         // `-` is the CLI's "write to stdout" sentinel — only valid for
         // stdout-capable formats (jsonl/trace).
@@ -870,19 +945,22 @@ final class SessionsViewModel {
             output: "-", sessionId: sessionId, format: format, redact: redact,
             traceNoRedactAvailable: traceNoRedactAvailable
         )
-        Task.detached { [sessionExportRunner, context, args, url, format, self] in
-            let result = sessionExportRunner(context, args)
-            let outcome = Self.writeExport(result: result, to: url, format: format)
-            await MainActor.run {
-                self.exportMessage = outcome.message
-                guard outcome.succeeded else { return }
-                let banner = outcome.message
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(5))
-                    // Only clear our own banner — a newer export may
-                    // have replaced it while we slept.
-                    if self?.exportMessage == banner { self?.exportMessage = nil }
-                }
+        let runner = sessionExportRunner
+        let ctx = context
+        Task { [self] in
+            // The CLI run and the file write block for the whole transfer:
+            // a thread of their own, not a cooperative-pool one (C10).
+            let outcome = await OffPool.run {
+                Self.writeExport(result: runner(ctx, args), to: url, format: format)
+            }
+            self.exportMessage = outcome.message
+            guard outcome.succeeded else { return }
+            let banner = outcome.message
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(5))
+                // Only clear our own banner — a newer export may
+                // have replaced it while we slept.
+                if self?.exportMessage == banner { self?.exportMessage = nil }
             }
         }
     }
@@ -895,21 +973,22 @@ final class SessionsViewModel {
             output: url.path, sessionId: sessionId, format: format, redact: redact,
             traceNoRedactAvailable: traceNoRedactAvailable
         )
-        Task.detached { [sessionExportRunner, context, args, url, self] in
-            let result = sessionExportRunner(context, args)
+        let runner = sessionExportRunner
+        let ctx = context
+        Task { [self] in
+            // A CLI run for the whole export: a thread of its own (C10).
+            let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
-            await MainActor.run {
-                if outcome.succeeded {
-                    let banner = "Exported to \(url.path)"
-                    self.exportMessage = banner
-                    Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: .seconds(5))
-                        if self?.exportMessage == banner { self?.exportMessage = nil }
-                    }
-                } else {
-                    self.exportMessage = outcome.detail.map { "Export failed: \($0)" }
-                        ?? "Export failed (exit \(result.exitCode))."
+            if outcome.succeeded {
+                let banner = "Exported to \(url.path)"
+                self.exportMessage = banner
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    if self?.exportMessage == banner { self?.exportMessage = nil }
                 }
+            } else {
+                self.exportMessage = outcome.detail.map { "Export failed: \($0)" }
+                    ?? "Export failed (exit \(result.exitCode))."
             }
         }
     }

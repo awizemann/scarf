@@ -30,6 +30,12 @@ struct HealthCheck: Identifiable {
         case ok
         case warning
         case error
+        /// A `hermes status` inventory row Hermes marks ✗ mid-line: an API
+        /// key that isn't set, a platform that isn't configured, a gateway
+        /// that is stopped, sudo off. Shown as off, never as passing, and not
+        /// counted as a failure either: most of these are simply not in use.
+        /// `hermes doctor` is where a missing piece is judged a problem.
+        case off
     }
 }
 
@@ -429,18 +435,14 @@ final class HealthViewModel {
         var checks: [HealthCheck] = []
 
         let subscriptionCheck: HealthCheck = {
+            // Sign-in is what Scarf can see; Hermes also checks the plan's
+            // entitlement, and ignores which inference provider is active
+            // (T3-F2, `tools/tool_backend_helpers.py:18-28` @ v2026.9.24).
             if subscription.subscribed {
                 return HealthCheck(
-                    label: "Nous Portal subscription active",
+                    label: "Signed in to Nous Portal",
                     status: .ok,
-                    detail: "Tool requests route through the Nous Portal gateway."
-                )
-            }
-            if subscription.present {
-                return HealthCheck(
-                    label: "Signed in, but Nous isn't the active provider",
-                    status: .warning,
-                    detail: "Open Settings → General and pick Nous Portal to route tools through the gateway."
+                    detail: "Tools your Nous plan covers can use the Tool Gateway. Which tools do is set per tool, not by the model provider."
                 )
             }
             return HealthCheck(
@@ -480,6 +482,11 @@ final class HealthViewModel {
         // config block the host ignores.
         if !capabilities.hasWebExtractAux {
             auxCandidates.removeAll { $0.0 == "web_extract" }
+        }
+        // Same for `auxiliary.session_search.*`, gone from v0.15.0
+        // (`hasSessionSearchAux`, also inverse) — S05-F1.
+        if !capabilities.hasSessionSearchAux {
+            auxCandidates.removeAll { $0.0 == "session_search" }
         }
         let auxOnNous = auxCandidates.filter { $0.1 == "nous" }.map(\.0)
         if !auxOnNous.isEmpty {
@@ -593,6 +600,19 @@ final class HealthViewModel {
         let svc = fileService
         let ctx = context
         Task { [weak self] in
+            // Stop + start on a gateway run by hand kills it, and the start
+            // can't bring it back (it drives a service manager, or installs a
+            // launchd plist on macOS). Same rule as every `gateway restart`
+            // — see ``HermesGatewayRestartGuard``.
+            if let refusal = await Task.detached(operation: { svc.restartRefusal(stopThenStart: true) }).value {
+                guard let self else { return }
+                self.isControlBusy = false
+                // Kept on screen (no settle timer clears it): it says what
+                // to do instead. The next control action replaces it.
+                self.actionMessage = refusal.detail
+                self.refreshProcessStatus()
+                return
+            }
             let stop = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
             let start = await Task.detached { Self.runGateway(.start, ctx) }.value
@@ -668,7 +688,13 @@ final class HealthViewModel {
         var currentTitle = ""
         var currentChecks: [HealthCheck] = []
 
-        for line in output.components(separatedBy: "\n") {
+        for rawLine in output.components(separatedBy: "\n") {
+            // A progress line rewritten in place (`doctor`'s "Running N
+            // connectivity checks…" + `\r` + the first result) reads, on a
+            // terminal, as whatever follows the last carriage return.
+            // A CRLF line end is not a rewrite; drop it first.
+            let unterminated = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+            let line = unterminated.split(separator: "\r", omittingEmptySubsequences: false).last.map(String.init) ?? unterminated
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if trimmed.hasPrefix("◆ ") {
@@ -683,6 +709,30 @@ final class HealthViewModel {
                 currentChecks = []
                 continue
             }
+
+            // The `─` * 60 rule that opens both footers ends the last
+            // section. `doctor`'s summary follows it with a numbered list of
+            // remaining issues (`  1. Install daytona SDK: pip install
+            // daytona`, `hermes_cli/doctor.py:142-163` @ v2026.9.24, the same
+            // shape back to v2026.3.12), and a number-prefixed line with an
+            // early colon parsed as a passing `Key: value` check inside the
+            // still-open section. `status` ends with the same rule
+            // (`status.py:351`) and only hints after it. Nothing after the
+            // rule is a check until another ◆ header opens a section.
+            if Self.isFooterRuleStatic(trimmed) {
+                if !currentTitle.isEmpty {
+                    sections.append(HealthSection(
+                        title: currentTitle,
+                        icon: iconForSectionStatic(currentTitle),
+                        checks: currentChecks
+                    ))
+                }
+                currentTitle = ""
+                currentChecks = []
+                continue
+            }
+            // Outside a section, only a ◆ header means anything.
+            if currentTitle.isEmpty { continue }
 
             if trimmed.hasPrefix("✓ ") {
                 let text = String(trimmed.dropFirst(2))
@@ -703,6 +753,30 @@ final class HealthViewModel {
                     let combined = [last.detail, extra].compactMap { $0 }.joined(separator: " ")
                     currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
                 }
+            } else if !currentTitle.isEmpty, var row = Self.midLineGlyphRowStatic(trimmed) {
+                // `hermes status` puts the mark mid-line: `_row` prints
+                // `  name  ✓|✗ text` (no colon) and `_kv_flag` prints
+                // `  Label:   ✓|✗ text` (`hermes_cli/status.py:35-52` @
+                // v2026.9.24). The mark decides the status: `Status: ✗
+                // stopped` used to count as a passing check, and every `_row`
+                // (API keys, auth and API-key providers, messaging platforms)
+                // was dropped.
+                //
+                // `--deep`'s section is the exception to ✗-means-off: its
+                // rows are live probes (`OpenRouter: ✗ error (401)`,
+                // status.py:330-345), and a ✗ there is a real failure.
+                if row.status == .off, currentTitle == "Deep Checks" {
+                    row = HealthCheck(label: row.label, status: .error, detail: row.detail)
+                }
+                currentChecks.append(row)
+            } else if Self.isRowDetailStatic(line), !currentChecks.isEmpty,
+                      trimmed.contains(":") {
+                // `_detail` lines under a `_row` (`    Auth file:  …`,
+                // `    Error:  …`, status.py:40-42) belong to the row above
+                // them, not to a check of their own.
+                let last = currentChecks.removeLast()
+                let combined = [last.detail, trimmed].compactMap { $0 }.joined(separator: " — ")
+                currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
             } else if !trimmed.isEmpty && trimmed.contains(":") && !trimmed.hasPrefix("┌") && !trimmed.hasPrefix("│") && !trimmed.hasPrefix("└") && !trimmed.hasPrefix("─") && !trimmed.hasPrefix("Run ") && !trimmed.hasPrefix("Found ") && !trimmed.hasPrefix("Tip:") {
                 let parts = trimmed.split(separator: ":", maxSplits: 1)
                 if parts.count == 2 {
@@ -736,6 +810,41 @@ final class HealthViewModel {
             ))
         }
         return sections
+    }
+
+    /// The footer rule `status` and `doctor` print before their summary:
+    /// a line made only of `─`. The box-drawing banner lines start with `┌`
+    /// or `└`, so they never match.
+    nonisolated static func isFooterRuleStatic(_ trimmed: String) -> Bool {
+        trimmed.count >= 20 && trimmed.allSatisfy { $0 == "─" }
+    }
+
+    /// A `hermes status` row whose ✓/✗/⚠ mark sits after its label:
+    /// `_row`'s `name  ✓ text` or `_kv_flag`'s `Label:  ✗ text`. `nil` for
+    /// anything else, including the glyph-first lines handled above and a
+    /// plain `Key: value` whose value happens to contain a mark later on.
+    /// ✗ maps to ``HealthCheck/CheckStatus/off``, not `.error`: see there.
+    nonisolated static func midLineGlyphRowStatic(_ trimmed: String) -> HealthCheck? {
+        let marks: [(Character, HealthCheck.CheckStatus)] = [("✓", .ok), ("✗", .off), ("⚠", .warning)]
+        guard let index = trimmed.firstIndex(where: { ch in marks.contains { $0.0 == ch } }),
+              index != trimmed.startIndex,
+              trimmed[trimmed.index(before: index)] == " "
+        else { return nil }
+        var label = trimmed[..<index].trimmingCharacters(in: .whitespaces)
+        if label.hasSuffix(":") { label.removeLast() }
+        // The mark must be the FIRST thing after the label: a `_kv` value
+        // like `Model:  gpt ✓ fast` is not a flag row, and a label that
+        // still holds a colon is prose, not a row name.
+        guard !label.isEmpty, !label.contains(":"), label.count < 60 else { return nil }
+        let status = marks.first { $0.0 == trimmed[index] }!.1
+        let detail = trimmed[trimmed.index(after: index)...].trimmingCharacters(in: .whitespaces)
+        return HealthCheck(label: label, status: status, detail: detail.isEmpty ? nil : detail)
+    }
+
+    /// `_detail` indentation (four spaces, `hermes_cli/status.py:40-42`):
+    /// deeper than a row's two.
+    nonisolated private static func isRowDetailStatic(_ line: String) -> Bool {
+        line.hasPrefix("    ") && !line.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// True for a bare identifier shaped like a Python exception class —

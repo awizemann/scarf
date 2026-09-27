@@ -44,8 +44,11 @@ struct ChatSessionListPane: View {
                             session: session,
                             preview: chatViewModel.previewFor(session),
                             projectName: chatViewModel.projectName(for: session),
-                            isActive: session.id == richChat.sessionId,
-                            isLive: session.id == richChat.sessionId && richChat.isAgentWorking,
+                            // By lineage (R14-2): after a mid-chat
+                            // compression rotation the row is listed under
+                            // the new tip while the chat keeps its ACP id.
+                            isActive: chatViewModel.isAttached(to: session),
+                            isLive: chatViewModel.isAttached(to: session) && richChat.isAgentWorking,
                             onSelect: { chatViewModel.resumeSession(session.id) }
                         )
                         .contextMenu {
@@ -117,13 +120,19 @@ struct ChatSessionListPane: View {
         ) {
             Button("Delete", role: .destructive) {
                 if let target = deleteTarget {
-                    chatViewModel.deleteSession(target.id)
+                    Task { await chatViewModel.deleteConversation(target) }
                 }
                 deleteTarget = nil
             }
             Button("Cancel", role: .cancel) { deleteTarget = nil }
         } message: {
-            Text("This permanently deletes the session and all its messages.")
+            // A rotated compression chain is one row but several session
+            // rows; the delete removes every one (R14-3).
+            if let target = deleteTarget, target.lineageIds.count > 1 {
+                Text("This conversation was compressed into \(target.lineageIds.count) linked segments. Deleting it permanently deletes all \(target.lineageIds.count) segments and their messages.")
+            } else {
+                Text("This permanently deletes the session and all its messages.")
+            }
         }
     }
 
@@ -134,7 +143,7 @@ struct ChatSessionListPane: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             ScarfTextField("Session title", text: $renameText)
                 .onSubmit { commitRename(session) }
-            if let renameError = chatViewModel.renameError {
+            if let renameError = chatViewModel.renameError(for: session.id) {
                 Label(renameError, systemImage: "exclamationmark.triangle")
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.danger)
@@ -150,7 +159,8 @@ struct ChatSessionListPane: View {
                 Button("Rename") { commitRename(session) }
                     .buttonStyle(ScarfPrimaryButton())
                     .keyboardShortcut(.defaultAction)
-                    .disabled(renameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(renameText.trimmingCharacters(in: .whitespaces).isEmpty
+                              || chatViewModel.isRenamingSession)
             }
         }
         .padding(ScarfSpace.s5)
@@ -187,8 +197,14 @@ struct ChatSessionListPane: View {
         // Keep the sheet open on failure so the reason is visible next
         // to the field — a rename Hermes refuses (a hidden canonical Bot
         // Chat) would otherwise just appear to do nothing.
-        if chatViewModel.renameSession(session.id, to: renameText) {
-            renameTarget = nil
+        let title = renameText
+        Task {
+            // Close only the sheet this rename came from: the user may have
+            // cancelled and opened another one while the CLI ran.
+            if await chatViewModel.renameSession(session.id, to: title),
+               renameTarget?.id == session.id {
+                renameTarget = nil
+            }
         }
     }
 

@@ -312,8 +312,14 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     let cronJobsToRemove: [(id: String, name: String)]
     /// Names recorded in the lock that we couldn't find in the current cron
     /// list (user-deleted, renamed, etc.). Shown in the sheet; skipped on
-    /// uninstall.
+    /// uninstall. Only ever filled from a cron list that was actually read.
     let cronJobsAlreadyGone: [String]
+    /// Names recorded in the lock whose job the plan could not pin down:
+    /// `jobs.json` exists but couldn't be read or decoded, or more than one
+    /// live job carries the name and none of them is clearly this
+    /// project's. NOT "already gone" — the job may well still be scheduled.
+    /// The uninstall looks again and reports any it still can't remove.
+    var cronJobsUnverified: [String] = []
 
     /// `true` if MEMORY.md still contains the template's begin/end markers
     /// and those bytes will be stripped on uninstall. `false` means no
@@ -360,6 +366,18 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     }
 }
 
+/// What an uninstall that ran to the end could not do. The uninstall keeps
+/// going past a failed step (a stray cron job is better than a stray cron
+/// job AND the files and secrets it pairs with), so "it didn't throw" is not
+/// "everything was removed" — these are the leftovers the success screen
+/// must name.
+struct TemplateUninstallOutcome: Sendable, Equatable {
+    /// One plain sentence per leftover, e.g. a cron job still scheduled.
+    var leftovers: [String] = []
+
+    nonisolated var isComplete: Bool { leftovers.isEmpty }
+}
+
 // MARK: - Errors
 
 nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
@@ -370,6 +388,10 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     case requiredFileMissing(String)
     case contentClaimMismatch(String)
     case projectDirExists(String)
+    /// A registry row already points at the install folder (a row whose
+    /// folder was deleted, so `projectDirExists` passes). Installing would
+    /// add a second row at one path, the Doctor's `duplicatePath`.
+    case projectPathRegistered(path: String, name: String)
     case conflictingFile(String)
     case memoryBlockAlreadyExists(String)
     case cronCreateFailed(job: String, output: String)
@@ -393,6 +415,10 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     /// MEMORY.md holds bytes that are not valid UTF-8. Read, but not text
     /// we can splice — and `?? ""` used to make it an empty document.
     case memoryFileNotText(String)
+    /// A symlink inside a skill being exported leads outside that skill (or
+    /// its target couldn't be checked). The bundle is for sharing, so its
+    /// target is not copied in.
+    case unsafeSkillLink(String, String)
 
     var errorDescription: String? {
         switch self {
@@ -410,6 +436,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "Template manifest doesn't match its contents: \(s)"
         case .projectDirExists(let p):
             return "A directory already exists at \(p). Refusing to overwrite — choose a different parent folder."
+        case .projectPathRegistered(let path, let name):
+            return "The projects list already has “\(name)” at \(path). Remove that entry or choose a different parent folder."
         case .conflictingFile(let p):
             return "An existing file would be overwritten at \(p). Refusing to clobber."
         case .memoryBlockAlreadyExists(let id):
@@ -430,6 +458,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "\(p) exists but couldn't be read; refusing to install a memory block over it."
         case .memoryFileNotText(let p):
             return "\(p) is not valid UTF-8 text; refusing to install a memory block over it."
+        case .unsafeSkillLink(let link, let why):
+            return "Can't export the skill file “\(link)”: \(why). Templates are made to be shared, so Scarf only bundles files that live inside the skill. Copy the file into the skill folder or remove the link, then export again."
         }
     }
 }

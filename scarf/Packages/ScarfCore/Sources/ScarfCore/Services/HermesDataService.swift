@@ -47,6 +47,8 @@ public actor HermesDataService {
     private var hasHiddenColumn = false
     private var hasLastReadAtColumn = false
     private var hasListableChildSupport = false
+    private var hasArchivedColumn = false
+    private var hasDisplayKindColumn = false
 
     /// Cached `state_meta.fts_tool_full_content_high_water`, read once
     /// per open on the first search that needs it. `.some(nil)` means
@@ -72,6 +74,15 @@ public actor HermesDataService {
     /// title its banner accurately instead of calling every failure a
     /// connection issue. `nil` when the last open succeeded.
     public private(set) var lastOpenErrorKind: OpenErrorKind?
+
+    /// `lastOpenError` as a page that lists sessions should report it:
+    /// on a remote host only, the Dashboard's rule. Locally an open
+    /// failure is almost always a fresh install with no `state.db` yet,
+    /// which those pages show as their ordinary empty state; a banner
+    /// there would also trip the section sweep's no-`error.banner` check.
+    public var reportableOpenError: String? {
+        context.isRemote ? lastOpenError : nil
+    }
 
     /// Coarse classes of `open()` failure (see `adoptOpenError`).
     public enum OpenErrorKind: Sendable, Equatable {
@@ -127,6 +138,8 @@ public actor HermesDataService {
         hasHiddenColumn = await backend.hasHiddenColumn
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
+        hasArchivedColumn = await backend.hasArchivedColumn
+        hasDisplayKindColumn = await backend.hasDisplayKindColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -146,6 +159,8 @@ public actor HermesDataService {
         hasHiddenColumn = await backend.hasHiddenColumn
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
+        hasArchivedColumn = await backend.hasArchivedColumn
+        hasDisplayKindColumn = await backend.hasDisplayKindColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -341,17 +356,37 @@ public actor HermesDataService {
     ///
     /// `hidden = 0` rides along when `sessions.hidden` exists so Scarf
     /// shows the same set Hermes does.
+    ///
+    /// The last two clauses are the rest of Hermes's default listing
+    /// filter (`_session_filter_where`, hermes_state_sessions.py:103-127
+    /// @ v2026.9.24):
+    /// - `_delegate_from IS NULL` — a delegate subagent whose parent was
+    ///   deleted is left as a parentless row that Hermes tags
+    ///   `_delegate_from = '__orphaned__'` (schema migration v16,
+    ///   hermes_state_schema.py:1011-1027) so it stays out of listings.
+    ///   Rides with the listable-child predicate, which already proved
+    ///   `model_config` and JSON1 exist. Written with Hermes's
+    ///   `json_valid` guard (`_sql_json_extract`,
+    ///   hermes_state_common.py:67-74) so one malformed `model_config`
+    ///   cannot fail the whole list.
+    /// - `archived = 0` — sessions the user soft-hid with
+    ///   `hermes sessions archive` or the Hermes dashboards. Gated on the
+    ///   column existing (v0.16+); older hosts emit the same SQL as before.
     private var sessionListPredicate: String {
         var clauses: [String] = []
         if hasListableChildSupport {
             let branch = """
-                json_extract(COALESCE(s.model_config, '{}'), '$._branched_from') IS NOT NULL \
+                \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
                 OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
                 AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
                 """
             clauses.append("(s.parent_session_id IS NULL OR \(branch) OR \(Self.resetChildSQL))")
+            clauses.append("\(Self.jsonMarker("s.model_config", "$._delegate_from")) IS NULL")
         } else {
             clauses.append("parent_session_id IS NULL")
+        }
+        if hasArchivedColumn {
+            clauses.append(hasListableChildSupport ? "s.archived = 0" : "archived = 0")
         }
         if hasHiddenColumn {
             clauses.append(hasListableChildSupport ? "s.hidden = 0" : "hidden = 0")
@@ -359,17 +394,31 @@ public actor HermesDataService {
         return clauses.joined(separator: " AND ")
     }
 
+    /// Hermes's non-throwing JSON marker lookup (`_sql_json_extract`,
+    /// hermes_state_common.py:67-74 @ v2026.9.24): `json_extract` over the
+    /// column when it holds valid JSON, over an empty object otherwise.
+    private static func jsonMarker(_ column: String, _ path: String) -> String {
+        "json_extract(CASE WHEN json_valid(\(column)) THEN \(column) ELSE json_object() END, '\(path)')"
+    }
+
     /// Hermes's `_RESET_CHILD_SQL` (hermes_state_common.py:139-143)
     /// against the outer alias `s`: the durable `_reset_from` marker,
     /// or the pre-marker heuristic — a child riding its parent's exact
     /// non-empty routing key where the parent ended at a reset
     /// boundary. `_RESET_END_REASONS` is copied verbatim from :100-113.
-    private static let resetChildSQL = """
-        json_extract(COALESCE(s.model_config, '{}'), '$._reset_from') IS NOT NULL \
-        OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
-        AND p.end_reason IN ('session_reset', 'session_switch', 'idle', 'daily', 'suspended', 'resume_pending_expired') \
-        AND s.session_key IS NOT NULL AND s.session_key != '' AND s.session_key = p.session_key)
+    private static let resetChildSQL = resetChildSQL(alias: "s")
+
+    /// `resetChildSQL` against any outer alias — the compression-chain
+    /// walk needs it against `child` (`_CHAIN_STEP_SQL`,
+    /// hermes_state_compression.py:29-49 @ v2026.9.24).
+    private static func resetChildSQL(alias a: String) -> String {
         """
+        \(jsonMarker("\(a).model_config", "$._reset_from")) IS NOT NULL \
+        OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = \(a).parent_session_id \
+        AND p.end_reason IN ('session_reset', 'session_switch', 'idle', 'daily', 'suspended', 'resume_pending_expired') \
+        AND \(a).session_key IS NOT NULL AND \(a).session_key != '' AND \(a).session_key = p.session_key)
+        """
+    }
 
     /// Hermes's `_ephemeral_child_sql` (hermes_state_common.py:178-190)
     /// for the children of one parent: subagent runs only — not branch,
@@ -379,7 +428,7 @@ public actor HermesDataService {
     private var subagentChildPredicate: String {
         guard hasListableChildSupport else { return "parent_session_id = ?" }
         let branch = """
-            json_extract(COALESCE(s.model_config, '{}'), '$._branched_from') IS NOT NULL \
+            \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
             OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
             AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
             """
@@ -492,7 +541,8 @@ public actor HermesDataService {
         let sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
-            return rows.map { sessionFromRow($0) }
+            let listed = rows.map { sessionFromRow($0) }
+            return await projectCompressionTips(listed, columns: sessionListColumns).sessions
         } catch {
             Self.logger.warning("fetchSessions failed: \(error.localizedDescription, privacy: .public)")
             throw queryFailure(error)
@@ -513,6 +563,15 @@ public actor HermesDataService {
         since: Date,
         limit: Int = QueryDefaults.periodSessionLimit
     ) async -> [HermesSession] {
+        (try? await fetchSessionsInPeriodChecked(since: since, limit: limit)) ?? []
+    }
+
+    /// `fetchSessionsInPeriod` that reports a failed query as
+    /// `QueryFailure` instead of an empty list. Same SQL.
+    public func fetchSessionsInPeriodChecked(
+        since: Date,
+        limit: Int = QueryDefaults.periodSessionLimit
+    ) async throws -> [HermesSession] {
         let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at >= ? ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(
@@ -521,8 +580,192 @@ public actor HermesDataService {
             )
             return rows.map { sessionFromRow($0) }
         } catch {
-            return []
+            Self.logger.warning("fetchSessionsInPeriod failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
         }
+    }
+
+    // MARK: - Usage population (what `hermes insights` sums)
+
+    /// One group of the usage population's sums: every session row in the
+    /// window sharing a model, a source and a cost state. Insights folds
+    /// these into its totals and its model / platform breakdowns.
+    public struct UsageAggregate: Sendable, Equatable {
+        public let model: String?
+        public let source: String
+        /// The group's `cost_status` (nil on a host without the column).
+        public let costStatus: String?
+        /// Whether the host's `sessions` table has `cost_status` — the same
+        /// probe `HermesSession.hasCostStatusColumn` records.
+        public let hasCostStatusColumn: Bool
+        /// Whether the group's rows carry a positive usable cost (the
+        /// first branch of `SessionCostDisplay`'s rule).
+        public let hasPositiveCost: Bool
+        public let sessions: Int
+        public let messages: Int
+        public let toolCalls: Int
+        public let inputTokens: Int
+        public let outputTokens: Int
+        public let cacheReadTokens: Int
+        public let cacheWriteTokens: Int
+        public let reasoningTokens: Int
+        /// Sum of `actual_cost_usd ?? estimated_cost_usd` per row — the same
+        /// preference order as `HermesSession.displayCostUSD`.
+        public let costUSD: Double
+
+        public init(
+            model: String?, source: String, costStatus: String?,
+            hasCostStatusColumn: Bool, hasPositiveCost: Bool, sessions: Int,
+            messages: Int, toolCalls: Int, inputTokens: Int, outputTokens: Int,
+            cacheReadTokens: Int, cacheWriteTokens: Int, reasoningTokens: Int,
+            costUSD: Double
+        ) {
+            self.model = model
+            self.source = source
+            self.costStatus = costStatus
+            self.hasCostStatusColumn = hasCostStatusColumn
+            self.hasPositiveCost = hasPositiveCost
+            self.sessions = sessions
+            self.messages = messages
+            self.toolCalls = toolCalls
+            self.inputTokens = inputTokens
+            self.outputTokens = outputTokens
+            self.cacheReadTokens = cacheReadTokens
+            self.cacheWriteTokens = cacheWriteTokens
+            self.reasoningTokens = reasoningTokens
+            self.costUSD = costUSD
+        }
+
+        public var totalTokens: Int {
+            inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + reasoningTokens
+        }
+
+        /// How many of this group's sessions Hermes never priced. The ONE
+        /// cost rule (`SessionCostDisplay`) decides; every row in a group
+        /// shares the inputs it reads, so the answer is all or none.
+        public var unknownCostSessions: Int {
+            let display = SessionCostDisplay(
+                actualCostUSD: hasPositiveCost ? 1 : nil,
+                estimatedCostUSD: nil,
+                costStatus: costStatus,
+                hasCostStatusColumn: hasCostStatusColumn
+            )
+            return display.isUnknown ? sessions : 0
+        }
+    }
+
+    /// The usage population's sums for every session row started at or
+    /// after `since`, aggregated IN SQL and uncapped.
+    ///
+    /// `hermes insights` sums every row in the window with no listing
+    /// filter and no row cap (`InsightsEngine._GET_SESSIONS_ALL`,
+    /// agent/insights.py:92-96 @ v2026.9.24): delegate subagents (their own
+    /// session rows, `tools/delegate_tool.py:246,277`), rotated compression
+    /// continuations, hidden and archived rows all carry real tokens and
+    /// cost. This used to fetch the rows themselves, capped at
+    /// `QueryDefaults.periodSessionLimit` (2000) to bound the wire payload,
+    /// so a busy host's "All Time" spend silently stopped at its newest
+    /// 2000 rows — sooner for anyone whose agent delegates. A GROUP BY
+    /// returns a handful of rows however large the window is.
+    ///
+    /// Counters come from `usageSessionsSource`, so on a v0.20+ host they
+    /// include the auxiliary usage Hermes records only per model.
+    public func fetchUsageAggregatesInPeriod(since: Date) async -> [UsageAggregate] {
+        (try? await fetchUsageAggregatesInPeriodChecked(since: since)) ?? []
+    }
+
+    /// `fetchUsageAggregatesInPeriod` that reports a failed query as
+    /// `QueryFailure` instead of an empty result. Same SQL.
+    public func fetchUsageAggregatesInPeriodChecked(since: Date) async throws -> [UsageAggregate] {
+        let hasStatus = hasV07Schema
+        // `SessionCostDisplay.usableAmount`: finite and non-negative, and
+        // the actual figure wins over the estimate when it is usable.
+        // SQLite has no NaN; 9e999 is its infinity.
+        func usable(_ column: String) -> String {
+            "(\(column) IS NOT NULL AND \(column) >= 0 AND \(column) < 9e999)"
+        }
+        let positive = hasStatus
+            ? "CASE WHEN \(usable("actual_cost_usd")) THEN actual_cost_usd > 0 ELSE (\(usable("estimated_cost_usd")) AND estimated_cost_usd > 0) END"
+            : "(\(usable("estimated_cost_usd")) AND estimated_cost_usd > 0)"
+        let status = hasStatus ? "cost_status" : "NULL"
+        let cost = hasStatus ? "COALESCE(actual_cost_usd, estimated_cost_usd)" : "estimated_cost_usd"
+        let reasoning = hasStatus ? "COALESCE(SUM(reasoning_tokens),0)" : "0"
+        let sql = """
+            SELECT model, COALESCE(source, ''), \(status) AS cost_state, (\(positive)) AS has_positive,
+                   COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
+                   COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                   COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+                   \(reasoning), COALESCE(SUM(\(cost)),0)
+            FROM \(usageSessionsSource)
+            WHERE started_at >= ?
+            GROUP BY model, COALESCE(source, ''), cost_state, has_positive
+            """
+        do {
+            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
+            return rows.map { row in
+                UsageAggregate(
+                    model: row.optionalString(at: 0),
+                    source: row.string(at: 1),
+                    costStatus: row.optionalString(at: 2),
+                    hasCostStatusColumn: hasStatus,
+                    hasPositiveCost: row.int(at: 3) != 0,
+                    sessions: row.int(at: 4),
+                    messages: row.int(at: 5),
+                    toolCalls: row.int(at: 6),
+                    inputTokens: row.int(at: 7),
+                    outputTokens: row.int(at: 8),
+                    cacheReadTokens: row.int(at: 9),
+                    cacheWriteTokens: row.int(at: 10),
+                    reasoningTokens: row.int(at: 11),
+                    costUSD: row.double(at: 12)
+                )
+            }
+        } catch {
+            Self.logger.warning("fetchUsageAggregatesInPeriod failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
+        }
+    }
+
+    /// Counter columns whose totals Hermes reconciles against
+    /// `session_model_usage`.
+    private static let usageReconciledColumns: Set<String> = [
+        "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
+        "reasoning_tokens", "estimated_cost_usd", "api_call_count"
+    ]
+
+    /// `FROM` source for usage sums: `sessions` itself, or — when the
+    /// v0.20 `session_model_usage` table exists — a derived table with the
+    /// same column names whose token/cost counters are the larger of the
+    /// session's own counter and the sum of its per-model rows.
+    ///
+    /// Why: session counters carry main-loop usage only, while auxiliary
+    /// calls (vision, compression, titles) land only in
+    /// `session_model_usage`. Hermes's overview totals therefore sum the
+    /// per-model rows plus each session's non-negative residual
+    /// (`_compute_model_breakdown`, agent/insights.py:346-368, used for the
+    /// overview at :271-292), which per session is exactly
+    /// `MAX(session counter, SUM(per-model rows))`. A session with no
+    /// per-model rows keeps its own values, NULL cost included.
+    /// `actual_cost_usd` is not reconciled: Hermes's overview reads it from
+    /// the session row (:287).
+    private var usageSessionsSource: String {
+        guard hasSessionModelUsageTable else { return "sessions" }
+        let columns = sessionColumns
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let select = columns.map { column -> String in
+            guard Self.usageReconciledColumns.contains(column) else { return "s.\(column)" }
+            return "CASE WHEN u.session_id IS NULL THEN s.\(column) ELSE MAX(COALESCE(s.\(column), 0), u.\(column)) END AS \(column)"
+        }.joined(separator: ", ")
+        let sums = Self.usageReconciledColumns.sorted()
+            .map { "SUM(\($0)) AS \($0)" }
+            .joined(separator: ", ")
+        return """
+            (SELECT \(select) FROM sessions s LEFT JOIN (\
+            SELECT session_id, \(sums) FROM session_model_usage GROUP BY session_id\
+            ) u ON u.session_id = s.id) usage_sessions
+            """
     }
 
     public func fetchSubagentSessions(parentId: String) async -> [HermesSession] {
@@ -564,6 +807,22 @@ public actor HermesDataService {
         limit: Int,
         before: Int? = nil
     ) async -> MessageFetchOutcome {
+        await fetchMessagesOutcome(sessionIds: [sessionId], limit: limit, before: before)
+    }
+
+    /// `fetchMessagesOutcome` across several sessions — a rotated
+    /// compression chain (`HermesSession.lineageIds`), whose turns are
+    /// spread over the root and every continuation. Hermes shows such a
+    /// conversation as one transcript spanning the whole lineage
+    /// (`get_resume_conversations`, hermes_state_messages.py:1273-1293 @
+    /// v2026.9.24). Message ids are global and monotonic, so ordering by id
+    /// interleaves the segments correctly. One id runs the single-session
+    /// SQL unchanged.
+    public func fetchMessagesOutcome(
+        sessionIds: [String],
+        limit: Int,
+        before: Int? = nil
+    ) async -> MessageFetchOutcome {
         await ScarfMon.measureAsync(.sessionLoad, "mac.fetchMessages") {
             // Use the lite column set — excludes reasoning_content which
             // can be 20+ KB per message on thinking-model sessions and
@@ -571,15 +830,17 @@ public actor HermesDataService {
             // sessions over 420ms-RTT remote links. The inspector pane
             // calls `fetchReasoningContent(for:)` to lazy-load when the
             // user opens a message's disclosure.
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return MessageFetchOutcome(messages: [], transportError: nil) }
             let sql: String
             let params: [SQLValue]
-            let activeClause = hasMessagesActiveColumn ? " AND active = 1" : ""
+            let activeClause = transcriptVisibleClause
             if let before {
-                sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ? AND id < ?\(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(before)), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql) AND id < ?\(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(before)), .integer(Int64(limit))]
             } else {
-                sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ?\(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql)\(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(limit))]
             }
             do {
                 let rows = try await backend.query(sql, params: params)
@@ -601,6 +862,23 @@ public actor HermesDataService {
         }
     }
 
+    /// `session_id = ?` for one id — the single-session SQL, byte for
+    /// byte — or `session_id IN (?, …)` for a compression lineage. Empty
+    /// ids are dropped; no ids gives no params (callers return empty).
+    static func sessionIdPredicate(_ sessionIds: [String]) -> (sql: String, params: [SQLValue]) {
+        var seen = Set<String>()
+        let ids = sessionIds.filter { !$0.isEmpty && seen.insert($0).inserted }
+        if ids.count == 1 { return ("session_id = ?", [.text(ids[0])]) }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        return ("session_id IN (\(placeholders))", ids.map { .text($0) })
+    }
+
+    /// The newest `limit` transcript rows across several sessions, oldest
+    /// first — see `fetchMessagesOutcome(sessionIds:limit:before:)`.
+    public func fetchMessages(sessionIds: [String], limit: Int, before: Int? = nil) async -> [HermesMessage] {
+        await fetchMessagesOutcome(sessionIds: sessionIds, limit: limit, before: before).messages
+    }
+
     /// Phase 1 of the v2.8 two-phase chat loader. Fetches user +
     /// assistant rows ONLY (skips `role='tool'` entirely) with
     /// `tool_calls`, `reasoning`, and `reasoning_content` hard-NULLed
@@ -620,16 +898,29 @@ public actor HermesDataService {
         limit: Int,
         before: Int? = nil
     ) async -> MessageFetchOutcome {
+        await fetchSkeletonMessages(sessionIds: [sessionId], limit: limit, before: before)
+    }
+
+    /// `fetchSkeletonMessages` across a compression lineage (see
+    /// `fetchMessagesOutcome(sessionIds:limit:before:)`). One id runs the
+    /// single-session SQL unchanged.
+    public func fetchSkeletonMessages(
+        sessionIds: [String],
+        limit: Int,
+        before: Int? = nil
+    ) async -> MessageFetchOutcome {
         await ScarfMon.measureAsync(.sessionLoad, "mac.fetchSkeletonMessages") {
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return MessageFetchOutcome(messages: [], transportError: nil) }
             let sql: String
             let params: [SQLValue]
-            let activeClause = hasMessagesActiveColumn ? " AND active = 1" : ""
+            let activeClause = transcriptVisibleClause
             if let before {
-                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE session_id = ? AND role IN ('user','assistant') AND id < ? \(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(before)), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE \(owner.sql) AND role IN ('user','assistant') AND id < ? \(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(before)), .integer(Int64(limit))]
             } else {
-                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE session_id = ? AND role IN ('user','assistant') \(activeClause) ORDER BY id DESC LIMIT ?"
-                params = [.text(sessionId), .integer(Int64(limit))]
+                sql = "SELECT \(messageColumnsSkeleton) FROM messages WHERE \(owner.sql) AND role IN ('user','assistant') \(activeClause) ORDER BY id DESC LIMIT ?"
+                params = owner.params + [.integer(Int64(limit))]
             }
             do {
                 let rows = try await backend.query(sql, params: params)
@@ -822,11 +1113,23 @@ public actor HermesDataService {
         maxId: Int,
         limit: Int = 50
     ) async -> [HermesMessage] {
+        await fetchToolResultsInRange(sessionIds: [sessionId], minId: minId, maxId: maxId, limit: limit)
+    }
+
+    /// `fetchToolResultsInRange` across a compression lineage. One id runs
+    /// the single-session SQL unchanged.
+    public func fetchToolResultsInRange(
+        sessionIds: [String],
+        minId: Int,
+        maxId: Int,
+        limit: Int = 50
+    ) async -> [HermesMessage] {
         await ScarfMon.measureAsync(.sessionLoad, "mac.hydrateToolResults") {
-            let activeClause = hasMessagesActiveColumn ? " AND active = 1" : ""
-            let sql = "SELECT \(messageColumnsLight) FROM messages WHERE session_id = ? AND role = 'tool' AND id >= ? AND id <= ? \(activeClause) ORDER BY id DESC LIMIT ?"
-            let params: [SQLValue] = [
-                .text(sessionId),
+            let owner = Self.sessionIdPredicate(sessionIds)
+            guard !owner.params.isEmpty else { return [] }
+            let activeClause = transcriptVisibleClause
+            let sql = "SELECT \(messageColumnsLight) FROM messages WHERE \(owner.sql) AND role = 'tool' AND id >= ? AND id <= ? \(activeClause) ORDER BY id DESC LIMIT ?"
+            let params: [SQLValue] = owner.params + [
                 .integer(Int64(minId)),
                 .integer(Int64(maxId)),
                 .integer(Int64(limit))
@@ -867,7 +1170,7 @@ public actor HermesDataService {
     /// materialise the whole history at once.
     @available(*, deprecated, message: "Use fetchMessages(sessionId:limit:before:) instead.")
     public func fetchMessages(sessionId: String) async -> [HermesMessage] {
-        let sql = "SELECT \(messageColumns) FROM messages WHERE session_id = ? ORDER BY timestamp ASC"
+        let sql = "SELECT \(messageColumns) FROM messages WHERE session_id = ?\(displayVisibleClause()) ORDER BY timestamp ASC"
         do {
             let rows = try await backend.query(sql, params: [.text(sessionId)])
             return rows.map { messageFromRow($0) }
@@ -1018,11 +1321,39 @@ public actor HermesDataService {
     /// One definition, so the two search passes cannot drift apart: a
     /// rewound row excluded by one and admitted by the other would make a
     /// hit appear or vanish depending on which pass found it.
+    ///
+    /// Also drops `display_kind = 'hidden'` rows when that column exists:
+    /// Hermes's search never returns model-facing scaffolding the person
+    /// never saw (hermes_state_search.py:149-150 @ v2026.9.24).
     private func searchActiveClause(alias: String) -> String {
-        guard hasMessagesActiveColumn else { return "" }
-        return hasCompactedColumn
+        let hidden = displayVisibleClause(alias: alias)
+        guard hasMessagesActiveColumn else { return hidden }
+        return (hasCompactedColumn
             ? " AND (\(alias)active = 1 OR \(alias)compacted = 1)"
-            : " AND \(alias)active = 1"
+            : " AND \(alias)active = 1") + hidden
+    }
+
+    /// ` AND COALESCE(<alias>display_kind, '') <> 'hidden'` when
+    /// `messages.display_kind` exists (Hermes v0.19.1+), else `""`.
+    /// `alias` is a qualifier prefix such as `"m."`, or `""` for bare
+    /// `messages`.
+    ///
+    /// Hermes tags three kinds of row this way — an empty placeholder for
+    /// an interrupted assistant reply (agent/conversation_loop.py:309-311),
+    /// muted diagnostic replies (agent/session_persistence.py:249-252) and
+    /// suppressed async-delegation notices (hermes_state_messages.py:340) —
+    /// and none of its own displays paint them
+    /// (tui_gateway/session_history.py:211-213). Scarf's transcripts,
+    /// search and previews drop them the same way.
+    private func displayVisibleClause(alias: String = "") -> String {
+        hasDisplayKindColumn ? " AND COALESCE(\(alias)display_kind, '') <> 'hidden'" : ""
+    }
+
+    /// Row filter for transcript reads over bare `messages`: the active
+    /// set (see the O1 decision in `fetchMessagesOutcome`), minus rows
+    /// Hermes hides from every display.
+    private var transcriptVisibleClause: String {
+        (hasMessagesActiveColumn ? " AND active = 1" : "") + displayVisibleClause()
     }
 
     private func deepToolContentMatches(
@@ -1227,7 +1558,35 @@ public actor HermesDataService {
     private var sessionPreviewFirstRowSQL: String {
         SessionPreviewSQL.firstEligibleUserRowSQL(
             hasActiveColumn: hasMessagesActiveColumn,
-            hasCompactedColumn: hasCompactedColumn
+            hasCompactedColumn: hasCompactedColumn,
+            hasDisplayKindColumn: hasDisplayKindColumn
+        )
+    }
+
+    /// The preview statement for exactly the rows the listing statement
+    /// (`sessionListFrom` + `sessionListPredicate`, newest first, `limit`)
+    /// returns, so it can ride in the same batch.
+    ///
+    /// It used to be "the newest `limit` first-user-message rows across
+    /// every session", a different population from the rows it labels:
+    /// delegate subagents, hidden and archived rows all have user rows, so
+    /// a busy delegating agent pushed an untitled listed session out of
+    /// the window and its row showed a raw id. Hermes computes the preview
+    /// per listed row (`_PREVIEW_RAW_SUBQUERY_SQL`,
+    /// hermes_state_common.py:163-165 @ v2026.9.24).
+    private func listedSessionPreviewStatement(limit: Int) -> (sql: String, params: [SQLValue]) {
+        (
+            """
+            SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
+            FROM messages m
+            INNER JOIN (
+            \(sessionPreviewFirstRowSQL)
+            ) first ON m.id = first.min_id
+            WHERE m.session_id IN (
+            SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?
+            )
+            """,
+            [.integer(Int64(limit))]
         )
     }
 
@@ -1289,7 +1648,8 @@ public actor HermesDataService {
             \(SessionPreviewSQL.firstEligibleUserRowSQL(
                 sessionIdCount: ids.count,
                 hasActiveColumn: hasMessagesActiveColumn,
-                hasCompactedColumn: hasCompactedColumn
+                hasCompactedColumn: hasCompactedColumn,
+                hasDisplayKindColumn: hasDisplayKindColumn
             ))
             ) first ON m.id = first.min_id
             """
@@ -1328,7 +1688,8 @@ public actor HermesDataService {
             \(SessionPreviewSQL.firstEligibleUserRowSQL(
                 sessionScoped: true,
                 hasActiveColumn: hasMessagesActiveColumn,
-                hasCompactedColumn: hasCompactedColumn
+                hasCompactedColumn: hasCompactedColumn,
+                hasDisplayKindColumn: hasDisplayKindColumn
             ))
             ) first ON m.id = first.min_id
             LIMIT 1
@@ -1393,9 +1754,16 @@ public actor HermesDataService {
     }
 
     public func fetchMessageFingerprint(sessionId: String) async -> MessageFingerprint {
-        let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE session_id = ?"
+        await fetchMessageFingerprint(sessionIds: [sessionId])
+    }
+
+    /// `fetchMessageFingerprint` across a compression lineage.
+    public func fetchMessageFingerprint(sessionIds: [String]) async -> MessageFingerprint {
+        let owner = Self.sessionIdPredicate(sessionIds)
+        guard !owner.params.isEmpty else { return .empty }
+        let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE \(owner.sql)"
         do {
-            let rows = try await backend.query(sql, params: [.text(sessionId)])
+            let rows = try await backend.query(sql, params: owner.params)
             guard let row = rows.first else { return .empty }
             return MessageFingerprint(
                 count: row.int(at: 0),
@@ -1415,6 +1783,69 @@ public actor HermesDataService {
         } catch {
             return nil
         }
+    }
+
+    /// A session opened by id from outside the list (a search hit), as
+    /// the detail view should show it.
+    public struct SessionDetailLookup: Sendable {
+        /// The row to show: the hit's own session, or — when the hit lies
+        /// in a rotated compression chain — the chain projected onto its
+        /// tip with the whole lineage, as the list would show it.
+        public let session: HermesSession
+        /// `archived = 1` on the conversation's row (v0.16+ hosts).
+        public let isArchived: Bool
+        /// Whether the session list's predicate admits the conversation
+        /// (false for archived, hidden, and delegate-subagent rows).
+        public let isListed: Bool
+    }
+
+    /// Resolve a session by id for display, whether or not the session
+    /// list shows it (R14-1). Search covers every row — Scarf does not
+    /// drop archived rows the way `hermes sessions search` does by default
+    /// (hermes_state_search.py:137-162 @ v2026.9.24) — so a hit can land on
+    /// an archived session, an orphaned or live delegate subagent, a
+    /// middle segment of a compression chain, or a conversation older than
+    /// the loaded list. Clicking such a hit used to do nothing.
+    ///
+    /// A hit in a compression chain resolves to the whole chain: parents
+    /// are followed while they ended by compression (bounded, cycle-safe,
+    /// like `acp_adapter/provenance.py`), then the chain is walked to its
+    /// tip with the list's own step query. Nil when the id is not in
+    /// state.db.
+    public func fetchSessionForDetail(id: String) async -> SessionDetailLookup? {
+        guard let hit = await fetchSession(id: id) else { return nil }
+        // Walk up to the conversation's root through compression parents.
+        var root = hit
+        var seen: Set<String> = [hit.id]
+        for _ in 0..<100 {
+            guard let parentId = root.parentSessionId, !parentId.isEmpty, !seen.contains(parentId),
+                  let parent = await fetchSession(id: parentId),
+                  parent.endReason == "compression" else { break }
+            seen.insert(parentId)
+            root = parent
+        }
+        var shown = hit
+        if hasListableChildSupport, root.endReason == "compression",
+           let chain = try? await compressionChains(for: [root.id])[root.id],
+           let tipId = chain.last,
+           let tip = await fetchSession(id: tipId) {
+            SessionLineageIndex.shared.record(server: context.id, lineage: chain)
+            shown = root.projectedOntoCompressionTip(tip, lineage: chain)
+        }
+        let idColumn = hasListableChildSupport ? "s.id" : "id"
+        var isListed = false
+        if let rows = try? await backend.query(
+            "SELECT COUNT(*) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) = ?",
+            params: [.text(root.id)]
+        ) {
+            isListed = (rows.first?.int(at: 0) ?? 0) > 0
+        }
+        var isArchived = false
+        if hasArchivedColumn,
+           let rows = try? await backend.query("SELECT archived FROM sessions WHERE id = ?", params: [.text(root.id)]) {
+            isArchived = (rows.first?.int(at: 0) ?? 0) != 0
+        }
+        return SessionDetailLookup(session: shown, isArchived: isArchived, isListed: isListed)
     }
 
     // MARK: - Canonical Bot Chat resolution (Bot Mode)
@@ -1524,29 +1955,11 @@ public actor HermesDataService {
         // would then be unbounded-by-predicate rather than empty, so bail.
         guard await sessionsTableHasColumn("end_reason") else { return sessionId }
 
-        let exclusions = hasModelConfig ? """
-              AND json_extract(COALESCE(child.model_config, '{}'), '$._branched_from') IS NULL
-              AND json_extract(COALESCE(child.model_config, '{}'), '$._delegate_from') IS NULL
-            """ : ""
-        let sql = """
-            SELECT child.id
-            FROM sessions parent
-            JOIN sessions child ON child.parent_session_id = parent.id
-            WHERE parent.id = ?
-              AND parent.end_reason = 'compression'
-            \(exclusions)
-              AND COALESCE(child.source, '') != 'tool'
-            ORDER BY
-              CASE
-                WHEN child.end_reason = 'compression' THEN 0
-                WHEN child.ended_at IS NULL THEN 1
-                ELSE 2
-              END,
-              COALESCE(child.ended_at, child.started_at) DESC,
-              child.started_at DESC,
-              child.id DESC
-            LIMIT 1
-            """
+        let sql = compressionChainStepSQL(
+            parentId: "?",
+            markerExclusions: hasModelConfig,
+            resetExclusion: hasListableChildSupport
+        )
 
         var current = sessionId
         var seen: Set<String> = [current]
@@ -1563,6 +1976,184 @@ public actor HermesDataService {
             current = child
         }
         return current
+    }
+
+    /// One step of Hermes's compression-chain walk (`_CHAIN_STEP_SQL`,
+    /// hermes_state_compression.py:29-49 @ v2026.9.24): the continuation
+    /// child of the session whose id is the SQL expression `parentId`, or
+    /// no row. Shared by `compressionTip(for:)` (bound `?`) and
+    /// `compressionChains(for:)` (correlated to the recursive CTE), so the
+    /// two walks cannot disagree about which child continues a chain.
+    ///
+    /// `resetExclusion` adds Hermes's `NOT (_RESET_CHILD_SQL)` — a reset
+    /// fork of a compression-ended parent is its own conversation, not the
+    /// continuation (#114271). It reads `session_key`, so it rides only
+    /// where the listable-child predicate already proved that column.
+    private func compressionChainStepSQL(
+        parentId: String,
+        markerExclusions: Bool,
+        resetExclusion: Bool
+    ) -> String {
+        var exclusions = ""
+        if markerExclusions {
+            exclusions += """
+
+                  AND \(Self.jsonMarker("child.model_config", "$._branched_from")) IS NULL
+                  AND \(Self.jsonMarker("child.model_config", "$._delegate_from")) IS NULL
+                """
+        }
+        if resetExclusion {
+            exclusions += """
+
+                  AND NOT (\(Self.resetChildSQL(alias: "child")))
+                """
+        }
+        return """
+            SELECT child.id
+            FROM sessions parent
+            JOIN sessions child ON child.parent_session_id = parent.id
+            WHERE parent.id = \(parentId)
+              AND parent.end_reason = 'compression'\(exclusions)
+              AND COALESCE(child.source, '') != 'tool'
+            ORDER BY
+              CASE
+                WHEN child.end_reason = 'compression' THEN 0
+                WHEN child.ended_at IS NULL THEN 1
+                ELSE 2
+              END,
+              COALESCE(child.ended_at, child.started_at) DESC,
+              child.started_at DESC,
+              child.id DESC
+            LIMIT 1
+            """
+    }
+
+    /// Root-to-tip compression chains for `rootIds`, in ONE query (a
+    /// recursive CTE over `compressionChainStepSQL`), keyed by root id.
+    /// Only chains that actually moved (two or more ids) are returned.
+    ///
+    /// One statement rather than `compressionTip(for:)`'s per-hop loop
+    /// because this runs on list loads, and on a remote host every hop
+    /// would be an SSH round-trip. The recursion is capped at 100 hops and
+    /// each chain is cut at its first repeated id, matching the per-hop
+    /// walk's seen-set, so a cyclic chain terminates.
+    func compressionChains(for rootIds: [String]) async throws -> [String: [String]] {
+        let ids = Array(Set(rootIds)).filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let step = compressionChainStepSQL(
+            parentId: "chain.cur_id",
+            markerExclusions: true,
+            resetExclusion: true
+        )
+        let sql = """
+            WITH RECURSIVE chain(root_id, cur_id, depth) AS (
+                SELECT id, id, 0 FROM sessions WHERE id IN (\(placeholders))
+                UNION ALL
+                SELECT chain.root_id, (\(step)), chain.depth + 1
+                FROM chain
+                WHERE chain.cur_id IS NOT NULL AND chain.depth < 100
+            )
+            SELECT root_id, cur_id FROM chain
+            WHERE cur_id IS NOT NULL
+            ORDER BY root_id, depth
+            """
+        let rows = try await backend.query(sql, params: ids.map { .text($0) })
+        var chains: [String: [String]] = [:]
+        var closed: Set<String> = []
+        for row in rows {
+            let root = row.string(at: 0)
+            let cur = row.string(at: 1)
+            guard !root.isEmpty, !cur.isEmpty, !closed.contains(root) else { continue }
+            var chain = chains[root, default: []]
+            if chain.contains(cur) {
+                closed.insert(root)
+                continue
+            }
+            chain.append(cur)
+            chains[root] = chain
+        }
+        return chains.filter { $0.value.count > 1 }
+    }
+
+    /// Project every compression-ended root in `sessions` onto the live
+    /// tip of its chain, the way every Hermes listing does
+    /// (`_project_compression_tips`, hermes_state_sessions.py:1028-1065 @
+    /// v2026.9.24, on by default in `list_sessions_rich`).
+    ///
+    /// A chain is created when a session compresses in rotation mode
+    /// (`compression.in_place: false`, or any Hermes before in-place
+    /// became the default): the root ends with `end_reason =
+    /// 'compression'` and every later turn lands on a continuation row the
+    /// list predicate rightly hides. Without this the list showed the
+    /// ended root — its stale title and counts — and the conversation's
+    /// later turns were unreachable.
+    ///
+    /// `columns` is the SELECT shape the caller's list used, so the tip
+    /// rows decode exactly like the rows they replace. Rows keep their
+    /// order (Hermes keeps the root's `started_at` for that reason).
+    ///
+    /// Gated on the listable-child predicate (v0.20.4+ hosts with JSON1):
+    /// older hosts get their list back untouched. Best-effort: if either
+    /// query fails, the unprojected list is returned.
+    ///
+    /// Returns the projected rows plus a root-id → tip-id map so callers
+    /// holding per-id side tables (previews) can re-key them.
+    private func projectCompressionTips(
+        _ sessions: [HermesSession],
+        columns: String
+    ) async -> (sessions: [HermesSession], tipByRoot: [String: String]) {
+        guard hasListableChildSupport else { return (sessions, [:]) }
+        let roots = sessions.filter { $0.endReason == "compression" }.map(\.id)
+        guard !roots.isEmpty else { return (sessions, [:]) }
+        do {
+            let chains = try await compressionChains(for: roots)
+            guard !chains.isEmpty else { return (sessions, [:]) }
+            let tipIds = Array(Set(chains.values.compactMap(\.last)))
+            let placeholders = Array(repeating: "?", count: tipIds.count).joined(separator: ",")
+            let rows = try await backend.query(
+                "SELECT \(columns) FROM \(sessionListFrom) WHERE s.id IN (\(placeholders))",
+                params: tipIds.map { .text($0) }
+            )
+            var tips: [String: HermesSession] = [:]
+            for row in rows {
+                let tip = sessionFromRow(row)
+                tips[tip.id] = tip
+            }
+            var tipByRoot: [String: String] = [:]
+            let projected = sessions.map { session -> HermesSession in
+                guard let chain = chains[session.id],
+                      let tipId = chain.last,
+                      let tip = tips[tipId] else { return session }
+                tipByRoot[session.id] = tipId
+                // Lets id-keyed lookups (project attribution on resume)
+                // find the root the chat was started under.
+                SessionLineageIndex.shared.record(server: context.id, lineage: chain)
+                return session.projectedOntoCompressionTip(tip, lineage: chain)
+            }
+            return (projected, tipByRoot)
+        } catch {
+            Self.logger.warning("compression-tip projection failed: \(error.localizedDescription, privacy: .public)")
+            return (sessions, [:])
+        }
+    }
+
+    /// Re-key `previews` after `projectCompressionTips`: each projected row
+    /// shows its tip's preview, as Hermes's listing does, falling back to
+    /// the root's opening line when the tip has no eligible user row yet.
+    private func rekeyPreviews(
+        _ previews: [String: String],
+        tipByRoot: [String: String]
+    ) async -> [String: String] {
+        guard !tipByRoot.isEmpty else { return previews }
+        let tipPreviews = await fetchSessionPreviews(sessionIds: Array(tipByRoot.values))
+        var result = previews
+        for (root, tip) in tipByRoot {
+            if let preview = tipPreviews[tip] ?? previews[root] {
+                result[tip] = preview
+            }
+        }
+        return result
     }
 
     /// Resolve a bot profile's canonical "Bot Chat" — the registry row that
@@ -1687,14 +2278,17 @@ public actor HermesDataService {
         }
     }
 
+    /// `statsSQL` binds `since` twice: once in the list-population count
+    /// subquery, once for the usage sums.
     private static func statsParams(since: Date?) -> [SQLValue] {
         guard let since else { return [] }
-        return [.real(since.timeIntervalSince1970)]
+        let bound = SQLValue.real(since.timeIntervalSince1970)
+        return [bound, bound]
     }
 
     /// Aggregate SQL for the stat cards.
     ///
-    /// Two things this query used NOT to do, both of which made it lie:
+    /// Things this query used NOT to do, each of which made it lie:
     ///
     /// * **`since`.** The Dashboard has always labelled these cards "Last
     ///   7 days" while the query had no `WHERE` at all, so every number
@@ -1703,32 +2297,39 @@ public actor HermesDataService {
     ///   lifetime counters for the session, so a long-running session
     ///   started inside the window contributes all of itself, exactly as
     ///   the Insights period aggregates already do.
-    /// * **Population.** It counted EVERY row in `sessions` — subagent
-    ///   runs, compression continuations and hidden rows included — while
-    ///   the session list beneath it shows only `sessionListPredicate`
-    ///   rows. "Sessions: 412" over a list of 96 is not a rounding
-    ///   difference, it is a different question. Both now ask the same one.
+    /// * **Two populations, on purpose.** The session COUNT is the
+    ///   session list's (`sessionListPredicate`): "Sessions: 412" over a
+    ///   list of 96 is a different question, not a rounding difference.
+    ///   The SUMS (messages, tool calls, tokens, cost) are over every
+    ///   session row in the window, as `hermes insights` sums them
+    ///   (`fetchUsageAggregatesInPeriod`): spend recorded on a delegate
+    ///   subagent or a compression continuation is still spend, and
+    ///   dropping it under-reported cost for anyone whose agent delegates.
+    ///   Parameters: the `since` bound binds twice when present (count
+    ///   subquery, then the sums) — see `statsParams`.
     private func statsSQL(since: Date? = nil) -> String {
+        let listStartedAt = hasListableChildSupport ? "s.started_at" : "started_at"
+        let listSince = since == nil ? "" : " AND \(listStartedAt) >= ?"
+        let count = "(SELECT COUNT(*) FROM \(sessionListFrom) WHERE \(sessionListPredicate)\(listSince))"
         let cols: String
         if hasV07Schema {
             cols = """
-                SELECT COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
+                SELECT \(count), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
                        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
                        COALESCE(SUM(estimated_cost_usd),0),
                        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(actual_cost_usd),0)
                 """
         } else {
             cols = """
-                SELECT COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
+                SELECT \(count), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
                        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
                        COALESCE(SUM(estimated_cost_usd),0)
                 """
         }
-        let startedAt = hasListableChildSupport ? "s.started_at" : "started_at"
-        let sinceClause = since == nil ? "" : " AND \(startedAt) >= ?"
+        let sinceClause = since == nil ? "" : " WHERE started_at >= ?"
         return """
             \(cols)
-            FROM \(sessionListFrom) WHERE \(sessionListPredicate)\(sinceClause)
+            FROM \(usageSessionsSource)\(sinceClause)
             """
     }
 
@@ -1853,30 +2454,23 @@ public actor HermesDataService {
     /// - Parameter statsSince: bounds the stat-card totals to sessions
     ///   started at or after this instant. The Dashboard passes its
     ///   "Last 7 days" window; `nil` keeps the all-time totals.
+    ///
+    /// Previews come for exactly the `sessionLimit` listed rows
+    /// (`listedSessionPreviewStatement`); there is no separate preview
+    /// window any more.
     public func dashboardSnapshot(
         sessionLimit: Int = 5,
-        previewLimit: Int = 5,
         toolCallLimit: Int = 8,
         statsSince: Date? = nil
     ) async -> DashboardSnapshot {
         var statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(since: statsSince), Self.statsParams(since: statsSince)),
             (
-                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: see `sessionListSnapshot`.
+                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
-            (
-                """
-                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
-                FROM messages m
-                INNER JOIN (
-                \(sessionPreviewFirstRowSQL)
-                ) first ON m.id = first.min_id
-                ORDER BY m.timestamp DESC
-                LIMIT ?
-                """,
-                [.integer(Int64(previewLimit))]
-            ),
+            listedSessionPreviewStatement(limit: sessionLimit),
             (
                 // `messageColumnsLight`, not `messageColumns`: the
                 // Dashboard's "Recent activity" card renders a tool NAME
@@ -1906,11 +2500,14 @@ public actor HermesDataService {
         do {
             let resultSets = try await backend.queryBatch(statements)
             let stats = resultSets.first?.first.map { statsFromRow($0) } ?? .empty
-            let sessions = (resultSets.count > 1 ? resultSets[1] : []).map { sessionFromRow($0) }
+            let listed = (resultSets.count > 1 ? resultSets[1] : []).map { sessionFromRow($0) }
             var previews: [String: String] = [:]
             for row in (resultSets.count > 2 ? resultSets[2] : []) {
                 previews[row.string(at: 0)] = SessionPreviewSQL.shape(row.string(at: 1))
             }
+            let projection = await projectCompressionTips(listed, columns: sessionColumns)
+            let sessions = projection.sessions
+            previews = await rekeyPreviews(previews, tipByRoot: projection.tipByRoot)
             let toolCalls = (resultSets.count > 3 ? resultSets[3] : []).map { messageFromRow($0) }
             let modelUsage = (resultSets.count > 4 ? resultSets[4] : []).map { modelUsageFromRow($0) }
             return DashboardSnapshot(
@@ -1948,6 +2545,17 @@ public actor HermesDataService {
     public struct SessionListSnapshot: Sendable {
         public let sessions: [HermesSession]
         public let previews: [String: String]
+        /// Why the batch failed, when it did; `nil` on success, including
+        /// a store that really has no sessions. The failure path returns
+        /// empty lists, which on screen read as "No sessions match this
+        /// filter" — same reason as `DashboardSnapshot.queryError`.
+        public let queryError: String?
+
+        public init(sessions: [HermesSession], previews: [String: String], queryError: String? = nil) {
+            self.sessions = sessions
+            self.previews = previews
+            self.queryError = queryError
+        }
     }
 
     /// - Parameter includeUnreadActivity: selects Hermes's `last_active`
@@ -1965,37 +2573,29 @@ public actor HermesDataService {
         limit: Int = QueryDefaults.sessionLimit,
         includeUnreadActivity: Bool = true
     ) async -> SessionListSnapshot {
-        let previewLimit = limit
         let columns = includeUnreadActivity ? sessionListColumns : sessionColumns
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: the preview statement repeats this listing as
+                // a subquery, and the two must pick the same rows on a tie.
+                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
-            (
-                """
-                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
-                FROM messages m
-                INNER JOIN (
-                \(sessionPreviewFirstRowSQL)
-                ) first ON m.id = first.min_id
-                ORDER BY m.timestamp DESC
-                LIMIT ?
-                """,
-                [.integer(Int64(previewLimit))]
-            )
+            listedSessionPreviewStatement(limit: limit)
         ]
         do {
             let resultSets = try await backend.queryBatch(statements)
-            let sessions = (resultSets.first ?? []).map { sessionFromRow($0) }
+            let listed = (resultSets.first ?? []).map { sessionFromRow($0) }
             var previews: [String: String] = [:]
             for row in (resultSets.count > 1 ? resultSets[1] : []) {
                 previews[row.string(at: 0)] = SessionPreviewSQL.shape(row.string(at: 1))
             }
-            return SessionListSnapshot(sessions: sessions, previews: previews)
+            let projection = await projectCompressionTips(listed, columns: columns)
+            previews = await rekeyPreviews(previews, tipByRoot: projection.tipByRoot)
+            return SessionListSnapshot(sessions: projection.sessions, previews: previews)
         } catch {
             Self.logger.warning("sessionListSnapshot failed: \(error.localizedDescription, privacy: .public)")
-            return SessionListSnapshot(sessions: [], previews: [:])
+            return SessionListSnapshot(sessions: [], previews: [:], queryError: queryFailure(error).message)
         }
     }
 
@@ -2006,6 +2606,9 @@ public actor HermesDataService {
         public let toolUsage: [(name: String, count: Int)]
         public let startHours: [Int: Int]
         public let daysOfWeek: [Int: Int]
+        /// Why the batch failed, when it did; `nil` on success. The failure
+        /// path returns zeros, which read as "no usage in this period".
+        public var queryError: String? = nil
     }
 
     /// - Parameter limit: row cap for the histogram query, which returns
@@ -2013,15 +2616,14 @@ public actor HermesDataService {
     ///   passes `fetchSessionsInPeriod` so both halves of the Insights page
     ///   describe the same set of sessions.
     ///
-    /// **Population.** All three statements below run over
-    /// `sessionListPredicate` — the identical predicate
-    /// `fetchSessionsInPeriod` uses. Pre-fix they filtered on a hand-rolled
-    /// `parent_session_id IS NULL`, which is neither the same thing (it
-    /// drops the branch/reset children the list keeps and keeps the hidden
-    /// rows the list drops) nor stable across schema versions. Insights
-    /// then showed a tool histogram and a session table that disagreed
-    /// about which sessions exist, on one page, with no way to tell which
-    /// was right.
+    /// **Population.** The start-time histogram counts CONVERSATIONS, so
+    /// it runs over `sessionListPredicate` — the identical predicate
+    /// `fetchSessionsInPeriod` uses. The user-message count and the tool
+    /// histogram measure USAGE, so they run over every session row in the
+    /// window, like `fetchUsageAggregatesInPeriod` and like `hermes
+    /// insights`: a delegate subagent's tool calls happened. (Pre-2026-09
+    /// all three used a hand-rolled `parent_session_id IS NULL`, which
+    /// matched neither population.)
     public func insightsSnapshot(
         since: Date,
         limit: Int = QueryDefaults.periodSessionLimit
@@ -2033,11 +2635,16 @@ public actor HermesDataService {
         let joinPredicate = sessionListPredicate
         let outerStartedAt = hasListableChildSupport ? "s.started_at" : "started_at"
         let statements: [(sql: String, params: [SQLValue])] = [
+            // Usage counts: every session row in the window, the way
+            // `hermes insights` counts messages and tool calls
+            // (agent/insights.py:108-137 @ v2026.9.24 — a plain
+            // `JOIN sessions s … WHERE s.started_at >= ?`). See
+            // `fetchUsageAggregatesInPeriod`.
             (
                 """
                 SELECT COUNT(*) FROM messages m
-                JOIN \(sessionListFrom) ON m.session_id = \(hasListableChildSupport ? "s" : "sessions").id
-                WHERE m.role = 'user' AND \(joinPredicate) AND \(outerStartedAt) >= ?
+                JOIN sessions us ON m.session_id = us.id
+                WHERE m.role = 'user' AND us.started_at >= ?
                 """,
                 [.real(sinceTs)]
             ),
@@ -2045,8 +2652,8 @@ public actor HermesDataService {
                 """
                 SELECT m.tool_name, COUNT(*) as cnt
                 FROM messages m
-                JOIN \(sessionListFrom) ON m.session_id = \(hasListableChildSupport ? "s" : "sessions").id
-                WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND \(joinPredicate) AND \(outerStartedAt) >= ?
+                JOIN sessions us ON m.session_id = us.id
+                WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND us.started_at >= ?
                 GROUP BY m.tool_name
                 ORDER BY cnt DESC
                 """,
@@ -2086,7 +2693,11 @@ public actor HermesDataService {
                 daysOfWeek: days
             )
         } catch {
-            return InsightsSnapshot(userMessageCount: 0, toolUsage: [], startHours: [:], daysOfWeek: [:])
+            Self.logger.warning("insightsSnapshot failed: \(error.localizedDescription, privacy: .public)")
+            return InsightsSnapshot(
+                userMessageCount: 0, toolUsage: [], startHours: [:], daysOfWeek: [:],
+                queryError: queryFailure(error).message
+            )
         }
     }
 

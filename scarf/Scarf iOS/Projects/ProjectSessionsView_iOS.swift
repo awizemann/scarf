@@ -21,6 +21,9 @@ struct ProjectSessionsView_iOS: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let err = viewModel?.loadError {
+                loadErrorBanner(err)
+            }
             content
         }
         .background(ScarfColor.backgroundPrimary)
@@ -80,7 +83,11 @@ struct ProjectSessionsView_iOS: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
             } else if vm.sessions.isEmpty {
-                emptyState(hint: vm.emptyStateHint)
+                // A read error is not "no sessions": the banner above says
+                // what happened, and the attribution hint would guess.
+                emptyState(hint: vm.loadError != nil
+                           ? String(localized: "Sessions couldn't be loaded.")
+                           : vm.emptyStateHint)
             } else {
                 sessionList(vm.sessions)
             }
@@ -89,6 +96,30 @@ struct ProjectSessionsView_iOS: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
         }
+    }
+
+    /// The Hermes state database couldn't be read; the list keeps what it
+    /// last loaded.
+    private func loadErrorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(ScarfColor.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Can't read Hermes state on \(serverContext.displayName)")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(ScarfColor.warning.opacity(0.10))
+        .accessibilityElement(children: .combine)
     }
 
     private func emptyState(hint: String?) -> some View {

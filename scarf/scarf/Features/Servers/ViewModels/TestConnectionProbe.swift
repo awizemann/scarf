@@ -60,117 +60,23 @@ struct TestConnectionProbe {
         sshArgs.append(hostSpec)
         sshArgs.append("--")
 
-        // Remote probe script. Tries three strategies in order:
-        //   1. `command -v hermes` against the bare non-interactive PATH —
-        //      works if the user put their install location in ~/.zshenv.
-        //   2. Source common login rc files (.zprofile, .bash_profile,
-        //      .profile) and re-probe — picks up PATH set in login shells.
-        //   3. Probe the well-known install candidates directly. Mirrors
-        //      `HermesPathSet.hermesBinaryCandidates` so behavior matches
-        //      Scarf's local resolution.
-        // The matched absolute path is stored as `hermesBinaryHint` on the
-        // SSHConfig so subsequent CLI/ACP invocations don't have to re-probe.
-        // If the user already typed a remoteHome override, use it; otherwise
-        // default to $HOME/.hermes. Either way, the script also probes a
-        // short list of well-known alternates when the primary path doesn't
-        // have state.db — systemd/docker/VPS installs tend to live at
-        // /var/lib/hermes/.hermes or /home/hermes/.hermes, and SSHing in as
-        // a different user than the Hermes daemon is the leading cause of
-        // "connection green, data empty" bug reports (issue #19).
-        let primary: String
-        if let override = config.remoteHome, !override.isEmpty {
-            if override.hasPrefix("~/") {
-                primary = "$HOME/\(override.dropFirst(2))"
-            } else if override == "~" {
-                primary = "$HOME"
-            } else {
-                primary = override
-            }
-        } else {
-            primary = "$HOME/.hermes"
-        }
-
-        // When the user supplied a manual `hermesBinaryHint` (gh#105
-        // Advanced override) the probe trusts it verbatim: a wrapper
-        // function defined in `~/.zshrc` or a `docker compose exec`
-        // alias won't survive a non-interactive /bin/sh PATH lookup,
-        // so the auto-detect would always fail for those setups.
-        // Source the common login rc files first so a function the
-        // user defined there has a chance to load; then check the
-        // first word against `command -v` (handles bare paths AND
-        // shell functions). Fall back to reporting the raw hint even
-        // if the lookup doesn't resolve — Hermes is invoked via
-        // `/bin/sh -c "<hint> …"` downstream, where a `~/.zshrc`-
-        // sourced shell may resolve the same string the probe
-        // couldn't reach (we can't replicate the runtime shell here).
-        let hintEnv: String
-        if let hint = config.hermesBinaryHint, !hint.isEmpty {
-            let escaped = hint
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            hintEnv = "HERMES_HINT=\"\(escaped)\"\n"
-        } else {
-            hintEnv = "HERMES_HINT=\"\"\n"
-        }
-
-        let script = #"""
-        \#(hintEnv)
-        # Always source login rc files first so functions/aliases the
-        # user defined in their interactive shell at least have a
-        # chance to be visible in the lookups below.
-        for rc in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-            [ -f "$rc" ] && . "$rc" 2>/dev/null
-        done
-        hpath=""
-        if [ -n "$HERMES_HINT" ]; then
-            # Resolve the first token of the hint via `command -v` so
-            # `hermes` (a function) → that function's display path,
-            # `/abs/path` → itself, etc. Failing that, surface the
-            # hint verbatim — downstream callers run it through a
-            # shell which may resolve it even when this probe can't.
-            first=$(printf '%s\n' "$HERMES_HINT" | awk '{print $1}')
-            resolved=$(command -v "$first" 2>/dev/null)
-            if [ -n "$resolved" ]; then
-                hpath="$resolved"
-            else
-                hpath="$HERMES_HINT"
-            fi
-        fi
-        if [ -z "$hpath" ]; then
-            hpath=$(command -v hermes 2>/dev/null)
-        fi
-        if [ -z "$hpath" ]; then
-            for cand in "$HOME/.local/bin/hermes" "/opt/homebrew/bin/hermes" "/usr/local/bin/hermes" "$HOME/.hermes/bin/hermes"; do
-                if [ -x "$cand" ]; then hpath="$cand"; break; fi
-            done
-        fi
-        echo "HERMES:$hpath"
-        PRIMARY="\#(primary)"
-        if [ -r "$PRIMARY/state.db" ]; then
-            echo "DB:ok"
-            echo "HOME_USED:$PRIMARY"
-        else
-            echo "DB:missing"
-            # Probe well-known alternates. Emit the first one that has a
-            # readable state.db so the UI can offer a one-click fill.
-            for alt in "/var/lib/hermes/.hermes" "/opt/hermes/.hermes" "/home/hermes/.hermes" "/root/.hermes"; do
-                if [ -r "$alt/state.db" ]; then
-                    echo "SUGGEST:$alt"
-                    break
-                fi
-            done
-        fi
-        """#
+        let script = Self.probeScript(config: config)
+        // The script goes to `/bin/sh -s` on stdin, never as an ssh argv
+        // word. ssh joins its argv into ONE string for the remote login
+        // shell, so `/bin/sh -c <script>` ran only the script's first line
+        // (`HERMES_HINT=…`) in that child sh, and every later line in the
+        // login shell with the hint gone: a manual "Hermes binary" override
+        // was never tested (S15-F3). `SSHScriptRunner` avoids the same trap
+        // the same way.
         sshArgs.append("/bin/sh")
-        sshArgs.append("-c")
-        sshArgs.append(script)
+        sshArgs.append("-s")
+        let scriptData = Data(script.utf8)
 
-        // Build the displayable command string. Show exactly what `ssh ...`
-        // would look like in the user's terminal (with single-quoting for
-        // the script). Doesn't have to be byte-equivalent to what
-        // `Process` invokes — just a faithful reproduction the user can
-        // paste into Terminal to compare.
+        // Build the displayable command string: what the user can paste
+        // into Terminal to reproduce the probe, script included as a
+        // heredoc on the same stdin.
         let displayCommand = "/usr/bin/ssh " + sshArgs.map { Self.shellDisplayQuote($0) }.joined(separator: " ")
+            + " <<'SCARF_PROBE'\n" + script + "\nSCARF_PROBE"
 
         // The login-shell env probe, hoisted OUT of the detached closure.
         // Everything else in that closure suspends rather than blocks (the
@@ -201,8 +107,10 @@ struct TestConnectionProbe {
             }
             proc.environment = env
 
+            let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
+            proc.standardInput = stdinPipe
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
             do {
@@ -211,12 +119,23 @@ struct TestConnectionProbe {
                 // Nothing spawned and no drain is running, so these are the
                 // explicit release. (`Pipe.deinit` closes them anyway —
                 // measured; the release is stated rather than implied.)
+                try? stdinPipe.fileHandleForReading.close()
+                try? stdinPipe.fileHandleForWriting.close()
                 try? stdoutPipe.fileHandleForReading.close()
                 try? stdoutPipe.fileHandleForWriting.close()
                 try? stderrPipe.fileHandleForReading.close()
                 try? stderrPipe.fileHandleForWriting.close()
                 return (-1, "", "Failed to launch /usr/bin/ssh: \(error.localizedDescription)")
             }
+            // Hand over the script and close stdin so the remote sh sees EOF.
+            // The script is a couple of KB, far under the smallest pipe
+            // buffer (16 KB), so this write returns at once even before ssh
+            // reads it; SIGPIPE is off so a dead ssh can't take Scarf down.
+            try? stdinPipe.fileHandleForReading.close()
+            let stdinFD = stdinPipe.fileHandleForWriting.fileDescriptor
+            _ = fcntl(stdinFD, F_SETNOSIGPIPE, 1)
+            try? stdinPipe.fileHandleForWriting.write(contentsOf: scriptData)
+            try? stdinPipe.fileHandleForWriting.close()
             // Drain BOTH pipes for the whole run, never with a `readToEnd()`
             // after the wait. This probe runs `ssh -vvv`, so a stderr trace
             // past the 64 KB pipe buffer is the EXPECTED case and not the
@@ -319,6 +238,125 @@ struct TestConnectionProbe {
             stderr: envSummary + (stderr.isEmpty ? "(ssh produced no stderr — this usually means the process itself failed to start, the executable couldn't be located, or stdin/stdout was closed unexpectedly.)" : stderr),
             command: displayCommand
         )
+    }
+
+    /// Two script lines that put the user's LOGIN shell's PATH in front of
+    /// this sh's, without sourcing any rc file into sh. Shared with Remote
+    /// Diagnostics, which used to source the rc files and died under dash
+    /// (T6-F2).
+    nonisolated static let loginPathBorrow = #"""
+    lp=$("${SHELL:-/bin/sh}" -lc 'printf "__SCARF_PATH__%s" "$PATH"' </dev/null 2>/dev/null | sed -n 's/.*__SCARF_PATH__//p' | tail -n 1)
+    [ -n "$lp" ] && PATH="$lp:$PATH"
+    """#
+
+    /// The remote probe script for `config`, fed to `/bin/sh -s` on stdin.
+    /// Split out so tests can run it against a local shell.
+    nonisolated static func probeScript(config: SSHConfig) -> String {
+        // Remote probe script. Tries three strategies in order:
+        //   1. A manual hint, if the user typed one.
+        //   2. `command -v hermes` against the login shell's PATH, borrowed
+        //      from `$SHELL -lc` (the rc files are not sourced into sh).
+        //   3. Probe the well-known install candidates directly. Mirrors
+        //      `HermesPathSet.hermesBinaryCandidates` so behavior matches
+        //      Scarf's local resolution.
+        // The matched absolute path is stored as `hermesBinaryHint` on the
+        // SSHConfig so subsequent CLI/ACP invocations don't have to re-probe.
+        // If the user already typed a remoteHome override, use it; otherwise
+        // default to $HOME/.hermes. Either way, the script also probes a
+        // short list of well-known alternates when the primary path doesn't
+        // have state.db — systemd/docker/VPS installs tend to live at
+        // /var/lib/hermes/.hermes or /home/hermes/.hermes, and SSHing in as
+        // a different user than the Hermes daemon is the leading cause of
+        // "connection green, data empty" bug reports (issue #19).
+        let primary: String
+        if let override = config.remoteHome, !override.isEmpty {
+            if override.hasPrefix("~/") {
+                primary = "$HOME/\(override.dropFirst(2))"
+            } else if override == "~" {
+                primary = "$HOME"
+            } else {
+                primary = override
+            }
+        } else {
+            primary = "$HOME/.hermes"
+        }
+
+        // When the user supplied a manual `hermesBinaryHint` (gh#105
+        // Advanced override) the probe trusts it verbatim: a
+        // `docker compose exec` wrapper won't survive a PATH lookup, so
+        // the auto-detect would always fail for those setups. A
+        // single-word hint is checked with `command -v` (on the login
+        // shell's PATH, see the script); anything else is reported as
+        // typed, since Hermes is invoked as `<hint> …` downstream.
+        let hintEnv: String
+        if let hint = config.hermesBinaryHint, !hint.isEmpty {
+            // Escape everything a double-quoted sh string would still
+            // expand, so a hint like `sh -c 'exec hermes "$@"' hermes`
+            // reaches the probe as typed.
+            let escaped = hint
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "$", with: "\\$")
+                .replacingOccurrences(of: "`", with: "\\`")
+            hintEnv = "HERMES_HINT=\"\(escaped)\"\n"
+        } else {
+            hintEnv = "HERMES_HINT=\"\"\n"
+        }
+
+        let script = #"""
+        \#(hintEnv)
+        # Borrow the PATH of the user's own login shell, so an install
+        # its profile puts on PATH (asdf, pipx, Homebrew) is found. The
+        # rc files are NOT sourced into this sh: under dash (Ubuntu's
+        # /bin/sh) one line of zsh syntax in them (`plugins=(git)`) ends
+        # the whole probe, and an rc command that reads stdin would eat
+        # the rest of this script. The marker skips anything a profile
+        # prints before the PATH.
+        \#(loginPathBorrow)
+        hpath=""
+        if [ -n "$HERMES_HINT" ]; then
+            # Resolve the first token of the hint via `command -v` so
+            # `hermes` (a function) → that function's display path,
+            # `/abs/path` → itself, etc. Failing that, surface the
+            # hint verbatim — downstream callers run it through a
+            # shell which may resolve it even when this probe can't.
+            # A multi-word hint (`docker compose exec hermes hermes`) is a
+            # command line, not a path: report it as typed, since the
+            # first word alone (`/usr/bin/docker`) is not the binary.
+            first=$(printf '%s\n' "$HERMES_HINT" | awk '{print $1}')
+            resolved=$(command -v "$first" 2>/dev/null)
+            if [ -n "$resolved" ] && [ "$first" = "$HERMES_HINT" ]; then
+                hpath="$resolved"
+            else
+                hpath="$HERMES_HINT"
+            fi
+        fi
+        if [ -z "$hpath" ]; then
+            hpath=$(command -v hermes 2>/dev/null)
+        fi
+        if [ -z "$hpath" ]; then
+            for cand in "$HOME/.local/bin/hermes" "/opt/homebrew/bin/hermes" "/usr/local/bin/hermes" "$HOME/.hermes/bin/hermes"; do
+                if [ -x "$cand" ]; then hpath="$cand"; break; fi
+            done
+        fi
+        echo "HERMES:$hpath"
+        PRIMARY="\#(primary)"
+        if [ -r "$PRIMARY/state.db" ]; then
+            echo "DB:ok"
+            echo "HOME_USED:$PRIMARY"
+        else
+            echo "DB:missing"
+            # Probe well-known alternates. Emit the first one that has a
+            # readable state.db so the UI can offer a one-click fill.
+            for alt in "/var/lib/hermes/.hermes" "/opt/hermes/.hermes" "/home/hermes/.hermes" "/root/.hermes"; do
+                if [ -r "$alt/state.db" ]; then
+                    echo "SUGGEST:$alt"
+                    break
+                fi
+            done
+        fi
+        """#
+        return script
     }
 
     /// Bounded `error_kind` token for a failed probe.

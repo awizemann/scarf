@@ -1042,7 +1042,16 @@ public enum HermesCLIMarkers {
         "Gateway started via",
         gatewayWindowsAlreadyRunning,
         gatewayDetachedFallbackStarted,
+        gatewaySupervisorRelaunched,
     ]
+
+    /// v0.21.4+: `✓ Gateway relaunched by its supervisor (PID {n})`, the
+    /// success line of the hand-back to an external supervisor
+    /// (`restart_externally_supervised_gateway`,
+    /// `hermes_cli/gateway_supervised_restart.py:86-90` @ v2026.9.24). Its
+    /// failure arms print `⚠` lines and `sys.exit(1)` (`:91-100`), which the
+    /// exit code owns.
+    public static let gatewaySupervisorRelaunched = "Gateway relaunched by its supervisor"
 
     /// `_cmd_restart`'s last-resort arm prints `Starting gateway...`
     /// (`gateway.py:6065`) and then calls `run_gateway(verbose=0)`, which
@@ -1852,7 +1861,26 @@ public enum HermesGatewayServiceVerdict {
         }
     }
 
-    public static func judge(verb: Verb, output: String, exitCode: Int32) -> HermesCLIOutcome {
+    /// The line `runHermesCLI` ends a timed-out run with
+    /// (`TransportError.timeout`'s description, never localized).
+    public static let transportTimeoutPrefix = "Command timed out after"
+
+    /// What a supervised restart that outlasted Scarf's wait says. See
+    /// ``judge(verb:output:exitCode:externallySupervised:)``.
+    public static let supervisedRestartPendingNote = String(
+        localized: "The gateway is still restarting: Hermes handed it back to its supervisor, which lets in-flight runs finish first and can take longer than Scarf waits. Check its status again in a minute."
+    )
+
+    /// - Parameter externallySupervised: the restart guard found the v0.21.4+
+    ///   external-supervisor case (``HermesGatewayRestartGuard/Decision``).
+    ///   That restart drains in-flight runs (a 60 s floor) and then waits up
+    ///   to 15 s for the new PID, so it can outlast Scarf's CLI timeout; the
+    ///   gateway goes on restarting after Scarf stops waiting, and killing
+    ///   the CLI does not stop it (the signal was already sent). A timeout
+    ///   there is "still restarting", not a failure.
+    public static func judge(
+        verb: Verb, output: String, exitCode: Int32, externallySupervised: Bool = false
+    ) -> HermesCLIOutcome {
         let successMarkers: [String]
         switch verb {
         case .start: successMarkers = HermesCLIMarkers.gatewayStartSuccess
@@ -1871,6 +1899,13 @@ public enum HermesGatewayServiceVerdict {
         if !verdict.succeeded,
            let lifecycle = profileLifecycleOutcome(verb: verb, lines: lines, exitCode: exitCode) {
             return lifecycle
+        }
+        // Only Scarf's own timer: `runHermesCLI` answers -1 for a missing
+        // binary or an SSH failure too, and then no signal was ever sent.
+        if verb == .restart, externallySupervised, !verdict.succeeded, exitCode == -1,
+           lines.last?.hasPrefix(transportTimeoutPrefix) == true, !sawServiceRefusal(lines) {
+            return HermesCLIOutcome(
+                succeeded: false, detail: supervisedRestartPendingNote, warning: nil, confidence: .unconfirmed)
         }
         if verb == .restart, !verdict.succeeded, !sawServiceRefusal(lines),
            lines.contains(where: {
@@ -1980,6 +2015,19 @@ public enum HermesMCPTestVerdict {
     /// (`hermes_cli/subcommands/mcp.py:49-50` @ v2026.9.7).
     public static func argv(name: String) -> [String] { ["mcp", "test", "--", name] }
 
+    /// How long Scarf lets one `mcp test` run before killing it (S09-F6).
+    ///
+    /// Hermes's own probe waits `connect_timeout` (default 30 s, clamped to
+    /// at least 1) and then gives the whole probe `connect_timeout + 10`
+    /// (`hermes_cli/mcp_config.py:431-443, 506` @ v2026.9.24), on top of
+    /// Python and CLI start-up. A flat 30 s killed slow servers and any
+    /// server configured with a longer `connect_timeout` before Hermes had
+    /// finished, and Scarf reported a failure the CLI would not have.
+    public static func timeout(connectTimeout: Double?) -> TimeInterval {
+        let configured = connectTimeout.flatMap { $0.isFinite ? $0 : nil } ?? 30
+        return max(30, configured) + 20
+    }
+
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
         HermesCLIVerdict.judge(
             output: output,
@@ -1989,6 +2037,70 @@ public enum HermesMCPTestVerdict {
             failureWins: true,
             successAnchored: true
         )
+    }
+}
+
+/// `hermes mcp install <identifier>` — install a Nous catalog entry by name
+/// (S09-F2). Used for OAuth catalog entries, which `mcp add` cannot create
+/// without a TTY (see ``HermesCapabilities/hasMCPOAuthAddNeedsDirectWrite``).
+///
+/// `install_entry` writes the entry (`url`, `auth: oauth`, and the
+/// manifest's pre-registered `oauth:` client block when it has one) BEFORE it
+/// probes, and a failed probe only prints `Probe failed:` and applies the
+/// manifest's tool defaults (`hermes_cli/mcp_catalog.py:522-541, 569-672,
+/// 721-790` @ v2026.9.24). With no TTY the OAuth probe fails fast, so the
+/// install completes and the user signs in afterwards.
+///
+/// Outcomes, all through `_say` at a two-space indent with one glyph
+/// (`hermes_cli/mcp_picker.py:104-111, 209-220`; the same text at every tag
+/// from `v2026.5.28`, where the verb first exists):
+/// - `✓ Installed '<name>' (enabled). …` (`mcp_catalog.py:782`).
+/// - `✗ '<identifier>' is not in the catalog. …` — the host's catalog does
+///   not carry the entry (an older Hermes, or a manifest that needs a newer
+///   one). Reported separately so the caller can fall back.
+/// - `✗ install failed: <reason>`, and the managed-install refusal under
+///   `save_config`, which `install_entry` does not notice before printing
+///   its success line — so refusals win.
+///
+/// Exit status is not relied on: before v2026.9.7 the dispatcher discarded
+/// `install_by_name`'s return code.
+public enum HermesMCPInstallVerdict {
+    public enum Result: Equatable, Sendable {
+        case installed
+        case notInCatalog
+        case failed(String?)
+        case unconfirmed(String?)
+    }
+
+    /// `identifier` is the subparser's only positional and nothing follows
+    /// it (`hermes_cli/subcommands/mcp.py:73-75` @ v2026.9.24), so `--` is
+    /// safe here for the same reason as ``HermesMCPRemoveVerdict/argv(name:)``.
+    public static func argv(identifier: String) -> [String] {
+        ["mcp", "install", "--", identifier]
+    }
+
+    public static func judge(output: String, exitCode: Int32, identifier: String) -> Result {
+        let notInCatalog = "'\(identifier)' is not in the catalog"
+        let outcome = HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: ["Installed '\(identifier)'"],
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored + [
+                notInCatalog,
+                "install failed:",
+            ],
+            failureWins: true,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+        if outcome.succeeded { return .installed }
+        if let detail = outcome.detail,
+           HermesCLIVerdict.unglyphed(detail).hasPrefix(notInCatalog) {
+            return .notInCatalog
+        }
+        return outcome.confidence == .unconfirmed
+            ? .unconfirmed(outcome.detail)
+            : .failed(outcome.detail)
     }
 }
 

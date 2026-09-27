@@ -349,7 +349,7 @@ struct HermesP38SourceSweepTests {
             "the 3 s is the FIXTURE — EOF deliberately lands between the two "
             + "graces (1 s and 6 s) so the latch race is decided by construction, "
             + "not by luck; it runs on a background queue, not in the test body",
-        "MainActorSpawnDisciplineP22Tests.swift:251":
+        "MainActorSpawnDisciplineP22Tests.swift:256":
             "the assertion is that the cancelled load did NOT reach its third "
             + "probe, so there is no observable to poll for; the window is one "
             + "probe delay (0.3 s) times three",

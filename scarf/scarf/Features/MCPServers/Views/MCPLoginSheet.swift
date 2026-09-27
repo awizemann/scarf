@@ -23,6 +23,7 @@ struct MCPLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var controller: MCPLoginController
     @State private var flow: String
+    @State private var pastedRedirect: String = ""
 
     init(
         serverName: String,
@@ -61,6 +62,10 @@ struct MCPLoginSheet: View {
 
             if let prompt = controller.devicePrompt {
                 devicePromptCard(prompt)
+            }
+
+            if controller.acceptsRedirectPaste {
+                redirectPasteCard
             }
 
             ScrollView {
@@ -106,6 +111,42 @@ struct MCPLoginSheet: View {
         .padding(ScarfSpace.s5)
         .frame(width: 560)
         .onDisappear { controller.stop() }
+    }
+
+    /// The browser flow's paste fallback (S09-F4). After approval the
+    /// provider redirects to Hermes's loopback listener, which on an SSH host
+    /// is on the remote machine, so the browser tab fails to load. Its
+    /// address carries the `code=` Hermes needs, and Hermes is waiting for it
+    /// on stdin.
+    private var redirectPasteCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(context.isRemote
+                 ? "After you approve, the browser tab can’t reach Hermes on the remote host and fails to load. Copy that tab’s full address and paste it here."
+                 : "If the browser tab fails to load after you approve, copy its full address and paste it here.")
+                .scarfStyle(.footnote)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: ScarfSpace.s2) {
+                TextField("http://127.0.0.1:…/callback?code=…", text: $pastedRedirect)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Redirect URL")
+                    .onSubmit(submitPastedRedirect)
+                Button("Send", action: submitPastedRedirect)
+                    .disabled(pastedRedirect.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(ScarfSpace.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                .fill(ScarfColor.accentTint)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private func submitPastedRedirect() {
+        if controller.submitRedirect(pastedRedirect) { pastedRedirect = "" }
     }
 
     /// The two things the person actually needs, lifted out of the log: where

@@ -244,10 +244,17 @@ struct PositionalSeparatorP47Tests {
     /// The Chat pane built its rename argv by hand and was the only site
     /// without the separator — the same rename worked from the Sessions pane
     /// and failed from Chat.
+    ///
+    /// R16b moved Chat's rename behind the `sessionRenameRunner` seam (so a
+    /// test can stub the CLI); the seam's production default is the one place
+    /// the argv is built, and it still goes through the shared builder.
     @Test func chatRenameUsesTheSharedBuilder() throws {
         let source = try PluginsManagedLockP47Tests
             .source("scarf/Features/Chat/ViewModels/ChatViewModel.swift")
-        #expect(source.contains("SessionsViewModel.renameArgv(sessionId: sessionId, title: trimmed)"))
+        #expect(source.contains("SessionsViewModel.renameArgv(sessionId: sessionId, title: title)"))
+        #expect(source.contains("let runner = sessionRenameRunner")
+            && source.contains("runner(ctx, sessionId, trimmed)"),
+            "the rename action must route through the seam, not a hand-built argv")
         #expect(source.contains("[\"sessions\", \"rename\", sessionId, trimmed]") == false)
         #expect(source.contains("[\"sessions\", \"delete\", \"--yes\", sessionId]") == false)
     }

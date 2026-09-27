@@ -35,10 +35,12 @@ import ScarfCore
 
     /// A temp Hermes home whose config.yaml carries a provider-prefix
     /// mismatch: `model.default` names a provider (`mycorp`) that isn't
-    /// the configured `model.provider` (`nous`).
+    /// the configured `model.provider` (`gemini`). A DIRECT provider on
+    /// purpose: `nous` (used until R03) is an aggregator in Hermes, and
+    /// vendor-prefixed ids under it are not a mismatch (S06-F1).
     static func mismatchedHome(
         modelDefault: String = "mycorp/private-model",
-        provider: String = "nous"
+        provider: String = "gemini"
     ) throws -> TempHermesHome {
         let home = try TempHermesHome()
         try "model:\n  default: \(modelDefault)\n  provider: \(provider)\n"
@@ -52,7 +54,7 @@ import ScarfCore
     @MainActor
     static func mismatchedVM(
         home: TempHermesHome,
-        roster: Set<String> = ["anthropic", "nous", "openai"]
+        roster: Set<String> = ["anthropic", "gemini", "openai"]
     ) async throws -> (ChatViewModel, ModelPreflight.Mismatch) {
         let vm = ChatViewModel(context: home.context)
         vm.knownProviderIDs = roster
@@ -86,7 +88,7 @@ import ScarfCore
         vm.chooseModelForMismatch(mismatch)
         let reason = try #require(vm.modelPreflightReason)
         #expect(reason.contains("mycorp/private-model"))
-        #expect(reason.contains("nous"))
+        #expect(reason.contains("gemini"))
         // Banner-initiated: no interrupted chat-start exists, so a
         // cancel (or pick) must not boot a session.
         vm.cancelModelPreflight()

@@ -172,7 +172,10 @@ public final class IOSSettingsViewModel {
         // (pass-1 M7 #5) so remote non-interactive shells find hermes
         // even when it's in ~/.local/bin or /opt/homebrew/bin.
         let argv = HermesConfigSet.argv(key: key, value: value).map(shellEscape).joined(separator: " ")
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
+        // `-p default` for a root home: the transport can't see a hermes
+        // argv inside `sh -c`, so the script carries the pin itself (S13-F1).
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(pin)\(argv)"
 
         // Round-6 decision 11: the `async` seam, so the wait is a suspension
         // rather than a cooperative-pool thread blocked on the exec that runs
@@ -246,7 +249,10 @@ public final class IOSSettingsViewModel {
         let ctx = context
         let hermes = ctx.paths.hermesBinary
         let argv = HermesConfigUnset.argv(key: key).map(shellEscape).joined(separator: " ")
-        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(argv)"
+        // `-p default` for a root home: the transport can't see a hermes
+        // argv inside `sh -c`, so the script carries the pin itself (S13-F1).
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(pin)\(argv)"
 
         // Round-6 decision 11: the `async` seam, so the wait is a suspension
         // rather than a cooperative-pool thread blocked on the exec that runs

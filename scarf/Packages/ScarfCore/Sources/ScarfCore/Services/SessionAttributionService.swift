@@ -30,6 +30,33 @@ public struct SessionAttributionService: Sendable {
 
     // MARK: - Read
 
+    /// Session id → project display name, from the sidecar's
+    /// session → path mappings and the registry's rows.
+    ///
+    /// Two registry rows can share a path: the Project Doctor reports it
+    /// (`duplicatePath`), a hand-edited `projects.json` produces it, and
+    /// older builds' Add Project allowed it. The first row at a path names
+    /// it, the same rule `ProjectMenuProbeCache` uses. This used to be
+    /// `Dictionary(uniqueKeysWithValues:)` at three call sites (Sessions
+    /// tab, chat sidebar, iOS Dashboard), which traps on a duplicate key,
+    /// so one duplicate row crashed the app on every Sessions load.
+    public nonisolated static func projectNames(
+        mappings: [String: String],
+        projects: [ProjectEntry]
+    ) -> [String: String] {
+        let pathToName = Dictionary(
+            projects.map { ($0.path, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var names: [String: String] = [:]
+        for (sessionID, path) in mappings {
+            if let name = pathToName[path] {
+                names[sessionID] = name
+            }
+        }
+        return names
+    }
+
     /// Maximum sidecar size, in bytes, that we'll accept off disk /
     /// SFTP. A legitimate `session_project_map.json` is in the tens
     /// of kilobytes even on heavy multi-project setups (one mapping
@@ -70,8 +97,18 @@ public struct SessionAttributionService: Sendable {
 
     /// Look up the project path a given session was attributed to.
     /// Returns nil for unattributed sessions.
+    ///
+    /// A rotated compression chain is listed (and resumed) under its tip
+    /// id while the attribution was recorded against the id the chat
+    /// started with, so a miss falls back to the other ids of a chain Scarf
+    /// has listed (`SessionLineageIndex`), nearest first.
     public nonisolated func projectPath(for sessionID: String) -> String? {
-        load().mappings[sessionID]
+        let mappings = load().mappings
+        if let path = mappings[sessionID] { return path }
+        for related in SessionLineageIndex.shared.relatedIds(server: context.id, sessionID: sessionID) {
+            if let path = mappings[related] { return path }
+        }
+        return nil
     }
 
     /// Reverse lookup: every session ID attributed to the given

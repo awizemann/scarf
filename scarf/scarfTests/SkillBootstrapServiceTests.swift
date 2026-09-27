@@ -282,6 +282,135 @@ struct SkillBootstrapServiceTests {
         #expect(!text.contains("cron list --json"))
     }
 
+    /// S10-F5. Scarf bootstraps these skills onto every host it manages,
+    /// including Linux servers over SSH. Hermes hides a skill whose
+    /// `platforms:` list doesn't match the host OS and `skill_view` refuses
+    /// it (`agent/skill_utils.py:128-145`, `tools/skills_tool.py:207,604-605`
+    /// @ v2026.9.24), so a macOS-only tag broke New Project and mini-app
+    /// authoring on remote Linux hosts. Nothing in either skill needs macOS
+    /// on the Hermes side.
+    @Test("no bundled skill restricts the platforms Hermes will load it on")
+    func bundledSkillsLoadOnEveryHostOS() throws {
+        let bundleDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()          // scarfTests
+            .deletingLastPathComponent()          // scarf
+            .appendingPathComponent("scarf/Resources/BuiltinSkills.bundle")
+        let skills = try FileManager.default.contentsOfDirectory(
+            at: bundleDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ).filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("SKILL.md").path) }
+        #expect(!skills.isEmpty)
+        for skill in skills {
+            let text = try String(contentsOf: skill.appendingPathComponent("SKILL.md"), encoding: .utf8)
+            // Frontmatter only: between the first two `---` lines.
+            let frontmatter = text.components(separatedBy: "\n---").first ?? ""
+            let platformLines = frontmatter
+                .split(separator: "\n")
+                .filter { $0.hasPrefix("platforms:") }
+            #expect(
+                platformLines.isEmpty || platformLines.allSatisfy { $0.contains("linux") },
+                Comment(rawValue: "\(skill.lastPathComponent) would be hidden on a Linux host")
+            )
+        }
+    }
+
+    /// Dropping `platforms:` only reaches hosts that already have a copy if
+    /// the version moves: the bootstrap replaces an installed skill only
+    /// when it is older than the bundled one.
+    @Test("the platforms fix ships with a version bump the gate will act on")
+    func platformsFixIsVersionBumped() throws {
+        let bundleDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scarf/Resources/BuiltinSkills.bundle")
+        for (name, previous) in [("scarf-template-author", "2.0.0"), ("scarf-miniapp-author", "1.0.0")] {
+            let data = try Data(contentsOf: bundleDir.appendingPathComponent("\(name)/SKILL.md"))
+            let version = try #require(SkillBootstrapService.parseVersion(data))
+            #expect(SkillBootstrapService.semverCompare(version, previous) > 0, "\(name) is still \(version)")
+        }
+    }
+
+    // MARK: - Template-installed copies (R06 fresh-eyes)
+
+    private static func scarfAuthored(_ name: String, version: String, body: String = "body") -> Data {
+        Data("""
+        ---
+        name: \(name)
+        version: \(version)
+        author: Alan Wizemann
+        metadata:
+          hermes:
+            homepage: https://github.com/awizemann/scarf/wiki/Project-Templates
+        ---
+
+        \(body)
+
+        """.utf8)
+    }
+
+    /// Hermes resolves two same-named copies only when their bytes match
+    /// (`_provably_same_skill`); the Template Author template installs its
+    /// own copy under `skills/templates/<slug>/`, so a bundled update that
+    /// leaves that copy behind makes `skill_view` refuse the skill.
+    @Test("an older Scarf-authored template copy is brought to the bundled bytes")
+    func templateCopyIsSynced() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let copyDir = home.appendingPathComponent("skills/templates/awizemann-template-author/scarf-template-author")
+        try FileManager.default.createDirectory(at: copyDir, withIntermediateDirectories: true)
+        try Self.scarfAuthored("scarf-template-author", version: "2.0.0", body: "old")
+            .write(to: copyDir.appendingPathComponent("SKILL.md"))
+        let bundled = Self.scarfAuthored("scarf-template-author", version: "2.0.1", body: "new")
+
+        let context = ServerContext.local(home: home)
+        let service = SkillBootstrapService(context: context)
+        let rewritten = service.syncTemplateCopies(
+            of: "scarf-template-author", bundledData: bundled, transport: context.makeTransport())
+
+        #expect(rewritten == [copyDir.appendingPathComponent("SKILL.md").path])
+        #expect(try Data(contentsOf: copyDir.appendingPathComponent("SKILL.md")) == bundled)
+        // A second run has nothing to do.
+        #expect(service.syncTemplateCopies(
+            of: "scarf-template-author", bundledData: bundled, transport: context.makeTransport()).isEmpty)
+    }
+
+    @Test("template copies that aren't Scarf's, or aren't older, are left alone")
+    func templateCopySyncIsNarrow() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent("skills/templates")
+        func plant(_ slug: String, _ data: Data) throws -> URL {
+            let dir = root.appendingPathComponent("\(slug)/scarf-template-author")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let file = dir.appendingPathComponent("SKILL.md")
+            try data.write(to: file)
+            return file
+        }
+        let userOwned = Data("---\nname: scarf-template-author\nversion: 1.0.0\n---\nmine\n".utf8)
+        let newer = Self.scarfAuthored("scarf-template-author", version: "3.0.0")
+        let userFile = try plant("someone-else", userOwned)
+        let newerFile = try plant("from-the-future", newer)
+        let bundled = Self.scarfAuthored("scarf-template-author", version: "2.0.1")
+
+        let context = ServerContext.local(home: home)
+        let rewritten = SkillBootstrapService(context: context).syncTemplateCopies(
+            of: "scarf-template-author", bundledData: bundled, transport: context.makeTransport())
+
+        #expect(rewritten.isEmpty)
+        #expect(try Data(contentsOf: userFile) == userOwned)
+        #expect(try Data(contentsOf: newerFile) == newer)
+    }
+
+    @Test("no templates directory is a no-op")
+    func templateCopySyncWithoutTemplates() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let context = ServerContext.local(home: home)
+        #expect(SkillBootstrapService(context: context).syncTemplateCopies(
+            of: "scarf-template-author",
+            bundledData: Self.scarfAuthored("scarf-template-author", version: "2.0.1"),
+            transport: context.makeTransport()).isEmpty)
+    }
+
     @Test func parseVersionReadsFrontmatterOnly() {
         #expect(SkillBootstrapService.parseVersion(Data("---\nversion: 2.0.0\n---\n".utf8)) == "2.0.0")
         #expect(SkillBootstrapService.parseVersion(Data("---\nname: x\n---\nversion: 9.9.9\n".utf8)) == nil)

@@ -42,7 +42,7 @@ struct CitadelTransportColumnsP54Tests {
     /// small; slicing from the `func` to the `runExec` call is exact.
     private static func asyncRunProcessBody(_ code: String) throws -> String {
         let start = try #require(code.range(of: "private func asyncRunProcessImpl("))
-        let end = try #require(code.range(of: "runExec(cmd, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)",
+        let end = try #require(code.range(of: "runExec(wrapped, stdin: stdin, timeout: timeout, midStream: .exitMinusOne)",
                                           range: start.upperBound..<code.endIndex))
         return String(code[start.lowerBound..<end.upperBound])
     }
@@ -84,5 +84,50 @@ struct CitadelTransportColumnsP54Tests {
         let body = String(code[start.lowerBound..<end.upperBound])
         #expect(body.contains("PATH=\\\"$HOME/.local/bin"), "the twin still exists and still guards PATH")
         #expect(!body.contains("COLUMNS"), "if this gained COLUMNS, update the rationale rather than the test")
+    }
+    /// S13-F1: the iOS exec path pins a root home with `-p default` using
+    /// the same shared rule as `SSHTransport.composedRemoteCommand`
+    /// (`HermesProfileScope.pinnedRemoteArguments`, behaviour-tested in
+    /// ScarfCore's `HermesProfileScopeTests`), and it joins the PINNED args,
+    /// not the caller's originals.
+    @Test func asyncRunProcessPinsARootHomeWithTheSharedRule() throws {
+        let code = Self.codeOnly(try Self.source("Sources/ScarfIOS/CitadelServerTransport.swift"))
+        let body = try Self.asyncRunProcessBody(code)
+        let pin = try #require(body.range(of: "let args = HermesProfileScope.pinnedRemoteArguments("))
+        // S15-F3: the join goes through `commandLine`, which keeps a
+        // wrapper "Hermes binary" as shell words (behaviour-tested below).
+        let join = try #require(body.range(
+            of: "Self.commandLine(executable: executable, args: args, fragment: config.hermesBinaryHintFragment)"))
+        #expect(pin.lowerBound < join.lowerBound)
+        #expect(body.contains("configuredBinary: config.hermesBinaryHint"))
+    }
+
+    /// S15-F3: a wrapper hint is emitted as words; everything else is
+    /// quoted by `shellJoin` exactly as before. `fragment` is
+    /// `SSHConfig.hermesBinaryHintFragment` (R16c).
+    @Test func aWrapperBinaryHintIsJoinedAsShellWords() {
+        let hint = "docker compose exec hermes hermes"
+        let wrapper = SSHConfig(host: "box", hermesBinaryHint: hint)
+        #expect(CitadelServerTransport.commandLine(
+            executable: hint, args: ["-p", "default", "cron", "list"], fragment: wrapper.hermesBinaryHintFragment)
+            == "docker compose exec hermes hermes -p default cron list")
+        #expect(CitadelServerTransport.commandLine(
+            executable: "hermes", args: ["config", "set", "a b"], fragment: nil)
+            == CitadelServerTransport.shellJoin(["hermes", "config", "set", "a b"]))
+        // A single-word hint goes through `shellJoin` like any argument.
+        let single = SSHConfig(host: "box", hermesBinaryHint: "/opt/hermes")
+        #expect(CitadelServerTransport.commandLine(
+            executable: "/opt/hermes", args: ["acp"], fragment: single.hermesBinaryHintFragment) == "/opt/hermes acp")
+    }
+
+    /// R16c F2: a path Test Connection found is one quoted word even with a
+    /// space in it, where the same value typed by the user is words.
+    @Test func aProbedSpacedPathIsJoinedAsOneWord() {
+        let path = "/Users/Jane Doe/.local/bin/hermes"
+        let probed = SSHConfig(host: "box", hermesBinaryHint: path, hermesBinaryHintIsPath: true)
+        #expect(CitadelServerTransport.commandLine(
+            executable: path, args: ["acp"], fragment: probed.hermesBinaryHintFragment)
+            == CitadelServerTransport.shellJoin([path, "acp"]))
+        #expect(CitadelServerTransport.shellJoin([path]) != path)
     }
 }

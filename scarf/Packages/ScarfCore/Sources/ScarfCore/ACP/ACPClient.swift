@@ -79,6 +79,13 @@ public actor ACPClient {
     private let channelFactory: ChannelFactory
 
     private var nextRequestId = 1
+    /// The last queued channel write. Each request/notification write
+    /// waits for this one before it goes out, so lines reach Hermes in the
+    /// order they were issued. Writes used to run as independent detached
+    /// tasks, and two prompts sent back to back (the held sends released
+    /// after an autostart's `session/load`) could land in either order.
+    /// Carries the write's error, `nil` on success.
+    private var writeTail: Task<Error?, Never>?
     private var pendingRequests: [Int: CheckedContinuation<AnyCodable?, Error>] = [:]
     private var readTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
@@ -383,6 +390,8 @@ public actor ACPClient {
         stderrTask = nil
         keepaliveTask?.cancel()
         keepaliveTask = nil
+        // A restart writes to a new channel; nothing there waits on the old one.
+        writeTail = nil
         eventContinuation?.finish()
         eventContinuation = nil
         _eventStream = nil
@@ -454,6 +463,21 @@ public actor ACPClient {
     }
 
     public func loadSession(cwd: String, sessionId: String) async throws -> String {
+        try await loadSessionWithProvenance(cwd: cwd, sessionId: sessionId).sessionId
+    }
+
+    /// ``loadSession(cwd:sessionId:)``, also returning the response's
+    /// `_meta.hermes.sessionProvenance` (`_session_response_fields`,
+    /// acp_adapter/server.py:597-602 @ v2026.9.24): `currentHermesSessionId`
+    /// is the internal row the agent was restored under. On v2026.9.24 a
+    /// fresh `hermes acp` restores under the requested id (`_restore`,
+    /// acp_adapter/session.py:444-446), so it names that same id and callers
+    /// see nothing new; they follow a differing head defensively. `nil` on
+    /// hosts without the extension (C1) and whenever Hermes could not build
+    /// it (it is best-effort).
+    public func loadSessionWithProvenance(
+        cwd: String, sessionId: String
+    ) async throws -> (sessionId: String, provenance: ACPSessionProvenance?) {
         statusMessage = "Loading session \(sessionId.prefix(12))..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
@@ -501,7 +525,7 @@ public actor ACPClient {
         #if canImport(os)
         logger.info("Loaded ACP session: \(loadedId)")
         #endif
-        return loadedId
+        return (loadedId, ACPSessionProvenance(meta: dict["_meta"]))
     }
 
     // NOTE: There is deliberately NO `session/resume` wrapper here
@@ -852,18 +876,34 @@ public actor ACPClient {
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             pendingRequests[requestId] = continuation
 
-            // Write in a detached task so the actor can process incoming
-            // response messages while we're awaiting the send. The
-            // continuation is already stored; the response arrives via
-            // the read loop.
+            // Write off the actor so it can process incoming response
+            // messages while we're awaiting the send, but in issue order
+            // (`enqueueWrite`). The continuation is already stored; the
+            // response arrives via the read loop.
+            let write = enqueueWrite(line, on: ch)
             Task.detached { [weak self] in
-                do {
-                    try await ch.send(line)
-                } catch {
+                if await write.value != nil {
                     await self?.handleWriteFailedForRequest(id: requestId)
                 }
             }
         }
+    }
+
+    /// Queue `line` behind every write issued before it and return the
+    /// write's task (its value is the send error, `nil` on success).
+    private func enqueueWrite(_ line: String, on ch: any ACPChannel) -> Task<Error?, Never> {
+        let previous = writeTail
+        let write = Task.detached { () -> Error? in
+            _ = await previous?.value
+            do {
+                try await ch.send(line)
+                return nil
+            } catch {
+                return error
+            }
+        }
+        writeTail = write
+        return write
     }
 
     /// Write a JSON-RPC notification (no `id`, no reply). Awaits the write
@@ -885,9 +925,9 @@ public actor ACPClient {
         #if canImport(os)
         logger.debug("Sending notification: \(method)")
         #endif
-        do {
-            try await ch.send(line)
-        } catch {
+        // Behind any request still being written: a `session/cancel` must
+        // not overtake the prompt it cancels.
+        if await enqueueWrite(line, on: ch).value != nil {
             let terminated = await disconnectedError()
             await handleWriteFailed()
             throw terminated
@@ -915,9 +955,7 @@ public actor ACPClient {
               let data = try? JSONSerialization.data(withJSONObject: dict),
               let line = String(data: data, encoding: .utf8)
         else { return }
-        do {
-            try await ch.send(line)
-        } catch {
+        if await enqueueWrite(line, on: ch).value != nil {
             await handleWriteFailed()
         }
     }
@@ -1330,13 +1368,16 @@ public enum ACPErrorHint {
             || haystack.localizedCaseInsensitiveContains("429") {
             return Classification(hint: "Your AI provider returned a rate-limit error. Try again in a moment.")
         }
-        // Model-availability failure. Hermes pins each session to the
-        // model that opened it, so resuming an old session whose model
-        // is no longer available (provider deprecation, OAuth swapped
-        // to a different provider, model name changed) returns a 404
-        // / model_not_found from the upstream provider — surfaced as
-        // an opaque "-32603 Internal error" in chat. v2.8 surfaces a
-        // clear "session is pinned" hint with the recovery path.
+        // Model-availability failure. Resuming an old session whose model
+        // is no longer available (provider deprecation, OAuth swapped to a
+        // different provider, model name changed) returns a 404 /
+        // model_not_found from the upstream provider — surfaced as an
+        // opaque "-32603 Internal error" in chat. The recovery is the chat
+        // header's model switch: `session/set_model` changes the live
+        // session's model (acp_adapter/server.py:1015-1051 @ v2026.9.24).
+        // The hint used to send users to `hermes sessions clone`, which is
+        // not a `sessions` verb (dispatch table at
+        // hermes_cli/sessions_cmd.py:998-1011 @ v2026.9.24).
         if haystack.localizedCaseInsensitiveContains("model_not_found")
             || haystack.localizedCaseInsensitiveContains("model not found")
             || haystack.localizedCaseInsensitiveContains("invalid_model")
@@ -1344,7 +1385,7 @@ public enum ACPErrorHint {
             || haystack.localizedCaseInsensitiveContains("unknown model")
             || (haystack.contains("404") && (haystack.localizedCaseInsensitiveContains("model")
                                               || haystack.localizedCaseInsensitiveContains("messages"))) {
-            return Classification(hint: "This session was created with a model the provider no longer offers. Hermes pins each session to its original model — start a new chat to use your current model, or run `hermes sessions clone` in Terminal to copy this conversation onto the new model.")
+            return Classification(hint: "This chat's model isn't available from the provider any more. Pick another model from the model menu in the chat header, or start a new chat.")
         }
         return nil
     }

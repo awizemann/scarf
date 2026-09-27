@@ -322,15 +322,15 @@ struct MCPOAuthAndTransportP24Tests {
     /// `env` execs the hermes script, so the quotes the shell consumed are
     /// gone from this one.
     private static func execedCmdline(_ server: String) -> String {
-        "/usr/bin/python3 /home/u/.local/bin/hermes mcp login --flow device -- \(server)"
+        "/usr/bin/python3 /home/u/.local/bin/hermes -p default mcp login --flow device -- \(server)"
     }
 
     /// …and for the `bash -lc` wrapper, which still carries the literal
     /// double quotes `SSHTransport.remotePathArg` put there
     /// (`SSHTransport.swift:303-322` — it quotes UNCONDITIONALLY).
     private static func wrapperCmdline(_ server: String) -> String {
-        "bash -lc HERMES_HOME=\"/home/u/.hermes\" \"env\" \"PYTHONUNBUFFERED=1\" "
-            + "\"/home/u/.local/bin/hermes\" \"mcp\" \"login\" \"--\" \"\(server)\""
+        "bash -lc " + HermesConfigReader.pathFallback + "; COLUMNS=400 \"env\" \"PYTHONUNBUFFERED=1\" "
+            + "\"/home/u/.local/bin/hermes\" \"-p\" \"default\" \"mcp\" \"login\" \"--\" \"\(server)\""
     }
 
     @Test(arguments: ["github", "github.com", "my server", "a|b", "x+y", "s(1)"])

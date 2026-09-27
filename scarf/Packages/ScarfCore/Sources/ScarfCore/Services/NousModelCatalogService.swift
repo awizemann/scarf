@@ -64,18 +64,51 @@ public struct NousModelCatalogService: Sendable {
     public static let cacheTTL: TimeInterval = 24 * 60 * 60   // 24h
     public static let requestTimeout: TimeInterval = 10        // seconds
 
-    /// Hard-coded fallback for offline-with-no-cache. Short on purpose
-    /// — only the canonical Hermes models (the family the user is most
-    /// likely to want) plus a reminder that fresh data is one
-    /// successful refresh away. Update when Nous releases a new
-    /// flagship; deliberately not exhaustive — the API is the source
-    /// of truth, this just keeps the picker non-empty.
+    /// Hard-coded fallback for offline-with-no-cache. Short on purpose —
+    /// the API is the source of truth, this just keeps the picker
+    /// non-empty with ids Nous actually serves.
+    ///
+    /// A subset of Hermes's own offline list, `_PROVIDER_MODELS["nous"]`
+    /// (`hermes_cli/models_catalog_static.py:164` @ v2026.9.24, built from
+    /// `OPENROUTER_MODELS` minus `_OPENROUTER_ONLY` and `:free` SKUs), in
+    /// that order, ending with `z-ai/glm-5.2` — the entry
+    /// `website/static/api/model-catalog.json` marks `"default": true`.
+    /// Until S06-F5 this held four `Hermes-3-…` ids, which Hermes itself
+    /// filters out of the Nous list (see ``agenticModels(_:)``). Update
+    /// alongside the Hermes release audit; not a checked table.
     public static let fallbackModels: [NousModel] = [
-        NousModel(id: "Hermes-3-Llama-3.1-405B"),
-        NousModel(id: "Hermes-3-Llama-3.1-70B"),
-        NousModel(id: "Hermes-3-Llama-3.1-8B"),
-        NousModel(id: "DeepHermes-3-Llama-3-8B-Preview")
+        NousModel(id: "anthropic/claude-fable-5.1"),
+        NousModel(id: "anthropic/claude-opus-5.5"),
+        NousModel(id: "anthropic/claude-sonnet-5"),
+        NousModel(id: "openai/gpt-6-astra"),
+        NousModel(id: "openai/gpt-5.5"),
+        NousModel(id: "google/gemini-3.1-pro-preview"),
+        NousModel(id: "x-ai/grok-4.7"),
+        NousModel(id: "deepseek/deepseek-v4-pro"),
+        NousModel(id: "moonshotai/kimi-k3"),
+        NousModel(id: "z-ai/glm-5.2"),
     ]
+
+    /// The models Hermes offers from a Nous `/models` response: any id
+    /// containing "hermes" (any case) is dropped — "Hermes models aren't
+    /// reliable for agentic tool-calling" (`fetch_nous_models`,
+    /// `hermes_cli/auth_nous.py:724-727` @ v2026.9.24; the same filter is
+    /// in `auth.py` back to v2026.4.30, from hermes-agent 69d3d3c15a) —
+    /// ids are trimmed, empties dropped, and duplicates collapsed keeping
+    /// the first. Applied to fresh fetches AND cached lists, so a cache
+    /// written before this filter existed doesn't bring them back.
+    public static func agenticModels(_ models: [NousModel]) -> [NousModel] {
+        var seen: Set<String> = []
+        var out: [NousModel] = []
+        for model in models {
+            let id = model.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, !id.lowercased().contains("hermes"), seen.insert(id).inserted else { continue }
+            out.append(id == model.id
+                ? model
+                : NousModel(id: id, owned_by: model.owned_by, created: model.created, description: model.description))
+        }
+        return out
+    }
 
     private static let logger = Logger(subsystem: "com.scarf", category: "NousModelCatalogService")
 
@@ -187,11 +220,106 @@ public struct NousModelCatalogService: Sendable {
 
     // MARK: - Network fetch
 
-    /// Read the bearer token from `auth.json` on the active server.
-    /// Returns nil when the user isn't signed in to Nous, in which
-    /// case `loadModels` skips the network call and falls through to
-    /// cache or fallback.
-    private func bearerToken() -> String? {
+    /// What `auth.json` says about calling Nous's `/models`.
+    public enum BearerLookup: Equatable, Sendable {
+        /// No Nous sign-in (or no token) in the record.
+        case missing
+        /// The key's recorded expiry has passed. Hermes renews it on its
+        /// next run; Scarf does not refresh it (that rotates the refresh
+        /// token under Hermes's feet).
+        case expired
+        /// Send `token` to `url`.
+        case usable(token: String, url: URL)
+    }
+
+    /// Seconds of life a key needs left to be worth sending.
+    static let expirySkew: TimeInterval = 60
+
+    /// The key and URL Hermes itself would use for `/models`, from the raw
+    /// `auth.json` bytes (T3-F3).
+    ///
+    /// - Key: `providers.nous.agent_key`, the inference key Hermes sends
+    ///   (`resolve_nous_runtime_credentials` returns it as `api_key`,
+    ///   `hermes_cli/auth_nous.py:1085-1090` @ v2026.9.24), falling back to
+    ///   `access_token`. Since v2026.5.28 the two are the same JWT
+    ///   (`_set_nous_agent_key_from_invoke_jwt`, `auth_nous.py:285-302`);
+    ///   before that `agent_key` was a separate opaque key, so reading only
+    ///   `access_token` sent the wrong credential on those hosts.
+    /// - Expiry: `agent_key_expires_at` for the agent key, `expires_at` for
+    ///   the access token, else the JWT's own `exp`. Hermes treats both as
+    ///   short-lived (about an hour) and renews them before each run
+    ///   (`ensure_usable_access_token`, `auth_nous.py:1060-1080`); Scarf
+    ///   reads a file Hermes may not have touched for a day. An expired key
+    ///   is not sent. An unknown expiry is sent as before.
+    /// - URL: `providers.nous.inference_base_url` + `/models`, as
+    ///   `fetch_nous_models` builds it (`auth_nous.py:702-712`), when it is
+    ///   an https URL; else the default inference host.
+    public static func bearerLookup(authJSON data: Data, now: Date = Date()) -> BearerLookup {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let nous = (root["providers"] as? [String: Any])?["nous"] as? [String: Any]
+        else { return .missing }
+        func text(_ key: String) -> String? {
+            guard let value = nous[key] as? String else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        let token: String
+        let recordedExpiry: String?
+        if let agentKey = text("agent_key") {
+            token = agentKey
+            recordedExpiry = text("agent_key_expires_at") ?? (agentKey == text("access_token") ? text("expires_at") : nil)
+        } else if let accessToken = text("access_token") {
+            token = accessToken
+            recordedExpiry = text("expires_at")
+        } else {
+            return .missing
+        }
+        let expiry = recordedExpiry.flatMap(parseISODate) ?? jwtExpiry(token)
+        if let expiry, expiry.timeIntervalSince(now) <= expirySkew {
+            return .expired
+        }
+        var url = baseURL
+        if let base = text("inference_base_url"),
+           let parsed = URL(string: base), parsed.scheme?.lowercased() == "https",
+           let host = parsed.host, !host.isEmpty {
+            var trimmed = base
+            while trimmed.hasSuffix("/") { trimmed.removeLast() }
+            url = URL(string: trimmed + "/models") ?? baseURL
+        }
+        return .usable(token: token, url: url)
+    }
+
+    /// An ISO-8601 timestamp as Hermes writes it (`datetime.isoformat()`,
+    /// with or without fractional seconds, `Z` or an offset, or naive UTC).
+    static func parseISODate(_ raw: String) -> Date? {
+        var text = raw
+        if text.hasSuffix("Z") { text = String(text.dropLast()) + "+00:00" }
+        let hasZone = text.range(of: #"[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil
+        if !hasZone { text += "+00:00" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+
+    /// The `exp` claim of a JWT, or nil when `token` is not one.
+    static func jwtExpiry(_ token: String) -> Date? {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload += "=" }
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = claims["exp"] as? NSNumber else { return nil }
+        return Date(timeIntervalSince1970: exp.doubleValue)
+    }
+
+    /// Read the bearer key from `auth.json` on the active server (see
+    /// ``bearerLookup(authJSON:now:)``). `.missing` when the user isn't
+    /// signed in to Nous, in which case `loadModels` skips the network
+    /// call and falls through to cache or fallback.
+    private func bearer() -> BearerLookup {
         // The subscription service already checks for `present`; we
         // re-read the raw token here because we need the actual string,
         // not just a Bool. Mirrors the SubscriptionService parse path.
@@ -202,14 +330,16 @@ public struct NousModelCatalogService: Sendable {
         // round-trips of the same file — candidate for caching.
         ScarfMon.measure(.diskIO, "nous.bearerToken") {
             let transport = context.makeTransport()
-            guard transport.fileExists(context.paths.authJSON) else { return nil }
-            guard let data = try? transport.readFile(context.paths.authJSON) else { return nil }
-            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-            let providers = root["providers"] as? [String: Any] ?? [:]
-            let nous = providers["nous"] as? [String: Any]
-            let token = nous?["access_token"] as? String
-            guard let token, !token.isEmpty else { return nil }
-            return token
+            // Named profile: Hermes falls back to the ROOT auth.json's
+            // `providers.nous` when the profile has none (S06-F3).
+            let merged = HermesAuthFallback.load(
+                authJSONPath: context.paths.authJSON,
+                home: context.paths.home,
+                capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+                transport: transport
+            )
+            guard let data = merged.data else { return .missing }
+            return Self.bearerLookup(authJSON: data)
         }
     }
 
@@ -219,10 +349,19 @@ public struct NousModelCatalogService: Sendable {
     /// the caller can log + fall back.
     public func fetchModels() async throws -> [NousModel] {
         try await ScarfMon.measureAsync(.transport, "nous.fetchModels") {
-            guard let token = bearerToken() else {
-                throw NousModelCatalogError.notAuthenticated
+            // `bearer()` reads auth.json over the transport and may
+            // probe the host version — a thread of its own, not the pool.
+            let service = self
+            let token: String
+            let url: URL
+            switch await OffPool.run({ service.bearer() }) {
+            case .missing: throw NousModelCatalogError.notAuthenticated
+            case .expired: throw NousModelCatalogError.tokenExpired
+            case .usable(let key, let endpoint):
+                token = key
+                url = endpoint
             }
-            var request = URLRequest(url: Self.baseURL)
+            var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = Self.requestTimeout
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -238,7 +377,7 @@ public struct NousModelCatalogService: Sendable {
             struct Envelope: Decodable { let data: [NousModel] }
             let envelope = try JSONDecoder().decode(Envelope.self, from: data)
             ScarfMon.event(.transport, "nous.fetchModels.bytes", count: envelope.data.count, bytes: data.count)
-            return envelope.data
+            return Self.agenticModels(envelope.data)
         }
     }
 
@@ -260,7 +399,13 @@ public struct NousModelCatalogService: Sendable {
         // and let writeCache rebuild it. The runaway `cat` keeps
         // running on its own 60 s transport timeout but no longer
         // blocks the picker.
-        let cached = await readCacheWithTimeout(seconds: 5)
+        let rawCached = await readCacheWithTimeout(seconds: 5)
+
+        // Same filter as a fresh fetch — a cache written by an older Scarf
+        // may still carry the Hermes-* ids Hermes drops (S06-F5).
+        let cached = rawCached.map {
+            NousModelsCache(version: $0.version, fetchedAt: $0.fetchedAt, models: Self.agenticModels($0.models))
+        }
 
         if let cached, !forceRefresh, !isCacheStale(cached) {
             return .cache(models: cached.models, fetchedAt: cached.fetchedAt, refreshError: nil)
@@ -296,6 +441,8 @@ public struct NousModelCatalogService: Sendable {
 
 public enum NousModelCatalogError: Error, Sendable {
     case notAuthenticated
+    /// The saved key has expired; Hermes renews it on its next run.
+    case tokenExpired
     case http(status: Int)
     case transport(String)
 
@@ -303,8 +450,12 @@ public enum NousModelCatalogError: Error, Sendable {
         switch self {
         case .notAuthenticated:
             return "Sign in to Nous Portal to fetch the latest model list."
+        case .tokenExpired:
+            return "The saved Nous token has expired. Hermes renews it the next time it runs, and the list refreshes after that."
         case .http(let status) where status == 401:
-            return "Nous rejected the saved token (401). Sign in again."
+            // Usually a token that expired after Hermes last wrote its
+            // expiry; Hermes renews it on its own (T3-F3).
+            return "Nous didn't accept the saved token (401). Hermes renews it the next time it runs; if this keeps happening, sign in to Nous Portal again."
         case .http(let status):
             return "Nous returned HTTP \(status)."
         case .transport(let detail):

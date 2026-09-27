@@ -177,7 +177,12 @@ struct ProjectTemplateExporter: Sendable {
                     throw ProjectTemplateError.conflictingFile(targetDir)
                 }
                 try FileManager.default.createDirectory(atPath: targetDir, withIntermediateDirectories: true)
-                for file in skill.files {
+                // The whole skill tree, not just its top level: hub and
+                // authored skills ship `references/`, `scripts/`,
+                // `templates/` and `assets/` folders beside SKILL.md, and
+                // `skill.files` lists those folders by name only — reading
+                // one as a file failed the export outright.
+                for file in try Self.skillFileTree(at: skill.path, transport: transport) {
                     try copyFromHermes(skill.path + "/" + file, to: targetDir + "/" + file, transport: transport)
                 }
             }
@@ -185,7 +190,7 @@ struct ProjectTemplateExporter: Sendable {
 
         // Cron jobs (stripped to the create-CLI-shaped spec)
         if !plan.cronJobs.isEmpty {
-            let specs = plan.cronJobs.map { Self.strip($0) }
+            let specs = plan.cronJobs.map { Self.strip($0, bundledSkillIds: plan.skillIds) }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(specs)
@@ -230,7 +235,7 @@ struct ProjectTemplateExporter: Sendable {
         // metadata; the values in `config.json` are the current user's
         // secrets or personal settings.
         let forwardedSchema: TemplateConfigSchema? = try Self.readCachedSchema(
-            from: plan.projectDir
+            from: plan.projectDir, transport: transport
         )
 
         // Bump schemaVersion based on the most-recent feature carried
@@ -309,10 +314,31 @@ struct ProjectTemplateExporter: Sendable {
     /// `.scarf/config.json` are intentionally ignored — an exported
     /// bundle carries the schema's shape, never the current user's
     /// configured values.
-    nonisolated private static func readCachedSchema(from projectDir: String) throws -> TemplateConfigSchema? {
+    ///
+    /// Through the transport like every other read here: the project can
+    /// live on an SSH host, where a `FileManager` check of the same path
+    /// looks at the Mac's disk, finds nothing, and quietly exports the
+    /// bundle without its configuration form. An absent manifest is `nil`
+    /// (a project that never had a schema); one that exists but can't be
+    /// read or decoded fails the export instead of dropping the schema.
+    nonisolated static func readCachedSchema(
+        from projectDir: String,
+        transport: any ServerTransport
+    ) throws -> TemplateConfigSchema? {
         let manifestPath = projectDir + "/.scarf/manifest.json"
-        guard FileManager.default.fileExists(atPath: manifestPath) else { return nil }
-        let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
+        let data: Data
+        do {
+            data = try transport.readFile(manifestPath)
+        } catch let error as TransportError where error.isNoSuchFile {
+            // The far end's own "no such file" — not a `fileExists` probe,
+            // which a dropped SSH connection also answers with false.
+            return nil
+        }
+        guard data.count <= ProjectStore.maxJSONBytes else {
+            throw ProjectTemplateError.manifestParseFailed(
+                ".scarf/manifest.json is \(data.count) bytes, over the \(ProjectStore.maxJSONBytes)-byte cap"
+            )
+        }
         // Use a bespoke decode rather than ProjectTemplateManifest so
         // this helper stays resilient if the manifest shape evolves
         // incompatibly in a future release.
@@ -321,21 +347,167 @@ struct ProjectTemplateExporter: Sendable {
         return onlyConfig.config
     }
 
+    /// Deepest folder level a skill export descends to. Hermes follows
+    /// symlinks inside skills, so a link loop would otherwise recurse
+    /// forever (over SSH, one round trip per level).
+    nonisolated static let maxSkillTreeDepth = 12
+
+    /// Every regular file under a skill directory, as paths relative to it,
+    /// sorted. Dotfiles and the guarded writers' `.bak` / `.corrupt-`
+    /// artifacts are skipped at every level, the same filter
+    /// `SkillsScanner` applies to the top level. One `statAll` per folder
+    /// (one SSH round trip). A symlink is followed: one that reads as a file
+    /// is a file, one that lists is a folder (reading first, because `ls`
+    /// over SSH "lists" a plain file), and a dangling one is skipped with a
+    /// warning rather than failing the export.
+    ///
+    /// A symlink is followed only while it stays inside the skill folder
+    /// (after resolving the folder itself, which may be a link). A link that
+    /// leads anywhere else refuses the export: the bundle is made to be
+    /// shared, and a link named `config` that points at `~/.hermes/.env`
+    /// would otherwise copy that file into it. A link whose target reads but
+    /// can't be resolved on the host refuses the export too; a dangling one
+    /// is still skipped, since nothing would be copied from it.
+    nonisolated static func skillFileTree(
+        at root: String,
+        transport: any ServerTransport
+    ) throws -> [String] {
+        var out: [String] = []
+        var resolvedRoot: String?
+        func requireInside(_ link: String, _ rel: String) throws {
+            if resolvedRoot == nil {
+                guard let r = try resolvedPaths([root], transport: transport).first ?? nil else {
+                    throw ProjectTemplateError.unsafeSkillLink(
+                        rel, "Scarf couldn't resolve the skill folder \(root) on the server to check whether it links outside the skill")
+                }
+                resolvedRoot = r
+            }
+            let base = resolvedRoot ?? root
+            guard let target = try resolvedPaths([link], transport: transport).first ?? nil else {
+                throw ProjectTemplateError.unsafeSkillLink(rel, "Scarf couldn't check whether it links outside the skill folder")
+            }
+            guard target == base || target.hasPrefix(base.hasSuffix("/") ? base : base + "/") else {
+                throw ProjectTemplateError.unsafeSkillLink(rel, "it's a link that points outside the skill folder, to \(target)")
+            }
+        }
+        func walk(_ relative: String, depth: Int) throws {
+            let dir = relative.isEmpty ? root : root + "/" + relative
+            let entries = try transport.listDirectory(dir)
+                .filter { !$0.hasPrefix(".") && !SkillsScanner.isGuardArtifact($0) }
+                .sorted()
+            let paths = entries.map { dir + "/" + $0 }
+            let stats = transport.statAll(paths) ?? Dictionary(
+                uniqueKeysWithValues: paths.compactMap { p in transport.stat(p).map { (p, $0) } }
+            )
+            for entry in entries {
+                let rel = relative.isEmpty ? entry : relative + "/" + entry
+                let full = root + "/" + rel
+                let info = stats[full]
+                var isDirectory = info?.isDirectory == true
+                // No stat answer: it might be a link, and `readFile` would
+                // follow it. Check where it leads before anything is read.
+                if info == nil {
+                    try requireInside(full, rel)
+                }
+                if info?.isSymbolicLink == true {
+                    if (try? transport.readFile(full)) != nil {
+                        isDirectory = false
+                    } else if (try? transport.listDirectory(full)) != nil {
+                        isDirectory = true
+                    } else {
+                        logger.warning("skill export skipped \(full, privacy: .public): a symlink to nothing readable")
+                        continue
+                    }
+                    // Readable, so it would be copied: only from inside the skill.
+                    try requireInside(full, rel)
+                }
+                if isDirectory {
+                    // Hermes follows links inside skills, so a link loop is
+                    // possible; the depth cap is what ends it.
+                    guard depth < maxSkillTreeDepth else {
+                        logger.warning("skill export stopped descending at \(full, privacy: .public): deeper than \(maxSkillTreeDepth) levels")
+                        continue
+                    }
+                    try walk(rel, depth: depth + 1)
+                } else {
+                    out.append(rel)
+                }
+            }
+        }
+        try walk("", depth: 0)
+        return out
+    }
+
+    /// The canonical path of each of `paths` on the host (every symlink
+    /// resolved), `nil` for one that can't be resolved. `realpath`, else
+    /// `readlink -f` (GNU, BusyBox and macOS 12.3+ all have one). Each
+    /// answer is on its own marker line because a login shell can print
+    /// noise of its own.
+    nonisolated static func resolvedPaths(
+        _ paths: [String], transport: any ServerTransport
+    ) throws -> [String?] {
+        let script = paths.map { path in
+            let q = HermesProfileScope.shellQuotePath(path)
+            return "r=$(realpath \(q) 2>/dev/null || readlink -f \(q) 2>/dev/null); printf 'SCARF_RP:%s\\n' \"$r\""
+        }.joined(separator: "; ")
+        let result = try transport.runProcess(
+            executable: "/bin/sh", args: ["-c", script], stdin: nil, timeout: 30
+        )
+        let answers = result.stdoutString.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.hasPrefix("SCARF_RP:") }
+            .map { line -> String? in
+                let value = String(line.dropFirst("SCARF_RP:".count))
+                return value.hasPrefix("/") ? value : nil
+            }
+        // A name with a line break in it splits its answer; don't guess.
+        guard answers.count == paths.count else { return paths.map { _ in nil } }
+        return answers
+    }
+
+    /// A live job name without Scarf's leading attribution tags
+    /// (`[tmpl:<id>]`, `[proj:<uuid>]`): those name THIS host's install,
+    /// the installer adds fresh ones, and exporting them would ship this
+    /// project's id in the bundle and stack tags on every re-export.
+    nonisolated static func strippingAttributionTags(_ name: String) -> String {
+        var rest = Substring(name)
+        while rest.hasPrefix("[tmpl:") || rest.hasPrefix("[proj:"),
+              let close = rest.firstIndex(of: "]") {
+            rest = rest[rest.index(after: close)...].drop(while: { $0 == " " })
+        }
+        return rest.isEmpty ? name : String(rest)
+    }
+
     /// Convert a live cron job (with runtime state) into the spec the
     /// installer will feed back to `hermes cron create`. Only preserves
     /// fields the CLI accepts.
-    nonisolated private static func strip(_ job: HermesCronJob) -> TemplateCronJobSpec {
+    ///
+    /// A job's skill reference that names a skill this bundle ships
+    /// (`bundledSkillIds` are skill ids — their path under `skills/`, such
+    /// as `creative/pixel-art`) is written as the bare bundle name
+    /// (`pixel-art`): the bundle flattens skills to `skills/<name>/`, so the
+    /// category path means nothing on the install host. The installer turns
+    /// it into the path it installs the skill at (see
+    /// ``ProjectTemplateInstaller/installedSkillRefs(_:bundled:slug:)``).
+    /// Any other reference — a Hermes-bundled or hub skill, the same on
+    /// every host — is kept as it is.
+    nonisolated static func strip(_ job: HermesCronJob, bundledSkillIds: [String] = []) -> TemplateCronJobSpec {
         let schedule: String = {
             if let expr = job.schedule.expression, !expr.isEmpty { return expr }
             if let runAt = job.schedule.runAt, !runAt.isEmpty { return runAt }
             return job.schedule.display ?? ""
         }()
         return TemplateCronJobSpec(
-            name: job.name,
+            name: strippingAttributionTags(job.name),
             schedule: schedule,
             prompt: job.prompt.isEmpty ? nil : job.prompt,
             deliver: job.deliver?.isEmpty == false ? job.deliver : nil,
-            skills: (job.skills?.isEmpty == false) ? job.skills : nil,
+            skills: (job.skills?.isEmpty == false)
+                ? job.skills?.map { ref in
+                    bundledSkillIds.contains(ref)
+                        ? (ref.split(separator: "/").last.map(String.init) ?? ref)
+                        : ref
+                }
+                : nil,
             repeatCount: nil
         )
     }

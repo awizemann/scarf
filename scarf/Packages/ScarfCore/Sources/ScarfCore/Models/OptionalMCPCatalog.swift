@@ -4,12 +4,15 @@ import Foundation
 /// (`optional-mcps/<name>/manifest.yaml` in hermes-agent). Hermes's own
 /// catalog grew from 6 to 20 entries in v0.20.4 (blender was removed), and
 /// to 65 entries in v0.21.0.
-/// Scarf has no `hermes mcp install` equivalent — this roster feeds a
-/// minimal picker in the add-server flow that prefills
-/// `MCPServerAddCustomView`'s fields; installing local (stdio git-clone)
-/// entries like `n8n` still requires the user to fill in the command
-/// themselves after prefill, since Scarf doesn't run the catalog's
-/// `install:` bootstrap steps.
+/// This roster feeds a minimal picker in the add-server flow that prefills
+/// `MCPServerAddCustomView`'s fields. An OAuth entry left unedited is
+/// installed with `hermes mcp install <name>` on Hermes v0.17+ (S09-F2,
+/// `HermesCapabilities.hasMCPOAuthAddNeedsDirectWrite`); every other entry
+/// is added through `hermes mcp add` from the prefilled form. An OAuth
+/// entry with ``installPrompts`` gets those values from the form, fed to
+/// `mcp install` on stdin. Local (stdio git-clone) entries like the v0.21.0
+/// `n8n` bridge still need the command filled in by hand, since Scarf
+/// doesn't run the catalog's `install:` bootstrap steps.
 public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     /// How the catalog entry authenticates. Mirrors the manifest's `auth.type`.
     public enum AuthKind: String, Sendable, Equatable {
@@ -44,8 +47,86 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     /// install time (everything else stays enabled, including tools the
     /// server adds later). Mutually exclusive with `defaultEnabledTools`.
     public let defaultExcludedTools: [String]
+    /// The manifest's `auth.env` block for an entry `hermes mcp install`
+    /// prompts for at install time (asana's client id and secret,
+    /// n8n-official's server URL). Empty for every other entry. See
+    /// ``InstallPrompt``.
+    public let installPrompts: [InstallPrompt]
+
+    /// One `auth.env` value `hermes mcp install` asks for, in manifest order.
+    ///
+    /// Hermes reads each answer from stdin (`_prompt_env_vars`,
+    /// `hermes_cli/mcp_catalog.py:467-493` @ v2026.9.24), and an empty answer
+    /// to a required one fails the install with `✗ install failed: <NAME> is
+    /// required but no value was provided` — which is every run Scarf made
+    /// without stdin (T4-F1). So Scarf asks for the values in the add form
+    /// and feeds them in, one line each (``installStdin(values:)``).
+    public struct InstallPrompt: Sendable, Equatable, Identifiable {
+        /// `auth.env[].name`.
+        public let name: String
+        /// `auth.env[].prompt`, shown as the field's label.
+        public let prompt: String
+        /// `auth.env[].secret` (Hermes's default is true). A secret goes to
+        /// the profile's `.env`; anything else is written into config.yaml.
+        public let isSecret: Bool
+        /// `auth.env[].required` (Hermes's default is true).
+        public let isRequired: Bool
+
+        public var id: String { name }
+
+        public init(name: String, prompt: String, isSecret: Bool = true, isRequired: Bool = true) {
+            self.name = name
+            self.prompt = prompt
+            self.isSecret = isSecret
+            self.isRequired = isRequired
+        }
+    }
 
     public var id: String { name }
+
+    /// Whether `values` (keyed by env-var name) answer every required
+    /// plain prompt with something other than whitespace.
+    ///
+    /// A secret may stay empty: Hermes does not ask for one the profile's
+    /// `.env` already holds (`mcp_catalog.py:484-487`), so a reinstall
+    /// needs none, and a first install without one fails in Hermes with
+    /// its own "is required" message, which Scarf shows.
+    public func installValuesComplete(_ values: [String: String]) -> Bool {
+        installPrompts.allSatisfy { prompt in
+            !prompt.isRequired || prompt.isSecret
+                || !(values[prompt.name] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    /// The stdin for `hermes mcp install -- <name>`: one line per prompt in
+    /// manifest order, or `nil` for an entry with no prompts (the run keeps
+    /// the empty stdin it always had).
+    ///
+    /// A value is trimmed and cut at its first line break, so a pasted
+    /// newline cannot shift a later answer into the wrong prompt. Hermes
+    /// skips the prompt for a SECRET that is already in the profile's
+    /// `.env` (`mcp_catalog.py:484-487`); every manifest that prompts puts
+    /// its secret last, so a skipped prompt only leaves a spare line at the
+    /// end, which nothing reads.
+    public func installStdin(values: [String: String]) -> String? {
+        installRequest(values: values)?.stdin
+    }
+
+    /// ``installStdin(values:)`` plus the secrets the user typed a value
+    /// for, so the caller can say when Hermes kept an older one
+    /// (``CatalogInstallRequest/reusedSecretNote(in:)``).
+    public func installRequest(values: [String: String]) -> CatalogInstallRequest? {
+        guard !installPrompts.isEmpty else { return nil }
+        var supplied: [String] = []
+        let lines = installPrompts.map { prompt -> String in
+            let raw = values[prompt.name] ?? ""
+            let firstLine = raw.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            let answer = firstLine.trimmingCharacters(in: .whitespaces)
+            if prompt.isSecret, !answer.isEmpty { supplied.append(prompt.name) }
+            return answer
+        }
+        return CatalogInstallRequest(stdin: lines.joined(separator: "\n") + "\n", suppliedSecrets: supplied)
+    }
 
     public init(
         name: String,
@@ -55,7 +136,8 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
         requiredEnvVars: [String] = [],
         url: String? = nil,
         defaultEnabledTools: [String] = [],
-        defaultExcludedTools: [String] = []
+        defaultExcludedTools: [String] = [],
+        installPrompts: [InstallPrompt] = []
     ) {
         self.name = name
         self.description = description
@@ -65,16 +147,27 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
         self.url = url
         self.defaultEnabledTools = defaultEnabledTools
         self.defaultExcludedTools = defaultExcludedTools
+        self.installPrompts = installPrompts
     }
 }
 
-/// Static, verbatim-captured roster of Hermes v0.21.0's (tag `v2026.8.31`)
-/// 65 `optional-mcps/*/manifest.yaml` entries. Name/description/transport/
-/// auth/tools were read directly from each manifest — see
-/// `documents/hermes-v0.21.0-audit-report.md` for the capture session.
-/// Hermes's own catalog can add/remove entries between releases; this list
-/// is a point-in-time snapshot, not a live fetch. Blender was removed from
-/// the upstream catalog before v0.20.4 and stays absent here.
+/// Static, verbatim-captured roster of Hermes's 65
+/// `optional-mcps/*/manifest.yaml` entries at v0.21.5 (tag `v2026.9.24`).
+/// Name/description/transport/auth/tools were read directly from each
+/// manifest; `scripts/check-hermes-tables.py` lane 7 diffs this list
+/// against the tag. Hermes's own catalog can add/remove entries between
+/// releases; this list is a point-in-time snapshot, not a live fetch.
+/// Blender was removed from the upstream catalog before v0.20.4 and stays
+/// absent here.
+///
+/// Two entries changed at v0.21.4 (tag `v2026.9.21`), and a host below
+/// that gets the v0.21.0 roster instead (``entries(for:)``), since its
+/// `hermes mcp install` still carries the old manifests:
+/// - `asana` moved to `https://mcp.asana.com/v2/mcp` and now needs a
+///   pre-registered Asana app (client id + secret prompted at install).
+///   The old `/sse` endpoint is retired.
+/// - the `n8n` stdio bridge was replaced by `n8n-official`, an OAuth
+///   connection whose URL is prompted at install.
 ///
 /// `transport` mirrors the manifest's `transport.type`, NOT the endpoint
 /// path. Three entries (asana / paypal / square) declare `type: http`
@@ -133,7 +226,13 @@ public enum OptionalMCPCatalog {
             description: "Tasks, projects, and goals from your Asana workspace.",
             transport: .http,
             authKind: .oauth,
-            url: "https://mcp.asana.com/sse"
+            url: "https://mcp.asana.com/v2/mcp",
+            installPrompts: [
+                .init(name: "ASANA_CLIENT_ID",
+                      prompt: "Asana MCP app Client ID (developer console → your MCP app → OAuth)",
+                      isSecret: false),
+                .init(name: "ASANA_CLIENT_SECRET", prompt: "Asana MCP app Client secret"),
+            ]
         ),
         OptionalMCPCatalogEntry(
             name: "atlassian",
@@ -401,12 +500,18 @@ public enum OptionalMCPCatalog {
             defaultEnabledTools: ["list_columns", "list_databases", "list_macros", "list_shares", "list_tables", "list_views", "query", "query_rw", "search_catalog"]
         ),
         OptionalMCPCatalogEntry(
-            name: "n8n",
-            description: "Manage and inspect n8n workflows from Hermes (stdio bridge, no public port).",
-            transport: .stdio,
-            authKind: .apiKey,
-            requiredEnvVars: ["N8N_BASE_URL", "N8N_API_KEY"],
-            defaultEnabledTools: ["health", "list_workflows", "get_workflow", "find_workflows", "list_executions", "get_execution", "recent_failures", "export_workflow"]
+            name: "n8n-official",
+            description: "Connect to your n8n instance's official MCP server with browser OAuth.",
+            transport: .http,
+            authKind: .oauth,
+            // The manifest's url is `${N8N_MCP_SERVER_URL}`, filled from
+            // the install prompt below; there is no fixed endpoint.
+            url: nil,
+            installPrompts: [
+                .init(name: "N8N_MCP_SERVER_URL",
+                      prompt: "MCP Server URL (n8n Settings > Instance-level MCP > Connect; ends in /mcp-server/http)",
+                      isSecret: false),
+            ]
         ),
         OptionalMCPCatalogEntry(
             name: "neon",
@@ -585,4 +690,63 @@ public enum OptionalMCPCatalog {
             url: "https://public-api.wordpress.com/wpcom/v2/mcp/v1"
         ),
     ]
+
+    /// The v0.21.0 (tag `v2026.8.31`) forms of the two entries that
+    /// changed at v0.21.4, for hosts below it.
+    static let legacyAsana = OptionalMCPCatalogEntry(
+        name: "asana",
+        description: "Tasks, projects, and goals from your Asana workspace.",
+        transport: .http,
+        authKind: .oauth,
+        url: "https://mcp.asana.com/sse"
+    )
+    static let legacyN8N = OptionalMCPCatalogEntry(
+        name: "n8n",
+        description: "Manage and inspect n8n workflows from Hermes (stdio bridge, no public port).",
+        transport: .stdio,
+        authKind: .apiKey,
+        requiredEnvVars: ["N8N_BASE_URL", "N8N_API_KEY"],
+        defaultEnabledTools: ["health", "list_workflows", "get_workflow", "find_workflows", "list_executions", "get_execution", "recent_failures", "export_workflow"]
+    )
+
+    /// The v0.21.0 roster, exactly as Scarf offered it before v0.21.4's
+    /// changes: `entries` with asana and n8n-official swapped back.
+    public static let preV0214Entries: [OptionalMCPCatalogEntry] = entries.map { entry in
+        switch entry.name {
+        case "asana": return legacyAsana
+        case "n8n-official": return legacyN8N
+        default: return entry
+        }
+    }
+
+    /// The roster a host's `hermes mcp install` knows (C1): the current
+    /// snapshot on v0.21.4+, the v0.21.0 one below it.
+    public static func entries(for capabilities: HermesCapabilities) -> [OptionalMCPCatalogEntry] {
+        capabilities.isV0214OrLater ? entries : preV0214Entries
+    }
+}
+
+/// What Scarf hands `hermes mcp install` for an entry with install prompts.
+public struct CatalogInstallRequest: Sendable, Equatable {
+    /// One answer per prompt, in manifest order.
+    public let stdin: String
+    /// Secret prompts the user typed a value for.
+    public let suppliedSecrets: [String]
+
+    /// A `Note: …` line when Hermes kept a secret that was already in the
+    /// profile's `.env` instead of the value the user typed, or `nil`.
+    ///
+    /// Hermes does not ask for a secret it already has; it prints
+    /// `✓ <NAME> already set in .env` and moves on
+    /// (`hermes_cli/mcp_catalog.py:484-487` @ v2026.9.24), so a new secret
+    /// typed for a reinstall is dropped while the install still succeeds.
+    /// Same shape as the `mcp add` token note in `HermesFileService`.
+    public func reusedSecretNote(in output: String) -> String? {
+        let reused = suppliedSecrets.filter { output.contains("\($0) already set in .env") }
+        guard !reused.isEmpty else { return nil }
+        let names = reused.joined(separator: ", ")
+        return String(
+            localized: "Note: \(names) was already set in this profile's .env, so Hermes kept that value and ignored the one you entered. To replace it, edit that line in .env (or remove it and add the server again)."
+        )
+    }
 }

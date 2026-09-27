@@ -68,6 +68,7 @@ struct PersonalitiesView: View {
                 PickerRow(label: "Active", selection: viewModel.activeName, options: viewModel.activeOptions) { viewModel.setActive($0) }
                     .disabled(viewModel.isSaving)
             }
+            PersonalityScopeNote(mentionsSoul: true)
         }
     }
 

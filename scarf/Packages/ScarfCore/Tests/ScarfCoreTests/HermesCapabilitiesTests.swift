@@ -578,6 +578,15 @@ import Foundation
         #expect(caps.isV018OrLater)
     }
 
+    /// S08-F1: `cron run` runs the job itself from v0.18.0 (`_execute_job_now`,
+    /// first tag v2026.7.1); v0.17 (v2026.6.19) only marks it due. Gates
+    /// Run Now's follow-up `cron tick`.
+    @Test func cronRunSynchronousFloorIsV018() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)").hasCronRunSynchronous)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasCronRunSynchronous)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)").hasCronRunSynchronous)
+    }
+
     @Test func v018FlagsIncludeTitleGenerationLanguage() {
         // `auxiliary.title_generation.language` landed at the same v0.18
         // boundary as `hasCronAttachToSession`/`hasMCPReauth`.
@@ -1688,6 +1697,7 @@ import Foundation
         #expect(caps.hasOpenAINativeWebSearchBackend)
         #expect(caps.hasCompressionThresholdTokensDefault256K)
         #expect(caps.hasWhatsAppUnauthorizedDMDecline)
+        #expect(caps.hasSupervisedGatewayRestart)
         // v0.21.5 is a later group, not yet reached at the v0.21.4 floor.
         #expect(!caps.hasMCPBoolishNumericTruthiness)
     }
@@ -1706,6 +1716,8 @@ import Foundation
         #expect(!caps.hasOpenAINativeWebSearchBackend)
         #expect(!caps.hasCompressionThresholdTokensDefault256K)
         #expect(!caps.hasWhatsAppUnauthorizedDMDecline)
+        // `gateway_supervised_restart.py` is absent at v2026.9.14.
+        #expect(!caps.hasSupervisedGatewayRestart)
     }
 
     // MARK: - v0.21.5 capability flags
@@ -1717,6 +1729,7 @@ import Foundation
         // Every v0.21.4 flag stays on for a patch bump.
         #expect(!caps.hasOpenCodeFreeProvider)
         #expect(caps.hasChatGPTCodexAliases)
+        #expect(caps.hasSupervisedGatewayRestart)
     }
 
     @Test func v0214HostHidesTheV0215Flag() {

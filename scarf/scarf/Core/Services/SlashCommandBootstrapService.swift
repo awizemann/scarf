@@ -47,8 +47,14 @@ struct SlashCommandBootstrapService: Sendable {
     /// bundled version. Throws on transport failures (e.g. a missing
     /// `~/.hermes` for a remote without one set up); callers should log
     /// and continue — a failed bootstrap shouldn't block app launch.
-    nonisolated func ensureBundledCommandsInstalled() throws {
-        guard let bundleCommandsDir = Self.bundleCommandsDir() else {
+    ///
+    /// `bundleCommandsDir` and `transport` default to the app bundle's
+    /// commands and the context's own transport; tests pass their own.
+    nonisolated func ensureBundledCommandsInstalled(
+        bundleCommandsDir: URL? = nil,
+        transport injectedTransport: (any ServerTransport)? = nil
+    ) throws {
+        guard let bundleCommandsDir = bundleCommandsDir ?? Self.bundleCommandsDir() else {
             Self.logger.info("no bundled SlashCommands/ directory; skipping bootstrap")
             return
         }
@@ -67,7 +73,7 @@ struct SlashCommandBootstrapService: Sendable {
             return
         }
 
-        let transport = context.makeTransport()
+        let transport = injectedTransport ?? context.makeTransport()
         let destRoot = context.paths.globalSlashCommandsDir
         try transport.createDirectory(destRoot)
 
@@ -85,6 +91,67 @@ struct SlashCommandBootstrapService: Sendable {
                 )
             }
         }
+    }
+
+    // MARK: - Remote hosts
+
+    /// Homes already bootstrapped (or being bootstrapped) this app session,
+    /// keyed by server id + Hermes home, so each remote host is visited once
+    /// however many windows open on it.
+    private nonisolated static let remoteHomesDone = OSAllocatedUnfairLock(initialState: Set<String>())
+
+    /// Install the bundled commands on a REMOTE host's Hermes home, once per
+    /// app session. The launch-time bootstrap only ever wrote the local
+    /// home, so a remote window's `/scarf-*` menu read an empty directory
+    /// (S03-F5). Called when a remote window connects; runs off the main
+    /// actor (it is several SSH round-trips, each with the transport's own
+    /// timeout) and is safe to repeat — the per-file version gate above
+    /// leaves current and user-edited copies alone. A failed run is
+    /// forgotten so the next window on that host tries again.
+    ///
+    /// ScarfGo reads the same remote directory, so an iPhone connected to a
+    /// host that a Mac window has opened sees the commands too.
+    ///
+    /// `makeTransport` and `bundleCommandsDir` are test seams: the tests run
+    /// this against a remote-shaped context whose home is a local temp dir.
+    /// Returns whether this call ran the install and it succeeded (`false`
+    /// for a local context, a host already done this session, a missing
+    /// Hermes home, or a failed install).
+    @discardableResult
+    nonisolated static func bootstrapRemoteIfNeeded(
+        context: ServerContext,
+        makeTransport: @escaping @Sendable (ServerContext) -> any ServerTransport = { $0.makeTransport() },
+        bundleCommandsDir: URL? = nil
+    ) async -> Bool {
+        guard context.isRemote else { return false }
+        let key = "\(context.id)|\(context.paths.home)"
+        let isNew = remoteHomesDone.withLock { $0.insert(key).inserted }
+        guard isNew else { return false }
+        let succeeded = await Task.detached(priority: .utility) { () -> Bool in
+            // Only into a Hermes home that exists: `mkdir -p` under a wrong
+            // `remoteHome` or a deleted profile would create a stray
+            // `profiles/<name>/` that older Hermes lists as a profile.
+            let transport = makeTransport(context)
+            guard transport.fileExists(context.paths.configYAML)
+                    || transport.fileExists(context.paths.stateDB) else {
+                logger.info("remote Hermes home not found; skipping the slash command bootstrap")
+                return false
+            }
+            do {
+                try SlashCommandBootstrapService(context: context).ensureBundledCommandsInstalled(
+                    bundleCommandsDir: bundleCommandsDir, transport: transport)
+                return true
+            } catch {
+                logger.warning(
+                    "remote slash command bootstrap failed: \(error.localizedDescription, privacy: .public)"
+                )
+                return false
+            }
+        }.value
+        if !succeeded {
+            _ = remoteHomesDone.withLock { $0.remove(key) }
+        }
+        return succeeded
     }
 
     // MARK: - Per-command install

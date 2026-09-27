@@ -552,6 +552,11 @@ struct SectionCard: View {
     private var accentColor: Color {
         if errorCount > 0 { return ScarfColor.danger }
         if warnCount > 0 { return ScarfColor.warning }
+        // Nothing passing and only rows that are off (a `hermes status`
+        // inventory with nothing set up) is not a success.
+        if okCount == 0, section.checks.contains(where: { $0.status == .off }) {
+            return ScarfColor.foregroundMuted
+        }
         return ScarfColor.success
     }
 
@@ -663,6 +668,7 @@ struct CheckRow: View {
         case .ok: return "OK"
         case .warning: return "Warning"
         case .error: return "Failing"
+        case .off: return "Off"
         }
     }
 
@@ -671,6 +677,7 @@ struct CheckRow: View {
         case .ok: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .error: return "xmark.circle.fill"
+        case .off: return "xmark.circle"
         }
     }
 
@@ -679,6 +686,7 @@ struct CheckRow: View {
         case .ok: return ScarfColor.success
         case .warning: return ScarfColor.warning
         case .error: return ScarfColor.danger
+        case .off: return ScarfColor.foregroundMuted
         }
     }
 }

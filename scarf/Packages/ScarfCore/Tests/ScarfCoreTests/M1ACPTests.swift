@@ -488,6 +488,52 @@ import Foundation
         await client.stop()
     }
 
+    /// R17: the load response's `_meta.hermes.sessionProvenance` is read.
+    /// The `_meta` below is what `session_provenance_meta` built for a
+    /// chain rotated once (root → tip), run from the v2026.9.24 tree's
+    /// `acp_adapter/provenance.py` against a two-row fake db. NOTE: a real
+    /// v2026.9.24 `session/load` of "root" reports current == "root" (the
+    /// agent is restored under the requested id, session.py:444-446); this
+    /// pins the parse and the defensive follow, not a shape that host sends.
+    @Test @MainActor func loadSessionReturnsTheLoadedHeadFromProvenance() async throws {
+        let (client, mock, startTask) = await buildClientWithMock()
+        try await waitFor { await mock.sent.count >= 1 }
+        let initId = await mock.lastSentRequestId() ?? 1
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(initId),"result":{}}"#)
+        try await startTask.value
+
+        let loadTask = Task {
+            try await client.loadSessionWithProvenance(cwd: "/tmp", sessionId: "root")
+        }
+        try await waitFor { await mock.sent.count >= 2 }
+        let loadId = await mock.lastSentRequestId() ?? 2
+        await mock.reply(with: #"""
+            {"jsonrpc":"2.0","id":\#(loadId),"result":{"_meta": {"hermes": {"sessionProvenance": {"acpSessionId": "root", "currentHermesSessionId": "tip", "rootHermesSessionId": "root", "parentHermesSessionId": "root", "sessionKind": "continuation", "compressionDepth": 1}}},"modes":{"availableModes":[],"currentModeId":"default"}}}
+            """#)
+        let loaded = try await loadTask.value
+        #expect(loaded.sessionId == "root")
+        #expect(loaded.provenance?.currentHermesSessionId == "tip")
+        #expect(loaded.provenance?.rootHermesSessionId == "root")
+        await client.stop()
+    }
+
+    /// The resumed transcript's lineage grows by the loaded head only when
+    /// it is new; with no provenance (a host without the extension, C1) the
+    /// answer is the one the caller already had.
+    @Test func theLoadedHeadExtendsTheLineageOnlyWhenItIsNew() {
+        // Unknown chain, rotated head reported → root + head.
+        #expect(RichChatViewModel.lineage([], for: "root", addingLoadedHead: "tip") == ["root", "tip"])
+        // Known chain already ending at the head → unchanged.
+        #expect(RichChatViewModel.lineage(["root", "tip"], for: "tip", addingLoadedHead: "tip") == ["root", "tip"])
+        // Known chain, head moved past it → appended.
+        #expect(RichChatViewModel.lineage(["root", "mid"], for: "mid", addingLoadedHead: "tip")
+            == ["root", "mid", "tip"])
+        // No provenance, or the head is the row itself → the old answer.
+        #expect(RichChatViewModel.lineage([], for: "root", addingLoadedHead: nil) == [])
+        #expect(RichChatViewModel.lineage([], for: "root", addingLoadedHead: "root") == [])
+        #expect(RichChatViewModel.lineage(["a", "b"], for: "b", addingLoadedHead: nil) == ["a", "b"])
+    }
+
     @Test @MainActor func loadSessionSucceedsOnMinimalNonEmptyDictResult() async throws {
         // Pin the exact guard boundary: any NON-empty dict counts as a
         // load — the guard must not demand any specific key, only
@@ -635,7 +681,7 @@ import Foundation
         let event = try await withTimeout(seconds: 2) {
             await eventTask.value
         }
-        guard case .messageChunk(let sid, let text, _, _) = event else {
+        guard case .messageChunk(let sid, let text, _, _, _) = event else {
             Issue.record("expected .messageChunk, got \(String(describing: event))")
             return
         }

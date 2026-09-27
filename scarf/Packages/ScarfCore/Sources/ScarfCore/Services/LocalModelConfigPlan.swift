@@ -162,7 +162,15 @@ public enum LocalModelConfigPlan {
     /// provider didn't change: the Local tab owns these fields outright,
     /// so a blanked API-key field on a custom→custom re-save must clear
     /// `model.api_key`, not leave the old secret behind.
-    public static func operations(selecting selection: LocalModelSelection) -> [Operation] {
+    ///
+    /// `capabilities` picks the `model.provider` value the row writes
+    /// (``LocalModelProvider/configProviderID(capabilities:)`` — llama.cpp
+    /// writes `custom` on v0.21.1+). `.empty` (unknown host) writes the
+    /// row's own ID, exactly as before.
+    public static func operations(
+        selecting selection: LocalModelSelection,
+        capabilities: HermesCapabilities = .empty
+    ) -> [Operation] {
         guard let descriptor = LocalModelProvider.descriptor(for: selection.providerID) else {
             return []
         }
@@ -217,7 +225,7 @@ public enum LocalModelConfigPlan {
         } else {
             ops.append(.set(key: "model.default", value: model))
         }
-        ops.append(.set(key: "model.provider", value: descriptor.providerID))
+        ops.append(.set(key: "model.provider", value: descriptor.configProviderID(capabilities: capabilities)))
         return ops
     }
 
@@ -269,7 +277,8 @@ public enum LocalModelConfigPlan {
         currentBaseURL: String? = nil,
         currentAPIKey: String? = nil,
         currentAPIMode: String? = nil,
-        currentContextLength: String? = nil
+        currentContextLength: String? = nil,
+        capabilities: HermesCapabilities = .empty
     ) -> [Operation] {
         let newProvider = trimmed(provider)
         let newModel = trimmed(model)
@@ -304,7 +313,7 @@ public enum LocalModelConfigPlan {
                 baseURL: currentBaseURL,
                 apiKey: currentAPIKey,
                 apiMode: currentAPIMode
-            ))
+            ), capabilities: capabilities)
         }
         var ops: [Operation] = []
         if !newProvider.isEmpty {
@@ -346,7 +355,8 @@ public enum LocalModelConfigPlan {
     public static func operations(
         selectingRemoteModel model: String,
         provider: String,
-        current config: HermesConfig
+        current config: HermesConfig,
+        capabilities: HermesCapabilities = .empty
     ) -> [Operation] {
         operations(
             selectingRemoteModel: model,
@@ -355,7 +365,8 @@ public enum LocalModelConfigPlan {
             currentBaseURL: config.modelBaseURL,
             currentAPIKey: config.modelAPIKey,
             currentAPIMode: config.modelAPIMode,
-            currentContextLength: config.modelContextLength
+            currentContextLength: config.modelContextLength,
+            capabilities: capabilities
         )
     }
 
