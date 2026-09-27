@@ -208,6 +208,13 @@ public enum HermesProfileScope {
     /// any subcommand option; the scan strips it from `sys.argv`, so every
     /// verb sees the same argv as before.
     ///
+    /// `env VAR=value … hermes <args>` (the OAuth and login flows set
+    /// `PYTHONUNBUFFERED=1` that way over SSH) is seen through: the
+    /// assignments are skipped and the same rule applies to the hermes token
+    /// and the args after it, so `-p default` lands right after `hermes`.
+    /// Without this those flows followed the host's `active_profile` — the
+    /// S13-F1 bug on a path the first fix missed.
+    ///
     /// Callers that run hermes inside a `/bin/sh -c` script can't be seen
     /// here; they add ``rootPinShellFragment(forHome:)`` to their script.
     public static func pinnedRemoteArguments(
@@ -216,12 +223,35 @@ public enum HermesProfileScope {
         home: String,
         configuredBinary: String? = nil
     ) -> [String] {
+        if (executable as NSString).lastPathComponent == "env" {
+            // Leading `NAME=value` words only; an env option (`-i`, `-u`)
+            // or anything else ends the scan and the argv passes untouched.
+            var i = 0
+            while i < args.count, isEnvAssignment(args[i]) { i += 1 }
+            guard i < args.count else { return args }
+            let pinned = pinnedRemoteArguments(
+                executable: args[i], args: Array(args[(i + 1)...]),
+                home: home, configuredBinary: configuredBinary)
+            return Array(args[...i]) + pinned
+        }
         guard !isProfileHome(home),
               isHermesExecutable(executable, configuredBinary: configuredBinary),
               !startsWithProfileFlag(args),
               args != ["--version"], args != ["-V"]
         else { return args }
         return profileFlag(nil) + args
+    }
+
+    /// `NAME=value` as `env` reads it: a non-empty name of letters, digits
+    /// and `_`, not starting with a digit.
+    static func isEnvAssignment(_ word: String) -> Bool {
+        guard let eq = word.firstIndex(of: "="), eq != word.startIndex else { return false }
+        let name = word[..<eq]
+        guard let first = name.unicodeScalars.first,
+              !CharacterSet.decimalDigits.contains(first) else { return false }
+        return name.unicodeScalars.allSatisfy {
+            $0 == "_" || ($0.isASCII && CharacterSet.alphanumerics.contains($0))
+        }
     }
 
     /// Shell text (`"-p default "`, note the trailing space) to put right

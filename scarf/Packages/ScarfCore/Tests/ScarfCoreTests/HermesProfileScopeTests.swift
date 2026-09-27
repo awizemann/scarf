@@ -370,6 +370,61 @@ import Foundation
             executable: "hermes", args: ["-V"], home: "~/.hermes") == ["-V"])
     }
 
+    /// The remote OAuth / MCP login / Nous flows run
+    /// `env PYTHONUNBUFFERED=1 <hermes> …`; the pin must land after the
+    /// hermes token, with every skip rule still applying.
+    @Test func envWrappedHermesGetsThePinAfterTheHermesToken() {
+        let root = "~/.hermes"
+        // NousAuthFlow shape.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["PYTHONUNBUFFERED=1", "hermes", "auth", "add", "nous", "--no-browser"],
+            home: root)
+            == ["PYTHONUNBUFFERED=1", "hermes", "-p", "default", "auth", "add", "nous", "--no-browser"])
+        // OAuthFlowController / MCPLoginController shape, with a path and
+        // several assignments, via /usr/bin/env.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/usr/bin/env", args: ["PYTHONUNBUFFERED=1", "A_B=x=y", "~/.local/bin/hermes", "mcp", "login", "srv"],
+            home: "/opt/data")
+            == ["PYTHONUNBUFFERED=1", "A_B=x=y", "~/.local/bin/hermes", "-p", "default", "mcp", "login", "srv"])
+        // A wrapper hint as the hermes token.
+        let hint = "docker compose exec hermes hermes"
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["PYTHONUNBUFFERED=1", hint, "auth", "list"], home: root,
+            configuredBinary: hint)
+            == ["PYTHONUNBUFFERED=1", hint, "-p", "default", "auth", "list"])
+        // No assignments at all.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["hermes", "acp"], home: root) == ["hermes", "-p", "default", "acp"])
+    }
+
+    @Test func envWrappedArgvKeepsTheSkipRules() {
+        // Named-profile home: pinned by HERMES_HOME already.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["PYTHONUNBUFFERED=1", "hermes", "acp"], home: "~/.hermes/profiles/work")
+            == ["PYTHONUNBUFFERED=1", "hermes", "acp"])
+        // Already pinned, version probe, not hermes.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["X=1", "hermes", "-p", "scout", "acp"], home: "~/.hermes")
+            == ["X=1", "hermes", "-p", "scout", "acp"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["X=1", "hermes", "--version"], home: "~/.hermes")
+            == ["X=1", "hermes", "--version"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/usr/bin/env", args: ["which", "hermes"], home: "~/.hermes") == ["which", "hermes"])
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "/usr/bin/env", args: ["signal-cli", "link"], home: "~/.hermes") == ["signal-cli", "link"])
+        // An env option ends the scan; the argv is left alone.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["-i", "hermes", "acp"], home: "~/.hermes") == ["-i", "hermes", "acp"])
+        // Only assignments, no command.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "env", args: ["X=1"], home: "~/.hermes") == ["X=1"])
+        // `=x` and `1A=x` are not assignments to env.
+        #expect(!HermesProfileScope.isEnvAssignment("=x"))
+        #expect(!HermesProfileScope.isEnvAssignment("1A=x"))
+        #expect(HermesProfileScope.isEnvAssignment("_A1="))
+    }
+
     @Test func rootPinShellFragmentMatchesTheArgvRule() {
         #expect(HermesProfileScope.rootPinShellFragment(forHome: "~/.hermes") == "-p default ")
         #expect(HermesProfileScope.rootPinShellFragment(forHome: "/opt/data") == "-p default ")

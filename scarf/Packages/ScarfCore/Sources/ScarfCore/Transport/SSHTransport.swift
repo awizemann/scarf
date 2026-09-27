@@ -676,8 +676,19 @@ public struct SSHTransport: ServerTransport {
         // the remote `rich` would otherwise take its 80-column non-TTY
         // default and wrap the lines Scarf's verdicts match on. Same value
         // and same reason as ``LocalTransport/wideColumns``.
+        //
+        // A "Hermes binary" override that is a shell fragment
+        // (`docker compose exec hermes hermes`) goes in as the words the
+        // user typed. Quoting it as one name made the shell look for a
+        // command literally called `docker compose exec hermes hermes`
+        // (S15-F3). It can appear as the executable or as an argument
+        // (`env PYTHONUNBUFFERED=1 <hermes> …` in the OAuth flows).
+        let hint = config.hermesBinaryHint
+        let fragment = HermesPathSet.binaryHintIsShellFragment(hint) ? hint : nil
         var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
-            + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+            + ([executable] + args).map { token in
+                token == fragment ? token : Self.remotePathArg(token)
+            }.joined(separator: " ")
         // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes
         // reads project context files from the process cwd, not the ACP
         // session cwd). `;` (not `&&`) is deliberate: a stale/missing dir
@@ -690,9 +701,28 @@ public struct SSHTransport: ServerTransport {
         return cmd
     }
 
+    /// ``composedRemoteCommand(executable:args:cwd:)`` with a PATH line in
+    /// front that lets every remote call find `hermes`.
+    ///
+    /// A non-login `sh -c` never sees `~/.local/bin`, where Hermes' own
+    /// installer puts the command for a normal user, so a server saved
+    /// without Test Connection (no binary hint) failed every one-shot CLI
+    /// call with exit 127 while chat, in a login shell, worked (S15-F1).
+    /// Login shells (`bash -lc`) miss `/opt/homebrew/bin` on a remote Mac,
+    /// whose Homebrew PATH lives in `.zprofile`.
+    ///
+    /// The install directories are APPENDED (``HermesConfigReader/pathFallback``),
+    /// so they only matter when nothing on the shell's own PATH is `hermes`:
+    /// a host where a lookup already worked keeps running the same binary,
+    /// and a non-hermes executable is found exactly as before.
+    func remoteShellCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+        HermesConfigReader.pathFallback + "; "
+            + composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+    }
+
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         // Wrap in `sh -c '<exe> <arg> <arg>'`.
-        let cmd = composedRemoteCommand(executable: executable, args: args)
+        let cmd = remoteShellCommand(executable: executable, args: args)
         var sshArgv = sshArgs()
         sshArgv.append(hostSpec)
         sshArgv.append("sh")
@@ -715,7 +745,7 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        let cmd = composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+        let cmd = remoteShellCommand(executable: executable, args: args, cwd: cwd)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)
@@ -754,7 +784,7 @@ public struct SSHTransport: ServerTransport {
                 // `makeProcess` above. Streaming consumers (log tails)
                 // don't tolerate a missing-binary failure any better than
                 // ACP does.
-                let cmd = composedRemoteCommand(executable: executable, args: args)
+                let cmd = remoteShellCommand(executable: executable, args: args)
                 var sshArgv = sshArgs()
                 sshArgv.insert("-T", at: 0)
                 sshArgv.append(hostSpec)

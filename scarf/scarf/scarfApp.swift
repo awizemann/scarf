@@ -508,6 +508,12 @@ private struct ContextBoundRoot: View {
             // until first resize.
             .windowFrameAutosave("Scarf.Window.\(context.id)")
             .onAppear { fileWatcher.startWatching() }
+            // The `/scarf-*` commands are installed on this Mac at launch;
+            // a remote host gets them the first time a window connects to
+            // it (S03-F5). Off-main and once per host per app session.
+            .task(id: context.id) {
+                await SlashCommandBootstrapService.bootstrapRemoteIfNeeded(context: context)
+            }
             .onDisappear {
                 fileWatcher.stopWatching()
                 // Window close, or a server/profile switch rebuilding this
