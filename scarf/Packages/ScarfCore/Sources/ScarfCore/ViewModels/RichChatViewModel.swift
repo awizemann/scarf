@@ -3246,8 +3246,17 @@ public final class RichChatViewModel {
         // pagination cursor pointing below a gap nothing ever re-fetches.
         let sessionRowIds = dbMessages.filter { ownIdSet.contains($0.sessionId) }.map(\.id)
         let windowFloor = sessionRowIds.min()
+        // A kept row is dropped when the window holds a copy of the same
+        // message: an in-place compaction that ran while this chat was open
+        // re-inserts the turns it keeps as fresh rows (and, from Hermes
+        // v0.21.5, flags the originals out of display history), so the
+        // on-screen original and the window's copy are one message.
+        let windowGenerations = Set(dbMessages.map(CompactionGenerationKey.init))
         let olderLoaded: [HermesMessage] = windowFloor.map { floor in
-            messages.filter { $0.id > 0 && ownIdSet.contains($0.sessionId) && $0.id < floor }
+            messages.filter {
+                $0.id > 0 && ownIdSet.contains($0.sessionId) && $0.id < floor
+                    && !windowGenerations.contains(CompactionGenerationKey($0))
+            }
         } ?? []
 
         // Find local-only user messages not yet in DB (negative ids are
@@ -4002,3 +4011,24 @@ public final class RichChatViewModel {
 }
 
 #endif // canImport(SQLite3)
+
+/// The identity Hermes uses to recognise one message across compaction
+/// generations (`_display_dedupe_key`, hermes_state_messages.py:866-878 @
+/// v2026.9.24), minus `tool_calls`, which transcript skeleton rows do not
+/// carry. `HermesDataService.transcriptVisibleClause` applies the full key
+/// in SQL; this is the in-memory twin for rows already on screen.
+struct CompactionGenerationKey: Hashable {
+    let role: String
+    let content: String
+    let timestamp: Date?
+    let toolCallId: String?
+    let toolName: String?
+
+    init(_ message: HermesMessage) {
+        role = message.role
+        content = message.content
+        timestamp = message.timestamp
+        toolCallId = message.toolCallId
+        toolName = message.toolName
+    }
+}

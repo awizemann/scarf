@@ -630,10 +630,12 @@ import Foundation
         #expect(!sql.contains("compacted"))
     }
 
-    @Test func transcriptFetchesStayActiveOnlyWithCompactedColumn() async {
-        // Hermes reloads only the active set for transcripts — compacted
-        // rows are summarized away and must NOT resurface in the chat
-        // view, only in search.
+    @Test func transcriptFetchesUseTheDisplayProjectionWithCompactedColumn() async {
+        // Blind re-audit B01 (S02-chat-events-F1) reversed the old pin
+        // here. Hermes DISPLAYS compaction-archived rows
+        // (`get_resume_conversations`, hermes_state_messages.py:1273-1293
+        // @ v2026.9.24); only its model projection is active-only. See
+        // HermesV0215CompactedTranscriptB01Tests for the end-to-end check.
         let mock = MockHermesQueryBackend()
         await mock.setHasMessagesActiveColumn(true)
         await mock.setHasCompactedColumn(true)
@@ -643,8 +645,8 @@ import Foundation
         _ = await service.fetchMessagesOutcome(sessionId: "s1", limit: 25, before: nil)
 
         let sql = await mock.queryLog[0].sql
-        #expect(sql.contains("AND active = 1"))
-        #expect(!sql.contains("compacted"))
+        #expect(sql.contains("AND (active = 1 OR compacted = 1)"))
+        #expect(sql.contains("_gen.active = 0 AND _gen.compacted = 1"))
     }
 
     // MARK: - hydrateAssistantToolCalls batching (v2.18)

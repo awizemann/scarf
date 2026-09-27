@@ -49,6 +49,7 @@ public actor HermesDataService {
     private var hasListableChildSupport = false
     private var hasArchivedColumn = false
     private var hasDisplayKindColumn = false
+    private var hasDisplayMetadataColumn = false
 
     /// Cached `state_meta.fts_tool_full_content_high_water`, read once
     /// per open on the first search that needs it. `.some(nil)` means
@@ -140,6 +141,7 @@ public actor HermesDataService {
         hasListableChildSupport = await backend.hasListableChildSupport
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
+        hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -161,6 +163,7 @@ public actor HermesDataService {
         hasListableChildSupport = await backend.hasListableChildSupport
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
+        hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -1198,8 +1201,9 @@ public actor HermesDataService {
         // (`active = 1 OR compacted = 1`), while rewind/undo rows
         // (active=0, compacted=0) stay hidden. Mirror that so Scarf
         // searches the same ROW SET as `hermes sessions search` on the
-        // same DB. Transcript/activity fetches above stay active-only
-        // — Hermes reloads only the active set there too.
+        // same DB. Transcript reads use the same row set (plus Hermes's
+        // generation dedupe — see `transcriptVisibleClause`); the
+        // Activity feeds stay active-only.
         //
         // The QUERY TEXT deliberately does NOT match Hermes's: Hermes
         // strips FTS5's special characters
@@ -1349,11 +1353,100 @@ public actor HermesDataService {
         hasDisplayKindColumn ? " AND COALESCE(\(alias)display_kind, '') <> 'hidden'" : ""
     }
 
-    /// Row filter for transcript reads over bare `messages`: the active
-    /// set (see the O1 decision in `fetchMessagesOutcome`), minus rows
-    /// Hermes hides from every display.
+    /// Row filter for transcript reads over bare `messages` (chat resume,
+    /// "Load earlier", tool-result hydration, reconnect reconcile, polling
+    /// and the Sessions detail): the rows Hermes itself DISPLAYS for a
+    /// conversation, minus rows it hides from every display.
+    ///
+    /// Hermes 0.21.5 compacts in place by default (`compression.in_place:
+    /// True`, hermes_cli/config_defaults.py:658-663 @ v2026.9.24): earlier
+    /// turns are soft-archived under the same session id as `active = 0,
+    /// compacted = 1` (`_ARCHIVE_ACTIVE_SQL`, hermes_state_messages.py:63).
+    /// Its display projection keeps them — `get_resume_conversations`
+    /// reads `active = 1 OR compacted = 1` (:1273-1293, #92080) — while
+    /// only the MODEL projection stays active-only. Reading the active set
+    /// alone made every reopened compacted chat look as if its earlier
+    /// turns had been deleted.
+    ///
+    /// With `messages.compacted` present this mirrors that projection:
+    /// - `(active = 1 OR compacted = 1)`: live rows plus archived history;
+    ///   rewind/undo rows (`active = 0, compacted = 0`) stay out.
+    /// - `compactionGenerationDedupeClause`: one row per logical message.
+    /// - `modelOnlyClause`: micro-compaction's merged rows stay out.
+    /// - `display_kind = 'hidden'` rows stay out, as before.
+    ///
+    /// A host without the column (pre-v0.18) gets exactly the SQL it got
+    /// before (charter C1/C4).
     private var transcriptVisibleClause: String {
-        (hasMessagesActiveColumn ? " AND active = 1" : "") + displayVisibleClause()
+        guard hasMessagesActiveColumn else { return displayVisibleClause() }
+        guard hasCompactedColumn else { return " AND active = 1" + displayVisibleClause() }
+        return " AND (active = 1 OR compacted = 1)"
+            + compactionGenerationDedupeClause
+            + modelOnlyClause()
+            + displayVisibleClause()
+    }
+
+    /// Drops a row when an EARLIER compaction-archived row of the same
+    /// session carries the same logical message.
+    ///
+    /// Each in-place compaction re-inserts what it keeps (the protected
+    /// head, the verbatim tail, turns that arrived mid-compaction) as
+    /// fresh rows, so the display set can hold the same message once per
+    /// generation. Hermes collapses them with `_dedupe_display_generations`
+    /// (hermes_state_messages.py:892-908 @ v2026.9.24), keyed on
+    /// `(role, content, timestamp, tool_call_id, tool_calls, tool_name)`
+    /// (`_display_dedupe_key`, :866-878), and orders each group by its
+    /// FIRST row's id. Scarf keeps that first row as the group's
+    /// representative, so ordering by id — which every transcript page,
+    /// the "Load earlier" cursor and the reconcile window rely on — stays
+    /// exactly Hermes's display order. The copies carry the original's
+    /// columns, so the text shown is the same row Hermes would pick.
+    ///
+    /// Only an archived (`active = 0, compacted = 1`) row can be the
+    /// earlier copy: a compaction archives every active row before it
+    /// inserts the new generation (`archive_and_compact`, :735-795), so
+    /// within one session the older copy is always archived. That keeps
+    /// the probe on `(session_id, active, timestamp)`
+    /// (`idx_messages_session_active`, hermes_state_common.py:585-586).
+    ///
+    /// Known difference: Hermes also folds a user row whose live text sits
+    /// inside a handoff carrier (`split_user_originated_turn`); that needs
+    /// Python-side parsing and is not reproduced here.
+    private var compactionGenerationDedupeClause: String {
+        let key = ["content", "tool_call_id", "tool_calls", "tool_name"]
+            .map { " AND _gen.\($0) IS messages.\($0)" }
+            .joined()
+        return " AND NOT EXISTS (SELECT 1 FROM messages _gen"
+            + " WHERE _gen.session_id = messages.session_id"
+            + " AND _gen.active = 0 AND _gen.compacted = 1"
+            + " AND _gen.timestamp = messages.timestamp"
+            + " AND _gen.id < messages.id"
+            + " AND _gen.role = messages.role"
+            + key
+            + modelOnlyClause(alias: "_gen.")
+            + displayVisibleClause(alias: "_gen.")
+            + ")"
+    }
+
+    /// ` AND <alias>display_metadata NOT LIKE '%"model_only": true%'` when
+    /// `messages.display_metadata` exists, else `""`.
+    ///
+    /// Micro-compaction merges adjacent user turns into one row the model
+    /// reads and flags it `display_metadata.model_only`; the original turns
+    /// stay in display history as compacted rows, so Hermes keeps the
+    /// merged row out of every display (`DISPLAY_VISIBLE_SQL`,
+    /// hermes_state_messages.py:48-51; agent/micro_compaction.py:428-432 @
+    /// v2026.9.24). Without this the merged text would show next to the
+    /// turns it was made from.
+    ///
+    /// Matched as text rather than with `json_extract` so it needs no JSON1
+    /// in the remote host's sqlite3: Hermes writes the column only through
+    /// `json.dumps` (`_encode_display_metadata`, :162-177), whose default
+    /// spelling is exactly `"model_only": true`.
+    private func modelOnlyClause(alias: String = "") -> String {
+        hasDisplayMetadataColumn
+            ? " AND COALESCE(\(alias)display_metadata, '') NOT LIKE '%\"model_only\": true%'"
+            : ""
     }
 
     private func deepToolContentMatches(

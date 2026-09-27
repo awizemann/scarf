@@ -47,6 +47,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasListableChildSupport = false
     private(set) public var hasArchivedColumn = false
     private(set) public var hasDisplayKindColumn = false
+    private(set) public var hasDisplayMetadataColumn = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Latched `true` once a strict `sqlite3 -readonly` invocation has been
@@ -370,13 +371,15 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         // v0.16: soft-hide flag. v0.19.1: messages.display_kind.
         hasArchivedColumn = sessionsTable.contains("archived")
         hasDisplayKindColumn = messagesTable.contains("display_kind")
+        hasDisplayMetadataColumn = messagesTable.contains("display_metadata")
         hasLastReadAtColumn = sessionsTable.contains("last_read_at")
         // v0.20.4: Hermes's listable/ephemeral child predicates. Same
         // gate as the local backend — v0.20.4 marker columns, the
         // columns the predicates read, and a JSON1-capable SQLite. The
-        // remote's `json_extract` runs in the REMOTE sqlite3 CLI, so
-        // availability is inferred from the version line the preflight
-        // already captures (JSON1 is built in from 3.38 onward).
+        // remote's `json_extract` runs in the REMOTE sqlite3 CLI, so the
+        // preflight asks that CLI directly (`json1ProbeCommand`, the
+        // fourth array). Only output without that array — a preflight
+        // shape from before the probe — falls back to the version rule.
         let predicateColumns = sessionsTable.contains("model_config")
             && sessionsTable.contains("session_key")
             && sessionsTable.contains("end_reason")
