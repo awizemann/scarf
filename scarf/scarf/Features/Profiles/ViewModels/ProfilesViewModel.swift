@@ -256,11 +256,13 @@ final class ProfilesViewModel {
         guard context.isRemote else {
             // When the name changed (`work.tgz` → `work.tar.gz`) say where the
             // archive actually is, so the user doesn't look for the old name.
-            let fileName = URL(fileURLWithPath: outputPath).lastPathComponent
-            let success = outputPath == url.path
-                ? String(localized: "Exported")
-                : String(localized: "Exported as \(fileName)")
-            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: success)
+            let args = ["profile", "export", "--output", outputPath, "--", profile.name]
+            if outputPath == url.path {
+                runAndReload(args, success: String(localized: "Exported"))
+            } else {
+                let fileName = URL(fileURLWithPath: outputPath).lastPathComponent
+                runAndReload(args, success: String(localized: "Exported as \(fileName)"))
+            }
             return
         }
         message = "Exporting \(profile.name)…"

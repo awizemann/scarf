@@ -60,7 +60,7 @@ import Foundation
 
         // Events all decoded as id 0 before, so `ForEach(events)` had seven
         // rows with one identity.
-        #expect(detail.events.count == 7)
+        try #require(detail.events.count == 7)
         #expect(Set(detail.events.map(\.id)).count == 7)
         #expect(detail.events.map(\.kind).first == "created")
         #expect(detail.events.map(\.kind).last == "completion_blocked_empty_result")
@@ -75,7 +75,7 @@ import Foundation
             of: #"{"author":"default","body":"BLOCKED: waiting on design","created_at":1790545192}]"#,
             with: #"{"author":"default","body":"BLOCKED: waiting on design","created_at":1790545192},{"author":"bob","body":"late","created_at":1790545300}]"#)
         let second = try JSONDecoder().decode(HermesKanbanTaskDetail.self, from: Data(grown.utf8))
-        #expect(second.comments.count == 4)
+        try #require(second.comments.count == 4)
         // Existing rows keep their identity; the new one gets a fresh one.
         #expect(Array(second.comments.prefix(3)) == first.comments)
         #expect(second.comments[3].id == 4)
@@ -94,7 +94,7 @@ import Foundation
         let detail = try JSONDecoder().decode(HermesKanbanTaskDetail.self, from: Data(json.utf8))
         #expect(detail.comments.map(\.body) == ["kept", "also kept"])
         #expect(detail.comments.map(\.id) == [1, 2])
-        #expect(detail.events.count == 1)
+        try #require(detail.events.count == 1)
         #expect(detail.events[0].runId == nil)
     }
 
@@ -307,9 +307,9 @@ import Foundation
     /// The v0.21.4+ order matches `parse_profile_routes` run on this block
     /// from the tag's venv: dm-user (16), loc (12), bot-scoped (0);
     /// blank-user skipped ("user_id cannot be null or empty").
-    @Test func userIDOutranksLocationRulesOnV0214() {
+    @Test func userIDOutranksLocationRulesOnV0214() throws {
         let block = ProfileRoutesYAML.parse(Self.routesYAML)
-        #expect(block.routes.count == 4)
+        try #require(block.routes.count == 4)
         let ranked = block.effectiveOrder(capabilities: Self.v0214)
         #expect(ranked.map(\.name) == ["dm-user", "loc", "bot-scoped"])
         #expect(ranked[0].specificity(capabilities: Self.v0214) == 16)
