@@ -562,6 +562,32 @@ final class ServerLiveStatus: Identifiable {
     var hermesRunning = false
     var gatewayRunning = false
 
+    /// Why the menu's Restart can't restart this server, when the restart
+    /// guard said so. `nil` when it can (or nobody has asked yet).
+    var restartBlock: RestartBlock?
+
+    /// What the guard's stop + start refusal means for the menu.
+    enum RestartBlock: Equatable {
+        /// The gateway was started by hand: a stop would kill it and the
+        /// start couldn't bring it back. Restart is disabled.
+        case handRun
+        /// `gateway status` didn't answer, so nothing is sent blind.
+        case statusUnknown
+    }
+
+    /// The menu state for a ``HermesGatewayRestartGuard`` stop + start
+    /// verdict (`nil` = may restart).
+    nonisolated static func restartBlock(for refusal: HermesCLIOutcome?) -> RestartBlock? {
+        guard let refusal else { return nil }
+        return refusal.detail == HermesGatewayRestartGuard.statusUnreadableNote ? .statusUnknown : .handRun
+    }
+
+    /// One guard probe at a time.
+    private var restartProbeInFlight = false
+    /// When the guard was last asked, so a block is re-checked now and then
+    /// (the user may have installed the gateway as a service meanwhile).
+    private var lastRestartProbe: Date?
+
     /// When true (app not frontmost), the poll cadence is floored at 60s
     /// to cut background CPU + SSH round-trips against remotes (gh#102),
     /// while still keeping the menu-bar status reasonably fresh. Set by
@@ -684,9 +710,12 @@ final class ServerLiveStatus: Identifiable {
     func restartHermes() {
         Task { [weak self, fileService, context] in
             // A gateway run by hand would be stopped for good: the start
-            // below can't bring it back. The menu has nowhere to explain
-            // that, so it does nothing; Health and the Gateway view say why.
-            if await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value != nil {
+            // below can't bring it back. Nothing is sent; the menu item
+            // relabels itself to say why (Health and the Gateway view give
+            // the full explanation).
+            let refusal = await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value
+            self?.restartBlock = Self.restartBlock(for: refusal)
+            if refusal != nil {
                 Analytics.record(.hermesControlAction(action: .restart, source: .menuBar, outcome: .init(.failed)))
                 self?.refresh()
                 return
@@ -707,6 +736,25 @@ final class ServerLiveStatus: Identifiable {
 
     private func refresh() {
         Task { [weak self] in _ = await self?.pollOnce() }
+    }
+
+    /// Ask the restart guard once, when Hermes is seen starting, so the
+    /// menu's Restart already says whether it can run before anyone clicks
+    /// it. One `gateway status` spawn (plus `status` on the no-service
+    /// branch) per start, off the main actor with the CLI's timeout (C10).
+    private func probeRestartBlock() {
+        guard !restartProbeInFlight else { return }
+        restartProbeInFlight = true
+        lastRestartProbe = Date()
+        Task { [weak self, fileService] in
+            let refusal = await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value
+            guard let self else { return }
+            self.restartProbeInFlight = false
+            // Hermes stopped while the probe ran: the answer is stale.
+            guard self.hermesRunning else { return }
+            let block = Self.restartBlock(for: refusal)
+            if self.restartBlock != block { self.restartBlock = block }
+        }
     }
 
     /// Single probe used by both the polling loop (which needs the
@@ -750,6 +798,14 @@ final class ServerLiveStatus: Identifiable {
         // poll cycle.
         if hermesRunning != probe.running {
             hermesRunning = probe.running
+            if probe.running {
+                probeRestartBlock()
+            } else if restartBlock != nil {
+                restartBlock = nil
+            }
+        } else if probe.running, restartBlock != nil,
+                  let last = lastRestartProbe, Date().timeIntervalSince(last) > 120 {
+            probeRestartBlock()
         }
         if gatewayRunning != probe.gatewayRunning {
             gatewayRunning = probe.gatewayRunning
@@ -997,8 +1053,19 @@ struct MenuBarMenu: View {
                 .disabled(status.hermesRunning)
             Button("Stop Hermes") { status.stopHermes() }
                 .disabled(!status.hermesRunning)
-            Button("Restart Hermes") { status.restartHermes() }
-                .disabled(!status.hermesRunning)
+            // A gateway started by hand can't be restarted from here (the
+            // stop would kill it and the start can't bring it back), so the
+            // item says so instead of doing nothing when clicked.
+            Button {
+                status.restartHermes()
+            } label: {
+                switch status.restartBlock {
+                case .handRun: Text("Restart Hermes (running manually)")
+                case .statusUnknown: Text("Restart Hermes (status unknown)")
+                case nil: Text("Restart Hermes")
+                }
+            }
+            .disabled(!status.hermesRunning || status.restartBlock == .handRun)
         }
     }
 }
