@@ -135,7 +135,7 @@ struct ProfilesView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Switching changes only what this phone shows — it points ScarfGo at the selected profile's data and chat. The server's active profile is unchanged.")
-            if namedProfiles.isEmpty && !isLoading {
+            if namedProfiles.isEmpty && !isLoading && lastError == nil {
                 Text("No named profiles yet. Create one with `hermes profile create <name>` from the Mac app. Renaming, deleting, and import/export also live there.")
             } else {
                 Text("Create, rename, delete, and import/export live in the Mac app.")

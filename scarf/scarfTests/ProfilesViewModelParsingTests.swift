@@ -34,8 +34,8 @@ struct ProfilesViewModelParsingTests {
 
          Profile                    Model                        Gateway      Alias        Distribution
          ───────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-         ◆Production (default)    deepseek/deepseek-v4-flash   running      —            —
-          Staging Box (gateway)   —                            stopped      —            —
+         ◆Production (default) deepseek/deepseek-v4-flash   running      —            —
+          Staging Box (gateway) —                            stopped      —            —
           scarfbox-smoke          deepseek/deepseek-v4-pro     stopped      —            —
 
         """
@@ -90,7 +90,7 @@ struct ProfilesViewModelParsingTests {
 
          Profile                             Model                        Gateway      Alias        Distribution
          ────────────────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-         ◆My (test) profile (myid)         deepseek/deepseek-v4-flash   running      —            —
+         ◆My (test) profile (myid) deepseek/deepseek-v4-flash   running      —            —
 
         """
         let (profiles, active) = ProfilesViewModel.parseProfileList(output)
@@ -123,7 +123,7 @@ struct ProfilesViewModelParsingTests {
 
          Profile                             Model                        Gateway      Alias        Distribution
          ────────────────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
-          My (test) profile (myid)         grok-4 (beta)                stopped      —            —
+          My (test) profile (myid) grok-4 (beta)                stopped      —            —
 
         """
         let (profiles, active) = ProfilesViewModel.parseProfileList(output)
@@ -140,15 +140,36 @@ struct ProfilesViewModelParsingTests {
                       HermesProfile(name: "work", isActive: true, path: ""),
                       HermesProfile(name: "coder", isActive: false, path: "")]
         let (profiles, active) = ProfilesViewModel.resolveActive(
-            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: "coder\n")
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .contents("coder\n"))
         #expect(active == "coder")
         #expect(profiles.filter(\.isActive).map(\.name) == ["coder"])
 
         // No file (or an empty one) means default, as it does to Hermes.
         let (noFile, noFileActive) = ProfilesViewModel.resolveActive(
-            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: nil)
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .missing)
         #expect(noFileActive == "default")
         #expect(noFile.filter(\.isActive).map(\.name) == ["default"])
+
+        // A failed read badges nothing rather than guessing.
+        let (unknown, unknownActive) = ProfilesViewModel.resolveActive(
+            parsed: parsed, markedActive: "work", isRemote: true, hostActiveFile: .unreadable)
+        #expect(unknownActive == nil)
+        #expect(unknown.filter(\.isActive).isEmpty)
+    }
+
+    /// The remote read is one `cat`, so "no file" (server on default) and
+    /// "couldn't read" stay distinct.
+    @Test("remote active_profile read: contents, missing and failure are told apart")
+    func hostActiveReadIsClassified() {
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 0, stdout: "coder\n", stderr: "")
+                == .contents("coder\n"))
+        #expect(ProfilesViewModel.classifyHostActiveRead(
+            exitCode: 1, stdout: "", stderr: "cat: /root/.hermes/active_profile: No such file or directory")
+                == .missing)
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 255, stdout: "", stderr: "ssh: connect to host box: Connection refused")
+                == .unreadable)
+        #expect(ProfilesViewModel.classifyHostActiveRead(exitCode: 1, stdout: "", stderr: "cat: active_profile: Permission denied")
+                == .unreadable)
     }
 
     @Test("local: the marker is kept (an unpinned local run marks the sticky profile)")
@@ -156,7 +177,7 @@ struct ProfilesViewModelParsingTests {
         let parsed = [HermesProfile(name: "default", isActive: false, path: ""),
                       HermesProfile(name: "work", isActive: true, path: "")]
         let (profiles, active) = ProfilesViewModel.resolveActive(
-            parsed: parsed, markedActive: "work", isRemote: false, hostActiveFile: "ignored")
+            parsed: parsed, markedActive: "work", isRemote: false, hostActiveFile: .contents("ignored"))
         #expect(active == "work")
         #expect(profiles == parsed)
     }

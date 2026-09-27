@@ -163,7 +163,12 @@ public enum HermesProfileScope {
     ///
     /// Floor: `-p`/`--profile` and the `default` alias both shipped with
     /// profiles in v2026.3.30 (0.6.0), which is Scarf's supported minimum,
-    /// so no capability gate is needed.
+    /// so there is no capability gate. Known, accepted gap: before
+    /// v2026.4.13 (0.6–0.8) `default` resolved to a hard-coded `~/.hermes`
+    /// (`hermes_cli/profiles.py:89-91,119-123` @ v2026.3.30), so on those
+    /// hosts a Docker-style custom root (`HERMES_HOME=/opt/data`) is
+    /// re-homed to `~/.hermes` by the remote root pin. Profiles themselves
+    /// were broken on such hosts until then (Hermes #7170).
     public static func profileFlag(_ name: String?) -> [String] {
         ["-p", normalize(name) ?? defaultProfileName]
     }

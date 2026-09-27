@@ -230,6 +230,7 @@ struct ProfilesView: View {
                             renameTarget = profile
                             renameNewName = profile.name
                         }
+                        .disabled(viewing)
                         Button("Export…") {
                             // The export lands on this Mac whichever host
                             // Hermes runs on (gh#132) — remote contexts
@@ -248,8 +249,13 @@ struct ProfilesView: View {
                             }
                         }
                         Divider()
+                        // Also refuse the profile this remote window is
+                        // viewing: every call here runs pinned to its home,
+                        // so this would delete the home under the window.
+                        // (Before S13-F3 the viewed profile was the one
+                        // marked active, which is what guarded it.)
                         Button("Delete", role: .destructive) { pendingDelete = profile }
-                            .disabled(profile.isActive)
+                            .disabled(profile.isActive || viewing)
                     }
                 }
             }
@@ -401,9 +407,18 @@ struct ProfilesView: View {
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Name")
             }
-            Toggle("Clone config, .env, SOUL.md from active profile", isOn: $createCloneConfig)
-                .disabled(createCloneAll)
-            Toggle("Full copy of active profile (all state)", isOn: $createCloneAll)
+            // `--clone` copies the profile the CLI runs in. On a remote
+            // window every call is pinned to the viewed profile, so that is
+            // the source there, not the server's active one.
+            if viewModel.context.isRemote {
+                Toggle("Clone config, .env, SOUL.md from the viewed profile", isOn: $createCloneConfig)
+                    .disabled(createCloneAll)
+                Toggle("Full copy of the viewed profile (all state)", isOn: $createCloneAll)
+            } else {
+                Toggle("Clone config, .env, SOUL.md from active profile", isOn: $createCloneConfig)
+                    .disabled(createCloneAll)
+                Toggle("Full copy of active profile (all state)", isOn: $createCloneAll)
+            }
             if capabilitiesStore?.capabilities.hasProfileNoSkills ?? false {
                 Toggle("Empty profile (no skills)", isOn: $createNoSkills)
                     .disabled(createCloneAll)

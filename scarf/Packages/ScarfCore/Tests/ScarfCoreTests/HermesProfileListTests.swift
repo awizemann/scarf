@@ -49,6 +49,41 @@ import Testing
         #expect(HermesProfileList.parse(Self.pinnedDefault).filter(\.isMarked).map(\.id) == ["default"])
     }
 
+    /// Real CLI output (v2026.9.24, same scratch home) where display names
+    /// overflow the 15-column Profile field and run into a Model that has
+    /// its own id-shaped parenthetical, and one display name carries a
+    /// parenthetical of its own. The old "last `(id)` in field 0" rule read
+    /// `preview` and `beta` as ids here.
+    static let overflowing = """
+
+         Profile          Model                        Gateway      Alias        Distribution
+         ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
+          default         —                            stopped      —            —
+          Tiny (ab)       m (x)                        stopped      —            —
+          My (test) profile (helper) vendor/model (beta)          stopped      helper       —
+         ◆Research Bot (research) gpt-4o (preview)             stopped      research     —
+
+        """
+
+    @Test func overflowingLabelsDoNotTakeTheModelsParenthetical() {
+        let rows = HermesProfileList.parse(Self.overflowing)
+        #expect(rows.map(\.id) == ["default", "ab", "helper", "research"])
+        #expect(rows.map(\.displayName) == [nil, "Tiny", "My (test) profile", "Research Bot"])
+        #expect(rows.filter(\.isMarked).map(\.id) == ["research"])
+    }
+
+    @Test func overflowingBareIdKeepsTheFirstToken() {
+        // A pre-0.20.5 host with a long bare id and a parenthesised model.
+        let output = """
+
+         Profile          Model                        Gateway      Alias
+         ───────────────    ───────────────────────────    ───────────    ───────────
+          a-very-long-profile-id gpt-4o (preview)             stopped      —
+
+        """
+        #expect(HermesProfileList.parse(output).map(\.id) == ["a-very-long-profile-id"])
+    }
+
     @Test func bareIdRowsFromOlderHosts() {
         let output = """
 

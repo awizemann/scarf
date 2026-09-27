@@ -34,7 +34,10 @@ final class ProfilesViewModel {
 
 
     var profiles: [HermesProfile] = []
-    var activeName: String = "default"
+    /// The server's active profile, or `nil` when it couldn't be read
+    /// (remote only: the `active_profile` read failed), in which case no
+    /// row is badged rather than guessing.
+    var activeName: String? = "default"
     var isLoading = false
     var message: String?
     var detailOutput: String = ""
@@ -62,13 +65,14 @@ final class ProfilesViewModel {
             }
             let (parsed, marked) = Self.parseProfileList(result.output)
             // Remote: the server's active profile lives in the root's
-            // `active_profile` file (see `resolveActive`). A read failure
-            // and a missing file both mean "default", as they do to Hermes.
-            let hostActiveFile: String? = context.isRemote
+            // `active_profile` file (see `resolveActive`). A missing file
+            // means "default", as it does to Hermes; a failed read means
+            // "unknown".
+            let hostActiveFile: HostActiveFile = context.isRemote
                 ? await OffPool.run {
-                    context.readText(HermesProfileScope.rootHome(forHome: context.paths.home) + "/active_profile")
+                    Self.readHostActiveFile(context: context)
                 }
-                : nil
+                : .missing
             let (profiles, active) = Self.resolveActive(
                 parsed: parsed, markedActive: marked,
                 isRemote: context.isRemote, hostActiveFile: hostActiveFile)
@@ -366,15 +370,50 @@ final class ProfilesViewModel {
     /// marker follows the process's home (`get_active_profile_name`,
     /// `hermes_cli/profiles.py:1941-1955` @ v2026.9.24), so it always marks
     /// the VIEWED profile. There the answer comes from `<root>/active_profile`
-    /// (`hostActiveFile`, `nil` when absent = default), the way ScarfGo does it.
+    /// (`hostActiveFile`; absent = default, unreadable = no badge), the way
+    /// ScarfGo does it.
     nonisolated static func resolveActive(
         parsed: [HermesProfile],
         markedActive: String,
         isRemote: Bool,
-        hostActiveFile: String?
-    ) -> (profiles: [HermesProfile], active: String) {
+        hostActiveFile: HostActiveFile
+    ) -> (profiles: [HermesProfile], active: String?) {
         guard isRemote else { return (parsed, markedActive) }
-        let active = HermesProfileList.activeProfile(fromFileContents: hostActiveFile)
+        let active: String?
+        switch hostActiveFile {
+        case .missing: active = HermesProfileList.activeProfile(fromFileContents: nil)
+        case .contents(let text): active = HermesProfileList.activeProfile(fromFileContents: text)
+        // Don't assert what we don't know: the marker would name the viewed
+        // profile, and "default" would be a guess.
+        case .unreadable: active = nil
+        }
         return (parsed.map { HermesProfile(name: $0.name, isActive: $0.name == active, path: $0.path) }, active)
+    }
+
+    /// Read the remote `<root>/active_profile` with one `cat`, so a missing
+    /// file (the server is on default) can be told apart from a failed read.
+    /// `ServerContext.readText` can't: its `fileExists` check reports a
+    /// transport failure as "no file", which would badge `default` on a guess.
+    nonisolated static func readHostActiveFile(context: ServerContext) -> HostActiveFile {
+        let path = HermesProfileScope.rootHome(forHome: context.paths.home) + "/active_profile"
+        guard let result = try? context.makeTransport().runProcess(
+            executable: "cat", args: [path], stdin: nil, timeout: 15) else { return .unreadable }
+        return classifyHostActiveRead(exitCode: result.exitCode, stdout: result.stdoutString, stderr: result.stderrString)
+    }
+
+    /// `cat`'s outcome → ``HostActiveFile``. Pure for tests.
+    nonisolated static func classifyHostActiveRead(exitCode: Int32, stdout: String, stderr: String) -> HostActiveFile {
+        if exitCode == 0 { return .contents(stdout) }
+        if stderr.contains("No such file or directory") { return .missing }
+        return .unreadable
+    }
+
+    /// What reading `<root>/active_profile` produced.
+    enum HostActiveFile: Sendable, Equatable {
+        /// No file: the server is on the default profile.
+        case missing
+        case contents(String)
+        /// The read failed; the server's active profile is unknown.
+        case unreadable
     }
 }

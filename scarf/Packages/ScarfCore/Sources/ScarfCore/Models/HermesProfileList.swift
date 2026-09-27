@@ -51,12 +51,19 @@ public enum HermesProfileList {
     /// fields separated by a single literal space, so a field shorter than its
     /// width leaves a run of 2+ spaces before the next field while a display
     /// name may still contain single spaces. We split on runs of 2+ spaces to
-    /// isolate field 0 (the Profile label) before searching it for a
-    /// `(canonical-id)` group, so an id-shaped parenthetical in the Model
-    /// column (`gpt-4o (preview)`) can't be mistaken for the id. Within field
-    /// 0 the LAST group wins, since a display name may itself contain one
-    /// ("My (test) profile (myid)"); with no group, field 0's first token is
-    /// the bare id, which is what pre-0.20.5 hosts print.
+    /// isolate field 0 before searching it for a `(canonical-id)` group.
+    ///
+    /// Field 0 is the label alone only while the label fits its 15-column
+    /// width. A longer label (most display-named rows) overflows, and then
+    /// the one-space separator is all that divides it from the Model, so
+    /// field 0 is `<label> <model>`. The model is never empty (Hermes prints
+    /// `—` for none) and is at most 26 characters. So the id is the last
+    /// `(id)` group that either ends field 0 (no overflow) or, on an
+    /// overflowed row, ends a label of 15+ characters and is followed by a
+    /// space and a model. That keeps an id-shaped parenthetical in the model
+    /// (`gpt-4o (preview)`) or earlier in the display name ("My (test)
+    /// profile (myid)") from being taken for the id. With no group, field
+    /// 0's first token is the bare id, which is what pre-0.20.5 hosts print.
     public static func parse(_ output: String) -> [Row] {
         var rows: [Row] = []
         var seen = Set<String>()
@@ -86,9 +93,9 @@ public enum HermesProfileList {
             let matches = idParenPattern.matches(in: field0, range: NSRange(location: 0, length: ns.length))
             let id: String
             var displayName: String?
-            if let last = matches.last {
-                id = ns.substring(with: last.range(at: 1))
-                let label = ns.substring(to: last.range.location).trimmingCharacters(in: .whitespaces)
+            if let match = Self.labelIDMatch(matches, in: ns) {
+                id = ns.substring(with: match.range(at: 1))
+                let label = ns.substring(to: match.range.location).trimmingCharacters(in: .whitespaces)
                 displayName = label.isEmpty ? nil : label
             } else {
                 guard let token = field0.split(whereSeparator: { $0.isWhitespace }).first else { continue }
@@ -103,6 +110,36 @@ public enum HermesProfileList {
             rows.append(Row(id: id, displayName: displayName, isMarked: isMarked))
         }
         return rows
+    }
+
+    /// Hermes' Profile column width (`{name:<15}`) and Model truncation
+    /// (`[:26]`), `hermes_cli/profile_cmd.py:119-124` @ v2026.9.24.
+    private static let labelWidth = 15
+    private static let modelMaxLength = 26
+
+    /// The `(id)` group that closes the label, per the rules in ``parse(_:)``.
+    private static func labelIDMatch(_ matches: [NSTextCheckingResult], in field0: NSString) -> NSTextCheckingResult? {
+        // Python pads by code points, so widths are counted in Unicode
+        // scalars, not UTF-16 units (an emoji in a display name is one
+        // column to Hermes but two units here).
+        func width(_ s: String) -> Int { s.unicodeScalars.count }
+        for match in matches.reversed() {
+            let end = match.range.location + match.range.length
+            let labelWidthSoFar = width(field0.substring(to: end))
+            if end == field0.length {
+                // Ends the field: the whole field is the label. That is only
+                // possible when the label didn't overflow into the model.
+                if labelWidthSoFar <= labelWidth { return match }
+                continue
+            }
+            // Overflowed: `<label> <model>`, label at least 15 wide.
+            guard labelWidthSoFar >= labelWidth,
+                  field0.substring(with: NSRange(location: end, length: 1)) == " " else { continue }
+            let model = field0.substring(from: end + 1).trimmingCharacters(in: .whitespaces)
+            if !model.isEmpty && width(model) <= modelMaxLength { return match }
+        }
+        // No group closes the label: a bare id (the first-token fallback).
+        return nil
     }
 
     /// The server's active profile from the raw contents of
