@@ -148,6 +148,10 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// already carries a per-file label for exactly this, so it is threaded
     /// through. `nil` falls back to the path (GW-F4).
     case registryBusy(path: String, label: String?)
+    /// Hermes itself held its own lock on a memory file (the `flock` on
+    /// `MEMORY.md.lock` / `USER.md.lock` that every Hermes memory write
+    /// takes) past the wait budget. The write did NOT happen.
+    case hermesBusy(path: String, label: String?)
     /// The file changed between the read this mutation was computed from
     /// and the write. Somebody else — a second Scarf window on another
     /// machine sharing the home, the MCP helper, an agent's editor — got
@@ -174,6 +178,8 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
             return loss.message
         case let .registryBusy(path, label):
             return "Another Scarf process is updating \(label ?? path) right now. Nothing was changed — try again in a moment."
+        case let .hermesBusy(path, label):
+            return "Hermes is updating \(label ?? path) right now. Nothing was changed — try again in a moment."
         case .refusedStaleOverwrite(let path):
             return "\(path) was changed by something else while this was open. Nothing was changed — reopen the list and try again."
         }

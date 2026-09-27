@@ -177,10 +177,16 @@ import Foundation
         #expect(throws: GuardedTextFile.Refusal.self) {
             try file.mutate(path.path) { _ in "clobbered\n" }
         }
+        // MEMORY.md's Scarf lock is `.MEMORY.md.scarf-lock`; `MEMORY.md.lock`
+        // is Hermes's persistent flock file, which Scarf takes but never
+        // deletes (S14-F5). Both must be free again after the refusal.
         #expect(
-            !FileManager.default.fileExists(atPath: path.path + ".lock"),
+            !FileManager.default.fileExists(atPath: scratch.appendingPathComponent(".MEMORY.md.scarf-lock").path),
             "a refusal must not leave the lock file behind"
         )
+        let fd = open(path.path + ".lock", O_RDWR)
+        defer { if fd >= 0 { close(fd) } }
+        #expect(fd < 0 || flock(fd, LOCK_EX | LOCK_NB) == 0, "a refusal must release Hermes's flock")
     }
 
     /// An UNSERIALIZED `GuardedTextFile` (the transport-only initializer, used
