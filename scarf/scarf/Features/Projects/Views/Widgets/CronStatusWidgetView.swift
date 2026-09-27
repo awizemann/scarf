@@ -116,16 +116,28 @@ struct CronStatusWidgetView: View {
         }
     }
 
+    /// Badge text and tint for a job, from the SAME effective state the
+    /// Cron tab shows (`HermesCronJob.effectiveState`, ported from Hermes's
+    /// `effective_job_state`, `cron/jobs.py:527-540` @ v2026.9.24).
+    ///
+    /// It used to test raw `enabled` first and print "DISABLED" for any
+    /// disabled job. Hermes never reports that state: a pause writes
+    /// `enabled: false, state: "paused"` (`:2073-2074`) and a finished
+    /// one-shot writes `enabled: false, state: "completed"` (`:1563`), so
+    /// every paused job and every finished one-shot read as "DISABLED".
+    static func badge(for job: HermesCronJob) -> (label: String, status: ListItemStatus) {
+        let state = job.effectiveState
+        switch state.lowercased() {
+        case "running", "active": return (state.uppercased(), .info)
+        case "paused":            return ("PAUSED", .warning)
+        case "completed":         return ("COMPLETED", .done)
+        case "error", "failed":   return (state.uppercased(), .danger)
+        default:                  return (state.uppercased(), .success)
+        }
+    }
+
     private func stateBadge(for job: HermesCronJob) -> some View {
-        let (label, status): (String, ListItemStatus) = {
-            if !job.enabled { return ("DISABLED", .neutral) }
-            switch job.state.lowercased() {
-            case "active", "running":   return (job.state.uppercased(), .info)
-            case "paused":              return ("PAUSED", .warning)
-            case "error", "failed":     return (job.state.uppercased(), .danger)
-            default:                    return (job.state.uppercased(), .success)
-            }
-        }()
+        let (label, status) = Self.badge(for: job)
         return Text(label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 6)
