@@ -714,6 +714,7 @@ final class ChatViewModel {
     /// `acpError` banner so the user sees something happened.
     func alignProviderToModelPrefix(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // We pass the bare model so config.yaml ends up with a
             // clean (provider-prefix-free) model name alongside the
@@ -732,7 +733,8 @@ final class ChatViewModel {
             let ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: mismatch.bareModel,
                 provider: mismatch.prefixProvider,
-                current: svc.loadConfig()
+                current: svc.loadConfig(),
+                capabilities: capabilities
             )
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
@@ -2492,6 +2494,9 @@ final class ChatViewModel {
         let svc = fileService
         let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
             modelConfigPlanApplier ?? { svc.applyModelConfigPlan($0) }
+        // Picks the `model.provider` a local row writes (llama.cpp →
+        // `custom` on v0.21.1+, S06-F2).
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // Both branches route through the shared write plan (T4
             // audit): local picks carry keys `setModelAndProvider` can't
@@ -2510,7 +2515,7 @@ final class ChatViewModel {
             // failed save, surfaced below.
             let ok: Bool
             if let local {
-                let ops = LocalModelConfigPlan.operations(selecting: local)
+                let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
                 ok = !ops.isEmpty && apply(ops)
             } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
                 // Parity with setModelAndProvider's guard: the preflight
@@ -2521,7 +2526,8 @@ final class ChatViewModel {
                 let ops = LocalModelConfigPlan.operations(
                     selectingRemoteModel: model,
                     provider: provider,
-                    current: svc.loadConfig()
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
                 )
                 ok = !ops.isEmpty && apply(ops)
             }

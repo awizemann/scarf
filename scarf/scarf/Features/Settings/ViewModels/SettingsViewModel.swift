@@ -617,23 +617,30 @@ final class SettingsViewModel {
     /// set` calls — blocking SSH round-trips on remote contexts that
     /// would beach-ball the MainActor (same rationale as `load`).
     func applyModelPickerSelection(model: String, provider: String, local: LocalModelSelection?) {
-        let ops: [LocalModelConfigPlan.Operation]
-        if let local {
-            ops = LocalModelConfigPlan.operations(selecting: local)
-        } else {
-            // The HermesConfig overload maps the current local-key
-            // values: a key that's already empty/absent is skipped
-            // rather than re-cleared, so a never-local user keeps the
-            // classic two-op write.
-            ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: model,
-                provider: provider,
-                current: config
-            )
-        }
-        guard !ops.isEmpty else { return }
         let svc = fileService
+        let ctx = context
+        let current = config
         Task.detached { [weak self] in
+            // Capabilities decide which `model.provider` a local row writes
+            // (llama.cpp → `custom` on v0.21.1+, S06-F2). Resolved here, off
+            // the main actor, because a cache miss probes the host (C10).
+            let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
+            let ops: [LocalModelConfigPlan.Operation]
+            if let local {
+                ops = LocalModelConfigPlan.operations(selecting: local, capabilities: caps)
+            } else {
+                // The HermesConfig overload maps the current local-key
+                // values: a key that's already empty/absent is skipped
+                // rather than re-cleared, so a never-local user keeps the
+                // classic two-op write.
+                ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: model,
+                    provider: provider,
+                    current: current,
+                    capabilities: caps
+                )
+            }
+            guard !ops.isEmpty else { return }
             let ok = svc.applyModelConfigPlan(ops)
             let cfg = svc.loadConfig()
             await MainActor.run { [weak self] in

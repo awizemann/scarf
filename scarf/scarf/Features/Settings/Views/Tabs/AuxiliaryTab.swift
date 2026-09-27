@@ -420,13 +420,17 @@ struct AuxiliaryTab: View {
     @ViewBuilder
     private var imageGenRow: some View {
         let value = viewModel.config.imageGenModel
+        // S06-F7: rows later Hermes tags added, each at its own floor.
+        let models = ModelCatalogService.imageGenModels(
+            capabilities: capabilitiesStore?.capabilities ?? .empty
+        )
         Picker("Model", selection: Binding(
             get: { value },
             set: { viewModel.setImageGenModel($0) }
         )) {
             Text("Hermes default").tag("")
             Divider()
-            ForEach(ModelCatalogService.imageGenModels) { model in
+            ForEach(models) { model in
                 Text(model.display).tag(model.modelID)
             }
             // User has set a custom value not in the curated list;
@@ -434,7 +438,7 @@ struct AuxiliaryTab: View {
             // actual selection rather than collapsing to "Hermes
             // default".
             if !value.isEmpty
-                && !ModelCatalogService.imageGenModels.contains(where: { $0.modelID == value }) {
+                && !models.contains(where: { $0.modelID == value }) {
                 Divider()
                 Text(value + "  (custom)").tag(value)
             }

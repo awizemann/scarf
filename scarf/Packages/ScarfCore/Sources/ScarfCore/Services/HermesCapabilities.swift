@@ -2000,6 +2000,23 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// ``HermesReasoningEffort/configSetValue(for:capabilities:)``.
     public var configSetCoercesNoneToNull: Bool { isV0211OrLater }
 
+    /// `model.provider: llamacpp` IGNORES `model.base_url`. From v2026.9.7
+    /// the llama.cpp aliases resolve to Hermes's managed local runtime
+    /// whenever no explicit base_url is passed in
+    /// (`hermes_cli/runtime_provider_custom.py:461` @ v2026.9.7, `:537-540`
+    /// @ v2026.9.24 → `_resolve_llamacpp_runtime` `:427-452`), which uses the
+    /// supervised server or a probe of `127.0.0.1:8080` only, and otherwise
+    /// raises "The local model server is turned off…". Config's
+    /// `model.base_url` never counts as explicit there (ACP passes none,
+    /// `acp_adapter/session.py:502-503`). Absent at v2026.8.31, where
+    /// llamacpp followed the generic custom path and honoured base_url.
+    ///
+    /// Reproduced at v2026.9.24 against a scratch HERMES_HOME:
+    /// `provider: llamacpp` + `base_url: http://127.0.0.1:8081/v1` raises,
+    /// while `provider: custom` with the same base_url resolves to it. See
+    /// ``LocalModelProvider/configProviderID(capabilities:)``.
+    public var llamaCppProviderIgnoresBaseURL: Bool { isV0211OrLater }
+
     /// `hermes cron create --paused [--paused-reason <text>]` — create a job
     /// already paused, instead of create-then-`cron pause` (v0.21.1+,
     /// `hermes_cli/subcommands/cron.py:84,86`). Prints `Created PAUSED — …`
