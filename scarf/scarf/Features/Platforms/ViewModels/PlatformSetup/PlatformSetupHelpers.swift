@@ -93,6 +93,15 @@ enum PlatformSetupHelpers {
             // the floor would report "Saved" over a save that did not happen.
             if !envService.unset(key) { envOK = false }
         }
+        // Stop here when `.env` did not take. The config half of a form save
+        // is written FOR the env half — `platforms.whatsapp_cloud.enabled:
+        // true` next to credentials that never landed starts an adapter with
+        // no credentials, and a blanked config copy would lose the only one
+        // left. Nothing in config.yaml changes, so the user retries one
+        // whole save rather than repairing half of one.
+        if !envOK {
+            return .failure(String(localized: "Failed to write .env — nothing was changed in config.yaml"))
+        }
 
         // `t-6fa3fc84`. A `_SHARED_KEYS` member does NOT reach the adapter
         // from whichever section the form happens to spell: `platform_section`
@@ -137,7 +146,6 @@ enum PlatformSetupHelpers {
         // A partial save is a FAILURE for outcome purposes: some of what the
         // user typed is not in the file, and a green checkmark over that is
         // the exact misreport GW-F4 exists to end.
-        if !envOK { return .failure(String(localized: "Failed to write .env")) }
         if !configFailures.isEmpty {
             return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
         }
