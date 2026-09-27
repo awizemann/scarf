@@ -172,4 +172,54 @@ import Foundation
         )
         #expect(ProjectContextBlock.renderManagedBlock(input) == ProjectContextBlock.renderManagedBlock(input))
     }
+
+    // MARK: - S11-F5: the block teaches the `[proj:<id>]` cron name prefix
+
+    /// Scarf attributes a cron job to a project only by the `[proj:<id>]`
+    /// name prefix. The block now tells the agent to use it, and a job
+    /// named that way is exactly one the block's own cron list attributes.
+    @Test func cronInstructionCarriesTheProjectNamePrefix() throws {
+        let id = UUID()
+        let prefix = "[proj:\(id.uuidString)]"
+        let block = ProjectContextBlock.renderManagedBlock(.init(
+            projectName: "Tracker", projectPath: "/srv/tracker", configFieldsLine: "(none)", projectId: id
+        ))
+        #expect(block.contains("--name \"\(prefix) <short label>\""))
+        #expect(block.contains("--workdir /srv/tracker"))
+        // Positional schedule + prompt, as `hermes cron create` takes them.
+        #expect(block.contains("\"<schedule>\" \"<prompt>\""))
+
+        // Round trip: a job named as instructed is attributed to the project.
+        let schedule = CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *")
+        let followed = HermesCronJob(id: "a", name: "\(prefix) refresh data", prompt: "p", model: nil,
+                                     schedule: schedule, enabled: true, state: "scheduled")
+        let unprefixed = HermesCronJob(id: "b", name: "refresh data", prompt: "p", model: nil,
+                                       schedule: schedule, enabled: true, state: "scheduled")
+        let lines = ProjectContextBlock.cronLines(from: [followed, unprefixed], projectId: id, templateId: nil)
+        #expect(lines.count == 1)
+        #expect(lines.first?.contains("refresh data") == true)
+    }
+
+    /// Without an id (a caller that has none) the line is the old one.
+    @Test func cronInstructionWithoutAnIdIsUnchanged() {
+        let block = ProjectContextBlock.renderManagedBlock(.init(
+            projectName: "Tracker", projectPath: "/srv/tracker", configFieldsLine: "(none)"
+        ))
+        #expect(block.contains("`hermes cron create --workdir /srv/tracker …`"))
+        #expect(!block.contains("[proj:"))
+    }
+
+    /// The shared reader passes the record's id, so both apps' blocks
+    /// carry the prefix.
+    @Test func storeInputCarriesTheProjectId() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-f5-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let ctx = ServerContext.local(home: home)
+        let dir = home.appendingPathComponent("proj").path
+        try FileManager.default.createDirectory(atPath: dir + "/.scarf", withIntermediateDirectories: true)
+        let project = ScarfProject(name: "P", rootPath: dir)
+        let block = ProjectStore(context: ctx).renderAgentContextBlock(for: project)
+        #expect(block.contains("[proj:\(project.id.uuidString)] <short label>"))
+    }
 }

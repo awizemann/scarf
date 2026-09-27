@@ -275,6 +275,10 @@ public enum ProjectContextBlock {
         public let slashCommandNames: [String]
         public let kanbanTenant: String?
         public let lockFilePresent: Bool
+        /// The project's stable id — the key of the `[proj:<id>]` cron name
+        /// prefix every Scarf project surface attributes jobs by. `nil`
+        /// keeps the old prefix-less cron line.
+        public let projectId: UUID?
 
         public init(
             projectName: String,
@@ -285,8 +289,10 @@ public enum ProjectContextBlock {
             cronLines: [String] = [],
             slashCommandNames: [String] = [],
             kanbanTenant: String? = nil,
-            lockFilePresent: Bool = false
+            lockFilePresent: Bool = false,
+            projectId: UUID? = nil
         ) {
+            self.projectId = projectId
             self.projectName = projectName
             self.projectPath = projectPath
             self.templateId = templateId
@@ -359,7 +365,17 @@ public enum ProjectContextBlock {
         lines.append("- **Kanban board.** Hermes Kanban tasks created from this chat should pass `--tenant <kanban tenant>` (above) so they land on this project's per-project board, not the global \"Untagged\" pile. Tasks are also auto-stamped with the ACP `session_id` of this chat, so the project's Kanban tab can scope to \"tasks from THIS chat\" with a single toggle.")
         lines.append("- **Per-project model preset.** The user may have bound a `(model, provider)` preset to this project — `session/set_model` already applied it at session boot. Mention the active model only when relevant; the user picks presets via Scarf's right-click → \"Chat Settings…\".")
         lines.append("- **Typed configuration schema.** `<project>/.scarf/manifest.json` may declare `config.schema` with typed fields. Secret-typed values live in the macOS Keychain and are referenced from `config.json` via opaque URI handles, not stored inline. NEVER write a secret value to disk yourself — route Keychain reads through `ProjectConfigService.resolveSecret(_:for:)`.")
-        lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --workdir \(projectPath) …` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project.")
+        if let projectId = input.projectId {
+            // Scarf attributes a job to a project ONLY by this name prefix
+            // (`cronLines` above, the cockpit's cron panel, archive's
+            // pause). Hermes stores `--name` as given (`cron/jobs.py:1804,1811`
+            // @ v2026.9.24), so a job the agent names any other way runs
+            // but never shows up as this project's.
+            let prefix = "[proj:\(projectId.uuidString)]"
+            lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --name \"\(prefix) <short label>\" --workdir \(projectPath) \"<schedule>\" \"<prompt>\"` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project. Always start the name with `\(prefix) ` exactly: Scarf attributes cron jobs to this project only by that prefix (the list above, the project's cron panel, pausing on archive), so a job without it is invisible here.")
+        } else {
+            lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --workdir \(projectPath) …` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project.")
+        }
         lines.append("- **Skills.** Hermes loads SKILL.md files from `~/.hermes/skills/`. Scarf bundles `scarf-template-author` (v2+) for project authoring, under the `scarf/` category folder; users can install more via `hermes skills install <identifier-or-https-url>` or by dropping a directory under `~/.hermes/skills/`.")
         lines.append("- **Export to template.** When the dashboard, optional schema, and AGENTS.md are stable, the user can right-click the project in Scarf → \"Export as Template…\" to produce a shareable `.scarftemplate` bundle. Authoring guidance: `~/.hermes/skills/scarf/scarf-template-author/SKILL.md`.")
         lines.append("")
