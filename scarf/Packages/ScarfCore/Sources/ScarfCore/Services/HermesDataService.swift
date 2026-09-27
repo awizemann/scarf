@@ -1733,6 +1733,69 @@ public actor HermesDataService {
         }
     }
 
+    /// A session opened by id from outside the list (a search hit), as
+    /// the detail view should show it.
+    public struct SessionDetailLookup: Sendable {
+        /// The row to show: the hit's own session, or — when the hit lies
+        /// in a rotated compression chain — the chain projected onto its
+        /// tip with the whole lineage, as the list would show it.
+        public let session: HermesSession
+        /// `archived = 1` on the conversation's row (v0.16+ hosts).
+        public let isArchived: Bool
+        /// Whether the session list's predicate admits the conversation
+        /// (false for archived, hidden, and delegate-subagent rows).
+        public let isListed: Bool
+    }
+
+    /// Resolve a session by id for display, whether or not the session
+    /// list shows it (R14-1). Search covers every row — Scarf does not
+    /// drop archived rows the way `hermes sessions search` does by default
+    /// (hermes_state_search.py:137-162 @ v2026.9.24) — so a hit can land on
+    /// an archived session, an orphaned or live delegate subagent, a
+    /// middle segment of a compression chain, or a conversation older than
+    /// the loaded list. Clicking such a hit used to do nothing.
+    ///
+    /// A hit in a compression chain resolves to the whole chain: parents
+    /// are followed while they ended by compression (bounded, cycle-safe,
+    /// like `acp_adapter/provenance.py`), then the chain is walked to its
+    /// tip with the list's own step query. Nil when the id is not in
+    /// state.db.
+    public func fetchSessionForDetail(id: String) async -> SessionDetailLookup? {
+        guard let hit = await fetchSession(id: id) else { return nil }
+        // Walk up to the conversation's root through compression parents.
+        var root = hit
+        var seen: Set<String> = [hit.id]
+        for _ in 0..<100 {
+            guard let parentId = root.parentSessionId, !parentId.isEmpty, !seen.contains(parentId),
+                  let parent = await fetchSession(id: parentId),
+                  parent.endReason == "compression" else { break }
+            seen.insert(parentId)
+            root = parent
+        }
+        var shown = hit
+        if hasListableChildSupport, root.endReason == "compression",
+           let chain = try? await compressionChains(for: [root.id])[root.id],
+           let tipId = chain.last,
+           let tip = await fetchSession(id: tipId) {
+            SessionLineageIndex.shared.record(server: context.id, lineage: chain)
+            shown = root.projectedOntoCompressionTip(tip, lineage: chain)
+        }
+        let idColumn = hasListableChildSupport ? "s.id" : "id"
+        var isListed = false
+        if let rows = try? await backend.query(
+            "SELECT COUNT(*) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) = ?",
+            params: [.text(root.id)]
+        ) {
+            isListed = (rows.first?.int(at: 0) ?? 0) > 0
+        }
+        var isArchived = false
+        if hasArchivedColumn,
+           let rows = try? await backend.query("SELECT archived FROM sessions WHERE id = ?", params: [.text(root.id)]) {
+            isArchived = (rows.first?.int(at: 0) ?? 0) != 0
+        }
+        return SessionDetailLookup(session: shown, isArchived: isArchived, isListed: isListed)
+    }
+
     // MARK: - Canonical Bot Chat resolution (Bot Mode)
 
     /// A resolved canonical Bot Chat. Two ids, because they are two

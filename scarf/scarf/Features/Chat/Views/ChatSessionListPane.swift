@@ -120,13 +120,19 @@ struct ChatSessionListPane: View {
         ) {
             Button("Delete", role: .destructive) {
                 if let target = deleteTarget {
-                    Task { await chatViewModel.deleteSession(target.id) }
+                    Task { await chatViewModel.deleteConversation(target) }
                 }
                 deleteTarget = nil
             }
             Button("Cancel", role: .cancel) { deleteTarget = nil }
         } message: {
-            Text("This permanently deletes the session and all its messages.")
+            // A rotated compression chain is one row but several session
+            // rows; the delete removes every one (R14-3).
+            if let target = deleteTarget, target.lineageIds.count > 1 {
+                Text("This conversation was compressed into \(target.lineageIds.count) linked segments. Deleting it permanently deletes all \(target.lineageIds.count) segments and their messages.")
+            } else {
+                Text("This permanently deletes the session and all its messages.")
+            }
         }
     }
 

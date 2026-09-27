@@ -2942,15 +2942,38 @@ final class ChatViewModel {
     /// one is decided AFTER it returns, so a switch made while it ran is
     /// respected.
     func deleteSession(_ sessionId: String) async {
+        await deleteSessionIds([sessionId])
+    }
+
+    /// Delete a sidebar row's whole conversation: every segment of a
+    /// rotated compression chain, tip first (R14-3, `SessionChainDelete`).
+    /// Deleting only the tip let Hermes orphan the earlier segments and
+    /// the conversation reappeared under the previous one.
+    func deleteConversation(_ session: HermesSession) async {
+        await deleteSessionIds(SessionChainDelete.deletionOrder(lineage: session.lineageIds, rowId: session.id))
+    }
+
+    private func deleteSessionIds(_ ids: [String]) async {
         let runner = sessionDeleteRunner
         let ctx = context
-        let exitCode = await OffPool.run { runner(ctx, sessionId) }
-        guard exitCode == 0 else { return }
-        recentSessions.removeAll { $0.id == sessionId }
-        sessionPreviews.removeValue(forKey: sessionId)
-        sessionProjectNames.removeValue(forKey: sessionId)
-        if richChatViewModel.sessionId == sessionId {
+        let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
+        guard !outcome.deleted.isEmpty else { return }
+        let deleted = Set(outcome.deleted)
+        recentSessions.removeAll { deleted.contains($0.id) }
+        for id in deleted {
+            sessionPreviews.removeValue(forKey: id)
+            sessionProjectNames.removeValue(forKey: id)
+        }
+        if richChatViewModel.transcriptSessionIds.contains(where: deleted.contains) {
             tearDownDeletedActiveSession()
+        }
+        if outcome.failed != nil {
+            // Some segments went, the rest are still there (and chained):
+            // the list will show the conversation again, shorter. Say so.
+            richChatViewModel.transientHint = String(
+                localized: "Deleted \(outcome.deleted.count) of \(ids.count) linked segments — the rest couldn't be deleted."
+            )
+            scheduleHintClear()
         }
         // Audit fix (t-5f1d9008 wave 1): this sidebar is ALSO an
         // independent delete surface for every OTHER window on the same
@@ -2958,19 +2981,21 @@ final class ChatViewModel {
         // session, and pre-fix a sidebar delete here orphaned the other
         // window's `hermes acp` client exactly the way the Sessions tab
         // did. Broadcast the same signal `SessionsViewModel.confirmDelete`
-        // posts (success only — the runner guard above already returned
-        // on failure). Posted AFTER the local teardown so this window's
-        // own observer no-ops on its `richChatViewModel.sessionId` guard
-        // regardless of whether NotificationCenter delivers the block
-        // synchronously or via a queue hop.
-        NotificationCenter.default.post(
-            name: SessionDeletedSignal.name,
-            object: nil,
-            userInfo: [
-                SessionDeletedSignal.sessionIdKey: sessionId,
-                SessionDeletedSignal.contextKey: context,
-            ]
-        )
+        // posts, once per deleted id (success only). Posted AFTER the
+        // local teardown so this window's own observer no-ops on its
+        // `transcriptCovers` guard regardless of whether
+        // NotificationCenter delivers the block synchronously or via a
+        // queue hop.
+        for id in outcome.deleted {
+            NotificationCenter.default.post(
+                name: SessionDeletedSignal.name,
+                object: nil,
+                userInfo: [
+                    SessionDeletedSignal.sessionIdKey: id,
+                    SessionDeletedSignal.contextKey: context,
+                ]
+            )
+        }
     }
 
     /// Shared teardown for "the ACTIVE (attached) session was just
@@ -3039,7 +3064,8 @@ final class ChatViewModel {
     ) {
         guard deletedContext.id == context.id,
               deletedContext.paths.home == context.paths.home,
-              richChatViewModel.sessionId == sessionId else { return }
+              richChatViewModel.sessionId != nil,
+              richChatViewModel.transcriptCovers(sessionId) else { return }
         // Same cache purge deleteSession does for the row it removed.
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)

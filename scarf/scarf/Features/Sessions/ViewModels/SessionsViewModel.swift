@@ -129,7 +129,7 @@ final class SessionsViewModel {
     /// contract (t-5f1d9008) doesn't spawn a real CLI process. Same
     /// seam shape as `ChatViewModel.sessionDeleteRunner` (t-01bd55ec).
     @ObservationIgnored
-    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
         ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
     }
 
@@ -189,6 +189,14 @@ final class SessionsViewModel {
     var renameError: String?
     var showDeleteConfirmation = false
     var deleteSessionId: String?
+    /// Every segment of the row being deleted, root first, when it is a
+    /// rotated compression chain (`HermesSession.lineageIds`); empty for
+    /// an ordinary session. `confirmDelete` deletes all of them (R14-3).
+    var deleteLineageIds: [String] = []
+
+    /// How many session rows the pending delete removes — the confirmation
+    /// dialog names it when a chain has more than one.
+    var deleteSegmentCount: Int { max(deleteLineageIds.count, 1) }
     /// Why the last delete attempt failed; `nil` when it succeeded or none
     /// has been made. Rendered as a banner in the page header — the
     /// confirmation dialog is already gone by the time the CLI answers,
@@ -437,7 +445,12 @@ final class SessionsViewModel {
         await dataService.fetchReasoningContent(for: messageId)
     }
 
+    /// Shown in the detail sheet when the open session came from a search
+    /// hit the list doesn't include (see `selectSessionById`).
+    var selectedSessionListingNote: String?
+
     func selectSession(_ session: HermesSession) async {
+        selectedSessionListingNote = nil
         selectedSession = session
         // A rotated compression chain spans several session rows; show the
         // whole conversation, as Hermes does, not just the tip's segment.
@@ -457,7 +470,28 @@ final class SessionsViewModel {
         // chain, while the list shows the chain under its tip id.
         if let session = sessions.first(where: { $0.covers(id) }) {
             await selectSession(session)
+            return
         }
+        // Not in the loaded list: an archived session, a delegate
+        // subagent, a hidden row, or a conversation older than the 500
+        // rows loaded. Search finds all of them, so open the hit directly
+        // rather than doing nothing (R14-1), and say why the list doesn't
+        // show it.
+        guard let lookup = await dataService.fetchSessionForDetail(id: id) else { return }
+        await selectSession(lookup.session)
+        selectedSessionListingNote = Self.listingNote(isArchived: lookup.isArchived, isListed: lookup.isListed)
+    }
+
+    /// Why a session opened from a search hit is not in the list; nil when
+    /// the list would show it (it was just older than the rows loaded).
+    nonisolated static func listingNote(isArchived: Bool, isListed: Bool) -> String? {
+        if isArchived {
+            return String(localized: "Archived — session lists don't show this session.")
+        }
+        if !isListed {
+            return String(localized: "Not in the session list — this is a subagent run or a hidden session.")
+        }
+        return nil
     }
 
     func search() async {
@@ -605,6 +639,7 @@ final class SessionsViewModel {
 
     func beginDelete(_ session: HermesSession) {
         deleteSessionId = session.id
+        deleteLineageIds = session.lineageIds.count > 1 ? session.lineageIds : []
         showDeleteConfirmation = true
     }
 
@@ -624,39 +659,48 @@ final class SessionsViewModel {
         isDeleting = true
         let runner = sessionDeleteRunner
         let ctx = context
+        // A compression chain is one row but several session rows; delete
+        // them all, tip first (`SessionChainDelete`, R14-3).
+        let ids = SessionChainDelete.deletionOrder(lineage: deleteLineageIds, rowId: sessionId)
         inFlightDelete = Task { [weak self] in
-            // Detached: the delete CLI is a remote process spawn. The
-            // injected `sessionDeleteRunner` seam is preserved exactly —
+            // Off the main actor: the delete CLI is a remote process spawn
+            // (OffPool, P60 — a blocking wait, not cooperative-pool work).
+            // The injected `sessionDeleteRunner` seam is preserved exactly —
             // tests still stub it, they just await instead of returning.
-            let exitCode = await Task.detached { runner(ctx, sessionId) }.value
+            let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
             guard let self else { return }
             self.isDeleting = false
-            guard exitCode == 0 else {
+            let deleted = Set(outcome.deleted)
+            if !deleted.isEmpty {
+                self.sessions.removeAll { deleted.contains($0.id) }
+                if let selected = self.selectedSession?.id, deleted.contains(selected) {
+                    self.selectedSession = nil
+                    self.messages = []
+                }
+                self.computeStats()
+                for id in outcome.deleted {
+                    NotificationCenter.default.post(
+                        name: SessionDeletedSignal.name,
+                        object: nil,
+                        userInfo: [
+                            SessionDeletedSignal.sessionIdKey: id,
+                            SessionDeletedSignal.contextKey: ctx,
+                        ]
+                    )
+                }
+            }
+            if let failed = outcome.failed {
                 // Pre-fix this branch was an implicit no-op: the dialog
                 // dismissed, the row stayed, and nothing said why. The row
                 // staying put IS the correct outcome for a failed delete —
                 // it's the silence that made it read as a UI glitch.
-                self.deleteError = "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(exitCode))."
-                self.showDeleteConfirmation = false
-                self.deleteSessionId = nil
-                return
+                self.deleteError = outcome.deleted.isEmpty
+                    ? "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
+                    : "Deleted \(outcome.deleted.count) of \(ids.count) linked segments on \(ctx.displayName); the rest couldn't be deleted (hermes sessions delete exited \(failed.exitCode))."
             }
-            self.sessions.removeAll { $0.id == sessionId }
-            if self.selectedSession?.id == sessionId {
-                self.selectedSession = nil
-                self.messages = []
-            }
-            self.computeStats()
-            NotificationCenter.default.post(
-                name: SessionDeletedSignal.name,
-                object: nil,
-                userInfo: [
-                    SessionDeletedSignal.sessionIdKey: sessionId,
-                    SessionDeletedSignal.contextKey: ctx,
-                ]
-            )
             self.showDeleteConfirmation = false
             self.deleteSessionId = nil
+            self.deleteLineageIds = []
         }
     }
 
