@@ -85,6 +85,14 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
     }
 
+    /// Below v0.18.0 `cron run` only marks the job due, so Run Now follows
+    /// it with a `cron tick`. False until the version probe answers: the
+    /// tick fires every due job, so an unknown host doesn't get one.
+    private var needsCronRunNowTick: Bool {
+        guard let caps = capabilitiesStore?.capabilities, caps.detected else { return false }
+        return !caps.hasCronRunSynchronous
+    }
+
     /// v0.20.6 — `--deliver bot-chat[:profile]`. Placeholder/hint only;
     /// the strip happens in `supportsCronDeliver`.
     private var hasCronBotChatDelivery: Bool {
@@ -165,6 +173,7 @@ struct CronView: View {
             viewModel.isV021OrLater = hasCronRecoverableErrorResume
             viewModel.isV0181OrLater = hasCronPastOneShotResumeRefusal
             viewModel.isV0211OrLater = isV0211OrLater
+            viewModel.hostNeedsRunNowTick = needsCronRunNowTick
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
             // so they can't be deferred behind a disclosure the way RUN
@@ -187,6 +196,7 @@ struct CronView: View {
         .onChange(of: hasCronRecoverableErrorResume) { _, newValue in viewModel.isV021OrLater = newValue }
         .onChange(of: hasCronPastOneShotResumeRefusal) { _, newValue in viewModel.isV0181OrLater = newValue }
         .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
+        .onChange(of: needsCronRunNowTick) { _, newValue in viewModel.hostNeedsRunNowTick = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
@@ -617,7 +627,7 @@ struct CronView: View {
                         // to see change.
                         .accessibilityIdentifier("cron.detail.state")
                 }
-                Text(CronScheduleFormatter.humanReadable(from: job.schedule))
+                Text(viewModel.schedulePhrase(for: job))
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
@@ -737,7 +747,7 @@ struct CronView: View {
     private func statsGrid(_ job: HermesCronJob) -> some View {
         HStack(spacing: ScarfSpace.s3) {
             statCard(label: "Schedule",
-                     value: CronScheduleFormatter.humanReadable(from: job.schedule),
+                     value: viewModel.schedulePhrase(for: job),
                      sub: job.schedule.expression ?? job.schedule.display)
             statCard(label: "Last run",
                      value: job.lastRunAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "—",

@@ -139,6 +139,29 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
         return keys
     }
 
+    // MARK: - Written provider
+
+    /// The value a save writes to `model.provider` for this row on the
+    /// given host. Equal to ``providerID`` except for llama.cpp on v0.21.1+
+    /// hosts, where it is `custom`.
+    ///
+    /// From v0.21.1 Hermes resolves `provider: llamacpp` to its own managed
+    /// llama.cpp runtime and ignores `model.base_url` (see
+    /// ``HermesCapabilities/llamaCppProviderIgnoresBaseURL``), so the URL the
+    /// user typed was saved but never used, and any server not on
+    /// `127.0.0.1:8080` failed at the first prompt (S06-F2). `custom` is
+    /// what the llama.cpp alias resolved to before that release, and it
+    /// honours `model.base_url`. A re-opened picker then shows the save
+    /// under "Custom endpoint", which is what Hermes runs it as.
+    ///
+    /// Unknown version (`.empty`) keeps writing `llamacpp`, as before.
+    public func configProviderID(capabilities: HermesCapabilities) -> String {
+        if providerID == "llamacpp", capabilities.llamaCppProviderIgnoresBaseURL {
+            return "custom"
+        }
+        return providerID
+    }
+
     // MARK: - api_mode validation
 
     /// The runtime's `_VALID_API_MODES` (runtime_provider.py:255-268),
@@ -280,6 +303,8 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
             blurb: "A llama.cpp server (llama-server) endpoint.",
             // Same story as vLLM: runtime-aliased to custom, no default
             // endpoint. Placeholder is llama-server's conventional port.
+            // On v0.21.1+ the save writes `custom` instead of `llamacpp` —
+            // see `configProviderID(capabilities:)`.
             defaultBaseURL: nil,
             baseURLPlaceholder: "http://127.0.0.1:8080/v1",
             baseURLRequired: true,

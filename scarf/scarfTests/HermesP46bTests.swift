@@ -22,7 +22,11 @@ struct EffortPickerBindingP46bTests {
             let src = try String(
                 contentsOf: P46bRepo.root.appendingPathComponent(relative), encoding: .utf8
             )
+            // R03/S05-F2: the top-level Agent picker binds through
+            // `agentPickerSelection`, which normalises via `pickerSelection`
+            // and additionally maps a stored disable spelling to "none".
             let uses = src.components(separatedBy: "HermesReasoningEffort.pickerSelection(").count - 1
+                + src.components(separatedBy: "HermesReasoningEffort.agentPickerSelection(").count - 1
             // A FLOOR, not an equality: the point is that no picker in the
             // file is left binding a raw stored value, and a later edit that
             // adds another `pickerSelection` call is not a regression.

@@ -408,7 +408,8 @@ public struct ProjectStore: Sendable {
             cronLines: cronLines,
             slashCommandNames: slashNames,
             kanbanTenant: kanbanTenant,
-            lockFilePresent: lockFilePresent
+            lockFilePresent: lockFilePresent,
+            projectId: project.id
         )
     }
 

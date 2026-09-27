@@ -121,6 +121,53 @@ public enum HermesReasoningEffort {
         normalizedLevel(raw).isEmpty ? "" : raw
     }
 
+    /// The string to SEND as `hermes config set agent.reasoning_effort <v>`
+    /// for a picker choice.
+    ///
+    /// From v0.21.1 `config set` turns the word `none` into YAML null for a
+    /// key with no string default (see
+    /// ``HermesCapabilities/configSetCoercesNoneToNull``), and
+    /// `agent.reasoning_effort` has no default at all. Null reads back as
+    /// "use the default" (`parse_reasoning_effort`, `hermes_constants.py:1316`
+    /// @ `v2026.9.24`), so picking "none" left reasoning ON while Scarf said
+    /// "Saved". On those hosts the choice is sent as `false`: `config set`
+    /// coerces it to YAML `False`, which `parse_reasoning_effort` maps to
+    /// `{"enabled": False}` (`:1324-1325`, "reasoning_effort: false must mean
+    /// disabled").
+    ///
+    /// Older hosts get `none` exactly as before: below v0.21.1 it is stored as
+    /// the string and disables at every tag, while `false` would be a bool
+    /// that pre-v0.18.1 `parse_reasoning_effort` short-circuits to "use the
+    /// default" (`if not effort`, `hermes_constants.py:805` @ `v2026.7.1`).
+    ///
+    /// Only for the top-level `agent.reasoning_effort`. The per-task
+    /// `auxiliary.<task>.reasoning_effort` keys default to `""`, so `config
+    /// set` keeps `none` as a string there; the per-model overrides are
+    /// written as YAML directly and never pass through the coercion.
+    public static func configSetValue(for selected: String, capabilities: HermesCapabilities) -> String {
+        guard capabilities.configSetCoercesNoneToNull,
+              normalizedLevel(selected) == "none"
+        else { return selected }
+        return "false"
+    }
+
+    /// Picker selection for the top-level `agent.reasoning_effort`: a stored
+    /// value that DISABLES reasoning on this host shows as the "none" row.
+    ///
+    /// ``configSetValue(for:capabilities:)`` writes `false` for "none" on
+    /// v0.21.1+, so without this the control would re-read `false` and show a
+    /// widened `false` row instead of the "none" the user picked. Any other
+    /// disabling spelling (`disabled`, bare `off`) is the same setting to
+    /// Hermes, so it shows as "none" too. Everything else is
+    /// ``pickerSelection(for:)``.
+    public static func agentPickerSelection(for raw: String, capabilities: HermesCapabilities) -> String {
+        let normalized = normalizedLevel(raw)
+        if normalized != "none", disablingSpellings(capabilities: capabilities).contains(normalized) {
+            return "none"
+        }
+        return pickerSelection(for: raw)
+    }
+
     /// The `agent.reasoning_overrides` rows that result from adding
     /// `pattern` at `effort` to `existing`, applying round-5 decision 16's
     /// EXACT replace-on-add.

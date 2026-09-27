@@ -414,6 +414,11 @@ final class ChatViewModel {
     /// at first prompt with no diagnostic.
     var modelProviderMismatch: ModelPreflight.Mismatch?
 
+    /// `model.provider: llamacpp` with a `model.base_url` a v0.21.1+ host
+    /// ignores (`ModelPreflight.llamaCppBaseURLIgnored`, S06-F2). Drives a
+    /// banner with a one-click switch to `custom`. Never migrated silently.
+    var llamaCppBaseURLIgnored: Bool = false
+
     /// Hermes v0.14 — current `approvals.mode` from config.yaml.
     /// Default `"manual"` matches Hermes's default. Refreshed off
     /// MainActor alongside `modelProviderMismatch`. The chat header
@@ -620,7 +625,9 @@ final class ChatViewModel {
     func refreshCredentialPreflight() {
         let svc = fileService
         Task.detached { [weak self] in
-            let missing = !svc.hasAnyAICredential()
+            // `hasAnyAICredential` reads over the transport and, under a named
+            // profile, may probe the host version — a thread of its own (C10).
+            let missing = await OffPool.run { !svc.hasAnyAICredential() }
             await MainActor.run { [weak self] in
                 self?.missingCredentials = missing
             }
@@ -697,8 +704,10 @@ final class ChatViewModel {
             // its privacy line; `nil` until the config has been read.
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
+            let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
             await MainActor.run { [weak self] in
                 self?.modelProviderMismatch = resolvedMismatch
+                self?.llamaCppBaseURLIgnored = llamaIgnored
                 self?.approvalMode = mode
                 self?.voiceChatModeRaw = voiceChatMode
                 self?.voiceTTSProviderRaw = ttsProvider
@@ -714,6 +723,7 @@ final class ChatViewModel {
     /// `acpError` banner so the user sees something happened.
     func alignProviderToModelPrefix(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // We pass the bare model so config.yaml ends up with a
             // clean (provider-prefix-free) model name alongside the
@@ -732,7 +742,8 @@ final class ChatViewModel {
             let ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: mismatch.bareModel,
                 provider: mismatch.prefixProvider,
-                current: svc.loadConfig()
+                current: svc.loadConfig(),
+                capabilities: capabilities
             )
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
@@ -743,6 +754,42 @@ final class ChatViewModel {
                 Analytics.record(.modelPreflightResult(outcome: .repairedOrFailed(ok)))
                 if ok {
                     self.modelProviderMismatch = nil
+                } else {
+                    self.acpError = "Couldn't write the new provider to config.yaml. Open Settings to fix manually."
+                }
+            }
+        }
+    }
+
+    /// The llama.cpp banner's one-click fix: keep every local key and
+    /// switch `model.provider` to `custom`, which honours `model.base_url`
+    /// (S06-F2). Routed through the local write plan so the provider still
+    /// commits last and any api_key / api_mode already present is kept.
+    /// The plan's clear of `model.context_length` is dropped: this is the
+    /// same server and model, so a user's context override still applies.
+    func switchLlamaCppToCustom() {
+        let svc = fileService
+        let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
+            modelConfigPlanApplier ?? { svc.applyModelConfigPlan($0) }
+        Task { [weak self] in
+            // Config read + up to six `hermes config set` spawns: a thread of
+            // their own, not the cooperative pool (C10).
+            let ok = await OffPool.run {
+                let config = svc.loadConfig()
+                let ops = LocalModelConfigPlan.operations(selecting: LocalModelSelection(
+                    providerID: "custom",
+                    modelID: config.model == "unknown" ? "" : config.model,
+                    baseURL: config.modelBaseURL,
+                    apiKey: config.modelAPIKey,
+                    apiMode: config.modelAPIMode
+                )).filter { $0 != .clear(key: "model.context_length") }
+                return !ops.isEmpty && apply(ops)
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if ok {
+                    self.llamaCppBaseURLIgnored = false
+                    self.refreshConfigDiagnostics()
                 } else {
                     self.acpError = "Couldn't write the new provider to config.yaml. Open Settings to fix manually."
                 }
@@ -2492,6 +2539,9 @@ final class ChatViewModel {
         let svc = fileService
         let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
             modelConfigPlanApplier ?? { svc.applyModelConfigPlan($0) }
+        // Picks the `model.provider` a local row writes (llama.cpp →
+        // `custom` on v0.21.1+, S06-F2).
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // Both branches route through the shared write plan (T4
             // audit): local picks carry keys `setModelAndProvider` can't
@@ -2510,7 +2560,7 @@ final class ChatViewModel {
             // failed save, surfaced below.
             let ok: Bool
             if let local {
-                let ops = LocalModelConfigPlan.operations(selecting: local)
+                let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
                 ok = !ops.isEmpty && apply(ops)
             } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
                 // Parity with setModelAndProvider's guard: the preflight
@@ -2521,7 +2571,8 @@ final class ChatViewModel {
                 let ops = LocalModelConfigPlan.operations(
                     selectingRemoteModel: model,
                     provider: provider,
-                    current: svc.loadConfig()
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
                 )
                 ok = !ops.isEmpty && apply(ops)
             }

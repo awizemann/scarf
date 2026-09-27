@@ -60,15 +60,22 @@ struct AgentTab: View {
                 // `"  "`, which matches neither the sentinel row's `""` tag
                 // nor any level — so the control rendered blank, the exact
                 // failure decision 13 exists to prevent.
-                selection: HermesReasoningEffort.pickerSelection(
-                    for: viewModel.config.reasoningEffort
+                //
+                // S05-F2: a stored disable spelling (`false`, which is what
+                // "none" is written as on v0.21.1+) selects the "none" row.
+                selection: HermesReasoningEffort.agentPickerSelection(
+                    for: viewModel.config.reasoningEffort,
+                    capabilities: capabilities
                 ),
                 options: [""] + HermesReasoningEffort.levels(
                     capabilities: capabilities,
-                    selected: viewModel.config.reasoningEffort
+                    selected: HermesReasoningEffort.agentPickerSelection(
+                        for: viewModel.config.reasoningEffort,
+                        capabilities: capabilities
+                    )
                 ),
                 optionLabel: { $0.isEmpty ? String(localized: "Hermes default") : $0 }
-            ) { viewModel.setReasoningEffort($0) }
+            ) { viewModel.setReasoningEffort($0, capabilities: capabilities) }
             UnsupportedEffortNote(
                 selected: viewModel.config.reasoningEffort,
                 capabilities: capabilities

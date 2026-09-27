@@ -69,8 +69,8 @@ final class NousAuthFlow {
         // C10. The LOCAL branch below needs `HermesFileService
         // .enrichedEnvironment()`, whose backing `enrichedShellEnv` is a
         // `static let` initialised by two `zsh` probes at 5 s + 3 s
-        // (`HermesFileService.swift:2608-2625`, probes at `:2575` and
-        // `:2580`). `scarfApp.swift:89-91` warms it on a detached task at
+        // (`HermesFileService.swift:3079-3096`, probes at `:3083` and
+        // `:3088`). `scarfApp.swift:89-91` warms it on a detached task at
         // launch, but a `static let` initialiser is a `swift_once`: a
         // main-actor reader arriving while the warm-up is still running
         // BLOCKS on it — up to eight seconds of frozen window, on the click
@@ -280,15 +280,26 @@ final class NousAuthFlow {
     }
 
     /// Detect the subscription-required failure and extract the billing URL
-    /// hermes prints (auth.py:3347-3356). Scarf shows a "Subscribe" button
-    /// linking to this URL so the user can resolve the blocker without
-    /// hunting through logs.
+    /// hermes prints. Scarf shows a "Subscribe" button linking to this URL so
+    /// the user can resolve the blocker without hunting through logs.
+    ///
+    /// Keyed on the two lines Hermes prints on that path at EVERY tag —
+    /// `  Subscribe here: {portal}/billing` and "After subscribing, run
+    /// `hermes model` again to finish setup." (`auth.py:4583-4585` @
+    /// v2026.4.30, `hermes_cli/auth_nous.py:1391-1393` @ v2026.9.24). The
+    /// sentence ABOVE them is not stable: the literal "Your Nous Portal
+    /// account does not have an active subscription." was dropped after
+    /// v2026.4.30 for `format_auth_error(exc)`, whose text varies ("No
+    /// active paid subscription found…", `auth.py:448`; "…has no active
+    /// subscription or usable credits…", `nous_account.py:277`). Requiring
+    /// it meant the Subscribe button never appeared on any current host
+    /// (S06-F4).
     nonisolated static func parseSubscriptionRequired(from text: String) -> URL? {
-        guard text.contains("Your Nous Portal account does not have an active subscription") else {
+        guard text.contains("After subscribing, run `hermes model` again to finish setup") else {
             return nil
         }
         guard
-            let raw = firstCapture(in: text, pattern: #"Subscribe here:\s*(https?://\S+)"#),
+            let raw = firstCapture(in: text, pattern: #"^\s*Subscribe here:\s*(https?://\S+)\s*$"#),
             let url = URL(string: raw)
         else {
             return nil

@@ -481,6 +481,11 @@ final class HealthViewModel {
         if !capabilities.hasWebExtractAux {
             auxCandidates.removeAll { $0.0 == "web_extract" }
         }
+        // Same for `auxiliary.session_search.*`, gone from v0.15.0
+        // (`hasSessionSearchAux`, also inverse) — S05-F1.
+        if !capabilities.hasSessionSearchAux {
+            auxCandidates.removeAll { $0.0 == "session_search" }
+        }
         let auxOnNous = auxCandidates.filter { $0.1 == "nous" }.map(\.0)
         if !auxOnNous.isEmpty {
             checks.append(HealthCheck(

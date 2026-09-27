@@ -76,7 +76,7 @@ struct CronListView: View {
             } else {
                 Section {
                     ForEach(vm.jobs) { job in
-                        CronRow(job: job) {
+                        CronRow(job: job, schedulePhrase: vm.schedulePhrase(for: job)) {
                             Task { await vm.toggleEnabled(id: job.id) }
                         } onTap: {
                             editingJob = job
@@ -215,6 +215,22 @@ struct CronListView: View {
 
 private struct CronRow: View {
     let job: HermesCronJob
+
+    /// Named from the job's effective state (Hermes's `effective_job_state`,
+    /// `cron/jobs.py:527-540` @ v2026.9.24). Hermes writes a pause as
+    /// state "paused" and a finished one-shot as "completed"; "DISABLED" is
+    /// only for a disabled record carrying neither.
+    private var disabledBadge: Text {
+        switch job.effectiveState {
+        case "paused": Text("PAUSED")
+        case "completed": Text("COMPLETED")
+        case "error": Text("ERROR")
+        default: Text("DISABLED")
+        }
+    }
+    /// From `IOSCronViewModel.schedulePhrase(for:)`, which names the host's
+    /// zone next to a time of day when it isn't this device's.
+    let schedulePhrase: String
     let onToggle: () -> Void
     let onTap: () -> Void
 
@@ -237,7 +253,7 @@ private struct CronRow: View {
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)
                         if !job.enabled {
-                            Text("DISABLED")
+                            disabledBadge
                                 .font(.caption2)
                                 .fontWeight(.bold)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
@@ -247,7 +263,7 @@ private struct CronRow: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
                     }
-                    Text(CronScheduleFormatter.humanReadable(from: job.schedule))
+                    Text(schedulePhrase)
                         .font(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                     Text("Next: \(CronScheduleFormatter.formatNextRun(iso: job.nextRunAt))")

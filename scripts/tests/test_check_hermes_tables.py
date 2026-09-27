@@ -99,6 +99,45 @@ class LaneFiveFailsClosed(unittest.TestCase):
         self.assertIsNone(cht.parse_models_dev_map(FakeSource({})))
 
 
+class LaneTwoModelNormalizeFailsClosed(unittest.TestCase):
+    """Lane 2's second source, `model_normalize._AGGREGATOR_PROVIDERS`.
+
+    Mirroring only providers.py `is_aggregator` missed `nous` (S06-F1), so the
+    lane now unions this set in — and it must fail closed exactly like the
+    other parsers: a reshaped table is an exit, never a silent empty set.
+    """
+
+    def _parse(self, text):
+        return cht.parse_normalize_aggregators(
+            FakeSource({cht.MODEL_NORMALIZE_PY: text}))
+
+    def test_annotated_frozenset_literal_parses(self):
+        self.assertEqual(
+            self._parse('_AGGREGATOR_PROVIDERS: frozenset[str] = frozenset({\n'
+                        '    "openrouter", "nous", "ai-gateway", "kilocode"})\n'),
+            {"openrouter", "nous", "ai-gateway", "kilocode"})
+
+    def test_plain_assignment_and_set_literal_parse(self):
+        # v2026.9.24's models_catalog_static.py spells a sibling set this way.
+        self.assertEqual(self._parse('_AGGREGATOR_PROVIDERS = {"nous"}\n'), {"nous"})
+
+    def test_absent_file_is_a_skip_not_an_error(self):
+        self.assertIsNone(cht.parse_normalize_aggregators(FakeSource({})))
+
+    def test_renamed_table_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self._parse('_AGGREGATORS: frozenset = frozenset({"nous"})\n')
+        self.assertIn("not a literal set", str(ctx.exception.code))
+
+    def test_nonliteral_set_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit):
+            self._parse('_AGGREGATOR_PROVIDERS = frozenset(_BASE | {"nous"})\n')
+
+    def test_empty_set_is_not_a_silent_empty(self):
+        with self.assertRaises(SystemExit):
+            self._parse('_AGGREGATOR_PROVIDERS = frozenset()\n')
+
+
 class AliasesShapeFailsClosed(unittest.TestCase):
     """Lane 1's `ALIASES` arm has the hole lane 5's was hardened against.
 
@@ -315,6 +354,36 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertIn("lanes=5/5", text)
         self.assertIn(f"tag {cht.HERMES_TARGET_TAG}", text)
+
+
+class LaneTwoCatchesAMissingNous(unittest.TestCase):
+    """End to end at the target tag: a Swift set without `nous` must FAIL.
+
+    `nous` is only in `model_normalize._AGGREGATOR_PROVIDERS`, never marked
+    `is_aggregator` in providers.py — so this is the case the old lane
+    passed while every Nous user saw a false mismatch banner (S06-F1).
+    """
+
+    def setUp(self):
+        _require_target_checkout(self)
+        real = cht.PREFLIGHT_SWIFT
+        text = open(real).read()
+        self.assertIn('"nous",', text)
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text.replace('"nous",', "", 1))
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.PREFLIGHT_SWIFT = tmp.name
+        self.addCleanup(setattr, cht, "PREFLIGHT_SWIFT", real)
+
+    def test_missing_nous_fails_the_aggregator_lane(self):
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+        self.assertEqual(ctx.exception.code, 1, out.getvalue())
+        self.assertIn("[aggregators] Hermes aggregators missing", out.getvalue())
+        self.assertIn("nous", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -249,8 +249,14 @@ struct SettingsView: View {
                 // Hermes asks it (`str(effort).strip()`) — a whitespace-only
                 // value is the absent key here too, and read raw it rendered
                 // as a blank value beside the label.
-                value: HermesReasoningEffort.pickerSelection(for: vm.config.reasoningEffort).isEmpty
-                    ? String(localized: "Hermes default") : vm.config.reasoningEffort
+                // S05-F2: a stored disable spelling (`false`, which the Mac
+                // writes for "none" on v0.21.1+) reads as "none" here too.
+                value: {
+                    let shown = HermesReasoningEffort.agentPickerSelection(
+                        for: vm.config.reasoningEffort, capabilities: caps
+                    )
+                    return shown.isEmpty ? String(localized: "Hermes default") : shown
+                }()
             )
             // Round-5 decision 17. The Mac renders this beside its picker
             // (`UnsupportedEffortNote`, `SettingsComponents.swift:395-415`);

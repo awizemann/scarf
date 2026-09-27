@@ -52,11 +52,25 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
     public let auth: String?
     public let env: [String: String]
     public let headers: [String: String]
-    public let timeout: Int?
-    public let connectTimeout: Int?
+    /// Seconds. `Double` because Hermes stores both keys as floats:
+    /// `mcp add --connect-timeout` is `type=float`
+    /// (`hermes_cli/subcommands/mcp.py:38-40` @ v2026.9.24) and lands in the
+    /// file as `connect_timeout: 45.0`, and the runtime reads both through
+    /// `float(...)` (`tools/mcp_tool_transport.py:359,547`). Reading them as
+    /// `Int` turned `45.0` into "absent", and the editor then deleted the key
+    /// on its next save. Render with ``formatSeconds(_:)``.
+    public let timeout: Double?
+    public let connectTimeout: Double?
     public let enabled: Bool
     public let toolsInclude: [String]
     public let toolsExclude: [String]
+    /// True when `tools.include` holds a list or a string, which makes it a
+    /// WHITELIST even when it is empty: Hermes registers nothing for
+    /// `include: []` (`tools/mcp_tool_registration.py:209-225` @ v2026.9.24,
+    /// the install checklist's "uncheck everything" path writes it). A bare
+    /// `include:` (null) or an absent key is false, and then the exclude
+    /// list applies. `toolsInclude` alone cannot tell `[]` from absent.
+    public let toolsIncludeIsExplicit: Bool
     public let resourcesEnabled: Bool
     public let promptsEnabled: Bool
     public let hasOAuthToken: Bool
@@ -130,8 +144,8 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         auth: String?,
         env: [String: String],
         headers: [String: String],
-        timeout: Int?,
-        connectTimeout: Int?,
+        timeout: Double?,
+        connectTimeout: Double?,
         enabled: Bool,
         toolsInclude: [String],
         toolsExclude: [String],
@@ -145,7 +159,8 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         identityHeader: MCPIdentityHeader? = nil,
         strictRedirectHeaders: Bool? = nil,
         cwd: String? = nil,
-        oauthFlow: String? = nil
+        oauthFlow: String? = nil,
+        toolsIncludeIsExplicit: Bool? = nil
     ) {
         self.name = name
         self.transport = transport
@@ -160,6 +175,8 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         self.enabled = enabled
         self.toolsInclude = toolsInclude
         self.toolsExclude = toolsExclude
+        // Default: a non-empty include list is a whitelist by definition.
+        self.toolsIncludeIsExplicit = toolsIncludeIsExplicit ?? !toolsInclude.isEmpty
         self.resourcesEnabled = resourcesEnabled
         self.promptsEnabled = promptsEnabled
         self.hasOAuthToken = hasOAuthToken
@@ -173,6 +190,26 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         self.oauthFlow = oauthFlow
     }
     public var id: String { name }
+
+    /// A timeout as the user should see it and as Scarf writes it: `45` for
+    /// a whole number (so an Int-valued key round-trips as the same text),
+    /// otherwise Swift's shortest decimal form (`45.5`).
+    public static func formatSeconds(_ value: Double) -> String {
+        if value.isFinite, value == value.rounded(), abs(value) < 1e15 {
+            return String(Int64(value))
+        }
+        return String(value)
+    }
+
+    /// Parses a timeout the way Hermes's `float(...)` would accept it from
+    /// the editor, or `nil` for anything that is not a positive finite
+    /// number. `Double("inf")` succeeds in Swift, but PyYAML reads a bare
+    /// `inf` as a string, so it is refused here rather than written.
+    public static func parseSeconds(_ raw: String) -> Double? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value.isFinite, value > 0 else { return nil }
+        return value
+    }
 
     public var summary: String {
         switch transport {

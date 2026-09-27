@@ -152,6 +152,35 @@ import Foundation
         }
     }
 
+    /// S08-F3: iOS names the host's zone next to a time-of-day phrase,
+    /// read from the same `config.yaml` key Hermes reads (`timezone`,
+    /// `hermes_time.py:83-106` @ v2026.9.24).
+    @Test @MainActor func cronSchedulePhraseNamesTheConfiguredHostZone() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            try "model:\n  default: m\ntimezone: Pacific/Kiritimati\n".write(
+                to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.scheduleZoneNote == "Pacific/Kiritimati")
+            let job = HermesCronJob(id: "j1", name: "N", prompt: "p", model: nil,
+                                    schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
+                                    enabled: true, state: "scheduled")
+            #expect(vm.schedulePhrase(for: job) == "Daily at 9 AM (Pacific/Kiritimati)")
+        }
+    }
+
+    /// No `timezone` key on a remote host: Hermes uses the server's local
+    /// time, which the phone can't see.
+    @Test @MainActor func cronSchedulePhraseSaysHostTimeWithoutAConfiguredZone() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.scheduleZoneNote == "host time")
+        }
+    }
+
     @Test @MainActor func cronLoadsAndSortsJobs() async throws {
         try await withLocalTransportFactory { [self] in
             let (ctx, home) = try makeFakeHermes()
