@@ -215,14 +215,16 @@ import ScarfCore
         )
         try Data("on disk\n".utf8).write(to: URL(fileURLWithPath: path))
 
-        // Baseline matches → saved, and the lock file is gone afterwards.
+        // Baseline matches → saved, and Scarf's lock file is gone afterwards.
+        // (`MEMORY.md.lock` is Hermes's persistent flock file, which the save
+        // takes and leaves in place — S14-F5 — so it is not the one checked.)
         #expect(
             try service.saveMemoryFile(
                 "edited\n", target: .memory, ifMatches: "on disk\n"
             ) == .saved
         )
         #expect(Self.text(path) == "edited\n")
-        #expect(!FileManager.default.fileExists(atPath: path + ".lock"))
+        #expect(!FileManager.default.fileExists(atPath: ctx.paths.memoriesDir + "/.MEMORY.md.scarf-lock"))
 
         // Baseline is stale → CONFLICT, and nothing is published. The old
         // shape could not tell this from a failed read; GW-F2 fixed that, and

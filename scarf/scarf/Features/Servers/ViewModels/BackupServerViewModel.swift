@@ -63,7 +63,9 @@ final class BackupServerViewModel {
             includeAuth: includeAuth,
             includeMcpTokens: includeMcpTokens,
             includeLogs: includeLogs,
-            checkpointedWAL: summary.sqliteAvailable
+            // Scarf never checkpoints (writes) state.db (charter C3); the
+            // service snapshots it read-only instead.
+            checkpointedWAL: false
         )
         phase = .running(.preflight)
         // Two-step capture: the outer task gets [weak self] so a sheet

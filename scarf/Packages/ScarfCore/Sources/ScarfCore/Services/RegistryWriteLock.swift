@@ -145,6 +145,16 @@ public struct RegistryWriteLock: Sendable {
 
     private let lockURL: URL
 
+    /// Hermes's OWN lock file for the target, when the target is a Hermes
+    /// memory file on this Mac. Held with `flock(LOCK_EX)` for the length
+    /// of the outermost hold, alongside Scarf's lock, and never created
+    /// exclusively or deleted: that is Hermes's protocol for it
+    /// (`tools/memory_tool_store.py:168-205` @ v2026.9.24), and every
+    /// Hermes memory write holds it because a bare write from an earlier
+    /// snapshot drops concurrent entries (`:514-517`). `nil` for every other
+    /// file, and for a remote target (a local `flock` cannot reach it).
+    private let hermesFlockURL: URL?
+
     /// How long a lock file may go untouched before a contender treats it
     /// as abandoned and removes it.
     public let staleAfter: TimeInterval
@@ -164,26 +174,54 @@ public struct RegistryWriteLock: Sendable {
     public nonisolated init?(context: ServerContext, path: String? = nil) {
         guard let url = Self.lockURL(for: context, path: path) else { return nil }
         self.lockURL = url
+        self.hermesFlockURL = Self.hermesFlockURL(for: context, path: path)
         self.staleAfter = context.isRemote ? Self.remoteStaleAfter : Self.localStaleAfter
         self.acquireTimeout = context.isRemote ? Self.remoteAcquireTimeout : Self.localAcquireTimeout
     }
 
     nonisolated init(
         lockURL: URL,
+        hermesFlockURL: URL? = nil,
         staleAfter: TimeInterval = RegistryWriteLock.localStaleAfter,
         acquireTimeout: TimeInterval = RegistryWriteLock.localAcquireTimeout
     ) {
         self.lockURL = lockURL
+        self.hermesFlockURL = hermesFlockURL
         self.staleAfter = staleAfter
         self.acquireTimeout = acquireTimeout
     }
 
+    /// The memory files whose `<name>.lock` belongs to Hermes. Hermes
+    /// `flock`s that path and never removes it, so Scarf's create-exclusive
+    /// lock must not use it: it used to find Hermes's persistent file, wait,
+    /// break it as "stale" (deleting the inode a Hermes writer might be
+    /// holding) and refuse the save as "Another Scarf process" (S14-F5).
+    static let hermesLockedFileNames: Set<String> = ["MEMORY.md", "USER.md"]
+
+    static func isHermesLockedFile(_ path: String) -> Bool {
+        hermesLockedFileNames.contains((path as NSString).lastPathComponent)
+    }
+
+    /// Hermes's own lock file for `path` when Scarf must take it too (a
+    /// Hermes memory file on this Mac), else `nil`.
+    static func hermesFlockURL(for context: ServerContext, path: String?) -> URL? {
+        guard !context.isRemote, let path, isHermesLockedFile(path) else { return nil }
+        return URL(fileURLWithPath: path + ".lock")
+    }
+
     /// Where this context's lock lives. LOCAL → beside the target file, so
-    /// a second process resolving the same home lands on the same file.
-    /// REMOTE → a local stand-in named for the remote identity.
+    /// a second process resolving the same home lands on the same file
+    /// (for a Hermes memory file, a hidden Scarf-only name, because
+    /// `<name>.lock` is Hermes's). REMOTE → a local stand-in named for the
+    /// remote identity.
     static func lockURL(for context: ServerContext, path: String? = nil) -> URL? {
         let registry = path ?? context.paths.projectsRegistry
         if !context.isRemote {
+            if isHermesLockedFile(registry) {
+                let dir = (registry as NSString).deletingLastPathComponent
+                let name = (registry as NSString).lastPathComponent
+                return URL(fileURLWithPath: dir).appendingPathComponent(".\(name).scarf-lock")
+            }
             return URL(fileURLWithPath: registry + ".lock")
         }
         guard let base = try? FileManager.default.url(
@@ -227,7 +265,7 @@ public struct RegistryWriteLock: Sendable {
     /// frame, move the frame off-main instead — that is the fix this
     /// override was standing in for.
     public nonisolated func withAcquireTimeout(_ seconds: TimeInterval) -> RegistryWriteLock {
-        RegistryWriteLock(lockURL: lockURL, staleAfter: staleAfter, acquireTimeout: seconds)
+        RegistryWriteLock(lockURL: lockURL, hermesFlockURL: hermesFlockURL, staleAfter: staleAfter, acquireTimeout: seconds)
     }
 
     // MARK: - Acquire / release
@@ -266,12 +304,77 @@ public struct RegistryWriteLock: Sendable {
             // ability to save is worse than losing the serialization.
             return try body()
         }
+        // Hermes's flock second, only in the outermost scope: a second
+        // `open` + `flock` of the same file from this process would contend
+        // with the first (flock locks belong to the open file description).
+        let hermesFD: Int32?
+        do {
+            hermesFD = try acquireHermesFlock(describing: path, label: label)
+        } catch {
+            release(token: token)
+            throw error
+        }
         dictionary[key] = 1
         defer {
             dictionary[key] = 0
+            if let hermesFD {
+                flock(hermesFD, LOCK_UN)
+                close(hermesFD)
+            }
             release(token: token)
         }
         return try body()
+    }
+
+    /// Take Hermes's `flock` on its memory-file lock, opened exactly as
+    /// Hermes opens it: `O_RDWR | O_CREAT | O_NOFOLLOW`, mode 0600
+    /// (tightened with `fchmod`, as Hermes does), then an exclusive
+    /// `flock`. Never `O_EXCL`, never unlinked. Polled non-blocking up to
+    /// ``acquireTimeout`` so a wedged holder is a refusal, not a hang.
+    ///
+    /// Returns the open descriptor, or `nil` when there is no Hermes lock
+    /// to take (not a memory file, or the file can't be opened here: the
+    /// same proceed-unlocked policy as ``withLock(path:label:_:)``).
+    private nonisolated func acquireHermesFlock(describing path: String, label: String?) throws -> Int32? {
+        guard let hermesFlockURL else { return nil }
+        let fd = hermesFlockURL.withUnsafeFileSystemRepresentation { rep -> Int32 in
+            guard let rep else { return -1 }
+            // O_CLOEXEC: a process Scarf spawns during the hold must not
+            // inherit the descriptor, or the flock would outlive the hold
+            // and leave Hermes's next memory write blocked on it.
+            return open(rep, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        }
+        guard fd >= 0 else {
+            #if canImport(os)
+            Self.logger.warning(
+                "Hermes's lock at \(hermesFlockURL.path, privacy: .public) cannot be opened (errno \(errno)); proceeding with Scarf's lock only"
+            )
+            #endif
+            return nil
+        }
+        _ = fchmod(fd, 0o600)
+        let deadline = Date().addingTimeInterval(acquireTimeout)
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            let err = errno
+            guard err == EWOULDBLOCK || err == EINTR else {
+                // Not contention: this filesystem can't flock (some network
+                // homes). Hermes can't either, so there is nothing to
+                // interoperate with; Scarf's own lock still holds.
+                #if canImport(os)
+                Self.logger.warning(
+                    "flock on Hermes's lock at \(hermesFlockURL.path, privacy: .public) failed (errno \(err)); proceeding with Scarf's lock only"
+                )
+                #endif
+                close(fd)
+                return nil
+            }
+            guard Date() < deadline else {
+                close(fd)
+                throw ProjectRegistryError.hermesBusy(path: path, label: label)
+            }
+            Thread.sleep(forTimeInterval: Self.pollInterval)
+        }
+        return fd
     }
 
     /// Acquire, returning the ownership token written into the lock file.

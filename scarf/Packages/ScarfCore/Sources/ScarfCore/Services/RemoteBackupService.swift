@@ -48,7 +48,8 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// "Archiving Hermes home — 412 MB so far" without polling.
     public enum Progress: Sendable, Equatable {
         case preflight
-        case checkpointingDB
+        /// Taking a read-only `.backup` snapshot of `state.db` on the host.
+        case snapshottingDB
         case archivingHermes(bytesWritten: Int64)
         case archivingProject(name: String, bytesWritten: Int64)
         case bundling
@@ -60,6 +61,10 @@ public final class RemoteBackupService: @unchecked Sendable {
         case remoteCommandFailed(String)
         case localIO(String)
         case zipFailed(String)
+        /// `state.db` exists but no consistent read-only snapshot of it
+        /// could be taken. The backup stops rather than archiving a live
+        /// database file that could be torn or missing its WAL frames.
+        case snapshotFailed(String)
         case cancelled
 
         public var errorDescription: String? {
@@ -68,6 +73,7 @@ public final class RemoteBackupService: @unchecked Sendable {
             case .remoteCommandFailed(let m): return "Remote command failed during backup: \(m)"
             case .localIO(let m): return "Local file I/O failed during backup: \(m)"
             case .zipFailed(let m): return "Couldn't assemble the backup archive: \(m)"
+            case .snapshotFailed(let m): return "Couldn't take a consistent snapshot of state.db: \(m)"
             case .cancelled: return "Backup cancelled."
             }
         }
@@ -82,7 +88,22 @@ public final class RemoteBackupService: @unchecked Sendable {
         public var hermesHomePath: String
         public var hermesHomeBytes: Int64?
         public var projects: [ProjectSummary]
+        /// `sqlite3` is on the host's PATH. It takes the read-only
+        /// `state.db` snapshot; `python3` is the fallback.
         public var sqliteAvailable: Bool
+        /// `python3` is on the host's PATH (snapshot fallback when
+        /// `sqlite3` is missing or fails).
+        public var pythonAvailable: Bool = false
+        /// `<home>/state.db` exists on the host. When it does, the backup
+        /// needs a snapshot tool; when it doesn't, there is nothing to
+        /// snapshot.
+        public var stateDBPresent: Bool = false
+
+        /// True when the backup can't archive `state.db` safely: the file
+        /// exists but neither snapshot tool is available.
+        public var snapshotUnavailable: Bool {
+            stateDBPresent && !sqliteAvailable && !pythonAvailable
+        }
 
         public struct ProjectSummary: Sendable, Equatable {
             public var id: String
@@ -171,22 +192,31 @@ public final class RemoteBackupService: @unchecked Sendable {
             ))
         }
 
-        // 5. Is `sqlite3` on PATH? Drives the WAL-checkpoint toggle.
-        //    Missing → we still archive, just without quiescing.
-        let sqliteCheck = try? await transport.asyncRunProcess(
+        // 5. Snapshot tooling. `state.db` is archived from a read-only
+        //    `.backup` snapshot (charter C3: Scarf never writes state.db),
+        //    taken with `sqlite3` or, failing that, `python3`.
+        let toolCheck = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
-            args: ["-lc", "command -v sqlite3 >/dev/null 2>&1 && echo yes || echo no"],
+            args: ["-lc", Self.toolProbeScript(stateDB: hermesHome + "/state.db")],
             stdin: nil,
             timeout: 30
         )
-        let sqliteAvailable = sqliteCheck?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) == "yes"
+        let tools = Self.parseToolProbe(toolCheck?.stdoutString ?? "")
+        // No markers at all means the probe never ran; reading that as "no
+        // state.db, no tools" would plan a backup without the sessions.
+        guard tools.contains("probe") else {
+            throw BackupError.preflightFailed(
+                "couldn't check the server for state.db and sqlite3 (\(toolCheck.map { "exit \($0.exitCode)" } ?? "no response")).")
+        }
 
         return PreflightSummary(
             hermesVersion: hermesVersion,
             hermesHomePath: hermesHome,
             hermesHomeBytes: hermesSize,
             projects: projectSummaries,
-            sqliteAvailable: sqliteAvailable
+            sqliteAvailable: tools.contains("sqlite3"),
+            pythonAvailable: tools.contains("python3"),
+            stateDBPresent: tools.contains("statedb")
         )
     }
 
@@ -223,32 +253,81 @@ public final class RemoteBackupService: @unchecked Sendable {
         try Task.checkCancellation()
         progress(.preflight)
 
-        // Stage 1: WAL checkpoint (best effort). Build the state.db
-        // path from the already-expanded hermesHomePath rather than
-        // `context.paths.stateDB`, which can still carry a literal
-        // `~` for remotes that didn't pin `remoteHome` — sqlite3
-        // would fail to open the file and leave the WAL un-flushed.
-        var checkpointed = false
-        if options.checkpointedWAL && preflight.sqliteAvailable {
-            progress(.checkpointingDB)
-            let stateDB = preflight.hermesHomePath + "/state.db"
-            let cmd = "sqlite3 \(Self.shellQuote(stateDB)) 'PRAGMA wal_checkpoint(TRUNCATE);' || true"
-            let result = try? await transport.asyncRunProcess(
-                executable: "/bin/bash",
-                args: ["-lc", cmd],
-                stdin: nil,
-                timeout: 60
-            )
-            checkpointed = (result?.exitCode == 0)
+        // Stage 1: consistent snapshots of every `*.db` in the home
+        // (state.db, each profile's state.db, kanban.db, response_store.db,
+        // cron/executions.db, …), archived as their own tarball. This used
+        // to run `PRAGMA wal_checkpoint(TRUNCATE)` on the live state.db: a
+        // write to state.db (charter C3), and not a reliable one either.
+        // Under a busy gateway it checkpointed only partially, still exited
+        // 0, and the frames left in the (excluded) WAL were missing from
+        // the archive; every other database was tarred live. Each snapshot
+        // copies every committed page, WAL frames included, through a
+        // connection that cannot write the source
+        // (``HermesDatabaseScripts/snapshotFunction``), which is how
+        // `hermes backup` snapshots every `*.db`
+        // (`hermes_cli/backup.py:101-104`, `:590-610` @ v2026.9.24). The
+        // paths come from the already-expanded hermesHomePath, never
+        // `context.paths`, which can still carry a literal `~`.
+        //
+        // It always runs, whatever preflight saw: the script finds the
+        // databases itself, so a probe that missed one can't produce a
+        // "successful" backup without it.
+        let hermesLeaf = (preflight.hermesHomePath as NSString).lastPathComponent
+        var databases: BackupManifest.DatabaseSnapshots?
+        try Task.checkCancellation()
+        progress(.snapshottingDB)
+        guard !preflight.snapshotUnavailable else {
+            throw BackupError.snapshotFailed(
+                "neither sqlite3 nor python3 is available on the server. Install sqlite3 there and back up again.")
         }
+        let snapshotDir = preflight.hermesHomePath + "/" + HermesDatabaseScripts.snapshotDirPrefix + UUID().uuidString
+        var snapshotted: [String] = []
+        do {
+            let report = try await takeDatabaseSnapshots(
+                transport: transport,
+                home: preflight.hermesHomePath,
+                snapshotDir: snapshotDir,
+                options: options,
+                timeout: Self.snapshotTimeout(homeBytes: preflight.hermesHomeBytes)
+            )
+            snapshotted = report.ok.map(\.path) + report.failed
+            let skipped = report.failed
+            if !report.ok.isEmpty {
+                try Task.checkCancellation()
+                let tarball = workDir.appendingPathComponent(BackupArchiveLayout.databasesTarballPath)
+                let hash = try await streamToFile(
+                    transport: transport,
+                    command: Self.tarCommand(workDir: snapshotDir, target: ".", excludes: []),
+                    destination: tarball
+                ) { _ in }
+                let size = (try? FileManager.default.attributesOfItem(atPath: tarball.path)[.size] as? Int64) ?? 0
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: BackupArchiveLayout.databasesTarballPath,
+                    tarballSize: size,
+                    tarballSHA256: hash,
+                    entries: report.ok.map { .init(path: $0.path, method: $0.method) },
+                    skipped: skipped
+                )
+            } else if !skipped.isEmpty {
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: "", tarballSize: 0, tarballSHA256: "", entries: [], skipped: skipped)
+            }
+        } catch {
+            await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
+            throw error
+        }
+        await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
 
-        // Stage 2: Hermes home tarball.
+        // Stage 2: Hermes home tarball, WITHOUT the live state.db (the
+        // snapshot above stands in for it) or its sidecars. The home's
+        // own directory name is archived, so a server whose Hermes home
+        // isn't called `.hermes` backs up too.
         try Task.checkCancellation()
         let hermesTarball = workDir.appendingPathComponent("hermes.tar.gz")
-        let hermesExcludes = Self.hermesExcludes(options: options)
+        let hermesExcludes = Self.hermesExcludes(leaf: hermesLeaf, options: options, databases: snapshotted)
         let hermesTarCmd = Self.tarCommand(
             workDir: preflight.hermesHomePath.deletingLastPathComponent_String(),
-            target: ".hermes",
+            target: hermesLeaf,
             excludes: hermesExcludes
         )
         let hermesHash = try await streamToFile(
@@ -317,8 +396,11 @@ public final class RemoteBackupService: @unchecked Sendable {
                 includeAuth: options.includeAuth,
                 includeMcpTokens: options.includeMcpTokens,
                 includeLogs: options.includeLogs,
-                checkpointedWAL: checkpointed
-            )
+                // Nothing checkpoints the WAL any more (C3). How state.db
+                // was captured is recorded, truthfully, in `stateDB`.
+                checkpointedWAL: false
+            ),
+            databases: databases
         )
         let manifestData: Data
         do {
@@ -407,7 +489,7 @@ public final class RemoteBackupService: @unchecked Sendable {
 
     // MARK: - Tar / shell helpers
 
-    private static func tarCommand(workDir: String, target: String, excludes: [String]) -> String {
+    static func tarCommand(workDir: String, target: String, excludes: [String]) -> String {
         var parts: [String] = ["tar -czf -"]
         for ex in excludes {
             parts.append("--exclude=\(shellQuote(ex))")
@@ -417,19 +499,133 @@ public final class RemoteBackupService: @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    /// Always-on Hermes-tree exclusions, regardless of options:
-    /// SQLite WAL siblings (would carry mid-flight writes) and runtime
-    /// state files (`gateway_state.json`).
-    private static func hermesExcludes(options: BackupManifest.Options) -> [String] {
-        var excludes: [String] = [
-            ".hermes/state.db-wal",
-            ".hermes/state.db-shm",
-            ".hermes/gateway_state.json",
+    /// Always-on Hermes-tree exclusions, regardless of options: each live
+    /// database the snapshot pass found (`databases`, home-relative: they
+    /// are archived from consistent snapshots, or listed as skipped), every
+    /// SQLite sidecar, Hermes's retired-WAL captures (left out whole, as
+    /// `hermes backup` does), Scarf's own snapshot and restore staging
+    /// directories, and runtime state files (`gateway_state.json`).
+    ///
+    /// The databases are excluded by their exact (glob-escaped) paths, not a
+    /// `*.db` pattern, which would also swallow a DIRECTORY named `x.db` and
+    /// everything in it. The sidecar patterns are unanchored, so they reach
+    /// every subdirectory under both GNU tar and bsdtar.
+    ///
+    /// `leaf` is the home's own directory name: `.hermes` for a default
+    /// install, something else for a server whose Hermes home was
+    /// configured elsewhere.
+    static func hermesExcludes(leaf: String, options: BackupManifest.Options, databases: [String]) -> [String] {
+        var excludes: [String] = databases.map { HermesDatabaseScripts.globEscape(leaf + "/" + $0) }
+        excludes += [
+            "*.db-wal",
+            "*.db-shm",
+            "*.db-journal",
+            HermesDatabaseScripts.retiredWALPattern,
+            "\(leaf)/\(HermesDatabaseScripts.snapshotDirPrefix)*",
+            "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
+            "\(leaf)/gateway_state.json",
         ]
-        if !options.includeAuth { excludes.append(".hermes/auth.json") }
-        if !options.includeMcpTokens { excludes.append(".hermes/mcp-tokens") }
-        if !options.includeLogs { excludes.append(".hermes/logs") }
+        excludes += prunedDirs(options: options).map { "\(leaf)/\($0)" }
+        if !options.includeAuth { excludes.append("\(leaf)/auth.json") }
         return excludes
+    }
+
+    /// Home-relative directories the backup leaves out entirely, so their
+    /// databases (if any) are not snapshotted either.
+    static func prunedDirs(options: BackupManifest.Options) -> [String] {
+        var dirs: [String] = []
+        if !options.includeMcpTokens { dirs.append("mcp-tokens") }
+        if !options.includeLogs { dirs.append("logs") }
+        return dirs
+    }
+
+    // MARK: - Database snapshots
+
+    /// Ceiling on the snapshot pass (charter C10). It copies every database
+    /// on the host in one pass, so it scales with the home's size (5 MB/s,
+    /// a slow disk), never below 15 minutes; an hour when the size is
+    /// unknown (`du -sb` is GNU-only).
+    static func snapshotTimeout(homeBytes: Int64?) -> TimeInterval {
+        guard let homeBytes else { return 3600 }
+        return max(900, TimeInterval(homeBytes) / 5_000_000)
+    }
+
+    /// Prints one `SCARF_TOOL:<name>` line per snapshot input that is
+    /// available on the host. Markers, because a login shell can print
+    /// its own noise to stdout.
+    static func toolProbeScript(stateDB: String) -> String {
+        [
+            "[ -f \(shellQuote(stateDB)) ] && echo SCARF_TOOL:statedb",
+            "command -v sqlite3 >/dev/null 2>&1 && echo SCARF_TOOL:sqlite3",
+            "command -v python3 >/dev/null 2>&1 && echo SCARF_TOOL:python3",
+            "echo SCARF_TOOL:probe",
+        ].joined(separator: "; ")
+    }
+
+    static func parseToolProbe(_ stdout: String) -> Set<String> {
+        Set(stdout.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("SCARF_TOOL:") else { return nil }
+            return String(trimmed.dropFirst("SCARF_TOOL:".count))
+        })
+    }
+
+    /// Snapshot every database under `home` into `snapshotDir`. The root
+    /// `state.db` is the one the backup cannot do without: if it exists and
+    /// could not be snapshotted, this throws. Any other database that could
+    /// not be snapshotted is reported back (and recorded in the manifest as
+    /// skipped), as `hermes backup` reports its own
+    /// (`hermes_cli/backup.py:723`).
+    private func takeDatabaseSnapshots(
+        transport: any ServerTransport,
+        home: String,
+        snapshotDir: String,
+        options: BackupManifest.Options,
+        timeout: TimeInterval
+    ) async throws -> HermesDatabaseScripts.SnapshotReport {
+        let result: ProcessResult
+        do {
+            result = try await transport.asyncRunProcess(
+                executable: "/bin/bash",
+                args: ["-lc", HermesDatabaseScripts.snapshotAll(
+                    home: home, snapshotDir: snapshotDir, prunedDirs: Self.prunedDirs(options: options))],
+                stdin: nil,
+                timeout: timeout
+            )
+        } catch {
+            throw BackupError.snapshotFailed(error.localizedDescription)
+        }
+        let report = HermesDatabaseScripts.parseSnapshotReport(result.stdoutString)
+        let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.exitCode == 0, report.finished else {
+            throw BackupError.snapshotFailed(why.isEmpty ? "exit \(result.exitCode)" : why)
+        }
+        // The root state.db is the one database a backup can't do without:
+        // present means snapshotted, or the backup fails.
+        if report.rootStateDB, !report.ok.contains(where: { $0.path == "state.db" }) {
+            throw BackupError.snapshotFailed(why.isEmpty ? "no method could read state.db" : why)
+        }
+        // A database whose name can't be carried through the report can be
+        // neither snapshotted nor excluded, so it would ride along live.
+        // Refuse rather than archive it that way.
+        if report.unnameable > 0 {
+            throw BackupError.snapshotFailed(
+                "\(report.unnameable) database file(s) in the Hermes home have a tab or line break in their name. Rename them and back up again.")
+        }
+        return report
+    }
+
+    /// Best-effort removal of the snapshot directory. A leftover (a run
+    /// killed mid-way) is excluded from later backups by
+    /// ``hermesExcludes(leaf:options:databases:)`` and swept by the next run's
+    /// ``HermesDatabaseScripts/leftoverCleanup(home:)``.
+    private func removeSnapshotDir(transport: any ServerTransport, snapshotDir: String) async {
+        _ = try? await transport.asyncRunProcess(
+            executable: "/bin/bash",
+            args: ["-lc", "rm -rf \(Self.shellQuote(snapshotDir))"],
+            stdin: nil,
+            timeout: 60
+        )
     }
 
     /// Default project-tree exclusions: things that don't restore well
@@ -453,7 +649,7 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// Single-quote a path / argument for embedding in a `bash -lc`
     /// string. Uses POSIX-safe single quotes with escape for embedded
     /// quotes (`'` → `'\''`).
-    private static func shellQuote(_ s: String) -> String {
+    static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 

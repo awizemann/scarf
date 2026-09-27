@@ -106,10 +106,12 @@ struct RestoreServerSheet: View {
                 if let v = inspection.targetHermesVersion {
                     row(label: "Hermes version", value: v)
                 }
-                if let h = inspection.targetHomeResolved {
-                    row(label: "Home", value: h, mono: true)
+                if let h = inspection.targetHermesHome ?? inspection.targetHomeResolved {
+                    row(label: "Hermes home", value: h, mono: true)
                 }
             }
+
+            holderWarning(inspection.stateDBHolders)
 
             if !m.projects.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -152,6 +154,30 @@ struct RestoreServerSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Restore refuses to replace a state.db that a running Hermes has
+    /// open (it re-checks when it runs); say so before the user commits.
+    @ViewBuilder
+    private func holderWarning(_ probe: RemoteRestoreService.DBHolderProbe?) -> some View {
+        switch probe {
+        case .held(let pids)?:
+            Label {
+                Text("Hermes is running on this server (process \(pids.map(String.init).joined(separator: ", ")) has a Hermes database open). Stop the Hermes gateway and close any Hermes chats there before restoring; the restore will refuse otherwise.")
+                    .font(.caption)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        case .unknown?:
+            Label {
+                Text("Scarf couldn't check whether Hermes is running on this server. Stop the Hermes gateway and any Hermes chats there before restoring.")
+                    .font(.caption)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        default:
+            EmptyView()
         }
     }
 

@@ -160,7 +160,10 @@ public struct GuardedTextFile: Sendable {
     /// property `RegistryWriteLock` documents at length. They carry a token,
     /// a pid and a timestamp — never file contents — so a `0644` lock file
     /// beside a `0600` `.env` discloses nothing, and `loadMemoryProfiles`
-    /// (directories only) and the config readers ignore them.
+    /// (directories only) and the config readers ignore them. MEMORY.md and
+    /// USER.md are the exception: `<name>.lock` there is HERMES's persistent
+    /// `flock` file, so Scarf's own lock is `.<name>.scarf-lock` and the
+    /// write also holds Hermes's `flock` (see `RegistryWriteLock`, S14-F5).
     public let lockContext: ServerContext?
 
     /// Generous: these are hand-sized files (a fat `config.yaml` is ~10 KB).
