@@ -669,9 +669,16 @@ public final class RichChatViewModel {
     public private(set) var acpCompressionCount = 0
 
     /// Slash commands advertised by the ACP server via `available_commands_update`.
+    ///
+    /// `quick_commands` from `config.yaml` are deliberately NOT a menu
+    /// source. Hermes's ACP adapter never reads them: its command table is
+    /// `acp_adapter/commands.py:53-80` and an unknown name returns `None`
+    /// (`:103-104`), so the literal `/name` falls through to the model as an
+    /// ordinary prompt (`acp_adapter/server.py:827-837` @ v2026.9.24). Only
+    /// the CLI (`cli.py:1219-1233`), the messaging gateway
+    /// (`gateway/run_inbound.py:812,1033`) and the TUI gateway run them. The
+    /// menu used to offer them as "Run: <cmd>", which never ran anything.
     public private(set) var acpCommands: [HermesSlashCommand] = []
-    /// User-defined commands parsed from `config.yaml` `quick_commands`.
-    public private(set) var quickCommands: [HermesSlashCommand] = []
     /// Project-scoped, Scarf-managed commands at
     /// `<project>/.scarf/slash-commands/<name>.md`. Loaded by
     /// `loadProjectScopedCommands(at:)` when a project chat starts; cleared
@@ -965,7 +972,8 @@ public final class RichChatViewModel {
     }
 
     /// Merged slash-menu list. Precedence: **ACP > project-scoped >
-    /// global Scarf > quick_commands** (most specific source wins).
+    /// global Scarf** (most specific source wins). No `quick_commands` —
+    /// see `acpCommands`.
     /// De-duplicated by name. Non-interruptive ACP commands (`/steer`)
     /// are always appended at the end so they don't crowd the more
     /// frequently-used options.
@@ -1000,15 +1008,9 @@ public final class RichChatViewModel {
                 )
             }
         let globalNames = Set(globalAsHermes.map(\.name))
-        let quicks = quickCommands.filter {
-            !acpNames.contains($0.name)
-                && !projectNames.contains($0.name)
-                && !globalNames.contains($0.name)
-        }
         let occupied = acpNames
             .union(projectNames)
             .union(globalNames)
-            .union(Set(quicks.map(\.name)))
         // Capability gate: BOTH non-interruptive rows are v0.13 ACP
         // surfaces — `steer` and `queue` are adjacent lines in the
         // adapter's command dict and arrived at the same tag
@@ -1045,7 +1047,7 @@ public final class RichChatViewModel {
         noteSlashCommandFallbackIfNeeded()
         let alwaysAvailable = Self.alwaysAvailableCommands(capabilities: capabilitiesGate)
             .filter { !occupied.contains($0.name) }
-        return acpCommands + projectAsHermes + globalAsHermes + quicks + nonInterruptive + alwaysAvailable
+        return acpCommands + projectAsHermes + globalAsHermes + nonInterruptive + alwaysAvailable
     }
 
     /// Publish a fresh capabilities snapshot from the controller.
@@ -1550,8 +1552,9 @@ public final class RichChatViewModel {
 
     /// Expand `/<name> args` when `<name>` matches a loaded project-
     /// scoped command. Falls through (returns the input unchanged) for
-    /// non-slash input, unknown names, ACP-advertised commands, and
-    /// quick_commands — those go to Hermes literally. The caller
+    /// non-slash input, unknown names and ACP-advertised commands — those
+    /// go to Hermes as typed (Hermes dispatches its own commands; any other
+    /// `/name` reaches the model as an ordinary prompt). The caller
     /// provides the `ServerContext` so the expansion service can read
     /// the project sidecar through the right transport.
     public func expandIfProjectScoped(
@@ -1906,7 +1909,6 @@ public final class RichChatViewModel {
         // scoped; a fresh chat starts back at the default "ask before
         // edits" posture rather than carrying the previous session's mode.
         activeApprovalMode = .default
-        loadQuickCommands()
     }
 
     public func setSessionId(_ id: String?) {
@@ -2219,29 +2221,6 @@ public final class RichChatViewModel {
         return result
     }
 
-    /// Load `quick_commands` from `config.yaml` off the main actor and publish
-    /// them as slash commands. Safe to call repeatedly — replaces the existing list.
-    public func loadQuickCommands() {
-        let ctx = context
-        Task.detached { [weak self] in
-            let loaded = Self.loadQuickCommands(context: ctx)
-            let mapped = loaded.map { (name, command) -> HermesSlashCommand in
-                let truncated = command.count > 60
-                    ? String(command.prefix(60)) + "…"
-                    : command
-                return HermesSlashCommand(
-                    name: name,
-                    description: "Run: \(truncated)",
-                    argumentHint: nil,
-                    source: .quickCommand
-                )
-            }
-            await MainActor.run { [weak self] in
-                self?.quickCommands = mapped
-            }
-        }
-    }
-
     /// Load project-scoped slash commands from
     /// `<projectPath>/.scarf/slash-commands/` off the main actor and
     /// publish them. Safe to call repeatedly — replaces the existing
@@ -2278,23 +2257,6 @@ public final class RichChatViewModel {
             await MainActor.run { [weak self] in
                 self?.globalScopedCommands = loaded
             }
-        }
-    }
-
-    /// Parse `quick_commands` from `<context>/config.yaml`. Returns
-    /// `[(name, command)]` for every well-formed `type: exec` entry.
-    /// Mac-side `QuickCommandsViewModel` uses a richer model + adds
-    /// an `isDangerous` check; here we only need the slash-menu
-    /// projection, so we keep the parser minimal and ScarfCore-local.
-    nonisolated static func loadQuickCommands(context: ServerContext) -> [(name: String, command: String)] {
-        guard let yaml = context.readText(context.paths.configYAML) else { return [] }
-        // Shared parser (HermesQuickCommandsYAML) so dotted names like
-        // `v1.2_deploy` survive on this side too — the naive
-        // `split(separator: ".", maxSplits: 2)` this used dropped them
-        // from the iOS slash menu while the Mac list showed them.
-        return HermesQuickCommandsYAML.entries(inYAML: yaml).compactMap { entry in
-            guard entry.type == "exec", !entry.command.isEmpty else { return nil }
-            return (name: entry.name, command: entry.command)
         }
     }
 

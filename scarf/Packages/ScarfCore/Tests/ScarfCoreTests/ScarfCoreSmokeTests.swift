@@ -243,9 +243,9 @@ import Foundation
 
     @Test func hermesSlashCommandInit() {
         let acp = HermesSlashCommand(name: "/clear", description: "Clear context", argumentHint: nil, source: .acp)
-        let quick = HermesSlashCommand(name: "/brief", description: "Summary", argumentHint: "topic", source: .quickCommand)
+        let project = HermesSlashCommand(name: "/brief", description: "Summary", argumentHint: "topic", source: .projectScoped)
         #expect(acp.source == .acp)
-        #expect(quick.source == .quickCommand)
+        #expect(project.source == .projectScoped)
         #expect(acp.id == "/clear")
     }
 

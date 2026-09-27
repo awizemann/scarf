@@ -2195,9 +2195,8 @@ final class ChatController {
         }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);
-        // Hermes receives the expanded prompt template body. Other
-        // command sources (ACP, quick_commands) keep going to Hermes
-        // literally. v2.5.
+        // Hermes receives the expanded prompt template body. ACP
+        // commands keep going to Hermes as typed. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
         await startPrompt(
             client: client,
