@@ -432,7 +432,8 @@ struct HermesFileService: Sendable {
                 identityHeader: server.identityHeader,
                 strictRedirectHeaders: server.strictRedirectHeaders,
                 cwd: server.cwd,
-                oauthFlow: server.oauthFlow
+                oauthFlow: server.oauthFlow,
+                toolsIncludeIsExplicit: server.toolsIncludeIsExplicit
             )
         }
     }
@@ -665,6 +666,278 @@ struct HermesFileService: Sendable {
         return addResult
     }
 
+    /// Creates an OAuth MCP server on a host where `hermes mcp add --auth
+    /// oauth` cannot (S09-F2, ``HermesCapabilities/hasMCPOAuthAddNeedsDirectWrite``).
+    ///
+    /// Without a TTY that command never builds the OAuth provider, never
+    /// writes `auth: oauth`, and its "Save config anyway?" default then
+    /// drops the entry altogether. So:
+    ///
+    /// 1. `catalogIdentifier` set (the form still describes the catalog
+    ///    entry the user picked, over HTTP): `hermes mcp install <id>`,
+    ///    which writes the entry with the manifest's own `oauth:` client
+    ///    block and tool defaults before it probes.
+    /// 2. Otherwise, or when the host's catalog does not carry that entry:
+    ///    the entry is written directly (``writeMCPServerOAuthEntry``).
+    ///
+    /// Either way the server has no token yet; the caller offers
+    /// `hermes mcp login` next. `installedViaCatalog` tells the caller the
+    /// manifest's tool defaults are already applied.
+    nonisolated func addMCPServerOAuth(
+        name: String,
+        url: String,
+        sse: Bool,
+        catalogIdentifier: String?,
+        overwriteConfirmed: Bool = false,
+        capabilities: HermesCapabilities = .empty
+    ) -> (exitCode: Int32, output: String, installedViaCatalog: Bool) {
+        // Authoritative re-check: `mcp install` replaces an existing entry
+        // without asking, so the overwrite decision has to be made here.
+        let exists = loadMCPServers().contains { $0.name == name }
+        if exists, !overwriteConfirmed {
+            let refusal = Self.describe(HermesMCPAdd.PlanError.serverAlreadyExists(name: name), name: name)
+            return (refusal.exitCode, refusal.output, false)
+        }
+        if let identifier = catalogIdentifier, !sse {
+            // `install_entry` writes the entry BEFORE it probes, and on
+            // 0.17-0.20.x a stale cached token can send that probe into the
+            // browser-callback wait, bounded only by `oauth.timeout`
+            // (default 300 s). So the budget sits above that, and a run that
+            // did not print its success line is re-checked on disk: an
+            // OAuth entry that is now there IS the install.
+            let result = runHermesCLI(
+                args: HermesMCPInstallVerdict.argv(identifier: identifier),
+                timeout: 360
+            )
+            switch HermesMCPInstallVerdict.judge(
+                output: result.output, exitCode: result.exitCode, identifier: identifier
+            ) {
+            case .installed:
+                return (0, result.output, true)
+            case .notInCatalog:
+                break  // An older catalog: write the entry ourselves.
+            case .unconfirmed:
+                // Only a NEW entry proves anything: a pre-existing one (an
+                // overwrite) is what the run was replacing.
+                if !exists,
+                   loadMCPServers().contains(where: { $0.name == name && $0.auth == "oauth" }) {
+                    return (0, result.output, true)
+                }
+                return (1, result.output, false)
+            case .failed:
+                return (1, result.output, false)
+            }
+        }
+        // `save_config` refuses every write on a managed install, and
+        // `mcp add` honoured that. This path bypasses `save_config`, so it
+        // checks the same marker itself.
+        if HermesManagedInstallCache.shared.managedInstall(for: context, capabilities: capabilities).isManaged {
+            return (1, String(
+                localized: "This Hermes install is managed by a package manager, which doesn’t allow config changes, so “\(name)” wasn’t added.",
+                comment: "OAuth MCP add refused on a managed Hermes install"
+            ), false)
+        }
+        let written = writeMCPServerOAuthEntry(
+            name: name, url: url, sse: sse, replacing: exists
+        )
+        return (written.ok ? 0 : 1, written.message, false)
+    }
+
+    /// Writes `mcp_servers.<name>` as `url` + `auth: oauth` (+ `transport:
+    /// sse`) + `enabled: true` — the same keys `mcp add --auth oauth` saves
+    /// when it can build the provider (`hermes_cli/mcp_config.py:545-547,
+    /// 650-688` @ v2026.9.24) — without a probe, which cannot succeed before
+    /// the user has signed in.
+    ///
+    /// Same guard rails as ``patchMCPServerField``: config.yaml's write lock,
+    /// a refusal for any layout the line writer was not built for (tabs, a
+    /// non-2-space block, a flow-style `mcp_servers:` value), a per-launch
+    /// backup, and an independent read-back that restores the original
+    /// bytes when the entry list or the new entry is not what we wrote.
+    /// `replacing` swaps an existing entry of that name wholesale, which is
+    /// what `mcp add`'s confirmed overwrite does too.
+    nonisolated func writeMCPServerOAuthEntry(
+        name: String,
+        url: String,
+        sse: Bool,
+        replacing: Bool
+    ) -> (ok: Bool, message: String) {
+        let refusal = String(
+            localized: "Scarf couldn’t add “\(name)” to config.yaml safely, so nothing was changed. Add it with `hermes mcp add \(name) --url <url> --auth oauth` in a terminal on that host.",
+            comment: "Direct OAuth MCP entry write refused or failed verification"
+        )
+        guard !name.isEmpty, !url.isEmpty,
+              !YAMLScalar.containsControlCharacter(name),
+              !YAMLScalar.containsControlCharacter(url),
+              !YAMLScalar.exceedsSimpleKeyLimit(name)
+        else { return (false, refusal) }
+
+        let configFile = GuardedTextFile(context: context, label: "config.yaml")
+        let ok = (try? configFile.withLock(context.paths.configYAML) { () -> Bool in
+            guard let loaded = try? configFile.load(context.paths.configYAML), loaded.exists else {
+                return false
+            }
+            let yaml = loaded.text
+            guard let newYAML = Self.insertingOAuthEntry(
+                into: yaml, name: name, url: url, sse: sse, replacing: replacing
+            ) else {
+                Self.logger.warning(
+                    "refusing to write OAuth MCP entry \(name, privacy: .public): unfamiliar mcp_servers layout"
+                )
+                return false
+            }
+            backUpConfigOnceForThisLaunch(originalText: yaml)
+            do {
+                try configFile.write(newYAML, to: context.paths.configYAML, after: loaded)
+            } catch {
+                Self.logger.warning(
+                    "Failed to write \(self.context.paths.configYAML, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            // Independent read-back, as in `patchMCPServerFieldLocked`.
+            var expectedNames = Self.entryNames(inYAML: yaml)
+            if !expectedNames.contains(name) { expectedNames.append(name) }
+            guard let written = readFile(context.paths.configYAML),
+                  Self.verifyPatchedConfig(
+                    text: written, name: name,
+                    expecting: Self.oauthEntryLines(url: url, sse: sse),
+                    namesBefore: expectedNames
+                  ) == nil
+            else {
+                Self.logger.error(
+                    "OAuth MCP entry \(name, privacy: .public) failed verification; restoring \(self.context.paths.configYAML, privacy: .public)"
+                )
+                try? configFile.write(yaml, to: context.paths.configYAML, after: loaded)
+                return false
+            }
+            return true
+        }) ?? false
+        guard ok else { return (false, refusal) }
+        return (true, String(
+            localized: "Saved “\(name)” with OAuth. Sign in to finish connecting it.",
+            comment: "OAuth MCP server entry written; the user still has to sign in"
+        ))
+    }
+
+    /// The entry's own key lines, at indent 4, in the order written.
+    nonisolated static func oauthEntryLines(url: String, sse: Bool) -> [String] {
+        var lines = ["    url: \(yamlScalar(url))", "    auth: oauth"]
+        if sse { lines.append("    transport: sse") }
+        lines.append("    enabled: true")
+        return lines
+    }
+
+    /// `yaml` with the OAuth entry added (or swapped in for an existing one
+    /// when `replacing`), or `nil` when the `mcp_servers` block has a
+    /// layout the line writer must not touch. Pure, so the layouts can be
+    /// tested without a file.
+    nonisolated static func insertingOAuthEntry(
+        into yaml: String,
+        name: String,
+        url: String,
+        sse: Bool,
+        replacing: Bool
+    ) -> String? {
+        var lines = yaml.components(separatedBy: "\n")
+        // Keep a CRLF file CRLF.
+        let eol = lines.first.map { $0.hasSuffix("\r") } == true ? "\r" : ""
+        let entry = (["  \(YAMLScalar.quoteIfNeeded(name)):"] + oauthEntryLines(url: url, sse: sse))
+            .map { $0 + eol }
+
+        // Every top-level line whose key is `mcp_servers`, however it is
+        // spelled. Only the plain spelling is one the rest of the MCP code
+        // reads, and a second block would hide the first from Hermes
+        // (PyYAML keeps the last duplicate key), so anything else refuses.
+        let blockHeaders = lines.indices.filter { index in
+            let line = lines[index]
+            guard !(line.first.map { $0 == " " || $0 == "\t" } ?? true) else { return false }
+            let trimmed = trimYAMLLine(line)
+            guard let span = HermesYAML.blockKeySpan(in: trimmed) else { return false }
+            return unquote(String(span.key).trimmingCharacters(in: .whitespaces)) == "mcp_servers"
+        }
+        if blockHeaders.count > 1 { return nil }
+        if let only = blockHeaders.first, !lines[only].hasPrefix("mcp_servers:") { return nil }
+        guard let start = blockHeaders.first else {
+            // No block at all: append one at the end of the file.
+            if replacing { return nil }
+            while let last = lines.last, trimYAMLLine(last).isEmpty { lines.removeLast() }
+            lines.append("mcp_servers:" + eol)
+            lines.append(contentsOf: entry)
+            return lines.joined(separator: "\n") + "\n"
+        }
+        // The header's value: empty (a block follows), or an empty flow map
+        // / null that we may turn into a block. Anything else is a flow
+        // mapping with content, which this writer does not edit.
+        let headerValue = stripInlineComment(
+            trimYAMLLine(String(lines[start].dropFirst("mcp_servers:".count)))
+        )
+        guard ["", "{}", "~", "null", "Null", "NULL"].contains(headerValue) else { return nil }
+        if !headerValue.isEmpty { lines[start] = "mcp_servers:" + eol }
+
+        // The block runs to the next line with no leading whitespace.
+        var end = lines.count
+        for index in (start + 1)..<lines.count {
+            let line = lines[index]
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            if !(line.first.map { $0 == " " || $0 == "\t" } ?? false) {
+                end = index
+                break
+            }
+        }
+        // Every entry header must sit at exactly two spaces, and no line in
+        // the block may be tab-indented — the shape every other MCP writer
+        // here requires.
+        var existingStart: Int?
+        var existingEnd: Int?
+        var sawEntry = false
+        for index in (start + 1)..<end {
+            let line = lines[index]
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let leading = line.prefix(while: { $0 == " " || $0 == "\t" })
+            if leading.contains("\t") { return nil }
+            let indent = leading.count
+            if indent < 2 { return nil }
+            // The first entry fixes the block's indent; it must be two.
+            if existingStart == nil, !sawEntry, indent != 2 { return nil }
+            if indent == 2 {
+                sawEntry = true
+                if existingStart != nil, existingEnd == nil { existingEnd = index }
+                guard trimmed.hasSuffix(":") else { return nil }
+                if unquote(String(trimmed.dropLast())) == name {
+                    // A duplicated entry name: which copy wins is PyYAML's
+                    // call, not ours, so leave the file alone.
+                    if existingStart != nil { return nil }
+                    existingStart = index
+                }
+            } else if indent == 3 {
+                return nil
+            }
+        }
+        if let existingStart {
+            guard replacing else { return nil }
+            var stop = existingEnd ?? end
+            // Leave trailing comments/blank lines with whatever follows.
+            while stop > existingStart + 1, trimYAMLLine(lines[stop - 1]).isEmpty
+                    || trimYAMLLine(lines[stop - 1]).hasPrefix("#") {
+                stop -= 1
+            }
+            lines.replaceSubrange(existingStart..<stop, with: entry)
+            return lines.joined(separator: "\n")
+        }
+        if replacing { return nil }
+        // Insert after the block's last real line, ahead of trailing
+        // comments that belong to whatever follows.
+        var insertAt = end
+        while insertAt > start + 1 {
+            let trimmed = trimYAMLLine(lines[insertAt - 1])
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { insertAt -= 1 } else { break }
+        }
+        lines.insert(contentsOf: entry, at: insertAt)
+        return lines.joined(separator: "\n")
+    }
+
     /// Updates the v0.14 `supports_parallel_tool_calls` scalar on an MCP
     /// server entry. Pass `nil` to drop the key (Hermes default applies);
     /// pass `true` / `false` to opt this server in or out explicitly.
@@ -895,11 +1168,15 @@ struct HermesFileService: Sendable {
         return HermesMCPRemoveVerdict.judge(output: result.output, exitCode: result.exitCode)
     }
 
-    nonisolated func testMCPServer(name: String) async -> MCPTestResult {
+    /// - Parameter connectTimeout: the server's configured
+    ///   `connect_timeout`, which sets how long Hermes's own probe may take
+    ///   (S09-F6, ``HermesMCPTestVerdict/timeout(connectTimeout:)``).
+    nonisolated func testMCPServer(name: String, connectTimeout: Double? = nil) async -> MCPTestResult {
         let started = Date()
         let service = self
+        let timeout = HermesMCPTestVerdict.timeout(connectTimeout: connectTimeout)
         let result = await Task.detached { () -> (Int32, String) in
-            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: 30)
+            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: timeout)
         }.value
         let elapsed = Date().timeIntervalSince(started)
         let tools = Self.parseToolListFromTestOutput(result.1)
@@ -1053,25 +1330,53 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    nonisolated func updateMCPToolFilters(name: String, include: [String], exclude: [String], resources: Bool, prompts: Bool) -> Bool {
+    nonisolated func updateMCPToolFilters(
+        name: String,
+        include: [String],
+        exclude: [String],
+        resources: Bool,
+        prompts: Bool,
+        includeIsExplicit: Bool = false,
+        preserveInclude: Bool = false
+    ) -> Bool {
         patchMCPServerField(name: name) { entryLines in
-            Self.replaceOrInsertToolsBlock(include: include, exclude: exclude, resources: resources, prompts: prompts, in: &entryLines)
+            Self.replaceOrInsertToolsBlock(
+                include: include, includeIsExplicit: includeIsExplicit,
+                preserveInclude: preserveInclude, exclude: exclude,
+                resources: resources, prompts: prompts, in: &entryLines
+            )
         }
     }
 
     @discardableResult
-    nonisolated func setMCPServerTimeouts(name: String, timeout: Int?, connectTimeout: Int?) -> Bool {
+    nonisolated func setMCPServerTimeouts(name: String, timeout: Double?, connectTimeout: Double?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
-            if let timeout {
-                Self.replaceOrInsertScalar(key: "timeout", value: String(timeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "timeout", in: &entryLines)
-            }
-            if let connectTimeout {
-                Self.replaceOrInsertScalar(key: "connect_timeout", value: String(connectTimeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "connect_timeout", in: &entryLines)
-            }
+            Self.writeSeconds(key: "timeout", value: timeout, in: &entryLines)
+            Self.writeSeconds(key: "connect_timeout", value: connectTimeout, in: &entryLines)
+        }
+    }
+
+    /// Writes ONE of the two timeout keys and leaves the other line exactly
+    /// as it is. The editor calls this only for a field the user changed, so
+    /// a `connect_timeout: 45.0` Hermes wrote survives an unrelated save
+    /// byte-for-byte (S09-F3).
+    @discardableResult
+    nonisolated func setMCPServerTimeout(name: String, key: MCPTimeoutKey, seconds: Double?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            Self.writeSeconds(key: key.rawValue, value: seconds, in: &entryLines)
+        }
+    }
+
+    enum MCPTimeoutKey: String, Sendable {
+        case timeout
+        case connectTimeout = "connect_timeout"
+    }
+
+    nonisolated private static func writeSeconds(key: String, value: Double?, in entryLines: inout [String]) {
+        if let value {
+            replaceOrInsertScalar(key: key, value: HermesMCPServer.formatSeconds(value), in: &entryLines)
+        } else {
+            removeScalar(key: key, in: &entryLines)
         }
     }
 
@@ -1189,6 +1494,9 @@ struct HermesFileService: Sendable {
         var headersMap: [String: String] = [:]
         var includeList: [String] = []
         var excludeList: [String] = []
+        // `tools.include` holds a list or a string (whitelist mode), even an
+        // empty one. See `HermesMCPServer.toolsIncludeIsExplicit`.
+        var includeIsExplicit = false
         var resources = true
         var prompts = true
         var subSection: String?
@@ -1245,8 +1553,16 @@ struct HermesFileService: Sendable {
             // `!= "false"` test read `enabled: no` as enabled — Scarf showed
             // a live server the gateway was ignoring.
             let enabled = Self.boolish(fields["enabled"], default: true, capabilities: capabilities)
-            let timeout = fields["timeout"].flatMap(Int.init)
-            let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
+            // Floats, not Ints: `mcp add --connect-timeout 90` stores
+            // `connect_timeout: 90.0` (see `HermesMCPServer.timeout`).
+            // `Int.init` read that as absent, and the editor then dropped
+            // the key on its next save.
+            func seconds(_ raw: String?) -> Double? {
+                guard let raw, let value = Double(Self.unquote(raw)), value.isFinite else { return nil }
+                return value
+            }
+            let timeout = seconds(fields["timeout"])
+            let connectTimeout = seconds(fields["connect_timeout"])
             // v0.14 — supports_parallel_tool_calls is an optional bool;
             // absent means "use Hermes's default" and stays nil.
             // Absent stays nil ("use Hermes's default"); a present value is
@@ -1346,7 +1662,8 @@ struct HermesFileService: Sendable {
                 identityHeader: identityHeader,
                 strictRedirectHeaders: strictRedirectHeaders,
                 cwd: cwd,
-                oauthFlow: oauthFlow
+                oauthFlow: oauthFlow,
+                toolsIncludeIsExplicit: includeIsExplicit
             )
             servers.append(server)
 
@@ -1357,6 +1674,7 @@ struct HermesFileService: Sendable {
             headersMap = [:]
             includeList = []
             excludeList = []
+            includeIsExplicit = false
             // `_parse_boolish(tools_filter.get(f), default=True)`
             // (`tools/mcp_tool_registration.py:77`): an ABSENT key means
             // exposed, not hidden. Defaulting these to false made the editor
@@ -1424,12 +1742,14 @@ struct HermesFileService: Sendable {
                     continue
                 }
                 subSection = nil
-                if trimmed.hasSuffix(":") {
-                    subSection = Self.unquote(String(trimmed.dropLast()))
-                    continue
-                }
                 if let (key, value) = keyValue(trimmed) {
-                    fields[key] = value
+                    // An empty value (after any `# comment`) opens a nested
+                    // block: `tools:` and `tools:   # filters` alike.
+                    if value.isEmpty {
+                        subSection = key
+                    } else {
+                        fields[key] = value
+                    }
                 }
                 continue
             }
@@ -1448,23 +1768,54 @@ struct HermesFileService: Sendable {
                     if let (key, value) = keyValue(trimmed) {
                         headersMap[key] = Self.unquote(value)
                     }
-                case "tools":
-                    if trimmed == "include:" {
-                        subSection = "tools.include"
-                    } else if trimmed == "exclude:" {
-                        subSection = "tools.exclude"
-                    } else if let (key, value) = keyValue(trimmed), key == "resources" {
+                case "tools", "tools.include", "tools.exclude":
+                    // A `- item` line belongs to whichever list is open. ANY
+                    // other line is a sibling key of the `tools:` block and
+                    // closes that list. S09-F1: the list states used to
+                    // swallow every line after them, so in Scarf's own
+                    // layout (`include:` → `exclude:` → `resources:` →
+                    // `prompts:`) the exclude items were read as INCLUDE
+                    // items and `resources`/`prompts: false` were dropped.
+                    // The editor then saved that misread back, turning a
+                    // blocklist into a whitelist of exactly the tools the
+                    // user had blocked.
+                    if trimmed == "-" || trimmed.hasPrefix("- ") {
+                        // A blank item (`-`, `- ''`) still makes `include`
+                        // a list, but names no tool; keeping it as "" would
+                        // make every editor save look like a change.
+                        let item = Self.unquote(Self.stripInlineComment(String(trimmed.dropFirst(1))))
+                            .trimmingCharacters(in: .whitespaces)
+                        if subSection == "tools.include" {
+                            if !item.isEmpty { includeList.append(item) }
+                            includeIsExplicit = true
+                        } else if subSection == "tools.exclude", !item.isEmpty {
+                            excludeList.append(item)
+                        }
+                        continue
+                    }
+                    subSection = "tools"
+                    guard let (key, value) = keyValue(trimmed) else { continue }
+                    switch key {
+                    case "include", "exclude":
+                        // Hermes's `_normalize_name_filter`
+                        // (`tools/mcp_tool_schema.py:231-240` @ v2026.9.24):
+                        // null → nothing, a string → one entry, a list →
+                        // its items. Block lists open the list state; the
+                        // flow and scalar forms are read in place.
+                        let parsed = Self.toolNameFilter(value)
+                        if key == "include" {
+                            includeList = parsed.items
+                            includeIsExplicit = parsed.isExplicit
+                        } else {
+                            excludeList = parsed.items
+                        }
+                        if parsed.opensBlockList { subSection = "tools.\(key)" }
+                    case "resources":
                         resources = Self.boolish(value, default: true, capabilities: capabilities)
-                    } else if let (key, value) = keyValue(trimmed), key == "prompts" {
+                    case "prompts":
                         prompts = Self.boolish(value, default: true, capabilities: capabilities)
-                    }
-                case "tools.include":
-                    if trimmed.hasPrefix("- ") {
-                        includeList.append(Self.unquote(String(trimmed.dropFirst(2))))
-                    }
-                case "tools.exclude":
-                    if trimmed.hasPrefix("- ") {
-                        excludeList.append(Self.unquote(String(trimmed.dropFirst(2))))
+                    default:
+                        break
                     }
                 case "oauth":
                     if let (key, value) = keyValue(trimmed), key == "flow" {
@@ -2248,14 +2599,43 @@ struct HermesFileService: Sendable {
         }
     }
 
-    nonisolated private static func replaceOrInsertToolsBlock(include: [String], exclude: [String], resources: Bool, prompts: Bool, in lines: inout [String]) {
+    /// Rewrites the entry's `tools:` block from Scarf's model.
+    ///
+    /// An empty list is OMITTED, not written as a bare `include:` /
+    /// `exclude:` (S09-F1). Hermes reads a bare key as null, so the old
+    /// output meant the right thing on the host, but it is the layout that
+    /// Scarf's own parser misread, and a written `include:` has two
+    /// meanings Hermes keeps apart: null means "no whitelist" while `[]`
+    /// means "register nothing" (`tools/mcp_tool_registration.py:209-225`
+    /// @ v2026.9.24). So an include list is written only when there is one,
+    /// and `includeIsExplicit` with no items writes `include: []` on
+    /// purpose.
+    nonisolated private static func replaceOrInsertToolsBlock(
+        include: [String],
+        includeIsExplicit: Bool = false,
+        preserveInclude: Bool = false,
+        exclude: [String],
+        resources: Bool,
+        prompts: Bool,
+        in lines: inout [String]
+    ) {
+        // The header: `tools:` at indent 4, however the key is spelled
+        // (quoted, trailing comment). Only an EMPTY value opens a block; a
+        // flow value is left alone by `unpatchableReason`'s callers' shape.
+        func isToolsHeader(_ line: String) -> Bool {
+            guard line.prefix(while: { $0 == " " }).count == 4 else { return false }
+            guard let span = HermesYAML.blockKeySpan(in: trimYAMLLine(line)) else { return false }
+            let key = unquote(String(span.key).trimmingCharacters(in: .whitespaces))
+            let value = stripInlineComment(String(span.afterColon).trimmingCharacters(in: .whitespaces))
+            return key == "tools" && value.isEmpty
+        }
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
             let trimmed = Self.trimYAMLLine(line)
-            if indent == 4 && trimmed == "tools:" {
+            if headerIndex == nil, isToolsHeader(line) {
                 headerIndex = index
                 continue
             }
@@ -2271,16 +2651,41 @@ struct HermesFileService: Sendable {
             }
         }
 
-        var newLines: [String] = ["    tools:"]
-        newLines.append("      include:")
-        for tool in include { newLines.append("        - \(yamlScalar(tool))") }
-        newLines.append("      exclude:")
-        for tool in exclude { newLines.append("        - \(yamlScalar(tool))") }
-        newLines.append("      resources: \(resources ? "true" : "false")")
-        newLines.append("      prompts: \(prompts ? "true" : "false")")
+        // What survives from the old block, and the indent its children
+        // use. New lines are written at that SAME indent: a block whose
+        // children sit at 8 with Scarf's lines at 6 is a YAML error for the
+        // whole file.
+        let end = removeEnd ?? lines.count
+        let old: (kept: [String], trailing: [String], childIndent: Int?) = headerIndex.map {
+            unmodelledToolsChildren(
+                Array(lines[($0 + 1)..<end]),
+                alsoKeep: preserveInclude ? ["include"] : []
+            )
+        } ?? ([], [], nil)
+        let pad = String(repeating: " ", count: old.childIndent ?? 6)
+
+        var newLines: [String] = [headerIndex.map { lines[$0] } ?? "    tools:"]
+        if !preserveInclude {
+            if !include.isEmpty {
+                newLines.append("\(pad)include:")
+                for tool in include { newLines.append("\(pad)  - \(yamlScalar(tool))") }
+            } else if includeIsExplicit {
+                newLines.append("\(pad)include: []")
+            }
+        }
+        if !exclude.isEmpty {
+            newLines.append("\(pad)exclude:")
+            for tool in exclude { newLines.append("\(pad)  - \(yamlScalar(tool))") }
+        }
+        newLines.append("\(pad)resources: \(resources ? "true" : "false")")
+        newLines.append("\(pad)prompts: \(prompts ? "true" : "false")")
+        // Every child key Scarf does not model (a future Hermes key, a
+        // user's own note), and `include` when the caller left it alone,
+        // with their nested lines, after the ones it rewrites.
+        newLines.append(contentsOf: old.kept)
+        newLines.append(contentsOf: old.trailing)
 
         if let headerIndex {
-            let end = removeEnd ?? lines.count
             lines.replaceSubrange(headerIndex..<end, with: newLines)
         } else {
             var insertAt = lines.count
@@ -2295,6 +2700,47 @@ struct HermesFileService: Sendable {
             }
             lines.insert(contentsOf: newLines, at: insertAt)
         }
+    }
+
+    /// Splits a `tools:` block's body (the lines under its header) into:
+    /// - `kept`: the children other than `include`, `exclude`, `resources`
+    ///   and `prompts` (plus any in `alsoKeep`), each with everything nested
+    ///   under it and the comments directly above it, in file order;
+    /// - `trailing`: comment lines after the last child, which describe
+    ///   whatever follows the block (blank lines are dropped);
+    /// - `childIndent`: the indent of the first child key, `nil` when the
+    ///   block has none. An indentless list (`- x` at that indent) stays
+    ///   with the key above it.
+    nonisolated static func unmodelledToolsChildren(
+        _ body: [String],
+        alsoKeep: Set<String> = []
+    ) -> (kept: [String], trailing: [String], childIndent: Int?) {
+        let modelled: Set<String> = Set(["include", "exclude", "resources", "prompts"])
+            .subtracting(alsoKeep)
+        var childIndent: Int?
+        var keep = true
+        var kept: [String] = []
+        var pending: [String] = []
+        for line in body {
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                pending.append(line)
+                continue
+            }
+            let indent = line.prefix(while: { $0 == " " }).count
+            let isKeyLine = !trimmed.hasPrefix("- ") && trimmed != "-"
+                && (childIndent == nil || indent == childIndent)
+            if isKeyLine {
+                if childIndent == nil { childIndent = indent }
+                let key = HermesYAML.blockKeySpan(in: trimmed)
+                    .map { unquote(String($0.key).trimmingCharacters(in: .whitespaces)) }
+                keep = key.map { !modelled.contains($0) } ?? true
+            }
+            if keep { kept.append(contentsOf: pending); kept.append(line) }
+            pending = []
+        }
+        let trailing = pending.filter { !trimYAMLLine($0).isEmpty }
+        return (kept, trailing, childIndent)
     }
 
     /// Emit one MCP scalar VALUE — a thin forwarder over
@@ -2424,6 +2870,33 @@ struct HermesFileService: Sendable {
     /// decoder now: ``YAMLScalar/unquote(_:)``.
     nonisolated static func unquote(_ value: String) -> String {
         YAMLScalar.unquote(value)
+    }
+
+    /// One `tools.include` / `tools.exclude` value as Hermes's
+    /// `_normalize_name_filter` reads it (`tools/mcp_tool_schema.py:231-240`
+    /// @ v2026.9.24): null is "no filter", a string is one entry and a list
+    /// is its items. `value` is the text after the colon, comment already
+    /// stripped.
+    ///
+    /// - `isExplicit`: the key holds a list or a string, which for `include`
+    ///   means whitelist mode even when the list is empty.
+    /// - `opensBlockList`: the value is empty, so any `- item` lines that
+    ///   follow are this key's block list. With no items it stays null.
+    nonisolated static func toolNameFilter(
+        _ value: String
+    ) -> (items: [String], isExplicit: Bool, opensBlockList: Bool) {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return ([], false, true) }
+        if ["~", "null", "Null", "NULL"].contains(trimmed) { return ([], false, false) }
+        if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
+            let inner = String(trimmed.dropFirst().dropLast())
+            let items = HermesYAML.splitFlowEntries(inner)
+                .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
+                .filter { !$0.isEmpty }
+            return (items, true, false)
+        }
+        let single = unquote(trimmed)
+        return (single.isEmpty ? [] : [single], true, false)
     }
 
     /// Normalizes an `client_cert`-style value that may be either a scalar

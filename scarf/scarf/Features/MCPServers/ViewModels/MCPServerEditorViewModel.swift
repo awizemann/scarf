@@ -68,8 +68,8 @@ final class MCPServerEditorViewModel {
         self.excludeDraft = server.toolsExclude.joined(separator: ", ")
         self.resourcesEnabled = server.resourcesEnabled
         self.promptsEnabled = server.promptsEnabled
-        self.timeoutDraft = server.timeout.map { String($0) } ?? ""
-        self.connectTimeoutDraft = server.connectTimeout.map { String($0) } ?? ""
+        self.timeoutDraft = server.timeout.map(HermesMCPServer.formatSeconds) ?? ""
+        self.connectTimeoutDraft = server.connectTimeout.map(HermesMCPServer.formatSeconds) ?? ""
         self.parallelToolCallsDraft = server.supportsParallelToolCalls
         self.clientCertDraft = server.clientCert ?? ""
         self.clientKeyDraft = server.clientKey ?? ""
@@ -182,8 +182,8 @@ final class MCPServerEditorViewModel {
     /// silently reshaping it is how a credential ends up subtly wrong.
     ///
     /// Scoped to what this save would actually WRITE. The env/headers maps
-    /// and the tool filters are rewritten on every save, so they are always
-    /// checked; the v0.15/v0.20.4 scalars are delta-gated in ``save`` and
+    /// are rewritten on every save, so they are always checked; the tool
+    /// filters and the v0.15/v0.20.4 scalars are delta-gated in ``save`` and
     /// are checked only when they differ from the loaded value — refusing on
     /// an unchanged field would make an entry whose config.yaml already
     /// carries a control character permanently uneditable, which is the
@@ -212,14 +212,11 @@ final class MCPServerEditorViewModel {
             if bad(row.value) { return "\(rowLabel) value" }
         }
         // Same rule for the tool filters, which `save` splits on `,` and
-        // trims item by item.
-        func toolItems(_ draft: String) -> [String] {
-            draft.split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+        // trims item by item — checked only when they will be written.
+        if toolFiltersChanged {
+            if Self.toolItems(includeDraft).contains(where: bad) { return "Include tools" }
+            if Self.toolItems(excludeDraft).contains(where: bad) { return "Exclude tools" }
         }
-        if toolItems(includeDraft).contains(where: bad) { return "Include tools" }
-        if toolItems(excludeDraft).contains(where: bad) { return "Exclude tools" }
 
         // Delta-gated, exactly as `save` gates the writes.
         guard server.transport != .stdio else {
@@ -289,6 +286,44 @@ final class MCPServerEditorViewModel {
             return "\(rowLabel) name"
         }
         return nil
+    }
+
+    /// Tool names out of a comma-separated draft, trimmed, blanks dropped.
+    static func toolItems(_ draft: String) -> [String] {
+        draft.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// True when the tool-filter controls differ from what was loaded.
+    ///
+    /// The `tools:` block is rewritten from Scarf's model, so it is written
+    /// only when the user changed it (S09-F1). Rewriting it on every save
+    /// is how a misread blocklist became a whitelist, and it would also
+    /// normalise a hand-written block the user never touched.
+    var toolFiltersChanged: Bool {
+        Self.toolItems(includeDraft) != server.toolsInclude
+            || Self.toolItems(excludeDraft) != server.toolsExclude
+            || resourcesEnabled != server.resourcesEnabled
+            || promptsEnabled != server.promptsEnabled
+    }
+
+    /// A timeout draft the user changed, resolved to what ``save`` writes:
+    /// `.unchanged` leaves the key alone (so Hermes's own `45.0` spelling
+    /// survives), `.set(nil)` removes it, and `.invalid` refuses the save.
+    enum TimeoutEdit: Equatable {
+        case unchanged
+        case set(Double?)
+        case invalid
+    }
+
+    static func timeoutEdit(draft: String, loaded: Double?) -> TimeoutEdit {
+        let trimmed = draft.trimmingCharacters(in: .whitespaces)
+        let seed = loaded.map(HermesMCPServer.formatSeconds) ?? ""
+        if trimmed == seed { return .unchanged }
+        if trimmed.isEmpty { return .set(nil) }
+        guard let value = HermesMCPServer.parseSeconds(trimmed) else { return .invalid }
+        return .set(value)
     }
 
     /// The `identity_header` block ``save`` would write, or `nil` when it
@@ -374,10 +409,35 @@ final class MCPServerEditorViewModel {
                 .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
             uniquingKeysWith: { _, last in last }
         )
-        let include = includeDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let exclude = excludeDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let timeoutValue = Int(timeoutDraft.trimmingCharacters(in: .whitespaces))
-        let connectValue = Int(connectTimeoutDraft.trimmingCharacters(in: .whitespaces))
+        // S09-F3: a timeout is written only when its field changed, and a
+        // value Hermes could not read as seconds is refused rather than
+        // silently deleting the key.
+        let timeoutChange = Self.timeoutEdit(draft: timeoutDraft, loaded: server.timeout)
+        let connectChange = Self.timeoutEdit(draft: connectTimeoutDraft, loaded: server.connectTimeout)
+        if timeoutChange == .invalid || connectChange == .invalid {
+            isSaving = false
+            let field = connectChange == .invalid
+                ? String(localized: "Connect timeout") : String(localized: "Call timeout")
+            saveError = String(
+                localized: "“\(field)” must be a number of seconds greater than zero, or empty for the default."
+            )
+            completion(false)
+            return
+        }
+
+        let include = Self.toolItems(includeDraft)
+        let exclude = Self.toolItems(excludeDraft)
+        let writeToolFilters = toolFiltersChanged
+        // `include: []` is a whitelist of nothing and must survive a save
+        // that leaves the include field alone; clearing a non-empty include
+        // list means "no whitelist", which is an absent key.
+        let includeIsExplicit = include.isEmpty
+            ? (server.toolsIncludeIsExplicit && server.toolsInclude.isEmpty)
+            : true
+        // An include list the user did not touch is kept exactly as written
+        // (`include: []`, a blank item): what those mean depends on the
+        // Hermes version (v0.20.6 changed `[]`), so Scarf does not respell it.
+        let preserveInclude = include == server.toolsInclude
         let parallelDraft = parallelToolCallsDraft
         let originalParallel = server.supportsParallelToolCalls
         // v0.15 — mTLS drafts. Resolve empty strings to nil so an untouched /
@@ -430,14 +490,21 @@ final class MCPServerEditorViewModel {
                     // `HermesMCPServer`).
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
                 }
-                if !service.updateMCPToolFilters(
+                if writeToolFilters, !service.updateMCPToolFilters(
                     name: name,
                     include: include,
                     exclude: exclude,
                     resources: resources,
-                    prompts: prompts
+                    prompts: prompts,
+                    includeIsExplicit: includeIsExplicit,
+                    preserveInclude: preserveInclude
                 ) { ok = false }
-                if !service.setMCPServerTimeouts(name: name, timeout: timeoutValue, connectTimeout: connectValue) {
+                if case .set(let value) = timeoutChange,
+                   !service.setMCPServerTimeout(name: name, key: .timeout, seconds: value) {
+                    ok = false
+                }
+                if case .set(let value) = connectChange,
+                   !service.setMCPServerTimeout(name: name, key: .connectTimeout, seconds: value) {
                     ok = false
                 }
                 // v0.14 — only write the parallel-tool-calls scalar when

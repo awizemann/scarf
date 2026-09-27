@@ -56,6 +56,11 @@ final class MCPServersViewModel {
     /// fails. (F9)
     var activeNotice: String?
 
+    /// A server that was just added with OAuth and has no token yet. The
+    /// view offers `hermes mcp login` for it (S09-F2): without a sign-in
+    /// Hermes cannot load its tools.
+    var pendingSignIn: String?
+
     /// Pull a leading `Note:` line out of an add's output. `HermesFileService`
     /// prefixes one when the plan withheld a supplied token.
     nonisolated static func addNotice(in output: String) -> String? {
@@ -222,8 +227,9 @@ final class MCPServersViewModel {
         guard !testingNames.contains(name) else { return }
         testingNames.insert(name)
         let fileService = self.fileService
+        let connectTimeout = servers.first { $0.name == name }?.connectTimeout
         Task.detached { [weak self] in
-            let result = await fileService.testMCPServer(name: name)
+            let result = await fileService.testMCPServer(name: name, connectTimeout: connectTimeout)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.testingNames.remove(name)
@@ -250,6 +256,9 @@ final class MCPServersViewModel {
         // Skip servers already being probed individually rather than
         // double-launching them.
         let targets = servers.map(\.name).filter { !testingNames.contains($0) }
+        let connectTimeouts = Dictionary(
+            servers.map { ($0.name, $0.connectTimeout) }, uniquingKeysWith: { first, _ in first }
+        )
         guard !targets.isEmpty else { return }
         let fileService = self.fileService
         // Every target enters the spinner set UP FRONT: previously `testAll`
@@ -263,7 +272,10 @@ final class MCPServersViewModel {
                 func addTask() {
                     let name = targets[next]
                     next += 1
-                    group.addTask { (name, await fileService.testMCPServer(name: name)) }
+                    let connectTimeout = connectTimeouts[name] ?? nil
+                    group.addTask {
+                        (name, await fileService.testMCPServer(name: name, connectTimeout: connectTimeout))
+                    }
                 }
                 while next < targets.count, next < Self.maxConcurrentTests { addTask() }
                 while let (name, result) = await group.next() {
@@ -313,6 +325,8 @@ final class MCPServersViewModel {
             if let pathArg, !pathArg.isEmpty { base.append(pathArg) }
             return base
         }()
+        let isOAuthDirect = preset.auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
             let addResult: (exitCode: Int32, output: String)
             switch preset.transport {
@@ -327,6 +341,13 @@ final class MCPServersViewModel {
                     args: allArgs,
                     env: envValues,
                     overwriteConfirmed: overwriteConfirmed
+                )
+            case .http where isOAuthDirect:
+                addResult = Self.runOAuthAdd(
+                    fileService: fileService, name: name, url: preset.url ?? "",
+                    sse: false, catalogIdentifier: nil,
+                    defaultEnabledTools: [], defaultExcludedTools: [],
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
                 )
             case .http:
                 addResult = fileService.addMCPServerHTTP(
@@ -354,13 +375,72 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.showPresetPicker = false
+                if isOAuthDirect {
+                    self.finishOAuthAdd(name: name)
+                    return
+                }
                 self.activeNotice = Self.addNotice(in: addResult.output)
                 self.flashStatus("Added \(name)")
                 self.load(force: true)
                 self.selectedServerName = name
                 self.showRestartBanner = true
-                self.showPresetPicker = false
             }
+        }
+    }
+
+    /// True when an OAuth add must bypass `hermes mcp add` on this host
+    /// (S09-F2). Older hosts keep the `mcp add --auth oauth` path, which
+    /// still built the provider there (charter C1).
+    private var oauthAddNeedsDirectWrite: Bool {
+        capabilities.hasMCPOAuthAddNeedsDirectWrite
+    }
+
+    /// Runs the OAuth add for `name` and reports the result the same way
+    /// the `mcp add` paths do. Off the main actor, like every add.
+    nonisolated private static func runOAuthAdd(
+        fileService: HermesFileService,
+        name: String,
+        url: String,
+        sse: Bool,
+        catalogIdentifier: String?,
+        defaultEnabledTools: [String],
+        defaultExcludedTools: [String],
+        overwriteConfirmed: Bool,
+        capabilities: HermesCapabilities
+    ) -> (exitCode: Int32, output: String) {
+        let result = fileService.addMCPServerOAuth(
+            name: name, url: url, sse: sse,
+            catalogIdentifier: catalogIdentifier,
+            overwriteConfirmed: overwriteConfirmed,
+            capabilities: capabilities
+        )
+        // `mcp install` already applied the manifest's own tool defaults.
+        if result.exitCode == 0, !result.installedViaCatalog {
+            applyCatalogToolDefaults(
+                fileService: fileService,
+                name: name,
+                defaultEnabledTools: defaultEnabledTools,
+                defaultExcludedTools: defaultExcludedTools
+            )
+        }
+        return (result.exitCode, result.output)
+    }
+
+    /// The main-actor half of a successful OAuth add: reload, select, and
+    /// hand the server to the sign-in offer.
+    private func finishOAuthAdd(name: String) {
+        flashStatus("Added \(name)")
+        load(force: true)
+        selectedServerName = name
+        showRestartBanner = true
+        if capabilities.hasMCPReauth {
+            pendingSignIn = name
+        } else {
+            activeNotice = String(
+                localized: "“\(name)” was added with OAuth. Run `hermes mcp login \(name)` on that host to sign in, then restart the gateway.",
+                comment: "OAuth MCP server added on a host without Scarf's sign-in sheet"
+            )
         }
     }
 
@@ -400,6 +480,7 @@ final class MCPServersViewModel {
         apiKey: String = "",
         defaultEnabledTools: [String] = [],
         defaultExcludedTools: [String] = [],
+        catalogIdentifier: String? = nil,
         overwriteConfirmed: Bool = false
     ) {
         if !overwriteConfirmed, serverNameIsTaken(name) {
@@ -409,15 +490,27 @@ final class MCPServersViewModel {
                     url: url, auth: auth, apiKey: apiKey,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
+                    catalogIdentifier: catalogIdentifier,
                     overwriteConfirmed: true
                 )
             }
             return
         }
         let fileService = self.fileService
+        let isOAuthDirect = transport == .http
+            && auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
             let result: (exitCode: Int32, output: String)
             switch transport {
+            case .http where isOAuthDirect:
+                result = Self.runOAuthAdd(
+                    fileService: fileService, name: name, url: url, sse: false,
+                    catalogIdentifier: catalogIdentifier,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools,
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
+                )
             case .stdio:
                 result = fileService.addMCPServerStdio(
                     name: name, command: command, args: args,
@@ -434,7 +527,7 @@ final class MCPServersViewModel {
                 // but kept so the switch is exhaustive without `@unknown default`.
                 result = (exitCode: 1, output: "SSE servers must be added via addCustomSSE.")
             }
-            if result.exitCode == 0 {
+            if result.exitCode == 0, !isOAuthDirect {
                 Self.applyCatalogToolDefaults(
                     fileService: fileService,
                     name: name,
@@ -444,7 +537,10 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
+                if result.exitCode == 0, isOAuthDirect {
+                    self.showAddCustom = false
+                    self.finishOAuthAdd(name: name)
+                } else if result.exitCode == 0 {
                     self.activeNotice = Self.addNotice(in: result.output)
                     self.flashStatus("Added \(name)")
                     self.load(force: true)
@@ -484,12 +580,22 @@ final class MCPServersViewModel {
             return
         }
         let fileService = self.fileService
+        let isOAuthDirect = auth?.lowercased() == "oauth" && oauthAddNeedsDirectWrite
+        let caps = capabilities
         Task.detached { [weak self] in
-            let result = fileService.addMCPServerSSE(
-                name: name, url: url,
-                auth: auth, apiKey: apiKey, overwriteConfirmed: overwriteConfirmed
-            )
-            if result.exitCode == 0 {
+            let result = isOAuthDirect
+                ? Self.runOAuthAdd(
+                    fileService: fileService, name: name, url: url, sse: true,
+                    catalogIdentifier: nil,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools,
+                    overwriteConfirmed: overwriteConfirmed, capabilities: caps
+                )
+                : fileService.addMCPServerSSE(
+                    name: name, url: url,
+                    auth: auth, apiKey: apiKey, overwriteConfirmed: overwriteConfirmed
+                )
+            if result.exitCode == 0, !isOAuthDirect {
                 Self.applyCatalogToolDefaults(
                     fileService: fileService,
                     name: name,
@@ -499,7 +605,10 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if result.exitCode == 0 {
+                if result.exitCode == 0, isOAuthDirect {
+                    self.showAddCustom = false
+                    self.finishOAuthAdd(name: name)
+                } else if result.exitCode == 0 {
                     self.activeNotice = Self.addNotice(in: result.output)
                     self.flashStatus("Added \(name)")
                     self.load(force: true)
