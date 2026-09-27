@@ -1610,7 +1610,6 @@
   "Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`.": "Fournissez une URL Git (https://github.com/...) ou un raccourci comme `owner/repo`.",
   "Provider": "Fournisseur",
   "Provider ID (e.g. openrouter)": "ID du fournisseur (p. ex. openrouter)",
-  "Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.": "Identifiants de fournisseur (clés Anthropic/OpenAI/Nous). **Désactivé par défaut** — ils sont sensibles et vous devrez probablement vous réauthentifier sur le nouveau droplet de toute façon.",
   "Provider default": "Valeur par défaut du fournisseur",
   "Publish Topic": "Sujet de publication",
   "Push **%@**'s config from %@ to other hosts.": "Pousser la configuration de **%1$@** depuis %2$@ vers d'autres hôtes.",
@@ -1794,7 +1793,6 @@
   "Restore from backup": "Restaurer depuis une sauvegarde",
   "Restore from backup?": "Restaurer depuis la sauvegarde ?",
   "Restore from remote backup": "Restaurer depuis une sauvegarde distante",
-  "Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.": "Les tâches cron restaurées peuvent contenir des identifiants obsolètes ou des planifications que vous ne voulez plus. Les mettre en pause vous permet de les réactiver intentionnellement depuis la vue Cron.",
   "Restored to": "Restauré vers",
   "Restores %@ to its state before the %@ mutation (%@). This adds a new ledger entry — it doesn't erase this one.": "Restaure %1$@ à son état avant la modification %2$@ (%3$@). Cela ajoute une nouvelle entrée au registre — cela n'efface pas celle-ci.",
   "Restore…": "Restaurer…",
@@ -3165,5 +3163,14 @@
   "Couldn't parse webhook list output": "Impossible d’analyser la sortie de la liste des webhooks",
   "`hermes profile list` failed: %@": "`hermes profile list` a échoué : %@",
   "`hermes profile list` failed (exit %lld).": "`hermes profile list` a échoué (code de sortie %lld).",
-  "Couldn't reach `hermes profile list` on this server.": "Impossible d’atteindre `hermes profile list` sur ce serveur."
+  "Couldn't reach `hermes profile list` on this server.": "Impossible d’atteindre `hermes profile list` sur ce serveur.",
+  "Archived — session lists don't show this session.": "Archivée — les listes de sessions n'affichent pas cette session.",
+  "Deleted %lld of %lld linked segments — the rest couldn't be deleted.": "%lld segments liés supprimés sur %lld — les autres n'ont pas pu être supprimés.",
+  "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.": "Live Voice n'a pas pu envoyer ce message — le chat charge encore sa session. Réessayez dans un instant.",
+  "Not in the session list — this is a subagent run or a hidden session.": "Absente de la liste des sessions — il s'agit d'une exécution de sous-agent ou d'une session masquée.",
+  "Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.": "Identifiants de connexion des fournisseurs et clés mutualisées que Hermes conserve dans `auth.json`. **Désactivé par défaut** — ils sont sensibles et vous devrez probablement vous réauthentifier sur le nouveau droplet de toute façon. Cela ne concerne que `auth.json` : les clés d'API dans `.env` et le coffre chiffré dans `vault/` (avec sa clé) sont toujours inclus dans l'archive, comme dans la sauvegarde propre à Hermes — gardez donc l'archive privée.",
+  "Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.": "Les tâches cron restaurées peuvent contenir des identifiants obsolètes ou des planifications que vous ne voulez plus. Cela met en pause toutes les tâches cron de l'hôte après la restauration — dans tous les profils, y compris celles qui existaient déjà et ne sont pas dans l'archive — afin que vous réactiviez celles que vous voulez depuis la vue Cron.",
+  "This conversation was compressed into %lld linked segments. Deleting it permanently deletes all %lld segments and their messages.": "Cette conversation a été compressée en %lld segments liés. La supprimer supprime définitivement les %lld segments et leurs messages.",
+  "Your last message wasn’t sent": "Votre dernier message n'a pas été envoyé",
+  "^[%lld message](inflect: true) couldn't be sent — the connection didn't come up.": "^[%lld message](inflect: true) n'a pas pu être envoyé — la connexion ne s'est pas rétablie."
 }

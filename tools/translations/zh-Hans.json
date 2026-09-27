@@ -1609,7 +1609,6 @@
   "Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`.": "提供 Git URL(https://github.com/...)或简写如 `owner/repo`。",
   "Provider": "提供方",
   "Provider ID (e.g. openrouter)": "提供方 ID(例如 openrouter)",
-  "Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.": "提供方凭证(Anthropic/OpenAI/Nous 密钥)。**默认关闭** — 它们很敏感,而且你在新的 droplet 上很可能仍需重新认证。",
   "Provider default": "提供方默认值",
   "Publish Topic": "发布主题",
   "Push **%@**'s config from %@ to other hosts.": "将 **%1$@** 的配置从 %2$@ 推送到其他主机。",
@@ -1793,7 +1792,6 @@
   "Restore from backup": "从备份恢复",
   "Restore from backup?": "从备份恢复?",
   "Restore from remote backup": "从远程备份恢复",
-  "Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.": "恢复的定时任务可能带有陈旧的凭证或你不再需要的时间表。暂停它们可让你在定时任务视图中有意识地重新启用。",
   "Restored to": "已恢复到",
   "Restores %@ to its state before the %@ mutation (%@). This adds a new ledger entry — it doesn't erase this one.": "将 %1$@ 恢复到 %2$@ 变更(%3$@)之前的状态。这会添加一条新的台账记录 — 不会抹去此条记录。",
   "Restore…": "恢复…",
@@ -3157,5 +3155,14 @@
   "Couldn't parse webhook list output": "无法解析 webhook 列表输出",
   "`hermes profile list` failed: %@": "`hermes profile list` 失败:%@",
   "`hermes profile list` failed (exit %lld).": "`hermes profile list` 失败(退出码 %lld)。",
-  "Couldn't reach `hermes profile list` on this server.": "无法在此服务器上访问 `hermes profile list`。"
+  "Couldn't reach `hermes profile list` on this server.": "无法在此服务器上访问 `hermes profile list`。",
+  "Archived — session lists don't show this session.": "已归档 — 会话列表不会显示此会话。",
+  "Deleted %lld of %lld linked segments — the rest couldn't be deleted.": "已删除 %lld/%lld 个关联片段 — 其余片段无法删除。",
+  "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.": "Live Voice 未能发送该内容 — 聊天仍在加载会话。请稍等片刻后再试一次。",
+  "Not in the session list — this is a subagent run or a hidden session.": "未出现在会话列表中 — 这是一次子 agent 运行或隐藏会话。",
+  "Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.": "Hermes 保存在 `auth.json` 中的提供方登录信息和共用密钥。**默认关闭** — 它们很敏感,而且你在新的 droplet 上很可能仍需重新认证。这仅涉及 `auth.json`:`.env` 中的 API 密钥以及 `vault/` 中的加密保管库(及其密钥)始终包含在归档中,就像 Hermes 自身的备份一样,因此请妥善保管归档文件的私密性。",
+  "Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.": "恢复的定时任务可能带有陈旧的凭证或你不再需要的时间表。此操作会在恢复后暂停主机上的每一个定时任务 — 涵盖所有配置,包括已存在且不在归档中的任务 — 以便你在定时任务视图中重新启用需要的任务。",
+  "This conversation was compressed into %lld linked segments. Deleting it permanently deletes all %lld segments and their messages.": "此对话已压缩为 %lld 个关联片段。删除它将永久删除全部 %lld 个片段及其消息。",
+  "Your last message wasn’t sent": "你的最后一条消息未发送",
+  "^[%lld message](inflect: true) couldn't be sent — the connection didn't come up.": "^[%lld 条消息](inflect: true) 无法发送 — 连接未能建立。"
 }

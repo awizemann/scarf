@@ -1613,7 +1613,6 @@
   "Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`.": "Git URL(https://github.com/...)または `owner/repo` のような省略形を指定してください。",
   "Provider": "プロバイダー",
   "Provider ID (e.g. openrouter)": "プロバイダー ID（例: openrouter）",
-  "Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.": "プロバイダーの資格情報(Anthropic/OpenAI/Nous キー)。**デフォルトではオフ** — 機密性が高く、どのみち新しい droplet では再認証が必要になる可能性が高いためです。",
   "Provider default": "プロバイダーのデフォルト",
   "Publish Topic": "パブリッシュトピック",
   "Push **%@**'s config from %@ to other hosts.": "**%1$@** の設定を %2$@ から他のホストにプッシュします。",
@@ -1797,7 +1796,6 @@
   "Restore from backup": "バックアップから復元",
   "Restore from backup?": "バックアップから復元しますか?",
   "Restore from remote backup": "リモートバックアップから復元",
-  "Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.": "復元された cron ジョブには、古い資格情報や不要になったスケジュールが含まれている可能性があります。一時停止しておくことで、Cron ビューから意図的に再有効化できます。",
   "Restored to": "復元先",
   "Restores %@ to its state before the %@ mutation (%@). This adds a new ledger entry — it doesn't erase this one.": "%1$@ を %2$@ の変更（%3$@）前の状態に復元します。これは台帳に新しいエントリを追加するものであり、このエントリを消去するものではありません。",
   "Restore…": "復元…",
@@ -3162,5 +3160,14 @@
   "Couldn't parse webhook list output": "webhook 一覧の出力を解析できませんでした",
   "`hermes profile list` failed: %@": "`hermes profile list` が失敗しました: %@",
   "`hermes profile list` failed (exit %lld).": "`hermes profile list` が失敗しました (終了コード %lld)。",
-  "Couldn't reach `hermes profile list` on this server.": "このサーバーで `hermes profile list` に到達できませんでした。"
+  "Couldn't reach `hermes profile list` on this server.": "このサーバーで `hermes profile list` に到達できませんでした。",
+  "Archived — session lists don't show this session.": "アーカイブ済み — セッション一覧にはこのセッションは表示されません。",
+  "Deleted %lld of %lld linked segments — the rest couldn't be deleted.": "リンクされたセグメント %lld/%lld 件を削除しました — 残りは削除できませんでした。",
+  "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.": "Live Voice はこれを送信できませんでした — チャットはまだセッションを読み込み中です。少し待ってからもう一度お試しください。",
+  "Not in the session list — this is a subagent run or a hidden session.": "セッション一覧にはありません — サブエージェントの実行、または非表示のセッションです。",
+  "Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.": "Hermes が `auth.json` に保持しているプロバイダーのログイン情報とプールされたキーです。**デフォルトではオフ** — 機密性が高く、どのみち新しい droplet では再認証が必要になる可能性が高いためです。これは `auth.json` のみに関わります。`.env` 内の API キーと `vault/` 内の暗号化されたボールト(そのキーを含む)は、Hermes 自身のバックアップと同様に常にアーカイブに含まれるため、アーカイブは非公開に保ってください。",
+  "Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.": "復元された cron ジョブには、古い資格情報や不要になったスケジュールが含まれている可能性があります。これにより、復元後はホスト上のすべての cron ジョブが一時停止されます — すべてのプロファイルで、アーカイブに含まれていない既存のジョブも含みます — 必要なものは Cron ビューから改めて有効化してください。",
+  "This conversation was compressed into %lld linked segments. Deleting it permanently deletes all %lld segments and their messages.": "この会話は %lld 個のリンクされたセグメントに圧縮されました。削除すると、%lld 個のセグメントすべてとそのメッセージが完全に削除されます。",
+  "Your last message wasn’t sent": "最後のメッセージは送信されませんでした",
+  "^[%lld message](inflect: true) couldn't be sent — the connection didn't come up.": "^[%lld 件のメッセージ](inflect: true) を送信できませんでした — 接続が確立されませんでした。"
 }

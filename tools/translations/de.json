@@ -1610,7 +1610,6 @@
   "Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`.": "Gib eine Git-URL (https://github.com/...) oder ein Kürzel wie `owner/repo` an.",
   "Provider": "Anbieter",
   "Provider ID (e.g. openrouter)": "Anbieter-ID (z. B. openrouter)",
-  "Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.": "Anbieter-Anmeldedaten (Anthropic-/OpenAI-/Nous-Schlüssel). **Standardmäßig aus** — sie sind sensibel und du wirst dich auf dem neuen Droplet ohnehin wahrscheinlich erneut authentifizieren.",
   "Provider default": "Anbieter-Standard",
   "Publish Topic": "Topic veröffentlichen",
   "Push **%@**'s config from %@ to other hosts.": "Übertrage die Konfiguration von **%@** von %@ auf andere Hosts.",
@@ -1794,7 +1793,6 @@
   "Restore from backup": "Aus Sicherung wiederherstellen",
   "Restore from backup?": "Aus Backup wiederherstellen?",
   "Restore from remote backup": "Aus Remote-Sicherung wiederherstellen",
-  "Restored cron jobs may carry stale credentials or schedules you no longer want. Pausing them lets you re-enable intentionally from the Cron view.": "Wiederhergestellte Cron-Jobs können veraltete Anmeldedaten oder nicht mehr gewünschte Zeitpläne enthalten. Durch Pausieren kannst du sie gezielt über die Cron-Ansicht wieder aktivieren.",
   "Restored to": "Wiederhergestellt auf",
   "Restores %@ to its state before the %@ mutation (%@). This adds a new ledger entry — it doesn't erase this one.": "Stellt %@ auf den Zustand vor der %@-Änderung (%@) zurück. Dies fügt einen neuen Ledger-Eintrag hinzu — dieser wird nicht gelöscht.",
   "Restore…": "Wiederherstellen…",
@@ -3158,5 +3156,14 @@
   "Couldn't parse webhook list output": "Ausgabe der Webhook-Liste konnte nicht verarbeitet werden",
   "`hermes profile list` failed: %@": "`hermes profile list` ist fehlgeschlagen: %@",
   "`hermes profile list` failed (exit %lld).": "`hermes profile list` ist fehlgeschlagen (Exit-Code %lld).",
-  "Couldn't reach `hermes profile list` on this server.": "`hermes profile list` war auf diesem Server nicht erreichbar."
+  "Couldn't reach `hermes profile list` on this server.": "`hermes profile list` war auf diesem Server nicht erreichbar.",
+  "Archived — session lists don't show this session.": "Archiviert — Sitzungslisten zeigen diese Sitzung nicht an.",
+  "Deleted %lld of %lld linked segments — the rest couldn't be deleted.": "%lld von %lld verknüpften Segmenten gelöscht — die übrigen konnten nicht gelöscht werden.",
+  "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.": "Live Voice konnte das nicht senden — der Chat lädt seine Sitzung noch. Frage es gleich noch einmal.",
+  "Not in the session list — this is a subagent run or a hidden session.": "Nicht in der Sitzungsliste — dies ist ein Subagent-Lauf oder eine ausgeblendete Sitzung.",
+  "Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.": "Anbieter-Logins und gepoolte Schlüssel, die Hermes in `auth.json` speichert. **Standardmäßig aus** — sie sind sensibel und du wirst dich auf dem neuen Droplet ohnehin wahrscheinlich erneut authentifizieren müssen. Dies betrifft nur `auth.json`: API-Schlüssel in `.env` und der verschlüsselte Vault in `vault/` (mit seinem Schlüssel) sind immer im Archiv enthalten, wie auch in Hermes' eigenem Backup — halte das Archiv daher privat.",
+  "Restored cron jobs may carry stale credentials or schedules you no longer want. This pauses every cron job on the host after the restore — in every profile, including jobs that were already there and aren't in the archive — so you re-enable the ones you want from the Cron view.": "Wiederhergestellte Cron-Jobs können veraltete Anmeldedaten oder nicht mehr gewünschte Zeitpläne enthalten. Dies pausiert nach der Wiederherstellung jeden Cron-Job auf dem Host — in jedem Profil, einschließlich Jobs, die bereits vorhanden waren und nicht im Archiv enthalten sind — sodass du die gewünschten über die Cron-Ansicht wieder aktivierst.",
+  "This conversation was compressed into %lld linked segments. Deleting it permanently deletes all %lld segments and their messages.": "Diese Unterhaltung wurde in %lld verknüpfte Segmente komprimiert. Sie zu löschen löscht dauerhaft alle %lld Segmente und ihre Nachrichten.",
+  "Your last message wasn’t sent": "Deine letzte Nachricht wurde nicht gesendet",
+  "^[%lld message](inflect: true) couldn't be sent — the connection didn't come up.": "^[%lld Nachricht](inflect: true) konnte nicht gesendet werden — die Verbindung kam nicht zustande."
 }
