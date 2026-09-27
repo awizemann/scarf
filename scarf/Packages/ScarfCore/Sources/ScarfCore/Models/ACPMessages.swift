@@ -209,11 +209,21 @@ public enum ACPEvent: @unchecked Sendable {
     /// Both default `false` — absent `_meta`, or `_meta` from an older
     /// host or a live (non-replay) chunk, parses as "not a summary"
     /// with zero behavior change.
+    ///
+    /// `messageId` is Hermes's per-reply id (`AssistantMessageIdAllocator`,
+    /// `acp_adapter/events.py:185-236` @ v2026.9.24): streamed chunks of one
+    /// assistant reply share it and the next reply gets a fresh UUID. It is
+    /// ABSENT on the out-of-band text Hermes sends for slash commands and
+    /// absorbed mid-turn prompts ("Queued for the next turn…", "⏩ Steer
+    /// queued…", `server.py:827-843`), and on every chunk from a host that
+    /// predates the allocator. `RichChatViewModel` starts a new bubble when
+    /// it changes.
     case messageChunk(
         sessionId: String,
         text: String,
         isCompactionSummary: Bool = false,
-        containsCompactionSummary: Bool = false
+        containsCompactionSummary: Bool = false,
+        messageId: String? = nil
     )
     /// Same compaction-summary semantics as `.messageChunk`, but for
     /// `user_message_chunk` replay updates — the compressor sometimes
@@ -225,7 +235,9 @@ public enum ACPEvent: @unchecked Sendable {
         isCompactionSummary: Bool = false,
         containsCompactionSummary: Bool = false
     )
-    case thoughtChunk(sessionId: String, text: String)
+    /// `messageId` shares `.messageChunk`'s allocator: a reply's thoughts
+    /// and its text carry the same id.
+    case thoughtChunk(sessionId: String, text: String, messageId: String? = nil)
     case toolCallStart(sessionId: String, call: ACPToolCallEvent)
     case toolCallUpdate(sessionId: String, update: ACPToolCallUpdateEvent)
     case permissionRequest(sessionId: String, requestId: Int, request: ACPPermissionRequestEvent)
@@ -241,9 +253,9 @@ public enum ACPEvent: @unchecked Sendable {
     /// from a session the VM is no longer attached to.
     public var sessionId: String? {
         switch self {
-        case let .messageChunk(sid, _, _, _),
+        case let .messageChunk(sid, _, _, _, _),
              let .userMessageChunk(sid, _, _, _),
-             let .thoughtChunk(sid, _),
+             let .thoughtChunk(sid, _, _),
              let .toolCallStart(sid, _),
              let .toolCallUpdate(sid, _),
              let .promptComplete(sid, _),
@@ -450,7 +462,8 @@ public enum ACPEventParser {
                 sessionId: sessionId,
                 text: text,
                 isCompactionSummary: meta.isSummary,
-                containsCompactionSummary: meta.containsSummary
+                containsCompactionSummary: meta.containsSummary,
+                messageId: extractMessageId(from: update)
             )
 
         case "user_message_chunk":
@@ -465,7 +478,7 @@ public enum ACPEventParser {
 
         case "agent_thought_chunk":
             let text = extractContentText(from: update)
-            return .thoughtChunk(sessionId: sessionId, text: text)
+            return .thoughtChunk(sessionId: sessionId, text: text, messageId: extractMessageId(from: update))
 
         case "tool_call":
             let event = ACPToolCallEvent(
@@ -528,6 +541,13 @@ public enum ACPEventParser {
     }
 
     // MARK: - Content Extraction
+
+    /// `messageId` off a chunk update; nil when absent, not a string, or
+    /// empty (an empty id would read as "same reply" for every such chunk).
+    nonisolated private static func extractMessageId(from update: [String: Any]) -> String? {
+        guard let id = update["messageId"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
 
     nonisolated private static func extractContentText(from update: [String: Any]) -> String {
         if let content = update["content"] as? [String: Any],

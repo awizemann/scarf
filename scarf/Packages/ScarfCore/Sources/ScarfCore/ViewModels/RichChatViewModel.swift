@@ -1637,6 +1637,13 @@ public final class RichChatViewModel {
     private var streamingAssistantText = ""
     private var streamingThinkingText = ""
     private var streamingToolCalls: [HermesToolCall] = []
+    /// Hermes `messageId` of the reply the streaming buffers hold (see
+    /// `ACPEvent.messageChunk`). A chunk under a different id — including
+    /// nil after an id, or an id after nil — is a different reply and gets
+    /// its own bubble. Hosts that never send ids stay nil == nil: one
+    /// buffer, as before.
+    @ObservationIgnored
+    private var streamingReplyId: String?
 
     /// Ids of tool calls whose `tool_call` start this VM processed and
     /// whose `tool_call_update` has not arrived yet. Separate from
@@ -1859,6 +1866,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         openToolCallIds = []
         turnCancelRequested = false
         cancelStreamingFlush()
@@ -2012,6 +2020,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         cancelStreamingFlush()
         buildMessageGroups()
         // User just submitted — jump to the bottom so they see their message
@@ -2157,7 +2166,8 @@ public final class RichChatViewModel {
             }
         }
         switch event {
-        case .messageChunk(_, let text, _, _):
+        case .messageChunk(_, let text, _, _, let messageId):
+            startNewReplyIfIdChanged(messageId)
             appendMessageChunk(text: text)
         case .userMessageChunk:
             // `user_message_chunk` only ever carries replayed history
@@ -2166,7 +2176,8 @@ public final class RichChatViewModel {
             // post-engagement is defensively ignored — the DB-hydrated
             // history owns replayed user turns.
             break
-        case .thoughtChunk(_, let text):
+        case .thoughtChunk(_, let text, let messageId):
+            startNewReplyIfIdChanged(messageId)
             appendThoughtChunk(text: text)
         case .toolCallStart(_, let call):
             handleToolCallStart(call)
@@ -2258,6 +2269,23 @@ public final class RichChatViewModel {
                 self?.globalScopedCommands = loaded
             }
         }
+    }
+
+    /// Finalize the streaming bubble when a chunk belongs to a different
+    /// Hermes reply than the one being streamed. Hermes answers a mid-turn
+    /// send with an id-less status line ("⏩ Steer queued for the active
+    /// turn: …", "Queued for the next turn. (1 queued)" —
+    /// `acp_adapter/commands.py:290-310`, `server.py:827-843` @ v2026.9.24)
+    /// while the resumed turn streams under its own UUID
+    /// (`events.py:185-236`); without this the two were glued into one
+    /// bubble with no separator.
+    private func startNewReplyIfIdChanged(_ messageId: String?) {
+        if messageId != streamingReplyId,
+           !streamingAssistantText.isEmpty || !streamingThinkingText.isEmpty {
+            finalizeStreamingMessage()
+            buildMessageGroups()
+        }
+        streamingReplyId = messageId
     }
 
     private func appendMessageChunk(text: String) {
@@ -2772,6 +2800,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         cancelStreamingFlush()
     }
 
