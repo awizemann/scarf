@@ -659,7 +659,7 @@ import ScarfCore
         #expect(promptInFlight)
         #expect(vm.richChatViewModel.isAgentWorking)
 
-        vm.deleteSession("sess-A")
+        await vm.deleteSession("sess-A")
         #expect(deletes.recorded == ["sess-A"])
 
         // The orphaned turn gets a bounded best-effort cancel…
@@ -709,7 +709,7 @@ import ScarfCore
         }
         #expect(ready)
 
-        vm.deleteSession("sess-A")
+        await vm.deleteSession("sess-A")
         #expect(deletes.recorded == ["sess-A"])
 
         let closed = await Self.waitUntil { await ch.closed }
@@ -755,7 +755,7 @@ import ScarfCore
         }
         #expect(promptInFlight)
 
-        vm.deleteSession("sess-other")
+        await vm.deleteSession("sess-other")
         #expect(deletes.recorded == ["sess-other"])
 
         // Give any erroneous teardown time to surface before asserting

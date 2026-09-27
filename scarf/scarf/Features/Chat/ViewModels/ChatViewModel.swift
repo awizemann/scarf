@@ -605,9 +605,21 @@ final class ChatViewModel {
     /// Sessions feature uses); tests inject a stub so exercising the
     /// delete-active-session teardown (t-01bd55ec) doesn't spawn a real
     /// CLI process.
+    ///
+    /// Always called off the main actor (`deleteSession` hops to
+    /// `OffPool`): on a remote host it is an SSH exec (charter C10).
     @ObservationIgnored
-    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
         ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
+    }
+
+    /// Runs `hermes sessions rename -- <id> <title>` for `renameSession`
+    /// and returns the CLI's output and exit code. Same seam shape as
+    /// `sessionDeleteRunner`, and likewise always called off the main
+    /// actor; tests stub it so no real CLI runs.
+    @ObservationIgnored
+    var sessionRenameRunner: @Sendable (ServerContext, String, String) -> (output: String, exitCode: Int32) = { ctx, sessionId, title in
+        ctx.runHermes(SessionsViewModel.renameArgv(sessionId: sessionId, title: title))
     }
 
     private static let maxReconnectAttempts = 5
@@ -2802,22 +2814,29 @@ final class ChatViewModel {
     /// caches in-place on success so the chat sidebar reflects the new
     /// title without a full reload. Same shell command path the
     /// SessionsView feature uses.
+    ///
+    /// The CLI runs off the main actor (S03-F4): it is a process spawn,
+    /// and an SSH exec on a remote host, and used to freeze the whole
+    /// window for the round trip. `isRenamingSession` is up while it runs
+    /// so the sheet can't submit twice.
     @discardableResult
-    func renameSession(_ sessionId: String, to newTitle: String) -> Bool {
+    func renameSession(_ sessionId: String, to newTitle: String) async -> Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         // Clear first — an empty title is a no-op, and a stale message
         // would read as a fresh failure.
         renameError = nil
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty, !isRenamingSession else { return false }
+        isRenamingSession = true
+        defer { isRenamingSession = false }
         // P47: `--` before the positionals, through the ONE argv builder the
         // Sessions pane already uses. `sessions rename` takes `session_id`
         // then `title` with `nargs="+"`
         // (`hermes_cli/subcommands/sessions.py:210-213` @ `v2026.9.7`), so a
         // title beginning with a dash exited 2 here while the identical
         // rename from the Sessions pane worked.
-        let result = context.runHermes(
-            SessionsViewModel.renameArgv(sessionId: sessionId, title: trimmed)
-        )
+        let runner = sessionRenameRunner
+        let ctx = context
+        let result = await OffPool.run { runner(ctx, sessionId, trimmed) }
         guard result.exitCode == 0 else {
             // Hermes refuses some renames server-side — most notably the
             // canonical Bot Chat, whose title IS its identity. Surface the
@@ -2873,6 +2892,9 @@ final class ChatViewModel {
     /// new rename sheet opens. Rendered inside the rename sheet.
     var renameError: String?
 
+    /// True while a sidebar rename's CLI call is in flight.
+    private(set) var isRenamingSession = false
+
     /// Apply a session title from an ACP `session_info_update` event
     /// (Hermes v0.16+). Mirrors `renameSession`'s in-place cache mutation
     /// so the sidebar reflects the new title immediately, but skips the
@@ -2897,8 +2919,16 @@ final class ChatViewModel {
     /// stayed alive until app quit and a mid-flight turn kept running
     /// server-side against the just-deleted session. Deleting a
     /// non-active session never disturbs the live client.
-    func deleteSession(_ sessionId: String) {
-        guard sessionDeleteRunner(context, sessionId) == 0 else { return }
+    ///
+    /// The CLI runs off the main actor (t-fa0043f6; C10) — it is an SSH
+    /// exec on a remote host. Whether the deleted session is the attached
+    /// one is decided AFTER it returns, so a switch made while it ran is
+    /// respected.
+    func deleteSession(_ sessionId: String) async {
+        let runner = sessionDeleteRunner
+        let ctx = context
+        let exitCode = await OffPool.run { runner(ctx, sessionId) }
+        guard exitCode == 0 else { return }
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)

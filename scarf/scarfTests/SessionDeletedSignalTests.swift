@@ -222,7 +222,7 @@ import ScarfCore
             deletes.record(sid)
             return 0
         }
-        vmA.deleteSession("sess-A")
+        await vmA.deleteSession("sess-A")
         #expect(deletes.recorded == ["sess-A"])
 
         let cancelSent = await Lifecycle.waitUntil {
@@ -287,12 +287,12 @@ import ScarfCore
         let deletes = Lifecycle.DeleteRecorder()
 
         vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 1 }
-        vm.deleteSession("sess-F")
+        await vm.deleteSession("sess-F")
         #expect(signals.recorded(for: home.context).isEmpty,
                 "failed sidebar CLI delete broadcast SessionDeletedSignal")
 
         vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 0 }
-        vm.deleteSession("sess-S")
+        await vm.deleteSession("sess-S")
         #expect(deletes.recorded == ["sess-F", "sess-S"])
         #expect(signals.recorded(for: home.context) == ["sess-S"],
                 "successful sidebar delete did not broadcast exactly one SessionDeletedSignal")
