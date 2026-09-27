@@ -97,8 +97,10 @@ struct BackupServerSheet: View {
                     let total: Int64 = summary.projects.compactMap { $0.sizeBytes }.reduce(0, +)
                     row(label: "Projects size", value: Self.formatBytes(total))
                 }
-                if !summary.sqliteAvailable {
-                    row(label: "WAL checkpoint", value: "skipped (sqlite3 not on remote PATH)")
+                if summary.snapshotUnavailable {
+                    row(label: "state.db", value: String(localized: "can't be snapshotted: install sqlite3 on the server"))
+                } else if summary.stateDBPresent {
+                    row(label: "state.db", value: String(localized: "read-only snapshot"))
                 }
             }
 
@@ -213,6 +215,8 @@ struct BackupServerSheet: View {
                 Button("Back up…") { presentSavePanel(summary: summary) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    // A live state.db is never archived without a snapshot.
+                    .disabled(summary.snapshotUnavailable)
             case .failed:
                 Button("Try again") { Task { await viewModel.start() } }
                     .keyboardShortcut(.defaultAction)
@@ -258,7 +262,7 @@ struct BackupServerSheet: View {
     private func stepLabel(_ step: RemoteBackupService.Progress) -> String {
         switch step {
         case .preflight: return "Preparing…"
-        case .checkpointingDB: return "Checkpointing state.db…"
+        case .snapshottingDB: return "Snapshotting state.db…"
         case .archivingHermes: return "Archiving Hermes home…"
         case .archivingProject(let name, _): return "Archiving project: \(name)…"
         case .bundling: return "Bundling archive…"

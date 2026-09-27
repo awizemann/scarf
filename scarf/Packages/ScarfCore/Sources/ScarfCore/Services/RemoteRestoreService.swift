@@ -91,6 +91,16 @@ public final class RemoteRestoreService: @unchecked Sendable {
         case integrityCheckFailed(path: String, expected: String, actual: String)
         case remoteCommandFailed(String)
         case localIO(String)
+        /// A process on the target has `state.db` (or its WAL/SHM) open.
+        /// Replacing the file under it is the corruption / split-brain
+        /// class Hermes's own `hermes import` refuses
+        /// (`hermes_cli/backup.py:536-559`, `:854-866` @ v2026.9.24).
+        /// `homeRestored` says whether the rest of the Hermes home had
+        /// already been written when the holder was found.
+        case hermesRunning(pids: [Int32], homeRestored: Bool)
+        /// Scarf could not tell whether anything holds `state.db` open
+        /// (no `/proc` and no `lsof` on the host). Fails closed.
+        case cannotConfirmHermesStopped(String, homeRestored: Bool)
         case cancelled
 
         public var errorDescription: String? {
@@ -101,8 +111,19 @@ public final class RemoteRestoreService: @unchecked Sendable {
             case .integrityCheckFailed(let p, let exp, let act): return "Backup is corrupt — \(p) hash mismatch (expected \(exp.prefix(12))…, got \(act.prefix(12))…)."
             case .remoteCommandFailed(let m): return "Remote command failed during restore: \(m)"
             case .localIO(let m): return "Local file I/O failed during restore: \(m)"
+            case .hermesRunning(let pids, let homeRestored):
+                let list = pids.map(String.init).joined(separator: ", ")
+                return "Hermes is running on this server: process \(list) has state.db open. Restoring over a database that is in use can corrupt it or lose sessions. Stop the Hermes gateway and close any Hermes chats on this server (including Scarf chat windows), then restore again. \(Self.outcome(homeRestored))"
+            case .cannotConfirmHermesStopped(let m, let homeRestored):
+                return "Couldn't confirm that Hermes is stopped on this server (\(m)). Stop the Hermes gateway and any Hermes chats there, then restore again. \(Self.outcome(homeRestored))"
             case .cancelled: return "Restore cancelled."
             }
+        }
+
+        private static func outcome(_ homeRestored: Bool) -> String {
+            homeRestored
+                ? "The rest of the Hermes home was restored, but state.db was left as it was."
+                : "Nothing was changed."
         }
     }
 
@@ -112,29 +133,48 @@ public final class RemoteRestoreService: @unchecked Sendable {
     public struct InspectionResult: Sendable {
         public var manifest: BackupManifest
         public var workDir: URL          // unzipped temp dir; reused by run()
+        /// The target user's `$HOME`. Only used for the default projects
+        /// landing path; the Hermes home is ``targetHermesHome``.
         public var targetHomeResolved: String?
         public var targetHermesVersion: String?
+        /// The Hermes home the restore writes into: the server's configured
+        /// home (`context.paths.home`, `~` expanded against the target's
+        /// `$HOME`), which is what the server's Hermes and every Scarf
+        /// window read. `nil` only when a `~` path couldn't be expanded.
+        public var targetHermesHome: String? = nil
+        /// Whether something on the target holds `state.db` open right now.
+        /// Shown in the plan sheet; `run()` checks again before writing.
+        public var stateDBHolders: DBHolderProbe? = nil
+    }
+
+    /// Result of looking for processes that hold the target's `state.db`
+    /// (or its `-wal`/`-shm`) open.
+    public enum DBHolderProbe: Sendable, Equatable {
+        case clear
+        case held([Int32])
+        case unknown(String)
     }
 
     public struct RestoreOptions: Sendable {
         /// Where to drop project tarballs. Each project lands at
         /// `<targetProjectsRoot>/<basename>`. Defaults to
-        /// `<targetHome>/projects` when not specified.
+        /// `<target $HOME>/projects` when not specified.
         public var targetProjectsRoot: String?
-        /// Override the resolved target home (rarely needed; the
-        /// default is whatever `bash -lc 'echo $HOME'` returned).
-        public var targetHomeOverride: String?
+        /// Override the Hermes home to restore into (the directory itself,
+        /// e.g. `/var/lib/hermes/.hermes`). Rarely needed: the default is
+        /// the server's configured Hermes home.
+        public var targetHermesHomeOverride: String?
         /// Pause every cron job after restore. Strongly recommended
         /// (the user re-enables intentionally).
         public var pauseCronJobs: Bool
 
         public init(
             targetProjectsRoot: String? = nil,
-            targetHomeOverride: String? = nil,
+            targetHermesHomeOverride: String? = nil,
             pauseCronJobs: Bool = true
         ) {
             self.targetProjectsRoot = targetProjectsRoot
-            self.targetHomeOverride = targetHomeOverride
+            self.targetHermesHomeOverride = targetHermesHomeOverride
             self.pauseCronJobs = pauseCronJobs
         }
     }
@@ -188,13 +228,16 @@ public final class RemoteRestoreService: @unchecked Sendable {
         guard manifest.kind == BackupManifest.kindMagic else {
             throw RestoreError.wrongKind(manifest.kind)
         }
-        guard manifest.schemaVersion == BackupManifest.currentSchemaVersion else {
+        guard BackupManifest.supportedSchemaVersions.contains(manifest.schemaVersion) else {
             throw RestoreError.unsupportedSchema(manifest.schemaVersion)
         }
 
         // Hash-verify every inner tarball before any remote bytes are
         // pushed.
         try await Self.verifyHash(file: workDir.appendingPathComponent(manifest.hermes.tarballPath), expected: manifest.hermes.tarballSHA256)
+        if let state = manifest.stateDB {
+            try await Self.verifyHash(file: workDir.appendingPathComponent(state.tarballPath), expected: state.tarballSHA256)
+        }
         for project in manifest.projects {
             try await Self.verifyHash(file: workDir.appendingPathComponent(project.tarballPath), expected: project.tarballSHA256)
         }
@@ -217,13 +260,21 @@ public final class RemoteRestoreService: @unchecked Sendable {
             timeout: 30
         )
         let resolvedVersion = versionProbe?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let home = (resolvedHome?.isEmpty == false) ? resolvedHome : nil
+        let hermesHome = Self.resolveTargetHermesHome(configured: context.paths.home, userHome: home)
+        var holders: DBHolderProbe?
+        if let hermesHome {
+            holders = await probeStateDBHolders(transport: transport, hermesHome: hermesHome)
+        }
 
         handedToCaller = true
         return InspectionResult(
             manifest: manifest,
             workDir: workDir,
-            targetHomeResolved: (resolvedHome?.isEmpty == false) ? resolvedHome : nil,
-            targetHermesVersion: (resolvedVersion?.isEmpty == false) ? resolvedVersion : nil
+            targetHomeResolved: home,
+            targetHermesVersion: (resolvedVersion?.isEmpty == false) ? resolvedVersion : nil,
+            targetHermesHome: hermesHome,
+            stateDBHolders: holders
         )
     }
 
@@ -243,10 +294,19 @@ public final class RemoteRestoreService: @unchecked Sendable {
         try Task.checkCancellation()
         progress(.planning)
 
-        let targetHome = options.targetHomeOverride
-            ?? inspection.targetHomeResolved
+        // The server's configured Hermes home, not `$HOME/.hermes`: a server
+        // whose home lives elsewhere (`/var/lib/hermes/.hermes`) used to be
+        // restored into the SSH user's `~/.hermes`, which nothing reads.
+        let hermesHome = options.targetHermesHomeOverride
+            ?? inspection.targetHermesHome
+            ?? manifest.hermes.homePath
+        let userHome = inspection.targetHomeResolved
             ?? (manifest.hermes.homePath as NSString).deletingLastPathComponent
-        let projectsRoot = options.targetProjectsRoot ?? (targetHome + "/projects")
+        let projectsRoot = options.targetProjectsRoot ?? (userHome + "/projects")
+
+        // Refuse BEFORE writing anything when something holds state.db
+        // open. Checked again right before state.db itself is replaced.
+        try await requireStateDBUnheld(transport: transport, hermesHome: hermesHome)
 
         // Make sure the projects root exists so `tar -xzf` doesn't
         // fail on a missing -C target.
@@ -269,16 +329,59 @@ public final class RemoteRestoreService: @unchecked Sendable {
             throw RestoreError.remoteCommandFailed("mkdir \(projectsRoot) failed: \(mkdirResult.stderrString)")
         }
 
-        // Stage 1: hermes home. Pushes into $HOME so the inner
-        // `.hermes/...` paths land at `<targetHome>/.hermes/...`.
+        // Stage 1: hermes home. The tarball's single top-level directory
+        // (`.hermes/` in v1, the source home's own name in v2) is stripped
+        // so its contents land directly in `hermesHome`, whatever that
+        // directory is called on the target.
         try Task.checkCancellation()
+        if manifest.stateDB == nil {
+            // v1 (or a source without state.db): if the tarball carries a
+            // state.db, `tar` replaces the file. The old database's
+            // -wal/-shm/-journal must go first, or SQLite would replay that
+            // foreign WAL over the restored file, and the guard re-checks
+            // that nothing holds it (`hermes_cli/backup.py:550-555`).
+            try await runStateDBGuarded(
+                transport: transport, hermesHome: hermesHome, homeRestored: false, then: nil)
+        }
         let hermesTar = inspection.workDir.appendingPathComponent(manifest.hermes.tarballPath)
         try await pushTarball(
             transport: transport,
             tarball: hermesTar,
-            extractInto: targetHome
+            extractCommand: Self.hermesExtractCommand(
+                hermesHome: hermesHome,
+                // v1 always archived `.hermes/`; v2 archives the source
+                // home's own directory name.
+                archiveLeaf: manifest.schemaVersion >= 2
+                    ? (manifest.hermes.homePath as NSString).lastPathComponent
+                    : ".hermes")
         ) { written in
             progress(.restoringHermes(bytesPushed: written))
+        }
+
+        // Stage 1b (v2): the state.db snapshot. Extracted into a staging
+        // directory beside the database (same filesystem, so the publish
+        // is a rename), then published only after a last holder check,
+        // with the old sidecars removed first.
+        if let state = manifest.stateDB {
+            try Task.checkCancellation()
+            let staging = hermesHome + "/" + Self.stagingDirPrefix + UUID().uuidString
+            do {
+                try await pushTarball(
+                    transport: transport,
+                    tarball: inspection.workDir.appendingPathComponent(state.tarballPath),
+                    extractCommand: "mkdir -p \(Self.shellQuote(staging)) && tar -xzf - -C \(Self.shellQuote(staging))"
+                ) { _ in }
+                try await runStateDBGuarded(
+                    transport: transport,
+                    hermesHome: hermesHome,
+                    homeRestored: true,
+                    then: "mv -f \(Self.shellQuote(staging + "/state.db")) \(Self.shellQuote(hermesHome + "/state.db"))"
+                )
+            } catch {
+                await removeStagingDir(transport: transport, staging: staging)
+                throw error
+            }
+            await removeStagingDir(transport: transport, staging: staging)
         }
 
         // Stage 2: per-project tarballs.
@@ -289,7 +392,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
             try await pushTarball(
                 transport: transport,
                 tarball: tar,
-                extractInto: projectsRoot
+                extractCommand: "tar -xzf - -C \(Self.shellQuote(projectsRoot))"
             ) { written in
                 progress(.restoringProject(name: project.name, bytesPushed: written))
             }
@@ -308,7 +411,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         progress(.reanchoringPaths)
         try await reanchorProjectsRegistry(
             transport: transport,
-            targetHome: targetHome,
+            hermesHome: hermesHome,
             mapping: Dictionary(
                 uniqueKeysWithValues: restoredProjects.map { ($0.sourcePath, $0.targetPath) }
             )
@@ -319,13 +422,13 @@ public final class RemoteRestoreService: @unchecked Sendable {
         if options.pauseCronJobs {
             try Task.checkCancellation()
             progress(.pausingCron)
-            paused = try await pauseAllCronJobs(transport: transport, targetHome: targetHome)
+            paused = try await pauseAllCronJobs(transport: transport, hermesHome: hermesHome)
         }
 
         progress(.finalizing)
         return RestoreResult(
             manifest: manifest,
-            hermesHome: targetHome + "/.hermes",
+            hermesHome: hermesHome,
             projectsRestored: restoredProjects,
             cronJobsPaused: paused
         )
@@ -333,14 +436,14 @@ public final class RemoteRestoreService: @unchecked Sendable {
 
     // MARK: - Push (tarball -> remote stdin)
 
-    /// Stream a local `.tar.gz` into `tar -xzf - -C <target>` on the
-    /// destination. We use `transport.makeProcess` so the command is
-    /// shell-wrapped the same way the rest of the app talks to remotes
-    /// (`bash -lc` for SSH, direct invocation for local).
+    /// Stream a local `.tar.gz` into `extractCommand` (a `tar -xzf -`
+    /// pipeline) on the destination. We use `transport.makeProcess` so the
+    /// command is shell-wrapped the same way the rest of the app talks to
+    /// remotes (`bash -lc` for SSH, direct invocation for local).
     private func pushTarball(
         transport: any ServerTransport,
         tarball: URL,
-        extractInto target: String,
+        extractCommand cmd: String,
         extractTimeout: TimeInterval = RemoteRestoreService.remoteExtractTimeout,
         stallTimeout: TimeInterval = RemoteRestoreService.pumpStallTimeout,
         onProgress: @Sendable @escaping (Int64) -> Void
@@ -348,7 +451,6 @@ public final class RemoteRestoreService: @unchecked Sendable {
         #if os(iOS)
         throw RestoreError.remoteCommandFailed("Remote restore is not supported on iOS in this build.")
         #else
-        let cmd = "tar -xzf - -C \(Self.shellQuote(target))"
         let proc = transport.makeProcess(executable: "/bin/bash", args: ["-lc", cmd])
         try await Self.streamTarball(
             into: proc,
@@ -695,11 +797,11 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// fields this Scarf doesn't model are re-emitted untouched.
     func reanchorProjectsRegistry(
         transport: any ServerTransport,
-        targetHome: String,
+        hermesHome: String,
         mapping: [String: String]
     ) async throws {
         guard !mapping.isEmpty else { return }
-        let registryPath = targetHome + "/.hermes/scarf/projects.json"
+        let registryPath = hermesHome + "/scarf/projects.json"
         // A read-modify-write of projects.json like any other, so it takes
         // the same lock (t-07e909e0 / DI-L1) — the restore's re-anchor and
         // a sidebar save landing at once would otherwise have the loser's
@@ -750,8 +852,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// that worked, so a restore could report "12 cron jobs paused" — or
     /// "0", which reads as "nothing to pause" — while every restored job
     /// stayed armed with the source host's credentials.
-    func pauseAllCronJobs(transport: any ServerTransport, targetHome: String) async throws -> Int {
-        let path = targetHome + "/.hermes/cron/jobs.json"
+    func pauseAllCronJobs(transport: any ServerTransport, hermesHome: String) async throws -> Int {
+        let path = hermesHome + "/cron/jobs.json"
         return try Self.mutateRemoteJSON(
             transport: transport,
             path: path,
@@ -830,6 +932,197 @@ public final class RemoteRestoreService: @unchecked Sendable {
             throw RestoreError.remoteCommandFailed("\(label) failed writing \(path): \(error.localizedDescription)")
         }
         return changed
+    }
+
+    // MARK: - Target Hermes home + live-database guard
+
+    /// Prefix of the directory a v2 state.db snapshot is staged in, inside
+    /// the target Hermes home, before it is renamed over `state.db`.
+    public static let stagingDirPrefix = ".scarf-restore-staging-"
+
+    /// Ceiling on a holder probe or a guarded state.db publish (C10). The
+    /// `/proc` scan and `lsof` both finish in well under a second on a
+    /// normal host.
+    static let holderProbeTimeout: TimeInterval = 60
+
+    /// The Hermes home a restore targets: the server's configured home, with
+    /// a leading `~` expanded against the target's `$HOME`. `nil` when the
+    /// configured home needs that expansion and `$HOME` is unknown.
+    static func resolveTargetHermesHome(configured: String, userHome: String?) -> String? {
+        if configured == "~" || configured.hasPrefix("~/") {
+            guard let userHome, !userHome.isEmpty else { return nil }
+            return RemoteBackupService.expandTilde(configured, home: userHome)
+        }
+        return configured
+    }
+
+    /// Extract the Hermes-home tarball INTO `hermesHome`, stripping the
+    /// archive's single top-level directory (`archiveLeaf`) so the target
+    /// directory's name doesn't have to match the source's.
+    ///
+    /// The database's `-wal`/`-shm`/`-journal` are never extracted, even
+    /// from a hand-built or older archive that carries them: they describe
+    /// some other image of the database, and SQLite would replay them over
+    /// the restored one. Hermes's own import skips them for the same reason
+    /// (`hermes_cli/backup.py:946-951` @ v2026.9.24).
+    static func hermesExtractCommand(hermesHome: String, archiveLeaf: String) -> String {
+        let home = shellQuote(hermesHome)
+        let excludes = ["-wal", "-shm", "-journal"]
+            .map { "--exclude=\(shellQuote(archiveLeaf + "/state.db" + $0))" }
+            .joined(separator: " ")
+        return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
+    }
+
+    /// A bash snippet that sets `holders` to the PIDs of the processes
+    /// (other than `ownPID`) holding `<hermesHome>/state.db`, `-wal` or
+    /// `-shm` open, or to `UNKNOWN` when the host offers no way to tell.
+    ///
+    /// Linux: every `/proc/<pid>/fd` link, read with one `ls -l`; an
+    /// already-unlinked `(deleted)` target still counts as held, the
+    /// split-brain fingerprint Hermes checks for
+    /// (`hermes_cli/backup.py:469-506` @ v2026.9.24). The database path is
+    /// resolved with `pwd -P` first because `/proc` links name the real
+    /// path. Elsewhere (the Mac's own local server): `lsof -t` on the files
+    /// that exist. Other users' processes are invisible without root,
+    /// exactly as they are to Hermes's own check.
+    static func holderScanScript(hermesHome: String, ownPID: Int32?) -> String {
+        """
+        scarf_db_dir=\(shellQuote(hermesHome))
+        if [ -d "$scarf_db_dir" ]; then scarf_db_dir=$(cd "$scarf_db_dir" && pwd -P); fi
+        scarf_db="$scarf_db_dir/state.db"
+        scarf_own=\(ownPID.map(String.init) ?? "")
+        holders=""
+        scarf_found=""
+        if [ "$(uname -s 2>/dev/null)" = Linux ] && [ -d /proc/self/fd ]; then
+          scarf_found=$(ls -l /proc/[0-9]*/fd 2>/dev/null | SCARF_DB="$scarf_db" awk \(shellQuote(procFDAwkProgram)) | sort -u)
+        elif command -v lsof >/dev/null 2>&1 || [ -x /usr/sbin/lsof ]; then
+          scarf_lsof=$(command -v lsof 2>/dev/null || echo /usr/sbin/lsof)
+          set --
+          for f in "$scarf_db" "$scarf_db-wal" "$scarf_db-shm"; do [ -e "$f" ] && set -- "$@" "$f"; done
+          if [ $# -gt 0 ]; then scarf_found=$("$scarf_lsof" -t -- "$@" 2>/dev/null | sort -u); fi
+        else
+          holders=UNKNOWN
+        fi
+        if [ "$holders" != UNKNOWN ]; then
+          for p in $scarf_found; do [ "$p" = "$scarf_own" ] || holders="$holders $p"; done
+        fi
+        """
+    }
+
+    /// Reads `ls -l /proc/[0-9]*/fd` and prints the PID of every directory
+    /// holding a link to `$SCARF_DB`, `-wal` or `-shm` (a ` (deleted)`
+    /// suffix still matches). Kept separate so the tests can feed it a
+    /// captured `/proc` listing on a Mac.
+    static let procFDAwkProgram = #"""
+    /^\/proc\/[0-9]+\/fd:$/ { pid = $0; sub(/^\/proc\//, "", pid); sub(/\/fd:$/, "", pid); next }
+    {
+      i = index($0, " -> ")
+      if (i > 0) {
+        t = substr($0, i + 4)
+        sub(/ \(deleted\)$/, "", t)
+        db = ENVIRON["SCARF_DB"]
+        if (t == db || t == db "-wal" || t == db "-shm") print pid
+      }
+    }
+    """#
+
+    /// The PID Scarf itself runs as when the target is this Mac. Scarf's
+    /// own read-only connection to the local state.db is not a Hermes
+    /// writer and must not block the restore.
+    private func ownPIDIfLocal(_ transport: any ServerTransport) -> Int32? {
+        transport.isRemote ? nil : ProcessInfo.processInfo.processIdentifier
+    }
+
+    static func parseHolderOutput(_ stdout: String) -> DBHolderProbe? {
+        guard let line = stdout.split(whereSeparator: \.isNewline)
+            .last(where: { $0.hasPrefix("SCARF_HOLDERS:") }) else { return nil }
+        let value = line.dropFirst("SCARF_HOLDERS:".count).trimmingCharacters(in: .whitespaces)
+        if value == "UNKNOWN" {
+            return .unknown("no /proc and no lsof on the server")
+        }
+        let pids = value.split(separator: " ").compactMap { Int32($0) }
+        return pids.isEmpty ? .clear : .held(pids)
+    }
+
+    /// Look for processes holding the target's state.db open. Never throws:
+    /// a probe that could not run is `.unknown`.
+    func probeStateDBHolders(transport: any ServerTransport, hermesHome: String) async -> DBHolderProbe {
+        let script = Self.holderScanScript(hermesHome: hermesHome, ownPID: ownPIDIfLocal(transport))
+            + "\necho \"SCARF_HOLDERS:$holders\""
+        do {
+            let result = try await transport.asyncRunProcess(
+                executable: "/bin/bash",
+                args: ["-lc", script],
+                stdin: nil,
+                timeout: Self.holderProbeTimeout
+            )
+            if let probe = Self.parseHolderOutput(result.stdoutString) { return probe }
+            return .unknown("the check printed no result (exit \(result.exitCode))")
+        } catch {
+            return .unknown(error.localizedDescription)
+        }
+    }
+
+    /// Throw unless nothing holds the target's state.db open.
+    private func requireStateDBUnheld(transport: any ServerTransport, hermesHome: String) async throws {
+        switch await probeStateDBHolders(transport: transport, hermesHome: hermesHome) {
+        case .clear: return
+        case .held(let pids): throw RestoreError.hermesRunning(pids: pids, homeRestored: false)
+        case .unknown(let why): throw RestoreError.cannotConfirmHermesStopped(why, homeRestored: false)
+        }
+    }
+
+    /// In ONE host command: re-check that nothing holds state.db, remove
+    /// its `-wal`/`-shm`/`-journal` (they describe the database being
+    /// replaced), then run `publish`, if any. The check and the replacement
+    /// share a shell, so nothing can open the database in between unseen.
+    /// Mirrors Hermes's own unlink+move restore
+    /// (`hermes_cli/backup.py:536-559` @ v2026.9.24).
+    private func runStateDBGuarded(
+        transport: any ServerTransport,
+        hermesHome: String,
+        homeRestored: Bool,
+        then publish: String?
+    ) async throws {
+        let db = Self.shellQuote(hermesHome + "/state.db")
+        var lines = [
+            Self.holderScanScript(hermesHome: hermesHome, ownPID: ownPIDIfLocal(transport)),
+            "if [ -n \"$holders\" ]; then echo \"SCARF_HOLDERS:$holders\"; exit 3; fi",
+            "rm -f \(db)-wal \(db)-shm \(db)-journal || exit 1",
+        ]
+        if let publish { lines.append("\(publish) || exit 1") }
+        lines.append("echo SCARF_GUARDED_OK")
+        let result: ProcessResult
+        do {
+            result = try await transport.asyncRunProcess(
+                executable: "/bin/bash",
+                args: ["-lc", lines.joined(separator: "\n")],
+                stdin: nil,
+                timeout: Self.holderProbeTimeout
+            )
+        } catch {
+            throw RestoreError.remoteCommandFailed("state.db safety check failed: \(error.localizedDescription)")
+        }
+        if result.exitCode == 0, result.stdoutString.contains("SCARF_GUARDED_OK") { return }
+        switch Self.parseHolderOutput(result.stdoutString) {
+        case .held(let pids)?:
+            throw RestoreError.hermesRunning(pids: pids, homeRestored: homeRestored)
+        case .unknown(let why)?:
+            throw RestoreError.cannotConfirmHermesStopped(why, homeRestored: homeRestored)
+        case .clear?, nil:
+            let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw RestoreError.remoteCommandFailed(
+                "replacing state.db failed (exit \(result.exitCode))" + (why.isEmpty ? "" : ": \(why)"))
+        }
+    }
+
+    private func removeStagingDir(transport: any ServerTransport, staging: String) async {
+        _ = try? await transport.asyncRunProcess(
+            executable: "/bin/bash",
+            args: ["-lc", "rm -rf \(Self.shellQuote(staging))"],
+            stdin: nil,
+            timeout: 60
+        )
     }
 
     // MARK: - Helpers
@@ -912,7 +1205,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         }
     }
 
-    private static func shellQuote(_ s: String) -> String {
+    static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

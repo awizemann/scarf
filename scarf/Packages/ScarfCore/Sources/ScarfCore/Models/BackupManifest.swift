@@ -7,6 +7,7 @@ import Foundation
 /// <name>.scarfbackup
 /// ├── manifest.json           — this struct, JSON-encoded
 /// ├── hermes.tar.gz            — gzipped tar of `~/.hermes/` (minus exclusions)
+/// ├── hermes-state.tar.gz      — (v2) read-only snapshot of `state.db`
 /// └── projects/
 ///     ├── <project-id>.tar.gz — one inner tarball per registered project
 ///     └── ...
@@ -25,12 +26,24 @@ import Foundation
 /// tree (the user's code), and the manifest itself. **What does NOT ride
 /// along by default**: `auth.json` (provider credentials), `mcp-tokens/`
 /// (per-host OAuth bearer tokens), `logs/` (size, low restore value),
-/// `state.db-wal` / `state.db-shm` (in-flight WAL siblings — we checkpoint
-/// before the archive). The `options` block records exactly which
+/// `state.db-wal` / `state.db-shm` (in-flight WAL siblings). From v2 the
+/// live `state.db` is not in `hermes.tar.gz` either: it is captured by a
+/// read-only SQLite `.backup` snapshot into its own tarball (`stateDB`),
+/// because copying a live WAL database file is how you get a torn or
+/// incomplete copy, and checkpointing it first would be a write to
+/// state.db (charter C3). The `options` block records exactly which
 /// exclusions were applied so the restore flow can warn the user.
 public struct BackupManifest: Codable, Sendable, Equatable {
-    /// Bumped when the on-disk shape changes incompatibly. v1 is the only
-    /// shape today; restores refuse anything they don't recognize.
+    /// Bumped when the on-disk shape changes incompatibly. Restores refuse
+    /// anything they don't recognize.
+    ///
+    /// - v1: `state.db` (copied live) inside `hermes.tar.gz`, always
+    ///   under a `.hermes/` top-level directory.
+    /// - v2: `state.db` comes from `stateDB`'s snapshot tarball and is NOT
+    ///   in `hermes.tar.gz`; the tarball's top-level directory is the
+    ///   source home's own name. A v1-only Scarf would restore a v2
+    ///   archive without its sessions and report success, which is why
+    ///   this is a version bump and not an optional field.
     public var schemaVersion: Int
     /// Magic string. Lets a future Scarf reject `.zip` files that aren't
     /// our backups before unpacking them as if they were.
@@ -51,6 +64,9 @@ public struct BackupManifest: Codable, Sendable, Equatable {
     /// restore preview honestly reports "auth.json was not in this
     /// backup — you'll re-authenticate after restore".
     public var options: Options
+    /// The read-only snapshot of `state.db` (v2). `nil` in v1 archives,
+    /// and in v2 archives from a host that had no `state.db`.
+    public var stateDB: StateDBSnapshot?
 
     public init(
         schemaVersion: Int = BackupManifest.currentSchemaVersion,
@@ -59,7 +75,8 @@ public struct BackupManifest: Codable, Sendable, Equatable {
         source: Source,
         hermes: HermesTree,
         projects: [ProjectEntry],
-        options: Options
+        options: Options,
+        stateDB: StateDBSnapshot? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.kind = kind
@@ -68,9 +85,31 @@ public struct BackupManifest: Codable, Sendable, Equatable {
         self.hermes = hermes
         self.projects = projects
         self.options = options
+        self.stateDB = stateDB
     }
 
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
+    /// Every schema this Scarf can restore.
+    public static let supportedSchemaVersions: ClosedRange<Int> = 1...2
+
+    /// A gzipped tar holding a single `state.db` member: a consistent
+    /// copy taken through SQLite's online-backup API from a read-only
+    /// connection on the source host.
+    public struct StateDBSnapshot: Codable, Sendable, Equatable {
+        /// Path inside the outer ZIP (always `hermes-state.tar.gz`).
+        public var tarballPath: String
+        public var tarballSize: Int64
+        public var tarballSHA256: String
+        /// Which host tool produced the snapshot (`sqlite3` or `python3`).
+        public var method: String
+
+        public init(tarballPath: String, tarballSize: Int64, tarballSHA256: String, method: String) {
+            self.tarballPath = tarballPath
+            self.tarballSize = tarballSize
+            self.tarballSHA256 = tarballSHA256
+            self.method = method
+        }
+    }
     public static let kindMagic = "scarf-server-backup"
 
     public struct Source: Codable, Sendable, Equatable {
@@ -143,11 +182,12 @@ public struct BackupManifest: Codable, Sendable, Equatable {
         public var includeAuth: Bool
         public var includeMcpTokens: Bool
         public var includeLogs: Bool
-        /// True if `sqlite3 PRAGMA wal_checkpoint(TRUNCATE)` was run on
-        /// the remote before tarballing the Hermes home. False means the
-        /// archive may contain a `state.db` mid-write — usually fine
-        /// (SQLite tolerates restarted reads from a quiesced DB) but
-        /// flagged for forensics.
+        /// Legacy v1 flag. v1 Scarf set it to true whenever it had run
+        /// `PRAGMA wal_checkpoint(TRUNCATE)` on the live database, even
+        /// when that checkpoint was partial, so a v1 `true` proves
+        /// nothing. Scarf no longer writes state.db (charter C3) and
+        /// always records `false`; ``BackupManifest/stateDB`` says how
+        /// state.db was actually captured.
         public var checkpointedWAL: Bool
 
         public init(includeAuth: Bool, includeMcpTokens: Bool, includeLogs: Bool, checkpointedWAL: Bool) {
@@ -161,7 +201,7 @@ public struct BackupManifest: Codable, Sendable, Equatable {
             includeAuth: false,
             includeMcpTokens: false,
             includeLogs: false,
-            checkpointedWAL: true
+            checkpointedWAL: false
         )
     }
 }
@@ -171,6 +211,7 @@ public struct BackupManifest: Codable, Sendable, Equatable {
 public enum BackupArchiveLayout {
     public static let manifestPath = "manifest.json"
     public static let hermesTarballPath = "hermes.tar.gz"
+    public static let stateDBTarballPath = "hermes-state.tar.gz"
     public static let projectsTarballPrefix = "projects/"
     public static let archiveExtension = "scarfbackup"
 

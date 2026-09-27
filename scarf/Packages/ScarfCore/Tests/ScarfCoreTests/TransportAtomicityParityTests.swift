@@ -164,7 +164,7 @@ import Foundation
 
         try await service.reanchorProjectsRegistry(
             transport: fake,
-            targetHome: "/home/u",
+            hermesHome: "/home/u/.hermes",
             mapping: ["/root/projects/a": "/home/u/projects/a"]
         )
 
@@ -186,7 +186,7 @@ import Foundation
         await #expect(throws: (any Error).self) {
             try await RemoteRestoreService(context: .local).reanchorProjectsRegistry(
                 transport: fake,
-                targetHome: "/home/u",
+                hermesHome: "/home/u/.hermes",
                 mapping: ["/a": "/b"]
             )
         }
@@ -199,7 +199,7 @@ import Foundation
         await #expect(throws: (any Error).self) {
             try await RemoteRestoreService(context: .local).reanchorProjectsRegistry(
                 transport: fake,
-                targetHome: "/home/u",
+                hermesHome: "/home/u/.hermes",
                 mapping: ["/a": "/b"]
             )
         }
@@ -210,7 +210,7 @@ import Foundation
         let fake = FakeTransport()
         try await RemoteRestoreService(context: .local).reanchorProjectsRegistry(
             transport: fake,
-            targetHome: "/home/u",
+            hermesHome: "/home/u/.hermes",
             mapping: ["/a": "/b"]
         )
         #expect(fake.contents("/home/u/.hermes/scarf/projects.json") == nil)
@@ -220,7 +220,7 @@ import Foundation
         let jobs = #"{"jobs":[{"id":"1","enabled":true},{"id":"2","enabled":false},{"id":"3","enabled":true}]}"#
         let fake = FakeTransport(files: ["/home/u/.hermes/cron/jobs.json": Data(jobs.utf8)])
         let paused = try await RemoteRestoreService(context: .local)
-            .pauseAllCronJobs(transport: fake, targetHome: "/home/u")
+            .pauseAllCronJobs(transport: fake, hermesHome: "/home/u/.hermes")
         #expect(paused == 2)
 
         let written = try #require(fake.contents("/home/u/.hermes/cron/jobs.json"))
@@ -237,13 +237,13 @@ import Foundation
         fake.failWrites = true
         await #expect(throws: (any Error).self) {
             _ = try await RemoteRestoreService(context: .local)
-                .pauseAllCronJobs(transport: fake, targetHome: "/home/u")
+                .pauseAllCronJobs(transport: fake, hermesHome: "/home/u/.hermes")
         }
     }
 
     @Test func cronPauseReportsZeroWhenJobsFileIsAbsent() async throws {
         let paused = try await RemoteRestoreService(context: .local)
-            .pauseAllCronJobs(transport: FakeTransport(), targetHome: "/home/u")
+            .pauseAllCronJobs(transport: FakeTransport(), hermesHome: "/home/u/.hermes")
         #expect(paused == 0)
     }
 
