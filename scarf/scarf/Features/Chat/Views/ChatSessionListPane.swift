@@ -143,7 +143,7 @@ struct ChatSessionListPane: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             ScarfTextField("Session title", text: $renameText)
                 .onSubmit { commitRename(session) }
-            if let renameError = chatViewModel.renameError {
+            if let renameError = chatViewModel.renameError(for: session.id) {
                 Label(renameError, systemImage: "exclamationmark.triangle")
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.danger)

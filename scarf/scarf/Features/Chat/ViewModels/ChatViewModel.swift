@@ -587,6 +587,15 @@ final class ChatViewModel {
     @ObservationIgnored
     var sendRouter: ((String, [ChatImageAttachment]) -> Bool)?
 
+    /// Consulted in place of `autoStartACPAndSend` — the send made with no
+    /// ACP client, typically after the reconnect ladder gave up. Returning
+    /// true means the owner took the send. Bot Chat sets it: an autostart
+    /// `session/load`s the bot's live id and, when that fails, falls back
+    /// to `session/new` — a stray session outside the canonical Bot Chat
+    /// that nothing re-verifies. Unlike `sendRouter` it leaves connected
+    /// sends (and voice turns) alone.
+    var autoStartInterceptor: ((String, [ChatImageAttachment]) -> Bool)?
+
     /// Test seam for the model-config write shared by the preflight
     /// sheet and the mismatch banner's "Choose model…" flow
     /// (t-79569a15). Nil in production — `confirmModelPreflight`
@@ -1078,9 +1087,9 @@ final class ChatViewModel {
             let ctx = context
             let intent = sessionStartGeneration
             Task { @MainActor in
-                let projectPath = await Task.detached {
+                let projectPath = await OffPool.run {
                     SessionAttributionService(context: ctx).resolveProjectPath(known: nil, sessionID: sessionId)
-                }.value
+                }
                 // Bail if a newer session-start superseded us while the
                 // (possibly remote) attribution read was in flight.
                 guard startStillCurrent(intent, client: nil) else { return }
@@ -1129,9 +1138,9 @@ final class ChatViewModel {
                     // (AGENTS.md + tool dirs), matching resumeSession. Off the
                     // MainActor — the attribution lookup is transport I/O.
                     let ctx = context
-                    let projectPath = await Task.detached {
+                    let projectPath = await OffPool.run {
                         SessionAttributionService(context: ctx).resolveProjectPath(known: nil, sessionID: sessionId)
-                    }.value
+                    }
                     // Bail if a newer session-start superseded us across the
                     // DB + attribution reads above.
                     guard startStillCurrent(intent, client: nil) else { return }
@@ -1194,8 +1203,12 @@ final class ChatViewModel {
         if let sendRouter, sendRouter(text, images) { return }
         if displayMode == .richChat {
             if let client = acpClient {
+                if holdSendIfReplayPending(client: client, text: text, images: images) { return }
                 sendViaACP(client: client, text: text, images: images)
             } else {
+                // A conversation that must not be auto-started blind (Bot
+                // Chat) re-resolves itself first.
+                if let autoStartInterceptor, autoStartInterceptor(text, images) { return }
                 // Auto-start ACP and send the queued message
                 autoStartACPAndSend(text: text, images: images)
             }
@@ -1205,6 +1218,49 @@ final class ChatViewModel {
                 acpError = "Image attachments require ACP mode (rich chat)."
             }
             sendToTerminal(tv, text: text + "\r")
+        }
+    }
+
+    /// Sends typed while a start path's `session/load` replay may still be
+    /// in flight, for the client in `heldSendsClient` (R10 carry-over).
+    ///
+    /// Hermes streams a session's whole stored history as live updates
+    /// inside `session/load` (acp_adapter/server.py:579-589 @ v2026.9.24).
+    /// The autostart and reconnect paths install their client before that
+    /// replay has been handled; a send in that window called
+    /// `markPromptSent`, which opens the replay gate, and the rest of the
+    /// replay painted as new content. Such sends are echoed now, with the
+    /// gate kept shut, and sent in order once the path has drained the
+    /// replay (`releaseHeldSends`). Dropped if the client is replaced.
+    @ObservationIgnored
+    private var heldSends: [(text: String, images: [ChatImageAttachment])] = []
+    @ObservationIgnored
+    private weak var heldSendsClient: ACPClient?
+
+    private func beginHoldingSends(for client: ACPClient) {
+        heldSends = []
+        heldSendsClient = client
+    }
+
+    /// Hold `text` if `client`'s replay has not drained yet. True when held.
+    private func holdSendIfReplayPending(client: ACPClient, text: String, images: [ChatImageAttachment]) -> Bool {
+        guard heldSendsClient === client else { return false }
+        richChatViewModel.addUserMessage(text: text)
+        richChatViewModel.closeReplayGate()
+        heldSends.append((text, images))
+        return true
+    }
+
+    /// Stop holding for `client` and send what was held, in order. A no-op
+    /// when another client has taken over (its path owns the sends).
+    private func releaseHeldSends(for client: ACPClient) {
+        guard heldSendsClient === client else { return }
+        let sends = heldSends
+        heldSends = []
+        heldSendsClient = nil
+        guard acpClient === client else { return }
+        for send in sends {
+            sendViaACP(client: client, text: send.text, images: send.images, localEchoAlreadyAdded: true)
         }
     }
 
@@ -1249,15 +1305,18 @@ final class ChatViewModel {
             // the single owner of chip + model-preset + git-branch setup.
             let knownProject = currentProjectPath
             let ctx = context
-            let projectPath = await Task.detached {
+            let projectPath = await OffPool.run {
                 SessionAttributionService(context: ctx).resolveProjectPath(known: knownProject, sessionID: sessionToResume)
-            }.value
+            }
             // Bail if a newer session-start superseded us while the (possibly
             // remote) attribution read was in flight.
             guard startStillCurrent(intent, client: nil) else { return }
 
             let client = acpClientFactory(context, projectPath)
             self.acpClient = client
+            // A second send before this path has sent the first one waits
+            // for the load's replay to drain, like the first one does.
+            beginHoldingSends(for: client)
 
             do {
                 acpStatus = ACPPhase.spawning
@@ -1335,6 +1394,7 @@ final class ChatViewModel {
                 // appended above (before session setup), so suppress
                 // the second one explicitly.
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
+                releaseHeldSends(for: client)
             } catch {
                 // Superseded start (a newer click, or the watchdog):
                 // the newer path owns the shared state — just make
@@ -1979,10 +2039,11 @@ final class ChatViewModel {
             if let projectPath {
                 // Synchronous file I/O (ProjectDashboardService.loadRegistry +
                 // ProjectAgentContextService.refresh, which itself walks the
-                // slash-commands directory) must run off the MainActor — the
-                // detached task runs the work on the cooperative pool and we
-                // await it here so the AGENTS.md block lands before client.start().
-                await Task.detached {
+                // slash-commands directory) must run off the MainActor, and
+                // off the cooperative pool too (`OffPool`, P60: on a remote
+                // it is blocking SFTP) — awaited here so the AGENTS.md block
+                // lands before client.start().
+                await OffPool.run {
                     let registry = ProjectDashboardService(context: contextForPrep).loadRegistry()
                     guard let project = registry.projects.first(where: { $0.path == projectPath }) else {
                         return
@@ -1992,7 +2053,7 @@ final class ChatViewModel {
                     } catch {
                         prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
                     }
-                }.value
+                }
                 // Pre-spawn await — a newer start may have superseded
                 // us while the registry/AGENTS.md I/O ran. Abandon
                 // BEFORE spawning so the superseded attempt never
@@ -2102,14 +2163,8 @@ final class ChatViewModel {
                 // under, so the per-project Sessions tab can surface it
                 // without a user action. No-op when projectPath is nil.
                 // Idempotent: re-attribution of the same pair is free.
-                if let projectPath {
-                    attribution.attribute(
-                        sessionID: resolvedSessionId,
-                        toProjectPath: projectPath
-                    )
-                }
-
-                // Resolve which project (if any) this session belongs
+                //
+                // Then resolve which project (if any) this session belongs
                 // to, so SessionInfoBar + nav title can surface it.
                 // Two inputs — use whichever is non-nil:
                 //   * `projectPath` — the caller asked for a project
@@ -2120,17 +2175,29 @@ final class ChatViewModel {
                 //     Covers "click an old project-attributed session
                 //     from the global Sessions sidebar / Resume menu"
                 //     where projectPath isn't known at the call site.
-                let attributedPath = projectPath
-                    ?? attribution.projectPath(for: resolvedSessionId)
+                // The name comes from the projects registry; a path in
+                // the sidecar whose project has since been removed shows
+                // the path as a fallback label.
+                //
+                // The sidecar write, the sidecar read and the registry
+                // read are all transport I/O (SFTP / SSH on a remote), so
+                // they run in one `OffPool` batch, never on the main actor
+                // (charter C10).
+                let attributionContext = context
+                let resolvedProject: (path: String?, name: String?) = await OffPool.run {
+                    if let projectPath {
+                        attribution.attribute(sessionID: resolvedSessionId, toProjectPath: projectPath)
+                    }
+                    guard let path = projectPath ?? attribution.projectPath(for: resolvedSessionId) else {
+                        return (nil, nil)
+                    }
+                    let registry = ProjectDashboardService(context: attributionContext).loadRegistry()
+                    return (path, registry.projects.first(where: { $0.path == path })?.name)
+                }
+                guard startStillCurrent(intent, client: client) else { return }
+                let attributedPath = resolvedProject.path
                 if let path = attributedPath {
-                    // Look up a human-readable name from the projects
-                    // registry. Missing project (path in the sidecar,
-                    // project since removed) → show the path as a
-                    // fallback label so the chip still renders and the
-                    // user sees *something* rather than silently losing
-                    // the indicator.
-                    let registry = ProjectDashboardService(context: context).loadRegistry()
-                    let name = registry.projects.first(where: { $0.path == path })?.name
+                    let name = resolvedProject.name
                     self.currentProjectPath = path
                     self.currentProjectName = name ?? path
                     // Pull any project-scoped slash commands the user has
@@ -2363,9 +2430,9 @@ final class ChatViewModel {
             acpStatus = "Reconnecting…"
             await recoverRemoteTransportAfterFailure()
 
-            let projectPath = await Task.detached {
+            let projectPath = await OffPool.run {
                 SessionAttributionService(context: ctx).resolveProjectPath(known: knownProject, sessionID: sessionId)
-            }.value
+            }
 
             for attempt in 1...Self.maxReconnectAttempts {
                 guard !Task.isCancelled else { return }
@@ -2418,8 +2485,11 @@ final class ChatViewModel {
                         return
                     }
 
-                    // Success — wire up the new client
+                    // Success — wire up the new client. Its load replay is
+                    // still buffered in the client's event stream (the loop
+                    // starts below), so sends wait until it has drained.
                     self.acpClient = client
+                    beginHoldingSends(for: client)
                     self.hasActiveProcess = true
                     richChatViewModel.setSessionId(resolvedSessionId)
 
@@ -2452,6 +2522,11 @@ final class ChatViewModel {
 
                     isHandlingDisconnect = false
                     logger.info("Reconnected successfully on attempt \(attempt)")
+                    // The replay Hermes streamed inside `session/load` is
+                    // handled (and dropped by the gate `setSessionId`
+                    // closed) before any held send opens the gate.
+                    await awaitEventLoopDrain(client: client)
+                    releaseHeldSends(for: client)
                     return
                 } catch {
                     logger.warning("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
@@ -2786,7 +2861,7 @@ final class ChatViewModel {
 
             // Project attribution + registry — single batched off-main read.
             let ctx = context
-            let bundle: (names: [String: String], projects: [ProjectEntry]) = await Task.detached {
+            let bundle: (names: [String: String], projects: [ProjectEntry]) = await OffPool.run {
                 let attribution = SessionAttributionService(context: ctx)
                 let registry = ProjectDashboardService(context: ctx).loadRegistry()
                 let pathToName = Dictionary(
@@ -2800,7 +2875,7 @@ final class ChatViewModel {
                     }
                 }
                 return (names: names, projects: registry.projects)
-            }.value
+            }
 
             // Single batched commit — assigning all four observables at once
             // means SwiftUI sees one update rather than four staggered ones.
@@ -2856,6 +2931,7 @@ final class ChatViewModel {
             // reason instead of silently swallowing the failure, which is
             // what this path used to do (`SessionRenameFailure`).
             renameError = SessionRenameFailure.message(for: result.output)
+            renameErrorSessionId = sessionId
             return false
         }
         renameError = nil
@@ -2902,8 +2978,19 @@ final class ChatViewModel {
     }
 
     /// Why the last sidebar rename failed; `nil` once one succeeds or a
-    /// new rename sheet opens. Rendered inside the rename sheet.
+    /// new rename sheet opens. Rendered inside the rename sheet — read it
+    /// through `renameError(for:)`.
     var renameError: String?
+
+    /// The session the last rename failure belongs to. A rename that fails
+    /// after the user cancelled its sheet and opened another one must not
+    /// show its message in the new sheet (R10 carry-over).
+    private(set) var renameErrorSessionId: String?
+
+    /// `renameError`, only when it belongs to `sessionId`'s sheet.
+    func renameError(for sessionId: String) -> String? {
+        renameErrorSessionId == sessionId ? renameError : nil
+    }
 
     /// True while a sidebar rename's CLI call is in flight.
     private(set) var isRenamingSession = false
