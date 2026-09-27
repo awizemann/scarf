@@ -134,19 +134,30 @@ public enum TransportError: LocalizedError {
     /// into a specific `TransportError`. Used by `SSHTransport` after a
     /// non-zero exit. Defaults to `.commandFailed` when no known marker
     /// matches.
+    ///
+    /// The stderr is often the REMOTE command's own (`cat`, `mv`, `ls`), so
+    /// a generic phrase only counts as an ssh failure when ssh itself failed:
+    /// exit 255, which ssh (and scp in its default SFTP mode) reserves for
+    /// its own errors. `cat: …/auth.json: Permission denied` exits 1 and used
+    /// to read as "SSH authentication failed" (T6-F3). Phrases only ssh
+    /// prints — `Permission denied (publickey,…)`, the host-key banners,
+    /// `ssh: connect to host …` — still count at any exit code, which covers
+    /// legacy `scp -O` (exit 1 on a failed connection).
     public static func classifySSHFailure(host: String, exitCode: Int32, stderr: String) -> TransportError {
         let s = stderr.lowercased()
-        if s.contains("permission denied") || s.contains("authentication failed")
-            || s.contains("publickey") && s.contains("denied") {
+        let sshExit = exitCode == 255
+        if s.contains("permission denied (") || s.contains("publickey") && s.contains("denied")
+            || sshExit && (s.contains("permission denied") || s.contains("authentication failed")) {
             return .authenticationFailed(host: host, stderr: stderr)
         }
         if s.contains("host key verification failed")
             || s.contains("remote host identification has changed") {
             return .hostKeyMismatch(host: host, stderr: stderr)
         }
-        if s.contains("no route to host") || s.contains("connection refused")
+        let unreachable = s.contains("no route to host") || s.contains("connection refused")
             || s.contains("connection timed out") || s.contains("could not resolve hostname")
-            || s.contains("connection closed by") && s.contains("port 22") {
+            || s.contains("connection closed by") && s.contains("port 22")
+        if unreachable && (sshExit || s.contains("ssh: ")) {
             return .hostUnreachable(host: host, stderr: stderr)
         }
         return .commandFailed(exitCode: exitCode, stderr: stderr)
