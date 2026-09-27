@@ -324,6 +324,12 @@ final class ChatViewModel {
     // ACP state
     private var acpClient: ACPClient?
     private var acpEventTask: Task<Void, Never>?
+    /// Events the current event loop has handed to the transcript. Paired
+    /// with `ACPClient.eventsEmitted` so a send path can wait until every
+    /// event that preceded an RPC response has been handled
+    /// (`awaitEventLoopDrain`). Reset whenever a loop starts, because the
+    /// client's count starts at zero with each new client.
+    private var acpEventsHandled = 0
     private var healthMonitorTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var isHandlingDisconnect = false
@@ -419,13 +425,14 @@ final class ChatViewModel {
     /// banner with a one-click switch to `custom`. Never migrated silently.
     var llamaCppBaseURLIgnored: Bool = false
 
-    /// Hermes v0.14 — current `approvals.mode` from config.yaml.
-    /// Default `"manual"` matches Hermes's default. Refreshed off
-    /// MainActor alongside `modelProviderMismatch`. The chat header
-    /// reads this to decide whether to show the YOLO warning badge
-    /// (rendered when value is `"yolo"` and the host advertises
-    /// `hasYOLOWarning`).
-    var approvalMode: String = "manual"
+    /// The `approvals.mode` stored in config.yaml, read the way Hermes
+    /// reads it (`HermesConfig.storedApprovalMode`: bare `false`/`no`/`off`
+    /// are the `off` mode, unknown strings are `manual`), or nil when the
+    /// key is absent (the host default, never `off`). Refreshed off
+    /// MainActor alongside `modelProviderMismatch`. The chat header shows
+    /// its YOLO warning badge when this is `.off` (S03-F3 — it used to
+    /// check for a `"yolo"` value Hermes has never accepted).
+    var approvalMode: HermesApprovalMode?
 
     /// Set when chat-start is blocked because the active server's
     /// `config.yaml` has no `model.default` / `model.provider`. The chat
@@ -598,9 +605,21 @@ final class ChatViewModel {
     /// Sessions feature uses); tests inject a stub so exercising the
     /// delete-active-session teardown (t-01bd55ec) doesn't spawn a real
     /// CLI process.
+    ///
+    /// Always called off the main actor (`deleteSession` hops to
+    /// `OffPool`): on a remote host it is an SSH exec (charter C10).
     @ObservationIgnored
-    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
         ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
+    }
+
+    /// Runs `hermes sessions rename -- <id> <title>` for `renameSession`
+    /// and returns the CLI's output and exit code. Same seam shape as
+    /// `sessionDeleteRunner`, and likewise always called off the main
+    /// actor; tests stub it so no real CLI runs.
+    @ObservationIgnored
+    var sessionRenameRunner: @Sendable (ServerContext, String, String) -> (output: String, exitCode: Int32) = { ctx, sessionId, title in
+        ctx.runHermes(SessionsViewModel.renameArgv(sessionId: sessionId, title: title))
     }
 
     private static let maxReconnectAttempts = 5
@@ -698,7 +717,7 @@ final class ChatViewModel {
                         config, knownProviders: known, capabilities: capabilities)
                 }
             }
-            let mode = config.approvalMode
+            let mode = config.storedApprovalMode
             let voiceChatMode = config.voice.voiceChatMode
             // The chained panel names the host's resolved TTS provider in
             // its privacy line; `nil` until the config has been read.
@@ -1205,6 +1224,13 @@ final class ChatViewModel {
         armStartWatchdog(intent: intent)
         // Show the user message immediately
         richChatViewModel.addUserMessage(text: text)
+        // …but keep the replay gate shut until the prompt is actually
+        // sent. The echo opens it, and the `session/load` below streams
+        // the session's whole stored history as live updates before it
+        // returns — with the gate open, that history painted as new
+        // content after this bubble (S02-F3). `sendViaACP` reopens it
+        // with `markPromptSent` once the load's replay has drained.
+        richChatViewModel.closeReplayGate()
 
         Task { @MainActor in
             let sessionToResume = richChatViewModel.sessionId
@@ -1296,6 +1322,13 @@ final class ChatViewModel {
                 // 500 ms debounce. An explicit call here keeps the
                 // "type → see new chat in the list" feedback prompt.
                 await loadRecentSessions()
+                guard startStillCurrent(intent, client: client) else { return }
+
+                // Hermes sends the whole replay before the load response,
+                // but the event loop may not have handled all of it yet.
+                // Wait until it has, so no replayed chunk lands after
+                // `sendViaACP` reopens the gate below.
+                await awaitEventLoopDrain(client: client)
                 guard startStillCurrent(intent, client: client) else { return }
 
                 // Now send the queued prompt. The optimistic echo was
@@ -1757,53 +1790,26 @@ final class ChatViewModel {
         sessionId: String,
         projectPath: String
     ) async {
-        let reader = ProjectModelPresetReader(context: context)
-        guard let idString = reader.presetID(forProjectPath: projectPath),
-              let presetID = UUID(uuidString: idString)
-        else {
-            currentModelPreset = nil
-            return
-        }
-
-        let service = ModelPresetService.shared(for: context)
-        let preset: ModelPreset?
-        do {
-            preset = try await service.get(id: presetID)
-        } catch {
-            logger.warning("couldn't load model preset \(idString): \(error.localizedDescription)")
-            currentModelPreset = nil
-            return
-        }
-
-        guard let preset else {
-            logger.info("project '\(projectPath)' references deleted preset \(idString) — falling back to global default")
-            currentModelPreset = nil
-            return
-        }
-
-        // No capability gate: ACP `session/set_model` is defined in the
-        // adapter at every tag Scarf supports (`acp_adapter/server.py:482` @
-        // v2026.3.30 = 0.6.0, the supported floor; `:466` @ v2026.3.17, the
-        // earliest adapter tag; `:929` @ v2026.9.7). P49 / round-5 decision 9.
-        do {
-            // Pass providerID so the RPC uses Hermes's
-            // `<provider>:<model>` colon-encoded wire format. Without
-            // it, less-obvious model IDs (e.g. `inclusionai/ring-2.6-1t`)
-            // fall into `detect_provider_for_model` which infers wrong
-            // — see issue #97. Empty `providerID` (older presets that
-            // pre-date the providerID field) falls back to bare-model
-            // wire shape.
-            let providerHint = preset.providerID.isEmpty ? nil : preset.providerID
-            try await client.setSessionModel(
-                sessionId: sessionId,
-                modelID: preset.modelID,
-                providerID: providerHint
-            )
-            currentModelPreset = preset
-            logger.info("applied model preset '\(preset.name)' (\(preset.modelID), provider: \(providerHint ?? "auto")) to session \(sessionId)")
-        } catch {
-            logger.warning("session/set_model failed for preset '\(preset.name)': \(error.localizedDescription) — session stays on config.yaml default")
-            currentModelPreset = nil
+        // Shared with ScarfGo (S11-F3). The manifest read inside runs off
+        // the MainActor — it is transport I/O on a remote host (C10).
+        let outcome = await ProjectModelPresetApplier.apply(
+            client: client,
+            sessionId: sessionId,
+            projectPath: projectPath,
+            context: context
+        )
+        currentModelPreset = outcome.appliedPreset
+        switch outcome {
+        case .noBinding:
+            break
+        case .presetMissing(let id):
+            logger.info("project '\(projectPath)' references deleted preset \(id) — falling back to global default")
+        case .storeUnreadable(let message):
+            logger.warning("couldn't load the project's model preset: \(message)")
+        case .applied(let preset):
+            logger.info("applied model preset '\(preset.name)' (\(preset.modelID), provider: \(preset.providerID.isEmpty ? "auto" : preset.providerID)) to session \(sessionId)")
+        case .rejected(let preset, let message):
+            logger.warning("session/set_model failed for preset '\(preset.name)': \(message) — session stays on config.yaml default")
         }
     }
 
@@ -1947,12 +1953,26 @@ final class ChatViewModel {
 
         // If the caller passed a project path, refresh the Scarf-
         // managed block in the project's AGENTS.md BEFORE starting
-        // ACP — Hermes auto-reads AGENTS.md at session boot, so the
-        // block has to land on disk first. Non-blocking on failure:
-        // we log and proceed without the block. Safe on bare
-        // projects (creates AGENTS.md with just the block); safe on
-        // template-installed projects (splices the block into
-        // existing AGENTS.md without touching template content).
+        // ACP — Hermes reads AGENTS.md when it builds a session's
+        // system prompt, so the block has to land on disk first.
+        // Non-blocking on failure: we log and proceed without the
+        // block. Safe on bare projects (creates AGENTS.md with just the
+        // block); safe on template-installed projects (splices the
+        // block into existing AGENTS.md without touching template
+        // content).
+        //
+        // What the refresh reaches (S11-F4): every NEW session, and a
+        // resume that `session/load` can't restore (it falls back to a
+        // new session). A resumed session that has history normally
+        // does NOT see it: Hermes reuses the system prompt it stored
+        // when the session began, and rebuilds it only when the model,
+        // provider or cwd no longer match
+        // (`_restore_or_build_system_prompt` /
+        // `_stored_prompt_matches_runtime`,
+        // `agent/conversation_loop.py:681-730,815-838` @ v2026.9.24).
+        // So cron, slash-command or project-name changes show up in new
+        // chats, not in old ones. The write is still worth doing on
+        // resume: it keeps the file current for those cases.
         let contextForPrep = context
         let prepLogger = logger
         Task { @MainActor [self] in
@@ -2184,6 +2204,7 @@ final class ChatViewModel {
     }
 
     private func startACPEventLoop(client: ACPClient) {
+        acpEventsHandled = 0
         acpEventTask = Task { @MainActor [weak self] in
             let eventStream = await client.events
             for await event in eventStream {
@@ -2201,6 +2222,7 @@ final class ChatViewModel {
                 ScarfMon.measure(.chatStream, "mac.handleACPEvent") {
                     self?.richChatViewModel.handleACPEvent(event)
                 }
+                self?.acpEventsHandled += 1
                 // Don't overwrite a phase-typed acpStatus with the
                 // ACP-side "Connected" string mid-stream; we promote
                 // to ready/agentWorking from the call sites that own
@@ -2212,6 +2234,24 @@ final class ChatViewModel {
             if !Task.isCancelled {
                 self?.handleConnectionDied()
             }
+        }
+    }
+
+    /// Wait until the event loop has handled every event `client` had
+    /// emitted when this was called. `ACPClient` handles incoming lines
+    /// one at a time, so a count read right after an RPC returns covers
+    /// every notification sent before that response (see
+    /// `ACPClient.eventsEmitted`). Bounded: a wedged loop must not hold
+    /// the send forever, and a client that is no longer the live one
+    /// ends the wait.
+    private func awaitEventLoopDrain(client: ACPClient, timeoutSeconds: TimeInterval = 5) async {
+        let target = await client.eventsEmitted
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while acpEventsHandled < target,
+              acpClient === client,
+              Date() < deadline,
+              !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
@@ -2761,22 +2801,29 @@ final class ChatViewModel {
     /// caches in-place on success so the chat sidebar reflects the new
     /// title without a full reload. Same shell command path the
     /// SessionsView feature uses.
+    ///
+    /// The CLI runs off the main actor (S03-F4): it is a process spawn,
+    /// and an SSH exec on a remote host, and used to freeze the whole
+    /// window for the round trip. `isRenamingSession` is up while it runs
+    /// so the sheet can't submit twice.
     @discardableResult
-    func renameSession(_ sessionId: String, to newTitle: String) -> Bool {
+    func renameSession(_ sessionId: String, to newTitle: String) async -> Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         // Clear first — an empty title is a no-op, and a stale message
         // would read as a fresh failure.
         renameError = nil
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty, !isRenamingSession else { return false }
+        isRenamingSession = true
+        defer { isRenamingSession = false }
         // P47: `--` before the positionals, through the ONE argv builder the
         // Sessions pane already uses. `sessions rename` takes `session_id`
         // then `title` with `nargs="+"`
         // (`hermes_cli/subcommands/sessions.py:210-213` @ `v2026.9.7`), so a
         // title beginning with a dash exited 2 here while the identical
         // rename from the Sessions pane worked.
-        let result = context.runHermes(
-            SessionsViewModel.renameArgv(sessionId: sessionId, title: trimmed)
-        )
+        let runner = sessionRenameRunner
+        let ctx = context
+        let result = await OffPool.run { runner(ctx, sessionId, trimmed) }
         guard result.exitCode == 0 else {
             // Hermes refuses some renames server-side — most notably the
             // canonical Bot Chat, whose title IS its identity. Surface the
@@ -2832,6 +2879,9 @@ final class ChatViewModel {
     /// new rename sheet opens. Rendered inside the rename sheet.
     var renameError: String?
 
+    /// True while a sidebar rename's CLI call is in flight.
+    private(set) var isRenamingSession = false
+
     /// Apply a session title from an ACP `session_info_update` event
     /// (Hermes v0.16+). Mirrors `renameSession`'s in-place cache mutation
     /// so the sidebar reflects the new title immediately, but skips the
@@ -2856,8 +2906,16 @@ final class ChatViewModel {
     /// stayed alive until app quit and a mid-flight turn kept running
     /// server-side against the just-deleted session. Deleting a
     /// non-active session never disturbs the live client.
-    func deleteSession(_ sessionId: String) {
-        guard sessionDeleteRunner(context, sessionId) == 0 else { return }
+    ///
+    /// The CLI runs off the main actor (t-fa0043f6; C10) — it is an SSH
+    /// exec on a remote host. Whether the deleted session is the attached
+    /// one is decided AFTER it returns, so a switch made while it ran is
+    /// respected.
+    func deleteSession(_ sessionId: String) async {
+        let runner = sessionDeleteRunner
+        let ctx = context
+        let exitCode = await OffPool.run { runner(ctx, sessionId) }
+        guard exitCode == 0 else { return }
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)

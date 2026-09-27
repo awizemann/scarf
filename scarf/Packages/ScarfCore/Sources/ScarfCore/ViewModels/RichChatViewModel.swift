@@ -2142,6 +2142,29 @@ public final class RichChatViewModel {
         hasUserSentPromptThisSession = true
     }
 
+    /// Close the replay-suppression gate again after an echo opened it.
+    ///
+    /// For a send path that echoes the user's message BEFORE it calls
+    /// `session/load` (Mac `autoStartACPAndSend`, typing after the
+    /// connection was lost). Hermes streams the whole stored history as
+    /// live updates inside the load call (`acp_adapter/server.py:579-589`,
+    /// `_history_replay_updates` `:125-167` @ v2026.9.24); with the gate
+    /// left open by `addUserMessage`, those replayed chunks and tool cards
+    /// painted as new content after the new bubble (S02-F3). The send path
+    /// reopens the gate with `markPromptSent` once the load has returned
+    /// and its replay has drained.
+    public func closeReplayGate() {
+        hasUserSentPromptThisSession = false
+    }
+
+    /// True while a tool call has started and its completion has not
+    /// arrived yet. Hermes sends nothing while a tool runs (only the
+    /// start and the completion, `make_tool_progress_cb`,
+    /// `acp_adapter/events.py:119-153` @ v2026.9.24), so a silent channel
+    /// is expected then. The iOS stall detector reads this so it doesn't
+    /// tear down a long-running command.
+    public var hasToolCallInFlight: Bool { !openToolCallIds.isEmpty }
+
     /// Add a user message immediately (before DB write) for instant UI feedback.
     public func addUserMessage(text: String) {
         // Fresh prompt → clear any stale error banner from a prior
