@@ -294,13 +294,14 @@ import ScarfCore
         #expect(reply == "deterministic")
     }
 
-    /// The agent session must resolve TOOL directories against the project:
-    /// it opens `session/new` with `cwd = projectRoot`. Pins the SESSION-cwd
-    /// half of the type's two-cwd contract (the half the docstring asserts
-    /// "tool dirs resolve there"). The PROCESS cwd — the AGENTS.md source —
-    /// is a separate, deliberately-not-the-project choice (t-0b850b5b) that
-    /// lives in the default `forMacApp` factory and isn't observable through
-    /// the injected in-memory channel, so it isn't asserted here.
+    /// The agent session runs in the project: it opens `session/new` with
+    /// `cwd = projectRoot`. Hermes resolves tool paths AND loads the
+    /// project's context files (AGENTS.md, CLAUDE.md, .cursorrules) from
+    /// that session cwd (`acp_adapter/server.py:759-770`,
+    /// `agent/system_prompt.py:708-719` @ v2026.9.24), so this is also what
+    /// gives the mini-app agent project context — kept on purpose (R12 /
+    /// S12-F6; the older "process cwd keeps them out" premise of t-0b850b5b
+    /// does not hold at the tag).
     @Test func sessionIsOpenedWithProjectRootAsSessionCwd() async throws {
         let fake = FakeACPChannel()
         let session = makeSession(fake)

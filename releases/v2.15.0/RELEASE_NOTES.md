@@ -37,7 +37,7 @@ Selecting a project now opens a single **cockpit** — mission control for every
 
 Opening a chat **inside a project** finally gives the agent that project's context. Scarf now spawns `hermes acp` with the project as its working directory, so Hermes loads the project's `AGENTS.md` / `CLAUDE.md` / `.cursorrules` into the agent automatically — for new chats and for resumed, reconnected, and auto-started ones alike. No more re-explaining the repo every time.
 
-> **A note on trust.** Opening a chat in a project now loads that project's `AGENTS.md` / `CLAUDE.md` / `.cursorrules` into the agent (so it has project context). Treat a project's context files like its code — only open chats in projects you trust. (Mini-apps deliberately do **not** load these files into their agent sessions, since they run less-trusted web content.)
+> **A note on trust.** Opening a chat in a project now loads that project's `AGENTS.md` / `CLAUDE.md` / `.cursorrules` into the agent (so it has project context). Treat a project's context files like its code — only open chats in projects you trust. _(Correction, added later: this note originally said mini-apps do not load these files. They do — Hermes loads context files from the agent session's folder, and a mini-app's session runs in the project folder.)_
 
 ## Smaller fixes
 
