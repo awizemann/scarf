@@ -66,6 +66,16 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      T4-F1: asana's retired endpoint, n8n's retired bridge). The manifests
      are read with a small YAML-subset reader (no PyYAML dependency); a
      manifest it can't read is a hard error, not a skip.
+  8. HermesRoutableProviders.providerIDs  <->  every `model.provider` name
+     Hermes's runtime resolver accepts: `_REGISTRY_ROWS` ids plus the plugin
+     rows and aliases `sync_plugin_provider_registry` mirrors in, every
+     `_plugin_aliases()` key (auth.py `_PROVIDER_ALIASES`, then plugin
+     aliases) that lands on one of those or on openrouter/custom, and the
+     name-only runtime shortcuts (`auto`, `moa`, `_VERTEX_NAMES`,
+     `_DIRECT_API_BASE_URLS`). Scarf's model picker hides every other
+     models.dev provider and preflight warns on one (S06-F1). FAILs both
+     ways. Checked once against Hermes's own `is_runtime_provider_routable`
+     at v2026.9.24: identical (194 names).
 
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
@@ -109,6 +119,8 @@ CREDENTIALS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift")
 LOCAL_PROVIDERS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift")
+ROUTABLE_SWIFT = os.path.join(
+    REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesRoutableProviders.swift")
 MCP_CATALOG_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift")
 OPTIONAL_MCPS_DIR = "optional-mcps"
@@ -617,6 +629,141 @@ def parse_provider_env_vars(src):
     return env_vars, builtin_ids, warn_plugins
 
 
+RUNTIME_PROVIDER_PY = "hermes_cli/runtime_provider.py"
+RUNTIME_PROVIDER_CUSTOM_PY = "hermes_cli/runtime_provider_custom.py"
+
+
+def _dict_of_strs(node):
+    """A {str: str} dict literal as a dict, else None."""
+    if not isinstance(node, ast.Dict):
+        return None
+    out = {}
+    for k, v in zip(node.keys, node.values):
+        if not (isinstance(k, ast.Constant) and isinstance(k.value, str)
+                and isinstance(v, ast.Constant) and isinstance(v.value, str)):
+            return None
+        out[k.value] = v.value
+    return out
+
+
+def parse_routable_providers(src, builtin_ids):
+    """Lane 8: every `model.provider` spelling Hermes's runtime can route.
+
+    Emulates `resolve_runtime_provider` (hermes_cli/runtime_provider.py) for a
+    requested name, statically:
+
+    * the shortcuts decided on the name alone — `moa` and `_VERTEX_NAMES` —
+      and `_DIRECT_API_BASE_URLS` (runtime_provider_custom.py), which turns
+      `openai` into a `custom` endpoint before `resolve_provider` sees it;
+    * `auth.resolve_provider`: `openrouter`/`custom`, or a name that, after
+      `_plugin_aliases()` (auth.py `_PROVIDER_ALIASES` first, then every
+      plugin profile's `aliases` via setdefault), is a PROVIDER_REGISTRY key;
+    * the registry is the `_REGISTRY_ROWS` ids plus what
+      `sync_plugin_provider_registry` (auth_plugin_providers.py) mirrors in:
+      a bundled plugin whose name is neither a built-in row nor in
+      `_REGISTRY_PLUGIN_SKIP` (an `api_key` plugin needs env_vars), together
+      with its aliases (never stealing an existing key);
+    * `auto` (config default) as `is_runtime_provider_routable` counts it.
+
+    `custom:<name>` and named `providers:` entries are config-dependent and
+    handled in Swift, not listed. User plugins under $HERMES_HOME can add more
+    at runtime; nothing static can see those. Returns (ids, warn_plugins).
+    FAILS CLOSED on a table whose shape changed.
+    """
+    auth_text = src.read(AUTH_PY)
+    plug_text = src.read(AUTH_PLUGIN_PY)
+    rp_text = src.read(RUNTIME_PROVIDER_PY)
+    rpc_text = src.read(RUNTIME_PROVIDER_CUSTOM_PY)
+    for path, text in ((AUTH_PY, auth_text), (AUTH_PLUGIN_PY, plug_text),
+                       (RUNTIME_PROVIDER_PY, rp_text),
+                       (RUNTIME_PROVIDER_CUSTOM_PY, rpc_text)):
+        if text is None:
+            sys.exit(f"error: {path} not found at {src.mode} — lane 8 needs it")
+    core_aliases = _dict_of_strs(_find_assign(ast.parse(auth_text), "_PROVIDER_ALIASES"))
+    if core_aliases is None:
+        sys.exit(f"error: `_PROVIDER_ALIASES` dict literal not found in {AUTH_PY} "
+                 f"at {src.mode} — its shape changed")
+    vertex = _str_tuple(_find_assign(ast.parse(rp_text), "_VERTEX_NAMES"))
+    if vertex is None:
+        sys.exit(f"error: `_VERTEX_NAMES` tuple not found in {RUNTIME_PROVIDER_PY} "
+                 f"at {src.mode}")
+    direct = _dict_of_strs(_find_assign(ast.parse(rpc_text), "_DIRECT_API_BASE_URLS"))
+    if direct is None:
+        sys.exit(f"error: `_DIRECT_API_BASE_URLS` dict literal not found in "
+                 f"{RUNTIME_PROVIDER_CUSTOM_PY} at {src.mode}")
+    skip_node = _find_assign(ast.parse(plug_text), "_REGISTRY_PLUGIN_SKIP")
+    skip = (_str_tuple(skip_node.args[0])
+            if isinstance(skip_node, ast.Call) and len(skip_node.args) == 1 else None)
+    if skip is None:
+        sys.exit(f"error: `_REGISTRY_PLUGIN_SKIP` frozenset literal not found in "
+                 f"{AUTH_PLUGIN_PY} at {src.mode}")
+
+    registry = set(builtin_ids)
+    plugin_aliases = []  # (alias, name) in discovery order
+    warn_plugins = set()
+    root = "plugins/model-providers"
+    for entry in src.listdir(root):
+        init = src.read(f"{root}/{entry}/__init__.py")
+        if init is None:
+            continue
+        try:
+            tree = ast.parse(init)
+        except SyntaxError:
+            warn_plugins.add(entry)
+            continue
+        assigned = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned[target.id] = node.value
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and node.args):
+                continue
+            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if fname != "register_provider":
+                continue
+            call = assigned.get(getattr(node.args[0], "id", None))
+            kw = {k.arg: k.value for k in call.keywords} if call else {}
+            name = kw.get("name")
+            if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                warn_plugins.add(entry)
+                continue
+            aliases = _str_tuple(kw["aliases"]) if "aliases" in kw else []
+            if aliases is None:
+                warn_plugins.add(entry)
+                continue
+            plugin_aliases += [(a, name.value) for a in aliases]
+            if name.value in builtin_ids or name.value in skip:
+                continue
+            auth = kw.get("auth_type")
+            auth = auth.value if isinstance(auth, ast.Constant) else ("api_key" if auth is None else None)
+            if auth is None:
+                warn_plugins.add(entry)
+                continue
+            if auth == "api_key":
+                env = _str_tuple(kw["env_vars"]) if "env_vars" in kw else []
+                if env is None:
+                    warn_plugins.add(entry)
+                    continue
+                if not env:
+                    continue
+            registry.add(name.value)
+            registry |= set(aliases)  # mirror_aliases: only adds missing keys
+    alias_map = dict(core_aliases)
+    for alias, name in plugin_aliases:
+        alias_map.setdefault(alias, name)
+
+    def resolves(pid):
+        target = alias_map.get(pid, pid)
+        return target in ("openrouter", "custom") or target in registry
+
+    candidates = registry | set(alias_map) | {"openrouter", "custom"}
+    ids = {pid for pid in candidates if resolves(pid)}
+    ids |= {"auto", "moa"} | set(vertex) | set(direct)
+    return ids, warn_plugins
+
+
 def parse_manifest_yaml(text, where):
     """The subset of YAML the optional-mcps manifests use, as nested dicts/lists.
 
@@ -1057,6 +1204,27 @@ def main(argv=None):
             f"[provider-env-vars] {len(env_warn_plugins)} plugin(s) skipped (registration "
             f"not readable statically): {', '.join(sorted(env_warn_plugins))}")
 
+    # Lane 8: HermesRoutableProviders.providerIDs <-> the names Hermes's
+    #         runtime resolver accepts (S06-F1: the picker offered ~186
+    #         models.dev providers that fail with "Unknown provider").
+    _, builtin_ids, _ = parse_provider_env_vars(src)
+    hermes_routable, routable_warn_plugins = parse_routable_providers(src, builtin_ids)
+    swift_routable = set(re.findall(
+        r'"([^"]+)"',
+        "\n".join(swift_block(ROUTABLE_SWIFT, "static let providerIDs"))))
+    if not swift_routable:
+        sys.exit(f"error: no entries parsed from providerIDs in {ROUTABLE_SWIFT}")
+    check("routable-providers", swift_routable, hermes_routable,
+          "provider names Hermes routes missing from HermesRoutableProviders.providerIDs "
+          "(the picker hides them)",
+          "HermesRoutableProviders.providerIDs entries Hermes's resolver rejects "
+          "(the picker offers a provider that can't chat)")
+    if routable_warn_plugins:
+        warnings.append(
+            f"[routable-providers] {len(routable_warn_plugins)} plugin(s) skipped "
+            f"(registration not readable statically; their aliases may be missing): "
+            f"{', '.join(sorted(routable_warn_plugins))}")
+
     # Lane 7: OptionalMCPCatalog.entries <-> optional-mcps/*/manifest.yaml
     manifests = parse_optional_mcps(src)
     swift_catalog = swift_catalog_entries()
@@ -1103,7 +1271,8 @@ def main(argv=None):
         print(f"FAIL  {f}")
     counts = (f"aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
               f"overlays={len(swift_overlays)} env-vars={len(swift_env_vars)} "
-              f"mcp-catalog={len(swift_catalog)} lanes={7 - len(skipped)}/7")
+              f"mcp-catalog={len(swift_catalog)} routable={len(swift_routable)} "
+              f"lanes={8 - len(skipped)}/8")
     if failures:
         print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against "
               f"{PROVIDERS_PY} at {src.mode}")

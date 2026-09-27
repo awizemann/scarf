@@ -1944,6 +1944,15 @@ public struct HermesConfig: Sendable {
     /// from model pickers and built-in resolution (inventory.py:100,
     /// case-insensitive on the Hermes side). List — direct-YAML writes.
     public var excludedProviders: [String]
+    /// True when config.yaml defines any named custom provider — a non-empty
+    /// `providers:` map or `custom_providers:` list. Hermes routes a
+    /// `model.provider` matching one of those entries through its
+    /// named-custom rung (`hermes_cli/runtime_provider_custom.py:191-207` @
+    /// v2026.9.24) even when the name is not a built-in provider, so the
+    /// "can't route" check (``ModelPreflight/unroutableProvider(_:capabilities:)``)
+    /// stays quiet whenever any such entry exists rather than re-implementing
+    /// Hermes's display-name/alias matching.
+    public var hasNamedCustomProviders: Bool
     /// `approvals.smart_policy` (v0.20+, hermes_cli/config_defaults.py:2053
     /// — landed at commit bd1db5460a, first released v2026.7.30; the next
     /// numbered Hermes minor after that calendar tag is v0.20.0 =
@@ -2064,6 +2073,7 @@ public struct HermesConfig: Sendable {
         modelContextLength: String = "",
         reasoningOverrides: [String: String] = [:],
         excludedProviders: [String] = [],
+        hasNamedCustomProviders: Bool = false,
         approvalSmartPolicy: String = "",
         commandSecrets: CommandSecretsSettings = .empty,
         telemetry: TelemetrySettings = .empty,
@@ -2154,6 +2164,7 @@ public struct HermesConfig: Sendable {
         self.modelContextLength = modelContextLength
         self.reasoningOverrides = reasoningOverrides
         self.excludedProviders = excludedProviders
+        self.hasNamedCustomProviders = hasNamedCustomProviders
         self.approvalSmartPolicy = approvalSmartPolicy
         self.commandSecrets = commandSecrets
         self.telemetry = telemetry

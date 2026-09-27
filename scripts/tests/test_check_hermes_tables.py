@@ -352,7 +352,7 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
             self.fail(reason)
         code, text = self._run()
         self.assertEqual(code, 0, text)
-        self.assertIn("lanes=7/7", text)
+        self.assertIn("lanes=8/8", text)
         self.assertIn(f"tag {cht.HERMES_TARGET_TAG}", text)
 
 
@@ -669,6 +669,109 @@ class LaneSevenCatchesDrift(unittest.TestCase):
         code, out = self._run_with(old)
         self.assertEqual(code, 1, out)
         self.assertIn("'motherduck' default_enabled", out)
+
+
+class LaneEightRoutableProviders(unittest.TestCase):
+    """`parse_routable_providers` rebuilds the names Hermes's runtime resolver
+    accepts, statically, and exits on any table shape it can't read."""
+
+    AUTH = textwrap.dedent("""
+        _REGISTRY_ROWS: Tuple[Any, ...] = (
+            ProviderConfig("nous", "Nous", "oauth_device_code", inference_base_url="x"),
+            ("deepseek", "DeepSeek", "https://x", ("DEEPSEEK_API_KEY",), "DEEPSEEK_BASE_URL"),
+        )
+        _PROVIDER_ALIASES: Dict[str, str] = {
+            "deep-seek": "deepseek", "ollama": "custom", "or2": "openrouter", "ghost": "nowhere"}
+    """)
+    PLUG = '_REGISTRY_PLUGIN_SKIP = frozenset({"openrouter", "custom", "zai"})\n'
+    RP = '_VERTEX_NAMES = ("vertex", "google-vertex")\n'
+    RPC = '_DIRECT_API_BASE_URLS: Dict[str, str] = {"openai": "https://api.openai.com/v1"}\n'
+
+    def _src(self, auth=None, plug=None, rp=None, rpc=None, plugins=None):
+        files = {cht.AUTH_PY: self.AUTH if auth is None else auth,
+                 cht.AUTH_PLUGIN_PY: self.PLUG if plug is None else plug,
+                 cht.RUNTIME_PROVIDER_PY: self.RP if rp is None else rp,
+                 cht.RUNTIME_PROVIDER_CUSTOM_PY: self.RPC if rpc is None else rpc}
+        plugins = plugins or {}
+        for name, text in plugins.items():
+            files[f"plugins/model-providers/{name}/__init__.py"] = text
+        return LaneSixProviderEnvVars.DirSource(files, {"plugins/model-providers": sorted(plugins)})
+
+    def test_resolution_rules(self):
+        plugins = {
+            # Mirrored plugin: its name AND aliases become registry keys.
+            "fireworks": 'p = ProviderProfile(name="fireworks", aliases=("fw",), env_vars=("FW_KEY",))\nregister_provider(p)\n',
+            # api_key plugin with no env vars: never registered, alias dangles.
+            "nokey": 'p = ProviderProfile(name="nokey", aliases=("nk",))\nregister_provider(p)\n',
+            # Built-in name: not re-registered, but its alias still resolves.
+            "deepseek": 'p = ProviderProfile(name="deepseek", aliases=("ds",), env_vars=("X",))\nregister_provider(p)\n',
+            # Skip set: not registered, alias lands on nothing routable.
+            "zai": 'p = ProviderProfile(name="zai", aliases=("glm",), env_vars=("Z",))\nregister_provider(p)\n',
+            # OAuth plugin: registered without env vars.
+            "oauthy": 'p = P(name="oauthy", auth_type="oauth_external")\nregister_provider(p)\n',
+            "kimi": 'k = _kimi("kimi", (), ("KIMI_API_KEY",), "x")\nregister_provider(k)\n',
+        }
+        ids, warn = cht.parse_routable_providers(self._src(plugins=plugins), {"nous", "deepseek"})
+        for ok in ("nous", "deepseek", "deep-seek", "ollama", "or2", "openrouter", "custom",
+                   "auto", "moa", "vertex", "google-vertex", "openai",
+                   "fireworks", "fw", "ds", "oauthy"):
+            self.assertIn(ok, ids)
+        for bad in ("ghost", "nokey", "nk", "zai", "glm", "mistral"):
+            self.assertNotIn(bad, ids)
+        self.assertEqual(warn, {"kimi"})
+
+    def _exits(self, **kw):
+        with self.assertRaises(SystemExit):
+            cht.parse_routable_providers(self._src(**kw), {"nous"})
+
+    def test_reshaped_alias_table_exits(self):
+        self._exits(auth="_PROVIDER_ALIASES = dict(ALIAS_ROWS)\n")
+
+    def test_missing_vertex_names_exits(self):
+        self._exits(rp="SOMETHING = 1\n")
+
+    def test_missing_direct_api_table_exits(self):
+        self._exits(rpc="SOMETHING = 1\n")
+
+    def test_missing_file_exits(self):
+        with self.assertRaises(SystemExit):
+            cht.parse_routable_providers(FakeSource({cht.AUTH_PY: self.AUTH}), {"nous"})
+
+
+class LaneEightCatchesDrift(unittest.TestCase):
+    """End to end at the target tag: a name Hermes routes missing from the
+    Swift table, or one it rejects added to it, must FAIL lane 8."""
+
+    def setUp(self):
+        _require_target_checkout(self)
+        self.real = cht.ROUTABLE_SWIFT
+        self.text = open(self.real).read()
+        self.addCleanup(setattr, cht, "ROUTABLE_SWIFT", self.real)
+
+    def _run_with(self, text):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.ROUTABLE_SWIFT = tmp.name
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+        return ctx.exception.code, out.getvalue()
+
+    def test_a_missing_name_fails(self):
+        self.assertIn('"moa", ', self.text)
+        code, out = self._run_with(self.text.replace('"moa", ', "", 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[routable-providers] provider names Hermes routes missing", out)
+        self.assertIn("moa", out)
+
+    def test_an_unroutable_name_fails(self):
+        code, out = self._run_with(self.text.replace('"moa", ', '"moa", "mistral", ', 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[routable-providers] HermesRoutableProviders.providerIDs entries", out)
+        self.assertIn("mistral", out)
 
 
 if __name__ == "__main__":

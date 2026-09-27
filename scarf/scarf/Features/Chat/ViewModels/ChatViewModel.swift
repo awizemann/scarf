@@ -425,6 +425,13 @@ final class ChatViewModel {
     /// banner with a one-click switch to `custom`. Never migrated silently.
     var llamaCppBaseURLIgnored: Bool = false
 
+    /// `model.provider` from config.yaml when this Hermes can't route it
+    /// (`ModelPreflight.unroutableProvider`, S06-F1) — e.g. `mistral` saved
+    /// by an older Scarf picker that listed every models.dev provider.
+    /// Drives a warning banner with a "Choose model…" button. Nil when the
+    /// provider routes, is unset, or the host predates the table.
+    var unroutableProvider: String?
+
     /// The `approvals.mode` stored in config.yaml, read the way Hermes
     /// reads it (`HermesConfig.storedApprovalMode`: bare `false`/`no`/`off`
     /// are the `off` mode, unknown strings are `manual`), or nil when the
@@ -735,8 +742,10 @@ final class ChatViewModel {
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
+            let unroutable = ModelPreflight.unroutableProvider(config, capabilities: capabilities)
             self?.modelProviderMismatch = resolvedMismatch
             self?.llamaCppBaseURLIgnored = llamaIgnored
+            self?.unroutableProvider = unroutable
             self?.approvalMode = mode
             self?.voiceChatModeRaw = voiceChatMode
             self?.voiceTTSProviderRaw = ttsProvider
@@ -877,6 +886,14 @@ final class ChatViewModel {
     /// diagnostics so this banner re-evaluates (and clears). No start
     /// args are stashed: unlike the preflight bail there's no
     /// interrupted chat-start to replay.
+    @MainActor
+    func chooseModelForUnroutableProvider(_ provider: String) {
+        pendingStartArgs = nil
+        modelPreflightReason = "This version of Hermes can't route the configured provider (\(provider))."
+    }
+
+    /// Same escape hatch as `chooseModelForUnroutableProvider`, for the
+    /// model/provider mismatch banner.
     @MainActor
     func chooseModelForMismatch(_ mismatch: ModelPreflight.Mismatch) {
         pendingStartArgs = nil
@@ -2836,6 +2853,7 @@ final class ChatViewModel {
                     // Clear eagerly, then re-read config.yaml for
                     // truth (t-79569a15).
                     self.modelProviderMismatch = nil
+                    self.unroutableProvider = nil
                     self.refreshConfigDiagnostics()
                     if let pending {
                         self.startACPSession(

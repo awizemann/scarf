@@ -1101,6 +1101,9 @@ public extension HermesConfig {
             // `'llama3:8b': high` reads back as `llama3:8b`.
             reasoningOverrides: maps["agent.reasoning_overrides"] ?? [:],
             excludedProviders: lists["model_catalog.excluded_providers"] ?? [],
+            hasNamedCustomProviders: Self.hasNamedCustomProviders(
+                yaml: yaml, values: values, lists: lists, maps: maps
+            ),
             // `approvals.smart_policy` (v0.20+, config_defaults.py:2053) —
             // free-form policy text for the smart-approval guardian.
             approvalSmartPolicy: str("approvals.smart_policy"),
@@ -1146,6 +1149,41 @@ public extension HermesConfig {
                 "tool_loop_guardrails.non_interactive_hard_stop_enabled"
             )
         )
+    }
+
+    /// Whether any `providers.<name>` or `custom_providers` content was
+    /// parsed. Deliberately loose (any child counts): it only silences a
+    /// warning, so a false "yes" costs nothing and a false "no" would warn
+    /// about a provider Hermes can in fact route.
+    private static func hasNamedCustomProviders(
+        yaml: String,
+        values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
+    ) -> Bool {
+        // A child of either block (`providers.x.base_url`), or a non-empty
+        // list/map AT either key. The bare key alone is not enough: Hermes's
+        // own default is `providers: {}`.
+        func child(_ key: String) -> Bool {
+            key.hasPrefix("providers.") || key.hasPrefix("custom_providers.")
+        }
+        func atOrUnder(_ key: String) -> Bool {
+            key == "providers" || key == "custom_providers" || child(key)
+        }
+        if values.keys.contains(where: child) { return true }
+        if lists.contains(where: { atOrUnder($0.key) && !$0.value.isEmpty }) { return true }
+        if maps.contains(where: { atOrUnder($0.key) && !$0.value.isEmpty }) { return true }
+        // A nested flow form (`providers: {x: {base_url: …}}`) reaches the
+        // flat parse as an empty map, indistinguishable from that default —
+        // so read that one top-level line from the raw text.
+        for line in yaml.split(whereSeparator: \.isNewline) {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon]
+            guard key == "providers" || key == "custom_providers" else { continue }
+            let body = line[line.index(after: colon)...]
+                .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            let compact = body.filter { !$0.isWhitespace }
+            if compact.count > 2, compact.first == "{" || compact.first == "[" { return true }
+        }
+        return false
     }
 
     /// Resolve `multiplex_profile_allowlist` from the three `ParsedYAML`
