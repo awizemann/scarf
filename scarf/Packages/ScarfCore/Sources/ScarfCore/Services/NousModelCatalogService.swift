@@ -64,18 +64,51 @@ public struct NousModelCatalogService: Sendable {
     public static let cacheTTL: TimeInterval = 24 * 60 * 60   // 24h
     public static let requestTimeout: TimeInterval = 10        // seconds
 
-    /// Hard-coded fallback for offline-with-no-cache. Short on purpose
-    /// — only the canonical Hermes models (the family the user is most
-    /// likely to want) plus a reminder that fresh data is one
-    /// successful refresh away. Update when Nous releases a new
-    /// flagship; deliberately not exhaustive — the API is the source
-    /// of truth, this just keeps the picker non-empty.
+    /// Hard-coded fallback for offline-with-no-cache. Short on purpose —
+    /// the API is the source of truth, this just keeps the picker
+    /// non-empty with ids Nous actually serves.
+    ///
+    /// A subset of Hermes's own offline list, `_PROVIDER_MODELS["nous"]`
+    /// (`hermes_cli/models_catalog_static.py:164` @ v2026.9.24, built from
+    /// `OPENROUTER_MODELS` minus `_OPENROUTER_ONLY` and `:free` SKUs), in
+    /// that order, ending with `z-ai/glm-5.2` — the entry
+    /// `website/static/api/model-catalog.json` marks `"default": true`.
+    /// Until S06-F5 this held four `Hermes-3-…` ids, which Hermes itself
+    /// filters out of the Nous list (see ``agenticModels(_:)``). Update
+    /// alongside the Hermes release audit; not a checked table.
     public static let fallbackModels: [NousModel] = [
-        NousModel(id: "Hermes-3-Llama-3.1-405B"),
-        NousModel(id: "Hermes-3-Llama-3.1-70B"),
-        NousModel(id: "Hermes-3-Llama-3.1-8B"),
-        NousModel(id: "DeepHermes-3-Llama-3-8B-Preview")
+        NousModel(id: "anthropic/claude-fable-5.1"),
+        NousModel(id: "anthropic/claude-opus-5.5"),
+        NousModel(id: "anthropic/claude-sonnet-5"),
+        NousModel(id: "openai/gpt-6-astra"),
+        NousModel(id: "openai/gpt-5.5"),
+        NousModel(id: "google/gemini-3.1-pro-preview"),
+        NousModel(id: "x-ai/grok-4.7"),
+        NousModel(id: "deepseek/deepseek-v4-pro"),
+        NousModel(id: "moonshotai/kimi-k3"),
+        NousModel(id: "z-ai/glm-5.2"),
     ]
+
+    /// The models Hermes offers from a Nous `/models` response: any id
+    /// containing "hermes" (any case) is dropped — "Hermes models aren't
+    /// reliable for agentic tool-calling" (`fetch_nous_models`,
+    /// `hermes_cli/auth_nous.py:724-727` @ v2026.9.24; the same filter is
+    /// in `auth.py` back to v2026.4.30, from hermes-agent 69d3d3c15a) —
+    /// ids are trimmed, empties dropped, and duplicates collapsed keeping
+    /// the first. Applied to fresh fetches AND cached lists, so a cache
+    /// written before this filter existed doesn't bring them back.
+    public static func agenticModels(_ models: [NousModel]) -> [NousModel] {
+        var seen: Set<String> = []
+        var out: [NousModel] = []
+        for model in models {
+            let id = model.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, !id.lowercased().contains("hermes"), seen.insert(id).inserted else { continue }
+            out.append(id == model.id
+                ? model
+                : NousModel(id: id, owned_by: model.owned_by, created: model.created, description: model.description))
+        }
+        return out
+    }
 
     private static let logger = Logger(subsystem: "com.scarf", category: "NousModelCatalogService")
 
@@ -202,8 +235,15 @@ public struct NousModelCatalogService: Sendable {
         // round-trips of the same file — candidate for caching.
         ScarfMon.measure(.diskIO, "nous.bearerToken") {
             let transport = context.makeTransport()
-            guard transport.fileExists(context.paths.authJSON) else { return nil }
-            guard let data = try? transport.readFile(context.paths.authJSON) else { return nil }
+            // Named profile: Hermes falls back to the ROOT auth.json's
+            // `providers.nous` when the profile has none (S06-F3).
+            let merged = HermesAuthFallback.load(
+                authJSONPath: context.paths.authJSON,
+                home: context.paths.home,
+                capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+                transport: transport
+            )
+            guard let data = merged.data else { return nil }
             guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             let providers = root["providers"] as? [String: Any] ?? [:]
             let nous = providers["nous"] as? [String: Any]
@@ -238,7 +278,7 @@ public struct NousModelCatalogService: Sendable {
             struct Envelope: Decodable { let data: [NousModel] }
             let envelope = try JSONDecoder().decode(Envelope.self, from: data)
             ScarfMon.event(.transport, "nous.fetchModels.bytes", count: envelope.data.count, bytes: data.count)
-            return envelope.data
+            return Self.agenticModels(envelope.data)
         }
     }
 
@@ -260,7 +300,13 @@ public struct NousModelCatalogService: Sendable {
         // and let writeCache rebuild it. The runaway `cat` keeps
         // running on its own 60 s transport timeout but no longer
         // blocks the picker.
-        let cached = await readCacheWithTimeout(seconds: 5)
+        let rawCached = await readCacheWithTimeout(seconds: 5)
+
+        // Same filter as a fresh fetch — a cache written by an older Scarf
+        // may still carry the Hermes-* ids Hermes drops (S06-F5).
+        let cached = rawCached.map {
+            NousModelsCache(version: $0.version, fetchedAt: $0.fetchedAt, models: Self.agenticModels($0.models))
+        }
 
         if let cached, !forceRefresh, !isCacheStale(cached) {
             return .cache(models: cached.models, fetchedAt: cached.fetchedAt, refreshError: nil)

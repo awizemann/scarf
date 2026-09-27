@@ -38,3 +38,45 @@ import ScarfCore
         #expect(keys(nil) == ["vision", "compression", "skills_hub", "approval", "mcp"])
     }
 }
+
+@Suite struct OAuthURLDetectionR03Tests {
+    /// S06-F6: OpenRouter's PKCE URL has no client_id, /authorize or /oauth/.
+    /// Output shape from `hermes_cli/auth_openrouter.py:77-79` @ v2026.9.24.
+    @Test func detectsOpenRouterLoopbackURL() {
+        let text = """
+        Open this URL to authorize Hermes with OpenRouter:
+          https://openrouter.ai/auth?callback_url=http%3A%2F%2F127.0.0.1%3A53121%2Fcallback%2Fabc&code_challenge=XyZ_123&code_challenge_method=S256
+
+        Docs: https://openrouter.ai/docs/guides/overview/auth/oauth
+        """
+        #expect(OAuthFlowController.extractAuthURL(from: text)
+                == "https://openrouter.ai/auth?callback_url=http%3A%2F%2F127.0.0.1%3A53121%2Fcallback%2Fabc&code_challenge=XyZ_123&code_challenge_method=S256")
+    }
+
+    /// The headless variant (`auth_openrouter.py:60-64`) omits callback_url.
+    @Test func detectsOpenRouterHeadlessURL() {
+        let text = """
+        Remote session detected — using OpenRouter's headless flow.
+        Open this URL in a browser on any machine, authorize, then paste the code shown:
+          https://openrouter.ai/auth?code_challenge=abc&code_challenge_method=S256
+
+        Authorization code:
+        """
+        #expect(OAuthFlowController.extractAuthURL(from: text)
+                == "https://openrouter.ai/auth?code_challenge=abc&code_challenge_method=S256")
+    }
+
+    @Test func docsURLAloneIsNotAnAuthURL() {
+        #expect(OAuthFlowController.extractAuthURL(
+            from: "Docs: https://openrouter.ai/docs/guides/overview/auth/oauth") == nil)
+    }
+
+    @Test func clientIDURLStillWinsOverAPKCEOnlyOne() {
+        let text = """
+        https://example.test/auth?code_challenge=a
+        https://claude.ai/oauth/authorize?code=true&client_id=abc&code_challenge=b
+        """
+        #expect(OAuthFlowController.extractAuthURL(from: text)
+                == "https://claude.ai/oauth/authorize?code=true&client_id=abc&code_challenge=b")
+    }
+}

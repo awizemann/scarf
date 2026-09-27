@@ -215,6 +215,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// to the ACP table — the follow-on P55 filed is `t-e9c464a9`.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
 
+    /// Under a named profile, `credential_pool.<provider>` falls back to the
+    /// ROOT `auth.json` when the profile has no entries for that provider
+    /// (hermes-agent 33bf5f6292, first released at v2026.5.7; absent at
+    /// v2026.4.30). `read_credential_pool`, `hermes_cli/auth.py:870-893` @
+    /// v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthPoolFallback: Bool { atLeastSemver(0, 13, 0) }
+
     /// `hermes kanban` task board CLI.
     ///
     /// **Floor v0.13.0, not v0.12.0** (P55 re-walk; charter C2 — the old doc
@@ -715,6 +722,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     // modes. Catalog-sync changes (the `openai-api` overlay, Krea image
     // models, xAI retired-model aliases, Vercel removal) are unconditional
     // and carry no flag.
+
+    /// Under a named profile, `providers.<provider>` OAuth state (e.g. Nous)
+    /// falls back to the ROOT `auth.json` when the profile has none.
+    /// `_load_provider_state` reads the profile only at v2026.5.16 (0.14.0,
+    /// `hermes_cli/auth.py:1054-1059`) and falls back at v2026.5.28;
+    /// `auth.py:755-766` @ v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthProviderStateFallback: Bool { atLeastSemver(0, 15, 0) }
 
     /// Kanban tasks carry an originating ACP `session_id`, and
     /// `hermes kanban list --session <id>` filters by it (v0.15+). The

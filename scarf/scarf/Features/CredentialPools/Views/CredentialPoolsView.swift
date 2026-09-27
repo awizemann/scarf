@@ -354,6 +354,9 @@ struct CredentialPoolsView: View {
                                     .foregroundStyle(.orange)
                             }
                             oauthExpiryBadge(provider)
+                            if provider.inheritedFromRoot {
+                                inheritedBadge
+                            }
                         }
                         HStack(spacing: 8) {
                             Text(provider.tokenTail.isEmpty ? "—" : provider.tokenTail)
@@ -436,8 +439,27 @@ struct CredentialPoolsView: View {
     }
 
     @ViewBuilder
+    /// S06-F3: shown on a pool or OAuth provider that Hermes reads from the
+    /// ROOT auth.json because this named profile has none of its own.
+    private var inheritedBadge: some View {
+        Text("inherited from default profile")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.quaternary)
+            .clipShape(Capsule())
+            .help(Text("This profile has no credentials of its own for this provider, so Hermes uses the ones in the default profile's auth.json. Adding one here makes this profile use its own instead."))
+    }
+
     private func poolSection(_ pool: HermesCredentialPool) -> some View {
         SettingsSection(title: LocalizedStringKey(pool.provider), icon: "key.horizontal") {
+            if pool.inheritedFromRoot {
+                HStack {
+                    inheritedBadge
+                    Spacer()
+                }
+            }
             PickerRow(label: "Rotation", selection: pool.strategy, options: viewModel.strategyOptions) { strategy in
                 viewModel.setStrategy(strategy, for: pool.provider)
             }

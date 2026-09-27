@@ -164,6 +164,157 @@ import Testing
     }
 }
 
+// MARK: - S06-F3: named-profile auth.json falls back to the root per provider
+
+@Suite struct HermesAuthFallbackR03Tests {
+    private func json(_ object: Any) -> Data {
+        try! JSONSerialization.data(withJSONObject: object)
+    }
+
+    private func object(_ data: Data?) -> [String: Any] {
+        (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+    }
+
+    let root: [String: Any] = [
+        "active_provider": "nous",
+        "providers": ["nous": ["access_token": "root-token"]],
+        "credential_pool": [
+            "openrouter": [["id": "r1", "access_token": "sk-root"]],
+            "anthropic": [["id": "r2", "access_token": "sk-ant-root"]],
+            "empty": [] as [Any],
+        ],
+    ]
+
+    @Test func rootFillsOnlyProvidersTheProfileLacks() {
+        let profile: [String: Any] = [
+            "credential_pool": ["anthropic": [["id": "p1", "access_token": "sk-ant-profile"]]],
+        ]
+        let merged = HermesAuthFallback.merge(
+            profile: json(profile), root: json(root), includeProviderState: true)
+        let out = object(merged.data)
+        let pool = out["credential_pool"] as? [String: [[String: Any]]]
+        // Profile wins where it has ANY entries.
+        #expect(pool?["anthropic"]?.first?["id"] as? String == "p1")
+        // Root fills the gap.
+        #expect(pool?["openrouter"]?.first?["id"] as? String == "r1")
+        // An empty root list is not inherited.
+        #expect(pool?["empty"] == nil)
+        #expect(merged.inheritedPools == ["openrouter"])
+        // providers.nous comes from the root.
+        let providers = out["providers"] as? [String: [String: Any]]
+        #expect(providers?["nous"]?["access_token"] as? String == "root-token")
+        #expect(merged.inheritedProviders == ["nous"])
+        // active_provider is the profile's own (none) — never merged.
+        #expect(out["active_provider"] == nil)
+    }
+
+    @Test func anEmptyProfileListStillInherits() {
+        // `[]` is "zero entries" to Hermes, so the root list applies.
+        let profile: [String: Any] = ["credential_pool": ["openrouter": [] as [Any]]]
+        let merged = HermesAuthFallback.merge(
+            profile: json(profile), root: json(root), includeProviderState: false)
+        #expect(merged.inheritedPools.contains("openrouter"))
+    }
+
+    @Test func providerStateFallbackHasItsOwnFloor() {
+        let merged = HermesAuthFallback.merge(profile: nil, root: json(root), includeProviderState: false)
+        #expect(merged.inheritedProviders.isEmpty)
+        #expect((object(merged.data)["providers"] as? [String: Any]) == nil)
+        #expect(merged.inheritedPools == ["openrouter", "anthropic"])
+    }
+
+    @Test func noRootLeavesTheProfileBytesAlone() {
+        let profile = json(["credential_pool": ["x": [["id": "1"]]]])
+        let merged = HermesAuthFallback.merge(profile: profile, root: nil, includeProviderState: true)
+        #expect(merged.data == profile)
+        #expect(merged.inheritedPools.isEmpty && merged.inheritedProviders.isEmpty)
+        // An unparseable root is the same as none.
+        let bad = HermesAuthFallback.merge(profile: profile, root: Data("{nope".utf8), includeProviderState: true)
+        #expect(bad.data == profile)
+    }
+
+    @Test func rootPathOnlyForNamedProfilesOnAFallbackHost() {
+        let host = HermesHost.caps("Hermes Agent v0.21.5 (2026.9.24)")
+        #expect(HermesAuthFallback.rootAuthJSONPath(forHome: "/Users/a/.hermes/profiles/work", capabilities: host)
+                == "/Users/a/.hermes/auth.json")
+        #expect(HermesAuthFallback.rootAuthJSONPath(forHome: "~/.hermes/profiles/work", capabilities: host)
+                == "~/.hermes/auth.json")
+        #expect(HermesAuthFallback.rootAuthJSONPath(forHome: "/Users/a/.hermes", capabilities: host) == nil)
+        #expect(HermesAuthFallback.rootAuthJSONPath(
+            forHome: "/Users/a/.hermes/profiles/work", capabilities: .empty) == nil)
+        #expect(HermesAuthFallback.rootAuthJSONPath(
+            forHome: "/Users/a/.hermes/profiles/work",
+            capabilities: HermesHost.caps("Hermes Agent v0.12.0 (2026.4.30)")) == nil)
+    }
+
+    @Test func floors() {
+        #expect(!HermesHost.caps("Hermes Agent v0.12.0 (2026.4.30)").hasProfileAuthPoolFallback)
+        #expect(HermesHost.caps("Hermes Agent v0.13.0 (2026.5.7)").hasProfileAuthPoolFallback)
+        #expect(!HermesHost.caps("Hermes Agent v0.14.0 (2026.5.16)").hasProfileAuthProviderStateFallback)
+        #expect(HermesHost.caps("Hermes Agent v0.15.0 (2026.5.28)").hasProfileAuthProviderStateFallback)
+    }
+
+    @Test func loadReadsBothFilesThroughTheTransport() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("r03-auth-\(UUID().uuidString)")
+        let profileHome = base.appendingPathComponent("profiles/work")
+        try FileManager.default.createDirectory(at: profileHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try json(root).write(to: base.appendingPathComponent("auth.json"))
+
+        let host = HermesHost.caps("Hermes Agent v0.21.5 (2026.9.24)")
+        // Profile has no auth.json at all: everything comes from the root.
+        let merged = HermesAuthFallback.load(
+            authJSONPath: profileHome.path + "/auth.json",
+            home: profileHome.path,
+            capabilities: host,
+            transport: LocalTransport())
+        #expect(merged.inheritedProviders == ["nous"])
+        #expect(merged.inheritedPools == ["openrouter", "anthropic"])
+
+        // Default-profile home: only its own file, unchanged.
+        let own = HermesAuthFallback.load(
+            authJSONPath: base.path + "/auth.json", home: base.path,
+            capabilities: host, transport: LocalTransport())
+        #expect(own.inheritedPools.isEmpty)
+        #expect(own.data == (try Data(contentsOf: base.appendingPathComponent("auth.json"))))
+    }
+}
+
+// MARK: - S06-F5: Nous catalog filter + fallback
+
+@Suite struct NousCatalogR03Tests {
+    @Test func hermesModelsAreDroppedLikeHermesDoes() {
+        let raw = [
+            NousModel(id: "Hermes-3-Llama-3.1-405B"),
+            NousModel(id: "anthropic/claude-opus-5.5"),
+            NousModel(id: "nousresearch/hermes-4-70b"),
+            NousModel(id: " openai/gpt-6-astra "),
+            NousModel(id: "anthropic/claude-opus-5.5"),
+            NousModel(id: "  "),
+        ]
+        let ids = NousModelCatalogService.agenticModels(raw).map(\.id)
+        #expect(ids == ["anthropic/claude-opus-5.5", "openai/gpt-6-astra"])
+    }
+
+    @Test func fallbackIsVendorPrefixedAndSurvivesTheFilter() {
+        let fallback = NousModelCatalogService.fallbackModels
+        #expect(!fallback.isEmpty)
+        #expect(NousModelCatalogService.agenticModels(fallback) == fallback)
+        #expect(fallback.allSatisfy { $0.id.contains("/") })
+        // Hermes's catalog default is offered.
+        #expect(fallback.contains { $0.id == "z-ai/glm-5.2" })
+        // Nous is an aggregator, so none of these can raise the
+        // model/provider mismatch banner (S06-F1).
+        for model in fallback {
+            var cfg = HermesConfig.empty
+            cfg.model = model.id
+            cfg.provider = "nous"
+            #expect(ModelPreflight.detectMismatch(cfg) == nil, "\(model.id)")
+        }
+    }
+}
+
 // MARK: - S06-F7: image-gen picker rows per host
 
 @Suite struct ImageGenModelsR03Tests {
