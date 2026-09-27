@@ -226,10 +226,7 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// shell expansion. So we expand here, in Swift, with a
     /// known-good `$HOME` value.
     static func expandTilde(_ path: String, home: String) -> String {
-        guard !home.isEmpty else { return path }
-        if path == "~" { return home }
-        if path.hasPrefix("~/") { return home + String(path.dropFirst(1)) }
-        return path
+        ServerContext.expandingTilde(path, home: home)
     }
 
     /// Run the full backup: stream Hermes home + each project tarball,

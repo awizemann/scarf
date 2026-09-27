@@ -29,24 +29,75 @@ struct ProjectTemplateUninstaller: Sendable {
     /// context (local process or SSH).
     typealias HermesRunner = @Sendable ([String]) -> (output: String, exitCode: Int32)
     let hermesRunner: HermesRunner?
+    /// The target host's absolute `$HOME`, used to expand the `~`-rooted
+    /// paths a remote install records (`~/projects/<slug>`, `~/.hermes/…`)
+    /// before any containment check. `nil` on a remote context means "not
+    /// resolved": every `~` path then stays unexpanded and the plan refuses
+    /// rather than guessing. Set by `resolvingUserHome()`; a local context
+    /// falls back to this Mac's home.
+    let userHome: String?
+    /// Test seam: the transport the uninstaller's OWN file operations go
+    /// through. Production builds it from `context`. The services the
+    /// uninstall delegates to (registry, `.env` mirror, lifecycle cleanup)
+    /// always use `context`.
+    private let transportOverride: (any ServerTransport)?
 
     nonisolated init(
         context: ServerContext = .local,
         keychain: ProjectConfigKeychain = ProjectConfigKeychain(),
-        hermesRunner: HermesRunner? = nil
+        hermesRunner: HermesRunner? = nil,
+        userHome: String? = nil,
+        transport: (any ServerTransport)? = nil
     ) {
         self.context = context
         self.keychain = keychain
         self.hermesRunner = hermesRunner
+        self.userHome = userHome
+        self.transportOverride = transport
+    }
+
+    /// A copy whose `userHome` is the target host's probed `$HOME`
+    /// (`ServerContext.resolvedUserHome()`, cached per server). Call before
+    /// planning or executing on a remote context: without it, every `~` path
+    /// fails containment and the plan refuses. A failed probe leaves the
+    /// copy unresolved — the plan then says so instead of acting.
+    nonisolated func resolvingUserHome() async -> ProjectTemplateUninstaller {
+        guard userHome == nil else { return self }
+        let probed = await context.resolvedUserHome()
+        guard probed.hasPrefix("/") else { return self }
+        return ProjectTemplateUninstaller(
+            context: context, keychain: keychain, hermesRunner: hermesRunner,
+            userHome: probed, transport: transportOverride
+        )
+    }
+
+    nonisolated private func makeTransport() -> any ServerTransport {
+        transportOverride ?? context.makeTransport()
+    }
+
+    /// `path` with a leading `~` expanded against the target host's home, or
+    /// unchanged when there is no absolute home to expand it with.
+    nonisolated func expanded(_ path: String) -> String {
+        let home = userHome ?? (context.isRemote ? nil : NSHomeDirectory())
+        guard let home else { return path }
+        return ServerContext.expandingTilde(path, home: home)
+    }
+
+    /// Why a root that still starts with `~` after expansion can't be used:
+    /// the home probe failed, so nothing can be proved to be inside it.
+    nonisolated private var unresolvedHomeReason: String {
+        String(
+            localized: "Scarf couldn't find the home folder on \(context.displayName), so it can't check which files belong to this project. Nothing was removed. Check the connection and try again."
+        )
     }
 
     // MARK: - Detection
 
     /// Is the given project installed from a template that we can
     /// uninstall cleanly? Cheap — just a file-existence check on the lock
-    /// path.
+    /// path. A `~`-rooted path is fine here: the transport expands it.
     nonisolated func isTemplateInstalled(project: ProjectEntry) -> Bool {
-        context.makeTransport().fileExists(lockPath(for: project))
+        makeTransport().fileExists(lockPath(forRoot: project.path))
     }
 
     // MARK: - Planning
@@ -55,8 +106,15 @@ struct ProjectTemplateUninstaller: Sendable {
     /// plan listing every op the uninstaller will perform. Does not
     /// modify anything.
     nonisolated func loadUninstallPlan(for project: ProjectEntry) throws -> TemplateUninstallPlan {
-        let transport = context.makeTransport()
-        let path = lockPath(for: project)
+        let transport = makeTransport()
+        // Every containment answer below is anchored on this spelling. A
+        // remote install records `~/projects/<slug>`; `PathGuard` and
+        // `ProjectRootPolicy` only accept absolute paths (a `~` can't be
+        // compared with anything), so the root and every lock path are
+        // expanded against the probed home first — the checks themselves are
+        // unchanged.
+        let root = expanded(project.path)
+        let path = lockPath(forRoot: root)
         guard transport.fileExists(path) else {
             throw ProjectTemplateError.lockFileMissing(path)
         }
@@ -89,11 +147,17 @@ struct ProjectTemplateUninstaller: Sendable {
         // silently do nothing. The project is NOT dropped from the registry
         // or the sidebar — see `ProjectRootPolicy`'s doc comment on why a
         // policy that disappears rows is worse than one that refuses acts.
-        if let refusal = ProjectRootPolicy.refusalAtUse(for: project.path, context: context) {
+        if root.hasPrefix("~") {
+            Self.logger.error(
+                "refusing to build an uninstall plan for \(project.path, privacy: .public): the host's home folder couldn't be resolved"
+            )
+            return Self.refusedPlan(lock: lock, project: project, reason: unresolvedHomeReason, context: context)
+        }
+        if let refusal = ProjectRootPolicy.refusalAtUse(for: root, context: context) {
             Self.logger.error(
                 "refusing to build an uninstall plan for \(project.path, privacy: .public): \(refusal.message, privacy: .public)"
             )
-            return Self.refusedPlan(lock: lock, project: project, refusal: refusal, context: context)
+            return Self.refusedPlan(lock: lock, project: project, reason: refusal.message, context: context)
         }
 
         // Partition tracked project files into present vs. already-gone.
@@ -108,20 +172,28 @@ struct ProjectTemplateUninstaller: Sendable {
         // here against the project root — and again at time-of-use in
         // `uninstall(plan:)`, because this plan can sit on screen while
         // the agent rewrites the lock underneath it.
+        //
+        // Lock paths get the same `~` expansion as the root (a remote
+        // install recorded them `~`-rooted); an entry that is still not
+        // absolute afterwards fails `PathGuard` exactly as before.
         let guardian = PathGuard(isRemote: transport.isRemote)
-        var lockTrackedFiles = lock.projectFiles
+        var lockTrackedFiles: [String] = []
+        var refused: [String] = []
+        for recorded in lock.projectFiles {
+            let file = expanded(recorded)
+            guard guardian.admits(file, under: root) else {
+                Self.logger.error(
+                    "lock lists \(recorded, privacy: .public) which is not inside \(root, privacy: .public); refusing to delete it"
+                )
+                refused.append(recorded)
+                continue
+            }
+            lockTrackedFiles.append(file)
+        }
         lockTrackedFiles.append(path)
         var toRemove: [String] = []
         var alreadyGone: [String] = []
-        var refused: [String] = []
         for file in lockTrackedFiles {
-            guard guardian.admits(file, under: project.path) else {
-                Self.logger.error(
-                    "lock lists \(file, privacy: .public) which is not inside \(project.path, privacy: .public); refusing to delete it"
-                )
-                refused.append(file)
-                continue
-            }
             if transport.fileExists(file) {
                 toRemove.append(file)
             } else {
@@ -135,8 +207,8 @@ struct ProjectTemplateUninstaller: Sendable {
         // a lock pointing it at `~` is the worst case in the file.
         var skillsDir: String? = nil
         if let claimed = lock.skillsNamespaceDir {
-            if guardian.admits(claimed, under: Self.skillsTemplatesRoot(context: context)) {
-                skillsDir = claimed
+            if guardian.admits(expanded(claimed), under: expanded(Self.skillsTemplatesRoot(context: context))) {
+                skillsDir = expanded(claimed)
             } else {
                 Self.logger.error(
                     "lock lists skills namespace dir \(claimed, privacy: .public) outside the template skills root; refusing to delete it"
@@ -150,7 +222,7 @@ struct ProjectTemplateUninstaller: Sendable {
         // removing lock-tracked files) gets removed too.
         let trackedSet = Set(lockTrackedFiles)
         let extras = try enumerateProjectDirExtras(
-            projectDir: project.path,
+            projectDir: root,
             trackedPaths: trackedSet,
             transport: transport
         )
@@ -337,7 +409,13 @@ struct ProjectTemplateUninstaller: Sendable {
             out.unverified = names
             return out
         }
-        let root = ProjectIdentity.normalizedPath(project.path)
+        // Hermes stores `workdir` expanded and resolved (`cron/jobs.py:1580-1590`
+        // @ v2026.9.24), so a `~`-rooted registry path is compared in its
+        // expanded spelling too.
+        let roots: Set<String> = [
+            ProjectIdentity.normalizedPath(project.path),
+            ProjectIdentity.normalizedPath(expanded(project.path)),
+        ]
         // Computed once, only if a legacy name needs it.
         var sharedTemplate: Bool?
         for name in names {
@@ -364,8 +442,9 @@ struct ProjectTemplateUninstaller: Sendable {
             }
             let ours = matches.filter { job in
                 if let workdir = job.workdir, !workdir.isEmpty,
-                   ProjectIdentity.normalizedPath(workdir) == root { return true }
+                   roots.contains(ProjectIdentity.normalizedPath(workdir)) { return true }
                 return Self.mentions(path: project.path, in: job.prompt)
+                    || Self.mentions(path: expanded(project.path), in: job.prompt)
             }
             if ours.count == 1 {
                 out.toRemove.append((id: ours[0].id, name: name))
@@ -454,7 +533,9 @@ struct ProjectTemplateUninstaller: Sendable {
     }
 
     /// An uninstall plan that does nothing, because the project's root is
-    /// not one Scarf will anchor destructive containment on. Every
+    /// not one Scarf will anchor destructive containment on — the root
+    /// policy refused it, or it is a remote `~` path and the host's home
+    /// couldn't be resolved to expand it. Every
     /// to-remove list is empty (so `totalRemoveCount` is 0 and the sheet has
     /// nothing to offer) and the reason leads `refusedEntries`, alongside
     /// the entries that would have been acted on — so the user can see
@@ -462,10 +543,10 @@ struct ProjectTemplateUninstaller: Sendable {
     nonisolated static func refusedPlan(
         lock: TemplateLock,
         project: ProjectEntry,
-        refusal: ProjectRootPolicy.Refusal,
+        reason: String,
         context: ServerContext
     ) -> TemplateUninstallPlan {
-        var refused: [String] = [refusal.message]
+        var refused: [String] = [reason]
         refused.append(contentsOf: lock.projectFiles)
         if let skills = lock.skillsNamespaceDir { refused.append(skills) }
         refused.append(contentsOf: lock.configKeychainItems ?? [])
@@ -512,13 +593,24 @@ struct ProjectTemplateUninstaller: Sendable {
         // BEFORE the first deletion (and before `unmirror` touches `.env`).
         // Throws rather than skipping: silently doing nothing here is the
         // "the sheet said it worked" failure.
-        if let refusal = ProjectRootPolicy.refusalAtUse(for: plan.project.path, context: context) {
+        //
+        // The root is expanded exactly as it was at plan time (a remote
+        // install records `~/projects/<slug>`); a `~` that is still there
+        // means the home couldn't be resolved, and nothing is provable.
+        let root = expanded(plan.project.path)
+        if root.hasPrefix("~") {
+            Self.logger.error(
+                "refusing to uninstall from \(plan.project.path, privacy: .public): the host's home folder couldn't be resolved"
+            )
+            throw ProjectTemplateError.inadmissibleProjectRoot(unresolvedHomeReason)
+        }
+        if let refusal = ProjectRootPolicy.refusalAtUse(for: root, context: context) {
             Self.logger.error(
                 "refusing to uninstall from \(plan.project.path, privacy: .public): \(refusal.message, privacy: .public)"
             )
             throw ProjectTemplateError.inadmissibleProjectRoot(refusal.message)
         }
-        let transport = context.makeTransport()
+        let transport = makeTransport()
         // Time-of-use re-derivation. The plan was built from the lock,
         // and the lock is agent-writable: between planning and the user's
         // click, both the file and the filesystem can change (a tracked
@@ -543,11 +635,16 @@ struct ProjectTemplateUninstaller: Sendable {
         }
 
         // 1. Project files (tracked only — user additions untouched).
+        // Anything that stays — refused at time of use, or a failed delete —
+        // is named in the outcome: "Removed" must not cover a file that is
+        // still on disk.
+        var filesLeft: [String] = []
         for file in plan.projectFilesToRemove {
-            guard guardian.admits(file, under: plan.project.path) else {
+            guard guardian.admits(file, under: root) else {
                 Self.logger.error(
-                    "skipping \(file, privacy: .public): no longer contained by \(plan.project.path, privacy: .public)"
+                    "skipping \(file, privacy: .public): no longer contained by \(root, privacy: .public)"
                 )
+                filesLeft.append(file)
                 continue
             }
             do {
@@ -556,14 +653,28 @@ struct ProjectTemplateUninstaller: Sendable {
                 Self.logger.warning("couldn't remove project file \(file, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 // keep going — partial cleanup is better than bailing and
                 // leaving orphan skills/cron state
+                filesLeft.append(file)
+            }
+        }
+        if !filesLeft.isEmpty {
+            outcome.leftovers.append(Self.filesLeftSentence(filesLeft))
+        }
+        // Entries the plan refused (the lock named them, but they aren't
+        // inside this project) are left alone by design — and so are still
+        // there. Named too, so the success screen doesn't read as if they went.
+        if !plan.rootRefused {
+            for entry in plan.refusedEntries {
+                outcome.leftovers.append(String(
+                    localized: "Left in place because it isn't inside this project: \(entry)"
+                ))
             }
         }
         // 1a. Scarf's own record. Not lock-tracked (the installer doesn't
         // write it) and not the user's, but its presence is what makes the
         // doctor call this folder an unlisted project — see
         // `scarfOwnedFiles`. Guarded like every other deletion here.
-        for file in Self.scarfOwnedFiles(in: plan.project.path + "/.scarf")
-        where guardian.admits(file, under: plan.project.path) && transport.fileExists(file) {
+        for file in Self.scarfOwnedFiles(in: root + "/.scarf")
+        where guardian.admits(file, under: root) && transport.fileExists(file) {
             do {
                 try transport.removeFile(file)
             } catch {
@@ -575,8 +686,8 @@ struct ProjectTemplateUninstaller: Sendable {
         // AGENTS.md writer keeps (t-e2cd2861). Scarf wrote it, the lock
         // doesn't know it, and leaving it behind would both litter the
         // user's folder and keep the directory from being removed.
-        for file in Self.scarfOwnedProjectRootFiles(in: plan.project.path)
-        where guardian.admits(file, under: plan.project.path) && transport.fileExists(file) {
+        for file in Self.scarfOwnedProjectRootFiles(in: root)
+        where guardian.admits(file, under: root) && transport.fileExists(file) {
             do {
                 try transport.removeFile(file)
             } catch {
@@ -586,34 +697,51 @@ struct ProjectTemplateUninstaller: Sendable {
         // The `.scarf/` directory itself, when nothing is left in it. Same
         // confirm-then-remove discipline as the project dir below: local
         // `removeFile` is recursive, so "I think it's empty" is not enough.
-        if transport.fileExists(plan.project.path + "/.scarf") {
-            removeProjectDirIfEmpty(plan.project.path + "/.scarf", transport: transport)
+        if transport.fileExists(root + "/.scarf") {
+            removeProjectDirIfEmpty(root + "/.scarf", transport: transport)
         }
-        if plan.projectDirBecomesEmpty, transport.fileExists(plan.project.path) {
-            removeProjectDirIfEmpty(plan.project.path, transport: transport)
+        if plan.projectDirBecomesEmpty, transport.fileExists(root) {
+            removeProjectDirIfEmpty(root, transport: transport)
+        }
+        // Decided by looking, not from the plan: the plan's "becomes empty"
+        // was a prediction, and a folder that survived (a file we couldn't
+        // delete, something written since) must not be reported as gone.
+        outcome.projectDirRemoved = !transport.fileExists(root)
+        if plan.projectDirBecomesEmpty, !outcome.projectDirRemoved {
+            outcome.leftovers.append(String(
+                localized: "The project folder is still there: \(root)"
+            ))
         }
 
         // 2. Skills namespace dir (always removed wholesale — it's
         // isolated, never mixed with user skills).
-        if let skillsDir = plan.skillsNamespaceDir,
-           guardian.admits(skillsDir, under: Self.skillsTemplatesRoot(context: context)),
-           transport.fileExists(skillsDir) {
+        let skillsRoot = expanded(Self.skillsTemplatesRoot(context: context))
+        if let skillsDir = plan.skillsNamespaceDir, transport.fileExists(skillsDir) {
             // Non-fatal, for the same reason step 4 is (GW-F1): a failed
             // `removeFile` in here used to throw out of `uninstall`, skipping
             // the cron, memory, KEYCHAIN, registry and grant steps below. A
             // skills file the uninstall couldn't delete must not be a way to
             // keep the template's secrets in the login Keychain.
-            do {
-                try removeRecursively(
-                    skillsDir,
-                    root: Self.skillsTemplatesRoot(context: context),
-                    guardian: guardian,
-                    transport: transport
-                )
-            } catch {
-                Self.logger.warning(
-                    "couldn't fully remove skills namespace dir \(skillsDir, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
+            //
+            // A folder refused at time of use, or one the walk had to leave
+            // partly in place, is still loaded by Hermes's skill index — so
+            // it is reported, never silently kept.
+            var skillsRemoved = false
+            if guardian.admits(skillsDir, under: skillsRoot) {
+                do {
+                    skillsRemoved = try removeRecursively(
+                        skillsDir,
+                        root: skillsRoot,
+                        guardian: guardian,
+                        transport: transport
+                    )
+                } catch {
+                    Self.logger.warning(
+                        "couldn't fully remove skills namespace dir \(skillsDir, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+            if !skillsRemoved {
                 outcome.leftovers.append(String(
                     localized: "The template's skills folder couldn't be fully removed: \(skillsDir)"
                 ))
@@ -903,8 +1031,24 @@ struct ProjectTemplateUninstaller: Sendable {
         URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
-    nonisolated private func lockPath(for project: ProjectEntry) -> String {
-        project.path + "/.scarf/template.lock.json"
+    nonisolated private func lockPath(forRoot root: String) -> String {
+        root + "/.scarf/template.lock.json"
+    }
+
+    /// One outcome line for project files the uninstall left on disk: the
+    /// first few by path, then a count, so a long list can't swamp the
+    /// success screen.
+    nonisolated static func filesLeftSentence(_ files: [String]) -> String {
+        let shown = files.prefix(5).joined(separator: ", ")
+        let more = files.count - min(files.count, 5)
+        if more > 0 {
+            return String(
+                localized: "\(files.count) project files couldn't be removed and are still on disk: \(shown) and \(more) more."
+            )
+        }
+        return String(
+            localized: "These project files couldn't be removed and are still on disk: \(shown)"
+        )
     }
 
     /// Walk the project dir and return the absolute paths of every entry
@@ -1081,9 +1225,12 @@ struct ProjectTemplateUninstaller: Sendable {
     ///
     /// Remote transports get the lexical half only: there is no realpath
     /// primitive on `ServerTransport`, and resolving locally would answer
-    /// questions about the WRONG filesystem. That is strictly better than
-    /// the previous "no check at all", and remote template installs don't
-    /// exist yet (`ProjectTemplateInstaller` is local-only today).
+    /// questions about the WRONG filesystem. Remote template installs are
+    /// real (the installer and its sheet support SSH hosts), and they record
+    /// `~`-rooted paths by default — which this guard refuses, because a `~`
+    /// can't be compared. The uninstaller expands `~` against the probed
+    /// remote home BEFORE calling it (`expanded(_:)`); the guard itself stays
+    /// absolute-only.
     nonisolated struct PathGuard: Sendable {
         let isRemote: Bool
 

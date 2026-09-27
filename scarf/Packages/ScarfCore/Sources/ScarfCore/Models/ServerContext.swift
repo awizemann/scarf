@@ -355,7 +355,12 @@ private actor UserHomeCache {
     func resolve(for context: ServerContext) async -> String {
         if let cached = cache[context.id] { return cached }
         let resolved = await probe(context: context)
-        cache[context.id] = resolved
+        // Only a real answer is remembered. The `~` fallback means the probe
+        // failed (a dropped connection, a host still waking up); caching it
+        // kept every later caller on the fallback for the rest of the app's
+        // life, so a caller that refuses to act without an absolute home
+        // (template uninstall) could never recover by trying again.
+        if resolved.hasPrefix("/") { cache[context.id] = resolved }
         return resolved
     }
 
@@ -429,6 +434,25 @@ extension ServerContext {
     /// or user path to a process that runs on the target host.
     public func resolvedUserHome() async -> String {
         await UserHomeCache.shared.resolve(for: self)
+    }
+
+    /// `path` with a leading `~` (`~` alone or `~/…`) replaced by `home`.
+    /// Anything else — an absolute path, `~user/…`, or a `home` that is not
+    /// absolute (the failed-probe fallback is `~`) — comes back unchanged,
+    /// so a failed probe can never produce a half-expanded path.
+    ///
+    /// Remote defaults are `~`-rooted (`~/.hermes`, `~/projects`) and the
+    /// transports let the remote shell expand them, which is fine for I/O
+    /// but useless for any check that compares paths: containment, "is this
+    /// the same folder", matching Hermes's own resolved `workdir`. Those
+    /// callers expand first with this and `resolvedUserHome()`.
+    public nonisolated static func expandingTilde(_ path: String, home: String) -> String {
+        var base = home
+        while base.count > 1, base.hasSuffix("/") { base.removeLast() }
+        guard base.hasPrefix("/") else { return path }
+        if path == "~" { return base }
+        if path.hasPrefix("~/") { return (base == "/" ? "" : base) + String(path.dropFirst(1)) }
+        return path
     }
 
     /// Called when a server is removed from the registry, so the process-wide

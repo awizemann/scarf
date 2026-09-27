@@ -374,6 +374,10 @@ nonisolated struct TemplateUninstallPlan: Sendable {
 struct TemplateUninstallOutcome: Sendable, Equatable {
     /// One plain sentence per leftover, e.g. a cron job still scheduled.
     var leftovers: [String] = []
+    /// Whether the project folder is actually gone after the run — checked
+    /// on disk, not taken from the plan's prediction. The success screen
+    /// keys its "files were kept" banner on this.
+    var projectDirRemoved: Bool = false
 
     nonisolated var isComplete: Bool { leftovers.isEmpty }
 }

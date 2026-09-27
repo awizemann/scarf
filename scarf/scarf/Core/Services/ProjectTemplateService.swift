@@ -113,7 +113,9 @@ struct ProjectTemplateService: Sendable {
         let slug = manifest.slug
         let projectDir = parentDir + "/" + slug
 
-        if FileManager.default.fileExists(atPath: projectDir) {
+        // Through the context's transport: on an SSH host the local
+        // `FileManager` answers about this Mac's disk, not the host's.
+        if context.makeTransport().fileExists(projectDir) {
             throw ProjectTemplateError.projectDirExists(projectDir)
         }
 
