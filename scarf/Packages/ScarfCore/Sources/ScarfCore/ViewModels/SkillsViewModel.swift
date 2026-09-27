@@ -737,7 +737,19 @@ public final class SkillsViewModel {
     /// skills.
     nonisolated static let updateAllArgs = ["skills", "update"]
 
-    public func uninstallHubSkill(_ identifier: String) {
+    /// The positional `hermes skills uninstall` takes: the BARE skill name
+    /// (`lock.get_installed(skill_name)`, `tools/skills_hub_install.py:205-210`
+    /// @ v2026.9.24). `skill.id` is the `<category>/<name>` path below
+    /// skills/, which the CLI refuses — at exit 0 (t-ec6d2e6d, S10-F2).
+    nonisolated static func uninstallIdentifier(for skill: HermesSkill) -> String {
+        skill.name
+    }
+
+    /// Uninstall a hub skill. Takes the skill, not a string, so no view can
+    /// hand the CLI the `<category>/<name>` id — iOS did exactly that after
+    /// the Mac was fixed (S10-F2).
+    public func uninstallHubSkill(_ skill: HermesSkill) {
+        let identifier = Self.uninstallIdentifier(for: skill)
         let bin = context.paths.hermesBinary
         let xport = transport
         Task { [weak self] in

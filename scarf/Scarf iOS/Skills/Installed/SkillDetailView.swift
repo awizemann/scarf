@@ -287,7 +287,7 @@ struct SkillDetailView: View {
                         // is the path below skills/, which `skills uninstall`
                         // refuses — at exit 0. Same fix as the Mac
                         // (t-ec6d2e6d).
-                        vm.uninstallHubSkill(skill.name)
+                        vm.uninstallHubSkill(skill)
                     } label: {
                         Label("Uninstall", systemImage: "trash")
                     }
