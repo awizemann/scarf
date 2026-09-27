@@ -88,6 +88,7 @@ struct KanbanBoardView: View {
     @State private var blockSheetDestination: KanbanBoardColumn = .blocked
     @State private var completeSheetTaskId: String?
     @State private var completeSheetTitle: String = ""
+    @State private var completeSheetResultRequired = false
 
     /// Cached gating state — refreshed on appear + after a successful
     /// `Enable now` click. `.disabled` triggers the toolset-off hint
@@ -150,8 +151,14 @@ struct KanbanBoardView: View {
         .onChange(of: supportsKanbanDiagnostics) { _, isOn in
             viewModel.supportsDiagnostics = isOn
         }
-        .onChange(of: hostCapabilities) { _, caps in
+        .onChange(of: hostCapabilities) { old, caps in
             viewModel.capabilities = caps
+            // The chat platform the toolset banner checks moves from `cli`
+            // to `acp` once a 0.21.5 host's version resolves.
+            if KanbanToolsetDetector.chatPlatform(for: old)
+                != KanbanToolsetDetector.chatPlatform(for: caps) {
+                Task { await refreshToolsetState() }
+            }
         }
         // Pause every poll loop while the window is not the active scene.
         // A backgrounded Scarf window kept spawning `hermes kanban list`
@@ -188,7 +195,10 @@ struct KanbanBoardView: View {
             }
         }
         .sheet(isPresented: completeSheetBinding) {
-            KanbanCompleteResultSheet(taskTitle: completeSheetTitle) { result in
+            KanbanCompleteResultSheet(
+                taskTitle: completeSheetTitle,
+                resultRequired: completeSheetResultRequired
+            ) { result in
                 if let taskId = completeSheetTaskId {
                     viewModel.attemptMove(
                         taskId: taskId,
@@ -471,6 +481,7 @@ struct KanbanBoardView: View {
                     inspectorTaskId = nil
                 },
                 onComplete: {
+                    completeSheetResultRequired = viewModel.completionNeedsResult(taskId: taskId)
                     completeSheetTaskId = taskId
                     completeSheetTitle = task.title
                 },
@@ -505,10 +516,13 @@ struct KanbanBoardView: View {
             blockSheetTitle = task.title
             blockSheetDestination = .blocked
         case .done:
-            // Manual checkoffs from running don't strictly need a result,
-            // but we offer the sheet anyway so users can record one
-            // when relevant. The move fires regardless on submit.
-            if KanbanStatus.from(task.status) == .running {
+            // The sheet opens whenever Hermes needs a result for this drop
+            // (0.21.4+ refuses evidence-less completions from every column
+            // but Review — see `completionNeedsResult`). From Running it
+            // opens on older hosts too, where the result stays optional.
+            let needsResult = viewModel.completionNeedsResult(taskId: taskId)
+            if needsResult || KanbanStatus.from(task.status) == .running {
+                completeSheetResultRequired = needsResult
                 completeSheetTaskId = taskId
                 completeSheetTitle = task.title
             } else {
@@ -618,7 +632,8 @@ struct KanbanBoardView: View {
 
     private func refreshToolsetState() async {
         let detector = KanbanToolsetDetector(context: viewModel.context)
-        let state = await detector.detect()
+        let state = await detector.detect(
+            platform: KanbanToolsetDetector.chatPlatform(for: viewModel.capabilities))
         await MainActor.run {
             self.toolsetState = state
         }
@@ -627,7 +642,8 @@ struct KanbanBoardView: View {
     private func enableToolsetFromBanner() async {
         await MainActor.run { isEnablingToolset = true }
         let enabler = KanbanToolsetEnabler(context: viewModel.context)
-        let result = await enabler.enable()
+        let result = await enabler.enable(
+            platform: KanbanToolsetDetector.chatPlatform(for: viewModel.capabilities))
         await MainActor.run {
             isEnablingToolset = false
             switch result {

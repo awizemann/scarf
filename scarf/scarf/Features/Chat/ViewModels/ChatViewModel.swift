@@ -3387,9 +3387,13 @@ final class ChatViewModel {
             dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
         ) else { return }
         let context = self.context
+        // Scarf chats are ACP sessions: on 0.21.5+ they read
+        // `platform_toolsets.acp`, not `cli` (see `chatPlatform(for:)`).
+        let platform = KanbanToolsetDetector.chatPlatform(
+            for: capabilitiesStore?.capabilities ?? .empty)
         Task { [weak self] in
             let detector = KanbanToolsetDetector(context: context)
-            let state = await detector.detect()
+            let state = await detector.detect(platform: platform)
             guard case .disabled = state else {
                 return
             }
@@ -3400,14 +3404,21 @@ final class ChatViewModel {
         }
     }
 
-    /// Called from the sheet's "Enable kanban tools" button. Runs the
-    /// `hermes tools enable kanban --platform cli` shellout and sets a
+    /// The platform the Kanban onboarding sheet names and writes:
+    /// `acp` on 0.21.5+, `cli` before.
+    var kanbanToolsetPlatform: String {
+        KanbanToolsetDetector.chatPlatform(for: capabilitiesStore?.capabilities ?? .empty)
+    }
+
+    /// Called from the sheet's "Enable kanban tools" button. Adds `kanban`
+    /// to the chat platform's list in config.yaml (`KanbanToolsetEnabler`
+    /// writes the YAML; `hermes tools enable` refuses kanban) and sets a
     /// transient hint either way so the user gets a confirmation toast
     /// without having to re-open the sheet.
     func enableKanbanToolset() async {
         UserDefaults.standard.set(true, forKey: kanbanOnboardingDismissedKey)
         let enabler = KanbanToolsetEnabler(context: context)
-        let result = await enabler.enable()
+        let result = await enabler.enable(platform: kanbanToolsetPlatform)
         await MainActor.run {
             switch result {
             case .enabled:

@@ -678,11 +678,12 @@ struct ChatView: View {
             .environment(\.serverContext, viewModel.context)
         }
         // Kanban toolset onboarding — fires on the user's first `/goal`
-        // against a host whose `cli` platform_toolsets list lacks
-        // `kanban`. ChatViewModel sets the trigger flag; this sheet
-        // explains the gating + offers one-click enable.
+        // against a host whose chat platform (`acp` on 0.21.5+, `cli`
+        // before) lacks `kanban`. ChatViewModel sets the trigger flag; this
+        // sheet explains the gating + offers one-click enable.
         .sheet(isPresented: kanbanOnboardingBinding) {
             ChatKanbanOnboardingSheet(
+                platform: viewModel.kanbanToolsetPlatform,
                 onEnable: {
                     await viewModel.enableKanbanToolset()
                 },

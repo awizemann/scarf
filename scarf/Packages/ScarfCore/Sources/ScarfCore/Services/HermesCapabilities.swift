@@ -2313,6 +2313,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// before anything is billed.
     public var hasGPTLiveVoice: Bool { isV0213OrLater }
 
+    /// A profile route applies only to messages received by the bot of its
+    /// `bot_profile` (absent, blank or `default` = the default profile's
+    /// shared bot) — `ProfileRoute.bot_profile` and `_bot_profile_key`
+    /// (`gateway/profile_routing.py:64`, `:86-88`, `:101-104` @
+    /// `v2026.9.24`). First at `v2026.9.14`; `git show
+    /// v2026.9.11:gateway/profile_routing.py` has no `bot_profile`.
+    public var hasProfileRouteBotScope: Bool { isV0213OrLater }
+
     // MARK: v0.21.4 (v2026.9.21) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
@@ -2479,6 +2487,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// gateway. See ``HermesGatewayRestartGuard``.
     public var hasSupervisedGatewayRestart: Bool { isV0214OrLater }
 
+    /// `hermes kanban complete` refuses an evidence-less completion:
+    /// `_gate_empty_completion` (`hermes_cli/kanban_db.py:2860-2891` @
+    /// `v2026.9.24`) raises `EmptyCompletionError` unless the task is in
+    /// `review`, or a non-blank `--result`/`--summary` is passed, or the task
+    /// already has a stored result; `_cmd_complete` turns that into
+    /// "cannot complete … Pass --result/--summary …" and exit 1
+    /// (`hermes_cli/kanban.py:932-935`). First at `v2026.9.21` (0.21.4):
+    /// `git grep _gate_empty_completion v2026.9.14 -- hermes_cli` is empty, and
+    /// there a blank completion succeeds. Gates whether Scarf's Complete sheet
+    /// requires a result (``KanbanService/plan(for:caps:)``).
+    public var hasKanbanEmptyCompletionGate: Bool { isV0214OrLater }
+
+    /// Profile routes match on the sender: a rule's `user_id` adds 16 to its
+    /// specificity, and a rule whose `user_id` is null or blank is skipped
+    /// (`gateway/profile_routing.py:65-70`, `:140-143` @ `v2026.9.24`). First
+    /// at `v2026.9.21`; at `v2026.9.14` `ProfileRoute` has no `user_id`, so
+    /// the key is ignored.
+    public var hasProfileRouteUserID: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
@@ -2551,6 +2578,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// audit's guess of "absent" (P7e re-walk; charter C2): v0.21.4 already
     /// warns, just not in the box `HermesGatewayStandaloneWarning` parses.
     public var hasGatewayStandaloneStatusBox: Bool { isV0215OrLater }
+
+    /// ACP chats (every Scarf chat) take their toolsets from
+    /// `platform_toolsets.acp`, else the `hermes-acp` default:
+    /// `acp_adapter/session.py:480-486` @ `v2026.9.24` calls
+    /// `_get_platform_tools(config, "acp")`. At `v2026.9.21` and every
+    /// earlier tag the ACP session hard-codes `["hermes-acp"]`
+    /// (`acp_adapter/session.py:484-485` @ `v2026.9.21`) and ignores the
+    /// config. Gates which platform the Kanban toolset onboarding reads and
+    /// writes (``KanbanToolsetDetector/chatPlatform(for:)``).
+    public var hasACPPlatformToolsets: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 

@@ -83,36 +83,95 @@ public struct HermesProfileRoute: Sendable, Equatable, Identifiable, Hashable {
         self.extraLines = extraLines
     }
 
-    /// Additive match weight — verbatim mirror of `ProfileRoute.specificity`
-    /// (profile_routing.py:62-72). Higher wins.
-    public var specificity: Int {
+    /// `user_id` as written in the rule, read from ``extraLines`` (Scarf
+    /// does not edit it, so it round-trips there verbatim). `nil` when the
+    /// key is absent; `""` when it is present but null or blank.
+    ///
+    /// Hermes 0.21.4+ treats it as a sender discriminator worth +16 and drops
+    /// a rule whose `user_id` is null or blank (`gateway/profile_routing.py:65-70`,
+    /// `:140-143` @ `v2026.9.24`); see ``HermesCapabilities/hasProfileRouteUserID``.
+    public var userID: String? { extraScalar("user_id") }
+
+    /// `bot_profile` as written, read from ``extraLines``. `nil` when absent.
+    /// From 0.21.3 a rule only applies to messages received by that
+    /// profile's bot; absent, blank or `default` means the default
+    /// profile's shared bot (`_bot_profile_key`,
+    /// `gateway/profile_routing.py:86-88`, `:101-104` @ `v2026.9.24`); see
+    /// ``HermesCapabilities/hasProfileRouteBotScope``.
+    public var botProfile: String? { extraScalar("bot_profile") }
+
+    /// The bot this rule is scoped to, when it is not the default profile's.
+    public func scopedBotProfile(capabilities: HermesCapabilities) -> String? {
+        guard capabilities.hasProfileRouteBotScope,
+              let bot = botProfile?.trimmingCharacters(in: .whitespaces),
+              !bot.isEmpty, bot != "default" else { return nil }
+        return bot
+    }
+
+    /// A non-blank `user_id` Hermes matches on, or `nil`.
+    private func effectiveUserID(capabilities: HermesCapabilities) -> String? {
+        guard capabilities.hasProfileRouteUserID,
+              let id = userID?.trimmingCharacters(in: .whitespaces),
+              !id.isEmpty else { return nil }
+        return id
+    }
+
+    /// A top-level `key: value` from ``extraLines`` (dedented to the rule's
+    /// own keys, so a top-level key starts at column 0), unquoted.
+    private func extraScalar(_ key: String) -> String? {
+        for line in extraLines where !line.hasPrefix(" ") && !line.hasPrefix("\t") {
+            guard let colon = line.firstIndex(of: ":"),
+                  line[..<colon].trimmingCharacters(in: .whitespaces) == key else { continue }
+            var raw = String(line[line.index(after: colon)...])
+                .trimmingCharacters(in: .whitespaces)
+            if raw.hasPrefix("#") { raw = "" }
+            if let first = raw.first, first != "\"", first != "'",
+               let hash = raw.range(of: " #") {
+                raw = String(raw[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+            if raw == "null" || raw == "~" || raw == "Null" || raw == "NULL" { return "" }
+            return YAMLScalar.unquote(raw)
+        }
+        return nil
+    }
+
+    /// Additive match weight — mirror of `ProfileRoute.specificity`
+    /// (`gateway/profile_routing.py:65-70` @ `v2026.9.24`): server 2 +
+    /// channel 4 + thread 8, plus 16 for a `user_id` on hosts that match on
+    /// it. Higher wins.
+    public func specificity(capabilities: HermesCapabilities) -> Int {
         var s = 0
         if !guildID.isEmpty { s += 2 }
         if !chatID.isEmpty { s += 4 }
         if !threadID.isEmpty { s += 8 }
+        if effectiveUserID(capabilities: capabilities) != nil { s += 16 }
         return s
     }
 
     /// Whether `parse_profile_routes` would keep this rule. It drops rules
-    /// with a missing `platform`/`profile` (line 119) or an invalid profile
-    /// name (line 134) — a dropped rule is silently inert in Hermes, so the
-    /// UI flags it instead.
-    public var isAcceptedByHermes: Bool {
-        !platform.trimmingCharacters(in: .whitespaces).isEmpty
-            && HermesProfileName.isValid(profile)
+    /// with a missing `platform`/`profile` or an invalid profile name, and
+    /// from 0.21.4 a rule whose `user_id` key is null or blank
+    /// (`gateway/profile_routing.py:124-143` @ `v2026.9.24`) — a dropped rule
+    /// is silently inert in Hermes, so the UI flags it instead.
+    public func isAcceptedByHermes(capabilities: HermesCapabilities) -> Bool {
+        rejectionReason(capabilities: capabilities) == nil
     }
 
     /// Human-readable reason this rule would be dropped, or `nil` when it's
     /// accepted.
-    public var rejectionReason: String? {
+    public func rejectionReason(capabilities: HermesCapabilities) -> String? {
         if platform.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "Hermes ignores this route: platform is required."
+            return String(localized: "Hermes ignores this route: platform is required.")
         }
         if profile.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "Hermes ignores this route: profile is required."
+            return String(localized: "Hermes ignores this route: profile is required.")
         }
         if !HermesProfileName.isValid(profile) {
-            return "Hermes ignores this route: “\(profile)” is not a valid profile name (lowercase [a-z0-9][a-z0-9_-]{0,63}, and not a reserved name)."
+            return String(localized: "Hermes ignores this route: “\(profile)” is not a valid profile name (lowercase [a-z0-9][a-z0-9_-]{0,63}, and not a reserved name).")
+        }
+        if capabilities.hasProfileRouteUserID,
+           let id = userID, id.trimmingCharacters(in: .whitespaces).isEmpty {
+            return String(localized: "Hermes ignores this route: user_id is empty. Set a user id or remove the key.")
         }
         return nil
     }
@@ -140,13 +199,20 @@ public struct HermesProfileRoute: Sendable, Equatable, Identifiable, Hashable {
     }
 
     /// One-line scope summary for list rows (e.g. `discord · server 123 · channel 456`).
-    public var scopeSummary: String {
+    /// On hosts that match on them it also names the sender (`user_id`) and
+    /// the receiving bot (`bot_profile`) the rule is limited to.
+    public func scopeSummary(capabilities: HermesCapabilities) -> String {
         var parts: [String] = []
         if !platform.isEmpty { parts.append(platform) }
+        if let bot = scopedBotProfile(capabilities: capabilities) { parts.append("bot \(bot)") }
         if !guildID.isEmpty { parts.append("server \(guildID)") }
         if !chatID.isEmpty { parts.append("channel \(chatID)") }
         if !threadID.isEmpty { parts.append("thread \(threadID)") }
-        if parts.count <= 1 { parts.append("any server/channel") }
+        if let user = effectiveUserID(capabilities: capabilities) { parts.append("user \(user)") }
+        if guildID.isEmpty, chatID.isEmpty, threadID.isEmpty,
+           effectiveUserID(capabilities: capabilities) == nil {
+            parts.append("any server/channel")
+        }
         return parts.joined(separator: " · ")
     }
 }
@@ -305,15 +371,19 @@ public struct HermesProfileRoutes: Sendable, Equatable {
     ///
     /// Rules Hermes would drop (`isAcceptedByHermes == false`) are excluded,
     /// because they never take part in matching.
-    public var effectiveOrder: [HermesProfileRoute] {
+    ///
+    /// The ranking is the host's: `user_id` only counts (+16) from 0.21.4.
+    /// A `bot_profile` does not change the rank; it narrows which bot's
+    /// messages the rule sees, which the row's scope summary names.
+    public func effectiveOrder(capabilities: HermesCapabilities) -> [HermesProfileRoute] {
         routes.enumerated()
-            .filter { $0.element.isAcceptedByHermes }
+            .filter { $0.element.isAcceptedByHermes(capabilities: capabilities) }
+            .map { (offset: $0.offset, route: $0.element,
+                    weight: $0.element.specificity(capabilities: capabilities)) }
             .sorted {
-                if $0.element.specificity != $1.element.specificity {
-                    return $0.element.specificity > $1.element.specificity
-                }
+                if $0.weight != $1.weight { return $0.weight > $1.weight }
                 return $0.offset < $1.offset
             }
-            .map(\.element)
+            .map(\.route)
     }
 }

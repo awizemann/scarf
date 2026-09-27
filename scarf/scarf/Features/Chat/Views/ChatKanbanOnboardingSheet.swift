@@ -3,7 +3,8 @@ import ScarfCore
 import ScarfDesign
 
 /// One-time sheet shown the first time a user sends `/goal …` against
-/// a host whose `cli` toolset doesn't include `kanban`. Surfaces the
+/// a host whose chat platform's toolset (`acp` on 0.21.5+, `cli` before —
+/// `KanbanToolsetDetector.chatPlatform(for:)`) doesn't include `kanban`. Surfaces the
 /// otherwise-invisible upstream constraint that goals and kanban are
 /// two separate Hermes mechanisms — without the toolset enabled, the
 /// agent can't decompose a goal into kanban tasks even if it wanted
@@ -15,6 +16,8 @@ import ScarfDesign
 /// ACP command at any tag, so there is no goal state to gate). The sheet
 /// exists to teach + offer one-click enablement.
 struct ChatKanbanOnboardingSheet: View {
+    /// The `platform_toolsets` key Enable writes.
+    let platform: String
     let onEnable: () async -> Void
     let onOpenTools: () -> Void
     let onSkip: () -> Void
@@ -62,7 +65,7 @@ struct ChatKanbanOnboardingSheet: View {
                 .scarfStyle(.body)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Enabling will run `hermes tools enable kanban --platform cli`. Existing chats keep their schema until you start a new one.")
+            Text("Enabling adds `kanban` to `platform_toolsets.\(platform)` in config.yaml. Existing chats keep their tools until you start a new one.")
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .fixedSize(horizontal: false, vertical: true)
