@@ -75,6 +75,15 @@ public actor HermesDataService {
     /// connection issue. `nil` when the last open succeeded.
     public private(set) var lastOpenErrorKind: OpenErrorKind?
 
+    /// `lastOpenError` as a page that lists sessions should report it:
+    /// on a remote host only, the Dashboard's rule. Locally an open
+    /// failure is almost always a fresh install with no `state.db` yet,
+    /// which those pages show as their ordinary empty state; a banner
+    /// there would also trip the section sweep's no-`error.banner` check.
+    public var reportableOpenError: String? {
+        context.isRemote ? lastOpenError : nil
+    }
+
     /// Coarse classes of `open()` failure (see `adoptOpenError`).
     public enum OpenErrorKind: Sendable, Equatable {
         /// The remote host has no `sqlite3` binary on PATH.
@@ -1574,7 +1583,7 @@ public actor HermesDataService {
             \(sessionPreviewFirstRowSQL)
             ) first ON m.id = first.min_id
             WHERE m.session_id IN (
-            SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?
+            SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?
             )
             """,
             [.integer(Int64(limit))]
@@ -2457,7 +2466,8 @@ public actor HermesDataService {
         var statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(since: statsSince), Self.statsParams(since: statsSince)),
             (
-                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: see `sessionListSnapshot`.
+                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
             listedSessionPreviewStatement(limit: sessionLimit),
@@ -2566,7 +2576,9 @@ public actor HermesDataService {
         let columns = includeUnreadActivity ? sessionListColumns : sessionColumns
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: the preview statement repeats this listing as
+                // a subquery, and the two must pick the same rows on a tie.
+                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
             listedSessionPreviewStatement(limit: limit)

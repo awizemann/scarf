@@ -103,8 +103,12 @@ public final class ProjectSessionsViewModel {
         // `open()` because refresh also re-pulls the remote-server
         // snapshot on each call — local is a cheap no-op).
         guard await dataService.refresh() else {
-            loadError = await dataService.lastOpenError
-                ?? String(localized: "Couldn't open the Hermes state database.")
+            loadError = await dataService.reportableOpenError
+            if loadError == nil {
+                // A local host with no state.db yet: nothing to list.
+                sessions = []
+                emptyStateHint = nil
+            }
             return
         }
 

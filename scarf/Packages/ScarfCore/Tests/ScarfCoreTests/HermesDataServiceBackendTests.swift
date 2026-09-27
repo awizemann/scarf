@@ -377,9 +377,14 @@ import Foundation
         #expect(stmts[0].sql.contains("FROM sessions"))
         // 1: recent sessions — selects session columns with a LIMIT param.
         #expect(stmts[1].sql.hasPrefix("SELECT id, source"))
-        #expect(stmts[1].sql.contains("ORDER BY started_at DESC LIMIT ?"))
-        // 2: session previews — joins messages with first user message.
+        // `, id DESC` (R18b): the preview statement repeats this listing
+        // as a subquery, and the two must agree on a started_at tie.
+        #expect(stmts[1].sql.contains("ORDER BY started_at DESC, id DESC LIMIT ?"))
+        // 2: session previews — joins messages with first user message,
+        // for exactly the listed rows (R18b / T2-F3).
         #expect(stmts[2].sql.contains("INNER JOIN"))
+        #expect(stmts[2].sql.contains("WHERE m.session_id IN ("))
+        #expect(stmts[2].sql.contains("ORDER BY started_at DESC, id DESC LIMIT ?"))
         // (W6: the subquery is now aliased and carrier-aware — see
         // `SessionPreviewSQL`. The aggregate is still MIN over ids.)
         #expect(stmts[2].sql.contains("MIN(m.id)"))

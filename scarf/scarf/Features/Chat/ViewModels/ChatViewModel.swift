@@ -2888,7 +2888,7 @@ final class ChatViewModel {
         Task {
             await client.respondToPermission(requestId: requestId, optionId: optionId)
         }
-        richChatViewModel.resolvePermission(requestId: requestId)
+        richChatViewModel.resolvePermission(requestId: requestId, answeredWith: optionId)
     }
 
     // MARK: - Recent Sessions

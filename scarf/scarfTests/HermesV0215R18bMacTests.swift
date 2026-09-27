@@ -130,6 +130,18 @@ struct HermesV0215R18bMacTests {
         #expect(vm.loadError?.lowercased().contains("no such column") == true)
     }
 
+    /// A local home with no state.db is a fresh install: the ordinary
+    /// empty state, no banner. The section sweep (SectionSweepUITests)
+    /// asserts no `error.banner` against exactly this kind of home.
+    @Test @MainActor func sessionsTabOnAFreshLocalInstallShowsNoBanner() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let vm = SessionsViewModel(context: home.context)
+        await vm.load()
+        #expect(vm.loadError == nil)
+        #expect(vm.sessions.isEmpty)
+    }
+
     @Test @MainActor func chatSidebarKeepsItsRowsOnAFailedRefresh() async throws {
         let home = try Self.duplicateRegistryHome()
         defer { home.cleanup() }

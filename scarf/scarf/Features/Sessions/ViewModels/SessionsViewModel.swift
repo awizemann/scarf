@@ -386,8 +386,7 @@ final class SessionsViewModel {
             // Say so, and keep what is already on screen: an empty list
             // here rendered "No sessions match this filter" for a host
             // that could not be read at all.
-            loadError = await dataService.lastOpenError
-                ?? String(localized: "Couldn't open the Hermes state database.")
+            loadError = await dataService.reportableOpenError
             return
         }
         // v2.7: folded the two serial fetches into one batched round

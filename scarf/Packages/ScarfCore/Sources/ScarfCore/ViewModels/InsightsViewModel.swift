@@ -161,10 +161,16 @@ public final class InsightsViewModel {
         let opened = await dataService.refresh()
         guard isCurrent(generation) else { return }
         guard opened else {
-            let message = await dataService.lastOpenError
-                ?? String(localized: "Couldn't open the Hermes state database.")
+            let message = await dataService.reportableOpenError
             guard isCurrent(generation) else { return }
-            failLoad(message, for: requestedPeriod)
+            if let message {
+                failLoad(message, for: requestedPeriod)
+            } else {
+                // A local host with no state.db yet: the page's ordinary
+                // empty state, as before.
+                loadError = nil
+                isLoading = false
+            }
             return
         }
 

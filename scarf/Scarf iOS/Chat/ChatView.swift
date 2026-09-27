@@ -3277,7 +3277,7 @@ final class ChatController {
         // answer, and a close that finds the request still queued is read
         // as Hermes having given up waiting
         // (`RichChatViewModel.closePermissionHermesSettled`).
-        vm.resolvePermission(requestId: requestId)
+        vm.resolvePermission(requestId: requestId, answeredWith: optionId)
         await client.respondToPermission(requestId: requestId, optionId: optionId)
         lastPermissionAnsweredAt = Date()
     }

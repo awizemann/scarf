@@ -267,6 +267,69 @@ import SQLite3
         #expect(vm.emptyStateHint == nil)
     }
 
+    /// A local host with no state.db yet is a fresh install, not a failed
+    /// read: no banner (the Dashboard's rule, and the section sweep's
+    /// no-`error.banner` check runs against exactly this home).
+    @MainActor
+    @Test func aLocalHomeWithNoStateDBIsAnEmptyPageNotAnError() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-r18b-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.writeScarfFile("session_project_map.json",
+                                #"{"mappings": {"live": "/work/app"}}"#, home: home)
+
+        let insights = InsightsViewModel(context: .local(home: home))
+        await insights.load()
+        #expect(insights.loadError == nil)
+        #expect(insights.isLoading == false)
+
+        let project = ProjectSessionsViewModel(
+            context: .local(home: home),
+            project: ProjectEntry(name: "App", path: "/work/app")
+        )
+        await project.load()
+        #expect(project.loadError == nil)
+        #expect(project.sessions.isEmpty)
+    }
+
+    /// The listed-row preview statement on a pre-v0.20.4 host, where the
+    /// listing is the plain `sessions` table with `parent_session_id IS
+    /// NULL` rather than the aliased listable-child form.
+    @Test func listedPreviewsWorkOnAPreListableChildSchema() async throws {
+        var sql = """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, source TEXT, user_id TEXT, model TEXT, title TEXT,
+            parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT,
+            message_count INTEGER, tool_call_count INTEGER, input_tokens INTEGER,
+            output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+            estimated_cost_usd REAL
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, tool_call_id TEXT,
+            tool_calls TEXT, tool_name TEXT, timestamp REAL, token_count INTEGER, finish_reason TEXT
+        );
+        INSERT INTO sessions (id, source, started_at) VALUES ('a', 'cli', 1.0), ('b', 'cli', 2.0);
+        INSERT INTO messages (session_id, role, content, timestamp) VALUES ('a', 'user', 'alpha opening', 1.5), ('b', 'user', 'beta opening', 2.5);
+        """
+        for i in 0..<10 {
+            sql += "INSERT INTO sessions (id, source, parent_session_id, started_at) VALUES ('kid\(i)', 'cli', 'a', \(10 + i));"
+            sql += "INSERT INTO messages (session_id, role, content, timestamp) VALUES ('kid\(i)', 'user', 'kid \(i)', \(10 + i));"
+        }
+        let home = try Self.makeHome(schema: sql, seed: "")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let service = HermesDataService(context: .local(home: home))
+        #expect(await service.open())
+
+        let list = await service.sessionListSnapshot(limit: 2)
+        #expect(list.queryError == nil)
+        #expect(list.sessions.map(\.id) == ["b", "a"])
+        #expect(list.previews == ["a": "alpha opening", "b": "beta opening"])
+        let dashboard = await service.dashboardSnapshot(sessionLimit: 2)
+        #expect(dashboard.queryError == nil)
+        #expect(dashboard.sessionPreviews == ["a": "alpha opening", "b": "beta opening"])
+    }
+
     // MARK: - T1-F2: the model hint names a real recovery
 
     @Test func unavailableModelHintNamesTheModelMenuNotAMissingVerb() throws {
@@ -347,6 +410,38 @@ import SQLite3
         vm.handleACPEvent(try #require(ACPEventParser.parse(notification: try Self.raw(Self.hermesTimeoutClose))))
         #expect(vm.transientHint == nil)
         #expect(vm.permissionQueue.map(\.requestId) == [8])
+    }
+
+    /// The user clicked Allow just as Hermes gave up: the request is
+    /// already popped, Hermes denies anyway and closes it `failed`. That
+    /// close is the only sign the tool did not run.
+    @MainActor
+    @Test func anAllowThatArrivedTooLateSaysTheToolWasDenied() throws {
+        let vm = engagedVM()
+        vm.handleACPEvent(try #require(ACPEventParser.parsePermissionRequest(try Self.raw(Self.hermesPermissionRequest))))
+        vm.resolvePermission(requestId: 7, answeredWith: "allow_once")
+        #expect(vm.pendingPermission == nil)
+        vm.handleACPEvent(try #require(ACPEventParser.parse(notification: try Self.raw(Self.hermesTimeoutClose))))
+        #expect(vm.transientHint?.contains("already stopped waiting") == true)
+    }
+
+    /// A Deny closes `failed` too; that is the user's own answer, no hint.
+    @MainActor
+    @Test func aDenyClosedFailedIsQuiet() throws {
+        let vm = engagedVM()
+        vm.handleACPEvent(try #require(ACPEventParser.parsePermissionRequest(try Self.raw(Self.hermesPermissionRequest))))
+        vm.resolvePermission(requestId: 7, answeredWith: "deny")
+        vm.handleACPEvent(try #require(ACPEventParser.parse(notification: try Self.raw(Self.hermesTimeoutClose))))
+        #expect(vm.transientHint == nil)
+    }
+
+    @Test func permissionOptionClassificationMatchesHermesIds() {
+        for id in ["allow_once", "allow_session", "allow_always"] {
+            #expect(RichChatViewModel.permissionOptionAllows(id))
+        }
+        for id in ["deny", "deny_always", "reject_once"] {
+            #expect(!RichChatViewModel.permissionOptionAllows(id))
+        }
     }
 
     /// A real tool's completion (an id that had a `tool_call` start) never
