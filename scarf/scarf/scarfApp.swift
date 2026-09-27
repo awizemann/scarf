@@ -90,69 +90,75 @@ struct ScarfApp: App {
             _ = HermesFileService.enrichedEnvironment()
         }
 
-        // Bootstrap built-in skills shipped inside the app bundle into
-        // `~/.hermes/skills/scarf/`. Today this is just
-        // `scarf-template-author`, which the "New Project from Scratch"
-        // wizard hands off to. The service is idempotent + version-gated;
-        // failures log and don't block launch — worst case is the wizard
-        // still works but the agent doesn't have the skill loaded for
-        // that session.
-        Task.detached(priority: .utility) {
-            do {
-                try SkillBootstrapService(context: .local).ensureBundledSkillsInstalled()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .skills))
+        // Everything below writes into the real `~/.hermes` (skills, slash
+        // commands, `.env`, the MCP registration). A unit-test host or a
+        // SwiftUI preview launches this same app, and must not touch the
+        // developer's Hermes home: tests plant their own scratch homes.
+        if !Analytics.isSyntheticHost {
+            // Bootstrap built-in skills shipped inside the app bundle into
+            // `~/.hermes/skills/scarf/`. Today this is just
+            // `scarf-template-author`, which the "New Project from Scratch"
+            // wizard hands off to. The service is idempotent + version-gated;
+            // failures log and don't block launch — worst case is the wizard
+            // still works but the agent doesn't have the skill loaded for
+            // that session.
+            Task.detached(priority: .utility) {
+                do {
+                    try SkillBootstrapService(context: .local).ensureBundledSkillsInstalled()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .skills))
+                }
             }
-        }
 
-        // Bootstrap global Scarf slash commands shipped inside the app
-        // bundle into `~/.hermes/scarf/slash-commands/`. These are the
-        // `/scarf-*` family that surfaces in EVERY chat (pre-session,
-        // global, project-scoped) so the user can drive Scarf-specific
-        // workflows without having to author per-project commands first.
-        // Same idempotent + version-gated pattern as
-        // `SkillBootstrapService`; failures log and don't block launch.
-        Task.detached(priority: .utility) {
-            do {
-                try SlashCommandBootstrapService(context: .local).ensureBundledCommandsInstalled()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .slashCommands))
+            // Bootstrap global Scarf slash commands shipped inside the app
+            // bundle into `~/.hermes/scarf/slash-commands/`. These are the
+            // `/scarf-*` family that surfaces in EVERY chat (pre-session,
+            // global, project-scoped) so the user can drive Scarf-specific
+            // workflows without having to author per-project commands first.
+            // Same idempotent + version-gated pattern as
+            // `SkillBootstrapService`; failures log and don't block launch.
+            Task.detached(priority: .utility) {
+                do {
+                    try SlashCommandBootstrapService(context: .local).ensureBundledCommandsInstalled()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .slashCommands))
+                }
             }
-        }
 
-        // Reconcile every registered project's secrets-env block in
-        // ~/.hermes/.env. Catches users upgrading from a pre-mirror
-        // Scarf version (existing projects' Keychain values weren't
-        // mirrored before) and any drift between the Keychain state
-        // and the env file. Idempotent — projects whose blocks are
-        // already current produce no write.
-        Task.detached(priority: .utility) {
-            do {
-                try KeychainEnvMirror(context: .local).reconcileAll()
-            } catch {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .envMirror))
+            // Reconcile every registered project's secrets-env block in
+            // ~/.hermes/.env. Catches users upgrading from a pre-mirror
+            // Scarf version (existing projects' Keychain values weren't
+            // mirrored before) and any drift between the Keychain state
+            // and the env file. Idempotent — projects whose blocks are
+            // already current produce no write.
+            Task.detached(priority: .utility) {
+                do {
+                    try KeychainEnvMirror(context: .local).reconcileAll()
+                } catch {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .envMirror))
+                }
             }
-        }
 
-        // Register the bundled `scarf-projects` MCP server into the local
-        // Hermes config, so agents get validated project CRUD instead of
-        // hand-appending rows to projects.json. Unconditional and
-        // untoggled — it is part of what Scarf is, not a preference. The
-        // `command` is re-asserted every launch so moving the app doesn't
-        // strand Hermes on a path that no longer exists; a launch where
-        // nothing moved writes nothing.
-        Task.detached(priority: .utility) {
-            let outcome = ProjectsMCPRegistrar(context: .local).ensureRegistered()
-            if case .failed(let reason) = outcome {
-                Logger(subsystem: "com.scarf", category: "scarfApp")
-                    .warning("projects MCP registration failed: \(reason, privacy: .public)")
-                Analytics.record(.bootstrapTaskFailed(task: .projectsMCP))
+            // Register the bundled `scarf-projects` MCP server into the local
+            // Hermes config, so agents get validated project CRUD instead of
+            // hand-appending rows to projects.json. Unconditional and
+            // untoggled — it is part of what Scarf is, not a preference. The
+            // `command` is re-asserted every launch so moving the app doesn't
+            // strand Hermes on a path that no longer exists; a launch where
+            // nothing moved writes nothing.
+            Task.detached(priority: .utility) {
+                let outcome = ProjectsMCPRegistrar(context: .local).ensureRegistered()
+                if case .failed(let reason) = outcome {
+                    Logger(subsystem: "com.scarf", category: "scarfApp")
+                        .warning("projects MCP registration failed: \(reason, privacy: .public)")
+                    Analytics.record(.bootstrapTaskFailed(task: .projectsMCP))
+                }
             }
         }
 
