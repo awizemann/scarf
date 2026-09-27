@@ -1222,6 +1222,11 @@ final class ChatViewModel {
                 if holdSendIfReplayPending(client: client, text: text, images: images) { return }
                 sendViaACP(client: client, text: text, images: images)
             } else {
+                // The reconnect ladder is bringing this session back: hold
+                // the send for the client it installs. Auto-starting here
+                // spawned a second `hermes acp` racing the ladder for the
+                // same session.
+                if holdSendDuringReconnect(text: text, images: images) { return }
                 // A conversation that must not be auto-started blind (Bot
                 // Chat) re-resolves itself first.
                 if let autoStartInterceptor, autoStartInterceptor(text, images) { return }
@@ -1252,10 +1257,41 @@ final class ChatViewModel {
     private var heldSends: [(text: String, images: [ChatImageAttachment])] = []
     @ObservationIgnored
     private weak var heldSendsClient: ACPClient?
+    /// True while the reconnect ladder runs with no client installed yet:
+    /// sends typed then are held for the client it installs.
+    @ObservationIgnored
+    private var holdingForReconnect = false
 
     private func beginHoldingSends(for client: ACPClient) {
-        heldSends = []
+        // The ladder's client inherits what was typed while it ran.
+        if !holdingForReconnect { heldSends = [] }
+        holdingForReconnect = false
         heldSendsClient = client
+    }
+
+    /// Hold `text` while the reconnect ladder runs. True when held.
+    private func holdSendDuringReconnect(text: String, images: [ChatImageAttachment]) -> Bool {
+        guard holdingForReconnect else { return false }
+        richChatViewModel.addUserMessage(text: text)
+        richChatViewModel.closeReplayGate()
+        heldSends.append((text, images))
+        return true
+    }
+
+    /// The ladder ended without a client (exhausted, or torn down): what
+    /// was held will never go out. `announce` is false for a deliberate
+    /// teardown, whose transcript is being replaced anyway.
+    private func dropReconnectHeldSends(announce: Bool) {
+        guard holdingForReconnect else { return }
+        holdingForReconnect = false
+        let dropped = heldSends.count
+        heldSends = []
+        if announce && dropped > 0 {
+            richChatViewModel.transientHint = String(
+                localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
+            )
+            scheduleHintClear()
+        }
     }
 
     /// Hold `text` if `client`'s replay has not drained yet. True when held.
@@ -2449,6 +2485,11 @@ final class ChatViewModel {
     private func attemptReconnect(sessionId: String) {
         reconnectTask?.cancel()
         clearACPErrorState()
+        // Sends from here until the ladder installs a client are held for
+        // it. A held send from the client that just died is not carried.
+        if !holdingForReconnect { heldSends = [] }
+        heldSendsClient = nil
+        holdingForReconnect = true
 
         reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2524,6 +2565,10 @@ final class ChatViewModel {
                     // the dead session's client and transcript over the
                     // one the user moved to, so stop ours and bow out.
                     guard !Task.isCancelled, self.acpClient == nil else {
+                        // Another path installed a client without tearing
+                        // this ladder down: the held sends were typed for
+                        // this session's client, which will not come.
+                        if !Task.isCancelled { dropReconnectHeldSends(announce: true) }
                         await client.stop()
                         return
                     }
@@ -2583,6 +2628,7 @@ final class ChatViewModel {
             // `acpClient` is nil (`canHostVoiceTurns`).
             guard !Task.isCancelled else { return }
             showConnectionFailure()
+            dropReconnectHeldSends(announce: true)
             isHandlingDisconnect = false
         }
     }
@@ -2603,6 +2649,7 @@ final class ChatViewModel {
         disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
+        dropReconnectHeldSends(announce: false)
         // Capture BEFORE cancelling the prompt task. Keyed off
         // ChatViewModel-owned turn state — NOT `richChatViewModel` —
         // because in the session-switch paths `reset()` already wiped
@@ -3635,10 +3682,18 @@ extension ChatViewModel: VoiceTurnHost {
               let sessionId = richChatViewModel.sessionId else {
             throw VoiceTurnSubmitError.noSession
         }
-        if isBusyWithNonVoiceTurn {
+        // The session's `session/load` replay has not drained yet (an
+        // autostart or reconnect just installed this client), or typed
+        // sends are held behind it. Sending now would open the replay gate
+        // (`markPromptSent`) mid-replay and jump the held sends, so answer
+        // busy like a typed turn in flight does.
+        let replayPending = heldSendsClient === client
+        if isBusyWithNonVoiceTurn || replayPending {
             busyVoiceRequestIDs.append(request.id)
             if busyVoiceRequestIDs.count > 8 { busyVoiceRequestIDs.removeFirst(busyVoiceRequestIDs.count - 8) }
-            richChatViewModel.transientHint = String(localized: "Live Voice didn't interrupt your typed request. Ask again when it's finished.")
+            richChatViewModel.transientHint = replayPending
+                ? String(localized: "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.")
+                : String(localized: "Live Voice didn't interrupt your typed request. Ask again when it's finished.")
             scheduleHintClear()
             return
         }
