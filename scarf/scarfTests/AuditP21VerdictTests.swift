@@ -177,6 +177,34 @@ struct AuditP21VerdictTests {
         #expect(result.approved.isEmpty)
     }
 
+    /// R18a (T5-F2): pending requests but no approved users — the normal
+    /// first-pairing state. `No approved users.` prints straight after the
+    /// pending block with no header between (`pairing.py:51` @ v2026.9.24),
+    /// so it parsed as a phantom pending pairing `No` / `approved`.
+    ///
+    /// Fixture printed by the tag's own `_cmd_list` (run from the v2026.9.24
+    /// checkout's venv with a one-pending, zero-approved store).
+    @Test func noApprovedUsersLineAfterPendingIsNotAPairing() {
+        let output = """
+
+          Pending Pairing Requests (1):
+          Platform     Request ID         User ID              Name                 Age
+          --------     ----------         -------              ----                 ---
+          telegram     req-7f3a           4815162342           Ada Lovelace         3m ago
+
+          Approve with: hermes pairing approve <platform> <request-id>
+          The code the bot DM'd the user also works if they relay it.
+
+          No approved users.
+
+        """
+        let result = MessagingGatewayViewModel.parsePairing(output: output)
+        #expect(result.pending.map(\.platform) == ["telegram"])
+        #expect(result.pending.map(\.code) == ["req-7f3a"])
+        #expect(result.pending.contains { $0.platform == "No" } == false)
+        #expect(result.approved.isEmpty)
+    }
+
     // MARK: - plugins install / update: the discarded consent bool
 
     /// `cmd_update` (plugins_cmd.py:822) calls `_run_capability_consent(...)`

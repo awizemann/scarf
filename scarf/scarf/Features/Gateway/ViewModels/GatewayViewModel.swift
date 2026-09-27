@@ -454,6 +454,19 @@ final class MessagingGatewayViewModel {
             // the filter simply never fires on an older host (charter C1).
             if Self.pairingHintLines.contains(where: { trimmed.hasPrefix($0) }) { continue }
 
+            // `_cmd_list`'s empty-section lines (hermes_cli/pairing.py:41,51
+            // @ v2026.9.24, the same text back to v2026.3.12). With pending
+            // requests but no approved users, `No approved users.` prints
+            // straight after the pending block with no header in between, so
+            // it landed in the pending section as a two-token row: a phantom
+            // pairing (platform `No`, code `approved`) with a live Approve
+            // button. Such a line also ends whatever section came before it.
+            if Self.pairingEmptySectionLines.contains(where: { trimmed.hasPrefix($0) }) {
+                inApproved = false
+                inPending = false
+                continue
+            }
+
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
             // An approved row is `{platform:<12} {user_id:<20} {user_name:<20}`
             // (pairing.py:49, the same shape back to v2026.6.19:57) and
@@ -482,6 +495,14 @@ final class MessagingGatewayViewModel {
     nonisolated static let pairingHintLines = [
         "Approve with: hermes pairing approve",
         "The code the bot DM'd the user also works if they relay it.",
+    ]
+
+    /// The lines `_cmd_list` prints in place of an empty section, and its
+    /// both-empty line (hermes_cli/pairing.py:27,41,51 @ v2026.9.24).
+    nonisolated static let pairingEmptySectionLines = [
+        "No approved users.",
+        "No pending pairing requests.",
+        "No pairing data found.",
     ]
 
     func startGateway() { runServiceAction(.start, label: "start", settleSeconds: 2) }
