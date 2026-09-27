@@ -255,6 +255,21 @@ struct GatewayPlatformsR07Tests {
         #expect(!HermesGatewayProcessMatch.commandLineIsGateway(Self.osascriptWrapper, profile: "work"))
         #expect(!HermesGatewayProcessMatch.commandLineIsGateway("hermes -p ops gateway run", profile: "work"))
         #expect(!HermesGatewayProcessMatch.commandLineIsGateway("\(Self.py) -m hermes_cli.main gateway status", profile: "work"))
+        // The root gateway stated explicitly, or a trailing flag for another
+        // profile, is not an unflagged gateway.
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("hermes -p default gateway run", profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("hermes gateway run -p ops", profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway("hermes --profile=ops gateway run", profile: "work"))
+    }
+
+    @Test func procStatStartTimeIsField22() {
+        // A real-shaped /proc/<pid>/stat line; the comm contains ") (".
+        let fields3to22 = (3...22).map { $0 == 22 ? "987654" : "\($0)" }.joined(separator: " ")
+        let stat = "4242 (py) (thon) \(fields3to22) 23 24\n"
+        #expect(HermesGatewayProcessMatch.procStatStartTime(stat) == 987654)
+        #expect(HermesGatewayProcessMatch.procStatStartTime("garbage") == nil)
+        #expect(HermesGatewayProcessMatch.startTime(fromPidFile: Self.pidRecord(pid: 1, home: "/h")) == 1)
+        #expect(HermesGatewayProcessMatch.startTime(fromPidFile: Data("12".utf8)) == nil)
     }
 
     #if os(macOS)

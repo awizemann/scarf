@@ -108,10 +108,36 @@ public enum HermesGatewayProcessMatch {
     /// set in its environment carries no `-p` at all, which is exactly why
     /// `pgrep` cannot find it. Same anchored patterns, so the launchd
     /// wrappers are refused here too.
+    ///
+    /// The unflagged form is STRICT for a named profile: no `-p`/`--profile`
+    /// anywhere on the line (so neither `-p default` nor a trailing `-p ops`
+    /// passes as this profile's gateway).
     public static func commandLineIsGateway(_ commandLine: String, profile: String?) -> Bool {
-        var patterns = [pgrepPattern(profile: profile)]
-        if HermesProfileScope.normalize(profile) != nil { patterns.append(pgrepPattern(profile: nil)) }
-        return patterns.contains { ereMatches($0, commandLine) }
+        if ereMatches(pgrepPattern(profile: profile), commandLine) { return true }
+        guard HermesProfileScope.normalize(profile) != nil else { return false }
+        let tokens = commandLine.split(whereSeparator: \.isWhitespace)
+        let flagged = tokens.contains { $0 == "-p" || $0 == "--profile"
+            || $0.hasPrefix("--profile=") || $0.hasPrefix("-p=") }
+        return !flagged && ereMatches(pgrepPattern(profile: nil), commandLine)
+    }
+
+    /// The `start_time` a pid record carries — Hermes's PID-reuse
+    /// fingerprint (`_get_process_start_time`, `gateway/status.py:458-468`:
+    /// `/proc/<pid>/stat` field 22 on Linux, psutil centiseconds elsewhere).
+    public static func startTime(fromPidFile data: Data) -> Int? {
+        guard let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (record["start_time"] as? NSNumber)?.intValue
+    }
+
+    /// Field 22 (`starttime`) of a Linux `/proc/<pid>/stat`. Parsed after the
+    /// LAST `)` because the command name in field 2 may contain spaces or
+    /// parentheses.
+    public static func procStatStartTime(_ stat: String) -> Int? {
+        guard let close = stat.lastIndex(of: ")") else { return nil }
+        let rest = stat[stat.index(after: close)...].split(whereSeparator: \.isWhitespace)
+        // `rest[0]` is field 3 (state), so field 22 is rest[19].
+        guard rest.count > 19 else { return nil }
+        return Int(rest[19])
     }
 
     /// POSIX `regcomp(REG_EXTENDED)` — the engine `pgrep -f` uses.

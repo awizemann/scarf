@@ -180,7 +180,36 @@ struct GatewayProcessScopeR07Tests {
             let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
             guard case .success(let pid) = svc.hermesPIDResult() else { Issue.record("probe failed"); return }
             #expect(pid == nil)
+            #expect(transport.calls.contains { $0.exe.hasSuffix("/ps") }, "the fallback never ran")
         }
+    }
+
+    /// Hermes's PID-reuse guard: on a `/proc` host the record's `start_time`
+    /// must equal the live process's stat field 22.
+    @Test func aReusedPidIsRefusedByStartTime() {
+        func stat(_ start: Int) -> String {
+            "888 (python) S " + (4...21).map(String.init).joined(separator: " ") + " \(start) 23\n"
+        }
+        for (live, expected) in [(1, Int32?(888)), (2, nil)] {
+            let transport = Transport(files: [Self.workHome + "/gateway.pid": Self.workPidFile,
+                                              "/proc/888/stat": stat(live)]) { exe, _ in
+                exe.hasSuffix("/ps") ? Self.result("python -m hermes_cli.main gateway run\n", 0) : Self.result("", 1)
+            }
+            let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+            guard case .success(let pid) = svc.hermesPIDResult() else { Issue.record("probe failed"); return }
+            #expect(pid == expected, "start_time \(live) vs recorded 1")
+        }
+    }
+
+    /// The default profile never takes the pid-file fallback.
+    @Test func theDefaultProfileDoesNotReadGatewayPid() {
+        let transport = Transport(files: [Self.root + "/gateway.pid": #"{"pid": 777}"#]) { exe, _ in
+            exe.hasSuffix("/ps") ? Self.result("python -m hermes_cli.main gateway run\n", 0) : Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.root), transport: transport)
+        guard case .success(let pid) = svc.hermesPIDResult() else { Issue.record("probe failed"); return }
+        #expect(pid == nil)
+        #expect(!transport.calls.contains { $0.exe.hasSuffix("/ps") })
     }
 
     /// The pid-file answer is the profile's OWN gateway, so the stop fallback

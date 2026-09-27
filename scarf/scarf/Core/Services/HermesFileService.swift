@@ -3011,7 +3011,19 @@ struct HermesFileService: Sendable {
               ps.exitCode == 0
         else { return nil }
         let commandLine = ps.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        return HermesGatewayProcessMatch.commandLineIsGateway(commandLine, profile: profile) ? pid : nil
+        guard HermesGatewayProcessMatch.commandLineIsGateway(commandLine, profile: profile) else { return nil }
+        // Hermes's own PID-reuse guard: where the host has `/proc` (Linux)
+        // the record's `start_time` is that process's stat field 22, so a
+        // mismatch means the PID now belongs to a different process. macOS
+        // records psutil centiseconds, which no read here reproduces; there
+        // the command line and `hermes_home` checks above are the guard.
+        if let recorded = HermesGatewayProcessMatch.startTime(fromPidFile: data),
+           let stat = readFileData("/proc/\(pid)/stat"),
+           let live = HermesGatewayProcessMatch.procStatStartTime(String(decoding: stat, as: UTF8.self)),
+           live != recorded {
+            return nil
+        }
+        return pid
     }
 
     /// Does the ROOT home's `gateway_state.json` list `profile` in
