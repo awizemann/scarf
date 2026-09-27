@@ -454,6 +454,19 @@ final class MessagingGatewayViewModel {
             // the filter simply never fires on an older host (charter C1).
             if Self.pairingHintLines.contains(where: { trimmed.hasPrefix($0) }) { continue }
 
+            // `_cmd_list`'s empty-section lines (hermes_cli/pairing.py:41,51
+            // @ v2026.9.24, the same text back to v2026.3.12). With pending
+            // requests but no approved users, `No approved users.` prints
+            // straight after the pending block with no header in between, so
+            // it landed in the pending section as a two-token row: a phantom
+            // pairing (platform `No`, code `approved`) with a live Approve
+            // button. Such a line also ends whatever section came before it.
+            if Self.pairingEmptySectionLines.contains(where: { trimmed.hasPrefix($0) }) {
+                inApproved = false
+                inPending = false
+                continue
+            }
+
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
             // An approved row is `{platform:<12} {user_id:<20} {user_name:<20}`
             // (pairing.py:49, the same shape back to v2026.6.19:57) and
@@ -482,6 +495,14 @@ final class MessagingGatewayViewModel {
     nonisolated static let pairingHintLines = [
         "Approve with: hermes pairing approve",
         "The code the bot DM'd the user also works if they relay it.",
+    ]
+
+    /// The lines `_cmd_list` prints in place of an empty section, and its
+    /// both-empty line (hermes_cli/pairing.py:27,41,51 @ v2026.9.24).
+    nonisolated static let pairingEmptySectionLines = [
+        "No approved users.",
+        "No pending pairing requests.",
+        "No pairing data found.",
     ]
 
     func startGateway() { runServiceAction(.start, label: "start", settleSeconds: 2) }
@@ -541,22 +562,46 @@ final class MessagingGatewayViewModel {
         invalidateInFlightLoads()
         let generation = actionGeneration
         let run = cliRunner
+        let ctx = context
+        let caps = capabilities
 
         Task { [weak self] in
             // `hermes gateway start|stop|restart` is a process spawn against a
             // possibly-remote host; running it inline froze the whole app for
             // the duration. Detached, exactly like `load()` above.
-            let result = await Task.detached {
-                run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+            let (outcome, refused) = await Task.detached { () -> (HermesCLIOutcome, Bool) in
+                // A restart of a gateway with no service behind it stops the
+                // gateway and runs its replacement inside this very spawn,
+                // which the timeout then kills (see
+                // ``HermesGatewayRestartGuard``). Ask first; never send it
+                // into that state.
+                if verb == .restart, let refusal = HermesGatewayRestartGuard.check(
+                    run: { args, timeout in let r = run(args, timeout); return (r.output, r.exitCode) },
+                    stateJSON: { ctx.readData(ctx.paths.gatewayStateJSON) },
+                    capabilities: caps, timeout: Self.probeTimeout
+                ) {
+                    return (refusal, true)
+                }
+                let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+                return (HermesGatewayServiceVerdict.judge(
+                    verb: verb, output: result.output, exitCode: result.exitCode
+                ), false)
             }.value
-            let outcome = HermesGatewayServiceVerdict.judge(
-                verb: verb, output: result.output, exitCode: result.exitCode
-            )
             guard let self else { return }
             self.isBusy = false
             // A newer action superseded this one while the CLI ran — its
             // message and its reload own the UI now.
             guard self.actionGeneration == generation else { return }
+
+            // Scarf declined to send the restart. The note says why and what
+            // to do; it stays until the next action, like a failure, and the
+            // reload shows the gateway exactly as it was.
+            if refused {
+                self.actionFailed = true
+                self.actionMessage = outcome.detail
+                self.load(force: true)
+                return
+            }
 
             // The third arm (P40c): a `.unconfirmed` verdict is not a
             // failure. Neutral wording, `actionFailed` stays false, and the

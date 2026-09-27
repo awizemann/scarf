@@ -157,8 +157,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         )
         let hermesVersion: String? = {
             guard let r = versionResult, r.exitCode == 0 else { return nil }
-            let trimmed = r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return Self.versionHeadline(r.stdoutString)
         }()
 
         // 3. Hermes home size + canonical path. `context.paths.home`
@@ -284,6 +283,16 @@ public final class RemoteBackupService: @unchecked Sendable {
         // Named profiles, for the per-profile `logs` exclusion. Best effort:
         // a listing that fails only means those logs ride along.
         let profileNames = (try? transport.listDirectory(preflight.hermesHomePath + "/profiles")) ?? []
+        // What each home's `cache/` holds, so everything but the durable
+        // subdirectories Hermes keeps can be left out (see
+        // ``runtimeExcludedPaths(profiles:cacheEntries:)``). Best effort,
+        // like the profile listing: a cache that can't be listed rides along.
+        var cacheEntries: [String: [String]] = [:]
+        for dir in ["cache"] + Self.listableProfiles(profileNames).map({ "profiles/\($0)/cache" }) {
+            if let entries = try? transport.listDirectory(preflight.hermesHomePath + "/" + dir) {
+                cacheEntries[dir] = entries
+            }
+        }
         var snapshotted: [String] = []
         do {
             let report = try await takeDatabaseSnapshots(
@@ -292,6 +301,7 @@ public final class RemoteBackupService: @unchecked Sendable {
                 snapshotDir: snapshotDir,
                 options: options,
                 profiles: profileNames,
+                cacheEntries: cacheEntries,
                 timeout: Self.snapshotTimeout(homeBytes: preflight.hermesHomeBytes)
             )
             snapshotted = report.ok.map(\.path) + report.failed
@@ -329,7 +339,8 @@ public final class RemoteBackupService: @unchecked Sendable {
         try Task.checkCancellation()
         let hermesTarball = workDir.appendingPathComponent("hermes.tar.gz")
         let hermesExcludes = Self.hermesExcludes(
-            leaf: hermesLeaf, options: options, databases: snapshotted, profiles: profileNames)
+            leaf: hermesLeaf, options: options, databases: snapshotted, profiles: profileNames,
+            cacheEntries: cacheEntries)
         let hermesTarCmd = Self.tarCommand(
             workDir: preflight.hermesHomePath.deletingLastPathComponent_String(),
             target: hermesLeaf,
@@ -492,8 +503,40 @@ public final class RemoteBackupService: @unchecked Sendable {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// The version line out of `hermes --version`'s banner. The command
+    /// prints several lines — version, install directory, install method,
+    /// Python, OpenAI SDK and, when it checked, an update note
+    /// (`hermes_cli/_startup_fast.py:181-221` @ v2026.9.24) — and the whole
+    /// banner used to be stored as the manifest's version and shown as one
+    /// six-line row. The first `Hermes Agent …` line wins (it has led the
+    /// output since v2026.3.12); failing that, the first non-empty line, so
+    /// a login shell's own chatter before it is skipped. `nil` for nothing.
+    public static func versionHeadline(_ output: String) -> String? {
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return lines.first { $0.hasPrefix("Hermes Agent") } ?? lines.first
+    }
+
     // MARK: - Tar / shell helpers
 
+    /// The `tar -czf -` a backup stage streams, with the one exit status
+    /// that is not a failure mapped to 0.
+    ///
+    /// GNU tar exits 1 when a file changed while it was being read — `file
+    /// changed as we read it`, including a DIRECTORY whose entries changed,
+    /// which a running gateway causes at least once a minute by atomically
+    /// rewriting `gateway_state.json` in the home root
+    /// (`gateway/status.py:743-744` @ v2026.9.24). The archive is complete
+    /// and valid; `--warning=no-file-changed` only hides the message, the
+    /// status stays 1. Treating it as fatal made every backup of a Linux
+    /// host with a live gateway fail. Exit 2 (fatal: an unreadable file, a
+    /// write error) still fails.
+    ///
+    /// Only GNU tar's 1 means that. bsdtar (a Mac) and BusyBox tar exit 1
+    /// for real errors, such as a file they could not open, so there any
+    /// non-zero status still fails. `tar --version`'s output goes to grep,
+    /// never into the archive stream on stdout.
     static func tarCommand(workDir: String, target: String, excludes: [String]) -> String {
         var parts: [String] = ["tar -czf -"]
         for ex in excludes {
@@ -501,8 +544,12 @@ public final class RemoteBackupService: @unchecked Sendable {
         }
         parts.append("-C \(shellQuote(workDir))")
         parts.append(shellQuote(target))
-        return parts.joined(separator: " ")
+        return parts.joined(separator: " ") + "; " + tarExitFilter
     }
+
+    /// See ``tarCommand(workDir:target:excludes:)``.
+    static let tarExitFilter =
+        "scarf_rc=$?; if [ \"$scarf_rc\" -eq 1 ] && tar --version 2>/dev/null | grep -q 'GNU tar'; then exit 0; fi; exit \"$scarf_rc\""
 
     /// Always-on Hermes-tree exclusions, regardless of options: each live
     /// database the snapshot pass found (`databases`, home-relative: they
@@ -535,8 +582,16 @@ public final class RemoteBackupService: @unchecked Sendable {
     ///
     /// `profiles` are the profile directory names found on the host, used
     /// for exclusions that must NOT over-reach (see ``prunedDirs(options:profiles:)``).
+    ///
+    /// Everything `hermes backup` itself leaves out is left out too
+    /// (`hermes_cli/backup.py:46-81,106-118` @ v2026.9.24): the Hermes
+    /// codebase, dependency trees, caches, prior backups and snapshots,
+    /// runtime downloads, pid files and browser profiles — see
+    /// ``hermesAnyDepthExcludes``, ``anyDepthPatterns(leaf:names:)`` and
+    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``.
     static func hermesExcludes(
-        leaf: String, options: BackupManifest.Options, databases: [String], profiles: [String] = []
+        leaf: String, options: BackupManifest.Options, databases: [String], profiles: [String] = [],
+        cacheEntries: [String: [String]] = [:]
     ) -> [String] {
         var excludes: [String] = databases.map { HermesDatabaseScripts.globEscape(leaf + "/" + $0) }
         excludes += [
@@ -548,7 +603,9 @@ public final class RemoteBackupService: @unchecked Sendable {
             "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
         ]
         excludes += homeScoped("gateway_state.json").map { "\(leaf)/\($0)" }
-        excludes += prunedDirs(options: options, profiles: profiles).map { "\(leaf)/\($0)" }
+        excludes += anyDepthPatterns(leaf: leaf, names: hermesAnyDepthExcludes)
+        excludes += prunedDirs(options: options, profiles: profiles, cacheEntries: cacheEntries)
+            .map { "\(leaf)/\($0)" }
         if !options.includeAuth {
             excludes += (homeScoped("auth.json") + homeScoped("auth.json.corrupt")).map { "\(leaf)/\($0)" }
         }
@@ -565,16 +622,135 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// also drop a `logs` folder deep inside a profile's skills, which is
     /// the user's data. A profile missed by the listing keeps its logs,
     /// which only costs archive size.
-    static func prunedDirs(options: BackupManifest.Options, profiles: [String] = []) -> [String] {
+    ///
+    /// Also always the Hermes-managed trees ``runtimeExcludedPaths(profiles:cacheEntries:)``
+    /// names, whatever the options say.
+    static func prunedDirs(
+        options: BackupManifest.Options, profiles: [String] = [], cacheEntries: [String: [String]] = [:]
+    ) -> [String] {
         var dirs: [String] = []
         if !options.includeMcpTokens { dirs += homeScoped("mcp-tokens") }
         if !options.includeLogs {
             dirs.append("logs")
-            dirs += profiles
-                .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+            dirs += listableProfiles(profiles)
                 .map { "profiles/" + HermesDatabaseScripts.globEscape($0) + "/logs" }
         }
+        dirs += runtimeExcludedPaths(profiles: profiles, cacheEntries: cacheEntries)
         return dirs
+    }
+
+    /// Profile directory names that can be spliced into a path.
+    static func listableProfiles(_ profiles: [String]) -> [String] {
+        profiles.filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+    }
+
+    // MARK: - What `hermes backup` leaves out (hermes_cli/backup.py @ v2026.9.24)
+
+    /// `_EXCLUDED_DIRS` (`backup.py:52-69`) without `hermes-agent`, which
+    /// Hermes matches only at the home's root (see
+    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``). Hermes skips these
+    /// at ANY depth (`_should_exclude`, `:270-279`): prior backups and
+    /// state snapshots (each a full state.db copy), trajectory checkpoints,
+    /// dependency trees and tool caches, nested `.git`, and both browser
+    /// profile stores. `browser-profile/` holds copies of the user's real
+    /// browser Cookies and Login Data — a credential store Hermes says must
+    /// never enter an archive — so it is excluded whether or not the user
+    /// included `auth.json`.
+    static let hermesAnyDepthExcludedDirs = [
+        "__pycache__", ".git", "node_modules", "backups", "state-snapshots", "checkpoints",
+        "browser-profiles", "browser-profile", ".venv", "venv", "site-packages",
+        ".cache", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ]
+
+    /// `_EXCLUDED_NAMES` (`:108`: runtime lock and pid files), the `.pyc` /
+    /// `.pyo` half of `_EXCLUDED_SUFFIXES` (`:106`; the SQLite sidecars are
+    /// excluded above) and the updater's `state.db.pre-update-emergency-*`
+    /// backups (`_EXCLUDED_PREFIXES`, `:115-118`; the other prefix is the
+    /// retired-WAL capture, already excluded). Any depth, as in Hermes.
+    static let hermesAnyDepthExcludedFiles = [
+        ".backup.lock", "gateway.pid", "cron.pid", "*.pyc", "*.pyo", "state.db.pre-update-emergency-*",
+    ]
+
+    static var hermesAnyDepthExcludes: [String] { hermesAnyDepthExcludedDirs + hermesAnyDepthExcludedFiles }
+
+    /// How many directories below the home an any-depth pattern reaches on
+    /// BusyBox tar. Eight covers
+    /// `profiles/<name>/skills/<category>/<skill>/node_modules` with room to
+    /// spare; GNU tar and bsdtar reach every depth (see below).
+    static let anyDepthPatternDepth = 8
+
+    /// Exclude patterns for names Hermes skips at any depth BELOW the home:
+    /// `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, ….
+    ///
+    /// Never the bare name. Tar is run as `-C <parent> <leaf>`, and every tar
+    /// also tries an unanchored pattern against the home's own directory, so
+    /// a home whose directory is called `backups` or `venv` would archive
+    /// nothing (Hermes matches home-relative paths, where the home's own
+    /// name never appears).
+    ///
+    /// The per-depth forms are for BusyBox tar: its `*` never crosses `/`
+    /// when creating an archive, and when EXTRACTING it anchors a pattern at
+    /// the start of the member name and compares only as many components as
+    /// the pattern has (`find_list_entry2`), so a bare `x` never matched
+    /// below the top directory at all. GNU tar and bsdtar let `*` cross `/`,
+    /// so there `leaf/*/x` alone already reaches every depth; the extra forms
+    /// only repeat it, and are only ever built from names Hermes excludes at
+    /// any depth anyway.
+    static func anyDepthPatterns(leaf: String, names: [String]) -> [String] {
+        let top = HermesDatabaseScripts.globEscape(leaf)
+        return names.flatMap { name in
+            (0..<anyDepthPatternDepth).map { depth in
+                top + "/" + String(repeating: "*/", count: depth) + name
+            }
+        }
+    }
+
+    /// Hermes-managed runtime trees matched ONLY at the root of a home — the
+    /// root home and each `profiles/<name>/` — because a deeper directory of
+    /// the same name (a skill's `models/`) is user data
+    /// (`_in_excluded_root_dir`, `backup.py:84-93`): `LOCAL_RUNTIME_ROOT_DIRS`
+    /// (`models`, `runtimes`, `node` — GGUF weights, llama.cpp runtimes,
+    /// managed Node; `hermes_constants.py:210`) and `browser_profiles`
+    /// (the Browser Use CLI's Chromium profile, `:78-81`).
+    static let hermesHomeRootExcludedDirs = ["models", "runtimes", "node", "browser_profiles"]
+
+    /// The `cache/` subdirectories Hermes keeps (`_KEPT_CACHE_SUBDIRS`,
+    /// `:83`): media the gateway delivered or received and the citations
+    /// ledger, which nothing can rebuild. Everything else directly under a
+    /// home's `cache/` is regenerable and left out.
+    static let hermesKeptCacheEntries: Set<String> = [
+        "images", "audio", "videos", "documents", "screenshots", "citations",
+    ]
+
+    /// Home-relative paths of the Hermes-managed trees, each named exactly:
+    ///
+    /// - `hermes-agent` at the root only (`backup.py:46-47`, `:278`): the
+    ///   Hermes codebase, venv and `.git` included, which is where a default
+    ///   non-root install puts it (`scripts/install.sh:188`). Restoring it
+    ///   over another host overwrote that host's installed Hermes.
+    /// - ``hermesHomeRootExcludedDirs`` at the root and at each profile root.
+    /// - every entry of a home's `cache/` that is not one of
+    ///   ``hermesKeptCacheEntries`` (`cacheEntries` maps `cache` or
+    ///   `profiles/<name>/cache` to that directory's listing).
+    ///
+    /// Exact per-profile names, never a `profiles/*/…` wildcard: GNU tar and
+    /// bsdtar let `*` cross `/`, so the wildcard would also drop a skill's
+    /// own `models/` deep inside a profile.
+    static func runtimeExcludedPaths(profiles: [String], cacheEntries: [String: [String]]) -> [String] {
+        let homes = [""] + listableProfiles(profiles).map { "profiles/" + HermesDatabaseScripts.globEscape($0) + "/" }
+        var paths = ["hermes-agent"]
+        for home in homes {
+            paths += hermesHomeRootExcludedDirs.map { home + $0 }
+        }
+        for (cacheDir, entries) in cacheEntries.sorted(by: { $0.key < $1.key }) {
+            let dir = cacheDir.split(separator: "/").map { HermesDatabaseScripts.globEscape(String($0)) }
+                .joined(separator: "/")
+            paths += entries
+                .filter { !$0.isEmpty && !$0.contains("/") && !hermesKeptCacheEntries.contains($0) }
+                .sorted()
+                .map { dir + "/" + HermesDatabaseScripts.globEscape($0) }
+        }
+        return paths
     }
 
     /// `name` at the root of the Hermes home and at the root of each
@@ -626,6 +802,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         snapshotDir: String,
         options: BackupManifest.Options,
         profiles: [String],
+        cacheEntries: [String: [String]],
         timeout: TimeInterval
     ) async throws -> HermesDatabaseScripts.SnapshotReport {
         let result: ProcessResult
@@ -634,7 +811,8 @@ public final class RemoteBackupService: @unchecked Sendable {
                 executable: "/bin/bash",
                 args: ["-lc", HermesDatabaseScripts.snapshotAll(
                     home: home, snapshotDir: snapshotDir,
-                    prunedDirs: Self.prunedDirs(options: options, profiles: profiles))],
+                    prunedDirs: Self.prunedDirs(options: options, profiles: profiles, cacheEntries: cacheEntries),
+                    prunedNames: Self.hermesAnyDepthExcludedDirs)],
                 stdin: nil,
                 timeout: timeout
             )

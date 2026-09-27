@@ -299,12 +299,49 @@ struct ProjectTemplateInstaller: Sendable {
     /// ids without parsing the create output, but the name is enough to
     /// find + remove them later. Each name carries the new project's tag
     /// after the template tag, which also makes it unique to this install.
+    /// A cron job's skill references, pointed at where this install puts
+    /// the skills the bundle ships.
+    ///
+    /// Bundled skills land at `skills/templates/<slug>/<name>/`
+    /// (``ProjectTemplateService``), but a job's reference was the author's
+    /// own id — `creative/pixel-art` for a categorized skill, which is what
+    /// Scarf's cron editor stores. Hermes resolves a reference as a direct
+    /// path under the skills dir or as a directory/frontmatter name equal to
+    /// the WHOLE string (`tools/skills_tool.py:345-361` @ v2026.9.24), so
+    /// `creative/pixel-art` never found `templates/<slug>/pixel-art` and every
+    /// run went ahead without the skill ("could not be found",
+    /// `cron/scheduler_prompt.py:190-198`). A bare `pixel-art` would resolve
+    /// by directory name, but Hermes refuses a name two skills share
+    /// (`_collect_skill_candidates`), so the exact path is used.
+    ///
+    /// A bare name the bundle ships (what a current export writes) is always
+    /// rewritten. A `category/name` whose name the bundle ships — what an
+    /// older export wrote — is rewritten only when it does not resolve on
+    /// this host (`resolves`, a direct `<skills>/<ref>/SKILL.md`): a current
+    /// export keeps a reference to a hub or Hermes-bundled skill as it is,
+    /// and when that skill merely shares its name with one the bundle ships,
+    /// it exists here and must keep pointing at itself. Every other
+    /// reference is kept.
+    nonisolated static func installedSkillRefs(
+        _ refs: [String], bundled: [String], slug: String, resolves: (String) -> Bool = { _ in false }
+    ) -> [String] {
+        let shipped = Set(bundled)
+        return refs.map { ref in
+            let leaf = ref.split(separator: "/").last.map(String.init) ?? ref
+            guard shipped.contains(leaf) else { return ref }
+            if ref.contains("/"), resolves(ref) { return ref }
+            return "templates/\(slug)/\(leaf)"
+        }
+    }
+
     nonisolated private func createCronJobs(
         plan: TemplateInstallPlan, projectID: UUID
     ) throws -> [String] {
         guard !plan.cronJobs.isEmpty else { return [] }
 
         var createdNames: [String] = []
+        let transport = context.makeTransport()
+        let skillsDir = context.paths.skillsDir
 
         // Probe the install host once: `--deliver all` is a v0.14+ value, and
         // forwarding it to an older host makes `hermes cron create` argparse-
@@ -338,7 +375,9 @@ struct ProjectTemplateInstaller: Sendable {
                 name: name,
                 deliver: job.deliver,
                 repeatCount: job.repeatCount,
-                skills: job.skills ?? [],
+                skills: Self.installedSkillRefs(
+                    job.skills ?? [], bundled: plan.manifest.contents.skills ?? [], slug: plan.manifest.slug,
+                    resolves: { transport.fileExists(skillsDir + "/" + $0 + "/SKILL.md") }),
                 schedule: job.schedule,
                 prompt: job.prompt.flatMap { $0.isEmpty ? nil : Self.substituteCronTokens($0, plan: plan) },
                 caps: caps,

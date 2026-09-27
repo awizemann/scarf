@@ -39,7 +39,12 @@ struct WebhooksView: View {
 
             if notEnabled {
                 Section("Setup required") {
-                    Text("The webhook gateway platform isn't enabled on this server. Run `hermes setup` from the Mac app or a shell to enable it.")
+                    // `hermes webhook` checks only config.yaml's
+                    // `platforms.webhook.enabled` (`hermes_cli/webhook.py:54-55`
+                    // @ v2026.9.24); `hermes setup` writes only WEBHOOK_ENABLED
+                    // to .env, so it never unlocks this list. Same advice as
+                    // the Mac Webhooks view.
+                    Text("The webhook platform isn't enabled on this server. Turn on Webhook in the Mac app's Platforms → Webhook, or set platforms.webhook.enabled: true in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

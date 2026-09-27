@@ -600,6 +600,19 @@ final class HealthViewModel {
         let svc = fileService
         let ctx = context
         Task { [weak self] in
+            // Stop + start on a gateway run by hand kills it, and the start
+            // can't bring it back (it drives a service manager, or installs a
+            // launchd plist on macOS). Same rule as every `gateway restart`
+            // — see ``HermesGatewayRestartGuard``.
+            if let refusal = await Task.detached(operation: { svc.restartRefusal(stopThenStart: true) }).value {
+                guard let self else { return }
+                self.isControlBusy = false
+                // Kept on screen (no settle timer clears it): it says what
+                // to do instead. The next control action replaces it.
+                self.actionMessage = refusal.detail
+                self.refreshProcessStatus()
+                return
+            }
             let stop = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
             let start = await Task.detached { Self.runGateway(.start, ctx) }.value
@@ -697,6 +710,30 @@ final class HealthViewModel {
                 continue
             }
 
+            // The `─` * 60 rule that opens both footers ends the last
+            // section. `doctor`'s summary follows it with a numbered list of
+            // remaining issues (`  1. Install daytona SDK: pip install
+            // daytona`, `hermes_cli/doctor.py:142-163` @ v2026.9.24, the same
+            // shape back to v2026.3.12), and a number-prefixed line with an
+            // early colon parsed as a passing `Key: value` check inside the
+            // still-open section. `status` ends with the same rule
+            // (`status.py:351`) and only hints after it. Nothing after the
+            // rule is a check until another ◆ header opens a section.
+            if Self.isFooterRuleStatic(trimmed) {
+                if !currentTitle.isEmpty {
+                    sections.append(HealthSection(
+                        title: currentTitle,
+                        icon: iconForSectionStatic(currentTitle),
+                        checks: currentChecks
+                    ))
+                }
+                currentTitle = ""
+                currentChecks = []
+                continue
+            }
+            // Outside a section, only a ◆ header means anything.
+            if currentTitle.isEmpty { continue }
+
             if trimmed.hasPrefix("✓ ") {
                 let text = String(trimmed.dropFirst(2))
                 let (label, detail) = splitCheckStatic(text)
@@ -773,6 +810,13 @@ final class HealthViewModel {
             ))
         }
         return sections
+    }
+
+    /// The footer rule `status` and `doctor` print before their summary:
+    /// a line made only of `─`. The box-drawing banner lines start with `┌`
+    /// or `└`, so they never match.
+    nonisolated static func isFooterRuleStatic(_ trimmed: String) -> Bool {
+        trimmed.count >= 20 && trimmed.allSatisfy { $0 == "─" }
     }
 
     /// A `hermes status` row whose ✓/✗/⚠ mark sits after its label:
