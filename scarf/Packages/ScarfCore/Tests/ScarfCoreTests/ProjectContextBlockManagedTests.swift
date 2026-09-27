@@ -185,7 +185,7 @@ import Foundation
             projectName: "Tracker", projectPath: "/srv/tracker", configFieldsLine: "(none)", projectId: id
         ))
         #expect(block.contains("--name \"\(prefix) <short label>\""))
-        #expect(block.contains("--workdir /srv/tracker"))
+        #expect(block.contains("--workdir \"/srv/tracker\""))
         // Positional schedule + prompt, as `hermes cron create` takes them.
         #expect(block.contains("\"<schedule>\" \"<prompt>\""))
 

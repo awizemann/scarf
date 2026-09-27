@@ -12,8 +12,8 @@ User's request: {{argument | default: "(no specifics yet — ask the user what t
 What you need from the user:
 
 1. **What the job does** — the prompt the agent will receive on each run. Make it self-contained: the job runs with no memory of this chat.
-2. **Schedule** — Hermes accepts a cron expression (`"0 9 * * 1-5"`), an interval (`"30m"`, `"every 2h"`), or a one-shot timestamp. If the user speaks in plain words ("every weekday at 9am"), turn that into a cron expression yourself and confirm it with them. Cron times are in the Hermes host's timezone (config `timezone`, else the server's local time).
-3. **Delivery** — where results land: `origin`, `local` (keep the output on the host only), a platform such as `telegram`, `discord` or `signal`, or `platform:chat_id` for a specific chat. Leave it out to use Hermes's default.
+2. **Schedule** — Hermes accepts a cron expression (`"0 9 * * 1-5"`), an interval (`"30m"`, `"every 2h"`), or a one-shot timestamp. If the user speaks in plain words ("every weekday at 9am"), turn that into a cron expression yourself and confirm it with them. Cron times are in the Hermes host's timezone (`HERMES_TIMEZONE` or config `timezone`, else the server's local time).
+3. **Delivery** — where results land: `local` (keep the output on the host only), a platform such as `telegram`, `discord` or `signal`, or `platform:chat_id` for a specific chat. Leave it out to use Hermes's default.
 4. **(Optional) Model** — the global default is used otherwise.
 
 Then run (the schedule and the prompt are positional, in that order, after the options):

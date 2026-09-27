@@ -372,7 +372,7 @@ public enum ProjectContextBlock {
             // @ v2026.9.24), so a job the agent names any other way runs
             // but never shows up as this project's.
             let prefix = "[proj:\(projectId.uuidString)]"
-            lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --name \"\(prefix) <short label>\" --workdir \(projectPath) \"<schedule>\" \"<prompt>\"` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project. Always start the name with `\(prefix) ` exactly: Scarf attributes cron jobs to this project only by that prefix (the list above, the project's cron panel, pausing on archive), so a job without it is invisible here.")
+            lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --name \"\(prefix) <short label>\" --workdir \"\(projectPath)\" \"<schedule>\" \"<prompt>\"` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project. Always start the name with `\(prefix) ` exactly: Scarf attributes cron jobs to this project only by that prefix (the list above, the project's cron panel, pausing on archive), so a job without it is invisible here.")
         } else {
             lines.append("- **Cron jobs.** Schedule recurring work with `hermes cron create --workdir \(projectPath) …` so the job inherits this project's AGENTS.md context and resolves relative paths inside the project.")
         }
