@@ -1,10 +1,9 @@
 ---
 name: scarf-miniapp-author
 description: Author a Scarf mini-app — a small sandboxed web surface (HTML/CSS/JS) that renders inside a project's cockpit and talks to the bound Hermes session + project data through the versioned window.scarf bridge. Use to build a bespoke panel (a task board, an approval queue, a chart, a data table) for a project.
-version: 1.0.0
+version: 1.0.1
 author: Alan Wizemann
 license: MIT
-platforms: [macos]
 metadata:
   hermes:
     tags: [Scarf, mini-app, webview, bridge, cockpit, authoring]

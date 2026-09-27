@@ -282,6 +282,53 @@ struct SkillBootstrapServiceTests {
         #expect(!text.contains("cron list --json"))
     }
 
+    /// S10-F5. Scarf bootstraps these skills onto every host it manages,
+    /// including Linux servers over SSH. Hermes hides a skill whose
+    /// `platforms:` list doesn't match the host OS and `skill_view` refuses
+    /// it (`agent/skill_utils.py:128-145`, `tools/skills_tool.py:207,604-605`
+    /// @ v2026.9.24), so a macOS-only tag broke New Project and mini-app
+    /// authoring on remote Linux hosts. Nothing in either skill needs macOS
+    /// on the Hermes side.
+    @Test("no bundled skill restricts the platforms Hermes will load it on")
+    func bundledSkillsLoadOnEveryHostOS() throws {
+        let bundleDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()          // scarfTests
+            .deletingLastPathComponent()          // scarf
+            .appendingPathComponent("scarf/Resources/BuiltinSkills.bundle")
+        let skills = try FileManager.default.contentsOfDirectory(
+            at: bundleDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ).filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("SKILL.md").path) }
+        #expect(!skills.isEmpty)
+        for skill in skills {
+            let text = try String(contentsOf: skill.appendingPathComponent("SKILL.md"), encoding: .utf8)
+            // Frontmatter only: between the first two `---` lines.
+            let frontmatter = text.components(separatedBy: "\n---").first ?? ""
+            let platformLines = frontmatter
+                .split(separator: "\n")
+                .filter { $0.hasPrefix("platforms:") }
+            #expect(
+                platformLines.isEmpty || platformLines.allSatisfy { $0.contains("linux") },
+                Comment(rawValue: "\(skill.lastPathComponent) would be hidden on a Linux host")
+            )
+        }
+    }
+
+    /// Dropping `platforms:` only reaches hosts that already have a copy if
+    /// the version moves: the bootstrap replaces an installed skill only
+    /// when it is older than the bundled one.
+    @Test("the platforms fix ships with a version bump the gate will act on")
+    func platformsFixIsVersionBumped() throws {
+        let bundleDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scarf/Resources/BuiltinSkills.bundle")
+        for (name, previous) in [("scarf-template-author", "2.0.0"), ("scarf-miniapp-author", "1.0.0")] {
+            let data = try Data(contentsOf: bundleDir.appendingPathComponent("\(name)/SKILL.md"))
+            let version = try #require(SkillBootstrapService.parseVersion(data))
+            #expect(SkillBootstrapService.semverCompare(version, previous) > 0, "\(name) is still \(version)")
+        }
+    }
+
     @Test func parseVersionReadsFrontmatterOnly() {
         #expect(SkillBootstrapService.parseVersion(Data("---\nversion: 2.0.0\n---\n".utf8)) == "2.0.0")
         #expect(SkillBootstrapService.parseVersion(Data("---\nname: x\n---\nversion: 9.9.9\n".utf8)) == nil)
