@@ -94,7 +94,9 @@ struct RestoreServerSheet: View {
                 Text("Source").font(.subheadline).bold().foregroundStyle(.secondary)
                 row(label: "Server", value: m.source.displayName)
                 row(label: "Host", value: m.source.host, mono: true)
-                row(label: "Hermes version", value: m.source.hermesVersion ?? "(unknown)")
+                // An archive made before R18a stored the whole multi-line
+                // `hermes --version` banner; show its version line only.
+                row(label: "Hermes version", value: m.source.hermesVersion.flatMap(RemoteBackupService.versionHeadline) ?? "(unknown)")
                 row(label: "Backup time", value: m.createdAt)
                 row(label: "Hermes size", value: ByteCountFormatter.string(fromByteCount: m.hermes.tarballSize, countStyle: .file))
                 row(label: "Projects", value: "\(m.projects.count)")

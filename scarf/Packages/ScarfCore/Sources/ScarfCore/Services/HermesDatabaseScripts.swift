@@ -156,10 +156,16 @@ enum HermesDatabaseScripts {
     /// reported as `SCARF_DB_UNNAMEABLE`, never silently dropped),
     /// `SCARF_ROOT_STATEDB` when the home has a state.db at all, then
     /// `SCARF_SNAPSHOT_DONE`.
-    static func snapshotAll(home: String, snapshotDir: String, prunedDirs: [String]) -> String {
+    ///
+    /// `prunedNames` are directory names skipped at any depth (the trees
+    /// `hermes backup` never walks, ``RemoteBackupService/hermesAnyDepthExcludedDirs``):
+    /// a database under `backups/` or `state-snapshots/` is an old copy of
+    /// one this pass already snapshots, not a database of its own.
+    static func snapshotAll(home: String, snapshotDir: String, prunedDirs: [String], prunedNames: [String] = []) -> String {
         var prunes = ["-path './\(snapshotDirPrefix)*'", "-path './\(stagingDirPrefix)*'",
                       "-name '\(retiredWALPattern)'"]
         prunes += prunedDirs.map { "-path \(q("./" + $0))" }
+        prunes += prunedNames.map { "-type d -name \(q($0))" }
         return """
         \(leftoverCleanup(home: home))
         cd \(q(home)) || exit 1

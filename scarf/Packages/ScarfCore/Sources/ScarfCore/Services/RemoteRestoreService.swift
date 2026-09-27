@@ -262,7 +262,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
             stdin: nil,
             timeout: 30
         )
-        let resolvedVersion = versionProbe?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedVersion = versionProbe.flatMap { RemoteBackupService.versionHeadline($0.stdoutString) }
         let home = (resolvedHome?.isEmpty == false) ? resolvedHome : nil
         let hermesHome = Self.resolveTargetHermesHome(configured: context.paths.home, userHome: home)
         var holders: DBHolderProbe?
@@ -1112,19 +1112,77 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// or older archive that carries them: they describe some other image
     /// of their database, and SQLite would replay them over the restored
     /// one. Hermes's own import skips them for the same reason
-    /// (`hermes_cli/backup.py:946-951` @ v2026.9.24). The patterns are
-    /// unanchored, so they reach every subdirectory.
+    /// (`hermes_cli/backup.py:946-951` @ v2026.9.24).
+    ///
+    /// Nor anything `hermes backup` leaves out (``RemoteBackupService/hermesExcludes(leaf:options:databases:profiles:cacheEntries:)``),
+    /// which archives made before R18a carried: the Hermes codebase
+    /// (`hermes-agent/`, venv included), runtime downloads, dependency trees,
+    /// browser profiles. Extracted over the target they replaced the target's
+    /// own installed Hermes — with venv scripts whose shebangs name the
+    /// source's paths — and its platform binaries. Also skipped: the runtime
+    /// files `hermes import` never restores (`_IMPORT_SKIP_NAMES`,
+    /// `backup.py:128`), which name the source's processes.
+    ///
+    /// Extraction matches excludes differently per tar. GNU tar and bsdtar
+    /// try an unanchored pattern at every component, so a bare name reaches
+    /// every depth. BusyBox tar anchors an extract exclude at the start of
+    /// the member name and compares only as many components as the pattern
+    /// has (`find_list_entry2`), so there `*.db-wal` never matched anything
+    /// below the archive's top directory. Each any-depth pattern is therefore
+    /// also given at every depth below the top directory up to
+    /// ``extractPatternDepth``: `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, …. GNU tar
+    /// and bsdtar let `*` cross `/`, so there those forms add nothing; they
+    /// are only ever used for names Hermes excludes at any depth anyway.
+    /// The root-scoped trees (`models/` and friends) are named exactly, for
+    /// the root and for each profile the archive's database list names —
+    /// never with a wildcard, which would reach a skill's own `models/`.
     static func hermesExtractCommand(hermesHome: String, archiveLeaf: String, databases: [String]) -> String {
         let home = shellQuote(hermesHome)
         // The databases by exact path (a `*.db` pattern would also drop a
         // DIRECTORY named `x.db`); sidecars and retired-WAL captures by
         // pattern.
+        let leafPattern = HermesDatabaseScripts.globEscape(archiveLeaf)
+        let anyDepth = ["*.db-wal", "*.db-shm", "*.db-journal", HermesDatabaseScripts.retiredWALPattern]
+            + RemoteBackupService.hermesAnyDepthExcludes + importSkippedNames
+        let profiles = profileNames(inDatabasePaths: databases)
         let patterns = databases.map { HermesDatabaseScripts.globEscape(archiveLeaf + "/" + $0) }
-            + ["*.db-wal", "*.db-shm", "*.db-journal", HermesDatabaseScripts.retiredWALPattern]
+            + anyDepth
+            + anyDepth.flatMap { name in
+                (0..<extractPatternDepth).map { depth in
+                    leafPattern + "/" + String(repeating: "*/", count: depth) + name
+                }
+            }
+            + RemoteBackupService.runtimeExcludedPaths(profiles: profiles, cacheEntries: [:])
+                .map { leafPattern + "/" + $0 }
         let excludes = patterns
             .map { "--exclude=\(shellQuote($0))" }
             .joined(separator: " ")
         return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
+    }
+
+    /// How deep below the archive's top directory an any-depth extract
+    /// exclude reaches on BusyBox tar (see ``hermesExtractCommand(hermesHome:archiveLeaf:databases:)``).
+    /// Eight covers `profiles/<name>/skills/<category>/<skill>/node_modules`
+    /// with room to spare.
+    static let extractPatternDepth = 8
+
+    /// `_IMPORT_SKIP_NAMES` (`hermes_cli/backup.py:128` @ v2026.9.24): runtime
+    /// state that names the source machine's processes, which `hermes import`
+    /// never writes, matched by basename at any depth.
+    static let importSkippedNames = ["gateway_state.json", "gateway.pid", "cron.pid", "gateway.lock", "processes.json"]
+
+    /// The profile names an archive's database list shows
+    /// (`profiles/<name>/…`). A profile with no database is missed, and
+    /// keeps whatever runtime trees an older archive carried for it.
+    static func profileNames(inDatabasePaths databases: [String]) -> [String] {
+        var seen: [String] = []
+        for path in databases {
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count >= 3, parts[0] == "profiles" else { continue }
+            let name = String(parts[1])
+            if !seen.contains(name) { seen.append(name) }
+        }
+        return seen
     }
 
     /// Home-relative database paths to look for holders of at inspect time:
