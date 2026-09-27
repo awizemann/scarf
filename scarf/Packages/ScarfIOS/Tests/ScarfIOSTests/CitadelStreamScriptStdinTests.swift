@@ -12,7 +12,7 @@ struct CitadelStreamScriptStdinTests {
 
     @Test func theCommandCarriesOnlyTheByteCount() {
         let command = CitadelServerTransport.streamScriptCommand(byteCount: 6269)
-        #expect(command == #"PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH" head -c 6269 | /bin/sh"#)
+        #expect(command == #"PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin" head -c 6269 | /bin/sh"#)
     }
 
     /// Code-only scan (comments dropped), the P53 convention: the stdin path

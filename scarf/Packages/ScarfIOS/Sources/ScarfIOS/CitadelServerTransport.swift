@@ -284,7 +284,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// Same PATH guard `asyncRunProcess` uses, so `head` and `sh` resolve on
     /// hosts with a stripped exec PATH.
     nonisolated static func streamScriptCommand(byteCount: Int) -> String {
-        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" "
+        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + "head -c \(byteCount) | /bin/sh"
     }
 
@@ -846,10 +846,11 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // scan), none of whose output is verdict-matched, and the Mac twin
         // (`SSHTransport.streamScript` → `SSHScriptRunner`) does not carry it
         // either. Parity is the point in both directions.
-        // The PATH directories are `HermesConfigReader.pathPrelude`'s, so
-        // iOS and the Mac look for `hermes` in the same places.
+        // The Mac's directories (`HermesConfigReader.hermesInstallDirs`),
+        // with `~/.hermes/bin` AFTER the host's PATH: it holds Hermes' own
+        // `uv`/`uvx`, which must not shadow the user's.
         let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
-            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + hermesHome
             + Self.commandLine(executable: executable, args: args, binaryHint: config.hermesBinaryHint)
         // Citadel's `executeCommand` discards captured output when the
