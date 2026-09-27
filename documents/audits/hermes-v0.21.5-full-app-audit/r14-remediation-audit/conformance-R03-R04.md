@@ -1,0 +1,2 @@
+R03+R04 conformance: 14 RESOLVED, 1 RESOLVED-NO-TEST (S03-F6 scarf-cron.md — add a content guard test). All capability floors verified against tags. Carry-overs RESOLVED (inherited creds read-only UI + iOS cron badge + scarf-cron origin untested).
+Residuals: S06-F2 two plan callers pass .empty caps (ChatViewModel:834 strip-prefix, CredentialPoolsView:1213) — harmless today; S08-F3 raw cron expression displays (CronView 399/751, BotRoutinesView 168, ProjectCockpitView 546) lack zone note.

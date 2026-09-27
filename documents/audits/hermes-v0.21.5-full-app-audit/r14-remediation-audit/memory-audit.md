@@ -1,0 +1,1 @@
+Memory/wiki audit: 9 new (7 KEEP/FIX), 24 modified. Citations spot-checked ~90, floors correct. Actions applied by memory-maintenance agent (see its report). Code-side leftovers → R15: HermesCapabilities.swift:709-710 comment says agent.approval_mode = yolo (should be approvals.mode: off).

@@ -1,0 +1,3 @@
+R01+R02 conformance (integration c2aa9e62): 10 RESOLVED, 1 RESOLVED-NO-TEST (S09-F5 one-line force reload), 0 PARTIAL/MISSING/REFUTED.
+Carry-overs R01: Linear /mcp, unmodelled tools keys kept, indent-following, preserveInclude, blank include, managed refusal, layout refusals, hasMCPEmptyIncludeWhitelist floor verified (v2026.8.27) — all RESOLVED with tests.
+Gaps: no test drives OAuth routing (catalog vs direct vs gate) as a whole; S09-F4 kept browser default (paste path) instead of device default — defensible; R02 has no Hermes-side _scan_profile_flag round-trip test; S13-F3 remote cat wiring and S13-F4 iOS exit-code branch untested; Citadel test is source-scan only.

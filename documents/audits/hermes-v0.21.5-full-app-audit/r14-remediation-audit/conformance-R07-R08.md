@@ -1,0 +1,2 @@
+R07+R08 conformance: 10 RESOLVED, 1 RESOLVED-NO-TEST (S03-F5 remote slash bootstrap: only local-skip guard tested; positive paths untested; iPhone-only users still never get /scarf-* — accepted via wiki doc). Carry-overs all RESOLVED (caption untested, UI text).
+Gaps: S07-F2 no config-derived fallback for pre-served_profiles records (Hermes status.py:1285 has one); PlatformsViewModel/ToolsViewModel consumers untested (one-line swaps); S15-F3 real ssh argv/stdin plumbing untested; dash probe test skipped on macOS.

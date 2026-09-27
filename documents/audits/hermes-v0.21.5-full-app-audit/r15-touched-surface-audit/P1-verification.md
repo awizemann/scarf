@@ -1,0 +1,5 @@
+R15 P1 verification (integration 8b311060, Hermes v2026.9.24): all CONFIRMED P1.
+T5-F1 Restart on a no-service gateway: _cmd_restart runs run_gateway in the CLI process (gateway.py:4977-4981, no detach); Scarf offers Restart unconditionally and its 30/60 s timeout SIGTERMs the new gateway.
+T7-F1 GNU tar exit 1 "file changed as we read it" (even for an excluded file in a scanned dir); --warning=no-file-changed still exits 1. Fix: accept tar exit 1, fail on >=2, both tar stages.
+T7-F2 home tarball includes hermes-agent/ (default non-root install, install.sh:188,434-438), venvs, node, runtimes, models, backups, caches, browser-profile(s) (credential store) — all excluded by hermes_cli/backup.py:46-81,108; restore extracts over target. Not a recorded decision. Fix: mirror backup.py exclusion sets in hermesExcludes, snapshot prunes and hermesExtractCommand.
+T2-F1 Dictionary(uniqueKeysWithValues:) traps on duplicate project paths at SessionsViewModel:406-408, IOSDashboardViewModel:129-131, ChatViewModel:2973-2975, RemoteRestoreService:450-452; addProject and template installer allow duplicate paths.
