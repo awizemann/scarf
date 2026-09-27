@@ -1237,6 +1237,13 @@ struct ModelPickerSheet: View {
             if isSelectedProviderSubscriptionGated { return true }
             return !overlayModelID.trimmingCharacters(in: .whitespaces).isEmpty
         }
+        // A provider Hermes can't route (S06-F1) — e.g. the unlisted one a
+        // saved config restored — must not be saved back.
+        if HermesRoutableProviders.isRoutable(
+            selectedProviderID, capabilities: capabilitiesStore?.capabilities ?? .empty
+        ) == false {
+            return false
+        }
         return !selectedModelID.isEmpty
     }
 
@@ -1359,6 +1366,11 @@ struct ModelPickerSheet: View {
         if providers.contains(where: { $0.providerID == initialProvider }) { return initialProvider }
         let canonical = ModelCatalogService.canonicalProviderID(initialProvider, capabilities: capabilities)
         if providers.contains(where: { $0.providerID == canonical }) { return canonical }
+        // A saved provider this Hermes can't route (S06-F1) has no row by
+        // design — select nothing, so Save can't write it straight back.
+        if HermesRoutableProviders.isRoutable(initialProvider, capabilities: capabilities) == false {
+            return ""
+        }
         // Neither matched — leave it unchanged rather than silently
         // substituting the first provider; the existing "no row selected"
         // fallback behavior for a truly unknown ID is unaffected.

@@ -68,6 +68,30 @@ public enum ModelPreflight: Sendable {
         return trimmed.isEmpty || trimmed == "unknown"
     }
 
+    /// The configured `model.provider` when this Hermes can't route it, else
+    /// nil (S06-F1). Hermes resolves the provider before looking up any key
+    /// and fails with "Unknown provider '<id>'"
+    /// (`hermes_cli/auth.py:1500-1509` @ v2026.9.24), so a config saved from
+    /// an older Scarf picker (which offered every models.dev provider) chats
+    /// into an error, or onto some other provider. Nil — no warning — when
+    /// the provider is unset, when the host is not one
+    /// ``HermesRoutableProviders`` applies to (older or undetected), and
+    /// when config.yaml defines a custom endpoint under that name, or has
+    /// custom-provider entries Scarf can't read (Hermes may route the name
+    /// through them). A warning, not a block: a user plugin on the
+    /// host can register names Scarf can't see.
+    public static func unroutableProvider(
+        _ config: HermesConfig, capabilities: HermesCapabilities
+    ) -> String? {
+        let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isUnset(provider), !config.hasUnreadCustomProviders,
+              !config.namedCustomProviders.contains(
+                  provider.lowercased().replacingOccurrences(of: " ", with: "-")),
+              HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
+        else { return nil }
+        return provider
+    }
+
     /// Result of a `model.default` ↔ `model.provider` mismatch check.
     /// Captures the case where `model.default` carries a `<provider>/...`
     /// prefix that doesn't match the standalone `model.provider` key —

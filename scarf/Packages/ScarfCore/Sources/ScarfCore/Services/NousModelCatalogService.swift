@@ -291,7 +291,7 @@ public struct NousModelCatalogService: Sendable {
 
     /// An ISO-8601 timestamp as Hermes writes it (`datetime.isoformat()`,
     /// with or without fractional seconds, `Z` or an offset, or naive UTC).
-    static func parseISODate(_ raw: String) -> Date? {
+    public static func parseISODate(_ raw: String) -> Date? {
         var text = raw
         if text.hasSuffix("Z") { text = String(text.dropLast()) + "+00:00" }
         let hasZone = text.range(of: #"[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil

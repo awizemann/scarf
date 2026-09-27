@@ -2389,6 +2389,32 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// unknown provider verbatim rather than resolving to `openai-codex`.
     public var hasChatGPTCodexAliases: Bool { isV0214OrLater }
 
+    /// Whether Scarf's table of provider names Hermes can route
+    /// (``HermesRoutableProviders``) applies to this host (S06-F1). The
+    /// table is `resolve_runtime_provider`'s accepted set:
+    /// `auth.resolve_provider` (`hermes_cli/auth.py:1500-1509` @
+    /// `v2026.9.24`) over `PROVIDER_REGISTRY` plus the plugin rows
+    /// `hermes_cli/auth_plugin_providers.py` mirrors in, the
+    /// `_PROVIDER_ALIASES` table, and the name-only shortcuts in
+    /// `hermes_cli/runtime_provider.py` / `runtime_provider_custom.py`.
+    /// `scripts/check-hermes-tables.py` lane 8 derives it statically and
+    /// yields the same 194 names at `v2026.9.21` and `v2026.9.24`; below
+    /// `v2026.9.21` `auth_plugin_providers.py` does not exist and plugin
+    /// providers registered differently, so the table was never derived
+    /// there. Older and undetected hosts keep the unfiltered roster and no
+    /// "can't route" warning, exactly as before.
+    public var hasRoutableProviderTable: Bool { isV0214OrLater }
+
+    /// Whether Hermes rewrites DeepSeek's retired `deepseek-chat` /
+    /// `deepseek-reasoner` to `deepseek-flash` (`_DEEPSEEK_RETIRED_ALIASES`,
+    /// `hermes_cli/model_normalize.py:94-95` @ `v2026.9.24`). Commit
+    /// `6964eebd35` introduced it; `git tag --contains` puts it first in
+    /// `v2026.9.11` (0.21.2). At `v2026.9.7` (0.21.1) `_normalize_for_deepseek`
+    /// sent both, and every other non-V-series id, to `deepseek-v4-flash`.
+    /// Picks the target of ``ModelCatalogService/resolveModelAlias(providerID:modelID:capabilities:)``
+    /// (S06-F4).
+    public var hasDeepSeekFlashRetiredAlias: Bool { isV0212OrLater }
+
     /// Whether `web.search_backend: openai-native` is a selectable Web
     /// Tools search backend. `plugins/web/openai_native/` (a new plugin
     /// directory, `provider.py:68` `NAME = "openai-native"`) first appears
