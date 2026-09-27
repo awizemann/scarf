@@ -514,6 +514,17 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// `leaf` is the home's own directory name: `.hermes` for a default
     /// install, something else for a server whose Hermes home was
     /// configured elsewhere.
+    ///
+    /// Every named profile is a Hermes home of its own, under
+    /// `profiles/<name>/`, with its own `auth.json`, `mcp-tokens/` and
+    /// `gateway_state.json` (`hermes_cli/profiles.py:174-177`,
+    /// `hermes_cli/auth.py:481-482`, `tools/mcp_oauth.py:229-232`
+    /// @ v2026.9.24). So each credential and runtime-state exclusion is made
+    /// twice: once at the home's root and once as `profiles/*/…`. The `*`
+    /// crosses `/` in both GNU tar and bsdtar exclude patterns, so the
+    /// profile form also drops a file of that exact name deeper inside a
+    /// profile: over-excluding a stray `auth.json` is the safe direction
+    /// when the user asked for no credentials.
     static func hermesExcludes(leaf: String, options: BackupManifest.Options, databases: [String]) -> [String] {
         var excludes: [String] = databases.map { HermesDatabaseScripts.globEscape(leaf + "/" + $0) }
         excludes += [
@@ -523,20 +534,30 @@ public final class RemoteBackupService: @unchecked Sendable {
             HermesDatabaseScripts.retiredWALPattern,
             "\(leaf)/\(HermesDatabaseScripts.snapshotDirPrefix)*",
             "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
-            "\(leaf)/gateway_state.json",
         ]
+        excludes += homeScoped("gateway_state.json").map { "\(leaf)/\($0)" }
         excludes += prunedDirs(options: options).map { "\(leaf)/\($0)" }
-        if !options.includeAuth { excludes.append("\(leaf)/auth.json") }
+        if !options.includeAuth {
+            excludes += homeScoped("auth.json").map { "\(leaf)/\($0)" }
+        }
         return excludes
     }
 
-    /// Home-relative directories the backup leaves out entirely, so their
-    /// databases (if any) are not snapshotted either.
+    /// Home-relative paths the backup leaves out entirely, so their
+    /// databases (if any) are not snapshotted either. Each is listed for
+    /// the root home and for every profile home (see
+    /// ``hermesExcludes(leaf:options:databases:)``).
     static func prunedDirs(options: BackupManifest.Options) -> [String] {
         var dirs: [String] = []
-        if !options.includeMcpTokens { dirs.append("mcp-tokens") }
+        if !options.includeMcpTokens { dirs += homeScoped("mcp-tokens") }
         if !options.includeLogs { dirs.append("logs") }
         return dirs
+    }
+
+    /// `name` at the root of the Hermes home and at the root of each
+    /// profile home.
+    static func homeScoped(_ name: String) -> [String] {
+        [name, "profiles/*/\(name)"]
     }
 
     // MARK: - Database snapshots
