@@ -3270,12 +3270,16 @@ final class ChatController {
     /// Called by `PermissionSheet`.
     func respondToPermission(requestId: Int, optionId: String) async {
         guard let client else { return }
-        await client.respondToPermission(requestId: requestId, optionId: optionId)
-        lastPermissionAnsweredAt = Date()
         // Pop by id, not "the head": a second request can arrive while
         // this sheet is open, and the head may no longer be the one the
-        // user just answered.
+        // user just answered. Popped BEFORE the reply goes out, as on the
+        // Mac: Hermes closes the request's tool call once it has the
+        // answer, and a close that finds the request still queued is read
+        // as Hermes having given up waiting
+        // (`RichChatViewModel.closePermissionHermesSettled`).
         vm.resolvePermission(requestId: requestId)
+        await client.respondToPermission(requestId: requestId, optionId: optionId)
+        lastPermissionAnsweredAt = Date()
     }
 }
 

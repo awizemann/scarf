@@ -402,15 +402,23 @@ public struct ACPPermissionRequestEvent: Sendable {
     public let toolCallTitle: String
     public let toolCallKind: String
     public let options: [(optionId: String, name: String)]
+    /// The request's own tool-call id (`perm-check-N` / `edit-approval-N`
+    /// on Hermes, acp_adapter/permissions.py:54-64 @ v2026.9.24). Hermes
+    /// closes that id with a `tool_call_update` once it has an answer —
+    /// including when it gave up waiting and denied the tool itself.
+    /// Empty when the request carried none.
+    public let toolCallId: String
 
     public init(
         toolCallTitle: String,
         toolCallKind: String,
-        options: [(optionId: String, name: String)]
+        options: [(optionId: String, name: String)],
+        toolCallId: String = ""
     ) {
         self.toolCallTitle = toolCallTitle
         self.toolCallKind = toolCallKind
         self.options = options
+        self.toolCallId = toolCallId
     }
 }
 
@@ -595,7 +603,8 @@ public enum ACPEventParser {
         let event = ACPPermissionRequestEvent(
             toolCallTitle: toolCall["title"] as? String ?? "",
             toolCallKind: toolCall["kind"] as? String ?? "other",
-            options: options
+            options: options,
+            toolCallId: toolCall["toolCallId"] as? String ?? ""
         )
         return .permissionRequest(sessionId: sessionId, requestId: requestId, request: event)
     }

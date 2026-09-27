@@ -474,6 +474,30 @@ public final class RichChatViewModel {
         permissionQueue.removeAll { $0.requestId == requestId }
     }
 
+    /// Hermes closed a permission request's own tool call while the
+    /// request was still on screen. Scarf answers by popping the request
+    /// before its reply is even sent, so a close for a request still in
+    /// the queue means Hermes settled it WITHOUT the user: it waited
+    /// `approvals.timeout` (300 s by default), cancelled the request,
+    /// denied the tool and sent `status: failed` for the id
+    /// (acp_adapter/permissions.py:94-113 @ v2026.9.24). Pre-fix the
+    /// sheet stayed up and a later Allow went nowhere while the user
+    /// believed the command ran.
+    ///
+    /// Hosts before v0.21.4 never send this close, so nothing changes
+    /// for them (C1). Only reached for ids that never had a tool-call
+    /// start, so a real tool's completion can never pop a request.
+    func closePermissionHermesSettled(_ update: ACPToolCallUpdateEvent) {
+        guard !update.toolCallId.isEmpty,
+              let settled = permissionQueue.first(where: { $0.toolCallId == update.toolCallId })
+        else { return }
+        resolvePermission(requestId: settled.requestId)
+        if update.status != "completed" {
+            let what = settled.title.isEmpty ? String(localized: "the tool") : "“\(settled.title)”"
+            transientHint = String(localized: "Hermes stopped waiting for your answer and denied \(what).")
+        }
+    }
+
     /// Invoked with the `requestId` of every queued permission request
     /// that `clearPendingPermissions()` drops, so the owner can answer
     /// the agent's still-open `session/request_permission` JSON-RPC
@@ -1903,17 +1927,22 @@ public final class RichChatViewModel {
         public let title: String
         public let kind: String
         public let options: [(optionId: String, name: String)]
+        /// The request's tool-call id, which Hermes closes when it stops
+        /// waiting (see `ACPPermissionRequestEvent.toolCallId`).
+        public let toolCallId: String
 
         public init(
             requestId: Int,
             title: String,
             kind: String,
-            options: [(optionId: String, name: String)]
+            options: [(optionId: String, name: String)],
+            toolCallId: String = ""
         ) {
             self.requestId = requestId
             self.title = title
             self.kind = kind
             self.options = options
+            self.toolCallId = toolCallId
         }
     }
 
@@ -2460,7 +2489,8 @@ public final class RichChatViewModel {
                 requestId: requestId,
                 title: request.toolCallTitle,
                 kind: request.toolCallKind,
-                options: request.options
+                options: request.options,
+                toolCallId: request.toolCallId
             ))
         case .promptComplete(_, let response):
             handlePromptComplete(response: response)
@@ -2701,6 +2731,7 @@ public final class RichChatViewModel {
         // `flush_open_tool_calls` each pop the id first).
         guard openToolCallIds.remove(update.toolCallId) != nil else {
             ScarfMon.event(.chatStream, "toolCallUpdate.unknownIdDropped", count: 1)
+            closePermissionHermesSettled(update)
             return
         }
         // Populate live telemetry on the matching streaming call BEFORE
