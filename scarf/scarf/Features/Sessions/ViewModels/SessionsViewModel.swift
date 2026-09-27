@@ -74,7 +74,7 @@ enum SessionExportFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// Value passed to `--format`.
-    var cliValue: String { rawValue }
+    nonisolated var cliValue: String { rawValue }
 
     nonisolated var displayName: String {
         switch self {
@@ -95,7 +95,7 @@ enum SessionExportFormat: String, CaseIterable, Identifiable {
 
     /// md/qmd export a *directory* of files (CLI default:
     /// `<hermes home>/session-exports`), not a single file.
-    var isDirectoryOutput: Bool { self == .markdown || self == .quarto }
+    nonisolated var isDirectoryOutput: Bool { self == .markdown || self == .quarto }
 
     /// Sensible single-file extension. Unused for `isDirectoryOutput`
     /// formats, which pick a destination folder instead.
@@ -248,6 +248,12 @@ final class SessionsViewModel {
     /// Read by `availableExportFormats` and surfaced as
     /// `exportAllExcludesTrace` — `trace` cannot serve that flow.
     private var pendingExportIsAllSessions = false
+    /// Every segment of the session being exported, root first, when it is
+    /// a rotated compression chain (`HermesSession.lineageIds`); empty for
+    /// an ordinary session or "export all". The row and its detail show the
+    /// whole lineage, so the export covers it too (see `exportArguments`
+    /// and `performExport`).
+    private var pendingExportLineageIds: [String] = []
     /// `HermesCapabilities.hasSessionsExportNoRedact`, captured when the
     /// flow starts (same environment-read-stays-in-SwiftUI split as
     /// `formatsAvailable`).
@@ -764,6 +770,7 @@ final class SessionsViewModel {
     ///   `PlatformsView`/`GatewayBehaviorViewModel`, where the environment
     ///   read stays in SwiftUI and the flag crosses in as a plain `Bool`.
     func exportSession(_ session: HermesSession, formatsAvailable: Bool, traceNoRedactAvailable: Bool = false) {
+        pendingExportLineageIds = session.lineageIds.count > 1 ? session.lineageIds : []
         beginExportFlow(
             sessionId: session.id,
             suggestedBaseName: session.id,
@@ -773,6 +780,7 @@ final class SessionsViewModel {
     }
 
     func exportAll(formatsAvailable: Bool, traceNoRedactAvailable: Bool = false) {
+        pendingExportLineageIds = []
         beginExportFlow(
             sessionId: nil,
             suggestedBaseName: "hermes-sessions",
@@ -880,7 +888,8 @@ final class SessionsViewModel {
             panel.prompt = String(localized: "Export")
             panel.message = String(localized: "Choose a folder for the \(format.displayName) export.")
             guard panel.runModal() == .OK, let url = panel.url else { return }
-            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact)
+            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact,
+                              lineageIds: pendingExportLineageIds)
             return
         }
         let panel = NSSavePanel()
@@ -892,9 +901,11 @@ final class SessionsViewModel {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if format.usesStdout {
-            performExport(to: url, sessionId: sessionId, format: format, redact: redact)
+            performExport(to: url, sessionId: sessionId, format: format, redact: redact,
+                          lineageIds: pendingExportLineageIds)
         } else {
-            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact)
+            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact,
+                              lineageIds: pendingExportLineageIds)
         }
     }
 
@@ -916,12 +927,23 @@ final class SessionsViewModel {
     /// flag's **v0.18.1** floor (`hermes_cli/main.py:13567` @ v2026.7.7), the
     /// same tag that introduced `--format trace` itself. Below it there is no
     /// trace format to opt out of.
-    static func exportArguments(
+    ///
+    /// **`logicalLineage`** adds `--lineage logical` for md/qmd, so a rotated
+    /// compression chain exports as ONE document spanning every segment
+    /// (`export_session_lineage`, hermes_state_portability.py:290-296, via
+    /// `_export_markdown`'s `include_lineage`, hermes_cli/sessions_cmd.py
+    /// :474-479 @ v2026.9.24). The flag is `choices=["single","logical"]`,
+    /// "md/qmd only" (hermes_cli/subcommands/sessions.py:95-96 @ v2026.9.24),
+    /// and has the same v0.18.1 floor as `--format` itself
+    /// (hermes_cli/main.py:13595-13600 @ v2026.7.7), so it is never emitted
+    /// for a format a host doesn't have. Ignored for every other format.
+    nonisolated static func exportArguments(
         output: String,
         sessionId: String?,
         format: SessionExportFormat = .jsonl,
         redact: Bool = false,
-        traceNoRedactAvailable: Bool = false
+        traceNoRedactAvailable: Bool = false,
+        logicalLineage: Bool = false
     ) -> [String] {
         var args = ["sessions", "export", output]
         if format != .jsonl { args += ["--format", format.cliValue] }
@@ -931,27 +953,95 @@ final class SessionsViewModel {
             args += ["--redact"]
         }
         if let sessionId { args += ["--session-id", sessionId] }
+        if logicalLineage && format.isDirectoryOutput { args += ["--lineage", "logical"] }
         return args
+    }
+
+    /// How a format exports a rotated compression chain.
+    nonisolated enum LineageExport: Equatable {
+        /// One CLI run per segment, root first, payloads concatenated
+        /// (`jsonl`: one session object per line, the same shape Hermes's
+        /// own multi-session JSONL export writes, sessions_cmd.py:355-357).
+        case perSegment
+        /// One run with `--lineage logical` (md/qmd).
+        case logicalFlag
+        /// The CLI can only export one segment for this format (`trace` and
+        /// `html` take a single `--session-id` and have no lineage option),
+        /// so the banner says so instead of claiming the whole conversation.
+        case latestSegmentOnly
+    }
+
+    nonisolated static func lineageExport(for format: SessionExportFormat) -> LineageExport {
+        switch format {
+        case .jsonl: return .perSegment
+        case .markdown, .quarto: return .logicalFlag
+        case .trace, .html: return .latestSegmentOnly
+        }
+    }
+
+    /// Runs one `jsonl` export per segment of a compression chain and joins
+    /// the payloads in lineage order. Stops at the first segment that fails
+    /// or returns something that is not a JSONL payload and hands back THAT
+    /// result, so `writeExport` reports the failure and nothing partial is
+    /// written (charter C5).
+    nonisolated static func exportLineageJSONL(
+        segmentIds: [String],
+        redact: Bool,
+        run: ([String]) -> (stdout: Data, stderr: String, exitCode: Int32)
+    ) -> (stdout: Data, stderr: String, exitCode: Int32) {
+        var combined = Data()
+        var stderr = ""
+        for id in segmentIds {
+            let result = run(exportArguments(output: "-", sessionId: id, format: .jsonl, redact: redact))
+            guard result.exitCode == 0, payloadIsValid(result.stdout, format: .jsonl) else { return result }
+            combined.append(result.stdout)
+            if let last = result.stdout.last, last != 0x0A { combined.append(0x0A) }
+            if !result.stderr.isEmpty { stderr += result.stderr }
+        }
+        return (combined, stderr, 0)
+    }
+
+    /// Suffix for a success banner when `latestSegmentOnly` applied.
+    nonisolated static func latestSegmentNote(segmentCount: Int, format: SessionExportFormat) -> String {
+        String(localized: " Only the latest of this conversation's \(segmentCount) compressed segments is in the \(format.displayName) export; choose JSONL to export all of it.")
     }
 
     /// Pipes the export out of the CLI and writes it to `url` on this Mac.
     /// Off the main actor because a remote export is an SSH round-trip
     /// streaming the whole payload — running it inline would block the main
     /// actor for its full duration.
-    func performExport(to url: URL, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) {
+    ///
+    /// `lineageIds` (root first) marks a rotated compression chain: `jsonl`
+    /// exports every segment, `trace` the latest one with a banner saying
+    /// so (see `LineageExport`).
+    func performExport(
+        to url: URL,
+        sessionId: String?,
+        format: SessionExportFormat = .jsonl,
+        redact: Bool = false,
+        lineageIds: [String] = []
+    ) {
         // `-` is the CLI's "write to stdout" sentinel — only valid for
         // stdout-capable formats (jsonl/trace).
         let args = Self.exportArguments(
             output: "-", sessionId: sessionId, format: format, redact: redact,
             traceNoRedactAvailable: traceNoRedactAvailable
         )
+        let chain = sessionId != nil && lineageIds.count > 1 ? lineageIds : []
+        let mode = Self.lineageExport(for: format)
         let runner = sessionExportRunner
         let ctx = context
         Task { [self] in
             // The CLI run and the file write block for the whole transfer:
             // a thread of their own, not a cooperative-pool one (C10).
-            let outcome = await OffPool.run {
-                Self.writeExport(result: runner(ctx, args), to: url, format: format)
+            var outcome = await OffPool.run {
+                let result = !chain.isEmpty && mode == .perSegment
+                    ? Self.exportLineageJSONL(segmentIds: chain, redact: redact) { runner(ctx, $0) }
+                    : runner(ctx, args)
+                return Self.writeExport(result: result, to: url, format: format)
+            }
+            if outcome.succeeded, !chain.isEmpty, mode == .latestSegmentOnly {
+                outcome.message += Self.latestSegmentNote(segmentCount: chain.count, format: format)
             }
             self.exportMessage = outcome.message
             guard outcome.succeeded else { return }
@@ -968,11 +1058,26 @@ final class SessionsViewModel {
     /// Real-output-path flow for `html`/`md`/`qmd`: the CLI writes the file
     /// (or directory of files) itself, so there's no stdout payload to pipe
     /// back — we just run the command and report the exit code.
-    func performPathExport(to url: URL, sessionId: String?, format: SessionExportFormat, redact: Bool) {
+    ///
+    /// `lineageIds` (root first) marks a rotated compression chain: md/qmd
+    /// export all of it with `--lineage logical`; `html` exports the latest
+    /// segment with a banner saying so.
+    func performPathExport(
+        to url: URL,
+        sessionId: String?,
+        format: SessionExportFormat,
+        redact: Bool,
+        lineageIds: [String] = []
+    ) {
+        let chain = sessionId != nil && lineageIds.count > 1 ? lineageIds : []
+        let mode = Self.lineageExport(for: format)
         let args = Self.exportArguments(
             output: url.path, sessionId: sessionId, format: format, redact: redact,
-            traceNoRedactAvailable: traceNoRedactAvailable
+            traceNoRedactAvailable: traceNoRedactAvailable,
+            logicalLineage: !chain.isEmpty && mode == .logicalFlag
         )
+        let note = !chain.isEmpty && mode == .latestSegmentOnly
+            ? Self.latestSegmentNote(segmentCount: chain.count, format: format) : ""
         let runner = sessionExportRunner
         let ctx = context
         Task { [self] in
@@ -980,7 +1085,7 @@ final class SessionsViewModel {
             let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
             if outcome.succeeded {
-                let banner = "Exported to \(url.path)"
+                let banner = "Exported to \(url.path)" + note
                 self.exportMessage = banner
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(5))
