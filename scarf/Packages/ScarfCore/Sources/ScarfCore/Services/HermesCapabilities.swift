@@ -1867,6 +1867,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// as `hostRefusesPastOneShotResume`.
     public var hasCronPastOneShotResumeRefusal: Bool { isV0181OrLater }
 
+    /// Whether `hermes cron run <id>` runs the job itself before it returns,
+    /// instead of only marking it due for the next scheduler tick.
+    ///
+    /// First tag with `_execute_job_now` (`tools/cronjob_tools.py:604`) and
+    /// the `Ran now: …` line (`hermes_cli/cron.py:411`) is **`v2026.7.1`**
+    /// (0.18.0); at `v2026.6.19` (0.17) `_job_action` only prints "It will
+    /// run on the next scheduler tick." (`hermes_cli/cron.py:316`). Below the
+    /// floor Run Now needs a follow-up `hermes cron tick` to fire at all. At
+    /// or above it that tick would fire every OTHER due job as well
+    /// (`cron/scheduler_tick.py:62-107` @ `v2026.9.24`), so it must not be
+    /// sent.
+    public var hasCronRunSynchronous: Bool { isV018OrLater }
+
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
     /// message the bot then responds to (`hermes_cli/subcommands/cron.py:29`

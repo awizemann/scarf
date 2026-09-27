@@ -578,6 +578,15 @@ import Foundation
         #expect(caps.isV018OrLater)
     }
 
+    /// S08-F1: `cron run` runs the job itself from v0.18.0 (`_execute_job_now`,
+    /// first tag v2026.7.1); v0.17 (v2026.6.19) only marks it due. Gates
+    /// Run Now's follow-up `cron tick`.
+    @Test func cronRunSynchronousFloorIsV018() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)").hasCronRunSynchronous)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasCronRunSynchronous)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)").hasCronRunSynchronous)
+    }
+
     @Test func v018FlagsIncludeTitleGenerationLanguage() {
         // `auxiliary.title_generation.language` landed at the same v0.18
         // boundary as `hasCronAttachToSession`/`hasMCPReauth`.

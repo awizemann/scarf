@@ -245,21 +245,288 @@ import Foundation
         }
     }
 
-    /// `setCronPaused` resolves the jobs it will act on from the SAME tags
+    /// The lifecycle resolves the jobs it will act on from the SAME tags
     /// `ProjectStore.derive` uses. With no cron file there is nothing to
     /// pause and nothing to fail — archiving a project on a host without
     /// Hermes running must not report an error.
     @Test func archivingWithNoCronJobsIsANoOp() async throws {
         try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
-            let lifecycle = ProjectLifecycleService(context: ctx)
-            #expect(lifecycle.cronJobIDs(for: ProjectEntry(
-                name: "Alpha", path: project.rootPath, uuid: project.id
-            )).isEmpty)
-            #expect(lifecycle.setCronPaused(true, for: ProjectEntry(
-                name: "Alpha", path: project.rootPath, uuid: project.id
-            )).isEmpty)
+            let lifecycle = ProjectLifecycleService(context: ctx, cronRunner: { _ in
+                Issue.record("nothing to pause, so nothing may be spawned")
+                return false
+            })
+            let entry = ProjectEntry(name: "Alpha", path: project.rootPath, uuid: project.id)
+            #expect(lifecycle.cronJobIDs(for: entry).isEmpty)
+            #expect(lifecycle.runnableCronJobIDs(for: entry) == [])
+            #expect(lifecycle.resumeArchivedCronJobs([]).isEmpty)
         }
+    }
+
+    // MARK: - S11-F2: archive pauses and restore resumes only what archive paused
+
+    /// Stands in for `hermes cron pause|resume <id>`: records the argv and
+    /// rewrites `jobs.json` the way Hermes does — `pause_job` writes
+    /// enabled=false/state=paused/paused_at (`cron/jobs.py:2067-2077` @
+    /// v2026.9.24), `resume_job` enabled=true/state=scheduled/no marker.
+    final class FakeCron: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls: [[String]] = []
+        let jobsPath: String
+        var failing: Set<String> = []
+        /// When set, every call waits on it first — to hold a follow-up
+        /// in flight while the test starts the next transition.
+        var gate: DispatchSemaphore?
+        init(jobsPath: String) { self.jobsPath = jobsPath }
+        var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return _calls }
+
+        func run(_ args: [String]) -> Bool {
+            gate?.wait()
+            lock.lock(); defer { lock.unlock() }
+            _calls.append(args)
+            guard args.count == 3, !failing.contains(args[2]),
+                  let data = FileManager.default.contents(atPath: jobsPath),
+                  var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  var jobs = root["jobs"] as? [[String: Any]],
+                  let index = jobs.firstIndex(where: { $0["id"] as? String == args[2] })
+            else { return false }
+            if args[1] == "pause" {
+                jobs[index]["enabled"] = false
+                jobs[index]["state"] = "paused"
+                jobs[index]["paused_at"] = "2026-09-26T09:00:00+00:00"
+            } else {
+                jobs[index]["enabled"] = true
+                jobs[index]["state"] = "scheduled"
+                jobs[index]["paused_at"] = NSNull()
+            }
+            root["jobs"] = jobs
+            return FileManager.default.createFile(
+                atPath: jobsPath, contents: try? JSONSerialization.data(withJSONObject: root))
+        }
+
+        func job(_ id: String) -> [String: Any]? {
+            guard let data = FileManager.default.contents(atPath: jobsPath),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            return (root["jobs"] as? [[String: Any]])?.first { $0["id"] as? String == id }
+        }
+    }
+
+    /// Four jobs: `live` (scheduled), `mine` (paused by the user before
+    /// archiving), `tmpl` (a template job created paused, never reviewed)
+    /// — all tagged for the project — and `other`, another project's.
+    static func writeJobs(_ ctx: ServerContext, projectID: UUID) throws -> String {
+        let tag = "[proj:\(projectID.uuidString)]"
+        let schedule = #""schedule": {"kind": "cron", "expr": "0 9 * * *", "display": "0 9 * * *"}"#
+        func job(_ id: String, _ name: String, enabled: Bool, state: String, pausedAt: Bool = false) -> String {
+            let marker = pausedAt ? #", "paused_at": "2026-09-01T09:00:00+00:00""# : ""
+            return #"{"id": "\#(id)", "name": "\#(name)", "prompt": "p", \#(schedule), "enabled": \#(enabled), "state": "\#(state)"\#(marker)}"#
+        }
+        let jobs = [
+            job("live", "\(tag) Live", enabled: true, state: "scheduled"),
+            job("mine", "\(tag) Mine", enabled: false, state: "paused", pausedAt: true),
+            job("tmpl", "\(tag) Template job", enabled: false, state: "paused", pausedAt: true),
+            job("other", "[proj:\(UUID().uuidString)] Other", enabled: true, state: "scheduled"),
+        ].joined(separator: ",")
+        let path = ctx.paths.cronJobsJSON
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try Data(#"{"jobs": [\#(jobs)], "updated_at": "2026-09-26T08:00:00+00:00"}"#.utf8)
+            .write(to: URL(fileURLWithPath: path))
+        return path
+    }
+
+    static func vm(_ ctx: ServerContext, _ fake: FakeCron) -> ProjectsViewModel {
+        let vm = loadedVM(ctx)
+        vm.makeLifecycle = { ProjectLifecycleService(context: $0, cronRunner: { fake.run($0) }) }
+        return vm
+    }
+
+    @Test func archiveThenRestoreResumesOnlyWhatArchivePaused() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.calls == [["cron", "pause", "live"]])
+            #expect(vm.mutationError == nil)
+            // The record is on the registry row as written to disk.
+            let archivedRow = try #require(ProjectDashboardService(context: ctx).loadRegistry().projects.first)
+            #expect(archivedRow.archived)
+            #expect(archivedRow.archivePausedCronJobIDs == ["live"])
+
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.calls == [["cron", "pause", "live"], ["cron", "resume", "live"]])
+            #expect(fake.job("live")?["enabled"] as? Bool == true)
+            // Paused before archive → still paused after restore.
+            #expect(fake.job("mine")?["enabled"] as? Bool == false)
+            #expect(fake.job("tmpl")?["enabled"] as? Bool == false)
+            #expect(fake.job("other")?["enabled"] as? Bool == true)
+            let restoredRow = try #require(ProjectDashboardService(context: ctx).loadRegistry().projects.first)
+            #expect(!restoredRow.archived)
+            #expect(restoredRow.archivePausedCronJobIDs == nil)
+            #expect(restoredRow.extra[ProjectEntry.archivePausedCronJobIDsKey] == nil)
+            #expect(vm.mutationError == nil)
+        }
+    }
+
+    /// A pause that fails is shown, not swallowed: the job is still firing.
+    @Test func archiveSurfacesAPauseFailure() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            fake.failing = ["live"]
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            let error = try #require(vm.mutationError)
+            #expect(error.title.contains("still scheduled"))
+            #expect(error.message.contains("live"))
+            // The archive itself stands.
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?.archived == true)
+        }
+    }
+
+    /// A job the user resumed (or deleted) while the project was archived
+    /// is not touched again on restore.
+    @Test func restoreSkipsAJobNoLongerPaused() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let vm = Self.vm(ctx, fake)
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.run(["cron", "resume", "live"]))
+
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.calls.filter { $0.starts(with: ["cron", "resume"]) }.count == 1,
+                    "only the user's own resume; restore found nothing paused to resume")
+            #expect(vm.mutationError == nil)
+        }
+    }
+
+    /// A row archived by an older Scarf carries no record; restoring it
+    /// resumes nothing rather than every attributed job.
+    @Test func restoreOfALegacyArchiveResumesNothing() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            var registry = ProjectDashboardService(context: ctx).loadRegistry()
+            registry.projects[0].archived = true
+            try ProjectDashboardService(context: ctx).saveRegistry(registry)
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(fake.calls.isEmpty)
+            #expect(fake.job("tmpl")?["enabled"] as? Bool == false)
+            // …but says so: `mine` and `tmpl` are the project's paused jobs.
+            let notice = try #require(vm.mutationError)
+            #expect(notice.message.hasPrefix("2 of this project's cron jobs are paused"))
+        }
+    }
+
+    /// A record of "paused nothing" is not a legacy archive: no notice,
+    /// even though the project has jobs the user had paused themselves.
+    @Test func restoreAfterAnArchiveThatPausedNothingIsQuiet() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            #expect(fake.run(["cron", "pause", "live"]))
+            let vm = Self.vm(ctx, fake)
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?
+                .archivePausedCronJobIDs == [])
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(vm.mutationError == nil)
+            #expect(fake.calls == [["cron", "pause", "live"]])
+        }
+    }
+
+    /// Restore started while archive's pause is still running waits for it,
+    /// so the job is paused THEN resumed — not skipped as "not paused" and
+    /// then paused for good under a restored project.
+    @Test func restoreWaitsForAnArchivePauseStillInFlight() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let gate = DispatchSemaphore(value: 0)
+            fake.gate = gate
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            // The pause is now blocked in the fake. Start the restore, then
+            // let the pause (and the resume after it) through.
+            let archived = try #require(vm.projects.first)
+            let restore = Task { await vm.unarchiveProject(archived) }
+            try await Task.sleep(nanoseconds: 100_000_000)
+            gate.signal()
+            gate.signal()
+            #expect(await restore.value)
+            await vm.cronFollowUp?.value
+            #expect(fake.calls == [["cron", "pause", "live"], ["cron", "resume", "live"]])
+            #expect(fake.job("live")?["enabled"] as? Bool == true)
+        }
+    }
+
+    /// An unreadable `jobs.json` doesn't block the archive, but it is said:
+    /// Scarf paused nothing, so the jobs may still be firing.
+    @Test func archiveWithUnreadableJobsIsArchivedAndReported() async throws {
+        try await Self.withTempHome { ctx, root in
+            try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let path = ctx.paths.cronJobsJSON
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data("{ not json".utf8).write(to: URL(fileURLWithPath: path))
+            let fake = FakeCron(jobsPath: path)
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            #expect(fake.calls.isEmpty)
+            #expect(vm.mutationError?.title.contains("may still be scheduled") == true)
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?.archived == true)
+        }
+    }
+
+    /// Archiving a row that is already archived keeps the earlier record.
+    @Test func reArchivingKeepsTheEarlierRecord() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let vm = Self.vm(ctx, fake)
+            let row = try #require(vm.projects.first)
+            #expect(await vm.archiveProject(row))
+            await vm.cronFollowUp?.value
+            // A stale menu hands in the pre-archive row again.
+            #expect(await vm.archiveProject(row))
+            await vm.cronFollowUp?.value
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?
+                .archivePausedCronJobIDs == ["live"])
+        }
+    }
+
+    /// The record survives an encode/decode of the registry row alongside
+    /// any other unknown key (`extra` round trip).
+    @Test func archiveRecordRoundTripsThroughTheRegistryCodable() throws {
+        var entry = ProjectEntry(name: "A", path: "/tmp/a", archived: true, extra: ["agentNote": .string("keep")])
+        entry.archivePausedCronJobIDs = ["j1", "j2"]
+        let decoded = try JSONDecoder().decode(ProjectEntry.self, from: JSONEncoder().encode(entry))
+        #expect(decoded.archivePausedCronJobIDs == ["j1", "j2"])
+        #expect(decoded.extra["agentNote"] == .string("keep"))
+        var empty = decoded
+        empty.archivePausedCronJobIDs = []
+        #expect(empty.archivePausedCronJobIDs == [])
+        var cleared = decoded
+        cleared.archivePausedCronJobIDs = nil
+        #expect(cleared.archivePausedCronJobIDs == nil)
+        #expect(cleared.extra[ProjectEntry.archivePausedCronJobIDsKey] == nil)
     }
 
     // MARK: - Root policy at the app's own door
