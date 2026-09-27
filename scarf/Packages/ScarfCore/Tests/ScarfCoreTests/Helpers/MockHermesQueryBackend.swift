@@ -28,6 +28,8 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     var hasHiddenColumn: Bool = false
     var hasLastReadAtColumn: Bool = false
     var hasListableChildSupport: Bool = false
+    var hasArchivedColumn: Bool = false
+    var hasDisplayKindColumn: Bool = false
     var lastOpenError: String? = nil
 
     /// Map of SQL prefix → rows. Lookup picks the longest matching
@@ -68,6 +70,8 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     func setHasHiddenColumn(_ value: Bool) { hasHiddenColumn = value }
     func setHasLastReadAtColumn(_ value: Bool) { hasLastReadAtColumn = value }
     func setHasListableChildSupport(_ value: Bool) { hasListableChildSupport = value }
+    func setHasArchivedColumn(_ value: Bool) { hasArchivedColumn = value }
+    func setHasDisplayKindColumn(_ value: Bool) { hasDisplayKindColumn = value }
     func setLastOpenError(_ value: String?) { lastOpenError = value }
 
     /// Build a one-row result keyed on `prefix`. `columns` is the

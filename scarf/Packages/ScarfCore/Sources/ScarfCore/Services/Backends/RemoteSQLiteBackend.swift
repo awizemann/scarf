@@ -45,6 +45,8 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasHiddenColumn = false
     private(set) public var hasLastReadAtColumn = false
     private(set) public var hasListableChildSupport = false
+    private(set) public var hasArchivedColumn = false
+    private(set) public var hasDisplayKindColumn = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Latched `true` once a strict `sqlite3 -readonly` invocation has been
@@ -365,6 +367,9 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             && sessionsTable.contains("last_activity_description")
         // v0.20.4: additive `sessions` columns.
         hasHiddenColumn = sessionsTable.contains("hidden")
+        // v0.16: soft-hide flag. v0.19.1: messages.display_kind.
+        hasArchivedColumn = sessionsTable.contains("archived")
+        hasDisplayKindColumn = messagesTable.contains("display_kind")
         hasLastReadAtColumn = sessionsTable.contains("last_read_at")
         // v0.20.4: Hermes's listable/ephemeral child predicates. Same
         // gate as the local backend — v0.20.4 marker columns, the

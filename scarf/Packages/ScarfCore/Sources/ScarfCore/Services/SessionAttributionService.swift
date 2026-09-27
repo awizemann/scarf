@@ -70,8 +70,18 @@ public struct SessionAttributionService: Sendable {
 
     /// Look up the project path a given session was attributed to.
     /// Returns nil for unattributed sessions.
+    ///
+    /// A rotated compression chain is listed (and resumed) under its tip
+    /// id while the attribution was recorded against the id the chat
+    /// started with, so a miss falls back to the other ids of a chain Scarf
+    /// has listed (`SessionLineageIndex`), nearest first.
     public nonisolated func projectPath(for sessionID: String) -> String? {
-        load().mappings[sessionID]
+        let mappings = load().mappings
+        if let path = mappings[sessionID] { return path }
+        for related in SessionLineageIndex.shared.relatedIds(server: context.id, sessionID: sessionID) {
+            if let path = mappings[related] { return path }
+        }
+        return nil
     }
 
     /// Reverse lookup: every session ID attributed to the given

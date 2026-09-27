@@ -5,15 +5,16 @@ import Foundation
 /// when Scarf spawns `hermes acp` with a project-scoped cwd; read
 /// by the per-project Sessions tab.
 ///
-/// Hermes's own `state.db` has no `cwd` column on the sessions
-/// table — the cwd is passed at runtime via ACP but not persisted
-/// on its side. This sidecar is how we recover the attribution
-/// without requiring an upstream schema change.
+/// Hermes does record a working directory per session (`sessions.cwd`
+/// and `git_repo_root`, hermes_state_common.py:364-366 @ v2026.9.24), but
+/// it has no notion of a Scarf project: a cwd says where the agent ran,
+/// not which project the user started the chat for, and several projects
+/// can share a directory tree. This sidecar records that choice
+/// explicitly at chat creation; sessions started outside Scarf simply
+/// stay unattributed.
 ///
-/// Stored at `~/.hermes/scarf/session_project_map.json`. Forward-
-/// compatible: if Hermes ever gains a canonical `cwd` column, Scarf
-/// can prefer that and fall back to this file for pre-upgrade
-/// sessions. Missing file → empty map (nothing attributed yet).
+/// Stored at `~/.hermes/scarf/session_project_map.json`. Missing file →
+/// empty map (nothing attributed yet).
 ///
 /// Promoted to ScarfCore in M9 #4.2 so iOS can use the same record
 /// type — ScarfGo's project-scoped chat writes here over SFTP.

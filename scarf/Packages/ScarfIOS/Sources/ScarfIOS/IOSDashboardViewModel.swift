@@ -107,7 +107,12 @@ public final class IOSDashboardViewModel {
                 allSessions = []
                 lastError = error.localizedDescription
             }
-            sessionPreviews = await dataService.fetchSessionPreviews(limit: 25)
+            // Rotated compression chains are listed under their tip id;
+            // the preview query keys by the root, so carry it across.
+            sessionPreviews = HermesSession.carryingLineageLabels(
+                await dataService.fetchSessionPreviews(limit: 25),
+                onto: allSessions + recentSessions
+            )
         }
         ScarfMon.event(.sessionLoad, "ios.allSessions.count", count: allSessions.count)
 
@@ -133,7 +138,7 @@ public final class IOSDashboardViewModel {
             }
             return (names: result, projects: projectRegistry.projects)
         }.value
-        sessionProjectNames = bundle.names
+        sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: allSessions)
         allProjects = bundle.projects
 
         await dataService.close()

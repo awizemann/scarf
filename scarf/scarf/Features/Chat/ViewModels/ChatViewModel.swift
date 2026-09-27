@@ -2739,7 +2739,7 @@ final class ChatViewModel {
             // late" reload artifact during session switches.
             recentSessions = fetchedSessions
             sessionPreviews = fetchedPreviews
-            sessionProjectNames = bundle.names
+            sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: fetchedSessions)
             allProjects = bundle.projects
 
             // Record the sidebar size after each reload so we can correlate
