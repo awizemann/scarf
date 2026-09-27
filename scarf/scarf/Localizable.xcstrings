@@ -130,6 +130,47 @@
         }
       }
     },
+    "%@ is now the server's active profile. This window keeps showing the profile it is viewing." : {
+      "comment" : "Profiles: note after making a profile the server's active profile from a remote window. %@ is the profile name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ist jetzt das aktive Profil des Servers. Dieses Fenster zeigt weiterhin das Profil an, das es gerade anzeigt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ es ahora el perfil activo del servidor. Esta ventana sigue mostrando el perfil que está viendo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ est désormais le profil actif du serveur. Cette fenêtre continue d'afficher le profil qu'elle consulte."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ がサーバーのアクティブなプロファイルになりました。このウィンドウは表示中のプロファイルを引き続き表示します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ agora é o perfil ativo do servidor. Esta janela continua mostrando o perfil que está exibindo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 现在是服务器的活动配置。此窗口仍显示它正在查看的配置。"
+          }
+        }
+      }
+    },
     "%@ — couldn't be matched to a scheduled job; Scarf will try again and tell you if it's still there" : {
       "localizations" : {
         "de" : {
@@ -1014,6 +1055,47 @@
         }
       }
     },
+    "Couldn't delete that session on %@ (hermes sessions delete exited %d)." : {
+      "comment" : "Chat: a session delete failed. %@ is the server name, %d the CLI exit code.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sitzung konnte auf %@ nicht gelöscht werden (hermes sessions delete wurde mit %d beendet)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo eliminar esa sesión en %@ (hermes sessions delete terminó con %d)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de supprimer cette session sur %@ (hermes sessions delete s'est terminé avec %d)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ でそのセッションを削除できませんでした（hermes sessions delete の終了コード %d）。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível excluir essa sessão em %@ (hermes sessions delete saiu com %d)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法删除 %@ 上的该会话（hermes sessions delete 退出码 %d）。"
+          }
+        }
+      }
+    },
     "Couldn't parse webhook list output" : {
       "localizations" : {
         "de" : {
@@ -1250,6 +1332,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法将 URL 传递给 hermes。登录可能已经结束。"
+          }
+        }
+      }
+    },
+    "Databases left as they were" : {
+      "comment" : "Restore done sheet: heading over databases the restore left alone.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unverändert gelassene Datenbanken"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bases de datos que se dejaron como estaban"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bases de données laissées telles quelles"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのまま残したデータベース"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bancos de dados deixados como estavam"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持原样的数据库"
           }
         }
       }
@@ -1494,6 +1617,129 @@
         }
       }
     },
+    "Hermes asks for these when it installs this catalog entry. Secrets go to the profile's `.env`; other values are written into config.yaml. Leave a secret empty to keep the one already saved in `.env`." : {
+      "comment" : "MCP add sheet: explanation under the Install settings section of an optional catalog entry.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes fragt diese Werte ab, wenn es diesen Katalogeintrag installiert. Geheimnisse landen in der `.env` des Profils, andere Werte werden in config.yaml geschrieben. Lass ein Geheimnis leer, um das bereits in `.env` gespeicherte zu behalten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes pide estos valores al instalar esta entrada del catálogo. Los secretos van al `.env` del perfil; los demás valores se escriben en config.yaml. Deja un secreto vacío para conservar el que ya está guardado en `.env`."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes demande ces valeurs lorsqu'il installe cette entrée du catalogue. Les secrets vont dans le `.env` du profil ; les autres valeurs sont écrites dans config.yaml. Laissez un secret vide pour conserver celui déjà enregistré dans `.env`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes はこのカタログ項目をインストールするときにこれらを尋ねます。シークレットはプロファイルの `.env` に、その他の値は config.yaml に書き込まれます。`.env` に保存済みのシークレットを残すには空欄のままにしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes pede estes valores ao instalar esta entrada do catálogo. Segredos vão para o `.env` do perfil; os outros valores são gravados no config.yaml. Deixe um segredo vazio para manter o que já está salvo no `.env`."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 在安装此目录条目时会询问这些值。机密写入配置的 `.env`，其他值写入 config.yaml。将机密留空即可保留 `.env` 中已保存的值。"
+          }
+        }
+      }
+    },
+    "Hermes didn't save the switch, so config.yaml still uses %@. Try the model picker, or run `hermes model` in a terminal." : {
+      "comment" : "Credential pools: the provider switch failed. %@ is the provider config.yaml still uses.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat den Wechsel nicht gespeichert, config.yaml verwendet also weiterhin %@. Versuche es mit der Modellauswahl oder führe `hermes model` in einem Terminal aus."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes no guardó el cambio, así que config.yaml sigue usando %@. Prueba el selector de modelos o ejecuta `hermes model` en una terminal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes n'a pas enregistré le changement : config.yaml utilise toujours %@. Essayez le sélecteur de modèle, ou lancez `hermes model` dans un terminal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes は切り替えを保存しなかったため、config.yaml は引き続き %@ を使用しています。モデルピッカーを使うか、ターミナルで `hermes model` を実行してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes não salvou a troca, então o config.yaml continua usando %@. Tente o seletor de modelos ou execute `hermes model` em um terminal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 未保存此次切换，config.yaml 仍在使用 %@。请尝试模型选择器，或在终端中运行 `hermes model`。"
+          }
+        }
+      }
+    },
+    "Hermes had already stopped waiting for your answer, so it denied the tool." : {
+      "comment" : "ScarfCore RichChatViewModel permission prompt that Hermes gave up on: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hatte bereits aufgehört, auf deine Antwort zu warten, und hat das Tool daher abgelehnt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes ya había dejado de esperar tu respuesta, así que denegó la herramienta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes avait déjà cessé d'attendre votre réponse ; il a donc refusé l'outil."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes はすでに応答の待機をやめていたため、ツールを拒否しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes já tinha parado de esperar sua resposta, então negou a ferramenta."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 已停止等待你的回答，因此拒绝了该工具。"
+          }
+        }
+      }
+    },
     "Hermes is running on this server (process %@ has a Hermes database open). Stop the Hermes gateway and close any Hermes chats there before restoring; the restore will refuse otherwise." : {
       "localizations" : {
         "de" : {
@@ -1610,6 +1856,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "即使其他进程正打开着会话数据库,Hermes 也会重写它(VACUUM)。如果其中某个进程正在写入 — 运行中的 Gateway、cron 或 Hermes 桌面应用 — 所有 agent 都可能开始拒绝轮次,直到它们全部重启。不会丢失任何对话数据。最稳妥的做法:先停止 Gateway 和其他 Hermes 应用。"
+          }
+        }
+      }
+    },
+    "Hermes stopped waiting for your answer and denied %@." : {
+      "comment" : "ScarfCore RichChatViewModel permission prompt that Hermes gave up on: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the tool name, or \"the tool\".",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat aufgehört, auf deine Antwort zu warten, und %@ abgelehnt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes dejó de esperar tu respuesta y denegó %@."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes a cessé d'attendre votre réponse et a refusé %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes は応答の待機をやめ、%@ を拒否しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes parou de esperar sua resposta e negou %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 已停止等待你的回答，并拒绝了 %@。"
           }
         }
       }
@@ -1738,6 +2025,47 @@
         }
       }
     },
+    "Install settings" : {
+      "comment" : "MCP add sheet: section heading for the values Hermes asks for when installing a catalog entry.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationseinstellungen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajustes de instalación"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réglages d'installation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストール設定"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configurações de instalação"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装设置"
+          }
+        }
+      }
+    },
     "Installed, but it could not be enabled: %@" : {
       "localizations" : {
         "de" : {
@@ -1814,6 +2142,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "稍后"
+          }
+        }
+      }
+    },
+    "Leave this empty: this catalog entry asks for its server URL under Install settings." : {
+      "comment" : "MCP add sheet: hint on the URL field for a catalog entry whose URL is an install setting.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lass dieses Feld leer: Dieser Katalogeintrag fragt seine Server-URL unter „Installationseinstellungen“ ab."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Déjalo vacío: esta entrada del catálogo pide la URL de su servidor en Ajustes de instalación."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laissez ce champ vide : cette entrée du catalogue demande l'URL de son serveur dans Réglages d'installation."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空欄のままにしてください。このカタログ項目はサーバー URL を「インストール設定」で尋ねます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deixe em branco: esta entrada do catálogo pede a URL do servidor em Configurações de instalação."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请留空：此目录条目会在“安装设置”中询问其服务器 URL。"
           }
         }
       }
@@ -1975,6 +2344,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未启用"
+          }
+        }
+      }
+    },
+    "Note: %@ was already set in this profile's .env, so Hermes kept that value and ignored the one you entered. To replace it, edit that line in .env (or remove it and add the server again)." : {
+      "comment" : "ScarfCore OptionalMCPCatalog install note: hand-added, no Xcode extractor sees ScarfCore string literals. %@ is the list of .env keys Hermes kept.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinweis: %@ war in der .env dieses Profils bereits gesetzt, daher hat Hermes diesen Wert behalten und deine Eingabe ignoriert. Um ihn zu ersetzen, bearbeite diese Zeile in .env (oder entferne sie und füge den Server erneut hinzu)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nota: %@ ya estaba definido en el .env de este perfil, así que Hermes conservó ese valor e ignoró el que introdujiste. Para reemplazarlo, edita esa línea en .env (o elimínala y vuelve a añadir el servidor)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remarque : %@ était déjà défini dans le .env de ce profil ; Hermes a donc conservé cette valeur et ignoré celle que vous avez saisie. Pour la remplacer, modifiez cette ligne dans .env (ou supprimez-la et ajoutez à nouveau le serveur)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "注意：%@ はこのプロファイルの .env にすでに設定されていたため、Hermes はその値を保持し、入力した値を無視しました。置き換えるには .env のその行を編集してください（または削除してからサーバーを追加し直してください）。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Observação: %@ já estava definido no .env deste perfil, então o Hermes manteve esse valor e ignorou o que você digitou. Para substituí-lo, edite essa linha no .env (ou remova-a e adicione o servidor novamente)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "注意：%@ 已在此配置的 .env 中设置，因此 Hermes 保留了该值并忽略了你输入的值。要替换它，请编辑 .env 中的那一行（或删除它后重新添加服务器）。"
           }
         }
       }
@@ -2740,6 +3150,88 @@
         }
       }
     },
+    "Restart Hermes (running manually)" : {
+      "comment" : "Menu bar: Restart item, disabled because the gateway was started by hand and Scarf can't restart it.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes neu starten (manuell gestartet)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reiniciar Hermes (ejecución manual)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redémarrer Hermes (lancé manuellement)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes を再起動（手動で実行中）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reiniciar Hermes (executando manualmente)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重启 Hermes（手动运行中）"
+          }
+        }
+      }
+    },
+    "Restart Hermes (status unknown)" : {
+      "comment" : "Menu bar: Restart item when the gateway's status couldn't be read.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes neu starten (Status unbekannt)"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reiniciar Hermes (estado desconocido)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redémarrer Hermes (état inconnu)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes を再起動（状態不明）"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reiniciar Hermes (status desconhecido)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重启 Hermes（状态未知）"
+          }
+        }
+      }
+    },
     "Runs `hermes sessions optimize --force` while other processes have the database open." : {
       "localizations" : {
         "de" : {
@@ -2860,6 +3352,47 @@
         }
       }
     },
+    "Scarf can't switch to %@ from here. Choose %@ and a model in the model picker instead." : {
+      "comment" : "Credential pools: provider switch not possible here. Both %@ are the provider name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf kann von hier aus nicht zu %@ wechseln. Wähle stattdessen %@ und ein Modell in der Modellauswahl."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no puede cambiar a %@ desde aquí. Elige %@ y un modelo en el selector de modelos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf ne peut pas passer à %@ depuis ici. Choisissez plutôt %@ et un modèle dans le sélecteur de modèle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf はここから %@ に切り替えられません。代わりにモデルピッカーで %@ とモデルを選んでください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não consegue mudar para %@ daqui. Em vez disso, escolha %@ e um modelo no seletor de modelos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法在此切换到 %@。请改为在模型选择器中选择 %@ 和一个模型。"
+          }
+        }
+      }
+    },
     "Scarf couldn't check whether Hermes is running on this server. Stop the Hermes gateway and any Hermes chats there before restoring." : {
       "localizations" : {
         "de" : {
@@ -2937,6 +3470,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Scarf 无法暂停 %lld 个任务:%@。请在 Cron 标签页中暂停它们。"
+          }
+        }
+      }
+    },
+    "Scarf couldn't read the gateway's status, so it didn't restart it. A restart of a gateway that isn't a service would stop it for good." : {
+      "comment" : "ScarfCore HermesGatewayRestartGuard refusal: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf konnte den Status des Gateways nicht lesen und hat es daher nicht neu gestartet. Ein Neustart eines Gateways, das kein Dienst ist, würde es endgültig stoppen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf no pudo leer el estado del gateway, así que no lo reinició. Reiniciar un gateway que no es un servicio lo detendría definitivamente."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf n'a pas pu lire l'état du gateway ; il ne l'a donc pas redémarré. Redémarrer un gateway qui n'est pas un service l'arrêterait définitivement."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は Gateway の状態を読み取れなかったため、再起動しませんでした。サービスではない Gateway を再起動すると、完全に停止してしまいます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf não conseguiu ler o status do gateway, então não o reiniciou. Reiniciar um gateway que não é um serviço o pararia de vez."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 无法读取 Gateway 的状态，因此没有重启它。重启一个不是服务的 Gateway 会使其彻底停止。"
           }
         }
       }
@@ -3059,6 +3633,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Scarf 无法安全地将“%@”添加到 config.yaml,因此未做任何更改。请在该主机的终端中使用 `hermes mcp add %@ --url <url> --auth oauth` 添加。"
+          }
+        }
+      }
+    },
+    "Sessions couldn't be loaded." : {
+      "comment" : "Sessions lists: the state.db read failed.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sitzungen konnten nicht geladen werden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudieron cargar las sesiones."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de charger les sessions."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションを読み込めませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível carregar as sessões."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载会话。"
           }
         }
       }
@@ -3219,6 +3834,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要登录“%@”吗?"
+          }
+        }
+      }
+    },
+    "Signed in to Nous Portal." : {
+      "comment" : "Model picker: Nous sign-in state.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei Nous Portal angemeldet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sesión iniciada en Nous Portal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecté à Nous Portal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nous Portal にサインイン済みです。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectado ao Nous Portal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登录 Nous Portal。"
           }
         }
       }
@@ -3588,6 +4244,129 @@
         }
       }
     },
+    "The gateway is still restarting: Hermes handed it back to its supervisor, which lets in-flight runs finish first and can take longer than Scarf waits. Check its status again in a minute." : {
+      "comment" : "ScarfCore HermesGatewayServiceVerdict note: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Gateway startet noch neu: Hermes hat es an seinen Supervisor zurückgegeben, der laufende Ausführungen erst abschließen lässt, was länger dauern kann, als Scarf wartet. Prüfe den Status in einer Minute erneut."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El gateway aún se está reiniciando: Hermes lo devolvió a su supervisor, que deja terminar primero las ejecuciones en curso y puede tardar más de lo que Scarf espera. Vuelve a comprobar su estado en un minuto."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le gateway est toujours en cours de redémarrage : Hermes l'a rendu à son superviseur, qui laisse d'abord se terminer les exécutions en cours, ce qui peut prendre plus longtemps que ce que Scarf attend. Vérifiez de nouveau son état dans une minute."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gateway はまだ再起動中です。Hermes はこれをスーパーバイザーに戻しました。スーパーバイザーは実行中の処理を先に完了させるため、Scarf の待機時間より長くかかることがあります。1 分後にもう一度状態を確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O gateway ainda está reiniciando: o Hermes o devolveu ao supervisor, que deixa as execuções em andamento terminarem primeiro e pode levar mais tempo do que o Scarf espera. Verifique o status novamente em um minuto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gateway 仍在重启：Hermes 已将其交还给其监管程序，监管程序会先让进行中的运行完成，耗时可能超过 Scarf 的等待时间。请一分钟后再次检查其状态。"
+          }
+        }
+      }
+    },
+    "The gateway isn't running and isn't installed as a service on this host, so there is nothing Scarf can restart in the background. Start it with `hermes gateway run` in a terminal, or install it as a service with `hermes gateway install`." : {
+      "comment" : "ScarfCore HermesGatewayRestartGuard refusal: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Gateway läuft nicht und ist auf diesem Host nicht als Dienst installiert, daher kann Scarf im Hintergrund nichts neu starten. Starte es mit `hermes gateway run` in einem Terminal oder installiere es mit `hermes gateway install` als Dienst."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El gateway no se está ejecutando ni está instalado como servicio en este host, así que Scarf no puede reiniciar nada en segundo plano. Inícialo con `hermes gateway run` en una terminal, o instálalo como servicio con `hermes gateway install`."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le gateway ne tourne pas et n'est pas installé comme service sur cet hôte ; Scarf ne peut donc rien redémarrer en arrière-plan. Démarrez-le avec `hermes gateway run` dans un terminal, ou installez-le comme service avec `hermes gateway install`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gateway は実行されておらず、このホストにサービスとしてインストールされていないため、Scarf がバックグラウンドで再起動できるものはありません。ターミナルで `hermes gateway run` を実行して起動するか、`hermes gateway install` でサービスとしてインストールしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O gateway não está em execução nem instalado como serviço neste host, então não há nada que o Scarf possa reiniciar em segundo plano. Inicie-o com `hermes gateway run` em um terminal ou instale-o como serviço com `hermes gateway install`."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gateway 未运行，且未在此主机上安装为服务，因此 Scarf 无法在后台重启任何内容。请在终端中用 `hermes gateway run` 启动它，或用 `hermes gateway install` 将其安装为服务。"
+          }
+        }
+      }
+    },
+    "The gateway on this host was started by hand (for example `hermes gateway run` in a terminal), not as a service. Restarting it from Scarf would stop it and could not keep a new one running, so Scarf left it alone. Restart it where it runs, or install it as a service with `hermes gateway install` so Scarf can restart it." : {
+      "comment" : "ScarfCore HermesGatewayRestartGuard refusal: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Gateway auf diesem Host wurde manuell gestartet (zum Beispiel mit `hermes gateway run` in einem Terminal), nicht als Dienst. Ein Neustart aus Scarf würde es stoppen, ohne ein neues am Laufen halten zu können, daher hat Scarf es in Ruhe gelassen. Starte es dort neu, wo es läuft, oder installiere es mit `hermes gateway install` als Dienst, damit Scarf es neu starten kann."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El gateway de este host se inició a mano (por ejemplo, con `hermes gateway run` en una terminal), no como servicio. Reiniciarlo desde Scarf lo detendría y no podría mantener uno nuevo en ejecución, así que Scarf lo dejó como estaba. Reinícialo donde se ejecuta, o instálalo como servicio con `hermes gateway install` para que Scarf pueda reiniciarlo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le gateway de cet hôte a été lancé à la main (par exemple avec `hermes gateway run` dans un terminal), pas comme service. Le redémarrer depuis Scarf l'arrêterait sans pouvoir en garder un nouveau en marche ; Scarf n'y a donc pas touché. Redémarrez-le là où il tourne, ou installez-le comme service avec `hermes gateway install` pour que Scarf puisse le redémarrer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストの Gateway はサービスとしてではなく、手動で起動されています（例：ターミナルでの `hermes gateway run`）。Scarf から再起動すると停止してしまい、新しいものを実行し続けることができないため、Scarf は何もしませんでした。実行している場所で再起動するか、Scarf が再起動できるよう `hermes gateway install` でサービスとしてインストールしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O gateway deste host foi iniciado manualmente (por exemplo, com `hermes gateway run` em um terminal), não como serviço. Reiniciá-lo pelo Scarf o pararia e não conseguiria manter um novo em execução, então o Scarf não mexeu nele. Reinicie-o onde ele roda ou instale-o como serviço com `hermes gateway install` para que o Scarf possa reiniciá-lo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此主机上的 Gateway 是手动启动的（例如在终端中运行 `hermes gateway run`），而不是作为服务运行。从 Scarf 重启会将其停止，且无法保持新的实例运行，因此 Scarf 没有动它。请在它运行的地方重启它，或用 `hermes gateway install` 将其安装为服务，以便 Scarf 可以重启它。"
+          }
+        }
+      }
+    },
     "The host gateway is not serving this profile — its bots and cron are stopped. Start serves it again without restarting the host gateway." : {
       "localizations" : {
         "de" : {
@@ -3789,6 +4568,88 @@
         }
       }
     },
+    "the tool" : {
+      "comment" : "ScarfCore RichChatViewModel: stands in for a tool name in \"Hermes stopped waiting for your answer and denied %@.\" hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "das Tool"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "la herramienta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "l'outil"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ツール"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "a ferramenta"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该工具"
+          }
+        }
+      }
+    },
+    "The webhook platform isn't enabled on this server. Turn on Webhook in the Mac app's Platforms → Webhook, or set platforms.webhook.enabled: true in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env." : {
+      "comment" : "ScarfGo webhooks: the webhook platform is disabled on the server.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Webhook-Plattform ist auf diesem Server nicht aktiviert. Aktiviere Webhook in der Mac-App unter Plattformen → Webhook oder setze platforms.webhook.enabled: true in config.yaml. Die hermes webhook-Befehle prüfen nur diesen Schlüssel, nicht WEBHOOK_ENABLED in .env."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La plataforma de webhooks no está habilitada en este servidor. Activa Webhook en Plataformas → Webhook de la app para Mac, o define platforms.webhook.enabled: true en config.yaml. Los comandos hermes webhook solo comprueban esa clave, no WEBHOOK_ENABLED en .env."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La plateforme webhook n'est pas activée sur ce serveur. Activez Webhook dans Plateformes → Webhook de l'app Mac, ou définissez platforms.webhook.enabled: true dans config.yaml. Les commandes hermes webhook ne vérifient que cette clé, pas WEBHOOK_ENABLED dans .env."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーでは Webhook プラットフォームが有効になっていません。Mac アプリの「プラットフォーム → Webhook」で Webhook をオンにするか、config.yaml で platforms.webhook.enabled: true を設定してください。hermes webhook コマンドはこのキーだけを確認し、.env の WEBHOOK_ENABLED は確認しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A plataforma de webhooks não está ativada neste servidor. Ative Webhook em Plataformas → Webhook no app para Mac ou defina platforms.webhook.enabled: true no config.yaml. Os comandos hermes webhook verificam só essa chave, não WEBHOOK_ENABLED no .env."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此服务器上未启用 Webhook 平台。请在 Mac 应用的“平台 → Webhook”中打开 Webhook，或在 config.yaml 中设置 platforms.webhook.enabled: true。hermes webhook 命令只检查该键，不检查 .env 中的 WEBHOOK_ENABLED。"
+          }
+        }
+      }
+    },
     "There was no stored auth state for this provider." : {
       "localizations" : {
         "de" : {
@@ -3905,6 +4766,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "以下数据库无法安全复制,未包含在此备份中:%@"
+          }
+        }
+      }
+    },
+    "This backup is older than Scarf's current backup scope and lists databases inside folders Hermes's own backup leaves out (old backups, caches, runtime downloads). They were not restored." : {
+      "comment" : "Restore done sheet: explains the databases listed below were skipped.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sicherung ist älter als der aktuelle Sicherungsumfang von Scarf und listet Datenbanken in Ordnern auf, die Hermes' eigene Sicherung auslässt (alte Sicherungen, Caches, Laufzeit-Downloads). Sie wurden nicht wiederhergestellt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta copia de seguridad es anterior al alcance actual de las copias de Scarf y enumera bases de datos dentro de carpetas que la copia propia de Hermes omite (copias antiguas, cachés, descargas de runtime). No se restauraron."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette sauvegarde est antérieure au périmètre de sauvegarde actuel de Scarf et répertorie des bases de données dans des dossiers que la sauvegarde de Hermes laisse de côté (anciennes sauvegardes, caches, téléchargements d'exécution). Elles n'ont pas été restaurées."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このバックアップは Scarf の現在のバックアップ範囲より古く、Hermes 自身のバックアップが除外するフォルダ（古いバックアップ、キャッシュ、ランタイムのダウンロード）内のデータベースが含まれています。それらは復元されませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este backup é anterior ao escopo de backup atual do Scarf e lista bancos de dados dentro de pastas que o próprio backup do Hermes deixa de fora (backups antigos, caches, downloads de runtime). Eles não foram restaurados."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此备份早于 Scarf 当前的备份范围，其中列出的数据库位于 Hermes 自身备份会排除的文件夹中（旧备份、缓存、运行时下载）。这些数据库未被恢复。"
           }
         }
       }
@@ -4185,6 +5087,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此配置没有该提供商自己的凭证,因此 Hermes 使用默认配置 auth.json 中的凭证。在此处添加后,此配置将改用自己的凭证。"
+          }
+        }
+      }
+    },
+    "This profile is parked: its gateway was stopped on purpose, so there is nothing for Scarf to restart. Start the gateway to serve it again; saved changes take effect then." : {
+      "comment" : "ScarfCore HermesGatewayRestartGuard refusal for a parked profile: hand-added, no Xcode extractor sees ScarfCore string literals.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Profil ist geparkt: Sein Gateway wurde absichtlich gestoppt, daher gibt es für Scarf nichts neu zu starten. Starte das Gateway, um es wieder zu bedienen; gespeicherte Änderungen werden dann wirksam."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil está aparcado: su gateway se detuvo a propósito, así que Scarf no tiene nada que reiniciar. Inicia el gateway para volver a atenderlo; los cambios guardados se aplicarán entonces."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce profil est mis en attente : son gateway a été arrêté volontairement, Scarf n'a donc rien à redémarrer. Démarrez le gateway pour le servir de nouveau ; les modifications enregistrées prendront effet à ce moment-là."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロファイルはパーク中です。Gateway は意図的に停止されているため、Scarf が再起動するものはありません。再び処理するには Gateway を起動してください。保存した変更はそのときに反映されます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este perfil está estacionado: o gateway dele foi parado de propósito, então não há nada para o Scarf reiniciar. Inicie o gateway para atendê-lo novamente; as alterações salvas entram em vigor nesse momento."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配置已暂停：其 Gateway 是有意停止的，因此 Scarf 没有可重启的内容。启动 Gateway 以再次服务它；已保存的更改届时生效。"
           }
         }
       }
@@ -48340,46 +49283,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Homeserver URL"
-          }
-        }
-      }
-    },
-    "Honcho Eager Init" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Honcho sofort initialisieren"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inicialización anticipada de Honcho"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Initialisation anticipée de Honcho"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Honcho の事前初期化"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inicialização antecipada do Honcho"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Honcho 预先初始化"
           }
         }
       }
@@ -97697,48 +98600,6 @@
         }
       }
     },
-    "Signed in to Nous, but another provider is active." : {
-      "comment" : "A description of a user's subscription to Nous, but",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bei Nous angemeldet, aber ein anderer Anbieter ist aktiv."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sesión iniciada en Nous, pero hay otro proveedor activo."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connecté à Nous, mais un autre fournisseur est actif."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nous にサインイン済みですが、別のプロバイダーがアクティブです。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Conectado ao Nous, mas outro provedor está ativo."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已登录 Nous,但另一个提供方处于活跃状态。"
-          }
-        }
-      }
-    },
     "Signpost only" : {
       "comment" : "A mode of ScarfMonDiagnosticsSection.",
       "isCommentAutoGenerated" : true,
@@ -102067,48 +102928,6 @@
         }
       }
     },
-    "Subscription active — active provider is Nous." : {
-      "comment" : "A description of a user's active subscription to",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abonnement aktiv — aktiver Anbieter ist Nous."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suscripción activa — el proveedor activo es Nous."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abonnement actif — le fournisseur actif est Nous."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "サブスクリプション有効 — アクティブなプロバイダーは Nous です。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Assinatura ativa — o provedor ativo é o Nous."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "订阅已激活 — 活跃提供方为 Nous。"
-          }
-        }
-      }
-    },
     "Subscription required" : {
       "localizations" : {
         "de" : {
@@ -105117,47 +105936,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上游版本将替换你编辑过的副本。此操作无法撤销。"
-          }
-        }
-      }
-    },
-    "The webhook gateway platform isn't enabled on this server. Run `hermes setup` from the Mac app or a shell to enable it." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die Webhook-Gateway-Plattform ist auf diesem Server nicht aktiviert. Führe `hermes setup` aus der Mac-App oder einer Shell aus, um sie zu aktivieren."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "La plataforma de gateway de webhooks no está activada en este servidor. Ejecuta `hermes setup` desde la app de Mac o desde un shell para activarla."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "La plateforme de passerelle webhook n'est pas activée sur ce serveur. Exécutez `hermes setup` depuis l'app Mac ou un shell pour l'activer."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このサーバーでは webhook ゲートウェイプラットフォームが有効になっていません。有効にするには、Mac アプリまたはシェルから `hermes setup` を実行してください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A plataforma de gateway de webhook não está ativada neste servidor. Execute `hermes setup` pelo app para Mac ou por um shell para ativá-la."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此服务器上未启用 webhook 网关平台。请在 Mac 应用或 shell 中运行 `hermes setup` 来启用它。"
           }
         }
       }

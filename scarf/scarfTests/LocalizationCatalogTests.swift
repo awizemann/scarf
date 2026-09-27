@@ -276,6 +276,7 @@ struct LocalizationCatalogTests {
         "`hermes profile list` failed: %@",
         "`hermes profile list` failed (exit %lld).",
         "Couldn't reach `hermes profile list` on this server.",
+        "The webhook platform isn't enabled on this server. Turn on Webhook in the Mac app's Platforms → Webhook, or set platforms.webhook.enabled: true in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env.",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")
