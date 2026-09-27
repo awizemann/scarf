@@ -123,7 +123,9 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
             // exits 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7).
             if HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded {
                 self.activeName = name
-                self.showSuccess(String(localized: "Active personality set to \(name)"))
+                // Say where it applies: the ACP adapter Scarf chats through
+                // never applies `display.personality` (S03-F2).
+                self.showSuccess(String(localized: "Personality set to \(name) for CLI, TUI and gateway sessions"))
             } else {
                 self.logger.warning("Failed to set personality: \(result.output)")
                 // Same `hermes config set` failure surface as Settings, so use

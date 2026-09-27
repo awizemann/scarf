@@ -433,3 +433,30 @@ struct UnsupportedEffortNote: View {
         }
     }
 }
+
+/// Where `display.personality` actually takes effect (S03-F2). Hermes
+/// applies the personality overlay only in the CLI, the TUI and the
+/// messaging gateway (`resolve_ephemeral_system_prompt`,
+/// `hermes_cli/personality.py:118-124`, read by
+/// `hermes_cli/cli_init_mixin.py:249`, `gateway/run_config_loaders.py:99`
+/// and `tui_gateway/server.py:2384-2385` @ v2026.9.24). The ACP adapter
+/// Scarf chats through builds its agent without it
+/// (`acp_adapter/session.py:487-530`), so the setting has no effect on
+/// Scarf's own chats. SOUL.md, by contrast, is part of every system prompt.
+struct PersonalityScopeNote: View {
+    /// Adds the pointer to SOUL.md, for the Personalities screen that
+    /// edits it.
+    var mentionsSoul = false
+
+    var body: some View {
+        Text(mentionsSoul
+             ? "Applies to Hermes CLI, TUI and messaging-gateway sessions. Scarf chats don't use it — Hermes doesn't apply a personality over ACP. To shape Scarf chats, edit SOUL.md below."
+             : "Applies to Hermes CLI, TUI and messaging-gateway sessions. Scarf chats don't use it — Hermes doesn't apply a personality over ACP.")
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+    }
+}

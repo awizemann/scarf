@@ -55,6 +55,7 @@ struct GeneralTab: View {
             } else {
                 EditableTextField(label: "Personality", value: viewModel.config.personality) { viewModel.setPersonality($0) }
             }
+            PersonalityScopeNote()
         }
 
         SettingsSection(title: "Locale", icon: "globe.americas") {
