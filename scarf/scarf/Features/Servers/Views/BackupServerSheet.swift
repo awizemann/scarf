@@ -127,7 +127,7 @@ struct BackupServerSheet: View {
                 Toggle(isOn: $viewModel.includeAuth) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Include `auth.json`").font(.callout)
-                        Text("Provider credentials (Anthropic/OpenAI/Nous keys). **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway.")
+                        Text("Provider logins and pooled keys Hermes keeps in `auth.json`. **Off by default** — they're sensitive and you'll likely re-auth on the new droplet anyway. This covers `auth.json` only: API keys in `.env` and the encrypted vault in `vault/` (with its key) are always in the archive, as in Hermes' own backup, so keep the archive private.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
