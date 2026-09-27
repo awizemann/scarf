@@ -135,6 +135,11 @@ struct ProfilesView: View {
                     Label(msg, systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if let error = viewModel.loadError, !viewModel.profiles.isEmpty {
+                    // A failed refresh keeps the last list; say it's stale.
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
@@ -251,7 +256,11 @@ struct ProfilesView: View {
             .listStyle(.inset)
             .overlay {
                 if viewModel.profiles.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView("No Profiles", systemImage: "person.2.crop.square.stack", description: Text("Create a profile to isolate config and skills."))
+                    if let error = viewModel.loadError {
+                        ContentUnavailableView("Couldn’t Load Profiles", systemImage: "exclamationmark.triangle", description: Text(error))
+                    } else {
+                        ContentUnavailableView("No Profiles", systemImage: "person.2.crop.square.stack", description: Text("Create a profile to isolate config and skills."))
+                    }
                 }
             }
         }

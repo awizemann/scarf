@@ -153,7 +153,7 @@ struct ProfilesView: View {
         let rootHome = HermesProfileScope.rootHome(
             forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome
         )
-        let result = await { () async -> (output: String?, active: String?) in
+        let result = await { () async -> (output: (text: String, exitCode: Int32)?, active: String?) in
             // `profile list` enumerates ALL profiles regardless of the
             // HERMES_HOME scope the transport injects — Hermes resolves it
             // against the root via get_default_hermes_root() (verified
@@ -171,23 +171,35 @@ struct ProfilesView: View {
         self.hostActiveProfile = result.active.flatMap {
             ($0.isEmpty || $0 == "default") ? nil : $0
         }
-        if let output = result.output {
+        if let output = result.output, output.exitCode == 0 {
             // The explicit "Default" row covers the root profile, so drop a
-            // parsed "default" entry to avoid a duplicate. Empty output is a
-            // legitimate zero-named-profiles host, NOT an error — the footer
-            // handles that case.
-            self.namedProfiles = Self.parse(output).filter { $0 != "default" }
+            // parsed "default" entry to avoid a duplicate. Ids come from the
+            // shared ScarfCore parser, which reads `Display Name (id)` rows
+            // correctly (S13-F4).
+            self.namedProfiles = HermesProfileList.parse(output.text)
+                .map(\.id)
+                .filter { $0 != HermesProfileScope.defaultProfileName && Self.isProfileName($0) }
             self.lastError = nil
+        } else if let output = result.output {
+            // Ran but failed (e.g. `hermes: not found`). A successful run
+            // always prints at least the default row, so this is not "no
+            // named profiles" — keep any last-known list and say why.
+            let detail = output.text
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .last { !$0.isEmpty }
+            self.lastError = detail.map { "`hermes profile list` failed: \($0.prefix(200))" }
+                ?? "`hermes profile list` failed (exit \(output.exitCode))."
         } else {
             // Transport threw — keep any last-known list and surface the error.
             self.lastError = "Couldn't reach `hermes profile list` on this server."
         }
     }
 
-    /// Run a hermes command, returning combined stdout+stderr, or `nil`
-    /// when the transport itself failed (so callers can tell "couldn't
-    /// reach the host" apart from "ran fine, printed nothing").
-    nonisolated private static func runHermes(context: ServerContext, args: [String]) async -> String? {
+    /// Run a hermes command, returning combined stdout+stderr and the exit
+    /// code, or `nil` when the transport itself failed (so callers can tell
+    /// "couldn't reach the host" apart from "ran and failed").
+    nonisolated private static func runHermes(context: ServerContext, args: [String]) async -> (text: String, exitCode: Int32)? {
         let transport = context.makeTransport()
         do {
             let r = try await transport.asyncRunProcess(
@@ -196,51 +208,16 @@ struct ProfilesView: View {
                 stdin: nil,
                 timeout: 30
             )
-            return r.stdoutString + r.stderrString
+            return (r.stdoutString + r.stderrString, r.exitCode)
         } catch {
             return nil
         }
     }
 
-    /// Tolerant parser for `hermes profile list`. The CLI prints a
-    /// table-like format with the profile name in the leading column. We
-    /// surface the names (an active marker like `◆`/`*` is stripped).
-    nonisolated private static func parse(_ output: String) -> [String] {
-        var results: [String] = []
-        for raw in output.components(separatedBy: "\n") {
-            var trimmed = raw.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            // Strip leading active markers.
-            for marker in ["◆", "*"] where trimmed.hasPrefix(marker) {
-                trimmed = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-            }
-            // Box-drawing / rule lines: extract the leading column if any.
-            if trimmed.hasPrefix("┃") || trimmed.hasPrefix("┏") || trimmed.hasPrefix("┡")
-                || trimmed.hasPrefix("┗") || trimmed.hasPrefix("━") || trimmed.hasPrefix("│") {
-                let body = trimmed
-                    .replacingOccurrences(of: "│", with: "|")
-                    .replacingOccurrences(of: "┃", with: "|")
-                guard body.contains("|") else { continue }
-                let cols = body.split(separator: "|", omittingEmptySubsequences: true)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                if let name = cols.first, isProfileName(name) {
-                    results.append(name)
-                }
-                continue
-            }
-            // Plain-text fallback: first whitespace-delimited token is the name.
-            if let token = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" }).first,
-               isProfileName(String(token)) {
-                results.append(String(token))
-            }
-        }
-        // Dedupe (table-row + plain-text passes can overlap), preserving order.
-        var seen = Set<String>()
-        return results.filter { seen.insert($0).inserted }
-    }
-
-    /// A token is a profile name if it matches Hermes' id grammar — keeps
-    /// table headers ("Profile", "Gateway", "Tip:") out of the list.
+    /// Whether an id matches Hermes' strict id grammar. The shared parser
+    /// is a little looser (it admits uppercase, as the Mac list always has);
+    /// ScarfGo turns the selection into a `profiles/<id>` home, so it keeps
+    /// only ids Hermes itself would accept.
     nonisolated private static func isProfileName(_ s: String) -> Bool {
         // \A…\z, not ^…$: ICU's $ matches before a trailing line terminator
         // (SEC-L1) — a token carrying a stray \r would otherwise validate and
