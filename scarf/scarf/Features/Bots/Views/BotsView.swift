@@ -146,6 +146,9 @@ struct BotsView: View {
         .onChange(of: hasCronPastOneShotResumeRefusal) { _, _ in
             mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
         }
+        .onChange(of: hasCronRunSynchronous) { _, _ in
+            mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
+        }
         .onChange(of: viewModel.selectedProfileName) { _, newValue in
             mirrorRoutinesCapability(forProfile: newValue)
             mirrorAgentCapability(forProfile: newValue)
@@ -631,6 +634,12 @@ struct BotsView: View {
         capabilitiesStore?.capabilities.hasCronPastOneShotResumeRefusal ?? false
     }
 
+    /// v0.18.0 — `cron run` runs the job itself; gates Run Now's follow-up
+    /// `cron tick`. Mirrored for the same reason as the other three.
+    private var hasCronRunSynchronous: Bool {
+        capabilitiesStore?.capabilities.hasCronRunSynchronous ?? false
+    }
+
     /// Fetch the cached per-bot routines view model. Pure — no capability
     /// mirroring here. That write used to happen inline in this accessor,
     /// which is called from the `@ViewBuilder` `detail` body: a stored
@@ -657,6 +666,7 @@ struct BotsView: View {
         vm.isV0206OrLater = hasCronResumeRunNow
         vm.isV021OrLater = hasCronRecoverableErrorResume
         vm.isV0181OrLater = hasCronPastOneShotResumeRefusal
+        vm.hostRunsCronSynchronously = hasCronRunSynchronous
     }
 
     // MARK: - Selection

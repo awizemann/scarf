@@ -117,15 +117,17 @@ import ScarfCore
                                 schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
                                 enabled: true, state: "scheduled")
         vm.runNow(job)
-        await Self.settle { !calls.all(["cron", "tick"]).isEmpty && vm.message != nil }
+        await Self.settle { !vm.isRunningNow(job) && vm.message != "Running \"Nightly\"…" }
         let run = try #require(calls.all(["cron", "run"]).first)
         #expect(run.args == ["cron", "run", "j1"])
         #expect(run.timeout == CronViewModel.runNowTimeout)
         #expect(run.timeout >= 300, "a synchronous agent run must not be killed at 30 s")
         #expect(vm.messageOutcome == .unconfirmed)
         #expect(vm.message == CronViewModel.runNowMessage(.stillRunning).text)
-        // The follow-up tick still runs.
-        #expect(calls.all(["cron", "tick"]).first?.timeout == 300)
+        // S08-F1: a timed-out run marked nothing due, so no follow-up tick
+        // (it used to tick after every verdict and fire every other due job).
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(calls.all(["cron", "tick"]).isEmpty)
     }
 
     /// P9 (t-d6384e2e item 8): `cron run` is a whole synchronous agent run
@@ -157,9 +159,90 @@ import ScarfCore
         #expect(calls.all(["cron", "run"]).count == 1, "a second click started a second run")
 
         gate.signal()
-        await Self.settle { !calls.all(["cron", "tick"]).isEmpty }
+        await Self.settle { !vm.isRunningNow(job) }
         #expect(!vm.isRunningNow(job))
         #expect(vm.message == CronViewModel.runNowMessage(.ran).text)
+    }
+
+    // MARK: - S08-F1: the follow-up `cron tick` only where it is needed
+
+    private static let tickJob = HermesCronJob(
+        id: "j1", name: "Nightly", prompt: "p", model: nil,
+        schedule: CronSchedule(kind: "cron", display: "0 9 * * *", expression: "0 9 * * *"),
+        enabled: true, state: "scheduled")
+
+    /// Drive a real Run Now against a runner that answers `cron run` with
+    /// `output`/`exit`, and return every call it saw once the run (and any
+    /// tick) has settled.
+    private static func runNowCalls(
+        output: String, exit: Int32, hostRunsSynchronously: Bool
+    ) async throws -> Calls {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let calls = Calls()
+        let vm = CronViewModel(context: home.context, mutationRunner: { args, timeout in
+            calls.append(args, timeout)
+            if args.starts(with: ["cron", "run"]) { return (output, exit) }
+            return ("", 0)
+        })
+        vm.hostRunsCronSynchronously = hostRunsSynchronously
+        vm.runNow(tickJob)
+        await settle { !vm.isRunningNow(tickJob) }
+        // The tick is sent 250 ms after the verdict; wait past that so an
+        // unwanted tick has had every chance to show up.
+        for _ in 0..<100 {
+            if !calls.all(["cron", "tick"]).isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return calls
+    }
+
+    /// A v0.17 host (`v2026.6.19` `_job_action` :316) only marks the job
+    /// due, so the tick is what fires it — unchanged from before (C1).
+    @Test func preV018StartedRunStillTicks() async throws {
+        let calls = try await Self.runNowCalls(
+            output: "Triggered job: Nightly (j1)\n  It will run on the next scheduler tick.\n",
+            exit: 0, hostRunsSynchronously: false)
+        #expect(calls.all(["cron", "tick"]).count == 1)
+        #expect(calls.all(["cron", "tick"]).first?.timeout == 300)
+    }
+
+    /// v0.18+: the job already ran; a tick would fire every other due job.
+    @Test func v018RanRunDoesNotTick() async throws {
+        let calls = try await Self.runNowCalls(
+            output: "Triggered job: Nightly (j1)\n  Ran now: succeeded.\n",
+            exit: 0, hostRunsSynchronously: true)
+        #expect(calls.all(["cron", "run"]).count == 1)
+        #expect(calls.all(["cron", "tick"]).isEmpty)
+    }
+
+    /// v0.18+ relay-fronted job: prints the old next-tick line, but the
+    /// running gateway owns it — still no tick.
+    @Test func v018RelayForwardDoesNotTick() async throws {
+        let calls = try await Self.runNowCalls(
+            output: "Triggered job: j1 (j1)\n  It will run on the next scheduler tick.\n",
+            exit: 0, hostRunsSynchronously: true)
+        #expect(calls.all(["cron", "tick"]).isEmpty)
+    }
+
+    /// A failed run marked nothing due on any host, so ticking would only
+    /// fire OTHER jobs.
+    @Test func failedRunDoesNotTickEvenOnAnOldHost() async throws {
+        let calls = try await Self.runNowCalls(
+            output: "Failed to run job: Job 'j1' not found\n",
+            exit: 1, hostRunsSynchronously: false)
+        #expect(calls.all(["cron", "tick"]).isEmpty)
+    }
+
+    @Test func tickDecisionMatrix() {
+        let verdicts: [CronViewModel.RunNowVerdict] = [
+            .ran, .started, .refused("x"), .alreadyRunning("x"), .stillRunning, .failed("x"),
+        ]
+        for verdict in verdicts {
+            #expect(!CronViewModel.shouldTickAfterRunNow(verdict, hostRunsSynchronously: true), "\(verdict)")
+            #expect(CronViewModel.shouldTickAfterRunNow(verdict, hostRunsSynchronously: false)
+                    == (verdict == .started), "\(verdict)")
+        }
     }
 
     // MARK: - (3) selection race

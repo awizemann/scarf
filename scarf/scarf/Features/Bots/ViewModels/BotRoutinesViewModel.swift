@@ -66,6 +66,12 @@ final class BotRoutinesViewModel {
         set { cron.isV0181OrLater = newValue }
     }
 
+    /// Mirror of `hasCronRunSynchronous` (v0.18.0), same shape.
+    var hostRunsCronSynchronously: Bool {
+        get { cron.hostRunsCronSynchronously }
+        set { cron.hostRunsCronSynchronously = newValue }
+    }
+
     /// This bot's routines, filtered from the FULL job list by the verified
     /// `[bot:<name>] ` prefix — never a separate fetch, so a job Hermes
     /// Desktop would show under this bot is exactly the set Scarf shows.

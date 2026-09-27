@@ -500,6 +500,11 @@ final class CronViewModel {
     /// offering plain Resume and lets the CLI decide.
     var isV0181OrLater = false
 
+    /// Set by `CronView` from `hasCronRunSynchronous` (v0.18.0). Gates the
+    /// follow-up `hermes cron tick` after Run Now: only a host whose
+    /// `cron run` merely marks the job due needs it (see ``runNow(_:)``).
+    var hostRunsCronSynchronously = false
+
     /// What Scarf may offer this job — the shared, cross-platform answer.
     /// `IOSCronViewModel.recoveryOffer(for:)` computes the same thing from
     /// the same model function, so the two platforms cannot diverge.
@@ -838,6 +843,21 @@ final class CronViewModel {
         }
     }
 
+    /// Whether Run Now should follow `cron run` with `hermes cron tick`.
+    ///
+    /// Only when the host is pre-v0.18 (`cron run` there only marks the job
+    /// due) AND the run came back as a plain "started". A refusal, a
+    /// failure or "already running" means nothing was marked due, so a tick
+    /// would only fire OTHER jobs. On v0.18+ never: the job already ran,
+    /// or (relay-fronted) the running gateway owns it.
+    nonisolated static func shouldTickAfterRunNow(
+        _ verdict: RunNowVerdict, hostRunsSynchronously: Bool
+    ) -> Bool {
+        guard !hostRunsSynchronously else { return false }
+        if case .started = verdict { return true }
+        return false
+    }
+
     /// Jobs whose `hermes cron run` this view model has in flight. Cleared
     /// when the run returns (before the follow-up tick), whatever the verdict.
     private(set) var runningNowJobIDs: Set<String> = []
@@ -860,9 +880,12 @@ final class CronViewModel {
         // - v0.18.0+: it RUNS the job synchronously and prints `Ran now:
         //   succeeded.`/`failed.` or a skip sentence (see `runNowVerdict`) —
         //   except a relay-fronted job, which is forwarded to the running
-        //   gateway and reads like the old "next tick" line. The follow-up
-        //   tick is then redundant but harmless: the run has cleared its
-        //   claim, and a live gateway holds the tick lock.
+        //   gateway and reads like the old "next tick" line. No tick there:
+        //   `cron tick` fires EVERY due or overdue job, not just this one
+        //   (`cron/scheduler_tick.py:62-107` @ v2026.9.24), inside a process
+        //   Scarf kills at 300 s. With no gateway running, that used to
+        //   deliver jobs the user never asked to run and cut some off
+        //   mid-run. See `shouldTickAfterRunNow`.
         //
         // The toast lands as soon as `cron run` returns, without waiting
         // for the tick; HermesFileWatcher picks up whatever the job wrote.
@@ -883,24 +906,29 @@ final class CronViewModel {
         post(String(localized: "Running \"\(job.name)\"…"), outcome: .unconfirmed)
         let offer = recoveryOffer(for: job)
         let timeout = Self.runNowTimeout
+        let hostRunsSynchronously = hostRunsCronSynchronously
         Task.detached { [mutationRunner, weak self] in
             // `OffPool.run`: a spawn that may block for the whole run gets a
             // thread of its own, not one of the cooperative pool's (C10).
             let runResult = await OffPool.run { mutationRunner(["cron", "run", jobID], timeout) }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.runningNowJobIDs.remove(jobID)
+            let verdict = await MainActor.run { [weak self] () -> RunNowVerdict in
                 let verdict = Self.runNowVerdict(
                     exitCode: runResult.exitCode, output: runResult.output, timeout: timeout, offer: offer)
+                guard let self else { return verdict }
+                self.runningNowJobIDs.remove(jobID)
                 let message = Self.runNowMessage(verdict, timeout: timeout)
                 self.post(message.text, outcome: message.outcome)
                 if case .failed = verdict {
                     self.logger.warning("cron run failed: \(runResult.output)")
                 }
                 self.load(force: true)
+                return verdict
             }
-            // Now force the tick (see above) — after every verdict, as it
-            // always ran. The 300s timeout catches truly stuck processes
+            guard Self.shouldTickAfterRunNow(verdict, hostRunsSynchronously: hostRunsSynchronously) else {
+                return
+            }
+            // A pre-v0.18 host only marked the job due, so force the tick
+            // (see above). The 300s timeout catches truly stuck processes
             // without killing the long-but-valid agent case that blew up the
             // 60s version. A timeout here is survivable — the Hermes
             // scheduler re-runs due jobs on its own cadence — so we log but
