@@ -258,7 +258,7 @@ import Foundation
             })
             let entry = ProjectEntry(name: "Alpha", path: project.rootPath, uuid: project.id)
             #expect(lifecycle.cronJobIDs(for: entry).isEmpty)
-            #expect(lifecycle.runnableCronJobIDs(for: entry).isEmpty)
+            #expect(lifecycle.runnableCronJobIDs(for: entry) == [])
             #expect(lifecycle.resumeArchivedCronJobs([]).isEmpty)
         }
     }
@@ -274,10 +274,14 @@ import Foundation
         private var _calls: [[String]] = []
         let jobsPath: String
         var failing: Set<String> = []
+        /// When set, every call waits on it first — to hold a follow-up
+        /// in flight while the test starts the next transition.
+        var gate: DispatchSemaphore?
         init(jobsPath: String) { self.jobsPath = jobsPath }
         var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return _calls }
 
         func run(_ args: [String]) -> Bool {
+            gate?.wait()
             lock.lock(); defer { lock.unlock() }
             _calls.append(args)
             guard args.count == 3, !failing.contains(args[2]),
@@ -421,6 +425,68 @@ import Foundation
             await vm.cronFollowUp?.value
             #expect(fake.calls.isEmpty)
             #expect(fake.job("tmpl")?["enabled"] as? Bool == false)
+        }
+    }
+
+    /// Restore started while archive's pause is still running waits for it,
+    /// so the job is paused THEN resumed — not skipped as "not paused" and
+    /// then paused for good under a restored project.
+    @Test func restoreWaitsForAnArchivePauseStillInFlight() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let gate = DispatchSemaphore(value: 0)
+            fake.gate = gate
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            // The pause is now blocked in the fake. Start the restore, then
+            // let the pause (and the resume after it) through.
+            let archived = try #require(vm.projects.first)
+            let restore = Task { await vm.unarchiveProject(archived) }
+            try await Task.sleep(nanoseconds: 100_000_000)
+            gate.signal()
+            gate.signal()
+            #expect(await restore.value)
+            await vm.cronFollowUp?.value
+            #expect(fake.calls == [["cron", "pause", "live"], ["cron", "resume", "live"]])
+            #expect(fake.job("live")?["enabled"] as? Bool == true)
+        }
+    }
+
+    /// An unreadable `jobs.json` doesn't block the archive, but it is said:
+    /// Scarf paused nothing, so the jobs may still be firing.
+    @Test func archiveWithUnreadableJobsIsArchivedAndReported() async throws {
+        try await Self.withTempHome { ctx, root in
+            try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let path = ctx.paths.cronJobsJSON
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data("{ not json".utf8).write(to: URL(fileURLWithPath: path))
+            let fake = FakeCron(jobsPath: path)
+            let vm = Self.vm(ctx, fake)
+
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            #expect(fake.calls.isEmpty)
+            #expect(vm.mutationError?.title.contains("may still be scheduled") == true)
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?.archived == true)
+        }
+    }
+
+    /// Archiving a row that is already archived keeps the earlier record.
+    @Test func reArchivingKeepsTheEarlierRecord() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            let vm = Self.vm(ctx, fake)
+            let row = try #require(vm.projects.first)
+            #expect(await vm.archiveProject(row))
+            await vm.cronFollowUp?.value
+            // A stale menu hands in the pre-archive row again.
+            #expect(await vm.archiveProject(row))
+            await vm.cronFollowUp?.value
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?
+                .archivePausedCronJobIDs == ["live"])
         }
     }
 

@@ -641,19 +641,28 @@ public final class ProjectsViewModel {
         // had already paused (or a template job created paused and never
         // reviewed) stays paused through archive and restore.
         //
-        // OFF THE MAIN ACTOR (charter C10): the jobs.json read here and the
-        // `hermes cron pause` spawns below, each with a 30s timeout.
+        // OFF THE MAIN ACTOR AND THE POOL (charter C10): the jobs.json read
+        // here and the `hermes cron pause` spawns below (each with a 30s
+        // timeout) block, so they run on `OffPool` threads of their own.
+        //
+        // A restore's resume still in flight would make a job look "not
+        // running" here and leave it out of the record; wait for it first.
+        await cronFollowUp?.value
         let lifecycle = makeLifecycle(context)
         let target = project
-        let toPause = await Task.detached(priority: .userInitiated) {
-            lifecycle.runnableCronJobIDs(for: target)
-        }.value
+        let runnable = await OffPool.run { lifecycle.runnableCronJobIDs(for: target) }
+        let toPause = runnable ?? []
         // Clear the selection only if the archive actually persisted —
         // otherwise the user loses their place to a write that didn't
         // happen.
         guard await mutateEntry(project, action: "archive “\(project.name)”", { entry in
+            // Archiving a row that is already archived (a stale menu, or
+            // another device) must not drop the ids an earlier archive
+            // recorded — those jobs are paused now, so they aren't in
+            // `toPause`.
+            let earlier = entry.archived ? (entry.archivePausedCronJobIDs ?? []) : []
             entry.archived = true
-            entry.archivePausedCronJobIDs = toPause
+            entry.archivePausedCronJobIDs = earlier + toPause.filter { !earlier.contains($0) }
         }) else {
             return false
         }
@@ -664,12 +673,17 @@ public final class ProjectsViewModel {
         // The pause is a follow-up the archive doesn't wait on, but its
         // failure is shown: a job Scarf couldn't pause keeps firing into a
         // project the sidebar says is put away.
+        guard runnable != nil else {
+            fail(
+                String(localized: "“\(project.name)” is archived, but its cron jobs may still be scheduled"),
+                reason: String(localized: "Scarf couldn't read this server's cron jobs, so it paused none of them. Check them in the Cron tab.")
+            )
+            return true
+        }
         if !toPause.isEmpty {
             let name = project.name
             cronFollowUp = Task { [weak self] in
-                let failed = await Task.detached(priority: .utility) {
-                    lifecycle.pauseCronJobs(toPause)
-                }.value
+                let failed = await OffPool.run { lifecycle.pauseCronJobs(toPause) }
                 guard let self, !failed.isEmpty else { return }
                 self.fail(
                     String(localized: "“\(name)” is archived, but some of its cron jobs are still scheduled"),
@@ -689,6 +703,11 @@ public final class ProjectsViewModel {
         // copy. A row archived by an older Scarf has no record, so nothing
         // is resumed — resuming every attributed job is what switched on
         // jobs the user had never enabled.
+        //
+        // Wait for an archive's pause still in flight: otherwise the resume
+        // below sees the job not yet paused, skips it, and the pause then
+        // lands on a restored project.
+        await cronFollowUp?.value
         var recorded: [String] = []
         guard await mutateEntry(project, action: "restore “\(project.name)”", { entry in
             recorded = entry.archivePausedCronJobIDs ?? []
@@ -697,14 +716,12 @@ public final class ProjectsViewModel {
         })
         else { return false }
         if !recorded.isEmpty {
-            // Detached for the same reason `archiveProject` detaches.
+            // Off-pool for the same reason as in `archiveProject`.
             let lifecycle = makeLifecycle(context)
             let ids = recorded
             let name = project.name
             cronFollowUp = Task { [weak self] in
-                let failed = await Task.detached(priority: .utility) {
-                    lifecycle.resumeArchivedCronJobs(ids)
-                }.value
+                let failed = await OffPool.run { lifecycle.resumeArchivedCronJobs(ids) }
                 guard let self, !failed.isEmpty else { return }
                 self.fail(
                     String(localized: "“\(name)” is restored, but some of its cron jobs are still paused"),

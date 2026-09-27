@@ -135,16 +135,7 @@ public struct ProjectLifecycleService: Sendable {
     /// applies, so archive acts on exactly the jobs the project record
     /// claims.
     public nonisolated func cronJobIDs(for entry: ProjectEntry) -> [String] {
-        let jobs = loadCronJobs()
-        guard !jobs.isEmpty else { return [] }
-        let projPrefix = "[proj:\(projectID(for: entry).uuidString)]"
-        let templateId = ProjectStore(context: context).templateInfo(projectPath: entry.path)?.id
-        let tmplPrefix = templateId.map { "[tmpl:\($0)]" }
-        return jobs.compactMap { job in
-            if job.name.hasPrefix(projPrefix) { return job.id }
-            if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return job.id }
-            return nil
-        }
+        attributed(loadCronJobs(), to: entry).map(\.id)
     }
 
     /// The attributed jobs the scheduler would fire right now — `enabled`
@@ -153,15 +144,30 @@ public struct ProjectLifecycleService: Sendable {
     /// jobs archiving pauses and records; a job that was already paused
     /// (a template job created paused and never reviewed, say) is left
     /// alone so restoring the project can't switch it on.
-    public nonisolated func runnableCronJobIDs(for entry: ProjectEntry) -> [String] {
-        let attributed = Set(cronJobIDs(for: entry))
-        guard !attributed.isEmpty else { return [] }
-        return loadCronJobs().compactMap { job in
-            guard attributed.contains(job.id), job.enabled,
+    ///
+    /// `nil` when `jobs.json` exists but can't be read or decoded (a remote
+    /// that is down, a half-written file): the caller must say so rather
+    /// than archive as if the project had no jobs. A missing file is `[]`.
+    public nonisolated func runnableCronJobIDs(for entry: ProjectEntry) -> [String]? {
+        guard let jobs = loadCronJobsIfReadable() else { return nil }
+        return attributed(jobs, to: entry).compactMap { job in
+            guard job.enabled,
                   job.state.trimmingCharacters(in: .whitespaces) != "paused",
                   !HermesCronJob.isTruthyPauseMarker(job.extra["paused_at"])
             else { return nil }
             return job.id
+        }
+    }
+
+    private nonisolated func attributed(_ jobs: [HermesCronJob], to entry: ProjectEntry) -> [HermesCronJob] {
+        guard !jobs.isEmpty else { return [] }
+        let projPrefix = "[proj:\(projectID(for: entry).uuidString)]"
+        let templateId = ProjectStore(context: context).templateInfo(projectPath: entry.path)?.id
+        let tmplPrefix = templateId.map { "[tmpl:\($0)]" }
+        return jobs.filter { job in
+            if job.name.hasPrefix(projPrefix) { return true }
+            if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return true }
+            return false
         }
     }
 
@@ -210,10 +216,20 @@ public struct ProjectLifecycleService: Sendable {
     // MARK: - Private
 
     private nonisolated func loadCronJobs() -> [HermesCronJob] {
-        guard let data = try? transport.readFile(context.paths.cronJobsJSON),
-              data.count <= ProjectStore.maxJSONBytes
-        else { return [] }
-        return (try? JSONDecoder().decode(CronJobsFile.self, from: data))?.jobs ?? []
+        loadCronJobsIfReadable() ?? []
+    }
+
+    /// `[]` when there is no `jobs.json` (no cron on this host), `nil` when
+    /// there is one Scarf can't read or decode.
+    private nonisolated func loadCronJobsIfReadable() -> [HermesCronJob]? {
+        let path = context.paths.cronJobsJSON
+        guard let data = try? transport.readFile(path) else {
+            return transport.fileExists(path) ? nil : []
+        }
+        guard data.count <= ProjectStore.maxJSONBytes,
+              let file = try? JSONDecoder().decode(CronJobsFile.self, from: data)
+        else { return nil }
+        return file.jobs
     }
 }
 
