@@ -583,6 +583,71 @@ public actor HermesDataService {
         }
     }
 
+    /// The listed sessions that own any of `sessionIds`, newest first —
+    /// the per-project Sessions tab's query.
+    ///
+    /// Queries the ids directly instead of filtering the host's newest
+    /// sessions: a project's chats are a handful among every cron run and
+    /// gateway conversation on the host, so a global top-N window dropped
+    /// them within days on a busy one. Same list predicate and compression
+    /// tip projection as `fetchSessionsChecked`, so a row looks exactly as
+    /// it does in the Sessions list.
+    ///
+    /// An id may name a rotated compression continuation (a chat resumed
+    /// after its session rotated) while the list shows the chain under its
+    /// root; the recursive step climbs `end_reason = 'compression'` parents
+    /// so that root is found too. That step reads `end_reason`, so it rides
+    /// only where the listable-child predicate proved the column exists —
+    /// the same hosts that get tip projection at all.
+    ///
+    /// Ids are sent in chunks of `chunkSize` to stay under SQLite's
+    /// bound-parameter limit (999 before 3.32).
+    public func fetchListedSessionsChecked(
+        owning sessionIds: Set<String>,
+        chunkSize: Int = 200
+    ) async throws -> [HermesSession] {
+        let ids = sessionIds.filter { !$0.isEmpty }.sorted()
+        guard !ids.isEmpty else { return [] }
+        let idColumn = hasListableChildSupport ? "s.id" : "id"
+        var listed: [String: HermesSession] = [:]
+        do {
+            for start in stride(from: 0, to: ids.count, by: max(chunkSize, 1)) {
+                let chunk = Array(ids[start..<min(start + max(chunkSize, 1), ids.count)])
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                let sql: String
+                if hasListableChildSupport {
+                    sql = """
+                        WITH RECURSIVE owned(id) AS (
+                            SELECT id FROM sessions WHERE id IN (\(placeholders))
+                            UNION
+                            SELECT parent.id FROM owned
+                            JOIN sessions child ON child.id = owned.id
+                            JOIN sessions parent ON parent.id = child.parent_session_id
+                            WHERE parent.end_reason = 'compression'
+                        )
+                        SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) IN (SELECT id FROM owned)
+                        """
+                } else {
+                    sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) IN (\(placeholders))"
+                }
+                let rows = try await backend.query(sql, params: chunk.map { .text($0) })
+                for row in rows {
+                    let session = sessionFromRow(row)
+                    listed[session.id] = session
+                }
+            }
+        } catch {
+            Self.logger.warning("fetchListedSessions failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
+        }
+        let ordered = listed.values.sorted {
+            let l = $0.startedAt ?? .distantPast
+            let r = $1.startedAt ?? .distantPast
+            return l != r ? l > r : $0.id > $1.id
+        }
+        return await projectCompressionTips(ordered, columns: sessionListColumns).sessions
+    }
+
     /// Every listable session started at or after `since`, newest first,
     /// capped at `limit` rows.
     ///
