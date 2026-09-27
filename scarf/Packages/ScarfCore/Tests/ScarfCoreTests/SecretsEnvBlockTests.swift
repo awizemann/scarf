@@ -97,44 +97,51 @@ struct SecretsEnvBlockTests {
         #expect(result.contains("SCARF_SITE_STATUS_CHECKER_TOKEN=abc"))
     }
 
-    @Test func renderBlockQuotesValuesWithWhitespace() {
-        let result = SecretsEnvBlock.renderBlock(
-            slug: "x",
-            entries: [("KEY", "hello world")]
-        )
-        // Whitespace forces single-quoting (dotenv canonical) so the
-        // value survives shell expansion and dotenv parsing.
-        #expect(result.contains("KEY='hello world'"))
-    }
-
-    @Test func renderBlockQuotesValuesWithSpecialChars() {
-        let cases: [(input: String, mustContain: String)] = [
-            ("a#b", "KEY='a#b'"),     // # is dotenv comment marker
-            ("a$b", "KEY='a$b'"),     // $ is shell expansion
-            ("a\"b", "KEY='a\"b'"),   // " conflicts with double-quote literal
-            ("a\\b", "KEY='a\\b'"),   // backslash needs escaping
+    /// Golden values: every right-hand side here was written to a scratch
+    /// `.env` and loaded with Hermes's own loader
+    /// (`hermes_cli.env_loader._load_dotenv_with_fallback` from the
+    /// v2026.9.24 reference worktree's `.venv`, python-dotenv 1.2.2) under
+    /// an empty environment, and each variable came back byte-identical to
+    /// the left-hand side. The single-quoted `'it'\''s fine'` this replaced
+    /// fails that parse (dotenv drops the line), and a single-quoted
+    /// `${HOME}` was expanded by the loader's `parse_variables` pass.
+    @Test func escapedValuesRoundTripThroughHermesDotenvLoader() {
+        let cases: [(value: String, written: String)] = [
+            ("hello world", "\"hello world\""),
+            ("a#b", "\"a#b\""),
+            ("a$b", "\"a$b\""),
+            ("a\"b", "\"a\\\"b\""),
+            ("a\\b", "\"a\\\\b\""),
+            ("it's fine", "\"it's fine\""),
+            ("x${HOME}y", "\"x${:-$}{HOME}y\""),
+            ("p${a:-b}q", "\"p${:-$}{a:-b}q\""),
+            ("${${", "\"${:-$}{${:-$}{\""),
+            ("line1\nline2", "\"line1\\nline2\""),
+            ("crlf\r\nend", "\"crlf\\r\\nend\""),
+            ("$", "\"$\""),
+            ("$$", "\"$$\""),
+            ("trailing\\", "\"trailing${:-\\}\""),
+            ("a'b\"c${d}e\\f", "\"a'b\\\"c${:-$}{d}e\\\\f\""),
+            ("${}", "\"${:-$}{}\""),
+            ("tab\there", "\"tab\there\""),
+            ("abc-123_def", "abc-123_def"),
+            ("\\n literal", "\"\\\\n literal\""),
+            ("two\\\\", "\"two${:-\\}${:-\\}\""),
+            ("\\", "\"${:-\\}\""),
+            ("q\\\"", "\"q\\\\\\\"\""),
+            ("a\\\\b", "\"a\\\\\\\\b\""),
         ]
-        for (input, mustContain) in cases {
-            let result = SecretsEnvBlock.renderBlock(
-                slug: "x",
-                entries: [("KEY", input)]
-            )
+        for (value, written) in cases {
             #expect(
-                result.contains(mustContain),
-                "value '\(input)' produced wrong escaping: \(result)"
+                SecretsEnvBlock.escape(value) == written,
+                "value \(value.debugDescription) escaped as \(SecretsEnvBlock.escape(value).debugDescription)"
             )
+            let block = SecretsEnvBlock.renderBlock(slug: "x", entries: [("KEY", value)])
+            #expect(block.contains("\nKEY=\(written)\n"))
+            // One line per value, whatever it contains — the marker-based
+            // splice depends on it.
+            #expect(block.split(separator: "\n", omittingEmptySubsequences: false).count == 3)
         }
-    }
-
-    @Test func renderBlockEscapesSingleQuotesViaCloseReopen() {
-        // A literal single quote inside a single-quoted string is
-        // dotenv-encoded as `'\''` (close, escape, reopen) — the
-        // canonical sh/dotenv pattern.
-        let result = SecretsEnvBlock.renderBlock(
-            slug: "x",
-            entries: [("KEY", "it's fine")]
-        )
-        #expect(result.contains("KEY='it'\\''s fine'"))
     }
 
     @Test func renderBlockLeavesPlainValuesUnquoted() {

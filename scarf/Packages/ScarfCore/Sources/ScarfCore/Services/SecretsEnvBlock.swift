@@ -87,18 +87,65 @@ public enum SecretsEnvBlock {
         return lines.joined(separator: "\n")
     }
 
-    /// Quote values that would confuse python-dotenv: anything with
-    /// whitespace, `#`, `$`, or quote characters. Single quotes around
-    /// the value are dotenv-canonical and preserve `$`-style
-    /// references literally (no shell expansion). Backslash-escape
-    /// embedded single quotes by closing+reopening: `'foo'\''bar'`.
-    private static func escape(_ value: String) -> String {
+    /// Quote a value so Hermes reads back exactly these bytes.
+    ///
+    /// Hermes loads `.env` with python-dotenv's parser and then expands
+    /// `${NAME}` / `${NAME:-default}` in EVERY value, whatever its quoting
+    /// (`hermes_cli/env_loader.py:265-310` @ v2026.9.24: `DotEnv(...,
+    /// interpolate=False).parse()`, then `parse_variables(value)`). So:
+    ///
+    /// - Double quotes, escaping `\` and `"` — the form Hermes's own writer
+    ///   uses (`_quote_env_value`, `hermes_cli/config.py:2557-2565`) and one
+    ///   python-dotenv 1.2.2 parses (`parser.py`: `"((?:\\"|[^"])*)"`,
+    ///   decoding `\\ \" \n \r …`). The shell-style `'foo'\''bar'` this
+    ///   used before is a dotenv parse error, and dotenv drops the whole
+    ///   line, so the secret was simply missing.
+    /// - Line breaks as `\n` / `\r`, so a value never spans lines of the
+    ///   marker-delimited block.
+    /// - `${` as `${:-$}{`. python-dotenv has no escape for `$`; the only
+    ///   way to keep a literal `${` through `parse_variables` is to make it
+    ///   the OUTPUT of a variable: `${:-$}` is the variable with an empty
+    ///   name (never set — no environment variable can have one) whose
+    ///   default is `$`, and the `{` after it is literal text. A bare `$`
+    ///   not followed by `{` is never expanded and stays as is.
+    /// - A trailing `\` as `${:-\}`, for the reason given below.
+    ///
+    /// Plain tokens (letters, digits, `-_./:@+=,` …) are written unquoted,
+    /// exactly as before, so an unchanged secret keeps its bytes on disk
+    /// and the launch reconciler's no-op-when-unchanged check still holds.
+    static func escape(_ value: String) -> String {
         let needsQuoting = value.contains(where: { c in
             c.isWhitespace || c == "#" || c == "$" || c == "\"" || c == "'" || c == "\\"
         })
         if !needsQuoting { return value }
-        let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-        return "'" + escaped + "'"
+        // Scalar by scalar: `String.replacingOccurrences` treats `\r\n` as
+        // one character and would turn a CRLF into a lone `\n`.
+        var scalars = Array(value.unicodeScalars)
+        // Trailing backslashes can't be written as `\\`: dotenv's quoted
+        // pattern reads the second one plus the closing quote as `\"` and
+        // the line fails to parse. Each becomes `${:-\}` (the same
+        // empty-name variable, defaulting to one backslash).
+        var trailingBackslashes = 0
+        while scalars.last == "\\" {
+            scalars.removeLast()
+            trailingBackslashes += 1
+        }
+        var escaped = String.UnicodeScalarView()
+        for (index, scalar) in scalars.enumerated() {
+            switch scalar {
+            case "\\": escaped.append(contentsOf: "\\\\".unicodeScalars)
+            case "\"": escaped.append(contentsOf: "\\\"".unicodeScalars)
+            case "\n": escaped.append(contentsOf: "\\n".unicodeScalars)
+            case "\r": escaped.append(contentsOf: "\\r".unicodeScalars)
+            case "$" where index + 1 < scalars.count && scalars[index + 1] == "{":
+                escaped.append(contentsOf: "${:-$}".unicodeScalars)
+            default: escaped.append(scalar)
+            }
+        }
+        for _ in 0..<trailingBackslashes {
+            escaped.append(contentsOf: "${:-\\}".unicodeScalars)
+        }
+        return "\"" + String(escaped) + "\""
     }
 
     // MARK: - Splice
