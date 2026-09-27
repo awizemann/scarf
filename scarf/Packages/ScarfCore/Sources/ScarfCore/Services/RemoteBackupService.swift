@@ -291,8 +291,7 @@ public final class RemoteBackupService: @unchecked Sendable {
                 timeout: Self.snapshotTimeout(homeBytes: preflight.hermesHomeBytes)
             )
             snapshotted = report.ok.map(\.path) + report.failed
-            let skipped = report.failed + (report.unnameable > 0
-                ? ["\(report.unnameable) database(s) with a tab or line break in the name (copied as-is, not snapshotted)"] : [])
+            let skipped = report.failed
             if !report.ok.isEmpty {
                 try Task.checkCancellation()
                 let tarball = workDir.appendingPathComponent(BackupArchiveLayout.databasesTarballPath)
@@ -605,6 +604,13 @@ public final class RemoteBackupService: @unchecked Sendable {
         // present means snapshotted, or the backup fails.
         if report.rootStateDB, !report.ok.contains(where: { $0.path == "state.db" }) {
             throw BackupError.snapshotFailed(why.isEmpty ? "no method could read state.db" : why)
+        }
+        // A database whose name can't be carried through the report can be
+        // neither snapshotted nor excluded, so it would ride along live.
+        // Refuse rather than archive it that way.
+        if report.unnameable > 0 {
+            throw BackupError.snapshotFailed(
+                "\(report.unnameable) database file(s) in the Hermes home have a tab or line break in their name. Rename them and back up again.")
         }
         return report
     }

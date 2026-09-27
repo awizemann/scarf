@@ -1094,9 +1094,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         for path in paths {
             let staged = Self.shellQuote(staging + "/" + path)
             let db = Self.shellQuote(hermesHome + "/" + path)
-            let dir = Self.shellQuote((hermesHome + "/" + path as NSString).deletingLastPathComponent)
             lines.append("scarf_db=$(scarf_resolve \(db))")
-            lines.append("mkdir -p \(dir) && chmod 600 \(staged) && rm -f \"$scarf_db-wal\" \"$scarf_db-shm\" \"$scarf_db-journal\" && mv -f \(staged) \"$scarf_db\" || exit 1")
+            lines.append("mkdir -p \"$(dirname \"$scarf_db\")\" && chmod 600 \(staged) && rm -f \"$scarf_db-wal\" \"$scarf_db-shm\" \"$scarf_db-journal\" && mv -f \(staged) \"$scarf_db\" || exit 1")
             lines.append("printf 'SCARF_PUBLISHED\\t%s\\n' \(Self.shellQuote(path))")
         }
         lines.append("echo SCARF_GUARDED_OK")
@@ -1138,7 +1137,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         guard path.hasSuffix(".db"), !path.hasPrefix("/"),
               !path.contains("\n"), !path.contains("\r"), !path.contains("\0") else { return false }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        return !parts.contains { $0.isEmpty || $0 == "." || $0 == ".." }
+        return !parts.contains { $0.isEmpty || $0 == "." || $0 == ".." || $0.contains(".retired-wal-") }
     }
 
     /// Lift every `*.db` out of a v1 home tarball on the Mac and re-pack
@@ -1154,36 +1153,40 @@ public final class RemoteRestoreService: @unchecked Sendable {
         #if os(iOS)
         return nil
         #else
-        let (listStatus, listing) = try await runLocalTar(["-tzf", tarball.path], capture: true)
-        guard listStatus == 0 else {
-            throw RestoreError.archiveUnreadable("couldn't list the backup's Hermes home (tar exit \(listStatus))")
-        }
-        let members = listing.split(whereSeparator: \.isNewline).map(String.init)
-        let prefix = leaf + "/"
-        // Hermes's retired-WAL captures move whole or not at all; the
-        // restore leaves them out, as `hermes import` never sees them.
-        let databases = members.filter {
-            $0.hasPrefix(prefix) && $0.hasSuffix(".db") && !$0.contains(".retired-wal-")
-                && isSafeDatabasePath(String($0.dropFirst(prefix.count)))
-        }
-        guard !databases.isEmpty else { return nil }
-        let wals = Set(members.filter { $0.hasSuffix(".db-wal") })
-
+        // Extract only databases and their WALs, then look at what landed.
+        // Not a `tar -t` listing: bsdtar escapes `\\` and non-ASCII bytes in
+        // it, so names read from it can't be fed back to an extract.
         let stage = workDir.appendingPathComponent("legacy-databases", isDirectory: true)
         try? FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-        let wanted = databases + databases.map { $0 + "-wal" }.filter(wals.contains)
-        // bsdtar reads member operands as patterns: escape them.
         let (status, output) = try await runLocalTar(
-            ["-xzf", tarball.path, "-C", stage.path] + wanted.map(HermesDatabaseScripts.globEscape))
-        guard status == 0 else {
+            ["-xzf", tarball.path, "-C", stage.path, "--include", "*.db", "--include", "*.db-wal"])
+        // bsdtar exits 1 when an `--include` pattern matched nothing (no
+        // WAL in the archive, or no database at all). That alone is fine;
+        // anything else it says is a real failure.
+        let onlyUnmatched = output.components(separatedBy: " / ").allSatisfy {
+            $0.contains("Not found in archive") || $0.contains("Error exit delayed")
+        }
+        guard status == 0 || onlyUnmatched else {
             throw RestoreError.archiveUnreadable("couldn't read the databases from the backup (tar exit \(status)): \(output)")
         }
-        for db in databases where wals.contains(db + "-wal") {
-            let copy = stage.appendingPathComponent(db).path
-            try await foldLocalWAL(copy)
-        }
         let root = stage.appendingPathComponent(leaf)
-        let paths = databases.map { String($0.dropFirst(prefix.count)) }
+        var paths: [String] = []
+        if let walker = FileManager.default.enumerator(atPath: root.path) {
+            while let rel = walker.nextObject() as? String {
+                // Hermes's retired-WAL captures move whole or not at all;
+                // the restore leaves them out, as `hermes import` never sees
+                // them. A directory that merely ends in `.db` isn't one.
+                guard rel.hasSuffix(".db"), isSafeDatabasePath(rel),
+                      (walker.fileAttributes?[.type] as? FileAttributeType) == .typeRegular
+                else { continue }
+                paths.append(rel)
+            }
+        }
+        guard !paths.isEmpty else { return nil }
+        paths.sort()
+        for rel in paths where FileManager.default.fileExists(atPath: root.appendingPathComponent(rel).path + "-wal") {
+            try await foldLocalWAL(root.appendingPathComponent(rel).path)
+        }
         let repacked = workDir.appendingPathComponent("legacy-databases.tar.gz")
         // `-C root` + plain operands: creation reads paths literally.
         let (packStatus, packOutput) = try await runLocalTar(["-czf", repacked.path, "-C", root.path] + paths)

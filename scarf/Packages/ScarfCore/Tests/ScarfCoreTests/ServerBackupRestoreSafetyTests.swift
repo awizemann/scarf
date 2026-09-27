@@ -405,9 +405,23 @@ struct ServerBackupRestoreSafetyTests {
         }
     }
 
+    @Test("a database whose name has a line break refuses the backup instead of riding along live")
+    func unnameableDatabaseRefuses() async throws {
+        let root = try Self.scratch("unnameable")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let seed = try Self.openWALWriter(home.appendingPathComponent("odd\nname.db").path, rows: 1)
+        sqlite3_close(seed)
+        var thrown: Error?
+        do { _ = try await Self.backUp(home: home, into: root) } catch { thrown = error }
+        #expect(thrown?.localizedDescription.contains("tab or line break") == true, "\(String(describing: thrown))")
+    }
+
     @Test("manifest database paths that could escape the home are refused")
     func unsafeDatabasePaths() {
-        for bad in ["../x.db", "/etc/x.db", "a/../../x.db", "a//x.db", "x.txt", "./x.db", "a\nb.db"] {
+        for bad in ["../x.db", "/etc/x.db", "a/../../x.db", "a//x.db", "x.txt", "./x.db", "a\nb.db",
+                    "state.db.retired-wal-1-2/image.db"] {
             #expect(!RemoteRestoreService.isSafeDatabasePath(bad), "\(bad)")
         }
         for good in ["state.db", "profiles/work/state.db", "odd [1].db"] {
@@ -592,6 +606,11 @@ struct ServerBackupRestoreSafetyTests {
         // still be found.
         let bracket = try Self.openWALWriter(stage.appendingPathComponent("k[1].db").path, rows: 4)
         sqlite3_close(bracket)
+        // bsdtar escapes `\` and non-ASCII in listings; names like these
+        // broke a listing-driven lift.
+        try FileManager.default.createDirectory(at: stage.appendingPathComponent("profiles/café"), withIntermediateDirectories: true)
+        let accent = try Self.openWALWriter(stage.appendingPathComponent("profiles/café/b\\c.db").path, rows: 6)
+        sqlite3_close(accent)
         let work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         let tarball = work.appendingPathComponent(BackupArchiveLayout.hermesTarballPath)
@@ -625,6 +644,7 @@ struct ServerBackupRestoreSafetyTests {
         #expect(!FileManager.default.fileExists(atPath: profile + "-wal"))
         #expect(try Self.inspect(profile).count == 17, "the archived WAL's rows were folded in")
         #expect(try Self.inspect(target.appendingPathComponent("k[1].db").path).count == 4)
+        #expect(try Self.inspect(target.appendingPathComponent("profiles/café/b\\c.db").path).count == 6)
     }
 
     @Test("a v1 home tarball without a database lifts to nil, not an error")
