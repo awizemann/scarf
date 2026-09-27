@@ -30,9 +30,14 @@ final class OAuthFlowController {
     private let logger = Logger(subsystem: "com.scarf", category: "OAuthFlowController")
     let context: ServerContext
 
-    init(context: ServerContext = .local, makeAuthProcess: ProcessFactory? = nil) {
+    init(
+        context: ServerContext = .local,
+        makeAuthProcess: ProcessFactory? = nil,
+        openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+    ) {
         self.context = context
         self.makeAuthProcess = makeAuthProcess
+        self.openURL = openURL
     }
 
 
@@ -104,6 +109,31 @@ final class OAuthFlowController {
 
     private let makeAuthProcess: ProcessFactory?
 
+    /// Opens a URL in the Mac's browser. Injectable so tests can observe the
+    /// auto-open without launching a browser.
+    private let openURL: @MainActor (URL) -> Void
+
+    /// An authorization URL has been detected but not yet auto-opened (see
+    /// ``autoOpenDecision(output:deferUntilPrompt:)``).
+    private var autoOpenPending = false
+    /// This run's login opens the browser itself (see
+    /// ``selfOpeningProviders``), so the auto-open waits to see whether it did.
+    private var deferAutoOpen = false
+
+    /// Providers whose Hermes login ignores `--no-browser` and opens the
+    /// browser itself: Anthropic's PKCE login never reads `args`
+    /// (`hermes_cli/auth_commands.py:201-205` @ v2026.9.24) and calls
+    /// `webbrowser.open` whenever a graphical browser is available, then
+    /// prints ``hermesOpenedBrowserMarker``
+    /// (`agent/anthropic_credentials.py:772-778`; the same two lines exist
+    /// back to v2026.4.8 in `agent/anthropic_adapter.py`). The spellings are
+    /// the ones `auth add` normalizes onto `anthropic` via `_plugin_aliases()`.
+    /// Other OAuth logins honour `--no-browser` (S06-F3).
+    static let selfOpeningProviders: Set<String> = ["anthropic", "claude", "claude-code", "claude-oauth"]
+
+    /// What Hermes prints right after it opened the URL itself.
+    static let hermesOpenedBrowserMarker = "(Browser opened automatically)"
+
     // MARK: - Lifecycle
 
     /// Start the OAuth flow. Any prior in-flight flow is terminated first.
@@ -115,6 +145,11 @@ final class OAuthFlowController {
         awaitingCode = false
         succeeded = false
         errorMessage = nil
+        autoOpenPending = false
+        // Only a LOCAL run: on a remote host Hermes opens the browser (if at
+        // all) on that host, not on this Mac, so Scarf still opens it here.
+        deferAutoOpen = !context.isRemote && Self.selfOpeningProviders.contains(
+            provider.trimmingCharacters(in: .whitespaces).lowercased())
 
         // Pass --no-browser so hermes doesn't try (and potentially fail) to
         // launch the browser itself — we do it explicitly with the button.
@@ -388,11 +423,17 @@ final class OAuthFlowController {
 
         if authorizationURL == nil, let url = Self.extractAuthURL(from: output) {
             authorizationURL = url
-            // Auto-open the browser on first detection, since that's what a
-            // well-behaved hermes would have done. We keep the manual button
-            // available for retries / copy-paste.
-            if let parsed = URL(string: url) {
-                NSWorkspace.shared.open(parsed)
+            autoOpenPending = true
+        }
+        // Auto-open the browser once per run, since that's what a
+        // well-behaved hermes would have done — unless Hermes already opened
+        // it (S06-F3: two identical tabs). The manual button stays available
+        // for retries / copy-paste.
+        if autoOpenPending,
+           let open = Self.autoOpenDecision(output: output, deferUntilPrompt: deferAutoOpen) {
+            autoOpenPending = false
+            if open, let url = authorizationURL, let parsed = URL(string: url) {
+                openURL(parsed)
             }
         }
 
@@ -401,6 +442,19 @@ final class OAuthFlowController {
         if !awaitingCode, output.contains("Authorization code:") {
             awaitingCode = true
         }
+    }
+
+    /// Whether to auto-open a detected authorization URL: `true` open,
+    /// `false` don't, `nil` not yet decided. Without deferral it opens at
+    /// once. Deferred (a local run of a ``selfOpeningProviders`` login), it
+    /// waits for Hermes's own attempt, which comes after the URL and before
+    /// the `Authorization code:` prompt: the marker means Hermes opened it;
+    /// the prompt without the marker means it couldn't, so Scarf does.
+    static func autoOpenDecision(output: String, deferUntilPrompt: Bool) -> Bool? {
+        guard deferUntilPrompt else { return true }
+        if output.contains(hermesOpenedBrowserMarker) { return false }
+        if output.contains("Authorization code:") { return true }
+        return nil
     }
 
     private func handleTermination(exitCode: Int32) {
