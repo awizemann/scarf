@@ -646,6 +646,75 @@ import ScarfCore
         #expect(ProjectTemplateUninstaller.mentions(path: "/x/foo", in: "/x/foo-bar and /x/foo/a"))
     }
 
+    // MARK: - R18a (T8-F1): bundled skills keep resolving after install
+
+    static func job(skills: [String]) throws -> HermesCronJob {
+        let list = skills.map { "\"\($0)\"" }.joined(separator: ",")
+        let json = """
+            {"id":"j1","name":"Nightly","prompt":"p","enabled":true,"state":"scheduled",
+             "schedule":{"kind":"cron","expr":"0 9 * * *"},"skills":[\(list)]}
+            """
+        return try JSONDecoder().decode(HermesCronJob.self, from: Data(json.utf8))
+    }
+
+    /// The exporter writes a skill it ships by its bundle name — the
+    /// category path is the author's layout, not the installer's — and
+    /// leaves every other reference alone.
+    @Test func exportWritesShippedSkillsByTheirBundleName() throws {
+        let spec = ProjectTemplateExporter.strip(
+            try Self.job(skills: ["creative/pixel-art", "research/arxiv", "flat-one"]),
+            bundledSkillIds: ["creative/pixel-art", "flat-one"])
+        #expect(spec.skills == ["pixel-art", "research/arxiv", "flat-one"])
+        #expect(ProjectTemplateExporter.strip(try Self.job(skills: ["creative/pixel-art"])).skills
+            == ["creative/pixel-art"], "nothing shipped, nothing rewritten")
+    }
+
+    /// The installer points a shipped skill's reference at where it put it,
+    /// `templates/<slug>/<name>`. Hermes resolves that direct path (checked
+    /// with the v2026.9.24 checkout's own `skill_view` against a scratch
+    /// home: `templates/acme-kit/pixel-art` → found,
+    /// `creative/pixel-art` → "Skill 'creative/pixel-art' not found.").
+    /// Older bundles still carry `category/name`; they are rewritten too.
+    @Test func installPointsShippedSkillsAtTheirInstalledPath() {
+        #expect(ProjectTemplateInstaller.installedSkillRefs(
+            ["pixel-art", "creative/pixel-art", "research/arxiv", "plugin:tool"],
+            bundled: ["pixel-art"], slug: "acme-kit")
+            == ["templates/acme-kit/pixel-art", "templates/acme-kit/pixel-art", "research/arxiv", "plugin:tool"])
+        #expect(ProjectTemplateInstaller.installedSkillRefs(["a/b"], bundled: [], slug: "s") == ["a/b"])
+    }
+
+    /// Export → install: the reference the installer hands `cron create`
+    /// names a directory that exists under the install host's skills dir.
+    @Test func exportedJobSkillResolvesToTheInstalledSkill() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let projectDir = scratch + "/source"
+        try Self.makeProject(at: projectDir)
+        try Self.write("---\nname: helper\ndescription: Helps\n---\nBody",
+                       to: home.context.paths.skillsDir + "/tools/helper/SKILL.md")
+        let outputPath = scratch + "/out.scarftemplate"
+        try await ProjectTemplateExporter(context: home.context).export(
+            inputs: Self.inputs(project: ProjectEntry(name: "Src", path: projectDir), skills: ["tools/helper"]),
+            outputZipPath: outputPath)
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try await service.inspect(zipPath: outputPath)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let parent = scratch + "/installed"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parent)
+        _ = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
+
+        let exported = ProjectTemplateExporter.strip(try Self.job(skills: ["tools/helper"]), bundledSkillIds: ["tools/helper"])
+        let refs = ProjectTemplateInstaller.installedSkillRefs(
+            exported.skills ?? [], bundled: plan.manifest.contents.skills ?? [], slug: plan.manifest.slug)
+        let ref = try #require(refs.first)
+        #expect(FileManager.default.fileExists(atPath: home.context.paths.skillsDir + "/" + ref + "/SKILL.md"),
+                "\(ref) is where the installer put the skill")
+        #expect(plan.skillsNamespaceDir.map { $0 + "/helper" } == home.context.paths.skillsDir + "/" + ref)
+    }
+
     /// A tag Scarf added on this host doesn't travel in an exported bundle.
     @Test func exportedJobNamesDropAttributionTags() {
         let id = UUID().uuidString

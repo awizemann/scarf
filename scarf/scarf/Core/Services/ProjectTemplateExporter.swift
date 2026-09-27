@@ -190,7 +190,7 @@ struct ProjectTemplateExporter: Sendable {
 
         // Cron jobs (stripped to the create-CLI-shaped spec)
         if !plan.cronJobs.isEmpty {
-            let specs = plan.cronJobs.map { Self.strip($0) }
+            let specs = plan.cronJobs.map { Self.strip($0, bundledSkillIds: plan.skillIds) }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(specs)
@@ -480,7 +480,17 @@ struct ProjectTemplateExporter: Sendable {
     /// Convert a live cron job (with runtime state) into the spec the
     /// installer will feed back to `hermes cron create`. Only preserves
     /// fields the CLI accepts.
-    nonisolated private static func strip(_ job: HermesCronJob) -> TemplateCronJobSpec {
+    ///
+    /// A job's skill reference that names a skill this bundle ships
+    /// (`bundledSkillIds` are skill ids — their path under `skills/`, such
+    /// as `creative/pixel-art`) is written as the bare bundle name
+    /// (`pixel-art`): the bundle flattens skills to `skills/<name>/`, so the
+    /// category path means nothing on the install host. The installer turns
+    /// it into the path it installs the skill at (see
+    /// ``ProjectTemplateInstaller/installedSkillRefs(_:bundled:slug:)``).
+    /// Any other reference — a Hermes-bundled or hub skill, the same on
+    /// every host — is kept as it is.
+    nonisolated static func strip(_ job: HermesCronJob, bundledSkillIds: [String] = []) -> TemplateCronJobSpec {
         let schedule: String = {
             if let expr = job.schedule.expression, !expr.isEmpty { return expr }
             if let runAt = job.schedule.runAt, !runAt.isEmpty { return runAt }
@@ -491,7 +501,13 @@ struct ProjectTemplateExporter: Sendable {
             schedule: schedule,
             prompt: job.prompt.isEmpty ? nil : job.prompt,
             deliver: job.deliver?.isEmpty == false ? job.deliver : nil,
-            skills: (job.skills?.isEmpty == false) ? job.skills : nil,
+            skills: (job.skills?.isEmpty == false)
+                ? job.skills?.map { ref in
+                    bundledSkillIds.contains(ref)
+                        ? (ref.split(separator: "/").last.map(String.init) ?? ref)
+                        : ref
+                }
+                : nil,
             repeatCount: nil
         )
     }
