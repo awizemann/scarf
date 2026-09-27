@@ -705,7 +705,16 @@ final class SettingsViewModel {
     /// the provider's own default — so `agent.reasoning_effort: ''` and no key
     /// at all are the same thing to Hermes. That gives the user a way back out
     /// of a pinned level without needing `hermes config unset`.
-    func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
+    ///
+    /// "none" goes through `HermesReasoningEffort.configSetValue` — on
+    /// v0.21.1+ `config set` would store the bare word as null, i.e. "use the
+    /// default", so it is sent as `false` there (S05-F2).
+    func setReasoningEffort(_ value: String, capabilities: HermesCapabilities) {
+        setSetting(
+            "agent.reasoning_effort",
+            value: HermesReasoningEffort.configSetValue(for: value, capabilities: capabilities)
+        )
+    }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     /// v0.21.1+ — length of the fast window the bounded `auto`/`cold` tiers
     /// open. Inert unless `agent.service_tier` is one of those.

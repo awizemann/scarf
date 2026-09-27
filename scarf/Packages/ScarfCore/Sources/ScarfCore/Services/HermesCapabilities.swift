@@ -118,6 +118,24 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s < SemVer(major: 0, minor: 12, patch: 0) // pre-v0.12 only
     }
 
+    /// Whether the host still reads the `auxiliary.session_search.*` block.
+    /// **Inverse semantics** — `true` means the Auxiliary tab's "Session
+    /// Search" row should still be shown.
+    ///
+    /// Session search stopped using an auxiliary LLM in hermes-agent commit
+    /// abf1af5401 (#27590), first released at v2026.5.28 (0.15.0): the block
+    /// is in `DEFAULT_CONFIG` at v2026.5.16 (0.14.0,
+    /// `hermes_cli/config.py:875`) and gone at v2026.5.28, which carries a
+    /// tombstone comment instead (`:1048-1050`). At v2026.9.24 the same
+    /// tombstone sits at `hermes_cli/config_defaults.py:737-738,754-756`
+    /// ("leftover blocks in user config are ignored"), and `config set` on
+    /// the key only warns that it is not recognised. Same shape and
+    /// unknown-version policy as `hasFlushMemoriesAux` / `hasWebExtractAux`.
+    public var hasSessionSearchAux: Bool {
+        guard let s = semver else { return false }        // unknown → hide
+        return s < SemVer(major: 0, minor: 15, patch: 0)  // pre-v0.15.0 only
+    }
+
     /// `auxiliary.curator` aux task is configurable (v0.12+).
     public var hasCuratorAux: Bool { atLeastSemver(0, 12, 0) }
 
@@ -1966,6 +1984,21 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `cron doctor`). Absent at v2026.8.31, where `plugins_cmd.py` has no
     /// `compat` verb at all, so an older host fails argparse.
     public var hasPluginsCompat: Bool { isV0211OrLater }
+
+    /// `hermes config set` coerces the word `none` (any case) to YAML null
+    /// for a key whose `DEFAULT_CONFIG` default is not a string — the
+    /// `_SCALAR_WORDS` table gained `'none': None` in hermes-agent commit
+    /// 5d4b97939e, first released at v2026.9.7 (`hermes_cli/config.py:3303`,
+    /// applied by `_coerce_config_set_value` at `:3306`; `:3245` at
+    /// v2026.9.24). Absent at v2026.8.31, where only true/false words are
+    /// coerced and `none` is stored as the string.
+    ///
+    /// It matters for `agent.reasoning_effort`, which has no default: from
+    /// this floor on, `config set agent.reasoning_effort none` stores null,
+    /// which `parse_reasoning_effort` reads as "use the default" rather than
+    /// "reasoning off". See
+    /// ``HermesReasoningEffort/configSetValue(for:capabilities:)``.
+    public var configSetCoercesNoneToNull: Bool { isV0211OrLater }
 
     /// `hermes cron create --paused [--paused-reason <text>]` — create a job
     /// already paused, instead of create-then-`cron pause` (v0.21.1+,
