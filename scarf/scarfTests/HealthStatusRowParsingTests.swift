@@ -194,6 +194,17 @@ import ScarfCore
         #expect(connectivity.checks[0].label.hasPrefix("IPv6 route"))
     }
 
+    /// `--deep` rows are live probes (status.py:330-345): a ✗ there is a
+    /// failure, not something switched off.
+    @Test("a ✗ in Deep Checks is a failure, and CRLF output parses")
+    func deepChecksFailAndCRLF() throws {
+        let output = "◆ Deep Checks\r\n  OpenRouter:   ✗ error (401)\r\n  Port 18789:   available\r\n"
+        let deep = try Self.section(HealthViewModel.parseOutputStatic(output), "Deep Checks")
+        #expect(try Self.check(deep, "OpenRouter").status == .error)
+        #expect(try Self.check(deep, "OpenRouter").detail == "error (401)")
+        #expect(try Self.check(deep, "Port 18789").status == .ok)
+    }
+
     @Test("a mark later in a plain value doesn't make it a flag row")
     func midValueMarkIsNotAFlag() {
         #expect(HealthViewModel.midLineGlyphRowStatic("Model:        gpt ✓ fast") == nil)

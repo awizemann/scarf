@@ -120,7 +120,9 @@ public actor HermesLogService {
     /// before it comes from ``readLastLines(count:)``'s one-shot `tail -n`;
     /// starting the follow with `-n 200` as well delivered those 200 lines a
     /// second time on the first poll (S14-F6). `-F` keeps following across
-    /// Hermes's rename-based rotation.
+    /// Hermes's rename-based rotation. The trade: a line written in the
+    /// moment between the one-shot read and the follow starting over SSH is
+    /// not shown, where before 200 lines were shown twice.
     static func remoteFollowArgs(path: String) -> [String] {
         ["-n", "0", "-F", path]
     }

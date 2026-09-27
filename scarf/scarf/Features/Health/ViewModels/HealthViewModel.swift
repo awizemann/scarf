@@ -683,7 +683,9 @@ final class HealthViewModel {
             // A progress line rewritten in place (`doctor`'s "Running N
             // connectivity checks…" + `\r` + the first result) reads, on a
             // terminal, as whatever follows the last carriage return.
-            let line = rawLine.split(separator: "\r", omittingEmptySubsequences: false).last.map(String.init) ?? rawLine
+            // A CRLF line end is not a rewrite; drop it first.
+            let unterminated = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+            let line = unterminated.split(separator: "\r", omittingEmptySubsequences: false).last.map(String.init) ?? unterminated
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if trimmed.hasPrefix("◆ ") {
@@ -718,7 +720,7 @@ final class HealthViewModel {
                     let combined = [last.detail, extra].compactMap { $0 }.joined(separator: " ")
                     currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
                 }
-            } else if !currentTitle.isEmpty, let row = Self.midLineGlyphRowStatic(trimmed) {
+            } else if !currentTitle.isEmpty, var row = Self.midLineGlyphRowStatic(trimmed) {
                 // `hermes status` puts the mark mid-line: `_row` prints
                 // `  name  ✓|✗ text` (no colon) and `_kv_flag` prints
                 // `  Label:   ✓|✗ text` (`hermes_cli/status.py:35-52` @
@@ -726,6 +728,13 @@ final class HealthViewModel {
                 // stopped` used to count as a passing check, and every `_row`
                 // (API keys, auth and API-key providers, messaging platforms)
                 // was dropped.
+                //
+                // `--deep`'s section is the exception to ✗-means-off: its
+                // rows are live probes (`OpenRouter: ✗ error (401)`,
+                // status.py:330-345), and a ✗ there is a real failure.
+                if row.status == .off, currentTitle == "Deep Checks" {
+                    row = HealthCheck(label: row.label, status: .error, detail: row.detail)
+                }
                 currentChecks.append(row)
             } else if Self.isRowDetailStatic(line), !currentChecks.isEmpty,
                       trimmed.contains(":") {
