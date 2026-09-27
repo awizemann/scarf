@@ -37,11 +37,12 @@ struct SessionInfoBar: View {
     // Scarf-invented state, on every host. Round-6 decision 3 dropped it;
     // `RichChatViewModel.acpUnhandledSlashNotice(name:)` is what the chat
     // says now.
-    /// Hermes config's `approvals.mode`. v0.14 surfaces a warning when
-    /// this is `"yolo"` so users notice they've opted out of dangerous-
-    /// command approvals. Pre-v0.14 hosts can still set the mode but
-    /// Scarf doesn't render the badge (no `hasYOLOWarning` flag).
-    var approvalMode: String = "manual"
+    /// Hermes config's `approvals.mode` as Hermes reads it, or nil when
+    /// the key is absent. The header warns when it is `.off` so users
+    /// notice they've opted out of dangerous-command approvals. Pre-v0.14
+    /// hosts can still set the mode but Scarf doesn't render the badge
+    /// (no `hasYOLOWarning` flag).
+    var approvalMode: HermesApprovalMode?
     /// Local mirror of prompts queued via `/queue …` (Hermes v0.13).
     /// Empty list hides the chip.
     var queuedPrompts: [HermesQueuedPrompt] = []
@@ -137,6 +138,14 @@ struct SessionInfoBar: View {
         }
     }
 
+    /// Whether the header shows the YOLO (approvals off) warning: the
+    /// stored mode is `off` and the host is v0.14+ (`hasYOLOWarning`, so
+    /// older hosts render exactly as before). An absent key is the host
+    /// default, which is never `off`.
+    static func showsApprovalsOffWarning(mode: HermesApprovalMode?, capabilities: HermesCapabilities) -> Bool {
+        capabilities.hasYOLOWarning && mode == .off
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             identityRow
@@ -188,13 +197,16 @@ struct SessionInfoBar: View {
                     }
                 }
 
-                // v0.14 — YOLO mode warning badge. Renders only when
-                // the user has explicitly opted in via
-                // `approvals.mode = yolo` AND the connected host is on
-                // v0.14+. Older Hermes versions also accept the mode
-                // but don't surface a warning of their own — Scarf
-                // matches v0.14's posture by gating on the flag.
-                if capabilities.hasYOLOWarning, approvalMode == "yolo" {
+                // v0.14 — YOLO warning badge: approvals are off, so
+                // dangerous commands run unprompted. Keyed on the mode
+                // Hermes actually enforces — `off`, including the bare
+                // YAML `false`/`no`/`off` its reader maps there
+                // (`_normalize_approval_mode`,
+                // `tools/approval_context.py:197-214` @ v2026.9.24).
+                // There is no `yolo` mode (S03-F3), and the help text
+                // doesn't point at `/yolo`: the ACP adapter has no such
+                // command, so in Scarf chat it would go to the model.
+                if Self.showsApprovalsOffWarning(mode: approvalMode, capabilities: capabilities) {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                         Text("YOLO")
@@ -204,7 +216,7 @@ struct SessionInfoBar: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(ScarfColor.warning.opacity(0.18)))
                     .foregroundStyle(ScarfColor.warning)
-                    .help("YOLO mode is on — dangerous commands run without approval. Toggle via `/yolo` or change approvals.mode in Settings → Agent.")
+                    .help("Approvals are off — dangerous commands run without asking. Change Approval Mode in Settings → Agent.")
                 }
 
                 // Model badge — renders the active preset name when

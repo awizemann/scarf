@@ -425,13 +425,14 @@ final class ChatViewModel {
     /// banner with a one-click switch to `custom`. Never migrated silently.
     var llamaCppBaseURLIgnored: Bool = false
 
-    /// Hermes v0.14 — current `approvals.mode` from config.yaml.
-    /// Default `"manual"` matches Hermes's default. Refreshed off
-    /// MainActor alongside `modelProviderMismatch`. The chat header
-    /// reads this to decide whether to show the YOLO warning badge
-    /// (rendered when value is `"yolo"` and the host advertises
-    /// `hasYOLOWarning`).
-    var approvalMode: String = "manual"
+    /// The `approvals.mode` stored in config.yaml, read the way Hermes
+    /// reads it (`HermesConfig.storedApprovalMode`: bare `false`/`no`/`off`
+    /// are the `off` mode, unknown strings are `manual`), or nil when the
+    /// key is absent (the host default, never `off`). Refreshed off
+    /// MainActor alongside `modelProviderMismatch`. The chat header shows
+    /// its YOLO warning badge when this is `.off` (S03-F3 — it used to
+    /// check for a `"yolo"` value Hermes has never accepted).
+    var approvalMode: HermesApprovalMode?
 
     /// Set when chat-start is blocked because the active server's
     /// `config.yaml` has no `model.default` / `model.provider`. The chat
@@ -704,7 +705,7 @@ final class ChatViewModel {
                         config, knownProviders: known, capabilities: capabilities)
                 }
             }
-            let mode = config.approvalMode
+            let mode = config.storedApprovalMode
             let voiceChatMode = config.voice.voiceChatMode
             // The chained panel names the host's resolved TTS provider in
             // its privacy line; `nil` until the config has been read.
