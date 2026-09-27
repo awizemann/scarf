@@ -244,10 +244,9 @@ struct TestConnectionProbe {
     /// Split out so tests can run it against a local shell.
     nonisolated static func probeScript(config: SSHConfig) -> String {
         // Remote probe script. Tries three strategies in order:
-        //   1. `command -v hermes` against the bare non-interactive PATH —
-        //      works if the user put their install location in ~/.zshenv.
-        //   2. Source common login rc files (.zprofile, .bash_profile,
-        //      .profile) and re-probe — picks up PATH set in login shells.
+        //   1. A manual hint, if the user typed one.
+        //   2. `command -v hermes` against the login shell's PATH, borrowed
+        //      from `$SHELL -lc` (the rc files are not sourced into sh).
         //   3. Probe the well-known install candidates directly. Mirrors
         //      `HermesPathSet.hermesBinaryCandidates` so behavior matches
         //      Scarf's local resolution.
@@ -274,18 +273,12 @@ struct TestConnectionProbe {
         }
 
         // When the user supplied a manual `hermesBinaryHint` (gh#105
-        // Advanced override) the probe trusts it verbatim: a wrapper
-        // function defined in `~/.zshrc` or a `docker compose exec`
-        // alias won't survive a non-interactive /bin/sh PATH lookup,
-        // so the auto-detect would always fail for those setups.
-        // Source the common login rc files first so a function the
-        // user defined there has a chance to load; then check the
-        // first word against `command -v` (handles bare paths AND
-        // shell functions). Fall back to reporting the raw hint even
-        // if the lookup doesn't resolve — Hermes is invoked via
-        // `/bin/sh -c "<hint> …"` downstream, where a `~/.zshrc`-
-        // sourced shell may resolve the same string the probe
-        // couldn't reach (we can't replicate the runtime shell here).
+        // Advanced override) the probe trusts it verbatim: a
+        // `docker compose exec` wrapper won't survive a PATH lookup, so
+        // the auto-detect would always fail for those setups. A
+        // single-word hint is checked with `command -v` (on the login
+        // shell's PATH, see the script); anything else is reported as
+        // typed, since Hermes is invoked as `<hint> …` downstream.
         let hintEnv: String
         if let hint = config.hermesBinaryHint, !hint.isEmpty {
             // Escape everything a double-quoted sh string would still
@@ -303,12 +296,15 @@ struct TestConnectionProbe {
 
         let script = #"""
         \#(hintEnv)
-        # Always source login rc files first so functions/aliases the
-        # user defined in their interactive shell at least have a
-        # chance to be visible in the lookups below.
-        for rc in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-            [ -f "$rc" ] && . "$rc" 2>/dev/null
-        done
+        # Borrow the PATH of the user's own login shell, so an install
+        # its profile puts on PATH (asdf, pipx, Homebrew) is found. The
+        # rc files are NOT sourced into this sh: under dash (Ubuntu's
+        # /bin/sh) one line of zsh syntax in them (`plugins=(git)`) ends
+        # the whole probe, and an rc command that reads stdin would eat
+        # the rest of this script. The marker skips anything a profile
+        # prints before the PATH.
+        lp=$("${SHELL:-/bin/sh}" -lc 'printf "__SCARF_PATH__%s" "$PATH"' </dev/null 2>/dev/null | sed -n 's/.*__SCARF_PATH__//p' | tail -n 1)
+        [ -n "$lp" ] && PATH="$lp:$PATH"
         hpath=""
         if [ -n "$HERMES_HINT" ]; then
             # Resolve the first token of the hint via `command -v` so
