@@ -778,6 +778,8 @@ struct ServerBackupRestoreSafetyTests {
             "profiles/work/skills/notes/SKILL.md",
             "profiles/my team [2]/auth.json", "profiles/my team [2]/SOUL.md",
             "profiles/my team [2]/mcp-tokens/github.json",
+            "auth.json.corrupt", "profiles/work/auth.json.corrupt",
+            "logs/agent.log", "profiles/work/logs/agent.log", "profiles/work/skills/notes/logs/keep.md",
         ]
         for rel in files {
             let url = home.appendingPathComponent(rel)
@@ -793,13 +795,14 @@ struct ServerBackupRestoreSafetyTests {
         }
 
         let off = try await listing(.init(includeAuth: false, includeMcpTokens: false, includeLogs: false, checkpointedWAL: false), "off.scarfbackup")
-        for secret in ["auth.json", "gateway_state.json", "mcp-tokens", "linear.json", "github.json", "linear.client.json"] {
+        for secret in ["auth.json", "auth.json.corrupt", "gateway_state.json", "mcp-tokens", "linear.json", "github.json", "linear.client.json", "agent.log"] {
             #expect(!off.contains { $0.hasSuffix("/" + secret) || $0.contains("/" + secret + "/") },
                     "\(secret) shipped: \(off.sorted())")
         }
         // Everything else in the profiles still ships.
         for kept in [".hermes/config.yaml", ".hermes/profiles/work/config.yaml",
-                     ".hermes/profiles/work/skills/notes/SKILL.md", ".hermes/profiles/my team [2]/SOUL.md"] {
+                     ".hermes/profiles/work/skills/notes/SKILL.md", ".hermes/profiles/my team [2]/SOUL.md",
+                     ".hermes/profiles/work/skills/notes/logs/keep.md"] {
             #expect(off.contains(kept), "\(kept) missing: \(off.sorted())")
         }
 
@@ -828,11 +831,18 @@ struct ServerBackupRestoreSafetyTests {
         #expect(ex.contains("hermes-data/profiles/*/gateway_state.json"))
         #expect(!ex.contains("hermes-data/mcp-tokens"), "includeMcpTokens is on in this case")
         #expect(!ex.contains { $0.hasPrefix(".hermes/") })
+        #expect(ex.contains("hermes-data/profiles/*/auth.json.corrupt"), "Hermes's copy of an unparseable store")
         let tokensOff = RemoteBackupService.hermesExcludes(leaf: ".hermes", options: .safeDefault, databases: [])
         #expect(tokensOff.contains(".hermes/mcp-tokens"))
         #expect(tokensOff.contains(".hermes/profiles/*/mcp-tokens"))
         #expect(RemoteBackupService.prunedDirs(options: .safeDefault).contains("profiles/*/mcp-tokens"),
                 "the snapshot pass prunes the same trees")
+        // Logs are named per profile: a `profiles/*/logs` wildcard would also
+        // drop a skill's own `logs` folder.
+        let logs = RemoteBackupService.prunedDirs(options: .safeDefault, profiles: ["work", "a [1]"])
+        #expect(logs.contains("profiles/work/logs"))
+        #expect(logs.contains("profiles/a \\[1\\]/logs"))
+        #expect(!logs.contains("profiles/*/logs"))
     }
 
     // MARK: - Process helpers

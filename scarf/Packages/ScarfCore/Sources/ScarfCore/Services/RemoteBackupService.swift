@@ -281,6 +281,9 @@ public final class RemoteBackupService: @unchecked Sendable {
                 "neither sqlite3 nor python3 is available on the server. Install sqlite3 there and back up again.")
         }
         let snapshotDir = preflight.hermesHomePath + "/" + HermesDatabaseScripts.snapshotDirPrefix + UUID().uuidString
+        // Named profiles, for the per-profile `logs` exclusion. Best effort:
+        // a listing that fails only means those logs ride along.
+        let profileNames = (try? transport.listDirectory(preflight.hermesHomePath + "/profiles")) ?? []
         var snapshotted: [String] = []
         do {
             let report = try await takeDatabaseSnapshots(
@@ -288,6 +291,7 @@ public final class RemoteBackupService: @unchecked Sendable {
                 home: preflight.hermesHomePath,
                 snapshotDir: snapshotDir,
                 options: options,
+                profiles: profileNames,
                 timeout: Self.snapshotTimeout(homeBytes: preflight.hermesHomeBytes)
             )
             snapshotted = report.ok.map(\.path) + report.failed
@@ -324,7 +328,8 @@ public final class RemoteBackupService: @unchecked Sendable {
         // isn't called `.hermes` backs up too.
         try Task.checkCancellation()
         let hermesTarball = workDir.appendingPathComponent("hermes.tar.gz")
-        let hermesExcludes = Self.hermesExcludes(leaf: hermesLeaf, options: options, databases: snapshotted)
+        let hermesExcludes = Self.hermesExcludes(
+            leaf: hermesLeaf, options: options, databases: snapshotted, profiles: profileNames)
         let hermesTarCmd = Self.tarCommand(
             workDir: preflight.hermesHomePath.deletingLastPathComponent_String(),
             target: hermesLeaf,
@@ -521,11 +526,18 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// `hermes_cli/auth.py:481-482`, `tools/mcp_oauth.py:229-232`
     /// @ v2026.9.24). So each credential and runtime-state exclusion is made
     /// twice: once at the home's root and once as `profiles/*/…`. The `*`
-    /// crosses `/` in both GNU tar and bsdtar exclude patterns, so the
-    /// profile form also drops a file of that exact name deeper inside a
-    /// profile: over-excluding a stray `auth.json` is the safe direction
-    /// when the user asked for no credentials.
-    static func hermesExcludes(leaf: String, options: BackupManifest.Options, databases: [String]) -> [String] {
+    /// crosses `/` in GNU tar and bsdtar exclude patterns (not in BusyBox
+    /// tar), so there the profile form also drops a file of that exact name
+    /// deeper inside a profile: over-excluding a stray `auth.json` is the
+    /// safe direction when the user asked for no credentials. `auth.json`
+    /// goes with the copy Hermes keeps of a store it couldn't parse,
+    /// `auth.json.corrupt` (`hermes_cli/auth.py:679`).
+    ///
+    /// `profiles` are the profile directory names found on the host, used
+    /// for exclusions that must NOT over-reach (see ``prunedDirs(options:profiles:)``).
+    static func hermesExcludes(
+        leaf: String, options: BackupManifest.Options, databases: [String], profiles: [String] = []
+    ) -> [String] {
         var excludes: [String] = databases.map { HermesDatabaseScripts.globEscape(leaf + "/" + $0) }
         excludes += [
             "*.db-wal",
@@ -536,9 +548,9 @@ public final class RemoteBackupService: @unchecked Sendable {
             "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
         ]
         excludes += homeScoped("gateway_state.json").map { "\(leaf)/\($0)" }
-        excludes += prunedDirs(options: options).map { "\(leaf)/\($0)" }
+        excludes += prunedDirs(options: options, profiles: profiles).map { "\(leaf)/\($0)" }
         if !options.includeAuth {
-            excludes += homeScoped("auth.json").map { "\(leaf)/\($0)" }
+            excludes += (homeScoped("auth.json") + homeScoped("auth.json.corrupt")).map { "\(leaf)/\($0)" }
         }
         return excludes
     }
@@ -546,11 +558,22 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// Home-relative paths the backup leaves out entirely, so their
     /// databases (if any) are not snapshotted either. Each is listed for
     /// the root home and for every profile home (see
-    /// ``hermesExcludes(leaf:options:databases:)``).
-    static func prunedDirs(options: BackupManifest.Options) -> [String] {
+    /// ``hermesExcludes(leaf:options:databases:profiles:)``).
+    ///
+    /// `logs` is named per profile (`profiles/<name>/logs`, from the
+    /// directory listing), not as `profiles/*/logs`: that wildcard would
+    /// also drop a `logs` folder deep inside a profile's skills, which is
+    /// the user's data. A profile missed by the listing keeps its logs,
+    /// which only costs archive size.
+    static func prunedDirs(options: BackupManifest.Options, profiles: [String] = []) -> [String] {
         var dirs: [String] = []
         if !options.includeMcpTokens { dirs += homeScoped("mcp-tokens") }
-        if !options.includeLogs { dirs.append("logs") }
+        if !options.includeLogs {
+            dirs.append("logs")
+            dirs += profiles
+                .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+                .map { "profiles/" + HermesDatabaseScripts.globEscape($0) + "/logs" }
+        }
         return dirs
     }
 
@@ -602,6 +625,7 @@ public final class RemoteBackupService: @unchecked Sendable {
         home: String,
         snapshotDir: String,
         options: BackupManifest.Options,
+        profiles: [String],
         timeout: TimeInterval
     ) async throws -> HermesDatabaseScripts.SnapshotReport {
         let result: ProcessResult
@@ -609,7 +633,8 @@ public final class RemoteBackupService: @unchecked Sendable {
             result = try await transport.asyncRunProcess(
                 executable: "/bin/bash",
                 args: ["-lc", HermesDatabaseScripts.snapshotAll(
-                    home: home, snapshotDir: snapshotDir, prunedDirs: Self.prunedDirs(options: options))],
+                    home: home, snapshotDir: snapshotDir,
+                    prunedDirs: Self.prunedDirs(options: options, profiles: profiles))],
                 stdin: nil,
                 timeout: timeout
             )
