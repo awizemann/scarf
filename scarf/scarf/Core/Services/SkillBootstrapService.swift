@@ -268,18 +268,16 @@ struct SkillBootstrapService: Sendable {
 
     // MARK: - Per-skill install
 
-    /// Hermes treats `~/.hermes/skills/<dir>/` as either a category folder
-    /// containing skill subdirectories OR a skill itself; Scarf's
-    /// `SkillsScanner` only recognizes the two-level layout
-    /// (`<category>/<skill>/SKILL.md`). v2.7.0 of this service installed
-    /// bundled skills FLAT (`~/.hermes/skills/<skill>/SKILL.md`), which
-    /// Hermes accepts (so the agent still loaded them) but Scarf's
-    /// Skills view ignored — leaving users wondering why
-    /// `scarf-template-author` was missing from the GUI. v2.10.1 fixes
-    /// the layout by installing under a `scarf/` category folder
-    /// (`~/.hermes/skills/scarf/<skill>/SKILL.md`) and migrating any
-    /// flat install in place. The migration is one-way; once the user
-    /// is on the new layout, the flat path is never re-created.
+    /// Bundled skills live under a `scarf/` category folder
+    /// (`~/.hermes/skills/scarf/<skill>/SKILL.md`). v2.7.0 of this service
+    /// installed them FLAT (`~/.hermes/skills/<skill>/SKILL.md`); v2.10.1
+    /// moved them under `scarf/` because `SkillsScanner` then only
+    /// recognised the two-level layout. The scanner now finds a `SKILL.md`
+    /// at any depth, as Hermes does (S10-F1), so the flat copy would show
+    /// up too — but the category stays: it is the namespace Scarf owns,
+    /// and `pruneKnownBadSkills` is only allowed to delete inside it. Any
+    /// flat install a prior version left is still migrated in place, and
+    /// the flat path is never re-created.
     private nonisolated static let bundledSkillCategory = "scarf"
 
     /// - Returns: `true` when this call actually wrote the skill (missing or
@@ -318,8 +316,8 @@ struct SkillBootstrapService: Sendable {
                 try transport.removeFile(flatSkillMd)
                 // Best-effort cleanup of companion files + the now-empty
                 // directory. Failures here are non-fatal — leaving a
-                // stale dir is benign (SkillsScanner ignores it because
-                // it has no SKILL.md inside any subdirectory).
+                // stale dir is benign (with its SKILL.md gone, neither
+                // Hermes nor SkillsScanner treats it as a skill).
                 if let companions = try? transport.listDirectory(flatDir) {
                     for entry in companions where entry != "SKILL.md" {
                         try? transport.removeFile(flatDir + "/" + entry)
