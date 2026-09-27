@@ -91,6 +91,11 @@ public struct HermesPathSet: Sendable, Hashable {
     /// `~/.hermes/skills/.curator_state`. Carries last-run metadata,
     /// run count, pause flag, and the path to the most recent report.
     public nonisolated var curatorStateFile: String { home + "/skills/.curator_state" }
+    /// Per-skill usage + provenance sidecar the curator reads and writes,
+    /// keyed by skill name. Curator pins live here as `"pinned": true` on
+    /// each record — not in `.curator_state` (`tools/skill_usage.py:50-51,
+    /// 345-350` @ v2026.9.24).
+    public nonisolated var skillsUsageFile: String { home + "/skills/.usage.json" }
     public nonisolated var scarfDir: String { home + "/scarf" }
     public nonisolated var projectsRegistry: String { scarfDir + "/projects.json" }
 
