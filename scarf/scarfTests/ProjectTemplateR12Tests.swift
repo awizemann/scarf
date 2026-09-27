@@ -683,6 +683,17 @@ import ScarfCore
         #expect(ProjectTemplateInstaller.installedSkillRefs(["a/b"], bundled: [], slug: "s") == ["a/b"])
     }
 
+    /// A job pointing at a hub or Hermes-bundled skill that merely shares its
+    /// name with one the bundle ships keeps its own skill: a `category/name`
+    /// that resolves on the install host is left alone. A bare name always
+    /// means the shipped one.
+    @Test func aSameNamedSkillThatExistsHereKeepsItsReference() {
+        let refs = ProjectTemplateInstaller.installedSkillRefs(
+            ["creative/ascii-art", "ascii-art", "mine/ascii-art"], bundled: ["ascii-art"], slug: "kit",
+            resolves: { $0 == "creative/ascii-art" })
+        #expect(refs == ["creative/ascii-art", "templates/kit/ascii-art", "templates/kit/ascii-art"])
+    }
+
     /// Export → install: the reference the installer hands `cron create`
     /// names a directory that exists under the install host's skills dir.
     @Test func exportedJobSkillResolvesToTheInstalledSkill() async throws {

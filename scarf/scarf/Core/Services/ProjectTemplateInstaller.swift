@@ -307,14 +307,23 @@ struct ProjectTemplateInstaller: Sendable {
     /// by directory name, but Hermes refuses a name two skills share
     /// (`_collect_skill_candidates`), so the exact path is used.
     ///
-    /// Any reference whose last path segment is a skill the bundle ships is
-    /// rewritten — the bare name a current export writes, and the
-    /// `category/name` an older bundle carries. Every other reference is kept.
-    nonisolated static func installedSkillRefs(_ refs: [String], bundled: [String], slug: String) -> [String] {
+    /// A bare name the bundle ships (what a current export writes) is always
+    /// rewritten. A `category/name` whose name the bundle ships — what an
+    /// older export wrote — is rewritten only when it does not resolve on
+    /// this host (`resolves`, a direct `<skills>/<ref>/SKILL.md`): a current
+    /// export keeps a reference to a hub or Hermes-bundled skill as it is,
+    /// and when that skill merely shares its name with one the bundle ships,
+    /// it exists here and must keep pointing at itself. Every other
+    /// reference is kept.
+    nonisolated static func installedSkillRefs(
+        _ refs: [String], bundled: [String], slug: String, resolves: (String) -> Bool = { _ in false }
+    ) -> [String] {
         let shipped = Set(bundled)
         return refs.map { ref in
             let leaf = ref.split(separator: "/").last.map(String.init) ?? ref
-            return shipped.contains(leaf) ? "templates/\(slug)/\(leaf)" : ref
+            guard shipped.contains(leaf) else { return ref }
+            if ref.contains("/"), resolves(ref) { return ref }
+            return "templates/\(slug)/\(leaf)"
         }
     }
 
@@ -324,6 +333,8 @@ struct ProjectTemplateInstaller: Sendable {
         guard !plan.cronJobs.isEmpty else { return [] }
 
         var createdNames: [String] = []
+        let transport = context.makeTransport()
+        let skillsDir = context.paths.skillsDir
 
         // Probe the install host once: `--deliver all` is a v0.14+ value, and
         // forwarding it to an older host makes `hermes cron create` argparse-
@@ -358,7 +369,8 @@ struct ProjectTemplateInstaller: Sendable {
                 deliver: job.deliver,
                 repeatCount: job.repeatCount,
                 skills: Self.installedSkillRefs(
-                    job.skills ?? [], bundled: plan.manifest.contents.skills ?? [], slug: plan.manifest.slug),
+                    job.skills ?? [], bundled: plan.manifest.contents.skills ?? [], slug: plan.manifest.slug,
+                    resolves: { transport.fileExists(skillsDir + "/" + $0 + "/SKILL.md") }),
                 schedule: job.schedule,
                 prompt: job.prompt.flatMap { $0.isEmpty ? nil : Self.substituteCronTokens($0, plan: plan) },
                 caps: caps,
