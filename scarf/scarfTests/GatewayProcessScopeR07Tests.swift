@@ -1,0 +1,182 @@
+import Testing
+import Foundation
+import ScarfCore
+@testable import scarf
+
+/// R07 (Hermes v0.21.5 audit): `HermesFileService`'s gateway probes for a
+/// named profile — S15-F2 (profile-scoped `pgrep`), S15-F5 (the stop fallback
+/// signals only the profile's own gateway) and S07-F2 (a multiplexer-served
+/// profile's state comes from the root `gateway_state.json`).
+@Suite("R07 — gateway probes scoped to the viewed profile")
+struct GatewayProcessScopeR07Tests {
+
+    /// Answers `runProcess` from a closure and `readFile` from a path map.
+    final class Transport: ServerTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls: [(exe: String, args: [String])] = []
+        private let files: [String: Data]
+        private let answer: @Sendable (String, [String]) -> ProcessResult
+
+        var calls: [(exe: String, args: [String])] {
+            lock.lock(); defer { lock.unlock() }; return _calls
+        }
+
+        init(files: [String: String] = [:],
+             answer: @escaping @Sendable (String, [String]) -> ProcessResult) {
+            self.files = files.mapValues { Data($0.utf8) }
+            self.answer = answer
+        }
+
+        let contextID: ServerID = UUID()
+        var isRemote: Bool { true }
+        func readFile(_ path: String) throws -> Data {
+            guard let data = files[path] else {
+                throw TransportError.fileIO(path: path, underlying: "No such file or directory")
+            }
+            return data
+        }
+        func unguardedWriteFile(_ path: String, data: Data) throws {}
+        func fileExists(_ path: String) -> Bool { files[path] != nil }
+        func stat(_ path: String) -> FileStat? { nil }
+        func statAll(_ paths: [String]) -> [String: FileStat]? { nil }
+        func listDirectory(_ path: String) throws -> [String] { [] }
+        func createDirectory(_ path: String) throws {}
+        func removeFile(_ path: String) throws {}
+        func runProcess(
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
+        ) throws -> ProcessResult {
+            lock.lock(); _calls.append((executable, args)); lock.unlock()
+            return answer(executable, args)
+        }
+        func makeProcess(executable: String, args: [String]) -> Process { Process() }
+        func makeProcess(executable: String, args: [String], cwd: String?) -> Process { Process() }
+        func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> { AsyncStream { $0.finish() } }
+        func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
+            answer("sh", [script])
+        }
+        func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+    }
+
+    private static func context(home: String) -> ServerContext {
+        ServerContext(
+            id: UUID(), displayName: "Box",
+            kind: .ssh(SSHConfig(host: "box.local", remoteHome: home,
+                                 hermesBinaryHint: "/usr/local/bin/hermes"))
+        )
+    }
+
+    private static func result(_ stdout: String, _ exit: Int32) -> ProcessResult {
+        ProcessResult(exitCode: exit, stdout: Data(stdout.utf8), stderr: Data())
+    }
+
+    static let root = "/home/u/.hermes"
+    static let workHome = "/home/u/.hermes/profiles/work"
+    static let servedRoot = #"""
+    {"pid": 4242, "gateway_state": "running", "updated_at": "2026-09-27T01:50:28+00:00",
+     "served_profiles": ["default", "work"],
+     "platforms": {"telegram": {"state": "connected"},
+                   "work:telegram": {"state": "connected", "error_code": null, "error_message": null},
+                   "work:discord": {"state": "fatal", "error_code": "auth_failed",
+                                    "error_message": "Improper token has been passed."}}}
+    """#
+
+    private static func isDefaultPattern(_ args: [String]) -> Bool {
+        args.last == HermesGatewayProcessMatch.pgrepPattern(profile: nil)
+    }
+    private static func isWorkPattern(_ args: [String]) -> Bool {
+        args.last == HermesGatewayProcessMatch.pgrepPattern(profile: "work")
+    }
+
+    @Test func aNamedProfileProbesWithItsOwnPattern() {
+        let transport = Transport { exe, args in
+            Self.isWorkPattern(args) ? Self.result("777\n", 0) : Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        guard case .success(let pid) = svc.hermesPIDResult() else {
+            Issue.record("probe failed"); return
+        }
+        #expect(pid == 777)
+        #expect(transport.calls.count == 1)
+    }
+
+    /// Served by the default multiplexer, no gateway of its own: the display
+    /// probe reports the multiplexer's process.
+    @Test func aServedProfileReportsTheMultiplexerPID() {
+        let transport = Transport(files: [Self.root + "/gateway_state.json": Self.servedRoot]) { _, args in
+            Self.isDefaultPattern(args) ? Self.result("4242\n", 0) : Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        guard case .success(let pid) = svc.hermesPIDResult() else {
+            Issue.record("probe failed"); return
+        }
+        #expect(pid == 4242)
+    }
+
+    /// Not served, and no gateway of its own: stopped — even though the
+    /// default profile's gateway is up (the old unscoped pattern said running).
+    @Test func anUnservedProfileIsNotRunningBecauseTheDefaultIs() {
+        let transport = Transport { _, args in
+            Self.isDefaultPattern(args) ? Self.result("4242\n", 0) : Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        guard case .success(let pid) = svc.hermesPIDResult() else {
+            Issue.record("probe failed"); return
+        }
+        #expect(pid == nil)
+    }
+
+    /// The stop fallback must never SIGTERM the multiplexer on behalf of a
+    /// profile it serves — that would take every other profile down with it.
+    @Test func theStopFallbackNeverSignalsTheMultiplexer() {
+        let transport = Transport(files: [Self.root + "/gateway_state.json": Self.servedRoot]) { exe, args in
+            if exe.hasSuffix("hermes") {
+                return Self.result("✗ Refusing to stop the gateway from inside the gateway process.", 1)
+            }
+            if exe.contains("pgrep") {
+                return Self.isDefaultPattern(args) ? Self.result("4242\n", 0) : Self.result("", 1)
+            }
+            return Self.result("", 0)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        let outcome = svc.stopHermes()
+        #expect(!outcome.succeeded)
+        // Premise: the refusal DID reach the fallback, which probed for the
+        // profile's own gateway only.
+        #expect(transport.calls.contains { $0.exe.contains("pgrep") && Self.isWorkPattern($0.args) })
+        #expect(!transport.calls.contains { $0.exe.contains("pgrep") && Self.isDefaultPattern($0.args) })
+        #expect(!transport.calls.contains { $0.exe.contains("kill") }, "SIGTERM went to the multiplexer")
+    }
+
+    /// S07-F2: the served profile's platforms are the root record's
+    /// `work:` entries, re-keyed — and the default profile's own telegram
+    /// entry is not among them.
+    @Test func aServedProfileReadsItsPlatformsFromTheRootRecord() throws {
+        let transport = Transport(files: [Self.root + "/gateway_state.json": Self.servedRoot]) { _, _ in
+            Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        let state = try #require(svc.loadGatewayState())
+        #expect(state.isRunning)
+        #expect(Set(state.platforms.map { Array($0.keys) } ?? []) == ["telegram", "discord"])
+        #expect(state.platforms?["discord"]?.errorText == "Improper token has been passed.")
+
+        guard case .success(let viaResult?) = svc.loadGatewayStateResult() else {
+            Issue.record("result variant lost the projection"); return
+        }
+        #expect(viaResult.platforms?["telegram"]?.isConnected == true)
+    }
+
+    /// The default profile reads its own (root) file, prefixed keys and all,
+    /// exactly as before.
+    @Test func theDefaultProfileKeepsItsOwnFile() throws {
+        let transport = Transport(files: [Self.root + "/gateway_state.json": Self.servedRoot]) { _, _ in
+            Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.root), transport: transport)
+        let state = try #require(svc.loadGatewayState())
+        #expect(state.platforms?["work:discord"] != nil)
+        #expect(state.platforms?["telegram"]?.isConnected == true)
+    }
+}
