@@ -17,7 +17,7 @@ import ScarfCore
 ///   says `enabled: false` (`gateway/config_env.py:182-207`). The wizard saves
 ///   every credential there (`hermes_cli/setup_whatsapp_cloud.py:144-150`) and
 ///   the allowlist as `WHATSAPP_CLOUD_ALLOWED_USERS` (`:269-285`). Same env
-///   bridge since whatsapp_cloud first shipped (v2026.7.1, in
+///   bridge since whatsapp_cloud first shipped (v2026.6.19, in
 ///   `gateway/config.py`), so no capability gate.
 /// - config.yaml `platforms.whatsapp_cloud.extra.*`, which is where Scarf
 ///   used to write them.
