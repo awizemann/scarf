@@ -139,8 +139,8 @@
         "name": "Alan Wizemann",
         "url": "https://github.com/awizemann"
       },
-      "bundleSha256": "f0f3e7960a07b66ffd84e521184750f826f2df521438c2a1a138b246da2731c5",
-      "bundleSize": 16487,
+      "bundleSha256": "8aef1103ea9dd65ec3e89b058fbe98523d9bec88e63a6dbf7fbb9eceffbea13f",
+      "bundleSize": 22333,
       "category": "developer-tools",
       "config": null,
       "contents": {
@@ -163,7 +163,7 @@
         "skill",
         "scaffolding"
       ],
-      "version": "1.0.0"
+      "version": "1.0.1"
     }
   ]
 }
