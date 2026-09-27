@@ -360,11 +360,36 @@ struct ProjectTemplateExporter: Sendable {
     /// is a file, one that lists is a folder (reading first, because `ls`
     /// over SSH "lists" a plain file), and a dangling one is skipped with a
     /// warning rather than failing the export.
+    ///
+    /// A symlink is followed only while it stays inside the skill folder
+    /// (after resolving the folder itself, which may be a link). A link that
+    /// leads anywhere else refuses the export: the bundle is made to be
+    /// shared, and a link named `config` that points at `~/.hermes/.env`
+    /// would otherwise copy that file into it. A link whose target reads but
+    /// can't be resolved on the host refuses the export too; a dangling one
+    /// is still skipped, since nothing would be copied from it.
     nonisolated static func skillFileTree(
         at root: String,
         transport: any ServerTransport
     ) throws -> [String] {
         var out: [String] = []
+        var resolvedRoot: String?
+        func requireInside(_ link: String, _ rel: String) throws {
+            if resolvedRoot == nil {
+                guard let r = try resolvedPaths([root], transport: transport).first ?? nil else {
+                    throw ProjectTemplateError.unsafeSkillLink(
+                        rel, "Scarf couldn't resolve the skill folder \(root) on the server to check where it points")
+                }
+                resolvedRoot = r
+            }
+            let base = resolvedRoot ?? root
+            guard let target = try resolvedPaths([link], transport: transport).first ?? nil else {
+                throw ProjectTemplateError.unsafeSkillLink(rel, "Scarf couldn't check where it points")
+            }
+            guard target == base || target.hasPrefix(base.hasSuffix("/") ? base : base + "/") else {
+                throw ProjectTemplateError.unsafeSkillLink(rel, "it points outside the skill folder, to \(target)")
+            }
+        }
         func walk(_ relative: String, depth: Int) throws {
             let dir = relative.isEmpty ? root : root + "/" + relative
             let entries = try transport.listDirectory(dir)
@@ -388,6 +413,8 @@ struct ProjectTemplateExporter: Sendable {
                         logger.warning("skill export skipped \(full, privacy: .public): a symlink to nothing readable")
                         continue
                     }
+                    // Readable, so it would be copied: only from inside the skill.
+                    try requireInside(full, rel)
                 }
                 if isDirectory {
                     // Hermes follows links inside skills, so a link loop is
@@ -404,6 +431,32 @@ struct ProjectTemplateExporter: Sendable {
         }
         try walk("", depth: 0)
         return out
+    }
+
+    /// The canonical path of each of `paths` on the host (every symlink
+    /// resolved), `nil` for one that can't be resolved. `realpath`, else
+    /// `readlink -f` (GNU, BusyBox and macOS 12.3+ all have one). Each
+    /// answer is on its own marker line because a login shell can print
+    /// noise of its own.
+    nonisolated static func resolvedPaths(
+        _ paths: [String], transport: any ServerTransport
+    ) throws -> [String?] {
+        let script = paths.map { path in
+            let q = HermesProfileScope.shellQuotePath(path)
+            return "r=$(realpath \(q) 2>/dev/null || readlink -f \(q) 2>/dev/null); printf 'SCARF_RP:%s\\n' \"$r\""
+        }.joined(separator: "; ")
+        let result = try transport.runProcess(
+            executable: "/bin/sh", args: ["-c", script], stdin: nil, timeout: 30
+        )
+        let answers = result.stdoutString.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.hasPrefix("SCARF_RP:") }
+            .map { line -> String? in
+                let value = String(line.dropFirst("SCARF_RP:".count))
+                return value.hasPrefix("/") ? value : nil
+            }
+        // A name with a line break in it splits its answer; don't guess.
+        guard answers.count == paths.count else { return paths.map { _ in nil } }
+        return answers
     }
 
     /// A live job name without Scarf's leading attribution tags

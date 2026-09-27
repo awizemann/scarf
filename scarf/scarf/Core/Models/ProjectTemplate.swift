@@ -411,6 +411,10 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     /// MEMORY.md holds bytes that are not valid UTF-8. Read, but not text
     /// we can splice — and `?? ""` used to make it an empty document.
     case memoryFileNotText(String)
+    /// A symlink inside a skill being exported leads outside that skill (or
+    /// its target couldn't be checked). The bundle is for sharing, so its
+    /// target is not copied in.
+    case unsafeSkillLink(String, String)
 
     var errorDescription: String? {
         switch self {
@@ -448,6 +452,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "\(p) exists but couldn't be read; refusing to install a memory block over it."
         case .memoryFileNotText(let p):
             return "\(p) is not valid UTF-8 text; refusing to install a memory block over it."
+        case .unsafeSkillLink(let link, let why):
+            return "Can't export the skill file “\(link)”: it's a link, and \(why). Templates are made to be shared, so Scarf only bundles files that live inside the skill. Copy the file into the skill folder or remove the link, then export again."
         }
     }
 }

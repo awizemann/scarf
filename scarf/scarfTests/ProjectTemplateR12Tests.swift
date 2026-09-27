@@ -183,10 +183,23 @@ import ScarfCore
         func listDirectory(_ path: String) throws -> [String] { try inner.listDirectory(map(path)) }
         func createDirectory(_ path: String) throws { try inner.createDirectory(map(path)) }
         func removeFile(_ path: String) throws { try inner.removeFile(map(path)) }
+        /// Runs a shell script on this Mac with the pseudo-remote root
+        /// mapped in, and the local root (as given and as `realpath` spells
+        /// it) mapped back out of stdout — enough for the exporter's
+        /// symlink resolution to answer in remote paths.
         func runProcess(
             executable: String, args: [String], stdin: Data?, timeout: TimeInterval
         ) throws -> ProcessResult {
-            throw TransportError.fileIO(path: executable, underlying: "no processes in this test")
+            guard executable == "/bin/sh", args.first == "-c", args.count == 2 else {
+                throw TransportError.fileIO(path: executable, underlying: "no processes in this test")
+            }
+            let script = args[1].replacingOccurrences(of: remoteRoot, with: localRoot)
+            let result = try inner.runProcess(executable: executable, args: ["-c", script], stdin: stdin, timeout: timeout)
+            let real = (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var")).map { _ in "/private" + localRoot } ?? localRoot
+            let out = result.stdoutString
+                .replacingOccurrences(of: real, with: remoteRoot)
+                .replacingOccurrences(of: localRoot, with: remoteRoot)
+            return ProcessResult(exitCode: result.exitCode, stdout: Data(out.utf8), stderr: result.stderr)
         }
         func makeProcess(executable: String, args: [String]) -> Process { Process() }
         func makeProcess(executable: String, args: [String], cwd: String?) -> Process { Process() }
@@ -232,6 +245,10 @@ import ScarfCore
         }
     }
 
+    /// Links that stay inside the skill are followed (R12); a dangling one
+    /// is skipped. R16a X5 narrowed R12's "follow every link": links out of
+    /// the skill now refuse the export (next test), so the followed links
+    /// here point inside it.
     @Test func skillTreeWalksFoldersThroughTheTransportAndFollowsSymlinks() throws {
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
@@ -239,19 +256,64 @@ import ScarfCore
         let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
         try Self.write("x", to: scratch + "/skill/SKILL.md")
         try Self.write("x", to: scratch + "/skill/references/a.md")
-        try Self.write("x", to: scratch + "/shared/b.md")
         try Self.write("x", to: scratch + "/skill/notes.corrupt-20260101")
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/linked", withDestinationPath: scratch + "/shared"
+            atPath: scratch + "/skill/linked", withDestinationPath: scratch + "/skill/references"
         )
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/alias.md", withDestinationPath: scratch + "/shared/b.md"
+            atPath: scratch + "/skill/alias.md", withDestinationPath: "references/a.md"
         )
         try FileManager.default.createSymbolicLink(
-            atPath: scratch + "/skill/dangling.md", withDestinationPath: scratch + "/nowhere.md"
+            atPath: scratch + "/skill/dangling.md", withDestinationPath: scratch + "/skill/nowhere.md"
         )
         let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skill", transport: transport)
-        #expect(tree == ["SKILL.md", "alias.md", "linked/b.md", "references/a.md"])
+        #expect(tree == ["SKILL.md", "alias.md", "linked/a.md", "references/a.md"])
+    }
+
+    /// R16a X5: a link out of the skill (to a secrets file, or a folder
+    /// elsewhere) refuses the export instead of copying the target into a
+    /// bundle made for sharing.
+    @Test(arguments: ["file", "folder", "file-relative"])
+    func skillTreeRefusesLinksThatLeaveTheSkill(kind: String) throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let remoteRoot = "/nonexistent-remote-\(UUID().uuidString)"
+        let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
+        try Self.write("x", to: scratch + "/skill/SKILL.md")
+        try Self.write("OPENAI_API_KEY=not-a-real-key", to: scratch + "/home/.env")
+        try Self.write("x", to: scratch + "/shared/b.md")
+        let target = switch kind {
+        case "file": scratch + "/home/.env"
+        case "folder": scratch + "/shared"
+        default: "../home/.env"
+        }
+        try FileManager.default.createSymbolicLink(atPath: scratch + "/skill/config", withDestinationPath: target)
+        do {
+            let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skill", transport: transport)
+            Issue.record("exported \(tree)")
+        } catch ProjectTemplateError.unsafeSkillLink(let link, let why) {
+            #expect(link == "config")
+            #expect(why.contains("outside the skill folder"), "\(why)")
+        }
+    }
+
+    /// A skill folder that is itself a link (a skill kept in a dev checkout)
+    /// still exports, links inside it included: containment is judged
+    /// against where the folder really is.
+    @Test func skillFolderThatIsItselfALinkStillExports() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let remoteRoot = "/nonexistent-remote-\(UUID().uuidString)"
+        let transport = RemappedTransport(remoteRoot: remoteRoot, localRoot: scratch)
+        try Self.write("x", to: scratch + "/dev/skill/SKILL.md")
+        try Self.write("x", to: scratch + "/dev/skill/refs/a.md")
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch + "/dev/skill/alias.md", withDestinationPath: "refs/a.md")
+        try FileManager.default.createDirectory(atPath: scratch + "/skills", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch + "/skills/mine", withDestinationPath: scratch + "/dev/skill")
+        let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skills/mine", transport: transport)
+        #expect(tree == ["SKILL.md", "alias.md", "refs/a.md"])
     }
 
     // MARK: - S12-F3: the memory block is its own Hermes entry
