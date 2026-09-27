@@ -625,7 +625,7 @@ struct CronView: View {
                         // to see change.
                         .accessibilityIdentifier("cron.detail.state")
                 }
-                Text(CronScheduleFormatter.humanReadable(from: job.schedule))
+                Text(viewModel.schedulePhrase(for: job))
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
@@ -745,7 +745,7 @@ struct CronView: View {
     private func statsGrid(_ job: HermesCronJob) -> some View {
         HStack(spacing: ScarfSpace.s3) {
             statCard(label: "Schedule",
-                     value: CronScheduleFormatter.humanReadable(from: job.schedule),
+                     value: viewModel.schedulePhrase(for: job),
                      sub: job.schedule.expression ?? job.schedule.display)
             statCard(label: "Last run",
                      value: job.lastRunAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "—",

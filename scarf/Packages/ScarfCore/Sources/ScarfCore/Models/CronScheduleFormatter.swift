@@ -19,6 +19,70 @@ public enum CronScheduleFormatter {
 
     /// Primary entry point. Returns a phrase suitable for the row
     /// subtitle in Mac + ScarfGo cron lists.
+    ///
+    /// `zoneNote` (from ``hostZoneNote(configTimezone:isRemote:localZone:)``)
+    /// is appended to a cron expression that names a time of day, because
+    /// Hermes evaluates it in ITS clock's zone, not the Mac's: `croniter(expr,
+    /// _hermes_now())` (`cron/jobs.py:1023` @ v2026.9.24), where the zone is
+    /// `HERMES_TIMEZONE`, then config `timezone`, else the server's local
+    /// time (`hermes_time.py:3-5,83-106`). Without it an SSH host in UTC
+    /// showed "Daily at 9 AM" for a job that fires at 2 AM on a Mac in PST.
+    public static func humanReadable(from schedule: CronSchedule, zoneNote: String?) -> String {
+        let phrase = humanReadable(from: schedule)
+        guard let zoneNote, !zoneNote.isEmpty, namesTimeOfDay(schedule) else { return phrase }
+        return "\(phrase) (\(zoneNote))"
+    }
+
+    /// The zone to name next to a time-of-day cron phrase, or `nil` when it
+    /// is the Mac's own zone and naming it would only add noise.
+    ///
+    /// - A config `timezone` Foundation recognises: that id, unless it is the
+    ///   Mac's zone.
+    /// - Otherwise Hermes uses the host's local zone. On this Mac that is the
+    ///   Mac's zone, so `nil`; on a remote host Scarf can't see it, so
+    ///   "host time".
+    ///
+    /// `HERMES_TIMEZONE` in the gateway's environment outranks the config
+    /// key (`hermes_time.py:83-87`) and is invisible to Scarf; the config
+    /// key is the documented setting and the one Settings edits.
+    public static func hostZoneNote(
+        configTimezone: String?, isRemote: Bool, localZone: TimeZone = .current
+    ) -> String? {
+        let configured = configTimezone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Hermes falls back to server-local time for a name `ZoneInfo`
+        // rejects (`hermes_time.py:120-124`); treat one Foundation rejects
+        // the same way.
+        if !configured.isEmpty, let zone = TimeZone(identifier: configured) {
+            // Compare zones, but show the name as the user wrote it:
+            // Foundation reports "UTC" back as "GMT".
+            return zone.identifier == localZone.identifier ? nil : configured
+        }
+        return isRemote ? String(localized: "host time") : nil
+    }
+
+    /// Whether `schedule` is a cron expression whose hour field is fixed,
+    /// i.e. the phrase names a time of day that depends on the zone.
+    /// Minute and hour steps ("every 15 minutes", "every 2 hours") read the
+    /// same in any whole-hour zone and are left alone.
+    nonisolated static func namesTimeOfDay(_ schedule: CronSchedule) -> Bool {
+        guard !isOneShot(schedule.kind), schedule.kind.lowercased() != "interval" else { return false }
+        // A label the user set (`display` that isn't raw cron) is shown
+        // verbatim; don't bolt a zone onto their words.
+        if let display = schedule.display, !display.isEmpty, !looksLikeCron(display) { return false }
+        let expr = (schedule.expression ?? schedule.display ?? "").trimmingCharacters(in: .whitespaces)
+        switch expr.lowercased() {
+        case "@daily", "@midnight", "@weekly", "@monthly", "@yearly", "@annually": return true
+        case "@hourly": return false
+        default: break
+        }
+        let fields = expr.split(separator: " ", omittingEmptySubsequences: true)
+        guard fields.count == 5 else { return false }
+        let hour = fields[1]
+        return hour != "*" && !hour.hasPrefix("*/")
+    }
+
+    /// The phrase alone, with no zone. Kept for callers with no host
+    /// context; the cron lists use ``humanReadable(from:zoneNote:)``.
     public static func humanReadable(from schedule: CronSchedule) -> String {
         // One-shot jobs first. Hermes calls this kind `"once"` (never
         // `"runat"` — `cron/jobs.py::parse_schedule` at v2026.8.31 emits

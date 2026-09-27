@@ -56,11 +56,30 @@ public final class IOSCronViewModel {
         self.context = context
     }
 
+    /// The host zone to show next to time-of-day schedule phrases, or `nil`
+    /// when it is this device's zone (S08-F3). Read from `config.yaml` once
+    /// per view model — one SFTP read, not one per refresh.
+    public private(set) var scheduleZoneNote: String?
+    private var hasResolvedZoneNote = false
+
+    /// The row schedule phrase, with the host zone when it matters.
+    public func schedulePhrase(for job: HermesCronJob) -> String {
+        CronScheduleFormatter.humanReadable(from: job.schedule, zoneNote: scheduleZoneNote)
+    }
+
     public func load() async {
         isLoading = true
         lastError = nil
         let ctx = context
         let path = ctx.paths.cronJobsJSON
+
+        if !hasResolvedZoneNote {
+            hasResolvedZoneNote = true
+            scheduleZoneNote = await Task.detached {
+                let timezone = ctx.readText(ctx.paths.configYAML).map { HermesConfig(yaml: $0).timezone }
+                return CronScheduleFormatter.hostZoneNote(configTimezone: timezone, isRemote: ctx.isRemote)
+            }.value
+        }
 
         // v2.7 — instrumented for parity with Mac `cron.load`. iOS
         // Cron load is a single SFTP read of jobs.json so should be

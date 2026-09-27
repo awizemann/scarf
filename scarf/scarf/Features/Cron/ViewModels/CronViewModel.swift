@@ -170,11 +170,21 @@ final class CronViewModel {
         let selectedID = selectedJob?.id
         loadGeneration += 1
         let generation = loadGeneration
+        // The zone note needs `config.yaml`: one more read (an SSH round
+        // trip on a remote), so only on the first load and on forced ones
+        // (after a mutation), not on every watcher tick.
+        let readZone = force || !hasResolvedZoneNote
+        hasResolvedZoneNote = true
+        let isRemote = context.isRemote
         Task.detached { [weak self] in
             // Three sync transport ops on remote — keep them off main.
             // v2.8: instrumented so we can see how many SSH RTTs the
             // Cron tab actually costs in captures.
             await ScarfMon.measureAsync(.diskIO, "cron.load") {
+                let zoneNote: String?? = readZone
+                    ? .some(CronScheduleFormatter.hostZoneNote(
+                        configTimezone: try? svc.loadConfigResult().get().timezone, isRemote: isRemote))
+                    : .none
                 let outcome = svc.loadCronJobsOutcome()
                 let jobs = outcome.jobs
                 let decodeFailed = outcome.decodeFailed
@@ -212,6 +222,7 @@ final class CronViewModel {
                     }
                     self.loadDecodeFailed = decodeFailed
                     self.availableSkills = skills
+                    if case .some(let note) = zoneNote { self.scheduleZoneNote = note }
                     // Only onto the selection this load was started for. A
                     // click that landed while the (remote) read was in flight
                     // owns `selectedJob` now; writing `refreshed` back would
@@ -226,6 +237,17 @@ final class CronViewModel {
                 }
             }
         }
+    }
+
+    /// The host zone to show next to time-of-day schedule phrases, or
+    /// `nil` when it is this Mac's zone (S08-F3). See
+    /// `CronScheduleFormatter.hostZoneNote`.
+    private(set) var scheduleZoneNote: String?
+    @ObservationIgnored private var hasResolvedZoneNote = false
+
+    /// The row/detail schedule phrase, with the host zone when it matters.
+    func schedulePhrase(for job: HermesCronJob) -> String {
+        CronScheduleFormatter.humanReadable(from: job.schedule, zoneNote: scheduleZoneNote)
     }
 
     func selectJob(_ job: HermesCronJob) {
