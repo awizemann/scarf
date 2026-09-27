@@ -44,8 +44,11 @@ struct ChatSessionListPane: View {
                             session: session,
                             preview: chatViewModel.previewFor(session),
                             projectName: chatViewModel.projectName(for: session),
-                            isActive: session.id == richChat.sessionId,
-                            isLive: session.id == richChat.sessionId && richChat.isAgentWorking,
+                            // By lineage (R14-2): after a mid-chat
+                            // compression rotation the row is listed under
+                            // the new tip while the chat keeps its ACP id.
+                            isActive: chatViewModel.isAttached(to: session),
+                            isLive: chatViewModel.isAttached(to: session) && richChat.isAgentWorking,
                             onSelect: { chatViewModel.resumeSession(session.id) }
                         )
                         .contextMenu {
@@ -117,13 +120,19 @@ struct ChatSessionListPane: View {
         ) {
             Button("Delete", role: .destructive) {
                 if let target = deleteTarget {
-                    Task { await chatViewModel.deleteSession(target.id) }
+                    Task { await chatViewModel.deleteConversation(target) }
                 }
                 deleteTarget = nil
             }
             Button("Cancel", role: .cancel) { deleteTarget = nil }
         } message: {
-            Text("This permanently deletes the session and all its messages.")
+            // A rotated compression chain is one row but several session
+            // rows; the delete removes every one (R14-3).
+            if let target = deleteTarget, target.lineageIds.count > 1 {
+                Text("This conversation was compressed into \(target.lineageIds.count) linked segments. Deleting it permanently deletes all \(target.lineageIds.count) segments and their messages.")
+            } else {
+                Text("This permanently deletes the session and all its messages.")
+            }
         }
     }
 
@@ -134,7 +143,7 @@ struct ChatSessionListPane: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             ScarfTextField("Session title", text: $renameText)
                 .onSubmit { commitRename(session) }
-            if let renameError = chatViewModel.renameError {
+            if let renameError = chatViewModel.renameError(for: session.id) {
                 Label(renameError, systemImage: "exclamationmark.triangle")
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.danger)

@@ -260,6 +260,28 @@ import Foundation
         }
     }
 
+    /// The manifest read is a blocking transport read on a remote host, so
+    /// it must run on an `OffPool` thread, never a cooperative-pool thread
+    /// (`Task.detached` would be the latter). The pool's threads carry a
+    /// `…cooperative` dispatch label; OffPool's own thread does not.
+    @Test func bindingReadRunsOffTheCooperativePool() async throws {
+        try await Self.withProject(manifest: #"{"name": "p"}"#, presets: []) { ctx, path in
+            let channel = PresetChannel(rejectSetModel: false)
+            let client = try await Self.startedClient(channel, context: ctx)
+            defer { Task { await client.stop() } }
+            let seen = ReadThreadRecorder()
+            let outcome = await ProjectModelPresetApplier.apply(
+                client: client, sessionId: "s1", projectPath: path, context: ctx,
+                readBinding: { _, _ in
+                    seen.record(String(cString: __dispatch_queue_get_label(nil)))
+                    return nil
+                })
+            #expect(outcome == .noBinding)
+            let label = try #require(seen.label)
+            #expect(!label.contains("cooperative"), "read ran on \(label)")
+        }
+    }
+
     @Test func noBindingSendsNoRPC() async throws {
         try await Self.withProject(manifest: #"{"name": "p"}"#, presets: []) { ctx, path in
             let channel = PresetChannel(rejectSetModel: false)
@@ -298,4 +320,12 @@ import Foundation
         #expect(block.contains("Per-project model preset"))
         #expect(!block.contains("already applied"))
     }
+}
+
+/// Records the dispatch label of the thread a seam ran on.
+private final class ReadThreadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+    func record(_ label: String) { lock.withLock { value = label } }
+    var label: String? { lock.withLock { value } }
 }

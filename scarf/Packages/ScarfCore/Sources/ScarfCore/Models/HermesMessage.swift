@@ -223,6 +223,28 @@ public struct HermesMessage: Identifiable, Sendable {
     /// messages with empty `toolCalls`; the background hydrate splices
     /// the parsed values in without re-fetching the conversational
     /// columns.
+    /// Return a copy of this message with `content` replaced — a
+    /// plugin-rewritten reply Hermes re-sends under the streamed bubble's id.
+    public func withContent(_ newContent: String) -> HermesMessage {
+        HermesMessage(
+            id: id,
+            sessionId: sessionId,
+            role: role,
+            content: newContent,
+            toolCallId: toolCallId,
+            toolCalls: toolCalls,
+            toolName: toolName,
+            timestamp: timestamp,
+            tokenCount: tokenCount,
+            finishReason: finishReason,
+            reasoning: reasoning,
+            reasoningContent: reasoningContent,
+            reasoningContentAvailable: reasoningContentAvailable,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
+        )
+    }
+
     public func withToolCalls(_ newCalls: [HermesToolCall]) -> HermesMessage {
         HermesMessage(
             id: id,

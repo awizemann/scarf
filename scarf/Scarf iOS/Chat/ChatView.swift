@@ -3234,9 +3234,13 @@ final class ChatController {
             // `loadSessionHistory` refreshes the SQLite snapshot first
             // so we pick up messages Hermes wrote between the
             // Dashboard's last load and now.
+            // A rotated compression chain is listed under its tip; load
+            // the whole lineage as one transcript, as the Mac does (R11
+            // carry-over). Empty for an ordinary session.
             await vm.loadSessionHistory(
                 sessionId: sessionID,
-                acpSessionId: resolvedID == sessionID ? nil : resolvedID
+                acpSessionId: resolvedID == sessionID ? nil : resolvedID,
+                lineage: SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID)
             )
             state = .ready
             lastActiveSessionID = resolvedID

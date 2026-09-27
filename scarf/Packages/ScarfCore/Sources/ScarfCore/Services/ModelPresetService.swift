@@ -162,9 +162,12 @@ public actor ModelPresetService {
 
     private func loadStore() async throws -> ModelPresetStore {
         let context = self.context
-        return try await Task.detached(priority: .utility) { () throws -> ModelPresetStore in
-            try Self.inspect(context).store
-        }.value
+        // `OffPool.run`, not `Task.detached` (P60): the store read is a
+        // blocking transport read (SFTP on a remote host), which must not
+        // park a cooperative-pool thread (charter C10).
+        return try await OffPool.run { () -> Result<ModelPresetStore, Error> in
+            Result { try Self.inspect(context).store }
+        }.get()
     }
 
     /// Read-modify-write in ONE detached pass, so the write is checked
@@ -177,7 +180,8 @@ public actor ModelPresetService {
     @discardableResult
     private func mutate(_ body: @Sendable @escaping (inout ModelPresetStore) -> Bool) async throws -> Bool {
         let context = self.context
-        return try await Task.detached(priority: .utility) { () throws -> Bool in
+        // `OffPool.run` for the same reason as `loadStore()` (P60, C10).
+        return try await OffPool.run { () -> Result<Bool, Error> in Result {
             let probe = try Self.inspect(context)
             var store = probe.store
             guard body(&store) else { return false }
@@ -189,7 +193,7 @@ public actor ModelPresetService {
             let data = try encoder.encode(store)
             try probe.guarded.write(data, to: probe.path, after: probe.inspection)
             return true
-        }.value
+        } }.get()
     }
 }
 

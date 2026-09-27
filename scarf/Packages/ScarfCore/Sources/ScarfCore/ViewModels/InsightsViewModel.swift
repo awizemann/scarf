@@ -85,15 +85,18 @@ public final class InsightsViewModel {
     public var isLoading = true
 
     public var sessions: [HermesSession] = []
-    /// Every session row in the period — subagent runs, compression
-    /// continuations, hidden and archived rows included — with counters
-    /// reconciled against per-model usage. The usage totals (tokens, cost,
-    /// messages, tool calls) and the model/platform breakdowns sum THIS,
-    /// the population `hermes insights` sums; session counts, durations,
-    /// the activity histogram and Notable Sessions stay on `sessions`, the
-    /// conversations the user can open. See
-    /// `HermesDataService.fetchUsageSessionsInPeriod`.
-    public var usageSessions: [HermesSession] = []
+    /// The usage population's sums for the period, grouped by model,
+    /// source and cost state — every session row in the window (subagent
+    /// runs, compression continuations, hidden and archived rows
+    /// included), the population `hermes insights` sums, aggregated in SQL
+    /// with no row cap. The usage totals (tokens, cost, messages, tool
+    /// calls) and the model/platform breakdowns sum THIS; session counts,
+    /// durations, the activity histogram and Notable Sessions stay on
+    /// `sessions`, the conversations the user can open. See
+    /// `HermesDataService.fetchUsageAggregatesInPeriod`.
+    public var usageAggregates: [HermesDataService.UsageAggregate] = []
+    /// How many session rows the usage sums cover.
+    public var usageSessionCount: Int { usageAggregates.reduce(0) { $0 + $1.sessions } }
     public var sessionPreviews: [String: String] = [:]
     public var userMessageCount = 0
     public var totalMessages = 0
@@ -105,7 +108,7 @@ public final class InsightsViewModel {
     public var totalReasoningTokens = 0
     public var totalTokens = 0
     public var totalCost: Double = 0
-    /// How many of the `usageSessions` have a cost Hermes recorded as
+    /// How many of the usage sessions have a cost Hermes recorded as
     /// unknown, and so contribute nothing to ``totalCost``. Greater than
     /// zero means ``totalCost`` is a partial figure, not a complete total.
     public var unknownCostSessionCount = 0
@@ -160,19 +163,20 @@ public final class InsightsViewModel {
         let since = period.sinceDate
         // The insights queries (user-message count, tool usage, hourly +
         // daily activity histograms) batch through one `insightsSnapshot`
-        // round-trip. The session list stays on its own call — it's the
-        // large result set. Both are bounded by the SAME
-        // `QueryDefaults.periodSessionLimit` over the SAME
-        // `sessionListPredicate` population, so every number on the page
-        // describes one set of sessions.
+        // round-trip. Two populations, as in `hermes insights`: the
+        // conversations (`sessionListPredicate`, `fetchSessionsInPeriod`,
+        // bounded by `QueryDefaults.periodSessionLimit` — the same bound
+        // the start-time histogram uses) and the usage rows (every session
+        // row in the window, summed in SQL by
+        // `fetchUsageAggregatesInPeriod`, uncapped).
         let periodSessions = await dataService.fetchSessionsInPeriod(since: since)
         guard isCurrent(generation) else { return }
-        let periodUsage = await dataService.fetchUsageSessionsInPeriod(since: since)
+        let periodUsage = await dataService.fetchUsageAggregatesInPeriod(since: since)
         guard isCurrent(generation) else { return }
         let snapshot = await dataService.insightsSnapshot(since: since)
         guard isCurrent(generation) else { return }
         sessions = periodSessions
-        usageSessions = periodUsage
+        usageAggregates = periodUsage
         userMessageCount = snapshot.userMessageCount
         let tools = snapshot.toolUsage
         hourlyActivity = snapshot.startHours
@@ -198,19 +202,19 @@ public final class InsightsViewModel {
     }
 
     /// Internal rather than private so `InsightsAggregatesTests` can drive it
-    /// over a hand-built `sessions` array — the aggregation is pure, and
+    /// over hand-built `usageAggregates` — the aggregation is pure, and
     /// reaching it through `load()` would need a real state.db.
     func computeAggregates() {
-        let usage = usageSessions
-        totalMessages = usage.reduce(0) { $0 + $1.messageCount }
-        totalToolCalls = usage.reduce(0) { $0 + $1.toolCallCount }
+        let usage = usageAggregates
+        totalMessages = usage.reduce(0) { $0 + $1.messages }
+        totalToolCalls = usage.reduce(0) { $0 + $1.toolCalls }
         totalInputTokens = usage.reduce(0) { $0 + $1.inputTokens }
         totalOutputTokens = usage.reduce(0) { $0 + $1.outputTokens }
         totalCacheReadTokens = usage.reduce(0) { $0 + $1.cacheReadTokens }
         totalCacheWriteTokens = usage.reduce(0) { $0 + $1.cacheWriteTokens }
         totalReasoningTokens = usage.reduce(0) { $0 + $1.reasoningTokens }
         totalTokens = totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens + totalReasoningTokens
-        totalCost = usage.reduce(0.0) { $0 + ($1.displayCostUSD ?? 0) }
+        totalCost = usage.reduce(0.0) { $0 + $1.costUSD }
         // Hermes stores an unknown cost as 0.0, so those sessions add
         // nothing to the sum and the total silently reads as complete.
         // Counting them lets the Insights card say the total is partial
@@ -219,8 +223,9 @@ public final class InsightsViewModel {
         // never priced that session either. Zero on any host BELOW the v0.7
         // schema, where the column does not exist and every session degrades
         // to `.legacy`, so that card keeps its previous rendering exactly —
-        // charter C1.
-        unknownCostSessionCount = usage.reduce(0) { $0 + ($1.costDisplay.isUnknown ? 1 : 0) }
+        // charter C1. The rule itself is `SessionCostDisplay`'s, applied per
+        // group (`UsageAggregate.unknownCostSessions`).
+        unknownCostSessionCount = usage.reduce(0) { $0 + $1.unknownCostSessions }
 
         var total: TimeInterval = 0
         var count = 0
@@ -236,10 +241,10 @@ public final class InsightsViewModel {
 
     private func computeModelBreakdown() {
         var grouped: [String: (sessions: Int, input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int)] = [:]
-        for s in usageSessions {
+        for s in usageAggregates {
             let model = s.model ?? "unknown"
             var entry = grouped[model, default: (0, 0, 0, 0, 0, 0)]
-            entry.sessions += 1
+            entry.sessions += s.sessions
             entry.input += s.inputTokens
             entry.output += s.outputTokens
             entry.cacheRead += s.cacheReadTokens
@@ -256,11 +261,11 @@ public final class InsightsViewModel {
 
     private func computePlatformBreakdown() {
         var grouped: [String: (sessions: Int, messages: Int, tokens: Int)] = [:]
-        for s in usageSessions {
+        for s in usageAggregates {
             var entry = grouped[s.source, default: (0, 0, 0)]
-            entry.sessions += 1
-            entry.messages += s.messageCount
-            entry.tokens += s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheWriteTokens + s.reasoningTokens
+            entry.sessions += s.sessions
+            entry.messages += s.messages
+            entry.tokens += s.totalTokens
             grouped[s.source] = entry
         }
         platformUsage = grouped.map { key, val in

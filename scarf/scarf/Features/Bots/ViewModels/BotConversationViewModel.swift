@@ -194,7 +194,10 @@ final class BotConversationViewModel {
         resolveAndConnect()
     }
 
-    private func resolveAndConnect() {
+    /// - Parameter pendingText: a message to send once the conversation is
+    ///   connected AND its binding verified — the send that found the ACP
+    ///   connection gone (see `ChatViewModel.autoStartInterceptor`).
+    private func resolveAndConnect(thenSend pendingText: String? = nil) {
         generation += 1
         let intent = generation
         phase = .resolving
@@ -211,12 +214,26 @@ final class BotConversationViewModel {
                     // full streaming stack applies.
                     self.delivery = .acpStreaming
                     self.chat.sendRouter = nil
+                    // A send with no ACP client (the reconnect ladder gave
+                    // up) must not auto-start blind: that path falls back to
+                    // `session/new` when the load fails and never checks
+                    // the result is still the Bot Chat. Re-resolve and
+                    // re-verify instead, then send.
+                    self.chat.autoStartInterceptor = { [weak self] text, _ in
+                        guard let self, self.delivery == .acpStreaming, case .live = self.phase else { return false }
+                        self.resolveAndConnect(thenSend: text)
+                        return true
+                    }
                     self.phase = .live
                     // `liveId` (the compression tip), never `registryId`: on a
                     // long-lived forever-chat the titled row is often a dead
                     // compressed ancestor.
                     self.chat.resumeSession(found.liveId, origin: .bots)
-                    await self.verifyCanonicalBinding(expected: found.liveId, intent: intent)
+                    let bound = await self.verifyCanonicalBinding(expected: found.liveId, intent: intent)
+                    if bound, let pendingText, self.generation == intent {
+                        // Already counted as sent when it was intercepted.
+                        self.chat.sendText(pendingText, images: [], recordAnalytics: false)
+                    }
                 } else {
                     // CLI/gateway-born session — the normal case for every
                     // Bot Chat Scarf or Hermes Desktop creates. ACP's
@@ -226,12 +243,17 @@ final class BotConversationViewModel {
                     // (rightly) kill the conversation — the release-blocking
                     // "Couldn't open this conversation" loop. Converse over
                     // the CLI transport instead.
+                    self.chat.autoStartInterceptor = nil
                     await self.connectViaCLITransport(found, intent: intent)
+                    if let pendingText, self.generation == intent, case .live = self.phase {
+                        self.deliverViaCLI(pendingText)
+                    }
                 }
             } else {
                 self.canonical = nil
                 self.delivery = nil
                 self.chat.sendRouter = nil
+                self.chat.autoStartInterceptor = nil
                 self.phase = .noConversationYet
             }
         }
@@ -339,15 +361,25 @@ final class BotConversationViewModel {
     /// — the binding is verified here and the conversation is stopped if it
     /// drifted. Failing loudly is the only safe outcome: a bot chat that
     /// silently is not the bot chat is worse than no bot chat.
-    private func verifyCanonicalBinding(expected: String, intent: Int) async {
-        // `richChatViewModel.sessionId` is assigned exactly once per start,
-        // at the moment ACP reaches ready. Poll for it rather than racing
-        // it; `ChatViewModel`'s own 90s-per-stage watchdog owns the
-        // never-ready case, so this only needs to outlast it.
+    /// True when the chat bound to `expected`; false when superseded or
+    /// when it failed (and the conversation was torn down).
+    @discardableResult
+    private func verifyCanonicalBinding(expected: String, intent: Int) async -> Bool {
+        // Poll `richChatViewModel.sessionId` rather than racing the start;
+        // `ChatViewModel`'s own 90s-per-stage watchdog owns the never-ready
+        // case, so this only needs to outlast it. A matching id is only
+        // accepted once the start has FINISHED: `loadSessionHistory` names
+        // the requested id before a `session/load` fallback re-points the
+        // transcript at the new session, so a mid-start match can be the
+        // very drift this guards against (R16b review).
         for _ in 0..<1_000 {
-            if Task.isCancelled || generation != intent { return }
+            if Task.isCancelled || generation != intent { return false }
             if let bound = chat.richChatViewModel.sessionId {
-                guard bound != expected else { return }
+                if bound == expected {
+                    if !chat.isStartingSession && chat.isACPConnected { return true }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    continue
+                }
                 chat.stopACP()
                 canonical = nil
                 delivery = nil
@@ -356,7 +388,7 @@ final class BotConversationViewModel {
                     + "live streaming, and Scarf won’t send messages into a replacement — they wouldn’t "
                     + "reach the bot. Try again; Scarf will re-check which transport the conversation needs."
                 )
-                return
+                return false
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -366,7 +398,7 @@ final class BotConversationViewModel {
         // that was never confirmed to be the Bot Chat — the exact outcome
         // the verifier exists to prevent, reached by timeout instead of by
         // drift. Fail the same way, loudly.
-        guard !Task.isCancelled, generation == intent else { return }
+        guard !Task.isCancelled, generation == intent else { return false }
         chat.stopACP()
         canonical = nil
         delivery = nil
@@ -375,6 +407,7 @@ final class BotConversationViewModel {
             + "so Scarf can’t confirm messages would reach the bot. Check that `hermes acp` starts "
             + "for this profile, then try again."
         )
+        return false
     }
 
     /// Tear the conversation down: cancel any in-flight resolve and stop
@@ -393,6 +426,7 @@ final class BotConversationViewModel {
         // ordinary behavior.
         chat.richChatViewModel.cancelPendingSend()
         chat.sendRouter = nil
+        chat.autoStartInterceptor = nil
         delivery = nil
         _ = acpHandle.take()
         canonical = nil

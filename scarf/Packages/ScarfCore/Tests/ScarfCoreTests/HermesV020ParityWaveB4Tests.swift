@@ -195,6 +195,21 @@ struct HermesV020ParityWaveB4Tests {
         #expect(!SkillsViewModel.uninstallSucceeded(exitCode: 1, output: removed))
     }
 
+    /// S10-F2: both apps now hand `uninstallHubSkill` the skill itself, and
+    /// the identifier it sends is the bare name, never the category path
+    /// iOS used to pass (`Error: 'creative/pixel-art' is not a
+    /// hub-installed skill`, exit 0).
+    @Test func uninstallSendsTheBareNameForACategorisedSkill() {
+        let skill = HermesSkill(
+            id: "creative/pixel-art", name: "pixel-art", category: "creative",
+            path: "/h/skills/creative/pixel-art", files: ["SKILL.md"], requiredConfig: []
+        )
+        let identifier = SkillsViewModel.uninstallIdentifier(for: skill)
+        #expect(identifier == "pixel-art")
+        #expect(SkillsViewModel.uninstallArgs(identifier) == ["skills", "uninstall", "--", "pixel-art"])
+        #expect(!SkillsViewModel.uninstallArgs(identifier).contains(skill.id))
+    }
+
     @Test func skillsUpdateArgvHasNoYesFlagAndNoName() {
         // Omitting the optional name positional updates all outdated skills.
         #expect(SkillsViewModel.updateAllArgs == ["skills", "update"])

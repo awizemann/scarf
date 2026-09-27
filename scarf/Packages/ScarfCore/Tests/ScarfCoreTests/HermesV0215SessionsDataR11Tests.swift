@@ -208,10 +208,14 @@ import SQLite3
         let service = await open(home)
         let since = Date(timeIntervalSince1970: 0)
 
-        let usage = await service.fetchUsageSessionsInPeriod(since: since)
-        #expect(usage.count == 8)
+        // R16b: the usage population is summed in SQL now (no row cap);
+        // `live` is the only `m-live` row, so its group carries its
+        // reconciled counters.
+        let usage = await service.fetchUsageAggregatesInPeriod(since: since)
+        #expect(usage.reduce(0) { $0 + $1.sessions } == 8)
         #expect(usage.reduce(0) { $0 + $1.inputTokens } == 610)
-        let live = try #require(usage.first { $0.id == "live" })
+        let live = try #require(usage.first { $0.model == "m-live" })
+        #expect(live.sessions == 1)
         #expect(live.inputTokens == 150)
         #expect(live.outputTokens == 15)
 

@@ -1600,6 +1600,37 @@ public final class RichChatViewModel {
     /// The original CLI session ID when resuming a CLI session via ACP.
     /// Used to combine old CLI messages with new ACP messages.
     public private(set) var originSessionId: String?
+
+    /// Every session row this transcript spans, root first, when the chat
+    /// is a rotated compression chain (`HermesSession.lineageIds`), or a
+    /// chain that rotated while this chat ran (`noteSessionRotation`).
+    /// Hermes shows such a conversation as one transcript across the whole
+    /// lineage (`get_resume_conversations`, hermes_state_messages.py:1273-1293
+    /// @ v2026.9.24), and after a rotation the new turns land on the tip row,
+    /// not the one the chat is attached to. Ignored unless it contains
+    /// `sessionId` — see `transcriptSessionIds`.
+    public private(set) var lineageSessionIds: [String] = []
+
+    /// The session ids every transcript read covers: the lineage when it
+    /// contains `sessionId`, else just `sessionId`.
+    public var transcriptSessionIds: [String] {
+        guard let sessionId else { return [] }
+        return lineageSessionIds.contains(sessionId) ? lineageSessionIds : [sessionId]
+    }
+
+    /// Whether `id` is one of the rows this transcript spans.
+    public func transcriptCovers(_ id: String) -> Bool {
+        transcriptSessionIds.contains(id)
+    }
+
+    /// Record that Hermes rotated the attached session's internal head to
+    /// `currentId` (ACP `sessionProvenance`, acp_adapter/provenance.py @
+    /// v2026.9.24): the ACP id stays the same, the turns from here on are
+    /// stored under `currentId`. No-op for an id already covered.
+    public func noteSessionRotation(to currentId: String) {
+        guard !currentId.isEmpty, sessionId != nil, !transcriptCovers(currentId) else { return }
+        lineageSessionIds = transcriptSessionIds + [currentId]
+    }
     /// Smallest DB id currently loaded for the *current session* (i.e.
     /// `sessionId`). Drives `loadEarlier()`: page back with
     /// `before: oldestLoadedMessageID`. `nil` when nothing has been
@@ -1668,6 +1699,15 @@ public final class RichChatViewModel {
     /// buffer, as before.
     @ObservationIgnored
     private var streamingReplyId: String?
+
+    /// Reply id → local message id of every text reply finalized in the
+    /// current turn. Hermes re-sends a plugin-rewritten reply
+    /// (`transform_llm_output`) under the id of the bubble it replaces
+    /// (`message_ids.last()`, acp_adapter/server.py:971-981 @ v2026.9.24),
+    /// and the ids are UUIDs never reused otherwise, so a chunk under one
+    /// of these ids is that rewrite. Cleared when a turn starts.
+    @ObservationIgnored
+    private var finalizedReplyMessageIds: [String: Int] = [:]
 
     /// Ids of tool calls whose `tool_call` start this VM processed and
     /// whose `tool_call_update` has not arrived yet. Separate from
@@ -1881,6 +1921,7 @@ public final class RichChatViewModel {
         lastKnownFingerprint = nil
         sessionId = nil
         originSessionId = nil
+        lineageSessionIds = []
         oldestLoadedMessageID = nil
         hasMoreHistory = false
         isLoadingEarlier = false
@@ -1894,6 +1935,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         streamingReplyId = nil
+        finalizedReplyMessageIds = [:]
         openToolCallIds = []
         turnCancelRequested = false
         cancelStreamingFlush()
@@ -2234,6 +2276,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         streamingReplyId = nil
+        finalizedReplyMessageIds = [:]
         cancelStreamingFlush()
         buildMessageGroups()
         // User just submitted — jump to the bottom so they see their message
@@ -2380,6 +2423,7 @@ public final class RichChatViewModel {
         }
         switch event {
         case .messageChunk(_, let text, _, _, let messageId):
+            if let messageId, replaceWithRewrittenReply(messageId: messageId, text: text) { break }
             startNewReplyIfIdChanged(messageId)
             appendMessageChunk(text: text)
         case .userMessageChunk:
@@ -2409,13 +2453,16 @@ public final class RichChatViewModel {
             handleConnectionLost(reason: reason)
         case .availableCommands(_, let commands):
             acpCommands = parseACPCommands(commands)
-        case .sessionInfoUpdate:
+        case .sessionInfoUpdate(_, _, _, let provenance):
             // The sidebar title mutation is owned by the platform chat VM
             // (ChatViewModel on Mac / ChatView on iOS), which intercepts
             // this event in its ACP event loop and updates recentSessions /
-            // sessionPreviews in place. Nothing to do at the rich-transcript
-            // level — the live transcript has no title affordance.
-            break
+            // sessionPreviews in place. The transcript only follows a
+            // compression rotation: the next turns are stored under the new
+            // internal id, and every DB read must cover it (R14-2).
+            if let current = provenance?.currentHermesSessionId {
+                noteSessionRotation(to: current)
+            }
         case .unknown:
             break
         }
@@ -2499,6 +2546,43 @@ public final class RichChatViewModel {
             buildMessageGroups()
         }
         streamingReplyId = messageId
+    }
+
+    /// A plugin-rewritten reply (R09 carry-over, S02-F4). When a
+    /// `transform_llm_output` hook changes a streamed reply, Hermes sends
+    /// the WHOLE rewritten text as one more chunk under the streamed
+    /// bubble's id, meaning "replace" (acp_adapter/server.py:971-981 @
+    /// v2026.9.24); it never re-sends an unchanged streamed reply. Two
+    /// shapes are recognisable and replace instead of appending:
+    /// - the id belongs to a reply already finalized this turn (a tool
+    ///   round or a thought ended it): only the rewrite reuses a closed id;
+    /// - the id is the reply still streaming and the chunk restates all of
+    ///   its text so far (a plugin that appends or wraps a footer). A real
+    ///   delta never repeats the whole reply before it — once the reply is
+    ///   long enough that a delta can't start with it by chance (a reply of
+    ///   "*" or "1" followed by "**Note" or "10" would otherwise lose text).
+    /// A rewrite of a still-open reply that does not restate it cannot be
+    /// told apart from a delta and still appends; the stored row (and so
+    /// the next load) has the rewritten text.
+    /// Shortest streamed reply the restating-prefix rule applies to.
+    static let rewriteRestateMinimumLength = 24
+
+    private func replaceWithRewrittenReply(messageId: String, text: String) -> Bool {
+        if messageId == streamingReplyId,
+           streamingAssistantText.count >= Self.rewriteRestateMinimumLength,
+           text.count > streamingAssistantText.count,
+           text.hasPrefix(streamingAssistantText) {
+            streamingAssistantText = text
+            scheduleStreamingUpsert()
+            return true
+        }
+        if let localId = finalizedReplyMessageIds[messageId],
+           let idx = messages.firstIndex(where: { $0.id == localId }) {
+            messages[idx] = messages[idx].withContent(text)
+            buildMessageGroups()
+            return true
+        }
+        return false
     }
 
     private func appendMessageChunk(text: String) {
@@ -3000,6 +3084,9 @@ public final class RichChatViewModel {
                 turnDurations[id] = Date().timeIntervalSince(start)
                 currentTurnStart = nil
             }
+            if let replyId = streamingReplyId, !streamingAssistantText.isEmpty {
+                finalizedReplyMessageIds[replyId] = id
+            }
         } else {
             // Remove empty streaming placeholder. Same no-animation
             // transaction pattern — empty-finalize used to ripple the
@@ -3048,11 +3135,13 @@ public final class RichChatViewModel {
         // Reconnects don't generate hundreds of unseen messages, so a
         // 200-row tail is plenty for the merge — and it keeps us from
         // re-materializing 1000+ message sessions on every reconnect.
-        var dbMessages = await dataService.fetchMessages(sessionId: sessionId, limit: HistoryPageSize.reconcile)
+        let ownIds = transcriptSessionIds
+        let ownIdSet = Set(ownIds)
+        var dbMessages = await dataService.fetchMessages(sessionIds: ownIds, limit: HistoryPageSize.reconcile)
 
         // If we have an origin session (CLI session continued via ACP),
         // include those messages too
-        if let origin = originSessionId, origin != sessionId {
+        if let origin = originSessionId, !ownIdSet.contains(origin) {
             let originMessages = await dataService.fetchMessages(sessionId: origin, limit: HistoryPageSize.reconcile)
             if !originMessages.isEmpty {
                 dbMessages = originMessages + dbMessages
@@ -3068,10 +3157,10 @@ public final class RichChatViewModel {
         // session OLDER than the window that are already on screen (paged
         // in through "Load earlier") stay: dropping them would leave the
         // pagination cursor pointing below a gap nothing ever re-fetches.
-        let sessionRowIds = dbMessages.filter { $0.sessionId == sessionId }.map(\.id)
+        let sessionRowIds = dbMessages.filter { ownIdSet.contains($0.sessionId) }.map(\.id)
         let windowFloor = sessionRowIds.min()
         let olderLoaded: [HermesMessage] = windowFloor.map { floor in
-            messages.filter { $0.id > 0 && $0.sessionId == sessionId && $0.id < floor }
+            messages.filter { $0.id > 0 && ownIdSet.contains($0.sessionId) && $0.id < floor }
         } ?? []
 
         // Find local-only user messages not yet in DB (negative ids are
@@ -3146,9 +3235,14 @@ public final class RichChatViewModel {
 
     /// Load message history from the DB, optionally combining an origin session
     /// (e.g., CLI session) with the current ACP session.
-    public func loadSessionHistory(sessionId: String, acpSessionId: String? = nil) async {
+    ///
+    /// `lineage` (root first, `sessionId` among them) loads a rotated
+    /// compression chain as one transcript; empty loads `sessionId` alone.
+    public func loadSessionHistory(sessionId: String, acpSessionId: String? = nil, lineage: [String] = []) async {
         await ScarfMon.measureAsync(.sessionLoad, "mac.hydrateMessages") {
         self.sessionId = sessionId
+        lineageSessionIds = lineage.contains(sessionId) ? lineage : []
+        let originIds = transcriptSessionIds
         // Capture the session-id we're loading FOR so we can verify
         // it's still the active one before assigning to `messages`.
         // Without this guard, switching to a small chat while a
@@ -3185,7 +3279,7 @@ public final class RichChatViewModel {
         // below in a Task.detached) fills tool calls + tool results in
         // the background — the chat is usable while it runs.
         let pageSize = HistoryPageSize.initial
-        let originOutcome = await dataService.fetchSkeletonMessages(sessionId: sessionId, limit: pageSize)
+        let originOutcome = await dataService.fetchSkeletonMessages(sessionIds: originIds, limit: pageSize)
         var allMessages = originOutcome.messages
         var transportFailure: String? = originOutcome.transportError
         // Race-check #2: session id may have changed during the
@@ -3271,9 +3365,9 @@ public final class RichChatViewModel {
         // session's history. Cross-session backfill (paging into the
         // CLI origin) isn't supported in v1 — the merged 2× pageSize
         // is enough headroom for the dashboard-resume case.
-        let currentSessionId = self.sessionId ?? sessionId
+        let currentSessionIds = Set(transcriptSessionIds)
         oldestLoadedMessageID = allMessages
-            .filter { $0.sessionId == currentSessionId }
+            .filter { currentSessionIds.contains($0.sessionId) }
             .map(\.id)
             .min()
         hasMoreHistory = moreHistory
@@ -3393,7 +3487,7 @@ public final class RichChatViewModel {
                 return
             }
             let toolResults = await dataService.fetchToolResultsInRange(
-                sessionId: sessionForLoad,
+                sessionIds: self.transcriptSessionIds,
                 minId: minId,
                 maxId: maxId
             )
@@ -3510,7 +3604,7 @@ public final class RichChatViewModel {
         var accumulated: [HermesMessage] = []
         for _ in 0..<Self.maxEarlierPageFetches {
             let page = await dataService.fetchMessages(
-                sessionId: sessionId,
+                sessionIds: transcriptSessionIds.isEmpty ? [sessionId] : transcriptSessionIds,
                 limit: pageSize,
                 before: cursor
             )
@@ -3603,10 +3697,11 @@ public final class RichChatViewModel {
 
         guard let sessionId else { return }
 
-        let fingerprint = await dataService.fetchMessageFingerprint(sessionId: sessionId)
+        let ownIds = transcriptSessionIds.isEmpty ? [sessionId] : transcriptSessionIds
+        let fingerprint = await dataService.fetchMessageFingerprint(sessionIds: ownIds)
 
         if fingerprint != lastKnownFingerprint {
-            let fetched = await dataService.fetchMessages(sessionId: sessionId, limit: HistoryPageSize.polling)
+            let fetched = await dataService.fetchMessages(sessionIds: ownIds, limit: HistoryPageSize.polling)
             let session = await dataService.fetchSession(id: sessionId)
             lastKnownFingerprint = fingerprint
 

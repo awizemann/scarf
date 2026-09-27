@@ -473,7 +473,7 @@ struct SkillsView: View {
                                 // name; `skill.id` is the path below skills/,
                                 // which `skills uninstall` rejects — and it
                                 // rejects with exit 0 (t-ec6d2e6d).
-                                viewModel.uninstallHubSkill(skill.name)
+                                viewModel.uninstallHubSkill(skill)
                             }
                             .controlSize(.small)
                             .accessibilityIdentifier("skills.detail.uninstall")
