@@ -1867,6 +1867,9 @@ public actor HermesDataService {
                       let tipId = chain.last,
                       let tip = tips[tipId] else { return session }
                 tipByRoot[session.id] = tipId
+                // Lets id-keyed lookups (project attribution on resume)
+                // find the root the chat was started under.
+                SessionLineageIndex.shared.record(server: context.id, lineage: chain)
                 return session.projectedOntoCompressionTip(tip, lineage: chain)
             }
             return (projected, tipByRoot)

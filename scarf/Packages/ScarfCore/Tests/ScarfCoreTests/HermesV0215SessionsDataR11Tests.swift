@@ -342,6 +342,50 @@ import SQLite3
         #expect(labels["tip2"] == "Own")
     }
 
+    @Test func resumingAChainByItsTipFindsTheRootsProject() async throws {
+        // Attribution is written against the id the chat started with (the
+        // root); every list — and so every resume — carries the tip id.
+        let home = try makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let context = ServerContext.local(home: home)
+        let attribution = SessionAttributionService(context: context)
+        attribution.attribute(sessionID: "chainRoot", toProjectPath: "/projects/alpha")
+
+        let service = HermesDataService(context: context)
+        #expect(await service.open())
+        _ = try await service.fetchSessionsChecked(limit: 100)
+        await service.close()
+
+        #expect(attribution.projectPath(for: "chainTip") == "/projects/alpha")
+        #expect(attribution.resolveProjectPath(known: nil, sessionID: "chainMid") == "/projects/alpha")
+        // A session that is not part of any listed chain still misses.
+        #expect(attribution.projectPath(for: "live") == nil)
+    }
+
+    @Test func lineageIndexOrdersNearestFirst() {
+        let index = SessionLineageIndex()
+        let server = UUID()
+        index.record(server: server, lineage: ["r", "m", "t"])
+        #expect(index.relatedIds(server: server, sessionID: "t") == ["m", "r"])
+        #expect(index.relatedIds(server: server, sessionID: "m") == ["r", "t"])
+        #expect(index.relatedIds(server: UUID(), sessionID: "t").isEmpty)
+        index.record(server: server, lineage: ["solo"])
+        #expect(index.relatedIds(server: server, sessionID: "solo").isEmpty)
+    }
+
+    @Test func renamingAChainRowKeepsItsLineage() {
+        let row = HermesSession(
+            id: "t", source: "cli", userId: nil, model: nil, title: "Old", parentSessionId: nil,
+            startedAt: nil, endedAt: nil, endReason: nil, messageCount: 0, toolCallCount: 0,
+            inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            estimatedCostUSD: nil, reasoningTokens: 0, actualCostUSD: nil, costStatus: nil,
+            billingProvider: nil, lineageIds: ["r", "t"]
+        )
+        let renamed = row.withTitle("New")
+        #expect(renamed.title == "New")
+        #expect(renamed.lineageIds == ["r", "t"])
+    }
+
     // MARK: - S04-F4: display_kind = 'hidden' rows stay out of sight
 
     @Test func hiddenDisplayRowsLeaveTranscriptSearchAndPreview() async throws {

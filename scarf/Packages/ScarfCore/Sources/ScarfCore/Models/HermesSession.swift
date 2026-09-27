@@ -319,7 +319,8 @@ public struct HermesSession: Identifiable, Sendable {
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,
             lastReadAt: lastReadAt,
-            lastActive: lastActive
+            lastActive: lastActive,
+            lineageIds: lineageIds
         )
     }
 }
