@@ -176,4 +176,54 @@ import ScarfCore
         #expect(vm.richChatViewModel.sessionId == "sess-A", "the ACP id stays the handle")
         vm.stopACP()
     }
+
+    // MARK: - Bot Chat: an undelivered message is kept
+
+    /// The reconnect gave up, the user typed, and the re-resolve found no
+    /// Bot Chat any more (renamed or deleted in Hermes). The message was
+    /// cleared from the composer with no bubble and simply vanished; now it
+    /// is kept for the view to show, and the next send clears it.
+    @Test @MainActor func aMessageTheReopenCannotDeliverIsKept() async throws {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-r17-bot-\(UUID().uuidString)")
+        let profileHome = home.appendingPathComponent("profiles/scout")
+        try FileManager.default.createDirectory(at: profileHome, withIntermediateDirectories: true)
+        let config = "model:\n  default: anthropic/claude-x\n  provider: anthropic\n"
+        try config.write(to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        try config.write(to: profileHome.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let lookups = ChatSessionsR16bMacTests.Box<Int>()
+        let vm = BotConversationViewModel(
+            profileName: "scout",
+            context: .local(home: home),
+            locator: { _ in
+                lookups.append(1)
+                // Found on open, gone by the time the send re-resolves.
+                return lookups.all.count == 1
+                    ? HermesDataService.CanonicalBotChat(registryId: "bot-chat-1", liveId: "bot-chat-1", liveSource: "acp")
+                    : nil
+            },
+            creator: { _, _, _ in nil },
+            acpClientMaker: { ctx, _, _ in
+                let ch = Lifecycle.ScriptedACPChannel(behavior: .happy(sessionId: "bot-chat-1"))
+                return ACPClient(context: ctx) { _ in ch }
+            }
+        )
+        vm.open()
+        #expect(await Lifecycle.waitUntil {
+            vm.phase == .live && vm.chat.richChatViewModel.sessionId == "bot-chat-1" && vm.chat.isACPConnected
+        })
+        vm.chat.stopACP()
+        _ = await Lifecycle.waitUntil { !vm.chat.isACPConnected }
+
+        vm.chat.sendText("are you there?")
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 10) { vm.phase == .noConversationYet })
+        #expect(vm.unsentMessage == "are you there?")
+
+        // The next send (which starts a new Bot Chat here) clears it.
+        vm.send("second try")
+        #expect(vm.unsentMessage == nil)
+        vm.close()
+    }
 }

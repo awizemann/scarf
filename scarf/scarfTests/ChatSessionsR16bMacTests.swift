@@ -327,6 +327,8 @@ import ScarfCore
             return false
         }
         #expect(failed, "expected the verifier to refuse the fallback session (phase \(vm.phase))")
+        // R17: the refused message is kept and shown, not dropped.
+        #expect(vm.unsentMessage == "hello bot")
         #expect(lookups.all.count == 2, "the send did not re-resolve the canonical Bot Chat")
         for ch in channels.all {
             #expect(await ch.sentMethods.contains("session/prompt") == false,
