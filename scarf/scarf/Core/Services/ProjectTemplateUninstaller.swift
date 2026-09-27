@@ -163,7 +163,9 @@ struct ProjectTemplateUninstaller: Sendable {
         // round trip, a half-written file) used to come back as `[]` and
         // file every job as "already gone", so the uninstall skipped jobs
         // that were still scheduled.
-        let cron = resolveCronJobs(names: lock.cronJobNames, project: project, transport: transport)
+        let cron = resolveCronJobs(
+            names: lock.cronJobNames, project: project, templateId: lock.templateId, transport: transport
+        )
 
         // Memory block detection. The installer wraps its appendix between
         // `<!-- scarf-template:<id>:begin -->` / `:end -->` markers; look
@@ -316,16 +318,19 @@ struct ProjectTemplateUninstaller: Sendable {
     ///
     /// - `jobs.json` present but unreadable → every name is `unverified`.
     /// - No job carries the name → `gone` (removed or renamed by hand).
-    /// - Exactly one job carries it → `toRemove`.
-    /// - Several do: names from an older Scarf (`[tmpl:<id>] <name>`, no
-    ///   project tag) are shared by every install of the template, so taking
-    ///   the first match could delete ANOTHER project's job. Narrow to the
-    ///   jobs that point at this project (the prompt Scarf filled in with
-    ///   `{{PROJECT_DIR}}`, or a `workdir` equal to the root); still
-    ///   ambiguous → `unverified`, never a guess.
+    /// - A name carrying this project's tag (installs since R12) is unique
+    ///   to this install: one match → `toRemove`.
+    /// - A name from an older Scarf (`[tmpl:<id>] <name>`, no project tag) is
+    ///   shared by every install of the template, so even a SINGLE match may
+    ///   be another project's job (this one's was deleted by hand). Unless
+    ///   no other registered project was installed from the same template,
+    ///   narrow to the jobs that point at this project (the prompt Scarf
+    ///   filled in with `{{PROJECT_DIR}}`, or a `workdir` equal to the
+    ///   root); still not exactly one → `unverified`, never a guess.
     nonisolated func resolveCronJobs(
         names: [String],
         project: ProjectEntry,
+        templateId: String,
         transport: any ServerTransport
     ) -> CronResolution {
         var out = CronResolution()
@@ -335,26 +340,40 @@ struct ProjectTemplateUninstaller: Sendable {
             return out
         }
         let root = ProjectIdentity.normalizedPath(project.path)
+        // Computed once, only if a legacy name needs it.
+        var sharedTemplate: Bool?
         for name in names {
             let matches = jobs.filter { $0.name == name }
             if matches.isEmpty {
                 out.gone.append(name)
                 continue
             }
-            if matches.count == 1 {
+            let isLegacyShared = name.hasPrefix("[tmpl:") && !name.contains("] [proj:")
+            if !isLegacyShared, matches.count == 1 {
                 out.toRemove.append((id: matches[0].id, name: name))
                 continue
+            }
+            if isLegacyShared, matches.count == 1 {
+                if sharedTemplate == nil {
+                    sharedTemplate = Self.templateIsSharedWithAnotherProject(
+                        templateId: templateId, project: project, context: context
+                    )
+                }
+                if sharedTemplate == false {
+                    out.toRemove.append((id: matches[0].id, name: name))
+                    continue
+                }
             }
             let ours = matches.filter { job in
                 if let workdir = job.workdir, !workdir.isEmpty,
                    ProjectIdentity.normalizedPath(workdir) == root { return true }
-                return job.prompt.contains(project.path)
+                return Self.mentions(path: project.path, in: job.prompt)
             }
             if ours.count == 1 {
                 out.toRemove.append((id: ours[0].id, name: name))
             } else {
                 Self.logger.error(
-                    "\(matches.count) cron jobs are named \(name, privacy: .public) and none is clearly this project's; leaving them for the user"
+                    "\(matches.count) cron job(s) named \(name, privacy: .public) and none is clearly this project's; leaving them for the user"
                 )
                 out.unverified.append(name)
             }
@@ -362,22 +381,68 @@ struct ProjectTemplateUninstaller: Sendable {
         return out
     }
 
+    /// Does `text` name `path` as a whole path — `/x/foo` or `/x/foo/…`, but
+    /// not `/x/foo-bar`?
+    nonisolated static func mentions(path: String, in text: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: path, range: searchStart..<text.endIndex) {
+            guard range.upperBound < text.endIndex else { return true }
+            let next = text[range.upperBound]
+            if !(next.isLetter || next.isNumber || next == "-" || next == "_" || next == ".") {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    /// Is another registered project installed from the same template id?
+    /// Leans cautious: a registry we can't read counts as "yes", so a legacy
+    /// job is only removed on proof that no other install could own it.
+    nonisolated static func templateIsSharedWithAnotherProject(
+        templateId: String, project: ProjectEntry, context: ServerContext
+    ) -> Bool {
+        let store = ProjectStore(context: context)
+        let transport = context.makeTransport()
+        let loaded = ProjectDashboardService(context: context).loadRegistryDetailed()
+        if loaded.loss != nil { return true }
+        let me = ProjectIdentity.normalizedPath(project.path)
+        return loaded.registry.projects.contains { other in
+            guard ProjectIdentity.normalizedPath(other.path) != me else { return false }
+            // The cached manifest exists only for schemaful templates; the
+            // lock every template install writes is the general answer.
+            if store.templateInfo(projectPath: other.path)?.id == templateId { return true }
+            let lockPath = other.path + "/.scarf/template.lock.json"
+            guard let data = try? transport.readFile(lockPath),
+                  data.count <= ProjectStore.maxJSONBytes,
+                  let lock = try? JSONDecoder().decode(TemplateLock.self, from: data)
+            else { return false }
+            return lock.templateId == templateId
+        }
+    }
+
     /// The live cron jobs, `[]` when the host has no `jobs.json`, `nil` when
     /// it has one Scarf couldn't read or decode.
+    ///
+    /// "No file" has to be the far end's own answer (`isNoSuchFile`), not a
+    /// follow-up `fileExists`: over SSH a dropped connection makes
+    /// `fileExists` say false too, which would turn "couldn't ask" back into
+    /// "every job is already gone".
     nonisolated static func readCronJobs(
         context: ServerContext, transport: any ServerTransport
     ) -> [HermesCronJob]? {
-        let outcome = HermesFileService(context: context).loadCronJobsOutcome()
-        if outcome.decodeFailed { return nil }
-        if outcome.jobs.isEmpty {
-            // `loadCronJobsOutcome` reports a failed read as an empty list;
-            // tell "no file" from "couldn't read it".
-            let path = context.paths.cronJobsJSON
-            if transport.fileExists(path), (try? transport.readFile(path)) == nil {
-                return nil
-            }
+        let data: Data
+        do {
+            data = try transport.readFile(context.paths.cronJobsJSON)
+        } catch let error as TransportError where error.isNoSuchFile {
+            return []
+        } catch {
+            return nil
         }
-        return outcome.jobs
+        guard data.count <= ProjectStore.maxJSONBytes,
+              let file = try? JSONDecoder().decode(CronJobsFile.self, from: data)
+        else { return nil }
+        return file.jobs
     }
 
     /// The field-key half of a ref's account (`<fieldKey>:<hash>`), split on
@@ -568,7 +633,8 @@ struct ProjectTemplateUninstaller: Sendable {
         var cronJobs = plan.cronJobsToRemove
         if !plan.cronJobsUnverified.isEmpty {
             let retry = resolveCronJobs(
-                names: plan.cronJobsUnverified, project: plan.project, transport: transport
+                names: plan.cronJobsUnverified, project: plan.project,
+                templateId: plan.lock.templateId, transport: transport
             )
             cronJobs += retry.toRemove
             for name in retry.unverified {
@@ -1185,21 +1251,33 @@ struct ProjectTemplateUninstaller: Sendable {
         end endRange: Range<String.Index>
     ) -> String {
         let delimiter = ProjectTemplateService.memoryEntryDelimiter
-        let before = text[..<beginRange.lowerBound]
-        let after = text[endRange.upperBound...]
-        // Text an agent added after the end marker but inside the same entry
-        // is not the template's; it stays, as an entry of its own.
-        let afterEndsEntry = after.allSatisfy(\.isWhitespace) || after.hasPrefix(delimiter)
-        if before.hasSuffix(delimiter) {
-            // `…previous entry\n§\n<block>[\n§\nnext entry]`
-            if afterEndsEntry {
-                return String(before.dropLast(delimiter.count)) + String(after)
-            }
-            return String(before) + String(after.drop(while: \.isWhitespace))
+        let before = String(text[..<beginRange.lowerBound])
+        let after = String(text[endRange.upperBound...])
+        // Where the block's entry starts: right after the last delimiter
+        // before it (only whitespace in between — Hermes strips each
+        // entry, so stray blank lines there are still the same entry), or
+        // at the top of the file.
+        var keptBefore: String?
+        if let r = before.range(of: delimiter, options: .backwards),
+           before[r.upperBound...].allSatisfy(\.isWhitespace) {
+            keptBefore = String(before[..<r.lowerBound])
+        } else if before.allSatisfy(\.isWhitespace) {
+            keptBefore = ""
         }
-        if before.allSatisfy(\.isWhitespace), after.hasPrefix(delimiter) {
-            // `<block>\n§\nnext entry` — the block is the first entry.
-            return String(before) + String(after.dropFirst(delimiter.count))
+        if let keptBefore {
+            // Where it ends: the next delimiter (only whitespace before it),
+            // or the end of the file. Anything else is text an agent added
+            // inside the same entry — not the template's, so it stays, as
+            // an entry of its own.
+            let remainder: String
+            if let r = after.range(of: delimiter), after[..<r.lowerBound].allSatisfy(\.isWhitespace) {
+                remainder = String(after[r.upperBound...])
+            } else if after.allSatisfy(\.isWhitespace) {
+                return keptBefore
+            } else {
+                remainder = String(after.drop(while: \.isWhitespace))
+            }
+            return keptBefore.isEmpty ? remainder : keptBefore + delimiter + remainder
         }
         // Legacy shape: `…\n\n<block>\n`.
         var upper = endRange.upperBound

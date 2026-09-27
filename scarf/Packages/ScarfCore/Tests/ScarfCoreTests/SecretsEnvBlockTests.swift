@@ -130,6 +130,8 @@ struct SecretsEnvBlockTests {
             ("\\", "\"${:-\\}\""),
             ("q\\\"", "\"q\\\\\\\"\""),
             ("a\\\\b", "\"a\\\\\\\\b\""),
+            ("\u{1F}x\u{1C}", "\"\u{1F}x\u{1C}\""),
+            ("a\u{01}b", "\"a\u{01}b\""),
         ]
         for (value, written) in cases {
             #expect(

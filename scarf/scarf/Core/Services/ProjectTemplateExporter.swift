@@ -329,9 +329,10 @@ struct ProjectTemplateExporter: Sendable {
         let data: Data
         do {
             data = try transport.readFile(manifestPath)
-        } catch {
-            if !transport.fileExists(manifestPath) { return nil }
-            throw error
+        } catch let error as TransportError where error.isNoSuchFile {
+            // The far end's own "no such file" — not a `fileExists` probe,
+            // which a dropped SSH connection also answers with false.
+            return nil
         }
         guard data.count <= ProjectStore.maxJSONBytes else {
             throw ProjectTemplateError.manifestParseFailed(
@@ -354,9 +355,11 @@ struct ProjectTemplateExporter: Sendable {
     /// Every regular file under a skill directory, as paths relative to it,
     /// sorted. Dotfiles and the guarded writers' `.bak` / `.corrupt-`
     /// artifacts are skipped at every level, the same filter
-    /// `SkillsScanner` applies to the top level. A symlink is followed:
-    /// one that reads as a file is a file, otherwise it is listed as a
-    /// folder (reading first, because `ls` over SSH "lists" a plain file).
+    /// `SkillsScanner` applies to the top level. One `statAll` per folder
+    /// (one SSH round trip). A symlink is followed: one that reads as a file
+    /// is a file, one that lists is a folder (reading first, because `ls`
+    /// over SSH "lists" a plain file), and a dangling one is skipped with a
+    /// warning rather than failing the export.
     nonisolated static func skillFileTree(
         at root: String,
         transport: any ServerTransport
@@ -367,20 +370,28 @@ struct ProjectTemplateExporter: Sendable {
             let entries = try transport.listDirectory(dir)
                 .filter { !$0.hasPrefix(".") && !SkillsScanner.isGuardArtifact($0) }
                 .sorted()
+            let paths = entries.map { dir + "/" + $0 }
+            let stats = transport.statAll(paths) ?? Dictionary(
+                uniqueKeysWithValues: paths.compactMap { p in transport.stat(p).map { (p, $0) } }
+            )
             for entry in entries {
                 let rel = relative.isEmpty ? entry : relative + "/" + entry
                 let full = root + "/" + rel
-                let info = transport.stat(full)
-                let isDirectory: Bool
-                if info?.isDirectory == true {
-                    isDirectory = true
-                } else if info?.isSymbolicLink == true {
-                    isDirectory = (try? transport.readFile(full)) == nil
-                        && (try? transport.listDirectory(full)) != nil
-                } else {
-                    isDirectory = false
+                let info = stats[full]
+                var isDirectory = info?.isDirectory == true
+                if info?.isSymbolicLink == true {
+                    if (try? transport.readFile(full)) != nil {
+                        isDirectory = false
+                    } else if (try? transport.listDirectory(full)) != nil {
+                        isDirectory = true
+                    } else {
+                        logger.warning("skill export skipped \(full, privacy: .public): a symlink to nothing readable")
+                        continue
+                    }
                 }
                 if isDirectory {
+                    // Hermes follows links inside skills, so a link loop is
+                    // possible; the depth cap is what ends it.
                     guard depth < maxSkillTreeDepth else {
                         logger.warning("skill export stopped descending at \(full, privacy: .public): deeper than \(maxSkillTreeDepth) levels")
                         continue
@@ -395,6 +406,19 @@ struct ProjectTemplateExporter: Sendable {
         return out
     }
 
+    /// A live job name without Scarf's leading attribution tags
+    /// (`[tmpl:<id>]`, `[proj:<uuid>]`): those name THIS host's install,
+    /// the installer adds fresh ones, and exporting them would ship this
+    /// project's id in the bundle and stack tags on every re-export.
+    nonisolated static func strippingAttributionTags(_ name: String) -> String {
+        var rest = Substring(name)
+        while rest.hasPrefix("[tmpl:") || rest.hasPrefix("[proj:"),
+              let close = rest.firstIndex(of: "]") {
+            rest = rest[rest.index(after: close)...].drop(while: { $0 == " " })
+        }
+        return rest.isEmpty ? name : String(rest)
+    }
+
     /// Convert a live cron job (with runtime state) into the spec the
     /// installer will feed back to `hermes cron create`. Only preserves
     /// fields the CLI accepts.
@@ -405,7 +429,7 @@ struct ProjectTemplateExporter: Sendable {
             return job.schedule.display ?? ""
         }()
         return TemplateCronJobSpec(
-            name: job.name,
+            name: strippingAttributionTags(job.name),
             schedule: schedule,
             prompt: job.prompt.isEmpty ? nil : job.prompt,
             deliver: job.deliver?.isEmpty == false ? job.deliver : nil,

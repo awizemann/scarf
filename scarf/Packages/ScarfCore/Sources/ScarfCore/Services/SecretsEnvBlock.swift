@@ -114,9 +114,11 @@ public enum SecretsEnvBlock {
     /// exactly as before, so an unchanged secret keeps its bytes on disk
     /// and the launch reconciler's no-op-when-unchanged check still holds.
     static func escape(_ value: String) -> String {
+        // Control characters too: dotenv strips an unquoted value's ends,
+        // and U+001C…U+001F count as whitespace to Python.
         let needsQuoting = value.contains(where: { c in
             c.isWhitespace || c == "#" || c == "$" || c == "\"" || c == "'" || c == "\\"
-        })
+        }) || value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
         if !needsQuoting { return value }
         // Scalar by scalar: `String.replacingOccurrences` treats `\r\n` as
         // one character and would turn a CRLF into a lone `\n`.

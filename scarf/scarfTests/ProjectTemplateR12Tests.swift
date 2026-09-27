@@ -247,6 +247,9 @@ import ScarfCore
         try FileManager.default.createSymbolicLink(
             atPath: scratch + "/skill/alias.md", withDestinationPath: scratch + "/shared/b.md"
         )
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch + "/skill/dangling.md", withDestinationPath: scratch + "/nowhere.md"
+        )
         let tree = try ProjectTemplateExporter.skillFileTree(at: remoteRoot + "/skill", transport: transport)
         #expect(tree == ["SKILL.md", "alias.md", "linked/b.md", "references/a.md"])
     }
@@ -463,12 +466,87 @@ import ScarfCore
             ("other", name, "check /elsewhere/project/status.md"),
             ("mine", name, "check \(entry.path)/status.md"),
         ])
-        let resolved = uninstaller.resolveCronJobs(names: [name], project: entry, transport: transport)
+        let resolved = uninstaller.resolveCronJobs(
+            names: [name], project: entry, templateId: "tester/r12", transport: transport
+        )
         #expect(resolved.toRemove.map(\.id) == ["mine"])
 
         try Self.writeJobs(home, [("x", name, "p"), ("y", name, "p")])
-        let ambiguous = uninstaller.resolveCronJobs(names: [name], project: entry, transport: transport)
+        let ambiguous = uninstaller.resolveCronJobs(
+            names: [name], project: entry, templateId: "tester/r12", transport: transport
+        )
         #expect(ambiguous.toRemove.isEmpty)
         #expect(ambiguous.unverified == [name])
+
+        // A lone legacy match is this project's only when no other
+        // registered project came from the same template; otherwise it may
+        // be the other install's job (this one's deleted by hand).
+        try Self.writeJobs(home, [("lone", name, "p")])
+        let alone = uninstaller.resolveCronJobs(
+            names: [name], project: entry, templateId: "tester/r12", transport: transport
+        )
+        #expect(alone.toRemove.map(\.id) == ["lone"])
+
+        let other = try await Self.installMinimal(home: home, scratch: scratch + "/second")
+        #expect(other.path != entry.path)
+        let shared = uninstaller.resolveCronJobs(
+            names: [name], project: entry, templateId: "tester/r12", transport: transport
+        )
+        #expect(shared.toRemove.isEmpty)
+        #expect(shared.unverified == [name])
+        try Self.writeJobs(home, [("lone", name, "check \(entry.path)/status.md")])
+        let claimed = uninstaller.resolveCronJobs(
+            names: [name], project: entry, templateId: "tester/r12", transport: transport
+        )
+        #expect(claimed.toRemove.map(\.id) == ["lone"])
+    }
+
+    @Test func pathMentionsNeedAWholePath() {
+        #expect(ProjectTemplateUninstaller.mentions(path: "/x/foo", in: "write /x/foo/log.md"))
+        #expect(ProjectTemplateUninstaller.mentions(path: "/x/foo", in: "cd /x/foo"))
+        #expect(!ProjectTemplateUninstaller.mentions(path: "/x/foo", in: "write /x/foo-bar/log.md"))
+        #expect(ProjectTemplateUninstaller.mentions(path: "/x/foo", in: "/x/foo-bar and /x/foo/a"))
+    }
+
+    /// A tag Scarf added on this host doesn't travel in an exported bundle.
+    @Test func exportedJobNamesDropAttributionTags() {
+        let id = UUID().uuidString
+        #expect(ProjectTemplateExporter.strippingAttributionTags("[tmpl:a/b] [proj:\(id)] nightly") == "nightly")
+        #expect(ProjectTemplateExporter.strippingAttributionTags("[proj:\(id)] refresh") == "refresh")
+        #expect(ProjectTemplateExporter.strippingAttributionTags("plain [tmpl:x] name") == "plain [tmpl:x] name")
+    }
+
+    /// Stray blank lines around the delimiter are still the same entry;
+    /// the strip must not leave a lone `§` (Hermes would then see the file
+    /// as externally edited and refuse memory writes).
+    @Test func memoryStripToleratesWhitespaceAroundTheDelimiter() {
+        let begin = ProjectTemplateService.memoryBlockBeginMarker(templateId: "t")
+        let end = ProjectTemplateService.memoryBlockEndMarker(templateId: "t")
+        let block = "\(begin) v1\nbody\n\(end)"
+        for (text, expected) in [
+            ("A\n§\n\n\(block)\n\n§\nB", "A\n§\nB"),
+            ("\(block)\n\n§\nB", "B"),
+            ("A\n§\n\(block)\n", "A"),
+            ("\n\n\(block)\n", ""),
+        ] {
+            let b = text.range(of: begin)!
+            let e = text.range(of: end)!
+            let out = ProjectTemplateUninstaller.removingMemoryBlock(from: text, begin: b, end: e)
+            #expect(out == expected, "\(text.debugDescription) -> \(out.debugDescription)")
+            #expect(Self.hermesEntries(out).roundTrips)
+        }
+    }
+
+    /// Unreadable is decided by the far end's own "no such file", never
+    /// by a `fileExists` re-probe (which a dropped SSH link also fails).
+    @Test func cronListReadDistinguishesAbsentFromUnreadable() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let transport = home.context.makeTransport()
+        #expect(ProjectTemplateUninstaller.readCronJobs(context: home.context, transport: transport) == [])
+        try FileManager.default.createDirectory(
+            atPath: home.context.paths.cronJobsJSON, withIntermediateDirectories: true
+        )
+        #expect(ProjectTemplateUninstaller.readCronJobs(context: home.context, transport: transport) == nil)
     }
 }

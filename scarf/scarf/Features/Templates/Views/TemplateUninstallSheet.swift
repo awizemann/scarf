@@ -236,7 +236,9 @@ struct TemplateUninstallSheet: View {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(ScarfColor.warning)
                             .font(.caption)
-                        Text("\(name) — couldn't be matched to a scheduled job; Scarf will try again and tell you if it's still there")
+                        Text(plan.rootRefused
+                             ? "\(name) — not checked"
+                             : "\(name) — couldn't be matched to a scheduled job; Scarf will try again and tell you if it's still there")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -390,7 +392,7 @@ struct TemplateUninstallSheet: View {
                     .scarfStyle(.headline)
             }
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(leftovers, id: \.self) { line in
+                ForEach(Array(leftovers.enumerated()), id: \.offset) { _, line in
                     Text(line)
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
