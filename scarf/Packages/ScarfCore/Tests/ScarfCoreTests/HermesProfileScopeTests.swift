@@ -232,11 +232,30 @@ import Foundation
         #expect(out == "HERMES_HOME='/o'\\''pt/profiles/x' ")
     }
 
-    @Test func shellAssignmentIsEmptyForDefaultRoot() {
-        // Default/root → no scoping → legacy active_profile behavior preserved.
+    @Test func shellAssignmentIsEmptyForTheStandardRoot() {
+        // The standard root → no assignment, so a host that exports its own
+        // HERMES_HOME keeps it; `-p default` does the pinning.
         #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "~/.hermes") == "")
-        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "/opt/data") == "")
-        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "/") == "")
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "~/.hermes/") == "")
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "$HOME/.hermes") == "")
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "") == "")
+    }
+
+    /// T6-F1: a custom root is named, so `-p default` resolves to it
+    /// (`hermes_cli/profiles.py:2345-2369` @ v2026.9.24) rather than to the
+    /// SSH user's own `~/.hermes`. This used to assert `""` for `/opt/data`.
+    @Test func shellAssignmentNamesACustomRoot() {
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "/opt/data")
+                == "HERMES_HOME='/opt/data' ")
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "/home/hermes/.hermes/")
+                == "HERMES_HOME='/home/hermes/.hermes' ")
+        #expect(HermesProfileScope.hermesHomeShellAssignment(forHome: "~/hermes-data")
+                == "HERMES_HOME=\"$HOME/hermes-data\" ")
+        // Still paired with the root pin: the assignment alone would follow
+        // the custom root's active_profile.
+        #expect(HermesProfileScope.pinnedRemoteArguments(
+            executable: "hermes", args: ["config", "path"], home: "/opt/data")
+                == ["-p", "default", "config", "path"])
     }
 
     /// The full round-trip the process layer relies on: resolve a selection

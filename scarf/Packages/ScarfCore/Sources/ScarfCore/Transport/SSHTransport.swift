@@ -660,13 +660,14 @@ public struct SSHTransport: ServerTransport {
     /// `active_profile` while the window's file reads show the viewing
     /// profile — a silent cross-profile split.
     ///
-    /// A root home needs the same pin, but `HERMES_HOME=<root>` doesn't
-    /// give it (Hermes ignores a root value and still follows
-    /// `active_profile`), so for a root home a hermes argv gets `-p default`
-    /// in front instead (S13-F1; see
-    /// `HermesProfileScope.pinnedRemoteArguments`). That is the only change
-    /// this layer makes to the argv; non-hermes executables and argv that
-    /// already carry `-p` pass through untouched.
+    /// A root home needs the same pin, but `HERMES_HOME=<root>` alone
+    /// doesn't give it (Hermes still follows that root's `active_profile`),
+    /// so for a root home a hermes argv also gets `-p default` in front
+    /// (S13-F1; see `HermesProfileScope.pinnedRemoteArguments`). A custom
+    /// root still carries `HERMES_HOME=<root>`, which is what `-p default`
+    /// resolves to; the standard `~/.hermes` carries none (T6-F1). That is
+    /// the only change this layer makes to the argv; non-hermes executables
+    /// and argv that already carry `-p` pass through untouched.
     func composedRemoteCommand(executable: String, args: [String], cwd: String? = nil) -> String {
         let home = config.remoteHome ?? HermesPathSet.defaultRemoteHome
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
