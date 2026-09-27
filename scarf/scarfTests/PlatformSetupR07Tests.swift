@@ -239,6 +239,22 @@ struct PlatformSetupR07Tests {
         #expect(vm.savePlan().config["platforms.whatsapp_cloud.extra.dm_policy"] == "open")
     }
 
+    /// A save whose `.env` write fails stops there: no `config set` runs, so
+    /// `enabled: true` never lands next to credentials that did not.
+    @Test func aFailedEnvWriteRunsNoConfigSet() {
+        let ctx = Self.scratchContext(env: "WHATSAPP_CLOUD_PHONE_NUMBER_ID=1\n")
+        try? FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: ctx.paths.envFile)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ctx.paths.envFile) }
+        let log = CLILog()
+        let outcome = PlatformSetupHelpers.saveForm(
+            context: ctx,
+            envPairs: ["WHATSAPP_CLOUD_ACCESS_TOKEN": "t"],
+            configKV: ["platforms.whatsapp_cloud.enabled": "true"],
+            runner: log.runner())
+        #expect(outcome.isFailure)
+        #expect(log.calls.isEmpty, "config.yaml was changed after the .env write failed")
+    }
+
     // MARK: - S07-F4 Webhook
 
     @Test func enablingWebhooksWritesTheConfigKeyTheCLIChecks() async {

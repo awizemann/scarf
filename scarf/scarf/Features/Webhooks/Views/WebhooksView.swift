@@ -98,8 +98,9 @@ struct WebhooksView: View {
         }
     }
 
-    /// Shown when hermes reports the webhook platform isn't enabled. Direct users
-    /// to the interactive setup wizard instead of showing a misleading empty list.
+    /// Shown when hermes reports the webhook platform isn't enabled, instead of
+    /// a misleading empty list. Points at Platforms → Webhook, the one place
+    /// that writes the config key the CLI checks.
     private var setupRequiredState: some View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
@@ -120,10 +121,10 @@ struct WebhooksView: View {
                 Button {
                     openGatewaySetupInTerminal()
                 } label: {
-                    Label("Run Setup in Terminal", systemImage: "terminal")
+                    Label("Set Port & Secret in Terminal", systemImage: "terminal")
                 }
-                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .help("Runs hermes gateway setup on \(viewModel.context.displayName). It sets the webhook port and secret in .env; it does not unlock this tab.")
                 Button {
                     viewModel.context.openInLocalEditor(viewModel.context.paths.configYAML)
                 } label: {
@@ -137,12 +138,9 @@ struct WebhooksView: View {
     }
 
     private func openGatewaySetupInTerminal() {
-        // Always use the local hermes binary — Terminal launches on this Mac,
-        // not the remote. (Webhook setup is itself local Hermes anyway since
-        // the gateway runs on the machine talking to messaging platforms.)
-        let hermes = ServerContext.local.paths.hermesBinary
-        let script = "tell application \"Terminal\"\n  activate\n  do script \"\(hermes) gateway setup\"\nend tell"
-        let appleScript = NSAppleScript(source: script)
+        // The window's host and profile — over ssh for a remote window.
+        // See `GatewaySetupTerminalCommand`.
+        let appleScript = NSAppleScript(source: GatewaySetupTerminalCommand.appleScript(for: viewModel.context))
         var err: NSDictionary?
         appleScript?.executeAndReturnError(&err)
     }

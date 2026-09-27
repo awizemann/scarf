@@ -149,6 +149,82 @@ struct GatewayProcessScopeR07Tests {
         #expect(!transport.calls.contains { $0.exe.contains("kill") }, "SIGTERM went to the multiplexer")
     }
 
+    // MARK: - `gateway.pid` fallback
+
+    static let workPidFile = #"{"pid": 888, "kind": "hermes-gateway", "argv": ["python", "-m", "hermes_cli.main", "gateway", "run"], "start_time": 1, "hermes_home": "/home/u/.hermes/profiles/work"}"#
+
+    /// A gateway started with `HERMES_HOME` in its environment has no `-p`
+    /// on its command line; the profile's own `gateway.pid` finds it once
+    /// `ps` confirms the process is that gateway.
+    @Test func anEnvOnlyGatewayIsFoundThroughItsPidFile() {
+        let transport = Transport(files: [Self.workHome + "/gateway.pid": Self.workPidFile]) { exe, args in
+            if exe.contains("pgrep") { return Self.result("", 1) }
+            if exe.hasSuffix("/ps") {
+                #expect(args == ["-p", "888", "-o", "command="])
+                return Self.result("/home/u/.hermes/venv/bin/python -m hermes_cli.main gateway run --replace\n", 0)
+            }
+            return Self.result("", 1)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        guard case .success(let pid) = svc.hermesPIDResult() else { Issue.record("probe failed"); return }
+        #expect(pid == 888)
+    }
+
+    /// A stale file: the PID is dead, or now belongs to something else.
+    @Test func aStalePidFileIsRefused() {
+        for ps in [Self.result("", 1), Self.result("/usr/bin/vim notes.txt\n", 0),
+                   Self.result("/home/u/.local/bin/hermes -p ops gateway run\n", 0)] {
+            let transport = Transport(files: [Self.workHome + "/gateway.pid": Self.workPidFile]) { exe, _ in
+                exe.hasSuffix("/ps") ? ps : Self.result("", 1)
+            }
+            let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+            guard case .success(let pid) = svc.hermesPIDResult() else { Issue.record("probe failed"); return }
+            #expect(pid == nil)
+        }
+    }
+
+    /// The pid-file answer is the profile's OWN gateway, so the stop fallback
+    /// may signal it.
+    @Test func theStopFallbackSignalsAPidFileGateway() {
+        let transport = Transport(files: [Self.workHome + "/gateway.pid": Self.workPidFile]) { exe, args in
+            if exe.hasSuffix("hermes") {
+                return Self.result("✗ Refusing to stop the gateway from inside the gateway process.", 1)
+            }
+            if exe.contains("pgrep") { return Self.result("", 1) }
+            if exe.hasSuffix("/ps") { return Self.result("python -m hermes_cli.main gateway run\n", 0) }
+            return Self.result("", 0)
+        }
+        let svc = HermesFileService(context: Self.context(home: Self.workHome), transport: transport)
+        #expect(svc.stopHermes().succeeded)
+        let kill = transport.calls.first { $0.exe.contains("kill") }
+        #expect(kill?.args == ["-TERM", "888"])
+    }
+
+    // MARK: - Webhooks "Set Port & Secret in Terminal"
+
+    @Test func theGatewaySetupCommandTargetsARemoteWindowsHostAndProfile() {
+        let ctx = ServerContext(
+            id: UUID(), displayName: "Box",
+            kind: .ssh(SSHConfig(host: "box.local", user: "deploy", port: 2222,
+                                 remoteHome: "~/.hermes/profiles/work",
+                                 hermesBinaryHint: "/home/deploy/.local/bin/hermes")))
+        let argv = GatewaySetupTerminalCommand.argv(for: ctx)
+        #expect(Array(argv.prefix(4)) == ["/usr/bin/ssh", "-t", "-p", "2222"])
+        #expect(argv.contains("deploy@box.local"))
+        #expect(argv.contains { $0.hasPrefix("HERMES_HOME=") && $0.contains("profiles/work") })
+        #expect(Array(argv.suffix(3)) == ["/home/deploy/.local/bin/hermes", "gateway", "setup"])
+        // Quoted for the LOCAL shell so `$PATH`/`$HOME` expand remotely.
+        #expect(GatewaySetupTerminalCommand.shellLine(for: ctx).contains(#"'PATH="$PATH:"#))
+    }
+
+    @Test func theGatewaySetupCommandPinsALocalRootWindow() {
+        let home = NSTemporaryDirectory() + "scarf-r07-root-\(UUID().uuidString)"
+        let argv = GatewaySetupTerminalCommand.argv(for: .local(home: URL(fileURLWithPath: home)))
+        #expect(Array(argv.suffix(4)) == ["-p", "default", "gateway", "setup"])
+        #expect(!argv.contains("/usr/bin/ssh"))
+        #expect(GatewaySetupTerminalCommand.singleQuote("it's") == #"'it'\''s'"#)
+    }
+
     /// S07-F2: the served profile's platforms are the root record's
     /// `work:` entries, re-keyed — and the default profile's own telegram
     /// entry is not among them.
