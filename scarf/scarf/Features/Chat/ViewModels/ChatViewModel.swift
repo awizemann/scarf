@@ -2888,7 +2888,7 @@ final class ChatViewModel {
         Task {
             await client.respondToPermission(requestId: requestId, optionId: optionId)
         }
-        richChatViewModel.resolvePermission(requestId: requestId)
+        richChatViewModel.resolvePermission(requestId: requestId, answeredWith: optionId)
     }
 
     // MARK: - Recent Sessions
@@ -2961,6 +2961,13 @@ final class ChatViewModel {
             // sessionListSnapshot halves the round-trips for every
             // sidebar refresh.
             let snapshot = await dataService.sessionListSnapshot(limit: 50)
+            if snapshot.queryError != nil {
+                // A failed read (an SSH drop on a watcher tick) must not
+                // blank a sidebar that loaded a moment ago; keep it and let
+                // the next tick try again.
+                await dataService.close()
+                return
+            }
             let fetchedSessions = snapshot.sessions
             let fetchedPreviews = snapshot.previews
             await dataService.close()
@@ -2970,16 +2977,11 @@ final class ChatViewModel {
             let bundle: (names: [String: String], projects: [ProjectEntry]) = await OffPool.run {
                 let attribution = SessionAttributionService(context: ctx)
                 let registry = ProjectDashboardService(context: ctx).loadRegistry()
-                let pathToName = Dictionary(
-                    uniqueKeysWithValues: registry.projects.map { ($0.path, $0.name) }
+                // First row wins at a shared path; see `projectNames`.
+                let names = SessionAttributionService.projectNames(
+                    mappings: attribution.load().mappings,
+                    projects: registry.projects
                 )
-                let map = attribution.load().mappings
-                var names: [String: String] = [:]
-                for (sessionID, path) in map {
-                    if let name = pathToName[path] {
-                        names[sessionID] = name
-                    }
-                }
                 return (names: names, projects: registry.projects)
             }
 
@@ -3150,7 +3152,18 @@ final class ChatViewModel {
         let runner = sessionDeleteRunner
         let ctx = context
         let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
-        guard !outcome.deleted.isEmpty else { return }
+        guard !outcome.deleted.isEmpty else {
+            // Nothing was deleted. The row staying put is right; saying
+            // nothing about it read as a UI glitch. Same wording as the
+            // Sessions tab's delete error.
+            if let failed = outcome.failed {
+                richChatViewModel.transientHint = String(
+                    localized: "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
+                )
+                scheduleHintClear()
+            }
+            return
+        }
         let deleted = Set(outcome.deleted)
         recentSessions.removeAll { deleted.contains($0.id) }
         for id in deleted {

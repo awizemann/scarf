@@ -1368,13 +1368,16 @@ public enum ACPErrorHint {
             || haystack.localizedCaseInsensitiveContains("429") {
             return Classification(hint: "Your AI provider returned a rate-limit error. Try again in a moment.")
         }
-        // Model-availability failure. Hermes pins each session to the
-        // model that opened it, so resuming an old session whose model
-        // is no longer available (provider deprecation, OAuth swapped
-        // to a different provider, model name changed) returns a 404
-        // / model_not_found from the upstream provider — surfaced as
-        // an opaque "-32603 Internal error" in chat. v2.8 surfaces a
-        // clear "session is pinned" hint with the recovery path.
+        // Model-availability failure. Resuming an old session whose model
+        // is no longer available (provider deprecation, OAuth swapped to a
+        // different provider, model name changed) returns a 404 /
+        // model_not_found from the upstream provider — surfaced as an
+        // opaque "-32603 Internal error" in chat. The recovery is the chat
+        // header's model switch: `session/set_model` changes the live
+        // session's model (acp_adapter/server.py:1015-1051 @ v2026.9.24).
+        // The hint used to send users to `hermes sessions clone`, which is
+        // not a `sessions` verb (dispatch table at
+        // hermes_cli/sessions_cmd.py:998-1011 @ v2026.9.24).
         if haystack.localizedCaseInsensitiveContains("model_not_found")
             || haystack.localizedCaseInsensitiveContains("model not found")
             || haystack.localizedCaseInsensitiveContains("invalid_model")
@@ -1382,7 +1385,7 @@ public enum ACPErrorHint {
             || haystack.localizedCaseInsensitiveContains("unknown model")
             || (haystack.contains("404") && (haystack.localizedCaseInsensitiveContains("model")
                                               || haystack.localizedCaseInsensitiveContains("messages"))) {
-            return Classification(hint: "This session was created with a model the provider no longer offers. Hermes pins each session to its original model — start a new chat to use your current model, or run `hermes sessions clone` in Terminal to copy this conversation onto the new model.")
+            return Classification(hint: "This chat's model isn't available from the provider any more. Pick another model from the model menu in the chat header, or start a new chat.")
         }
         return nil
     }

@@ -474,6 +474,70 @@ public final class RichChatViewModel {
         permissionQueue.removeAll { $0.requestId == requestId }
     }
 
+    /// Pop a request the USER answered with `optionId`, remembering the
+    /// answer against the request's tool-call id for
+    /// `closePermissionHermesSettled`: an Allow that reaches Hermes just
+    /// after it stopped waiting is still denied, and Hermes's `failed`
+    /// close is then the only sign of it.
+    public func resolvePermission(requestId: Int, answeredWith optionId: String) {
+        if let answered = permissionQueue.first(where: { $0.requestId == requestId }),
+           !answered.toolCallId.isEmpty {
+            answeredPermissionAllowed[answered.toolCallId] = Self.permissionOptionAllows(optionId)
+            if answeredPermissionAllowed.count > 16 {
+                answeredPermissionAllowed.removeAll()
+                answeredPermissionAllowed[answered.toolCallId] = Self.permissionOptionAllows(optionId)
+            }
+        }
+        resolvePermission(requestId: requestId)
+    }
+
+    /// Tool-call id → whether the user allowed it, for requests answered
+    /// but not yet closed by Hermes. Small and bounded; entries go when
+    /// the close arrives.
+    @ObservationIgnored
+    private var answeredPermissionAllowed: [String: Bool] = [:]
+
+    /// Whether an option id is an allow. Hermes's ids are `allow_once`,
+    /// `allow_session`, `allow_always`, `deny`, `deny_always`
+    /// (acp_adapter/permissions.py:33-50 @ v2026.9.24); anything with a
+    /// deny-like marker is a denial, as `ChatViewModel` classifies them.
+    nonisolated static func permissionOptionAllows(_ optionId: String) -> Bool {
+        let id = optionId.lowercased()
+        return !["deny", "reject", "decline", "cancel"].contains { id.contains($0) }
+    }
+
+    /// Hermes closed a permission request's own tool call while the
+    /// request was still on screen. Scarf answers by popping the request
+    /// before its reply is even sent, so a close for a request still in
+    /// the queue means Hermes settled it WITHOUT the user: it waited
+    /// `approvals.timeout` (300 s by default), cancelled the request,
+    /// denied the tool and sent `status: failed` for the id
+    /// (acp_adapter/permissions.py:94-113 @ v2026.9.24). Pre-fix the
+    /// sheet stayed up and a later Allow went nowhere while the user
+    /// believed the command ran.
+    ///
+    /// Hosts before v0.21.4 never send this close, so nothing changes
+    /// for them (C1). Only reached for ids that never had a tool-call
+    /// start, so a real tool's completion can never pop a request.
+    func closePermissionHermesSettled(_ update: ACPToolCallUpdateEvent) {
+        guard !update.toolCallId.isEmpty else { return }
+        // Answered by the user: Hermes closes it `completed` for an allow
+        // and `failed` for a deny. A `failed` close for an ALLOW means the
+        // answer arrived after Hermes had already stopped waiting.
+        if let allowed = answeredPermissionAllowed.removeValue(forKey: update.toolCallId) {
+            if allowed && update.status == "failed" {
+                transientHint = String(localized: "Hermes had already stopped waiting for your answer, so it denied the tool.")
+            }
+            return
+        }
+        guard let settled = permissionQueue.first(where: { $0.toolCallId == update.toolCallId }) else { return }
+        resolvePermission(requestId: settled.requestId)
+        if update.status != "completed" {
+            let what = settled.title.isEmpty ? String(localized: "the tool") : "“\(settled.title)”"
+            transientHint = String(localized: "Hermes stopped waiting for your answer and denied \(what).")
+        }
+    }
+
     /// Invoked with the `requestId` of every queued permission request
     /// that `clearPendingPermissions()` drops, so the owner can answer
     /// the agent's still-open `session/request_permission` JSON-RPC
@@ -1903,17 +1967,22 @@ public final class RichChatViewModel {
         public let title: String
         public let kind: String
         public let options: [(optionId: String, name: String)]
+        /// The request's tool-call id, which Hermes closes when it stops
+        /// waiting (see `ACPPermissionRequestEvent.toolCallId`).
+        public let toolCallId: String
 
         public init(
             requestId: Int,
             title: String,
             kind: String,
-            options: [(optionId: String, name: String)]
+            options: [(optionId: String, name: String)],
+            toolCallId: String = ""
         ) {
             self.requestId = requestId
             self.title = title
             self.kind = kind
             self.options = options
+            self.toolCallId = toolCallId
         }
     }
 
@@ -1921,6 +1990,7 @@ public final class RichChatViewModel {
 
     public func reset() {
         debounceTask?.cancel()
+        answeredPermissionAllowed.removeAll()
         hydrationTask?.cancel()
         hydrationTask = nil
         isHydratingTools = false
@@ -2460,7 +2530,8 @@ public final class RichChatViewModel {
                 requestId: requestId,
                 title: request.toolCallTitle,
                 kind: request.toolCallKind,
-                options: request.options
+                options: request.options,
+                toolCallId: request.toolCallId
             ))
         case .promptComplete(_, let response):
             handlePromptComplete(response: response)
@@ -2701,6 +2772,7 @@ public final class RichChatViewModel {
         // `flush_open_tool_calls` each pop the id first).
         guard openToolCallIds.remove(update.toolCallId) != nil else {
             ScarfMon.event(.chatStream, "toolCallUpdate.unknownIdDropped", count: 1)
+            closePermissionHermesSettled(update)
             return
         }
         // Populate live telemetry on the matching streaming call BEFORE

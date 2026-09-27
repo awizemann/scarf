@@ -20,6 +20,10 @@ struct ProjectSessionsView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let err = viewModel?.loadError {
+                StateReadErrorBanner(context: serverContext, message: err)
+                    .padding()
+            }
             content
         }
         // `idealHeight: 400` caps what this subtree reports as its
@@ -90,7 +94,11 @@ struct ProjectSessionsView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if vm.sessions.isEmpty {
-                emptyState(hint: vm.emptyStateHint)
+                // A read error is not "no sessions": the banner above says
+                // what happened, and the attribution hint would guess.
+                emptyState(hint: vm.loadError != nil
+                           ? String(localized: "Sessions couldn't be loaded.")
+                           : vm.emptyStateHint)
             } else {
                 sessionList(vm.sessions)
             }

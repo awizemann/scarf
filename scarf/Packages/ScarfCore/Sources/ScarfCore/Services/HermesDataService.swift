@@ -75,6 +75,15 @@ public actor HermesDataService {
     /// connection issue. `nil` when the last open succeeded.
     public private(set) var lastOpenErrorKind: OpenErrorKind?
 
+    /// `lastOpenError` as a page that lists sessions should report it:
+    /// on a remote host only, the Dashboard's rule. Locally an open
+    /// failure is almost always a fresh install with no `state.db` yet,
+    /// which those pages show as their ordinary empty state; a banner
+    /// there would also trip the section sweep's no-`error.banner` check.
+    public var reportableOpenError: String? {
+        context.isRemote ? lastOpenError : nil
+    }
+
     /// Coarse classes of `open()` failure (see `adoptOpenError`).
     public enum OpenErrorKind: Sendable, Equatable {
         /// The remote host has no `sqlite3` binary on PATH.
@@ -554,6 +563,15 @@ public actor HermesDataService {
         since: Date,
         limit: Int = QueryDefaults.periodSessionLimit
     ) async -> [HermesSession] {
+        (try? await fetchSessionsInPeriodChecked(since: since, limit: limit)) ?? []
+    }
+
+    /// `fetchSessionsInPeriod` that reports a failed query as
+    /// `QueryFailure` instead of an empty list. Same SQL.
+    public func fetchSessionsInPeriodChecked(
+        since: Date,
+        limit: Int = QueryDefaults.periodSessionLimit
+    ) async throws -> [HermesSession] {
         let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at >= ? ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(
@@ -562,7 +580,8 @@ public actor HermesDataService {
             )
             return rows.map { sessionFromRow($0) }
         } catch {
-            return []
+            Self.logger.warning("fetchSessionsInPeriod failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
         }
     }
 
@@ -652,6 +671,12 @@ public actor HermesDataService {
     /// Counters come from `usageSessionsSource`, so on a v0.20+ host they
     /// include the auxiliary usage Hermes records only per model.
     public func fetchUsageAggregatesInPeriod(since: Date) async -> [UsageAggregate] {
+        (try? await fetchUsageAggregatesInPeriodChecked(since: since)) ?? []
+    }
+
+    /// `fetchUsageAggregatesInPeriod` that reports a failed query as
+    /// `QueryFailure` instead of an empty result. Same SQL.
+    public func fetchUsageAggregatesInPeriodChecked(since: Date) async throws -> [UsageAggregate] {
         let hasStatus = hasV07Schema
         // `SessionCostDisplay.usableAmount`: finite and non-negative, and
         // the actual figure wins over the estimate when it is usable.
@@ -697,7 +722,7 @@ public actor HermesDataService {
             }
         } catch {
             Self.logger.warning("fetchUsageAggregatesInPeriod failed: \(error.localizedDescription, privacy: .public)")
-            return []
+            throw queryFailure(error)
         }
     }
 
@@ -1535,6 +1560,33 @@ public actor HermesDataService {
             hasActiveColumn: hasMessagesActiveColumn,
             hasCompactedColumn: hasCompactedColumn,
             hasDisplayKindColumn: hasDisplayKindColumn
+        )
+    }
+
+    /// The preview statement for exactly the rows the listing statement
+    /// (`sessionListFrom` + `sessionListPredicate`, newest first, `limit`)
+    /// returns, so it can ride in the same batch.
+    ///
+    /// It used to be "the newest `limit` first-user-message rows across
+    /// every session", a different population from the rows it labels:
+    /// delegate subagents, hidden and archived rows all have user rows, so
+    /// a busy delegating agent pushed an untitled listed session out of
+    /// the window and its row showed a raw id. Hermes computes the preview
+    /// per listed row (`_PREVIEW_RAW_SUBQUERY_SQL`,
+    /// hermes_state_common.py:163-165 @ v2026.9.24).
+    private func listedSessionPreviewStatement(limit: Int) -> (sql: String, params: [SQLValue]) {
+        (
+            """
+            SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
+            FROM messages m
+            INNER JOIN (
+            \(sessionPreviewFirstRowSQL)
+            ) first ON m.id = first.min_id
+            WHERE m.session_id IN (
+            SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?
+            )
+            """,
+            [.integer(Int64(limit))]
         )
     }
 
@@ -2402,30 +2454,23 @@ public actor HermesDataService {
     /// - Parameter statsSince: bounds the stat-card totals to sessions
     ///   started at or after this instant. The Dashboard passes its
     ///   "Last 7 days" window; `nil` keeps the all-time totals.
+    ///
+    /// Previews come for exactly the `sessionLimit` listed rows
+    /// (`listedSessionPreviewStatement`); there is no separate preview
+    /// window any more.
     public func dashboardSnapshot(
         sessionLimit: Int = 5,
-        previewLimit: Int = 5,
         toolCallLimit: Int = 8,
         statsSince: Date? = nil
     ) async -> DashboardSnapshot {
         var statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(since: statsSince), Self.statsParams(since: statsSince)),
             (
-                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: see `sessionListSnapshot`.
+                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
-            (
-                """
-                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
-                FROM messages m
-                INNER JOIN (
-                \(sessionPreviewFirstRowSQL)
-                ) first ON m.id = first.min_id
-                ORDER BY m.timestamp DESC
-                LIMIT ?
-                """,
-                [.integer(Int64(previewLimit))]
-            ),
+            listedSessionPreviewStatement(limit: sessionLimit),
             (
                 // `messageColumnsLight`, not `messageColumns`: the
                 // Dashboard's "Recent activity" card renders a tool NAME
@@ -2500,6 +2545,17 @@ public actor HermesDataService {
     public struct SessionListSnapshot: Sendable {
         public let sessions: [HermesSession]
         public let previews: [String: String]
+        /// Why the batch failed, when it did; `nil` on success, including
+        /// a store that really has no sessions. The failure path returns
+        /// empty lists, which on screen read as "No sessions match this
+        /// filter" — same reason as `DashboardSnapshot.queryError`.
+        public let queryError: String?
+
+        public init(sessions: [HermesSession], previews: [String: String], queryError: String? = nil) {
+            self.sessions = sessions
+            self.previews = previews
+            self.queryError = queryError
+        }
     }
 
     /// - Parameter includeUnreadActivity: selects Hermes's `last_active`
@@ -2517,25 +2573,15 @@ public actor HermesDataService {
         limit: Int = QueryDefaults.sessionLimit,
         includeUnreadActivity: Bool = true
     ) async -> SessionListSnapshot {
-        let previewLimit = limit
         let columns = includeUnreadActivity ? sessionListColumns : sessionColumns
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                // `, id DESC`: the preview statement repeats this listing as
+                // a subquery, and the two must pick the same rows on a tie.
+                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
-            (
-                """
-                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
-                FROM messages m
-                INNER JOIN (
-                \(sessionPreviewFirstRowSQL)
-                ) first ON m.id = first.min_id
-                ORDER BY m.timestamp DESC
-                LIMIT ?
-                """,
-                [.integer(Int64(previewLimit))]
-            )
+            listedSessionPreviewStatement(limit: limit)
         ]
         do {
             let resultSets = try await backend.queryBatch(statements)
@@ -2549,7 +2595,7 @@ public actor HermesDataService {
             return SessionListSnapshot(sessions: projection.sessions, previews: previews)
         } catch {
             Self.logger.warning("sessionListSnapshot failed: \(error.localizedDescription, privacy: .public)")
-            return SessionListSnapshot(sessions: [], previews: [:])
+            return SessionListSnapshot(sessions: [], previews: [:], queryError: queryFailure(error).message)
         }
     }
 
@@ -2560,6 +2606,9 @@ public actor HermesDataService {
         public let toolUsage: [(name: String, count: Int)]
         public let startHours: [Int: Int]
         public let daysOfWeek: [Int: Int]
+        /// Why the batch failed, when it did; `nil` on success. The failure
+        /// path returns zeros, which read as "no usage in this period".
+        public var queryError: String? = nil
     }
 
     /// - Parameter limit: row cap for the histogram query, which returns
@@ -2644,7 +2693,11 @@ public actor HermesDataService {
                 daysOfWeek: days
             )
         } catch {
-            return InsightsSnapshot(userMessageCount: 0, toolUsage: [], startHours: [:], daysOfWeek: [:])
+            Self.logger.warning("insightsSnapshot failed: \(error.localizedDescription, privacy: .public)")
+            return InsightsSnapshot(
+                userMessageCount: 0, toolUsage: [], startHours: [:], daysOfWeek: [:],
+                queryError: queryFailure(error).message
+            )
         }
     }
 

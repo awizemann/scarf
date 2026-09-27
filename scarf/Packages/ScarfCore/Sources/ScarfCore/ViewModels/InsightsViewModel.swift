@@ -83,6 +83,10 @@ public final class InsightsViewModel {
 
     public var period: InsightsPeriod = .month
     public var isLoading = true
+    /// Why the last load couldn't read `state.db`, or nil when it could.
+    /// The page keeps its previous figures while this is set: a failed
+    /// read used to publish zeros, which read as "no usage this period".
+    public private(set) var loadError: String?
 
     public var sessions: [HermesSession] = []
     /// The usage population's sums for the period, grouped by model,
@@ -151,16 +155,26 @@ public final class InsightsViewModel {
 
     private func loadImpl(generation: Int) async {
         isLoading = true
+        let requestedPeriod = period
         // refresh() forces a fresh remote snapshot each load. On local it's
         // a cheap reopen of the live DB.
         let opened = await dataService.refresh()
         guard isCurrent(generation) else { return }
         guard opened else {
-            isLoading = false
+            let message = await dataService.reportableOpenError
+            guard isCurrent(generation) else { return }
+            if let message {
+                failLoad(message, for: requestedPeriod)
+            } else {
+                // A local host with no state.db yet: the page's ordinary
+                // empty state, as before.
+                loadError = nil
+                isLoading = false
+            }
             return
         }
 
-        let since = period.sinceDate
+        let since = requestedPeriod.sinceDate
         // The insights queries (user-message count, tool usage, hourly +
         // daily activity histograms) batch through one `insightsSnapshot`
         // round-trip. Two populations, as in `hermes insights`: the
@@ -169,12 +183,26 @@ public final class InsightsViewModel {
         // the start-time histogram uses) and the usage rows (every session
         // row in the window, summed in SQL by
         // `fetchUsageAggregatesInPeriod`, uncapped).
-        let periodSessions = await dataService.fetchSessionsInPeriod(since: since)
-        guard isCurrent(generation) else { return }
-        let periodUsage = await dataService.fetchUsageAggregatesInPeriod(since: since)
-        guard isCurrent(generation) else { return }
+        let periodSessions: [HermesSession]
+        let periodUsage: [HermesDataService.UsageAggregate]
+        do {
+            periodSessions = try await dataService.fetchSessionsInPeriodChecked(since: since)
+            guard isCurrent(generation) else { return }
+            periodUsage = try await dataService.fetchUsageAggregatesInPeriodChecked(since: since)
+            guard isCurrent(generation) else { return }
+        } catch {
+            guard isCurrent(generation) else { return }
+            failLoad(error.localizedDescription, for: requestedPeriod)
+            return
+        }
         let snapshot = await dataService.insightsSnapshot(since: since)
         guard isCurrent(generation) else { return }
+        if let failure = snapshot.queryError {
+            failLoad(failure, for: requestedPeriod)
+            return
+        }
+        loadError = nil
+        loadedPeriod = requestedPeriod
         sessions = periodSessions
         usageAggregates = periodUsage
         userMessageCount = snapshot.userMessageCount
@@ -194,6 +222,35 @@ public final class InsightsViewModel {
         computeToolBreakdown(tools)
         await computeNotableSessions(generation: generation)
         guard isCurrent(generation) else { return }
+        isLoading = false
+    }
+
+    /// The period the figures on screen describe; nil before the first
+    /// successful load.
+    @ObservationIgnored
+    private var loadedPeriod: InsightsPeriod?
+
+    /// A read failed: say why. The figures already on screen stay when
+    /// they describe the period being asked for (a watcher tick that hit
+    /// an SSH drop); figures for a DIFFERENT period are cleared, because
+    /// showing last week's numbers under "30 Days" would be a lie the
+    /// banner doesn't undo.
+    private func failLoad(_ message: String, for requested: InsightsPeriod) {
+        loadError = message
+        if loadedPeriod != requested {
+            sessions = []
+            usageAggregates = []
+            userMessageCount = 0
+            hourlyActivity = [:]
+            dailyActivity = [:]
+            sessionPreviews = [:]
+            notableSessions = []
+            computeAggregates()
+            computeModelBreakdown()
+            computePlatformBreakdown()
+            computeToolBreakdown([])
+            loadedPeriod = nil
+        }
         isLoading = false
     }
 

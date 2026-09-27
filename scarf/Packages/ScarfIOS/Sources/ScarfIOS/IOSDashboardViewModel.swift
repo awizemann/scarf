@@ -107,11 +107,16 @@ public final class IOSDashboardViewModel {
                 allSessions = []
                 lastError = error.localizedDescription
             }
-            // Rotated compression chains are listed under their tip id;
-            // the preview query keys by the root, so carry it across.
+            // Previews for exactly the listed rows and their chain
+            // segments. "The newest 25 previews across every session"
+            // counted delegate subagents and hidden rows too, so an
+            // untitled listed session could fall out and show its raw id.
+            // A rotated chain is listed under its tip id; its own preview
+            // wins, the root's is carried across otherwise.
+            let listed = allSessions + recentSessions
             sessionPreviews = HermesSession.carryingLineageLabels(
-                await dataService.fetchSessionPreviews(limit: 25),
-                onto: allSessions + recentSessions
+                await dataService.fetchSessionPreviews(sessionIds: listed.flatMap(\.allSessionIds)),
+                onto: listed
             )
         }
         ScarfMon.event(.sessionLoad, "ios.allSessions.count", count: allSessions.count)
@@ -126,16 +131,11 @@ public final class IOSDashboardViewModel {
         let bundle: (names: [String: String], projects: [ProjectEntry]) = await Task.detached {
             let attribution = SessionAttributionService(context: ctx)
             let projectRegistry = ProjectDashboardService(context: ctx).loadRegistry()
-            let pathToName = Dictionary(
-                uniqueKeysWithValues: projectRegistry.projects.map { ($0.path, $0.name) }
+            // First row wins at a shared path; see `projectNames`.
+            let result = SessionAttributionService.projectNames(
+                mappings: attribution.load().mappings,
+                projects: projectRegistry.projects
             )
-            let map = attribution.load().mappings
-            var result: [String: String] = [:]
-            for (sessionID, path) in map {
-                if let name = pathToName[path] {
-                    result[sessionID] = name
-                }
-            }
             return (names: result, projects: projectRegistry.projects)
         }.value
         sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: allSessions)

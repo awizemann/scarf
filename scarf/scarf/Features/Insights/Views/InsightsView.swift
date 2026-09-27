@@ -23,6 +23,9 @@ struct InsightsView: View {
             pageHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: ScarfSpace.s5) {
+                    if let err = viewModel.loadError {
+                        StateReadErrorBanner(context: viewModel.context, message: err)
+                    }
                     overviewSection
                     modelSection
                     platformSection

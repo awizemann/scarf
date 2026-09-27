@@ -41,6 +41,12 @@ public final class ProjectSessionsViewModel {
     /// matched the project's attribution map).
     public var emptyStateHint: String?
 
+    /// Why the last load couldn't read `state.db`, or nil when it could.
+    /// The list keeps its previous rows while this is set. A failed read
+    /// used to fall through to the "may have been deleted from Hermes"
+    /// hint, blaming Hermes for a query Scarf couldn't run.
+    public private(set) var loadError: String?
+
     /// Refresh the session list. Safe to call repeatedly; the data
     /// service reconnects to state.db on demand and the attribution
     /// service reads the sidecar afresh each call.
@@ -82,6 +88,7 @@ public final class ProjectSessionsViewModel {
         }.value
         if attributed.isEmpty {
             sessions = []
+            loadError = nil
             emptyStateHint = "No chats have been started in this project yet. Click New Chat to begin."
             return
         }
@@ -95,7 +102,15 @@ public final class ProjectSessionsViewModel {
         // pattern used by those other VMs (`refresh()` rather than
         // `open()` because refresh also re-pulls the remote-server
         // snapshot on each call — local is a cheap no-op).
-        _ = await dataService.refresh()
+        guard await dataService.refresh() else {
+            loadError = await dataService.reportableOpenError
+            if loadError == nil {
+                // A local host with no state.db yet: nothing to list.
+                sessions = []
+                emptyStateHint = nil
+            }
+            return
+        }
 
         // Fetch a generous page; we filter client-side by attribution
         // map membership. The 200 ceiling matches other feature VMs
@@ -104,7 +119,14 @@ public final class ProjectSessionsViewModel {
         // SQLite read happens off the MainActor. If a single project
         // accumulates more than 200 attributed sessions, we'll need
         // a paged query; roadmap item, not a v2.3 problem.
-        let all = await dataService.fetchSessions(limit: 200)
+        let all: [HermesSession]
+        do {
+            all = try await dataService.fetchSessionsChecked(limit: 200)
+        } catch {
+            loadError = error.localizedDescription
+            return
+        }
+        loadError = nil
         // `allSessionIds`: a rotated compression chain is listed under its
         // tip id, while attribution was recorded against the id the chat
         // started with.

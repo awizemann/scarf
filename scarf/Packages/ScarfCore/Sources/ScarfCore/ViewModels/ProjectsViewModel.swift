@@ -431,6 +431,16 @@ public final class ProjectsViewModel {
             fail("Couldn't add “\(name)”", reason: "A project with that name is already in the list.")
             return false
         }
+        // One folder, one row — the rule `project_register` and
+        // `ProjectStore.indexInRegistry` already hold, compared normalized
+        // so `/a/b` and `/a/b/` are the same folder. A second row at a path
+        // splits the project's identity and is the state the Doctor reports
+        // as `duplicatePath`.
+        let normalized = ProjectIdentity.normalizedPath(path)
+        if let existing = registry.projects.first(where: { ProjectIdentity.normalizedPath($0.path) == normalized }) {
+            fail("Couldn't add “\(name)”", reason: "That folder is already in the list as “\(existing.name)”.")
+            return false
+        }
         // Same policy `project_register` enforces, at the app's own door.
         // A root of `/` or `$HOME` makes every containment check downstream
         // vacuous, and the folder picker will happily hand over either.
