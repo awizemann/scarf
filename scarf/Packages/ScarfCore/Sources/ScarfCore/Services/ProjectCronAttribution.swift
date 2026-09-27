@@ -40,6 +40,17 @@ public enum ProjectCronAttribution {
         return tmpl + " " + projectTag(projectID) + " " + rest
     }
 
+    /// Does the job named `jobName` carry this project's own tag, either
+    /// first or right after a template tag? Unlike ``isAttributed(jobName:projectID:templateId:)``
+    /// it never matches on a template tag alone, which every project
+    /// installed from that template shares.
+    public static func namesProject(jobName: String, projectID: UUID) -> Bool {
+        let proj = projectTag(projectID)
+        if jobName.hasPrefix(proj) { return true }
+        guard jobName.hasPrefix("[tmpl:"), let close = jobName.firstIndex(of: "]") else { return false }
+        return jobName[jobName.index(after: close)...].drop(while: { $0 == " " }).hasPrefix(proj)
+    }
+
     /// Does the job named `jobName` belong to the project with this id and
     /// (when it was installed from a template) this template id?
     public static func isAttributed(
