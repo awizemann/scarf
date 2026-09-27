@@ -719,14 +719,23 @@ final class KanbanBoardViewModel {
             }
             try await service.block(taskId: taskId, reason: reason)
         case .complete(let resultRequired):
-            let result = Self.isBlank(completeResult) ? nil : completeResult
-            let storedResult = tasks.first(where: { $0.id == taskId }).map(Self.hasStoredResult) ?? false
-            if resultRequired && result == nil && !storedResult {
-                throw KanbanError.forbiddenTransition(
-                    from: "—",
-                    to: "Done",
-                    reason: Self.completionResultRequiredMessage
-                )
+            var result = Self.isBlank(completeResult) ? nil : completeResult
+            let storedResult = tasks.first(where: { $0.id == taskId })
+                .flatMap { Self.hasStoredResult($0) ? $0.result : nil }
+            if resultRequired && result == nil {
+                guard let storedResult else {
+                    throw KanbanError.forbiddenTransition(
+                        from: "—",
+                        to: "Done",
+                        reason: Self.completionResultRequiredMessage
+                    )
+                }
+                // The stored result is what lets Hermes accept this blank
+                // completion, but `complete_task` writes `result = ?` with
+                // whatever it is given (`hermes_cli/kanban_db.py:2777-2789` @
+                // `v2026.9.24`), so sending nothing would erase it and child
+                // tasks would lose their upstream context. Send it back.
+                result = storedResult
             }
             try await service.complete(taskIds: [taskId], result: result, summary: nil, metadataJSON: nil)
         case .archive:

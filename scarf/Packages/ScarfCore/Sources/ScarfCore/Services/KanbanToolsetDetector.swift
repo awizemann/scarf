@@ -286,7 +286,7 @@ public actor KanbanToolsetDetector {
     }
 
     /// Drops a ` # comment` tail from an unquoted scalar or flow value.
-    private nonisolated static func stripTrailingComment(_ text: String) -> String {
+    nonisolated static func stripTrailingComment(_ text: String) -> String {
         if text.hasPrefix("#") { return "" }
         guard let first = text.first, first != "\"", first != "'",
               let hash = text.range(of: " #") else { return text }

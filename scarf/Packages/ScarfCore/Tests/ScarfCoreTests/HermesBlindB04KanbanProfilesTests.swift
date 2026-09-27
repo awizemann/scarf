@@ -211,6 +211,11 @@ import Foundation
             // Null key: items added under it, and the `null` value dropped.
             ("platform_toolsets:\n  acp: null\n  cli:\n  - hermes-cli\n",
              "platform_toolsets:\n  acp:\n  - hermes-acp\n  - kanban\n  cli:\n  - hermes-cli\n"),
+            // Brackets in a trailing comment are not a flow list.
+            ("platform_toolsets:\n  acp: [hermes-acp] # see [docs]\n",
+             "platform_toolsets:\n  acp: [hermes-acp, kanban] # see [docs]\n"),
+            ("platform_toolsets:\n  acp:  # see [docs]\n  - hermes-acp\n",
+             "platform_toolsets:\n  acp:  # see [docs]\n  - hermes-acp\n  - kanban\n"),
             // Top-level opt-in shadowed by a saved acp list: still written.
             ("toolsets:\n- kanban\nplatform_toolsets:\n  acp:\n  - hermes-acp\n",
              "toolsets:\n- kanban\nplatform_toolsets:\n  acp:\n  - hermes-acp\n  - kanban\n"),

@@ -273,7 +273,8 @@ public actor KanbanToolsetEnabler {
         if let colonIdx = platformLine.firstIndex(of: ":") {
             let afterColon = platformLine[platformLine.index(after: colonIdx)...]
                 .trimmingCharacters(in: .whitespaces)
-            if !afterColon.isEmpty {
+            // A trailing comment (`acp:  # notes`) is not a value.
+            if !afterColon.isEmpty, !afterColon.hasPrefix("#") {
                 return .refuse(reason:
                     "`platform_toolsets.\(platform)` has a scalar value `\(afterColon)` instead of a list. This usually means `hermes config set` was run against it and clobbered the original list. Open ~/.hermes/config.yaml and convert it back to a list of toolset names."
                 )
@@ -380,27 +381,31 @@ public actor KanbanToolsetEnabler {
         case .list:
             guard let keyLine = location.keyLine else { break }
             let keyText = lines[keyLine]
-            if keyText.contains("[") {
-                // Flow list. Only an unquoted one-line `[...]` is rewritten.
-                guard let open = keyText.firstIndex(of: "["),
-                      let close = keyText.lastIndex(of: "]"),
-                      keyText[keyText.index(after: close)...]
-                        .trimmingCharacters(in: .whitespaces).isEmpty,
-                      !keyText[..<open].contains("\""), !keyText[..<open].contains("'")
-                else {
-                    return .refuse(reason:
-                        "`platform_toolsets.acp` is written in a form Scarf can't safely edit. Open ~/.hermes/config.yaml and add `kanban` to the `acp:` list under `platform_toolsets:`."
-                    )
-                }
-                let inner = keyText[keyText.index(after: open)..<close]
-                    .trimmingCharacters(in: .whitespaces)
-                let newInner = inner.isEmpty ? "kanban" : "\(inner), kanban"
-                lines[keyLine] = String(keyText[..<open]) + "[\(newInner)]"
-                return .rewrite(lines.joined(separator: "\n"))
+            // The key's own value, with any trailing comment set aside: a
+            // `[` inside `# see [docs]` must not read as a flow list.
+            let afterKey = keyText.trimmingCharacters(in: .whitespaces)
+                .dropFirst("\(platform):".count)
+                .trimmingCharacters(in: .whitespaces)
+            let value = KanbanToolsetDetector.stripTrailingComment(afterKey)
+            guard !value.isEmpty else {
+                // Block list: the existing insertion keeps the file's indent
+                // and alphabetical order.
+                return planInsert(yaml: yaml, platform: platform)
             }
-            // Block list: the existing insertion keeps the file's indent and
-            // alphabetical order.
-            return planInsert(yaml: yaml, platform: platform)
+            // Flow list. Only an unquoted one-line `[...]` is rewritten.
+            guard value.hasPrefix("["), value.hasSuffix("]"),
+                  let items = KanbanToolsetDetector.parseFlowList(value)
+            else {
+                return .refuse(reason:
+                    "`platform_toolsets.acp` is written in a form Scarf can't safely edit. Open ~/.hermes/config.yaml and add `kanban` to the `acp:` list under `platform_toolsets:`."
+                )
+            }
+            let comment = afterKey.dropFirst(value.count).trimmingCharacters(in: .whitespaces)
+            let indent = String(repeating: " ", count: location.keyIndent)
+            var rebuilt = "\(indent)\(platform): [\((items + ["kanban"]).joined(separator: ", "))]"
+            if !comment.isEmpty { rebuilt += " \(comment)" }
+            lines[keyLine] = rebuilt
+            return .rewrite(lines.joined(separator: "\n"))
         case .scalar(let value):
             return .refuse(reason:
                 "`platform_toolsets.acp` has a value `\(value)` instead of a list. Open ~/.hermes/config.yaml and turn it into a list of toolset names that includes `hermes-acp` and `kanban`."
