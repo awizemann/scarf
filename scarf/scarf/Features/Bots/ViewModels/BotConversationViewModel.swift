@@ -349,7 +349,13 @@ final class BotConversationViewModel {
                 // The conversation itself is fine — the transcript is
                 // real and retrying is safe — so surface the failure in
                 // the chat's error banner rather than tearing the whole
-                // phase down to `.failed`.
+                // phase down to `.failed`. Read the transcript once more
+                // first: a turn that failed part-way can still have saved
+                // the prompt and part of a reply, and with the poll
+                // stopped nothing else would show it until the chat was
+                // reopened.
+                await rich.refreshMessages()
+                guard self.generation == intent else { return }
                 rich.cancelPendingSend()
                 rich.acpError = failure
             } else {
@@ -574,6 +580,21 @@ final class BotConversationViewModel {
     /// ``BotChatSession/renameNeedsConfirmation(currentTitle:newTitle:)``.
     /// (This docstring previously claimed a warning that did not yet exist;
     /// go/no-go blocking condition 3c.)
+    /// How long one CLI-transport Bot Chat turn may run before Scarf ends
+    /// it. A bound only because every subprocess needs one (charter C10):
+    /// it must never cut short a turn a user is waiting on.
+    ///
+    /// It was 300 s, which killed any bot turn that ran tools for more
+    /// than five minutes (a build, several web extracts, a delegate) and
+    /// lost the reply. Hermes' own Bot Mode runs this same command with no
+    /// limit at all: `_run_local_turn` is a plain `subprocess.run` with no
+    /// timeout (tools/bot_mode_dm.py:411-421 @ v2026.9.24), inside a
+    /// background runner nothing kills (`_start_delivery`/`_spawn_delivery`,
+    /// :595-695). `hermes chat -Q` has no turn cap of its own either
+    /// (hermes_cli/cli_single_query.py:180-260). The composer shows the
+    /// turn as working, with its elapsed time, for as long as it runs.
+    nonisolated static let cliTurnCeiling: TimeInterval = 24 * 60 * 60
+
     nonisolated static func createCanonicalBotChat(
         context: ServerContext,
         profile: String,
@@ -620,8 +641,12 @@ final class BotConversationViewModel {
             guard let argv = canonicalBotChatArguments(profile: name, queryFile: path) else {
                 return invalid
             }
-            let result = context.runHermes(argv, timeout: 300)
+            let started = Date()
+            let result = context.runHermes(argv, timeout: cliTurnCeiling)
             guard result.exitCode == 0 else {
+                if Date().timeIntervalSince(started) >= cliTurnCeiling - 1 {
+                    return "Scarf stopped waiting for \(name)’s reply after \(Int(cliTurnCeiling / 3600)) hours and ended the turn. Anything Hermes saved before then is in the conversation."
+                }
                 let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 return detail.isEmpty
                     ? "Couldn’t start \(name)’s conversation (hermes exited \(result.exitCode))."
