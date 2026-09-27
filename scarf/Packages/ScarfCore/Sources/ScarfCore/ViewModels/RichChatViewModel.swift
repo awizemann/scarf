@@ -1669,6 +1669,15 @@ public final class RichChatViewModel {
     @ObservationIgnored
     private var streamingReplyId: String?
 
+    /// Reply id → local message id of every text reply finalized in the
+    /// current turn. Hermes re-sends a plugin-rewritten reply
+    /// (`transform_llm_output`) under the id of the bubble it replaces
+    /// (`message_ids.last()`, acp_adapter/server.py:971-981 @ v2026.9.24),
+    /// and the ids are UUIDs never reused otherwise, so a chunk under one
+    /// of these ids is that rewrite. Cleared when a turn starts.
+    @ObservationIgnored
+    private var finalizedReplyMessageIds: [String: Int] = [:]
+
     /// Ids of tool calls whose `tool_call` start this VM processed and
     /// whose `tool_call_update` has not arrived yet. Separate from
     /// `streamingToolCalls`, which `finalizeStreamingMessage` empties on
@@ -1894,6 +1903,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         streamingReplyId = nil
+        finalizedReplyMessageIds = [:]
         openToolCallIds = []
         turnCancelRequested = false
         cancelStreamingFlush()
@@ -2234,6 +2244,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         streamingReplyId = nil
+        finalizedReplyMessageIds = [:]
         cancelStreamingFlush()
         buildMessageGroups()
         // User just submitted — jump to the bottom so they see their message
@@ -2380,6 +2391,7 @@ public final class RichChatViewModel {
         }
         switch event {
         case .messageChunk(_, let text, _, _, let messageId):
+            if let messageId, replaceWithRewrittenReply(messageId: messageId, text: text) { break }
             startNewReplyIfIdChanged(messageId)
             appendMessageChunk(text: text)
         case .userMessageChunk:
@@ -2499,6 +2511,38 @@ public final class RichChatViewModel {
             buildMessageGroups()
         }
         streamingReplyId = messageId
+    }
+
+    /// A plugin-rewritten reply (R09 carry-over, S02-F4). When a
+    /// `transform_llm_output` hook changes a streamed reply, Hermes sends
+    /// the WHOLE rewritten text as one more chunk under the streamed
+    /// bubble's id, meaning "replace" (acp_adapter/server.py:971-981 @
+    /// v2026.9.24); it never re-sends an unchanged streamed reply. Two
+    /// shapes are recognisable and replace instead of appending:
+    /// - the id belongs to a reply already finalized this turn (a tool
+    ///   round or a thought ended it): only the rewrite reuses a closed id;
+    /// - the id is the reply still streaming and the chunk restates all of
+    ///   its text so far (a plugin that appends or wraps a footer). A real
+    ///   delta never repeats the whole reply before it.
+    /// A rewrite of a still-open reply that does not restate it cannot be
+    /// told apart from a delta and still appends; the stored row (and so
+    /// the next load) has the rewritten text.
+    private func replaceWithRewrittenReply(messageId: String, text: String) -> Bool {
+        if messageId == streamingReplyId,
+           !streamingAssistantText.isEmpty,
+           text.count > streamingAssistantText.count,
+           text.hasPrefix(streamingAssistantText) {
+            streamingAssistantText = text
+            scheduleStreamingUpsert()
+            return true
+        }
+        if let localId = finalizedReplyMessageIds[messageId],
+           let idx = messages.firstIndex(where: { $0.id == localId }) {
+            messages[idx] = messages[idx].withContent(text)
+            buildMessageGroups()
+            return true
+        }
+        return false
     }
 
     private func appendMessageChunk(text: String) {
@@ -2999,6 +3043,9 @@ public final class RichChatViewModel {
             if let start = currentTurnStart {
                 turnDurations[id] = Date().timeIntervalSince(start)
                 currentTurnStart = nil
+            }
+            if let replyId = streamingReplyId, !streamingAssistantText.isEmpty {
+                finalizedReplyMessageIds[replyId] = id
             }
         } else {
             // Remove empty streaming placeholder. Same no-animation
