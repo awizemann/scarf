@@ -56,17 +56,37 @@ public enum HermesProviderCredentials {
         "bedrock", "vertex", "copilot-acp", "lmstudio",
     ]
 
+    /// Provider vars that are also general-purpose tokens: a `GITHUB_TOKEN`
+    /// for the GitHub tools or an `HF_TOKEN` for downloads sits in many
+    /// shells and `.env` files without meaning the model provider is set up.
+    /// Hermes lists them for its setup check, but never picks Copilot from
+    /// the environment on its own (`_NO_AUTO_DETECT_PROVIDERS`,
+    /// `hermes_cli/auth.py:1453` @ v2026.9.24), so they count for the hint
+    /// only when the main model's provider is the one they belong to.
+    public static let providerScopedVars: [String: String] = [
+        "GH_TOKEN": "copilot", "GITHUB_TOKEN": "copilot", "HF_TOKEN": "huggingface",
+    ]
+
+    /// Whether `key` counts as a configured provider for a main model whose
+    /// provider is `provider` (see ``providerScopedVars``).
+    static func counts(_ key: String, provider: String?) -> Bool {
+        guard providerEnvVarSet.contains(key) else { return false }
+        guard let owner = providerScopedVars[key] else { return true }
+        return provider?.trimmingCharacters(in: .whitespaces).lowercased() == owner
+    }
+
     /// True when `env` holds a non-empty value for any provider var.
-    public static func environmentHasProviderKey(_ env: [String: String]) -> Bool {
-        providerEnvVars.contains { !(env[$0] ?? "").isEmpty }
+    /// `provider` is the main model's `model.provider`, if known.
+    public static func environmentHasProviderKey(_ env: [String: String], provider: String? = nil) -> Bool {
+        providerEnvVars.contains { counts($0, provider: provider) && !(env[$0] ?? "").isEmpty }
     }
 
     /// True when a `.env` file assigns a non-empty value to any provider var.
     /// Line for line the rule of Hermes' `_dotenv_has_provider_key`
     /// (`hermes_cli/main.py:1012-1030` @ v2026.9.24): skip comments, drop an
     /// `export ` prefix, split on the first `=`, and strip whitespace and
-    /// quotes from the value.
-    public static func dotEnvHasProviderKey(_ text: String) -> Bool {
+    /// quotes from the value. The one difference is ``providerScopedVars``.
+    public static func dotEnvHasProviderKey(_ text: String, provider: String? = nil) -> Bool {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             var line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#") || !line.contains("=") { continue }
@@ -76,21 +96,51 @@ public enum HermesProviderCredentials {
             let value = line[line.index(after: eq)...]
                 .trimmingCharacters(in: .whitespaces)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-            if providerEnvVarSet.contains(key) && !value.isEmpty { return true }
+            if counts(key, provider: provider) && !value.isEmpty { return true }
         }
         return false
     }
 
     /// True when the main model points at an endpoint that needs no key
-    /// Scarf can see: a `model.base_url` (Ollama, LM Studio, vLLM, llama.cpp
-    /// or any custom endpoint — Hermes counts a `base_url` as configured,
-    /// `hermes_cli/main.py:1107-1112`), a named custom provider
-    /// (`custom:<name>`, whose endpoint lives in config), or one of
-    /// ``keylessProviders``.
+    /// Scarf can see:
+    /// - one of ``keylessProviders``;
+    /// - a custom endpoint — `custom` with a `model.base_url`, or a named
+    ///   `custom:<name>` provider, whose endpoint lives in config (Hermes
+    ///   allows both without a key);
+    /// - any provider whose `model.base_url` is on this machine or a private
+    ///   network (Ollama, LM Studio, vLLM, llama.cpp under whatever id).
+    ///
+    /// A public `base_url` alone does NOT count: Hermes' setup writes one
+    /// for nearly every provider (`hermes_cli/model_setup_flows.py:75,581`
+    /// @ v2026.9.24), so treating it as keyless would hide the hint for an
+    /// OpenRouter or DeepSeek user whose key is actually missing.
     public static func modelUsesKeylessEndpoint(provider: String, baseURL: String) -> Bool {
-        if !baseURL.trimmingCharacters(in: .whitespaces).isEmpty { return true }
         let id = provider.trimmingCharacters(in: .whitespaces).lowercased()
-        if id.hasPrefix("custom:") { return true }
-        return keylessProviders.contains(id)
+        let url = baseURL.trimmingCharacters(in: .whitespaces)
+        if keylessProviders.contains(id) || id.hasPrefix("custom:") { return true }
+        if id == "custom" && !url.isEmpty { return true }
+        return isLocalOrPrivate(url)
+    }
+
+    /// True for a URL whose host is loopback, link-local, an RFC 1918
+    /// private address, a `.local`/`.lan`/`.internal` name, or Docker's
+    /// `host.docker.internal`.
+    static func isLocalOrPrivate(_ urlString: String) -> Bool {
+        guard !urlString.isEmpty,
+              let host = URLComponents(string: urlString)?.host?.lowercased(),
+              !host.isEmpty else { return false }
+        let h = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if h == "localhost" || h == "::1" || h == "0.0.0.0" || h == "host.docker.internal" { return true }
+        if h.hasSuffix(".localhost") || h.hasSuffix(".local") || h.hasSuffix(".lan")
+            || h.hasSuffix(".internal") || h.hasSuffix(".home.arpa") { return true }
+        if h.contains(":") && (h.hasPrefix("fe80:") || h.hasPrefix("fc") || h.hasPrefix("fd")) { return true }
+        let parts = h.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (127, _), (10, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        case (100, 64...127): return true   // CGNAT / Tailscale
+        default: return false
+        }
     }
 }

@@ -30,7 +30,7 @@ import Foundation
     @Test(arguments: [
         ("DEEPSEEK_API_KEY=sk-live", true),
         ("export KIMI_API_KEY=\"abc\"", true),
-        ("  HF_TOKEN = 'hf_abc'  ", true),
+        ("  MINIMAX_API_KEY = 'abc'  ", true),
         ("OPENAI_BASE_URL=http://127.0.0.1:8000/v1", true),
         ("DEEPSEEK_API_KEY=", false),
         ("DEEPSEEK_API_KEY=\"\"", false),
@@ -54,16 +54,44 @@ import Foundation
     }
 
     @Test func keylessEndpoints() {
-        // Any base_url: Ollama, LM Studio, vLLM, a custom endpoint.
-        #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(
-            provider: "custom", baseURL: "http://localhost:11434/v1"))
-        #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "custom:my-vllm", baseURL: ""))
+        // Keyless provider ids, and custom endpoints.
         #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "lmstudio", baseURL: ""))
         #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "Bedrock", baseURL: ""))
         #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "vertex", baseURL: " "))
-        // A keyed provider with no key is still "missing".
+        #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "custom:my-vllm", baseURL: ""))
+        #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(
+            provider: "custom", baseURL: "https://llm.example.com/v1"))
+        // A local or private base_url under any provider id.
+        for url in ["http://localhost:11434/v1", "http://127.0.0.1:8000/v1", "http://[::1]:1234/v1",
+                    "http://192.168.1.20:1234/v1", "http://10.0.0.5/v1", "http://172.20.0.2:8080",
+                    "http://gpu-box.local:8000/v1", "http://host.docker.internal:11434/v1",
+                    "http://100.101.102.103:11434"] {
+            #expect(HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "ollama", baseURL: url), "\(url)")
+        }
+        // Hermes' setup writes a PUBLIC base_url for keyed providers, so that
+        // alone must not hide a missing key.
+        #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(
+            provider: "openrouter", baseURL: "https://openrouter.ai/api/v1"))
+        #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(
+            provider: "deepseek", baseURL: "https://api.deepseek.com/v1"))
+        #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(
+            provider: "openai-api", baseURL: "http://172.32.0.1/v1"))
+        #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(
+            provider: "openai-api", baseURL: "https://fcbank.example/v1"))
         #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "anthropic", baseURL: ""))
         #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "unknown", baseURL: ""))
         #expect(!HermesProviderCredentials.modelUsesKeylessEndpoint(provider: "custom", baseURL: ""))
+    }
+
+    /// GITHUB_TOKEN / GH_TOKEN / HF_TOKEN are everyday tokens; they count
+    /// only for the provider they belong to.
+    @Test func generalPurposeTokensCountOnlyForTheirProvider() {
+        #expect(!HermesProviderCredentials.dotEnvHasProviderKey("GITHUB_TOKEN=ghp_real\n", provider: "anthropic"))
+        #expect(!HermesProviderCredentials.dotEnvHasProviderKey("GITHUB_TOKEN=ghp_real\n"))
+        #expect(HermesProviderCredentials.dotEnvHasProviderKey("GITHUB_TOKEN=ghp_real\n", provider: "copilot"))
+        #expect(!HermesProviderCredentials.environmentHasProviderKey(["GH_TOKEN": "x", "HF_TOKEN": "y"], provider: "openrouter"))
+        #expect(HermesProviderCredentials.environmentHasProviderKey(["HF_TOKEN": "y"], provider: "HuggingFace"))
+        // COPILOT_GITHUB_TOKEN is Copilot-only by name, so it always counts.
+        #expect(HermesProviderCredentials.environmentHasProviderKey(["COPILOT_GITHUB_TOKEN": "x"]))
     }
 }

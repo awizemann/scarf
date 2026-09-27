@@ -3232,13 +3232,19 @@ struct HermesFileService: Sendable {
     /// The check itself, with the process environment passed in (`nil` for
     /// a remote context) so tests can run it without the developer's shell.
     nonisolated func hasAnyAICredential(environment: [String: String]?) -> Bool {
-        if let environment, HermesProviderCredentials.environmentHasProviderKey(environment) {
+        // The main model's provider decides whether a general-purpose token
+        // (GITHUB_TOKEN, HF_TOKEN) counts; see `providerScopedVars`.
+        let configText = readFile(context.paths.configYAML)
+        let config = configText.map { HermesConfig(yaml: $0) }
+        let provider = config?.provider
+        if let environment,
+           HermesProviderCredentials.environmentHasProviderKey(environment, provider: provider) {
             return true
         }
         // `.env` via the transport (local file or scp), parsed with Hermes'
         // own `_dotenv_has_provider_key` rule.
         if let envText = readFile(context.paths.envFile),
-           HermesProviderCredentials.dotEnvHasProviderKey(envText) {
+           HermesProviderCredentials.dotEnvHasProviderKey(envText, provider: provider) {
             return true
         }
         // Scan auth.json. Two shapes need to count as "credential present":
@@ -3300,11 +3306,10 @@ struct HermesFileService: Sendable {
         // Scan config.yaml for `api_key:` lines with a non-empty value.
         // Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
         // without needing to parse YAML structure.
-        if let text = readFile(context.paths.configYAML) {
+        if let text = configText, let config {
             // A local or custom endpoint may need no key at all (Ollama,
             // LM Studio, vLLM): Hermes counts it as configured, so the hint
             // must not tell that user to go add ANTHROPIC_API_KEY.
-            let config = HermesConfig(yaml: text)
             if HermesProviderCredentials.modelUsesKeylessEndpoint(
                 provider: config.provider, baseURL: config.modelBaseURL) {
                 return true
