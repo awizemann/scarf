@@ -75,6 +75,54 @@ import ScarfCore
         #expect(vm.recentSessions.count == 2)
     }
 
+    /// R18b / T2-F1 (P1): two registry rows at one path trapped
+    /// `Dictionary(uniqueKeysWithValues:)` in the attribution pass, so the
+    /// iOS Dashboard crashed on every load against that server.
+    @Test func duplicateProjectPathsInTheRegistryDoNotCrashTheLoad() async throws {
+        let home = try makeHome(Self.sessionsDDL)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let scarf = home.appendingPathComponent("scarf", isDirectory: true)
+        try FileManager.default.createDirectory(at: scarf, withIntermediateDirectories: true)
+        try Data("""
+        {"projects": [{"name": "App", "path": "/work/app"}, {"name": "App (work)", "path": "/work/app"}]}
+        """.utf8).write(to: scarf.appendingPathComponent("projects.json"))
+        try Data(#"{"mappings": {"s1": "/work/app"}}"#.utf8)
+            .write(to: scarf.appendingPathComponent("session_project_map.json"))
+
+        let vm = IOSDashboardViewModel(context: .local(home: home))
+        await vm.load()
+
+        #expect(vm.lastError == nil)
+        #expect(vm.allProjects.count == 2)
+        // First row at a path names it.
+        #expect(vm.projectName(for: try #require(vm.allSessions.first { $0.id == "s1" })) == "App")
+    }
+
+    /// R18b / T2-F3: previews come for the listed rows, not "the newest 25
+    /// first messages anywhere". Thirty subagent rows (not listed) whose
+    /// opening messages are newer used to crowd the listed sessions out,
+    /// and their rows showed raw ids.
+    @Test func previewsCoverTheListedSessionsNotNewerUnlistedOnes() async throws {
+        var sql = Self.sessionsDDL + """
+        INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (1, 's1', 'user', 'first opening', 1.5);
+        INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (2, 's2', 'user', 'second opening', 2.5);
+        """
+        for i in 0..<30 {
+            sql += "INSERT INTO sessions (id, source, parent_session_id, started_at) VALUES ('child\(i)', 'cli', 's1', \(10 + i));"
+            sql += "INSERT INTO messages (session_id, role, content, timestamp) VALUES ('child\(i)', 'user', 'delegate \(i)', \(10 + i));"
+        }
+        let home = try makeHome(sql)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let vm = IOSDashboardViewModel(context: .local(home: home))
+        await vm.load()
+
+        #expect(vm.allSessions.map(\.id) == ["s2", "s1"])
+        #expect(vm.sessionPreviews["s1"] == "first opening")
+        #expect(vm.sessionPreviews["s2"] == "second opening")
+        #expect(!vm.sessionPreviews.keys.contains { $0.hasPrefix("child") })
+    }
+
     /// `.task` and `.refreshable` firing together: both loads must finish
     /// with the data, neither may leave the other reading a closed service.
     /// The second load starts at a sweep of offsets into the first, so some
