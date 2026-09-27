@@ -822,6 +822,7 @@ final class ChatViewModel {
     /// switch their active provider and the stale prefix is the bug.
     func stripPrefixFromModelDefault(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // Same plan seam as `alignProviderToModelPrefix`, but this
             // action KEEPS the active provider — the plan sees
@@ -834,7 +835,8 @@ final class ChatViewModel {
             let ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: mismatch.bareModel,
                 provider: mismatch.activeProvider,
-                current: svc.loadConfig()
+                current: svc.loadConfig(),
+                capabilities: capabilities
             )
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
