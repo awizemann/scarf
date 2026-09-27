@@ -1953,12 +1953,26 @@ final class ChatViewModel {
 
         // If the caller passed a project path, refresh the Scarf-
         // managed block in the project's AGENTS.md BEFORE starting
-        // ACP — Hermes auto-reads AGENTS.md at session boot, so the
-        // block has to land on disk first. Non-blocking on failure:
-        // we log and proceed without the block. Safe on bare
-        // projects (creates AGENTS.md with just the block); safe on
-        // template-installed projects (splices the block into
-        // existing AGENTS.md without touching template content).
+        // ACP — Hermes reads AGENTS.md when it builds a session's
+        // system prompt, so the block has to land on disk first.
+        // Non-blocking on failure: we log and proceed without the
+        // block. Safe on bare projects (creates AGENTS.md with just the
+        // block); safe on template-installed projects (splices the
+        // block into existing AGENTS.md without touching template
+        // content).
+        //
+        // What the refresh reaches (S11-F4): every NEW session, and a
+        // resume that `session/load` can't restore (it falls back to a
+        // new session). A resumed session that has history normally
+        // does NOT see it: Hermes reuses the system prompt it stored
+        // when the session began, and rebuilds it only when the model,
+        // provider or cwd no longer match
+        // (`_restore_or_build_system_prompt` /
+        // `_stored_prompt_matches_runtime`,
+        // `agent/conversation_loop.py:681-730,815-838` @ v2026.9.24).
+        // So cron, slash-command or project-name changes show up in new
+        // chats, not in old ones. The write is still worth doing on
+        // resume: it keeps the file current for those cases.
         let contextForPrep = context
         let prepLogger = logger
         Task { @MainActor [self] in

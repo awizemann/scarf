@@ -3160,10 +3160,16 @@ final class ChatController {
             }
         }
 
-        // Refresh the project's AGENTS.md block before the spawn so a
-        // resumed project chat picks up cron/config changes made since the
-        // chat was created (Hermes re-reads context at every `hermes acp`
-        // boot). Project-attributed sessions only.
+        // Refresh the project's AGENTS.md block before the spawn.
+        // Project-attributed sessions only. This does NOT update what a
+        // resumed chat with history sees (S11-F4): Hermes reuses the
+        // system prompt it stored when the session began, and rebuilds
+        // it only when the model, provider or cwd no longer match
+        // (`agent/conversation_loop.py:681-730,815-838` @ v2026.9.24).
+        // It does reach the fresh session opened below when
+        // `session/load` can't restore this one, and it keeps the file
+        // current for the project's next new chat — cron, slash-command
+        // and project-name changes apply to new chats.
         if let resumePath = resolved?.path {
             await writeProjectContextBlock(projectPath: resumePath, projectName: resolved?.name ?? "")
         }
