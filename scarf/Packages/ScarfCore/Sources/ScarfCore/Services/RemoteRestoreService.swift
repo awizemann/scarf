@@ -1123,16 +1123,12 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// files `hermes import` never restores (`_IMPORT_SKIP_NAMES`,
     /// `backup.py:128`), which name the source's processes.
     ///
-    /// Extraction matches excludes differently per tar. GNU tar and bsdtar
-    /// try an unanchored pattern at every component, so a bare name reaches
-    /// every depth. BusyBox tar anchors an extract exclude at the start of
-    /// the member name and compares only as many components as the pattern
-    /// has (`find_list_entry2`), so there `*.db-wal` never matched anything
-    /// below the archive's top directory. Each any-depth pattern is therefore
-    /// also given at every depth below the top directory up to
-    /// ``extractPatternDepth``: `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, …. GNU tar
-    /// and bsdtar let `*` cross `/`, so there those forms add nothing; they
-    /// are only ever used for names Hermes excludes at any depth anyway.
+    /// Extraction matches excludes differently per tar. BusyBox tar anchors
+    /// an extract exclude at the start of the member name and compares only
+    /// as many components as the pattern has (`find_list_entry2`), so there
+    /// the bare `*.db-wal` never matched anything below the archive's top
+    /// directory. Each any-depth name is therefore given per depth below the
+    /// top directory (``RemoteBackupService/anyDepthPatterns(leaf:names:)``).
     /// The root-scoped trees (`models/` and friends) are named exactly, for
     /// the root and for each profile the archive's database list names —
     /// never with a wildcard, which would reach a skill's own `models/`.
@@ -1142,16 +1138,13 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // DIRECTORY named `x.db`); sidecars and retired-WAL captures by
         // pattern.
         let leafPattern = HermesDatabaseScripts.globEscape(archiveLeaf)
-        let anyDepth = ["*.db-wal", "*.db-shm", "*.db-journal", HermesDatabaseScripts.retiredWALPattern]
-            + RemoteBackupService.hermesAnyDepthExcludes + importSkippedNames
+        let sidecars = ["*.db-wal", "*.db-shm", "*.db-journal", HermesDatabaseScripts.retiredWALPattern]
         let profiles = profileNames(inDatabasePaths: databases)
         let patterns = databases.map { HermesDatabaseScripts.globEscape(archiveLeaf + "/" + $0) }
-            + anyDepth
-            + anyDepth.flatMap { name in
-                (0..<extractPatternDepth).map { depth in
-                    leafPattern + "/" + String(repeating: "*/", count: depth) + name
-                }
-            }
+            + sidecars
+            + RemoteBackupService.anyDepthPatterns(
+                leaf: archiveLeaf,
+                names: sidecars + RemoteBackupService.hermesAnyDepthExcludes + importSkippedNames)
             + RemoteBackupService.runtimeExcludedPaths(profiles: profiles, cacheEntries: [:])
                 .map { leafPattern + "/" + $0 }
         let excludes = patterns
@@ -1159,12 +1152,6 @@ public final class RemoteRestoreService: @unchecked Sendable {
             .joined(separator: " ")
         return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
     }
-
-    /// How deep below the archive's top directory an any-depth extract
-    /// exclude reaches on BusyBox tar (see ``hermesExtractCommand(hermesHome:archiveLeaf:databases:)``).
-    /// Eight covers `profiles/<name>/skills/<category>/<skill>/node_modules`
-    /// with room to spare.
-    static let extractPatternDepth = 8
 
     /// `_IMPORT_SKIP_NAMES` (`hermes_cli/backup.py:128` @ v2026.9.24): runtime
     /// state that names the source machine's processes, which `hermes import`

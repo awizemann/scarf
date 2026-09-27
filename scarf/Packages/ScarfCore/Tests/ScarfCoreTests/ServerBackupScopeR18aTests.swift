@@ -140,9 +140,34 @@ struct ServerBackupScopeR18aTests {
         #expect(command.contains("--exclude='.hermes/profiles/work/models'"))
         // Never a wildcard for a root-scoped tree: `*` crosses `/` in GNU
         // tar and bsdtar and would reach a skill's own models/.
+        #expect(!command.contains("--exclude='node_modules'"), "never a bare any-depth name")
         #expect(!command.contains("*/models'"))
         #expect(!command.contains("*/hermes-agent'"))
         #expect(!command.contains("*/node'"))
+    }
+
+    /// Hermes matches its exclusions against home-relative paths, so the
+    /// home's own directory name never matters. Tar sees `<leaf>/…`, and a
+    /// bare `backups` pattern matched a home that is itself called
+    /// `backups`: an empty archive.
+    @Test("a home whose own directory has an excluded name still backs up")
+    func homeNamedLikeAnExcludedDirectory() async throws {
+        let root = try Helpers.scratch("r18a-leaf")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("backups")
+        try Self.write(home, "config.yaml")
+        try Self.write(home, "skills/a/SKILL.md")
+        try Self.write(home, "skills/a/backups/old.zip")
+        let backup = try await Helpers.backUp(home: home, into: root)
+        let tarball = try Helpers.unzipped(backup.archiveURL, in: root)
+            .appendingPathComponent(backup.manifest.hermes.tarballPath)
+        let listing = Set(try Helpers.capture("/usr/bin/tar", ["-tzf", tarball.path])
+            .split(separator: "\n").map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "/")) })
+        #expect(listing.contains("backups/config.yaml"), "\(listing.sorted())")
+        #expect(listing.contains("backups/skills/a/SKILL.md"))
+        #expect(!listing.contains("backups/skills/a/backups/old.zip"))
+        #expect(!RemoteBackupService.hermesExcludes(leaf: "backups", options: .safeDefault, databases: [])
+            .contains("backups"), "never a bare any-depth name")
     }
 
     // MARK: - T7-F1: GNU tar's exit 1

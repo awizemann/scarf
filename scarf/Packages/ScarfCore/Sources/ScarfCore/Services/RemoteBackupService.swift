@@ -587,10 +587,8 @@ public final class RemoteBackupService: @unchecked Sendable {
     /// (`hermes_cli/backup.py:46-81,106-118` @ v2026.9.24): the Hermes
     /// codebase, dependency trees, caches, prior backups and snapshots,
     /// runtime downloads, pid files and browser profiles — see
-    /// ``hermesAnyDepthExcludes`` and
-    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``. The any-depth names
-    /// are bare patterns: GNU tar, bsdtar and BusyBox tar all try an
-    /// unanchored exclude at every path component when CREATING an archive.
+    /// ``hermesAnyDepthExcludes``, ``anyDepthPatterns(leaf:names:)`` and
+    /// ``runtimeExcludedPaths(profiles:cacheEntries:)``.
     static func hermesExcludes(
         leaf: String, options: BackupManifest.Options, databases: [String], profiles: [String] = [],
         cacheEntries: [String: [String]] = [:]
@@ -605,7 +603,7 @@ public final class RemoteBackupService: @unchecked Sendable {
             "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
         ]
         excludes += homeScoped("gateway_state.json").map { "\(leaf)/\($0)" }
-        excludes += hermesAnyDepthExcludes
+        excludes += anyDepthPatterns(leaf: leaf, names: hermesAnyDepthExcludes)
         excludes += prunedDirs(options: options, profiles: profiles, cacheEntries: cacheEntries)
             .map { "\(leaf)/\($0)" }
         if !options.includeAuth {
@@ -674,6 +672,38 @@ public final class RemoteBackupService: @unchecked Sendable {
     ]
 
     static var hermesAnyDepthExcludes: [String] { hermesAnyDepthExcludedDirs + hermesAnyDepthExcludedFiles }
+
+    /// How many directories below the home an any-depth pattern reaches on
+    /// BusyBox tar. Eight covers
+    /// `profiles/<name>/skills/<category>/<skill>/node_modules` with room to
+    /// spare; GNU tar and bsdtar reach every depth (see below).
+    static let anyDepthPatternDepth = 8
+
+    /// Exclude patterns for names Hermes skips at any depth BELOW the home:
+    /// `leaf/x`, `leaf/*/x`, `leaf/*/*/x`, ….
+    ///
+    /// Never the bare name. Tar is run as `-C <parent> <leaf>`, and every tar
+    /// also tries an unanchored pattern against the home's own directory, so
+    /// a home whose directory is called `backups` or `venv` would archive
+    /// nothing (Hermes matches home-relative paths, where the home's own
+    /// name never appears).
+    ///
+    /// The per-depth forms are for BusyBox tar: its `*` never crosses `/`
+    /// when creating an archive, and when EXTRACTING it anchors a pattern at
+    /// the start of the member name and compares only as many components as
+    /// the pattern has (`find_list_entry2`), so a bare `x` never matched
+    /// below the top directory at all. GNU tar and bsdtar let `*` cross `/`,
+    /// so there `leaf/*/x` alone already reaches every depth; the extra forms
+    /// only repeat it, and are only ever built from names Hermes excludes at
+    /// any depth anyway.
+    static func anyDepthPatterns(leaf: String, names: [String]) -> [String] {
+        let top = HermesDatabaseScripts.globEscape(leaf)
+        return names.flatMap { name in
+            (0..<anyDepthPatternDepth).map { depth in
+                top + "/" + String(repeating: "*/", count: depth) + name
+            }
+        }
+    }
 
     /// Hermes-managed runtime trees matched ONLY at the root of a home — the
     /// root home and each `profiles/<name>/` — because a deeper directory of
