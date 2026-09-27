@@ -97,23 +97,37 @@ struct CitadelTransportColumnsP54Tests {
         // S15-F3: the join goes through `commandLine`, which keeps a
         // wrapper "Hermes binary" as shell words (behaviour-tested below).
         let join = try #require(body.range(
-            of: "Self.commandLine(executable: executable, args: args, binaryHint: config.hermesBinaryHint)"))
+            of: "Self.commandLine(executable: executable, args: args, fragment: config.hermesBinaryHintFragment)"))
         #expect(pin.lowerBound < join.lowerBound)
         #expect(body.contains("configuredBinary: config.hermesBinaryHint"))
     }
 
     /// S15-F3: a wrapper hint is emitted as words; everything else is
-    /// quoted by `shellJoin` exactly as before.
+    /// quoted by `shellJoin` exactly as before. `fragment` is
+    /// `SSHConfig.hermesBinaryHintFragment` (R16c).
     @Test func aWrapperBinaryHintIsJoinedAsShellWords() {
         let hint = "docker compose exec hermes hermes"
+        let wrapper = SSHConfig(host: "box", hermesBinaryHint: hint)
         #expect(CitadelServerTransport.commandLine(
-            executable: hint, args: ["-p", "default", "cron", "list"], binaryHint: hint)
+            executable: hint, args: ["-p", "default", "cron", "list"], fragment: wrapper.hermesBinaryHintFragment)
             == "docker compose exec hermes hermes -p default cron list")
         #expect(CitadelServerTransport.commandLine(
-            executable: "hermes", args: ["config", "set", "a b"], binaryHint: nil)
+            executable: "hermes", args: ["config", "set", "a b"], fragment: nil)
             == CitadelServerTransport.shellJoin(["hermes", "config", "set", "a b"]))
         // A single-word hint goes through `shellJoin` like any argument.
+        let single = SSHConfig(host: "box", hermesBinaryHint: "/opt/hermes")
         #expect(CitadelServerTransport.commandLine(
-            executable: "/opt/hermes", args: ["acp"], binaryHint: "/opt/hermes") == "/opt/hermes acp")
+            executable: "/opt/hermes", args: ["acp"], fragment: single.hermesBinaryHintFragment) == "/opt/hermes acp")
+    }
+
+    /// R16c F2: a path Test Connection found is one quoted word even with a
+    /// space in it, where the same value typed by the user is words.
+    @Test func aProbedSpacedPathIsJoinedAsOneWord() {
+        let path = "/Users/Jane Doe/.local/bin/hermes"
+        let probed = SSHConfig(host: "box", hermesBinaryHint: path, hermesBinaryHintIsPath: true)
+        #expect(CitadelServerTransport.commandLine(
+            executable: path, args: ["acp"], fragment: probed.hermesBinaryHintFragment)
+            == CitadelServerTransport.shellJoin([path, "acp"]))
+        #expect(CitadelServerTransport.shellJoin([path]) != path)
     }
 }

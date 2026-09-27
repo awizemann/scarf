@@ -113,17 +113,29 @@ final class AddServerViewModel {
         let config = draftConfig
         let probe = TestConnectionProbe(config: config)
         testResult = await probe.run()
+        testedWithTypedBinary = config.hermesBinaryHint != nil
     }
+
+    /// Whether the last Test Connection ran with a typed "Hermes binary".
+    /// Its reported path is then that value echoed back (possibly a wrapper
+    /// command line), not a path the probe found. Internal for tests.
+    var testedWithTypedBinary = false
 
     /// If the test succeeded, we prefer to save the probed binary path into
     /// `hermesBinaryHint` so subsequent calls don't need to re-resolve it.
     /// A user-supplied `hermesBinary` override (gh#105) always wins — that's
     /// the point of the field — so we only fall back to the probe value when
     /// the user left it blank.
+    ///
+    /// A probed value is a PATH (`command -v` or an install candidate), so it
+    /// is saved marked as one: a home with a space in it
+    /// (`/Users/Jane Doe/.local/bin/hermes`) must stay one word, where a value
+    /// the user typed with spaces is a command line meant as words.
     func configForSave() -> SSHConfig {
         var cfg = draftConfig
         if cfg.hermesBinaryHint == nil, case .success(let path, _, _) = testResult {
             cfg.hermesBinaryHint = path
+            if !testedWithTypedBinary { cfg.hermesBinaryHintIsPath = true }
         }
         return cfg
     }

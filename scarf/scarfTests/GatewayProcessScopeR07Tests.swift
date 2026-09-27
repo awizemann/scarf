@@ -242,8 +242,59 @@ struct GatewayProcessScopeR07Tests {
         #expect(argv.contains("deploy@box.local"))
         #expect(argv.contains { $0.hasPrefix("HERMES_HOME=") && $0.contains("profiles/work") })
         #expect(Array(argv.suffix(3)) == ["/home/deploy/.local/bin/hermes", "gateway", "setup"])
-        // Quoted for the LOCAL shell so `$PATH`/`$HOME` expand remotely.
-        #expect(GatewaySetupTerminalCommand.shellLine(for: ctx).contains(#"'PATH="$PATH:"#))
+        // Quoted for the LOCAL shell so `$PATH`/`$HOME` expand remotely; the
+        // quote closes after `$PATH` so a csh/tcsh login shell doesn't read
+        // `$PATH:` as a modifier (R16c F1).
+        #expect(GatewaySetupTerminalCommand.shellLine(for: ctx).contains(#"'PATH="$PATH"":"#))
+    }
+
+    /// R16c F1 + F2, end to end: the Terminal line as the LOCAL shell splits
+    /// it, the words after `--` joined the way ssh joins them, then run by a
+    /// csh/tcsh login shell (and sh) against a throwaway home whose probed
+    /// hermes path has a space in it.
+    @Test(arguments: ["/bin/sh", "/bin/tcsh", "/bin/csh"].filter { FileManager.default.isExecutableFile(atPath: $0) })
+    func theGatewaySetupLineRunsUnderTheRemoteLoginShell(shell: String) throws {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-r16c-gw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let hermes = home.appendingPathComponent("My Tools/hermes")
+        try FileManager.default.createDirectory(
+            at: hermes.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\necho \"HOME_PIN=${HERMES_HOME:-none} ARGS=$*\"\n"
+            .write(to: hermes, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hermes.path)
+
+        func remoteText(_ ctx: ServerContext) throws -> String {
+            // What ssh sends: the local shell's words after `--`, joined.
+            let script = "f() { while [ \"$1\" != \"--\" ]; do shift; done; shift; printf '%s' \"$*\"; }; f "
+                + GatewaySetupTerminalCommand.shellLine(for: ctx)
+            return try Self.runShell("/bin/sh", script, home: home).1
+        }
+        let root = ServerContext(id: UUID(), displayName: "Box", kind: .ssh(SSHConfig(
+            host: "box", hermesBinaryHint: hermes.path, hermesBinaryHintIsPath: true)))
+        #expect(try Self.runShell(shell, try remoteText(root), home: home)
+            == (0, "HOME_PIN=none ARGS=-p default gateway setup"))
+        let named = ServerContext(id: UUID(), displayName: "Box", kind: .ssh(SSHConfig(
+            host: "box", remoteHome: "~/.hermes/profiles/work",
+            hermesBinaryHint: hermes.path, hermesBinaryHintIsPath: true)))
+        #expect(try Self.runShell(shell, try remoteText(named), home: home)
+            == (0, "HOME_PIN=\(home.path)/.hermes/profiles/work ARGS=gateway setup"))
+    }
+
+    private static func runShell(_ shell: String, _ command: String, home: URL) throws -> (Int32, String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: shell)
+        proc.arguments = ["-c", command]
+        proc.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = out
+        proc.standardInput = FileHandle.nullDevice
+        try proc.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return (proc.terminationStatus, String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @Test func theGatewaySetupCommandPinsALocalRootWindow() {

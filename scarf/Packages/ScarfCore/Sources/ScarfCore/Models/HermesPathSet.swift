@@ -21,6 +21,10 @@ public struct HermesPathSet: Sendable, Hashable {
     /// Populated by `SSHTransport` once `command -v hermes` has run on the
     /// target host. Unused when `isRemote == false`.
     public let binaryHint: String?
+    /// `binaryHint` is a path Test Connection found (one word even with a
+    /// space in it), not a value the user typed. See
+    /// `SSHConfig.hermesBinaryHintIsPath`.
+    public let binaryHintIsPath: Bool
 
     // MARK: - Defaults
 
@@ -29,11 +33,13 @@ public struct HermesPathSet: Sendable, Hashable {
     public init(
         home: String,
         isRemote: Bool,
-        binaryHint: String?
+        binaryHint: String?,
+        binaryHintIsPath: Bool = false
     ) {
         self.home = home
         self.isRemote = isRemote
         self.binaryHint = binaryHint
+        self.binaryHintIsPath = binaryHintIsPath
     }
     /// Resolved path to the active local Hermes profile (issue #50).
     ///
@@ -156,11 +162,42 @@ public struct HermesPathSet: Sendable, Hashable {
     /// as the user typed it, instead of quoting it as one command name
     /// (S15-F3). A single path with a space in it has to be quoted by the
     /// user in that case, the same as in a terminal.
-    public nonisolated static func binaryHintIsShellFragment(_ hint: String?) -> Bool {
-        guard let hint else { return false }
+    ///
+    /// `isPath` is true for a path Test Connection found: that is one word
+    /// whatever it contains (`/Users/Jane Doe/.local/bin/hermes`), and
+    /// reading it as words ran `/Users/Jane` and exited 127.
+    public nonisolated static func binaryHintIsShellFragment(_ hint: String?, isPath: Bool = false) -> Bool {
+        guard let hint, !isPath else { return false }
         return hint.trimmingCharacters(in: .whitespaces)
             .contains(where: { $0 == " " || $0 == "\t" })
     }
+
+    /// Whether ``hermesBinary`` is a user-typed shell fragment (see
+    /// ``binaryHintIsShellFragment(_:isPath:)``). Always false locally.
+    public nonisolated var hermesBinaryIsShellFragment: Bool {
+        isRemote && Self.binaryHintIsShellFragment(binaryHint, isPath: binaryHintIsPath)
+    }
+
+    /// ``hermesBinary`` as text for a shell command line (a `/bin/sh -c`
+    /// script, or the words a Terminal hands the remote login shell).
+    ///
+    /// A path Test Connection found is quoted as one word when it needs it
+    /// (a space, a quote, `$`); every other value goes in exactly as before:
+    /// bare `hermes`, a plain path, and the user's own override, which may be
+    /// a command line meant to be read as words. Single quotes, via
+    /// `HermesProfileScope.shellQuotePath`, mean the same thing to sh, bash,
+    /// zsh, dash and csh/tcsh.
+    public nonisolated var hermesBinaryShellWord: String {
+        let bin = hermesBinary
+        guard isRemote, binaryHintIsPath, binaryHint != nil,
+              bin.unicodeScalars.contains(where: { !Self.shellInertScalars.contains($0) })
+        else { return bin }
+        return HermesProfileScope.shellQuotePath(bin)
+    }
+
+    /// Characters that need no quoting in any shell Scarf talks to.
+    private nonisolated static let shellInertScalars = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+=:,./-_")
 
     /// Resolved path to the `hermes` executable for this installation.
     ///
