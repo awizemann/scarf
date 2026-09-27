@@ -285,12 +285,17 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
         let name = HermesProfileScope.normalize(profile)
         switch kind {
         case .local:
+            // Always frozen into `localHomeOverride`, even when the pin equals
+            // the home resolved right now. Without an override a local
+            // context re-resolves `~/.hermes/active_profile` on every access,
+            // so a bot pinned while the sticky profile happened to match
+            // followed it when `hermes profile use` later changed it: the
+            // default bot's reads moved to another profile while its ACP,
+            // launched with `-p default`, stayed on the root.
             let base = localHomeOverride ?? HermesPathSet.defaultLocalHome
             let root = HermesProfileScope.rootHome(forHome: base)
-            let pinned = HermesProfileScope.resolveHome(baseHome: root, profile: name)
-            guard pinned != base else { return self }
             var copy = self
-            copy.localHomeOverride = pinned
+            copy.localHomeOverride = HermesProfileScope.resolveHome(baseHome: root, profile: name)
             return copy
         case .ssh(var config):
             let base = config.remoteHome ?? HermesPathSet.defaultRemoteHome
