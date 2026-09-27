@@ -96,14 +96,6 @@ import SQLite3
         vm.messages.filter(\.isUser).map(\.content)
     }
 
-    /// Switch away and back. `reset()` closes the data service in a
-    /// fire-and-forget task; give it time to land before the reopen, as the
-    /// app's own reopen (seconds later, after an ACP spawn) always does —
-    /// otherwise the close can race the reload's open.
-    private static func letResetCloseLand() async throws {
-        try await Task.sleep(for: .milliseconds(100))
-    }
-
     /// Echo `typed`, report the wire payload, let Hermes store `stored`
     /// (nil = no row), then switch away and back.
     @MainActor
@@ -123,11 +115,9 @@ import SQLite3
             try fx.insert(id: 2, role: "assistant", content: "reply")
         }
         vm.reset()
-        try await letResetCloseLand()
         await vm.loadSessionHistory(sessionId: "s")
         // A second reopen must not resurrect anything either.
         vm.reset()
-        try await letResetCloseLand()
         await vm.loadSessionHistory(sessionId: "s")
         return userTexts(vm)
     }
@@ -191,13 +181,11 @@ import SQLite3
         vm.addUserMessage(text: "hi")
         vm.notePromptWire(displayText: "hi", wireText: "hi", imageCount: 0)
         vm.reset()
-        try await Self.letResetCloseLand()
         await vm.loadSessionHistory(sessionId: "s")
         #expect(Self.userTexts(vm) == ["hi", "hi"])
         // Hermes catches up: exactly one of each now.
         try fx.insert(id: 3, role: "user", content: "hi")
         vm.reset()
-        try await Self.letResetCloseLand()
         await vm.loadSessionHistory(sessionId: "s")
         #expect(Self.userTexts(vm) == ["hi", "hi"])
         #expect(vm.messages.filter(\.isUser).allSatisfy { $0.id > 0 })
@@ -220,9 +208,47 @@ import SQLite3
         #expect(Self.userTexts(vm) == ["Expanded body."])
         // The settled echoes left the pending cache too.
         vm.reset()
-        try await Self.letResetCloseLand()
         await vm.loadSessionHistory(sessionId: "s")
         #expect(Self.userTexts(vm) == ["Expanded body."])
+    }
+
+    /// Autostart (typing into a blank Chat screen): the echo is made while
+    /// the chat has no session id, so nothing is cached; the wire note must
+    /// adopt it once the id is set, or a reconnect keeps it beside the row.
+    @Test @MainActor func autostartEchoIsAdoptedByTheWireNote() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        let vm = RichChatViewModel(context: fx.context)
+        vm.addUserMessage(text: "/scarf-help")
+        vm.setSessionId("s")
+        vm.notePromptWire(displayText: "/scarf-help", wireText: "Expanded body.", imageCount: 0)
+        try fx.insert(id: 1, role: "user", content: "Expanded body.")
+        await vm.reconcileWithDB(sessionId: "s")
+        #expect(Self.userTexts(vm) == ["Expanded body."])
+    }
+
+    /// Autostart whose `session/load` fell back to a NEW session: the echo
+    /// was cached under the old id and must move, not be re-injected into
+    /// the old session on its next open.
+    @Test @MainActor func autostartFallbackMovesTheEchoToTheNewSession() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        try fx.exec("""
+        INSERT INTO sessions (id, source, started_at, message_count, tool_call_count, input_tokens,
+            output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost_usd)
+        VALUES ('old', 'acp', 1700000000, 0, 0, 0, 0, 0, 0, 0);
+        """)
+        let vm = RichChatViewModel(context: fx.context)
+        vm.setSessionId("old")
+        vm.addUserMessage(text: "hello there")
+        vm.setSessionId("s")
+        vm.notePromptWire(displayText: "hello there", wireText: "hello there", imageCount: 0)
+        vm.reset()
+        await vm.loadSessionHistory(sessionId: "old")
+        #expect(Self.userTexts(vm).isEmpty, "echo re-injected into the session it was never sent to")
+        vm.reset()
+        await vm.loadSessionHistory(sessionId: "s")
+        #expect(Self.userTexts(vm) == ["hello there"], "unpersisted echo lost from its real session")
     }
 }
 

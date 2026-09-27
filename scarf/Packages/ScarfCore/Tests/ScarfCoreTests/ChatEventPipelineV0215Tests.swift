@@ -193,6 +193,32 @@ import Foundation
         #expect(vm.messages.filter(\.isAssistant).map(\.content) == ["Hello there"])
     }
 
+    /// A normal multi-round turn (thought → tool → thought → answer) must
+    /// render exactly as on a host without ids: Hermes closes the id before
+    /// each tool round, but the tool completion already finalized the
+    /// bubble, so the id change adds no extra split — and the turn clock
+    /// (`turnDurations`) is recorded the same number of times.
+    @Test @MainActor func multiRoundTurnRendersTheSameWithAndWithoutIds() throws {
+        func run(ids: Bool) throws -> (rows: [String], durations: Int) {
+            let vm = Self.engagedVM()
+            vm.handleACPEvent(.thoughtChunk(sessionId: "s", text: "plan", messageId: ids ? "a" : nil))
+            vm.handleACPEvent(try #require(Self.parse(Self.readA)))
+            vm.handleACPEvent(try #require(Self.parse(Self.complete("tc-aaaaaaaaaaaa"))))
+            vm.handleACPEvent(.thoughtChunk(sessionId: "s", text: "more", messageId: ids ? "b" : nil))
+            vm.handleACPEvent(.messageChunk(sessionId: "s", text: "Answer", messageId: ids ? "b" : nil))
+            vm.handleACPEvent(.promptComplete(sessionId: "s", response: ACPPromptResult(
+                stopReason: "end_turn", inputTokens: 1, outputTokens: 1, thoughtTokens: 0, cachedReadTokens: 0
+            )))
+            let rows = vm.messages.filter(\.isAssistant).map { "\($0.content)|\($0.reasoning ?? "")|\($0.toolCalls.count)" }
+            return (rows, vm.turnDurations.count)
+        }
+        let withIds = try run(ids: true)
+        let without = try run(ids: false)
+        #expect(withIds.rows == without.rows)
+        #expect(withIds.durations == without.durations)
+        #expect(withIds.rows == ["|plan|1", "Answer|more|0"])
+    }
+
     /// A reply's thoughts and its text share one id: one message.
     @Test @MainActor func thoughtAndTextOfOneReplyStayTogether() throws {
         let vm = Self.engagedVM()
@@ -232,6 +258,9 @@ import Foundation
         // Image-only.
         #expect(keys("", 2, Self.roster) == ["[screenshot]", "[Image attachment]"])
         #expect(keys("  ", 0, Self.roster) == [])
+        // Hermes splits on any whitespace and lower-cases the name.
+        #expect(keys("/steer\nbe brief", 0, Self.roster) == ["be brief"])
+        #expect(keys("/HELP", 0, Self.roster) == [])
     }
 
     private static func row(_ id: Int, _ content: String, role: String = "user", summary: Bool = false) -> HermesMessage {
@@ -277,6 +306,29 @@ import Foundation
             Self.echo(-2, "hi", watermark: 0, keys: ["hi"]),
         ]
         #expect(RichChatViewModel.settledEchoIds(twice, persisted: rows) == [-1])
+    }
+
+    /// A short prompt whose row never landed must not claim a later
+    /// prompt's row that merely contains its text — the later prompt's own
+    /// echo gets it (strict pass first).
+    @Test func strictShapesWinBeforeContainment() {
+        let rows = [Self.row(5, "go ahead and fix it")]
+        let echoes = [
+            Self.echo(-1, "go", watermark: 0, keys: ["go"]),
+            Self.echo(-2, "go ahead and fix it", watermark: 0, keys: ["go ahead and fix it"]),
+        ]
+        #expect(RichChatViewModel.settledEchoIds(echoes, persisted: rows) == [-2])
+    }
+
+    /// Terminal-mode / bot CLI polling merge: a re-sent text survives
+    /// beside the older identical row until its own row lands.
+    @Test func pollMergeKeepsAResendAboveAnOlderIdenticalRow() {
+        let older = Self.row(1, "hi")
+        let resend = Self.row(-1, "hi")
+        let merged = RichChatViewModel.mergedAfterPoll(fetched: [older], currentLocal: [older, resend])
+        #expect(merged.filter(\.isUser).map(\.id).sorted() == [-1, 1])
+        let landed = RichChatViewModel.mergedAfterPoll(fetched: [older, Self.row(2, "hi")], currentLocal: [older, resend])
+        #expect(landed.filter(\.isUser).map(\.id).sorted() == [1, 2])
     }
 
     /// A standalone compaction summary is a Hermes-authored user-role row;
