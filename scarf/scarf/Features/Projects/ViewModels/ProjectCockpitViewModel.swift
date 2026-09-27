@@ -304,11 +304,10 @@ final class ProjectCockpitViewModel {
             var memory: String?
             if let ns = sp.memoryNamespace {
                 let memText = context.readText(context.paths.memoryMD)
-                memory = Self.extractBlock(
-                    memText,
-                    begin: "<!-- scarf-template:\(ns):begin -->",
-                    end: "<!-- scarf-template:\(ns):end -->"
-                )
+                if let memText,
+                   let markers = ProjectTemplateService.memoryBlockMarkers(in: memText, templateId: ns) {
+                    memory = Self.extractBlock(memText, begin: markers.begin, end: markers.end)
+                }
             }
 
             let miniApps = MiniAppService(context: context).discover(projectPath: project.path)
