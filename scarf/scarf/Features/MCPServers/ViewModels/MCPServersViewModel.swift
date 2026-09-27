@@ -222,8 +222,9 @@ final class MCPServersViewModel {
         guard !testingNames.contains(name) else { return }
         testingNames.insert(name)
         let fileService = self.fileService
+        let connectTimeout = servers.first { $0.name == name }?.connectTimeout
         Task.detached { [weak self] in
-            let result = await fileService.testMCPServer(name: name)
+            let result = await fileService.testMCPServer(name: name, connectTimeout: connectTimeout)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.testingNames.remove(name)
@@ -250,6 +251,9 @@ final class MCPServersViewModel {
         // Skip servers already being probed individually rather than
         // double-launching them.
         let targets = servers.map(\.name).filter { !testingNames.contains($0) }
+        let connectTimeouts = Dictionary(
+            servers.map { ($0.name, $0.connectTimeout) }, uniquingKeysWith: { first, _ in first }
+        )
         guard !targets.isEmpty else { return }
         let fileService = self.fileService
         // Every target enters the spinner set UP FRONT: previously `testAll`
@@ -263,7 +267,10 @@ final class MCPServersViewModel {
                 func addTask() {
                     let name = targets[next]
                     next += 1
-                    group.addTask { (name, await fileService.testMCPServer(name: name)) }
+                    let connectTimeout = connectTimeouts[name] ?? nil
+                    group.addTask {
+                        (name, await fileService.testMCPServer(name: name, connectTimeout: connectTimeout))
+                    }
                 }
                 while next < targets.count, next < Self.maxConcurrentTests { addTask() }
                 while let (name, result) = await group.next() {

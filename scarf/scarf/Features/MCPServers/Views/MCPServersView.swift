@@ -102,7 +102,12 @@ struct MCPServersView: View {
                     context: viewModel.context,
                     onFinished: { didSucceed in
                         loginServer = nil
-                        if didSucceed { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
+                        // `force: true` (S09-F5): `hasLoaded` is already set,
+                        // so a plain `load` returned at once and the new
+                        // token's badge and Clear Token control stayed stale.
+                        if didSucceed {
+                            viewModel.load(force: true, capabilities: capabilitiesStore?.capabilities ?? .empty)
+                        }
                     }
                 )
             }

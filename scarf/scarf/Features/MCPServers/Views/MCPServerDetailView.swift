@@ -245,12 +245,21 @@ struct MCPServerDetailView: View {
         )
     }
 
+    /// `include: []` is a whitelist of nothing: Hermes registers no tools
+    /// from this server, which is the opposite of "(all)".
+    private var includeSummary: String {
+        if !server.toolsInclude.isEmpty { return server.toolsInclude.joined(separator: ", ") }
+        return server.toolsIncludeIsExplicit
+            ? String(localized: "(none — no tools registered)")
+            : String(localized: "(all)")
+    }
+
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Tool Filters")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Include", value: server.toolsInclude.isEmpty ? String(localized: "(all)") : server.toolsInclude.joined(separator: ", "))
+            summaryRow(label: "Include", value: includeSummary)
             summaryRow(label: "Exclude", value: server.toolsExclude.isEmpty ? "—" : server.toolsExclude.joined(separator: ", "))
             summaryRow(label: "Resources", value: server.resourcesEnabled ? String(localized: "enabled") : String(localized: "disabled"))
             summaryRow(label: "Prompts", value: server.promptsEnabled ? String(localized: "enabled") : String(localized: "disabled"))
@@ -272,8 +281,8 @@ struct MCPServerDetailView: View {
             Text("Timeouts")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Connect", value: server.connectTimeout.map { "\($0)s" } ?? String(localized: "default"))
-            summaryRow(label: "Call", value: server.timeout.map { "\($0)s" } ?? String(localized: "default"))
+            summaryRow(label: "Connect", value: server.connectTimeout.map { "\(HermesMCPServer.formatSeconds($0))s" } ?? String(localized: "default"))
+            summaryRow(label: "Call", value: server.timeout.map { "\(HermesMCPServer.formatSeconds($0))s" } ?? String(localized: "default"))
         }
         .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)

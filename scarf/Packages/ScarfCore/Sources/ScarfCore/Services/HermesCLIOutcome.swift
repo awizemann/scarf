@@ -1980,6 +1980,19 @@ public enum HermesMCPTestVerdict {
     /// (`hermes_cli/subcommands/mcp.py:49-50` @ v2026.9.7).
     public static func argv(name: String) -> [String] { ["mcp", "test", "--", name] }
 
+    /// How long Scarf lets one `mcp test` run before killing it (S09-F6).
+    ///
+    /// Hermes's own probe waits `connect_timeout` (default 30 s, clamped to
+    /// at least 1) and then gives the whole probe `connect_timeout + 10`
+    /// (`hermes_cli/mcp_config.py:431-443, 506` @ v2026.9.24), on top of
+    /// Python and CLI start-up. A flat 30 s killed slow servers and any
+    /// server configured with a longer `connect_timeout` before Hermes had
+    /// finished, and Scarf reported a failure the CLI would not have.
+    public static func timeout(connectTimeout: Double?) -> TimeInterval {
+        let configured = connectTimeout.flatMap { $0.isFinite ? $0 : nil } ?? 30
+        return max(30, configured) + 20
+    }
+
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
         HermesCLIVerdict.judge(
             output: output,

@@ -432,7 +432,8 @@ struct HermesFileService: Sendable {
                 identityHeader: server.identityHeader,
                 strictRedirectHeaders: server.strictRedirectHeaders,
                 cwd: server.cwd,
-                oauthFlow: server.oauthFlow
+                oauthFlow: server.oauthFlow,
+                toolsIncludeIsExplicit: server.toolsIncludeIsExplicit
             )
         }
     }
@@ -895,11 +896,15 @@ struct HermesFileService: Sendable {
         return HermesMCPRemoveVerdict.judge(output: result.output, exitCode: result.exitCode)
     }
 
-    nonisolated func testMCPServer(name: String) async -> MCPTestResult {
+    /// - Parameter connectTimeout: the server's configured
+    ///   `connect_timeout`, which sets how long Hermes's own probe may take
+    ///   (S09-F6, ``HermesMCPTestVerdict/timeout(connectTimeout:)``).
+    nonisolated func testMCPServer(name: String, connectTimeout: Double? = nil) async -> MCPTestResult {
         let started = Date()
         let service = self
+        let timeout = HermesMCPTestVerdict.timeout(connectTimeout: connectTimeout)
         let result = await Task.detached { () -> (Int32, String) in
-            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: 30)
+            service.runHermesCLI(args: HermesMCPTestVerdict.argv(name: name), timeout: timeout)
         }.value
         let elapsed = Date().timeIntervalSince(started)
         let tools = Self.parseToolListFromTestOutput(result.1)
@@ -1053,25 +1058,51 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    nonisolated func updateMCPToolFilters(name: String, include: [String], exclude: [String], resources: Bool, prompts: Bool) -> Bool {
+    nonisolated func updateMCPToolFilters(
+        name: String,
+        include: [String],
+        exclude: [String],
+        resources: Bool,
+        prompts: Bool,
+        includeIsExplicit: Bool = false
+    ) -> Bool {
         patchMCPServerField(name: name) { entryLines in
-            Self.replaceOrInsertToolsBlock(include: include, exclude: exclude, resources: resources, prompts: prompts, in: &entryLines)
+            Self.replaceOrInsertToolsBlock(
+                include: include, includeIsExplicit: includeIsExplicit, exclude: exclude,
+                resources: resources, prompts: prompts, in: &entryLines
+            )
         }
     }
 
     @discardableResult
-    nonisolated func setMCPServerTimeouts(name: String, timeout: Int?, connectTimeout: Int?) -> Bool {
+    nonisolated func setMCPServerTimeouts(name: String, timeout: Double?, connectTimeout: Double?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
-            if let timeout {
-                Self.replaceOrInsertScalar(key: "timeout", value: String(timeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "timeout", in: &entryLines)
-            }
-            if let connectTimeout {
-                Self.replaceOrInsertScalar(key: "connect_timeout", value: String(connectTimeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "connect_timeout", in: &entryLines)
-            }
+            Self.writeSeconds(key: "timeout", value: timeout, in: &entryLines)
+            Self.writeSeconds(key: "connect_timeout", value: connectTimeout, in: &entryLines)
+        }
+    }
+
+    /// Writes ONE of the two timeout keys and leaves the other line exactly
+    /// as it is. The editor calls this only for a field the user changed, so
+    /// a `connect_timeout: 45.0` Hermes wrote survives an unrelated save
+    /// byte-for-byte (S09-F3).
+    @discardableResult
+    nonisolated func setMCPServerTimeout(name: String, key: MCPTimeoutKey, seconds: Double?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            Self.writeSeconds(key: key.rawValue, value: seconds, in: &entryLines)
+        }
+    }
+
+    enum MCPTimeoutKey: String, Sendable {
+        case timeout
+        case connectTimeout = "connect_timeout"
+    }
+
+    nonisolated private static func writeSeconds(key: String, value: Double?, in entryLines: inout [String]) {
+        if let value {
+            replaceOrInsertScalar(key: key, value: HermesMCPServer.formatSeconds(value), in: &entryLines)
+        } else {
+            removeScalar(key: key, in: &entryLines)
         }
     }
 
@@ -1189,6 +1220,9 @@ struct HermesFileService: Sendable {
         var headersMap: [String: String] = [:]
         var includeList: [String] = []
         var excludeList: [String] = []
+        // `tools.include` holds a list or a string (whitelist mode), even an
+        // empty one. See `HermesMCPServer.toolsIncludeIsExplicit`.
+        var includeIsExplicit = false
         var resources = true
         var prompts = true
         var subSection: String?
@@ -1245,8 +1279,16 @@ struct HermesFileService: Sendable {
             // `!= "false"` test read `enabled: no` as enabled — Scarf showed
             // a live server the gateway was ignoring.
             let enabled = Self.boolish(fields["enabled"], default: true, capabilities: capabilities)
-            let timeout = fields["timeout"].flatMap(Int.init)
-            let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
+            // Floats, not Ints: `mcp add --connect-timeout 90` stores
+            // `connect_timeout: 90.0` (see `HermesMCPServer.timeout`).
+            // `Int.init` read that as absent, and the editor then dropped
+            // the key on its next save.
+            func seconds(_ raw: String?) -> Double? {
+                guard let raw, let value = Double(Self.unquote(raw)), value.isFinite else { return nil }
+                return value
+            }
+            let timeout = seconds(fields["timeout"])
+            let connectTimeout = seconds(fields["connect_timeout"])
             // v0.14 — supports_parallel_tool_calls is an optional bool;
             // absent means "use Hermes's default" and stays nil.
             // Absent stays nil ("use Hermes's default"); a present value is
@@ -1346,7 +1388,8 @@ struct HermesFileService: Sendable {
                 identityHeader: identityHeader,
                 strictRedirectHeaders: strictRedirectHeaders,
                 cwd: cwd,
-                oauthFlow: oauthFlow
+                oauthFlow: oauthFlow,
+                toolsIncludeIsExplicit: includeIsExplicit
             )
             servers.append(server)
 
@@ -1357,6 +1400,7 @@ struct HermesFileService: Sendable {
             headersMap = [:]
             includeList = []
             excludeList = []
+            includeIsExplicit = false
             // `_parse_boolish(tools_filter.get(f), default=True)`
             // (`tools/mcp_tool_registration.py:77`): an ABSENT key means
             // exposed, not hidden. Defaulting these to false made the editor
@@ -1448,23 +1492,50 @@ struct HermesFileService: Sendable {
                     if let (key, value) = keyValue(trimmed) {
                         headersMap[key] = Self.unquote(value)
                     }
-                case "tools":
-                    if trimmed == "include:" {
-                        subSection = "tools.include"
-                    } else if trimmed == "exclude:" {
-                        subSection = "tools.exclude"
-                    } else if let (key, value) = keyValue(trimmed), key == "resources" {
+                case "tools", "tools.include", "tools.exclude":
+                    // A `- item` line belongs to whichever list is open. ANY
+                    // other line is a sibling key of the `tools:` block and
+                    // closes that list. S09-F1: the list states used to
+                    // swallow every line after them, so in Scarf's own
+                    // layout (`include:` → `exclude:` → `resources:` →
+                    // `prompts:`) the exclude items were read as INCLUDE
+                    // items and `resources`/`prompts: false` were dropped.
+                    // The editor then saved that misread back, turning a
+                    // blocklist into a whitelist of exactly the tools the
+                    // user had blocked.
+                    if trimmed == "-" || trimmed.hasPrefix("- ") {
+                        let item = Self.unquote(Self.stripInlineComment(String(trimmed.dropFirst(1))))
+                        if subSection == "tools.include" {
+                            includeList.append(item)
+                            includeIsExplicit = true
+                        } else if subSection == "tools.exclude" {
+                            excludeList.append(item)
+                        }
+                        continue
+                    }
+                    subSection = "tools"
+                    guard let (key, value) = keyValue(trimmed) else { continue }
+                    switch key {
+                    case "include", "exclude":
+                        // Hermes's `_normalize_name_filter`
+                        // (`tools/mcp_tool_schema.py:231-240` @ v2026.9.24):
+                        // null → nothing, a string → one entry, a list →
+                        // its items. Block lists open the list state; the
+                        // flow and scalar forms are read in place.
+                        let parsed = Self.toolNameFilter(value)
+                        if key == "include" {
+                            includeList = parsed.items
+                            includeIsExplicit = parsed.isExplicit
+                        } else {
+                            excludeList = parsed.items
+                        }
+                        if parsed.opensBlockList { subSection = "tools.\(key)" }
+                    case "resources":
                         resources = Self.boolish(value, default: true, capabilities: capabilities)
-                    } else if let (key, value) = keyValue(trimmed), key == "prompts" {
+                    case "prompts":
                         prompts = Self.boolish(value, default: true, capabilities: capabilities)
-                    }
-                case "tools.include":
-                    if trimmed.hasPrefix("- ") {
-                        includeList.append(Self.unquote(String(trimmed.dropFirst(2))))
-                    }
-                case "tools.exclude":
-                    if trimmed.hasPrefix("- ") {
-                        excludeList.append(Self.unquote(String(trimmed.dropFirst(2))))
+                    default:
+                        break
                     }
                 case "oauth":
                     if let (key, value) = keyValue(trimmed), key == "flow" {
@@ -2248,7 +2319,25 @@ struct HermesFileService: Sendable {
         }
     }
 
-    nonisolated private static func replaceOrInsertToolsBlock(include: [String], exclude: [String], resources: Bool, prompts: Bool, in lines: inout [String]) {
+    /// Rewrites the entry's `tools:` block from Scarf's model.
+    ///
+    /// An empty list is OMITTED, not written as a bare `include:` /
+    /// `exclude:` (S09-F1). Hermes reads a bare key as null, so the old
+    /// output meant the right thing on the host, but it is the layout that
+    /// Scarf's own parser misread, and a written `include:` has two
+    /// meanings Hermes keeps apart: null means "no whitelist" while `[]`
+    /// means "register nothing" (`tools/mcp_tool_registration.py:209-225`
+    /// @ v2026.9.24). So an include list is written only when there is one,
+    /// and `includeIsExplicit` with no items writes `include: []` on
+    /// purpose.
+    nonisolated private static func replaceOrInsertToolsBlock(
+        include: [String],
+        includeIsExplicit: Bool = false,
+        exclude: [String],
+        resources: Bool,
+        prompts: Bool,
+        in lines: inout [String]
+    ) {
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
@@ -2272,10 +2361,16 @@ struct HermesFileService: Sendable {
         }
 
         var newLines: [String] = ["    tools:"]
-        newLines.append("      include:")
-        for tool in include { newLines.append("        - \(yamlScalar(tool))") }
-        newLines.append("      exclude:")
-        for tool in exclude { newLines.append("        - \(yamlScalar(tool))") }
+        if !include.isEmpty {
+            newLines.append("      include:")
+            for tool in include { newLines.append("        - \(yamlScalar(tool))") }
+        } else if includeIsExplicit {
+            newLines.append("      include: []")
+        }
+        if !exclude.isEmpty {
+            newLines.append("      exclude:")
+            for tool in exclude { newLines.append("        - \(yamlScalar(tool))") }
+        }
         newLines.append("      resources: \(resources ? "true" : "false")")
         newLines.append("      prompts: \(prompts ? "true" : "false")")
 
@@ -2430,6 +2525,32 @@ struct HermesFileService: Sendable {
     /// path or an inline YAML list (`[cert, key, password]`). For a list,
     /// returns the first element (the cert path); for a scalar, returns it
     /// unquoted. Tolerant of whitespace and quoting on the list element.
+    /// One `tools.include` / `tools.exclude` value as Hermes's
+    /// `_normalize_name_filter` reads it (`tools/mcp_tool_schema.py:231-240`
+    /// @ v2026.9.24): null is "no filter", a string is one entry and a list
+    /// is its items. `value` is the text after the colon, comment already
+    /// stripped.
+    ///
+    /// - `isExplicit`: the key holds a list or a string, which for `include`
+    ///   means whitelist mode even when the list is empty.
+    /// - `opensBlockList`: the value is empty, so any `- item` lines that
+    ///   follow are this key's block list. With no items it stays null.
+    nonisolated static func toolNameFilter(
+        _ value: String
+    ) -> (items: [String], isExplicit: Bool, opensBlockList: Bool) {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return ([], false, true) }
+        if ["~", "null", "Null", "NULL"].contains(trimmed) { return ([], false, false) }
+        if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
+            let inner = String(trimmed.dropFirst().dropLast())
+            let items = HermesYAML.splitFlowEntries(inner)
+                .map { unquote($0.trimmingCharacters(in: .whitespaces)) }
+                .filter { !$0.isEmpty }
+            return (items, true, false)
+        }
+        return ([unquote(trimmed)], true, false)
+    }
+
     nonisolated private static func firstListElementOrScalar(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("[") else { return unquote(trimmed) }

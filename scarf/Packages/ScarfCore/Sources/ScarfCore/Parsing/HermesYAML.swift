@@ -821,7 +821,7 @@ public enum HermesYAML {
     /// wrong test.
     ///
     /// Empty entries survive as empty substrings; both callers drop them.
-    static func splitFlowEntries(_ inner: String) -> [Substring] {
+    public static func splitFlowEntries(_ inner: String) -> [Substring] {
         var out: [Substring] = []
         var start = inner.startIndex
         var i = inner.startIndex
