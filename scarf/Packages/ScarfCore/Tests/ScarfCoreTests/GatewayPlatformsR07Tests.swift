@@ -233,7 +233,6 @@ struct GatewayPlatformsR07Tests {
         sleeper.arguments = ["-c", "exec -a '\(fake)' /bin/sleep 20"]
         try sleeper.run()
         defer { sleeper.terminate() }
-        Thread.sleep(forTimeInterval: 0.5)
 
         func pgrep(_ profile: String?) throws -> [Int32] {
             let p = Process()
@@ -246,7 +245,13 @@ struct GatewayPlatformsR07Tests {
             let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             return text.split(separator: "\n").compactMap { Int32($0) }
         }
-        #expect(try pgrep(marker).contains(sleeper.processIdentifier))
+        // Poll until bash has exec'd into the renamed process.
+        var found = false
+        for _ in 0..<100 where !found {
+            found = try pgrep(marker).contains(sleeper.processIdentifier)
+            if !found { Thread.sleep(forTimeInterval: 0.05) }
+        }
+        #expect(found)
         #expect(try !pgrep(nil).contains(sleeper.processIdentifier),
                 "a named-profile gateway read as the default profile's")
     }

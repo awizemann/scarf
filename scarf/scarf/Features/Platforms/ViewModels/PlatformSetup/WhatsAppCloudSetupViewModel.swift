@@ -211,7 +211,7 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
     /// The `.env` pairs and config.yaml keys a Save writes. See the type doc.
     func savePlan() -> (env: [String: String], config: [String: String]) {
         var env: [String: String] = [:]
-        var config: [String: String] = [:]
+        var configKV: [String: String] = [:]
         let configured = !phoneNumberID.trimmingCharacters(in: .whitespaces).isEmpty
             && !accessToken.trimmingCharacters(in: .whitespaces).isEmpty
         // whatsapp_cloud is a BUILT-IN platform, so `enabled` defaults false
@@ -220,7 +220,7 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
         // a blank field here may be a credential that lives somewhere this
         // form does not show, and an explicit `false` beats `.env` credentials.
         if configured {
-            config["platforms.whatsapp_cloud.enabled"] = "true"
+            configKV["platforms.whatsapp_cloud.enabled"] = "true"
         } else if enabledKeyInConfig,
                   phoneNumberID.trimmingCharacters(in: .whitespaces).isEmpty,
                   accessToken.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -228,19 +228,19 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
             // files, so nothing is left anywhere. Turn off the switch a
             // previous save turned on, or the gateway starts a credential-less
             // adapter that goes fatal. Only over a key that already exists.
-            config["platforms.whatsapp_cloud.enabled"] = "false"
+            configKV["platforms.whatsapp_cloud.enabled"] = "false"
         }
         if credentialsInConfig {
             // Legacy layout: leave the block in config.yaml. These cross argv
             // (`hermes config set` has no other input) — the reason new
             // setups go to `.env` instead.
-            config["platforms.whatsapp_cloud.extra.phone_number_id"] = phoneNumberID
-            config["platforms.whatsapp_cloud.extra.access_token"] = accessToken
-            config["platforms.whatsapp_cloud.extra.verify_token"] = verifyToken
-            config["platforms.whatsapp_cloud.extra.app_secret"] = appSecret
-            config["platforms.whatsapp_cloud.extra.app_id"] = appID
-            config["platforms.whatsapp_cloud.extra.waba_id"] = wabaID
-            config["platforms.whatsapp_cloud.extra.api_version"] = apiVersion
+            configKV["platforms.whatsapp_cloud.extra.phone_number_id"] = phoneNumberID
+            configKV["platforms.whatsapp_cloud.extra.access_token"] = accessToken
+            configKV["platforms.whatsapp_cloud.extra.verify_token"] = verifyToken
+            configKV["platforms.whatsapp_cloud.extra.app_secret"] = appSecret
+            configKV["platforms.whatsapp_cloud.extra.app_id"] = appID
+            configKV["platforms.whatsapp_cloud.extra.waba_id"] = wabaID
+            configKV["platforms.whatsapp_cloud.extra.api_version"] = apiVersion
         } else {
             // `.env` (0600, written through the transport): no secret on argv.
             env[Self.phoneEnv] = phoneNumberID
@@ -261,16 +261,16 @@ final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
                 .filter { !$0.isEmpty }
                 .map { "\"" + $0.replacingOccurrences(of: "\\", with: "\\\\")
                     .replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
-            config["platforms.whatsapp_cloud.extra.allow_from"] = "[" + items.joined(separator: ", ") + "]"
+            configKV["platforms.whatsapp_cloud.extra.allow_from"] = "[" + items.joined(separator: ", ") + "]"
         } else {
-            config["platforms.whatsapp_cloud.extra.allow_from"] = allowFrom
+            configKV["platforms.whatsapp_cloud.extra.allow_from"] = allowFrom
         }
         // `dm_policy` only when config.yaml already carries it or the user
         // changed it — otherwise the adapter's own default (allowlist when an
         // allowlist exists) must stay in charge.
         if dmPolicyInConfig || dmPolicy != loadedDMPolicy {
-            config["platforms.whatsapp_cloud.extra.dm_policy"] = dmPolicy
+            configKV["platforms.whatsapp_cloud.extra.dm_policy"] = dmPolicy
         }
-        return (env, config)
+        return (env, configKV)
     }
 }
