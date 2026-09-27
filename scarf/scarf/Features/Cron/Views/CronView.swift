@@ -524,7 +524,8 @@ struct CronView: View {
     private func rowAccessibilityValue(_ job: HermesCronJob) -> String {
         var parts: [String] = []
         if let schedule = job.schedule.expression ?? job.schedule.display, !schedule.isEmpty {
-            parts.append(schedule)
+            parts.append(CronScheduleFormatter.withZoneNote(
+                schedule, for: job.schedule, zoneNote: viewModel.scheduleZoneNote))
         }
         if let next = job.nextRunAt {
             parts.append(String(localized: "next \(CronScheduleFormatter.formatNextRun(iso: next))"))
