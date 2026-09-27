@@ -708,13 +708,31 @@ public final class ProjectsViewModel {
         // below sees the job not yet paused, skips it, and the pause then
         // lands on a restored project.
         await cronFollowUp?.value
-        var recorded: [String] = []
+        var record: [String]?
+        var restored: ProjectEntry?
         guard await mutateEntry(project, action: "restore “\(project.name)”", { entry in
-            recorded = entry.archivePausedCronJobIDs ?? []
+            record = entry.archivePausedCronJobIDs
             entry.archived = false
             entry.archivePausedCronJobIDs = nil
+            restored = entry
         })
         else { return false }
+        if record == nil, let restored {
+            // No record: an older Scarf archived this. Resume nothing, but
+            // don't leave it silent — say how many of the project's jobs
+            // are paused so the user can decide.
+            let lifecycle = makeLifecycle(context)
+            let name = project.name
+            cronFollowUp = Task { [weak self] in
+                let paused = await OffPool.run { lifecycle.pausedCronJobIDs(for: restored) }
+                guard let self, !paused.isEmpty else { return }
+                self.fail(
+                    String(localized: "“\(name)” is restored"),
+                    reason: String(localized: "\(paused.count) of this project's cron jobs are paused. Resume them from the Cron tab if you want them running.")
+                )
+            }
+        }
+        let recorded = record ?? []
         if !recorded.isEmpty {
             // Off-pool for the same reason as in `archiveProject`.
             let lifecycle = makeLifecycle(context)

@@ -191,6 +191,13 @@ public struct ProjectLifecycleService: Sendable {
         return ids.filter { stillPaused.contains($0) }.filter { !runCron(["cron", "resume", $0]) }
     }
 
+    /// The attributed jobs that are paused now (Hermes's effective state).
+    /// Restoring a project archived with no record resumes none of them;
+    /// the caller tells the user how many there are.
+    public nonisolated func pausedCronJobIDs(for entry: ProjectEntry) -> [String] {
+        attributed(loadCronJobs(), to: entry).filter { $0.effectiveState == "paused" }.map(\.id)
+    }
+
     /// One cron verb, exit 0 or not. Through the transport, not a Mac-only
     /// helper: this runs on iOS over SSH too, and every subprocess Scarf
     /// spawns carries a timeout (charter C10).
@@ -241,20 +248,20 @@ extension ProjectEntry {
     /// since the registry's unknown-key contract carries through unchanged.
     static let archivePausedCronJobIDsKey = "archivePausedCronJobIds"
 
-    /// The ids archiving paused, or `nil` when there is no record: the row
-    /// isn't archived, archiving paused nothing, or an older Scarf archived
-    /// it (it recorded nothing, so restoring resumes nothing).
+    /// The ids archiving paused — `[]` when it paused nothing — or `nil`
+    /// when there is no record: the row isn't archived, or an older Scarf
+    /// archived it (it recorded nothing, so restoring resumes nothing and
+    /// only points the user at the jobs left paused).
     public var archivePausedCronJobIDs: [String]? {
         get {
             guard case .array(let values)? = extra[Self.archivePausedCronJobIDsKey] else { return nil }
-            let ids = values.compactMap { value -> String? in
+            return values.compactMap { value -> String? in
                 if case .string(let id) = value { return id }
                 return nil
             }
-            return ids.isEmpty ? nil : ids
         }
         set {
-            if let newValue, !newValue.isEmpty {
+            if let newValue {
                 extra[Self.archivePausedCronJobIDsKey] = .array(newValue.map { .string($0) })
             } else {
                 extra.removeValue(forKey: Self.archivePausedCronJobIDsKey)

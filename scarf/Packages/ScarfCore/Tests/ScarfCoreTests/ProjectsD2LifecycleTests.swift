@@ -425,6 +425,28 @@ import Foundation
             await vm.cronFollowUp?.value
             #expect(fake.calls.isEmpty)
             #expect(fake.job("tmpl")?["enabled"] as? Bool == false)
+            // …but says so: `mine` and `tmpl` are the project's paused jobs.
+            let notice = try #require(vm.mutationError)
+            #expect(notice.message.hasPrefix("2 of this project's cron jobs are paused"))
+        }
+    }
+
+    /// A record of "paused nothing" is not a legacy archive: no notice,
+    /// even though the project has jobs the user had paused themselves.
+    @Test func restoreAfterAnArchiveThatPausedNothingIsQuiet() async throws {
+        try await Self.withTempHome { ctx, root in
+            let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
+            let fake = FakeCron(jobsPath: try Self.writeJobs(ctx, projectID: project.id))
+            #expect(fake.run(["cron", "pause", "live"]))
+            let vm = Self.vm(ctx, fake)
+            #expect(await vm.archiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.first?
+                .archivePausedCronJobIDs == [])
+            #expect(await vm.unarchiveProject(try #require(vm.projects.first)))
+            await vm.cronFollowUp?.value
+            #expect(vm.mutationError == nil)
+            #expect(fake.calls == [["cron", "pause", "live"]])
         }
     }
 
@@ -498,8 +520,11 @@ import Foundation
         let decoded = try JSONDecoder().decode(ProjectEntry.self, from: JSONEncoder().encode(entry))
         #expect(decoded.archivePausedCronJobIDs == ["j1", "j2"])
         #expect(decoded.extra["agentNote"] == .string("keep"))
+        var empty = decoded
+        empty.archivePausedCronJobIDs = []
+        #expect(empty.archivePausedCronJobIDs == [])
         var cleared = decoded
-        cleared.archivePausedCronJobIDs = []
+        cleared.archivePausedCronJobIDs = nil
         #expect(cleared.archivePausedCronJobIDs == nil)
         #expect(cleared.extra[ProjectEntry.archivePausedCronJobIDsKey] == nil)
     }
