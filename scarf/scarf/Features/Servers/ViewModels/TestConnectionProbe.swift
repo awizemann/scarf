@@ -240,6 +240,15 @@ struct TestConnectionProbe {
         )
     }
 
+    /// Two script lines that put the user's LOGIN shell's PATH in front of
+    /// this sh's, without sourcing any rc file into sh. Shared with Remote
+    /// Diagnostics, which used to source the rc files and died under dash
+    /// (T6-F2).
+    nonisolated static let loginPathBorrow = #"""
+    lp=$("${SHELL:-/bin/sh}" -lc 'printf "__SCARF_PATH__%s" "$PATH"' </dev/null 2>/dev/null | sed -n 's/.*__SCARF_PATH__//p' | tail -n 1)
+    [ -n "$lp" ] && PATH="$lp:$PATH"
+    """#
+
     /// The remote probe script for `config`, fed to `/bin/sh -s` on stdin.
     /// Split out so tests can run it against a local shell.
     nonisolated static func probeScript(config: SSHConfig) -> String {
@@ -303,8 +312,7 @@ struct TestConnectionProbe {
         # the whole probe, and an rc command that reads stdin would eat
         # the rest of this script. The marker skips anything a profile
         # prints before the PATH.
-        lp=$("${SHELL:-/bin/sh}" -lc 'printf "__SCARF_PATH__%s" "$PATH"' </dev/null 2>/dev/null | sed -n 's/.*__SCARF_PATH__//p' | tail -n 1)
-        [ -n "$lp" ] && PATH="$lp:$PATH"
+        \#(loginPathBorrow)
         hpath=""
         if [ -n "$HERMES_HINT" ]; then
             # Resolve the first token of the hint via `command -v` so
