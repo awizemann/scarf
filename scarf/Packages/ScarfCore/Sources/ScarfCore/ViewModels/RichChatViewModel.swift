@@ -1631,6 +1631,21 @@ public final class RichChatViewModel {
         guard !currentId.isEmpty, sessionId != nil, !transcriptCovers(currentId) else { return }
         lineageSessionIds = transcriptSessionIds + [currentId]
     }
+
+    /// The lineage to load a resumed transcript with: `base` (root first,
+    /// or empty for a lone row), extended by the internal head a
+    /// `session/load` reported (`ACPSessionProvenance`) when the chain
+    /// rotated past what the caller knew. Empty when there is nothing to
+    /// span, which `loadSessionHistory` reads as `sessionId` alone.
+    nonisolated public static func lineage(
+        _ base: [String], for sessionId: String, addingLoadedHead head: String?
+    ) -> [String] {
+        let known = base.contains(sessionId) ? base : [sessionId]
+        guard let head, !head.isEmpty, !known.contains(head) else {
+            return base.contains(sessionId) ? base : []
+        }
+        return known + [head]
+    }
     /// Smallest DB id currently loaded for the *current session* (i.e.
     /// `sessionId`). Drives `loadEarlier()`: page back with
     /// `before: oldestLoadedMessageID`. `nil` when nothing has been

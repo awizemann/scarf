@@ -463,6 +463,19 @@ public actor ACPClient {
     }
 
     public func loadSession(cwd: String, sessionId: String) async throws -> String {
+        try await loadSessionWithProvenance(cwd: cwd, sessionId: sessionId).sessionId
+    }
+
+    /// ``loadSession(cwd:sessionId:)``, also returning the response's
+    /// `_meta.hermes.sessionProvenance` (`_session_response_fields`,
+    /// acp_adapter/server.py:597-602 @ v2026.9.24). A chain that rotated
+    /// while no client was attached is only visible here: the load answers
+    /// for the ACP id, and `currentHermesSessionId` names the internal row
+    /// the turns are now stored under. `nil` on hosts without the extension
+    /// (C1) and whenever Hermes could not build it (it is best-effort).
+    public func loadSessionWithProvenance(
+        cwd: String, sessionId: String
+    ) async throws -> (sessionId: String, provenance: ACPSessionProvenance?) {
         statusMessage = "Loading session \(sessionId.prefix(12))..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
@@ -510,7 +523,7 @@ public actor ACPClient {
         #if canImport(os)
         logger.info("Loaded ACP session: \(loadedId)")
         #endif
-        return loadedId
+        return (loadedId, ACPSessionProvenance(meta: dict["_meta"]))
     }
 
     // NOTE: There is deliberately NO `session/resume` wrapper here

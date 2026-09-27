@@ -1412,10 +1412,13 @@ final class ChatViewModel {
                 hasActiveProcess = true
 
                 let resolvedSessionId: String
+                var loadedHead: String?
                 if let existing = sessionToResume {
                     acpStatus = ACPPhase.loadingSession
                     do {
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: existing)
+                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: existing)
+                        resolvedSessionId = loaded.sessionId
+                        loadedHead = loaded.provenance?.currentHermesSessionId
                     } catch {
                         guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(existing) not found in ACP, creating new session")
@@ -1445,6 +1448,7 @@ final class ChatViewModel {
                 }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
+                noteLoadedHead(loadedHead)
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
                 disarmStartWatchdog()
@@ -2170,8 +2174,11 @@ final class ChatViewModel {
                 let resolvedSessionId: String
                 if let sessionId {
                     acpStatus = ACPPhase.loadingSession
+                    var loadedHead: String?
                     do {
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                        resolvedSessionId = loaded.sessionId
+                        loadedHead = loaded.provenance?.currentHermesSessionId
                     } catch {
                         guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(sessionId) not found in ACP, creating new session with history")
@@ -2197,10 +2204,13 @@ final class ChatViewModel {
                     // A rotated compression chain is listed under its tip;
                     // load the whole lineage as one transcript (R11
                     // carry-over), as Hermes does.
+                    // …extended by the head `session/load` reported when the
+                    // chain rotated past what the list knew.
                     await richChatViewModel.loadSessionHistory(
                         sessionId: sessionId,
                         acpSessionId: resolvedSessionId,
-                        lineage: transcriptLineage(for: sessionId)
+                        lineage: RichChatViewModel.lineage(
+                            transcriptLineage(for: sessionId), for: sessionId, addingLoadedHead: loadedHead)
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                 } else {
@@ -2555,7 +2565,8 @@ final class ChatViewModel {
                     // loses all conversation context. Keep in sync with the
                     // iOS ladder (Scarf iOS/Chat/ChatView.swift,
                     // attemptReconnect).
-                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: a sidebar
                     // click / delete / leaving the chat runs `stopACP`,
@@ -2580,6 +2591,8 @@ final class ChatViewModel {
                     beginHoldingSends(for: client)
                     self.hasActiveProcess = true
                     richChatViewModel.setSessionId(resolvedSessionId)
+                    // A rotation while disconnected: reconcile the new head too.
+                    noteLoadedHead(loaded.provenance?.currentHermesSessionId)
 
                     // Reconcile in-memory messages with what Hermes persisted to DB
                     await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
@@ -3255,6 +3268,19 @@ final class ChatViewModel {
     /// The compression chain `sessionId` belongs to (root first), from the
     /// sidebar row that lists it or from any list Scarf has loaded this
     /// launch (`SessionLineageIndex`); empty for an ordinary session.
+    /// A `session/load` answered with an internal head this transcript does
+    /// not cover: the chain rotated while no client was attached
+    /// (`ACPSessionProvenance`). Follow it like a live rotation — the
+    /// transcript spans it, id lookups on the new tip find the chain, and
+    /// the sidebar relists it under that tip. Nil or covered: no-op.
+    func noteLoadedHead(_ head: String?) {
+        guard let head, richChatViewModel.sessionId != nil,
+              !richChatViewModel.transcriptCovers(head) else { return }
+        richChatViewModel.noteSessionRotation(to: head)
+        SessionLineageIndex.shared.record(server: context.id, lineage: richChatViewModel.transcriptSessionIds)
+        scheduleSessionsRefresh()
+    }
+
     func transcriptLineage(for sessionId: String) -> [String] {
         if let row = recentSessions.first(where: { $0.covers(sessionId) }), row.lineageIds.count > 1 {
             return row.lineageIds

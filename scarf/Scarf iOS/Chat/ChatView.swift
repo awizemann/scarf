@@ -2818,7 +2818,8 @@ final class ChatController {
 
                     // load-only — see the doc comment above for why
                     // resume must never come back here.
-                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: "New
                     // chat", a resume or a project start (`stop()` cancels
@@ -2839,6 +2840,13 @@ final class ChatController {
                         await client?.recentStderr ?? ""
                     }
                     vm.setSessionId(resolvedSessionId)
+                    // The chain rotated while disconnected (the load's
+                    // `sessionProvenance` names a head the transcript does
+                    // not cover): span it, so the reconcile reads it too.
+                    if let head = loaded.provenance?.currentHermesSessionId {
+                        vm.noteSessionRotation(to: head)
+                        SessionLineageIndex.shared.record(server: context.id, lineage: vm.transcriptSessionIds)
+                    }
                     // Clear any error banner left over from a send that
                     // failed because the channel was torn down by
                     // pauseInBackground (gh#108: user sends, app
@@ -3218,8 +3226,11 @@ final class ChatController {
             // state.db below (via the original `sessionID`), so the user sees
             // the past content and can continue in a new context.
             let resolvedID: String
+            var loadedHead: String?
             do {
-                resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
+                let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionID)
+                resolvedID = loaded.sessionId
+                loadedHead = loaded.provenance?.currentHermesSessionId
             } catch {
                 resolvedID = try await client.newSession(cwd: cwd)
             }
@@ -3240,7 +3251,9 @@ final class ChatController {
             await vm.loadSessionHistory(
                 sessionId: sessionID,
                 acpSessionId: resolvedID == sessionID ? nil : resolvedID,
-                lineage: SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID)
+                lineage: RichChatViewModel.lineage(
+                    SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
+                    for: sessionID, addingLoadedHead: loadedHead)
             )
             state = .ready
             lastActiveSessionID = resolvedID
