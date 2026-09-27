@@ -30,6 +30,12 @@ struct HealthCheck: Identifiable {
         case ok
         case warning
         case error
+        /// A `hermes status` inventory row Hermes marks ✗ mid-line: an API
+        /// key that isn't set, a platform that isn't configured, a gateway
+        /// that is stopped, sudo off. Shown as off, never as passing, and not
+        /// counted as a failure either: most of these are simply not in use.
+        /// `hermes doctor` is where a missing piece is judged a problem.
+        case off
     }
 }
 
@@ -673,7 +679,11 @@ final class HealthViewModel {
         var currentTitle = ""
         var currentChecks: [HealthCheck] = []
 
-        for line in output.components(separatedBy: "\n") {
+        for rawLine in output.components(separatedBy: "\n") {
+            // A progress line rewritten in place (`doctor`'s "Running N
+            // connectivity checks…" + `\r` + the first result) reads, on a
+            // terminal, as whatever follows the last carriage return.
+            let line = rawLine.split(separator: "\r", omittingEmptySubsequences: false).last.map(String.init) ?? rawLine
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if trimmed.hasPrefix("◆ ") {
@@ -708,6 +718,23 @@ final class HealthViewModel {
                     let combined = [last.detail, extra].compactMap { $0 }.joined(separator: " ")
                     currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
                 }
+            } else if !currentTitle.isEmpty, let row = Self.midLineGlyphRowStatic(trimmed) {
+                // `hermes status` puts the mark mid-line: `_row` prints
+                // `  name  ✓|✗ text` (no colon) and `_kv_flag` prints
+                // `  Label:   ✓|✗ text` (`hermes_cli/status.py:35-52` @
+                // v2026.9.24). The mark decides the status: `Status: ✗
+                // stopped` used to count as a passing check, and every `_row`
+                // (API keys, auth and API-key providers, messaging platforms)
+                // was dropped.
+                currentChecks.append(row)
+            } else if Self.isRowDetailStatic(line), !currentChecks.isEmpty,
+                      trimmed.contains(":") {
+                // `_detail` lines under a `_row` (`    Auth file:  …`,
+                // `    Error:  …`, status.py:40-42) belong to the row above
+                // them, not to a check of their own.
+                let last = currentChecks.removeLast()
+                let combined = [last.detail, trimmed].compactMap { $0 }.joined(separator: " — ")
+                currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
             } else if !trimmed.isEmpty && trimmed.contains(":") && !trimmed.hasPrefix("┌") && !trimmed.hasPrefix("│") && !trimmed.hasPrefix("└") && !trimmed.hasPrefix("─") && !trimmed.hasPrefix("Run ") && !trimmed.hasPrefix("Found ") && !trimmed.hasPrefix("Tip:") {
                 let parts = trimmed.split(separator: ":", maxSplits: 1)
                 if parts.count == 2 {
@@ -741,6 +768,34 @@ final class HealthViewModel {
             ))
         }
         return sections
+    }
+
+    /// A `hermes status` row whose ✓/✗/⚠ mark sits after its label:
+    /// `_row`'s `name  ✓ text` or `_kv_flag`'s `Label:  ✗ text`. `nil` for
+    /// anything else, including the glyph-first lines handled above and a
+    /// plain `Key: value` whose value happens to contain a mark later on.
+    /// ✗ maps to ``HealthCheck/CheckStatus/off``, not `.error`: see there.
+    nonisolated static func midLineGlyphRowStatic(_ trimmed: String) -> HealthCheck? {
+        let marks: [(Character, HealthCheck.CheckStatus)] = [("✓", .ok), ("✗", .off), ("⚠", .warning)]
+        guard let index = trimmed.firstIndex(where: { ch in marks.contains { $0.0 == ch } }),
+              index != trimmed.startIndex,
+              trimmed[trimmed.index(before: index)] == " "
+        else { return nil }
+        var label = trimmed[..<index].trimmingCharacters(in: .whitespaces)
+        if label.hasSuffix(":") { label.removeLast() }
+        // The mark must be the FIRST thing after the label: a `_kv` value
+        // like `Model:  gpt ✓ fast` is not a flag row, and a label that
+        // still holds a colon is prose, not a row name.
+        guard !label.isEmpty, !label.contains(":"), label.count < 60 else { return nil }
+        let status = marks.first { $0.0 == trimmed[index] }!.1
+        let detail = trimmed[trimmed.index(after: index)...].trimmingCharacters(in: .whitespaces)
+        return HealthCheck(label: label, status: status, detail: detail.isEmpty ? nil : detail)
+    }
+
+    /// `_detail` indentation (four spaces, `hermes_cli/status.py:40-42`):
+    /// deeper than a row's two.
+    nonisolated private static func isRowDetailStatic(_ line: String) -> Bool {
+        line.hasPrefix("    ") && !line.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// True for a bare identifier shaped like a Python exception class —
