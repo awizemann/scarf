@@ -35,6 +35,32 @@ struct ProjectTemplateExporter: Sendable {
         ".github/copilot-instructions.md"
     ]
 
+    /// Which of the files an export needs (and the optional per-agent
+    /// instruction files) exist in the project folder. The only part of the
+    /// export preview that depends on the filesystem rather than the form —
+    /// so the sheet scans once, off the main actor, instead of re-running
+    /// seven transport `fileExists` calls (SSH round trips on a remote
+    /// host) on every keystroke.
+    struct ProjectFileScan: Sendable, Equatable {
+        let dashboardPresent: Bool
+        let readmePresent: Bool
+        let agentsMdPresent: Bool
+        let instructionFiles: [String]
+    }
+
+    /// Blocking transport I/O — call off the main actor (charter C10).
+    nonisolated func scanProjectFiles(projectDir dir: String) -> ProjectFileScan {
+        let transport = context.makeTransport()
+        return ProjectFileScan(
+            dashboardPresent: transport.fileExists(dir + "/.scarf/dashboard.json"),
+            readmePresent: transport.fileExists(dir + "/README.md"),
+            agentsMdPresent: transport.fileExists(dir + "/AGENTS.md"),
+            instructionFiles: Self.knownInstructionFiles.filter {
+                transport.fileExists(dir + "/" + $0)
+            }
+        )
+    }
+
     /// Author-facing description of what `export` will do with the given
     /// selections. Shown in the export sheet so the user knows exactly
     /// what's about to go into the bundle before saving.
@@ -84,13 +110,7 @@ struct ProjectTemplateExporter: Sendable {
     /// `FileManager.default.fileExists` would silently return `false`.
     nonisolated func previewPlan(for inputs: ExportInputs) -> ExportPlan {
         let dir = inputs.project.path
-        let transport = context.makeTransport()
-        let dashboard = transport.fileExists(dir + "/.scarf/dashboard.json")
-        let readme = transport.fileExists(dir + "/README.md")
-        let agents = transport.fileExists(dir + "/AGENTS.md")
-        let instructions = Self.knownInstructionFiles.filter {
-            transport.fileExists(dir + "/" + $0)
-        }
+        let scan = scanProjectFiles(projectDir: dir)
         let allJobs = HermesFileService(context: context).loadCronJobs()
         let picked = allJobs.filter { inputs.includeCronJobIds.contains($0.id) }
         // Pick up every project-scoped slash command at
@@ -107,10 +127,10 @@ struct ProjectTemplateExporter: Sendable {
             templateName: inputs.templateName,
             templateVersion: inputs.templateVersion,
             projectDir: dir,
-            dashboardPresent: dashboard,
-            agentsMdPresent: agents,
-            readmePresent: readme,
-            instructionFiles: instructions,
+            dashboardPresent: scan.dashboardPresent,
+            agentsMdPresent: scan.agentsMdPresent,
+            readmePresent: scan.readmePresent,
+            instructionFiles: scan.instructionFiles,
             skillIds: inputs.includeSkillIds,
             cronJobs: picked,
             memoryAppendix: inputs.memoryAppendix,

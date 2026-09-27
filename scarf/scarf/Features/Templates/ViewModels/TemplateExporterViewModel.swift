@@ -47,12 +47,24 @@ final class TemplateExporterViewModel {
     // Derived: what the author can pick from
     var availableSkills: [HermesSkill] = []
     var availableCronJobs: [HermesCronJob] = []
+    /// The project-folder half of the preview, scanned once by `load()` off
+    /// the main actor. `nil` while the scan is running. The sheet reads this
+    /// instead of recomputing a plan in `body` — which ran seven transport
+    /// `fileExists`, a `jobs.json` read and a directory listing, three times
+    /// per keystroke, on the main actor (SSH round trips on a remote host).
+    var fileScan: ProjectTemplateExporter.ProjectFileScan?
 
     var stage: Stage = .idle
 
     func load() {
         let ctx = context
+        let exporter = exporter
+        let projectDir = project.path
         Task.detached { [weak self] in
+            let scan = exporter.scanProjectFiles(projectDir: projectDir)
+            await MainActor.run { [weak self] in
+                self?.fileScan = scan
+            }
             let service = HermesFileService(context: ctx)
             let skills = service.loadSkills().flatMap(\.skills)
             let jobs = service.loadCronJobs()
@@ -63,8 +75,11 @@ final class TemplateExporterViewModel {
         }
     }
 
-    func previewPlan() -> ProjectTemplateExporter.ExportPlan {
-        exporter.previewPlan(for: currentInputs)
+    /// Whether the required files are present, as of the last scan. `false`
+    /// until the scan lands — Export stays disabled rather than guessing.
+    var requiredFilesPresent: Bool {
+        guard let fileScan else { return false }
+        return fileScan.dashboardPresent && fileScan.readmePresent && fileScan.agentsMdPresent
     }
 
     /// Kick off the export, writing to `outputPath`. The caller is
