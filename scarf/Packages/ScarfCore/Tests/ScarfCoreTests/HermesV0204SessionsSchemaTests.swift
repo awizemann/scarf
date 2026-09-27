@@ -431,7 +431,10 @@ import SQLite3
         #expect(await service.open())
         _ = await service.fetchSessions()
         let listSQL = try #require(await mock.queryLog.last?.sql)
-        #expect(listSQL.contains("FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
+        // The internal-source exclusion (B01, S04-sessions-data-F3) rides on
+        // every host: each source is hidden by Hermes's pickers from the
+        // release that first writes it, so an older host lists the same rows.
+        #expect(listSQL.contains("FROM sessions WHERE COALESCE(source, '') NOT IN ('kanban', 'tool', 'oneshot') AND parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
         #expect(!listSQL.contains("hidden"))
         #expect(!listSQL.contains("last_read_at"))
         #expect(!listSQL.contains("json_extract"))

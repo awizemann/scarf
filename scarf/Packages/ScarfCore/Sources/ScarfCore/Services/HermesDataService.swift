@@ -375,8 +375,10 @@ public actor HermesDataService {
     /// - `archived = 0` — sessions the user soft-hid with
     ///   `hermes sessions archive` or the Hermes dashboards. Gated on the
     ///   column existing (v0.16+); older hosts emit the same SQL as before.
+    /// - `source NOT IN ('kanban', 'tool', 'oneshot')` — see
+    ///   `internalListingSourcesClause`.
     private var sessionListPredicate: String {
-        var clauses: [String] = []
+        var clauses: [String] = [internalListingSourcesClause]
         if hasListableChildSupport {
             let branch = """
                 \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
@@ -395,6 +397,35 @@ public actor HermesDataService {
             clauses.append(hasListableChildSupport ? "s.hidden = 0" : "hidden = 0")
         }
         return clauses.joined(separator: " AND ")
+    }
+
+    /// Sessions that are not human conversations, which every Hermes
+    /// session picker leaves out: kanban workers, third-party tool
+    /// integrations (`hermes chat --source tool`) and one-shot runs.
+    ///
+    /// The list is `INTERNAL_LISTING_SOURCES`
+    /// (hermes_state_sessions.py:173-177 @ v2026.9.24), applied as
+    /// `s.source NOT IN (…)` by `_session_filter_where` (:117) for the
+    /// console `sessions list` (hermes_cli/console_engine.py:602-605), the
+    /// CLI `/sessions` picker (hermes_cli/cli_session_mixin.py:319-324) and
+    /// the TUI/Desktop lists (tui_gateway/methods_session.py:126-129).
+    /// `hermes sessions list` hides `tool` only
+    /// (`_default_exclude`, hermes_cli/sessions_cmd.py:259-261); Scarf
+    /// follows the desktop pickers, the GUIs it sits beside.
+    ///
+    /// Not gated (charter C1): each source is hidden by Hermes's pickers
+    /// from the release that first writes it — `tool` since v2026.3.28
+    /// (below Scarf's supported floor), `kanban` since v2026.8.3 (tagged in
+    /// the kanban dispatcher and denied by the TUI/CLI pickers in the same
+    /// tag), `oneshot` since v2026.9.21 — so an older host has no such rows
+    /// and lists exactly what it did. `COALESCE` keeps a NULL source (never
+    /// written by Hermes; `source` is NOT NULL) listed rather than dropped.
+    ///
+    /// Also bounds the Dashboard's session count, which counts listed
+    /// conversations. Usage sums still cover every session row.
+    private var internalListingSourcesClause: String {
+        let column = hasListableChildSupport ? "s.source" : "source"
+        return "COALESCE(\(column), '') NOT IN ('kanban', 'tool', 'oneshot')"
     }
 
     /// Hermes's non-throwing JSON marker lookup (`_sql_json_extract`,

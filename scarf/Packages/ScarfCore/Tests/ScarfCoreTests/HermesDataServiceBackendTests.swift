@@ -81,7 +81,7 @@ import Foundation
         try #require(log.count == 1)
         let first = log[0]
         #expect(first.sql.hasPrefix("SELECT id, source"))
-        #expect(first.sql.contains("FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
+        #expect(first.sql.contains("FROM sessions WHERE COALESCE(source, '') NOT IN ('kanban', 'tool', 'oneshot') AND parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
         // QueryDefaults.sessionLimit == 100.
         #expect(first.params == [.integer(100)])
     }
