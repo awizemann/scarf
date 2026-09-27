@@ -69,7 +69,7 @@ final class NousAuthFlow {
         // C10. The LOCAL branch below needs `HermesFileService
         // .enrichedEnvironment()`, whose backing `enrichedShellEnv` is a
         // `static let` initialised by two `zsh` probes at 5 s + 3 s
-        // (`HermesFileService.swift:3163-3197`, probes at `:3172` and
+        // (`HermesFileService.swift:3183-3217`, probes at `:3172` and
         // `:3177`). `scarfApp.swift:89-91` warms it on a detached task at
         // launch, but a `static let` initialiser is a `swift_once`: a
         // main-actor reader arriving while the warm-up is still running

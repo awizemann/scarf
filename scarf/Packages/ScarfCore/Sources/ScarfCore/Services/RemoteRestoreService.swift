@@ -184,6 +184,11 @@ public final class RemoteRestoreService: @unchecked Sendable {
         public var hermesHome: String
         public var projectsRestored: [RestoredProject]
         public var cronJobsPaused: Int
+        /// Home-relative databases the archive listed but the restore left
+        /// alone, because they sit in trees `hermes backup` leaves out (an
+        /// archive made before Scarf matched it). See
+        /// ``RemoteRestoreService/restorableDatabases(_:)``.
+        public var databasesSkipped: [String] = []
 
         public struct RestoredProject: Sendable {
             public var name: String
@@ -316,18 +321,46 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // touches a database, and databases are only ever replaced by the
         // guarded publish in Stage 1b. A database the archive doesn't carry
         // (and its WAL) is left exactly as it is on the target.
-        let archiveLeaf = manifest.schemaVersion >= 2
-            ? (manifest.hermes.homePath as NSString).lastPathComponent
-            : ".hermes"   // v1 always archived `.hermes/`
-        let hermesTar = inspection.workDir.appendingPathComponent(manifest.hermes.tarballPath)
-        let dbBundle: (tarball: URL, paths: [String])?
+        //
+        // The home tarball's members are `./…` from R19 on. An older one's
+        // are `<leaf>/…`, and a root-only exclude on those (`<leaf>/models`)
+        // also matches wherever the leaf's name recurs below the root (see
+        // ``RemoteBackupService/homeTarCommand(home:excludes:)``), so it is
+        // re-rooted to `./…` here, on the Mac, first.
+        let originalTar = inspection.workDir.appendingPathComponent(manifest.hermes.tarballPath)
+        let archiveLeaf: String
+        let hermesTar: URL
+        if manifest.hermes.memberRoot == BackupManifest.HermesTree.dotMemberRoot {
+            (archiveLeaf, hermesTar) = (BackupManifest.HermesTree.dotMemberRoot, originalTar)
+        } else {
+            let leaf = manifest.schemaVersion >= 2
+                ? (manifest.hermes.homePath as NSString).lastPathComponent
+                : ".hermes"   // v1 always archived `.hermes/`
+            if let rerooted = try await Self.rerootHomeTarball(originalTar, leaf: leaf, workDir: inspection.workDir) {
+                (archiveLeaf, hermesTar) = (BackupManifest.HermesTree.dotMemberRoot, rerooted)
+            } else {
+                (archiveLeaf, hermesTar) = (leaf, originalTar)
+            }
+        }
+        let listedBundle: (tarball: URL, paths: [String])?
         if let databases = manifest.databases {
-            dbBundle = databases.entries.isEmpty ? nil : (
+            listedBundle = databases.entries.isEmpty ? nil : (
                 inspection.workDir.appendingPathComponent(databases.tarballPath),
                 databases.entries.map(\.path))
         } else {
-            dbBundle = try await Self.liftLegacyDatabases(
+            listedBundle = try await Self.liftLegacyDatabases(
                 from: hermesTar, leaf: archiveLeaf, workDir: inspection.workDir)
+        }
+        // An older archive's list can name databases inside trees `hermes
+        // backup` leaves out (a prior backup's state.db under `backups/`, a
+        // cache's). The home extraction already skips those trees, so
+        // publishing their databases would plant stray copies in the target
+        // — and a live one there would block the restore. Left alone, and
+        // named in the result.
+        let split = listedBundle.map { Self.restorableDatabases($0.paths) }
+        let dbBundle: (tarball: URL, paths: [String])? = listedBundle.flatMap { bundle in
+            let kept = split?.kept ?? []
+            return kept.isEmpty ? nil : (bundle.tarball, kept)
         }
         let targetDatabases = Self.absolute(dbBundle?.paths ?? ["state.db"], in: hermesHome)
 
@@ -374,7 +407,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
             transport: transport,
             tarball: hermesTar,
             extractCommand: Self.hermesExtractCommand(
-                hermesHome: hermesHome, archiveLeaf: archiveLeaf, databases: dbBundle?.paths ?? [])
+                hermesHome: hermesHome, archiveLeaf: archiveLeaf, databases: listedBundle?.paths ?? [])
         ) { written in
             progress(.restoringHermes(bytesPushed: written))
         }
@@ -455,7 +488,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
             manifest: manifest,
             hermesHome: hermesHome,
             projectsRestored: restoredProjects,
-            cronJobsPaused: paused
+            cronJobsPaused: paused,
+            databasesSkipped: split?.skipped ?? []
         )
     }
 
@@ -1159,10 +1193,43 @@ public final class RemoteRestoreService: @unchecked Sendable {
                 names: sidecars + RemoteBackupService.hermesAnyDepthExcludes + importSkippedNames)
             + RemoteBackupService.runtimeExcludedPaths(profiles: profiles, cacheEntries: [:])
                 .map { leafPattern + "/" + $0 }
-        let excludes = patterns
-            .map { "--exclude=\(shellQuote($0))" }
-            .joined(separator: " ")
-        return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
+        // Anchored at the archive's root on every tar: see
+        // ``RemoteBackupService/homeTarCommand(home:excludes:)``.
+        let excludes = RemoteBackupService.anchoredExcludes(patterns, root: archiveLeaf)
+        return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && { \(RemoteBackupService.bsdtarAnchorProbe) tar -xzf - \(excludes) --strip-components=1 -C \(home); }"
+    }
+
+    /// Rewrites an older home tarball's `<leaf>/…` members to `./…`, the
+    /// R19 layout, so the extract's root-only excludes are anchored (see
+    /// ``RemoteBackupService/homeTarCommand(home:excludes:)``). bsdtar's
+    /// `-s` over `@archive` copies every header as it is — owners, modes,
+    /// times — and rewrites hardlink targets with the names, but not symlink
+    /// targets (`S`), which are relative to the link, not the archive.
+    ///
+    /// `nil` where it can't run (iOS, or a leaf that uses every candidate
+    /// delimiter): the caller extracts the tarball as it is, with the
+    /// leaf-rooted patterns, which bsdtar still anchors.
+    static func rerootHomeTarball(_ tarball: URL, leaf: String, workDir: URL) async throws -> URL? {
+        #if os(iOS)
+        return nil
+        #else
+        guard let delimiter = ["|", ",", "#", "%", "@", "!", ":", ";"].first(where: { !leaf.contains($0) })
+        else { return nil }
+        // Basic regular expression: escape what BRE treats specially.
+        let escaped = leaf.map { "\\.[]*^$".contains($0) ? "\\\($0)" : String($0) }.joined()
+        let d = delimiter
+        let out = workDir.appendingPathComponent("hermes-rerooted.tar.gz")
+        let (status, output) = try await runLocalTar([
+            "-czf", out.path,
+            "-s", "\(d)^\(escaped)/\(d)./\(d)S",
+            "-s", "\(d)^\(escaped)$\(d).\(d)S",
+            "@" + tarball.path,
+        ])
+        guard status == 0 else {
+            throw RestoreError.archiveUnreadable("couldn't prepare the Hermes home from the backup (tar exit \(status)): \(output)")
+        }
+        return out
+        #endif
     }
 
     /// `_IMPORT_SKIP_NAMES` (`hermes_cli/backup.py:128` @ v2026.9.24): runtime
@@ -1184,11 +1251,29 @@ public final class RemoteRestoreService: @unchecked Sendable {
         return seen
     }
 
+    /// Splits an archive's database list into the ones this restore
+    /// publishes and the ones it leaves alone because they sit in a tree
+    /// `hermes backup` leaves out
+    /// (``RemoteBackupService/isInTreeHermesBackupLeavesOut(_:)``). Archives
+    /// made since R18a don't list those; older ones do.
+    static func restorableDatabases(_ paths: [String]) -> (kept: [String], skipped: [String]) {
+        var kept: [String] = []
+        var skipped: [String] = []
+        for path in paths {
+            if RemoteBackupService.isInTreeHermesBackupLeavesOut(path) {
+                skipped.append(path)
+            } else {
+                kept.append(path)
+            }
+        }
+        return (kept, skipped)
+    }
+
     /// Home-relative database paths to look for holders of at inspect time:
     /// the archive's own list, or state.db for a v1 archive (whose full list
     /// is only read when the restore runs).
     static func databasePathsForProbe(_ manifest: BackupManifest) -> [String] {
-        let listed = manifest.databases?.entries.map(\.path) ?? []
+        let listed = restorableDatabases(manifest.databases?.entries.map(\.path) ?? []).kept
         return listed.contains("state.db") ? listed : ["state.db"] + listed
     }
 

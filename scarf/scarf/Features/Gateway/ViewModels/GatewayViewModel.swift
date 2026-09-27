@@ -575,16 +575,24 @@ final class MessagingGatewayViewModel {
                 // which the timeout then kills (see
                 // ``HermesGatewayRestartGuard``). Ask first; never send it
                 // into that state.
-                if verb == .restart, let refusal = HermesGatewayRestartGuard.check(
-                    run: { args, timeout in let r = run(args, timeout); return (r.output, r.exitCode) },
-                    stateJSON: { ctx.readData(ctx.paths.gatewayStateJSON) },
-                    capabilities: caps, timeout: Self.probeTimeout
-                ) {
-                    return (refusal, true)
+                var supervised = false
+                if verb == .restart {
+                    switch HermesGatewayRestartGuard.decide(
+                        run: { args, timeout in let r = run(args, timeout); return (r.output, r.exitCode) },
+                        stateJSON: { ctx.readData(ctx.paths.gatewayStateJSON) },
+                        capabilities: caps, timeout: Self.probeTimeout,
+                        profileName: HermesProfileScope.profileName(forHome: ctx.paths.home)
+                    ) {
+                    case .refuse(let refusal): return (refusal, true)
+                    case .restart(let externallySupervised): supervised = externallySupervised
+                    }
                 }
                 let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+                // A supervised hand-back that outlasts the timeout is still
+                // restarting, not failed (see the verdict).
                 return (HermesGatewayServiceVerdict.judge(
-                    verb: verb, output: result.output, exitCode: result.exitCode
+                    verb: verb, output: result.output, exitCode: result.exitCode,
+                    externallySupervised: supervised
                 ), false)
             }.value
             guard let self else { return }

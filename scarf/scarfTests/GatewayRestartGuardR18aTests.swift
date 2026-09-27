@@ -140,7 +140,9 @@ struct GatewayRestartGuardR18aTests {
             encoding: .utf8)
         let body = try #require(source.range(of: "nonisolated func restartGateway() -> HermesCLIOutcome {"))
         let rest = source[body.upperBound...]
-        let guardCall = try #require(rest.range(of: "restartRefusal(stopThenStart: false)"))
+        // R19: the decision (not just the refusal), so a supervised
+        // hand-back's timeout can be judged "still restarting".
+        let guardCall = try #require(rest.range(of: "restartDecision(stopThenStart: false)"))
         let restart = try #require(rest.range(of: "HermesGatewayServiceVerdict.argv(.restart)"))
         #expect(guardCall.lowerBound < restart.lowerBound)
     }

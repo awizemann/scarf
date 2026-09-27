@@ -184,7 +184,7 @@ public struct MCPServerPreset: Identifiable, Sendable, Equatable {
         MCPServerPreset(
             id: "fetch",
             displayName: "Fetch",
-            description: "Retrieve and convert web pages to markdown.",
+            description: "Retrieve and convert web pages to markdown. Runs with uvx, so the Hermes host needs uv installed.",
             category: "Built-in",
             iconSystemName: "arrow.down.circle",
             transport: .stdio,

@@ -1042,7 +1042,16 @@ public enum HermesCLIMarkers {
         "Gateway started via",
         gatewayWindowsAlreadyRunning,
         gatewayDetachedFallbackStarted,
+        gatewaySupervisorRelaunched,
     ]
+
+    /// v0.21.4+: `✓ Gateway relaunched by its supervisor (PID {n})`, the
+    /// success line of the hand-back to an external supervisor
+    /// (`restart_externally_supervised_gateway`,
+    /// `hermes_cli/gateway_supervised_restart.py:86-90` @ v2026.9.24). Its
+    /// failure arms print `⚠` lines and `sys.exit(1)` (`:91-100`), which the
+    /// exit code owns.
+    public static let gatewaySupervisorRelaunched = "Gateway relaunched by its supervisor"
 
     /// `_cmd_restart`'s last-resort arm prints `Starting gateway...`
     /// (`gateway.py:6065`) and then calls `run_gateway(verbose=0)`, which
@@ -1852,7 +1861,26 @@ public enum HermesGatewayServiceVerdict {
         }
     }
 
-    public static func judge(verb: Verb, output: String, exitCode: Int32) -> HermesCLIOutcome {
+    /// The line `runHermesCLI` ends a timed-out run with
+    /// (`TransportError.timeout`'s description, never localized).
+    public static let transportTimeoutPrefix = "Command timed out after"
+
+    /// What a supervised restart that outlasted Scarf's wait says. See
+    /// ``judge(verb:output:exitCode:externallySupervised:)``.
+    public static let supervisedRestartPendingNote = String(
+        localized: "The gateway is still restarting: Hermes handed it back to its supervisor, which lets in-flight runs finish first and can take longer than Scarf waits. Check its status again in a minute."
+    )
+
+    /// - Parameter externallySupervised: the restart guard found the v0.21.4+
+    ///   external-supervisor case (``HermesGatewayRestartGuard/Decision``).
+    ///   That restart drains in-flight runs (a 60 s floor) and then waits up
+    ///   to 15 s for the new PID, so it can outlast Scarf's CLI timeout; the
+    ///   gateway goes on restarting after Scarf stops waiting, and killing
+    ///   the CLI does not stop it (the signal was already sent). A timeout
+    ///   there is "still restarting", not a failure.
+    public static func judge(
+        verb: Verb, output: String, exitCode: Int32, externallySupervised: Bool = false
+    ) -> HermesCLIOutcome {
         let successMarkers: [String]
         switch verb {
         case .start: successMarkers = HermesCLIMarkers.gatewayStartSuccess
@@ -1871,6 +1899,13 @@ public enum HermesGatewayServiceVerdict {
         if !verdict.succeeded,
            let lifecycle = profileLifecycleOutcome(verb: verb, lines: lines, exitCode: exitCode) {
             return lifecycle
+        }
+        // Only Scarf's own timer: `runHermesCLI` answers -1 for a missing
+        // binary or an SSH failure too, and then no signal was ever sent.
+        if verb == .restart, externallySupervised, !verdict.succeeded, exitCode == -1,
+           lines.last?.hasPrefix(transportTimeoutPrefix) == true, !sawServiceRefusal(lines) {
+            return HermesCLIOutcome(
+                succeeded: false, detail: supervisedRestartPendingNote, warning: nil, confidence: .unconfirmed)
         }
         if verb == .restart, !verdict.succeeded, !sawServiceRefusal(lines),
            lines.contains(where: {
