@@ -1,10 +1,9 @@
 ---
 name: scarf-template-author
 description: Scaffold a new Scarf project OR enrich an existing one after a Scarf "Upgrade Project" — dashboard, optional configuration schema, optional cron job, AGENTS.md, and (via the scarf-miniapp-author skill) a starter mini-app — from a short conversational interview. Output is immediately usable locally and cleanly exportable as a .scarftemplate bundle.
-version: 2.0.0
+version: 2.0.1
 author: Alan Wizemann
 license: MIT
-platforms: [macos]
 metadata:
   hermes:
     tags: [Scarf, templates, scaffolding, dashboard, authoring]

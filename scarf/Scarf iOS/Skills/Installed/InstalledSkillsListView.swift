@@ -31,7 +31,9 @@ struct InstalledSkillsListView: View {
     private var listContent: some View {
         List {
             ForEach(vm.filteredCategories) { category in
-                Section(category.name) {
+                // Flat skills (`skills/<name>/`, the hub default) have no
+                // category folder; give their group a heading anyway.
+                Section(category.name.isEmpty ? String(localized: "Uncategorized") : category.name) {
                     ForEach(category.skills) { skill in
                         NavigationLink {
                             SkillDetailView(skill: skill, vm: vm)

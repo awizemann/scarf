@@ -7,10 +7,10 @@ import os
 /// parsing `hermes bundles list` text output, so the surface works
 /// identically over a remote SSH transport.
 ///
-/// Body mirrors `SkillsScanner.scan(context:transport:)` exactly — the
-/// directory walk goes through `transport.listDirectory` +
-/// `transport.readFile`, and a missing directory returns `[]` (a fresh
-/// install or a pre-v0.15 host) rather than an error.
+/// Same transport pattern as `SkillsScanner` — the directory walk goes
+/// through `transport.listDirectory` + `transport.readFile`, and a missing
+/// directory returns `[]` (a fresh install or a pre-v0.15 host) rather
+/// than an error.
 ///
 /// Synchronous + transport-backed: callers on the MainActor should wrap
 /// in `Task.detached` (the iOS / `SkillsViewModel.load` pattern) since
