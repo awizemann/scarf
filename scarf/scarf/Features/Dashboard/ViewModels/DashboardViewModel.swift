@@ -97,7 +97,6 @@ final class DashboardViewModel {
         if opened {
             let snapshot = await dataService.dashboardSnapshot(
                 sessionLimit: 5,
-                previewLimit: 5,
                 toolCallLimit: 8,
                 statsSince: Self.statsWindowStart()
             )

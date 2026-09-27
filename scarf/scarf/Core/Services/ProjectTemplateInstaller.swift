@@ -115,6 +115,13 @@ struct ProjectTemplateInstaller: Sendable {
         if transport.fileExists(plan.projectDir) {
             throw ProjectTemplateError.projectDirExists(plan.projectDir)
         }
+        // A row whose folder is gone passes the check above. Refused here,
+        // before anything is written; `registerProjectLocked` re-checks
+        // under the registry lock.
+        try Self.refuseRegisteredPath(
+            plan.projectDir,
+            in: ProjectDashboardService(context: context).loadRegistry().projects
+        )
         for copy in plan.projectFiles where transport.fileExists(copy.destinationPath) {
             throw ProjectTemplateError.conflictingFile(copy.destinationPath)
         }
@@ -403,6 +410,7 @@ struct ProjectTemplateInstaller: Sendable {
         // waiting on lazy migration — fleet/portfolio only groups projects
         // whose id somebody actually asserted. The canonical `project.json`
         // is written after the lock file lands (see install()).
+        try Self.refuseRegisteredPath(plan.projectDir, in: registry.projects)
         let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: projectID)
         registry.projects.append(entry)
         // Must throw on failure — silent failure here used to make the
@@ -413,6 +421,15 @@ struct ProjectTemplateInstaller: Sendable {
         // user can see + address the underlying problem.
         try service.saveRegistry(registry, expecting: loaded.contentFingerprint)
         return entry
+    }
+
+    /// Throw when a registry row already claims `path`, compared
+    /// normalized — the rule `project_register` and `ProjectStore` hold.
+    nonisolated static func refuseRegisteredPath(_ path: String, in projects: [ProjectEntry]) throws {
+        let normalized = ProjectIdentity.normalizedPath(path)
+        if let existing = projects.first(where: { ProjectIdentity.normalizedPath($0.path) == normalized }) {
+            throw ProjectTemplateError.projectPathRegistered(path: path, name: existing.name)
+        }
     }
 
     // MARK: - Token substitution (install-time placeholder resolution)

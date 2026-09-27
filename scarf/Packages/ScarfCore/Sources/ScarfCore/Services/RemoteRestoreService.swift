@@ -447,9 +447,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         try await reanchorProjectsRegistry(
             transport: transport,
             hermesHome: hermesHome,
-            mapping: Dictionary(
-                uniqueKeysWithValues: restoredProjects.map { ($0.sourcePath, $0.targetPath) }
-            )
+            mapping: Self.reanchorMapping(restoredProjects)
         )
 
         progress(.finalizing)
@@ -802,6 +800,20 @@ public final class RemoteRestoreService: @unchecked Sendable {
     #endif
 
     // MARK: - Path re-anchor
+
+    /// Source path → target path for every restored project.
+    ///
+    /// The manifest lists one project per registry row, and two rows can
+    /// share a path (the Project Doctor's `duplicatePath`). Both restore to
+    /// the same target, so the first one's pair is kept. This was
+    /// `Dictionary(uniqueKeysWithValues:)`, which traps on the repeated
+    /// source path and crashed the restore after every tarball had landed.
+    static func reanchorMapping(_ restored: [RestoreResult.RestoredProject]) -> [String: String] {
+        Dictionary(
+            restored.map { ($0.sourcePath, $0.targetPath) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
 
     /// Rewrite each entry's `path` in `~/.hermes/scarf/projects.json`
     /// from source-host paths to target-host paths. We do this on the

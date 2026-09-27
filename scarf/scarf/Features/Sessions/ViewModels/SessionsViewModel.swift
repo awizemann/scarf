@@ -150,6 +150,9 @@ final class SessionsViewModel {
     /// True while `load()` runs so the view can show a `.loadingOverlay`
     /// instead of a blank table on first open / refresh. (t-aud07)
     var isLoading = false
+    /// Why the last load couldn't read `state.db`, or nil when it could.
+    /// The list keeps its previous rows while this is set.
+    private(set) var loadError: String?
     var sessions: [HermesSession] = [] { didSet { recomputeFilteredSessions() } }
     var sessionPreviews: [String: String] = [:]
     var selectedSession: HermesSession?
@@ -379,7 +382,14 @@ final class SessionsViewModel {
         // open after load() so selectSession()/search() can query without
         // re-opening — cleanup() closes on disappear.
         let opened = await dataService.refresh()
-        guard opened else { return }
+        guard opened else {
+            // Say so, and keep what is already on screen: an empty list
+            // here rendered "No sessions match this filter" for a host
+            // that could not be read at all.
+            loadError = await dataService.lastOpenError
+                ?? String(localized: "Couldn't open the Hermes state database.")
+            return
+        }
         // v2.7: folded the two serial fetches into one batched round
         // trip via sessionListSnapshot. Pre-fix this paid the 420 ms
         // SSH RTT twice on every Sessions tab open (~840 ms minimum
@@ -391,6 +401,14 @@ final class SessionsViewModel {
         // subqueries bought for a value nothing on this screen reads. The
         // chat sidebar, which does badge unread, keeps it.
         let snapshot = await dataService.sessionListSnapshot(limit: 500, includeUnreadActivity: false)
+        if let failure = snapshot.queryError {
+            // A failed batch (an SSH drop on a watcher tick, a locked DB)
+            // must not wipe a list that loaded a moment ago. Keep the last
+            // good rows and raise the banner.
+            loadError = failure
+            return
+        }
+        loadError = nil
         sessions = snapshot.sessions
         sessionPreviews = snapshot.previews
 
@@ -403,16 +421,11 @@ final class SessionsViewModel {
         let bundle: (names: [String: String], projects: [ProjectEntry], dbSize: String) = await OffPool.run {
             let attribution = SessionAttributionService(context: ctx)
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
-            let pathToName = Dictionary(
-                uniqueKeysWithValues: registry.projects.map { ($0.path, $0.name) }
+            // First row wins at a shared path; see `projectNames`.
+            let names = SessionAttributionService.projectNames(
+                mappings: attribution.load().mappings,
+                projects: registry.projects
             )
-            let map = attribution.load().mappings
-            var names: [String: String] = [:]
-            for (sessionID, path) in map {
-                if let name = pathToName[path] {
-                    names[sessionID] = name
-                }
-            }
             // Fold the state.db stat() into this off-main batch so the file-
             // size display doesn't cost a synchronous SSH stat on the main
             // actor on every watcher tick during a stream (gh#102).

@@ -63,9 +63,14 @@ struct SessionsView: View {
                 activeFilterSummary
             }
             ScrollView {
-                sessionsTable
-                    .padding(.horizontal, ScarfSpace.s6)
-                    .padding(.vertical, ScarfSpace.s3)
+                VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+                    if let err = viewModel.loadError {
+                        StateReadErrorBanner(context: viewModel.context, message: err)
+                    }
+                    sessionsTable
+                }
+                .padding(.horizontal, ScarfSpace.s6)
+                .padding(.vertical, ScarfSpace.s3)
             }
         }
         .background(ScarfColor.backgroundPrimary)
@@ -415,11 +420,19 @@ struct SessionsView: View {
     }
 
     private var emptyState: some View {
-        Text("No sessions match this filter.")
-            .scarfStyle(.body)
-            .foregroundStyle(ScarfColor.foregroundMuted)
-            .frame(maxWidth: .infinity)
-            .padding(ScarfSpace.s10)
+        // With nothing loaded and a read error, "no sessions match" would
+        // be a claim about the data; the banner above says what happened.
+        Group {
+            if viewModel.loadError != nil && viewModel.sessions.isEmpty {
+                Text("Sessions couldn't be loaded.")
+            } else {
+                Text("No sessions match this filter.")
+            }
+        }
+        .scarfStyle(.body)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .frame(maxWidth: .infinity)
+        .padding(ScarfSpace.s10)
     }
 
     /// Hermes rebuilds `messages_fts` in chunks; while it does, MATCH

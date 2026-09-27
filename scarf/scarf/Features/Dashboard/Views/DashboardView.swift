@@ -11,7 +11,6 @@ import ScarfDesign
 /// elided for now (TODO when we surface activity items via the data layer).
 struct DashboardView: View {
     @State private var viewModel: DashboardViewModel
-    @State private var showDiagnostics = false
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
 
@@ -25,7 +24,7 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ScarfSpace.s5) {
                     if let err = viewModel.lastReadError {
-                        readErrorBanner(err)
+                        StateReadErrorBanner(context: viewModel.context, message: err)
                     }
                     statusRow
                     statsSection
@@ -49,9 +48,6 @@ struct DashboardView: View {
         .task { await viewModel.load() }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.load() }
-        }
-        .sheet(isPresented: $showDiagnostics) {
-            RemoteDiagnosticsView(context: viewModel.context)
         }
     }
 
@@ -92,44 +88,6 @@ struct DashboardView: View {
             Rectangle().fill(ScarfColor.border).frame(height: 1),
             alignment: .bottom
         )
-    }
-
-    // MARK: - Read-error banner
-
-    private func readErrorBanner(_ err: String) -> some View {
-        HStack(alignment: .top, spacing: ScarfSpace.s2) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(ScarfColor.warning)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Can't read Hermes state on \(viewModel.context.displayName)")
-                    .scarfStyle(.bodyEmph)
-                    .foregroundStyle(ScarfColor.foregroundPrimary)
-                Text(err)
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            Button {
-                showDiagnostics = true
-            } label: {
-                Label("Run Diagnostics…", systemImage: "stethoscope")
-            }
-            .buttonStyle(ScarfSecondaryButton())
-        }
-        .padding(ScarfSpace.s3)
-        .background(
-            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                        .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
-                )
-        )
-        // Sweep contract: the section sweep (SectionSweepUITests) asserts
-        // no `error.banner` is on screen after switching to a section.
-        .accessibilityIdentifier("error.banner")
     }
 
     // MARK: - Hermes shadow banner

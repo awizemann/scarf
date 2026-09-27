@@ -388,6 +388,10 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     case requiredFileMissing(String)
     case contentClaimMismatch(String)
     case projectDirExists(String)
+    /// A registry row already points at the install folder (a row whose
+    /// folder was deleted, so `projectDirExists` passes). Installing would
+    /// add a second row at one path, the Doctor's `duplicatePath`.
+    case projectPathRegistered(path: String, name: String)
     case conflictingFile(String)
     case memoryBlockAlreadyExists(String)
     case cronCreateFailed(job: String, output: String)
@@ -432,6 +436,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "Template manifest doesn't match its contents: \(s)"
         case .projectDirExists(let p):
             return "A directory already exists at \(p). Refusing to overwrite — choose a different parent folder."
+        case .projectPathRegistered(let path, let name):
+            return "The projects list already has “\(name)” at \(path). Remove that entry or choose a different parent folder."
         case .conflictingFile(let p):
             return "An existing file would be overwritten at \(p). Refusing to clobber."
         case .memoryBlockAlreadyExists(let id):
