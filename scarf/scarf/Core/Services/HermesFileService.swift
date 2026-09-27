@@ -2570,14 +2570,19 @@ struct HermesFileService: Sendable {
     /// resolves AI provider auth by reading env vars — a GUI-launched Scarf
     /// subprocess sees none of the `export ANTHROPIC_API_KEY=…` lines from
     /// the user's shell init files.
+    ///
+    /// The credential keys are Hermes' own provider env-var table
+    /// (``HermesProviderCredentials/providerEnvVars``) rather than a
+    /// hand-picked few, so a DeepSeek or Kimi key exported in `.zshrc`
+    /// reaches a Scarf-spawned `hermes` just as it would from a terminal,
+    /// and counts for the chat's credential hint (S15-F4).
     nonisolated private static let shellEnvKeys: [String] = [
         "PATH",
-        "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "GEMINI_API_KEY", "GOOGLE_API_KEY",
-        "GROQ_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        // Not in Hermes' provider table, but Scarf forwarded them before
+        // and a user may rely on that for a tool or plugin.
+        "GROQ_API_KEY", "MISTRAL_API_KEY",
+    ] + HermesProviderCredentials.providerEnvVars + [
         // SSH agent socket — set by 1Password / Secretive / a manual
         // `ssh-add` in the user's shell rc. GUI-launched apps don't inherit
         // these by default, so without harvesting them here, `ssh` spawned
@@ -2730,14 +2735,16 @@ struct HermesFileService: Sendable {
         return env
     }
 
-    /// True if any known AI-provider credential is reachable. Hermes itself
-    /// resolves credentials from four locations at runtime, so the preflight
-    /// mirrors that set to avoid false "no credentials" warnings:
+    /// True if any AI-provider credential is reachable. Mirrors the parts of
+    /// Hermes' own `_has_any_provider_configured` (`hermes_cli/main.py:1052`
+    /// @ v2026.9.24) that can be read from files, so the preflight doesn't
+    /// warn about a setup Hermes will happily run:
     ///   1. Current process env + login-shell env (queried once at startup)
-    ///   2. `~/.hermes/.env`
-    ///   3. `~/.hermes/auth.json` — Credential Pools (v1.6+ blessed flow)
-    ///   4. `~/.hermes/config.yaml` — embedded `api_key:` for auxiliary /
-    ///      delegation tasks
+    ///   2. `~/.hermes/.env`, against Hermes' provider env-var table
+    ///   3. `~/.hermes/auth.json` — Credential Pools and OAuth providers
+    ///   4. `~/.hermes/config.yaml` — a keyless endpoint for the main model
+    ///      (`model.base_url`, a `custom:` provider, Bedrock/Vertex/LM
+    ///      Studio), or an embedded `api_key:`
     /// Used by Chat to warn the user before `hermes acp` fails on send with
     /// "No Anthropic credentials found".
     ///
@@ -2746,33 +2753,20 @@ struct HermesFileService: Sendable {
     /// do with the remote `hermes acp`'s runtime env. The remote `.env` /
     /// `auth.json` / `config.yaml` are still checked through the transport.
     nonisolated func hasAnyAICredential() -> Bool {
-        let credentialKeys = Self.shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
+        hasAnyAICredential(environment: context.isRemote ? nil : Self.enrichedEnvironment())
+    }
 
-        if !context.isRemote {
-            let env = Self.enrichedEnvironment()
-            for key in credentialKeys {
-                if let value = env[key], !value.isEmpty {
-                    return true
-                }
-            }
+    /// The check itself, with the process environment passed in (`nil` for
+    /// a remote context) so tests can run it without the developer's shell.
+    nonisolated func hasAnyAICredential(environment: [String: String]?) -> Bool {
+        if let environment, HermesProviderCredentials.environmentHasProviderKey(environment) {
+            return true
         }
-        // Scan .env (via transport — local file or scp) for KEY= lines.
-        // Uses a simple substring check — good enough for a preflight hint;
-        // hermes itself does the real parse.
-        if let envText = readFile(context.paths.envFile) {
-            for line in envText.split(separator: "\n") {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-                for key in credentialKeys where trimmed.hasPrefix("\(key)=") || trimmed.hasPrefix("export \(key)=") {
-                    // Must have a non-empty value after `=`
-                    if let eq = trimmed.firstIndex(of: "="),
-                       trimmed.index(after: eq) < trimmed.endIndex {
-                        let value = trimmed[trimmed.index(after: eq)...]
-                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-                        if !value.isEmpty { return true }
-                    }
-                }
-            }
+        // `.env` via the transport (local file or scp), parsed with Hermes'
+        // own `_dotenv_has_provider_key` rule.
+        if let envText = readFile(context.paths.envFile),
+           HermesProviderCredentials.dotEnvHasProviderKey(envText) {
+            return true
         }
         // Scan auth.json. Two shapes need to count as "credential present":
         //
@@ -2821,6 +2815,14 @@ struct HermesFileService: Sendable {
         // Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
         // without needing to parse YAML structure.
         if let text = readFile(context.paths.configYAML) {
+            // A local or custom endpoint may need no key at all (Ollama,
+            // LM Studio, vLLM): Hermes counts it as configured, so the hint
+            // must not tell that user to go add ANTHROPIC_API_KEY.
+            let config = HermesConfig(yaml: text)
+            if HermesProviderCredentials.modelUsesKeylessEndpoint(
+                provider: config.provider, baseURL: config.modelBaseURL) {
+                return true
+            }
             for line in text.split(separator: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 guard trimmed.hasPrefix("api_key:") else { continue }
