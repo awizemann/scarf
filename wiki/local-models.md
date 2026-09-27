@@ -19,7 +19,7 @@ not to your Mac.
 |---|---|---|
 | **Ollama** | `http://127.0.0.1:11434/v1` | Scarf always saves the base URL — Hermes has no built-in Ollama default and would otherwise silently route to OpenRouter. Installed models are listed live (`/api/tags`) with size/quant details. |
 | **LM Studio** | `http://127.0.0.1:1234/v1` | Base URL optional (Hermes' registry default; `LM_BASE_URL` env overrides). Hermes JIT-loads the selected model. |
-| **vLLM / llama.cpp** | none — you supply it | Saved as provider `vllm` / `llamacpp` (Hermes runtime-aliases both to `custom`). |
+| **vLLM / llama.cpp** | none — you supply it | Saved as provider `vllm` / `llamacpp` (Hermes runtime-aliases both to `custom`). On Hermes v0.21.1+ the llama.cpp row saves as `custom` instead, because Hermes's `llamacpp` provider ignores your base URL there and only talks to its own managed server or `127.0.0.1:8080`; the saved model then shows under **Custom endpoint**. |
 | **Custom endpoint** | none — you supply it | Any OpenAI-compatible server. Optional API key and API mode (auto-detect, chat_completions, codex_responses, anthropic_messages, bedrock_converse). Leaving the model empty on a loopback URL lets Hermes auto-detect a single loaded model. |
 
 No API key is needed for Ollama/LM Studio/vLLM/llama.cpp — Hermes substitutes a placeholder itself.

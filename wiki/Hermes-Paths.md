@@ -28,7 +28,7 @@ Canonical layout of `~/.hermes/`. Scarf reads these paths through [`HermesPathSe
 | `~/.hermes/logs/agent.log` | Agent log (per-session tagged) | read-only, tail |
 | `~/.hermes/logs/errors.log` | Error log | read-only, tail |
 | `~/.hermes/logs/gateway.log` | Messaging-gateway log | read-only, tail |
-| `~/.hermes/gateway_state.json` | Gateway live state (PID, connected platforms) | read-only |
+| `~/.hermes/gateway_state.json` | Gateway live state (PID, per-platform `state`/`error_message`; served profiles' platforms under `<profile>:<platform>` keys) | read-only |
 | `~/.hermes/skills/` | Installed skills (with v0.11 SKILL.md frontmatter) | read + write (install/update/uninstall) |
 | `~/.hermes/plugins/` | Installed plugins (cloned from Git URLs) | read + write |
 | `~/.hermes/personalities/` | Personalities + their `SOUL.md` | read + write |

@@ -37,7 +37,7 @@ Every install goes through a preview sheet that lists:
 - The exact project directory to be created (you pick the parent folder). _v2.5.2+:_ on remote server contexts the parent-directory step uses a path-input + Verify sheet (mirroring the Add Project pattern from #54) — the installer writes the project files to the remote host via SFTP rather than to the Mac filesystem.
 - Every file inside the project.
 - Every skill to be namespaced under `~/.hermes/skills/templates/<slug>/`.
-- Every cron job to be registered, always paused on install — you enable each one manually from the Cron sidebar when ready.
+- Every cron job to be registered, always paused on install — you enable each one manually from the Cron sidebar when ready. A job that uses a skill the template ships is pointed at the installed copy (`templates/<slug>/<name>`), so it finds it on any machine.
 - Every Keychain secret the Configure step will write.
 - A live diff of any memory appendix against your existing `MEMORY.md`.
 
@@ -89,7 +89,7 @@ Right-click any template-installed project in the sidebar → **Uninstall Templa
 
 Uninstall is driven by `<project>/.scarf/template.lock.json`, which records everything the installer wrote. The preview sheet lists what will be removed and what will be preserved:
 
-- **Removed:** every file listed in the lock, the skills namespace directory (wholesale — it's isolated), every Keychain ref, every tagged cron job via `hermes cron remove`, the memory block between its `<!-- scarf-template:<id>:begin/end -->` markers, and the projects-registry entry.
+- **Removed:** every file listed in the lock, the skills namespace directory (wholesale — it's isolated), every Keychain ref, every tagged cron job via `hermes cron remove`, the template's memory entry (the one between its `<!-- scarf-template:<key>:begin/end -->` markers — the key is a hash of the template id, so Hermes's memory threat scan never blocks the entry; blocks installed by older Scarf, whose markers spell the id out, are still found — together with its own `§` separator), and the projects-registry entry. If a step can't finish — say `hermes cron remove` fails, or the cron list can't be read — the uninstall still completes the rest and the success screen says **Removed, except:** with what is left to clean up.
 - **Preserved:** every file in the project directory that *wasn't* installed by the template. If the cron job wrote a `status-log.md` or you dropped a personal file into the project folder, it stays. The directory itself is removed only if nothing user-owned is left inside; otherwise the directory is kept with just your files. A banner on the uninstall success screen explicitly lists preserved paths so you know what's left behind.
 
 There's no undo — reinstalling means re-running the install flow.
@@ -112,6 +112,8 @@ Select any project → **Projects → Templates → Export "&lt;name&gt;" as Tem
 - Which skills from `~/.hermes/skills/` to include.
 - Which cron jobs from `~/.hermes/cron/jobs.json` to include.
 - Optional memory snippet to ship.
+
+Skills are copied whole, following symlinks only while they stay inside the skill folder: a link that leads anywhere else (say, to `~/.hermes/.env`) stops the export with a message naming it, because the bundle is meant to be shared.
 
 The exporter carries the configuration *schema* from `<project>/.scarf/manifest.json` into the bundle but **never** the user's values from `<project>/.scarf/config.json`. Exporting is safe on projects with live config — your secrets and personal settings stay local.
 
@@ -145,7 +147,7 @@ And optionally:
 ├── cron/
 │   └── jobs.json           # array of cron job definitions
 └── memory/
-    └── append.md           # appended to ~/.hermes/memories/MEMORY.md
+    └── append.md           # added to ~/.hermes/memories/MEMORY.md as its own memory entry
 ```
 
 ### Manifest (`template.json`)
@@ -230,7 +232,7 @@ In cron-job prompts and in `dashboard.json` strings, the installer substitutes:
 - `{{TEMPLATE_ID}}` — the `owner/name` id from the manifest.
 - `{{TEMPLATE_SLUG}}` — the sanitised slug used for the skills namespace + project dir.
 
-Cron jobs need `{{PROJECT_DIR}}` because Hermes doesn't set a CWD when firing cron — relative paths would resolve against wherever Hermes happens to be.
+Cron jobs need `{{PROJECT_DIR}}` because a job only runs from a project directory when it carries a `workdir` (`hermes cron create --workdir`, Hermes v0.12+), and the template installer does not set one — relative paths would resolve against wherever Hermes happens to be.
 
 ## The public catalog
 
@@ -300,7 +302,7 @@ Intentional. The uninstaller preserves files that weren't installed by the templ
 Expected — the installer refuses a re-install of the same template id into the same location to avoid double-appending to `MEMORY.md`. Uninstall the existing install first, or pick a different parent directory.
 
 **"My template's cron job runs but uses relative paths that don't resolve."**
-Use `{{PROJECT_DIR}}` in the cron prompt. Hermes doesn't set a CWD for cron runs, so relative paths resolve against the agent's own dir. The installer substitutes `{{PROJECT_DIR}}` with the absolute project path at install time.
+Use `{{PROJECT_DIR}}` in the cron prompt. Template-installed jobs have no `workdir` (Hermes runs a job from a directory only when it was created with `--workdir`), so relative paths resolve against the agent's own dir. The installer substitutes `{{PROJECT_DIR}}` with the absolute project path at install time.
 
 ## See also
 

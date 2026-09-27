@@ -3,7 +3,7 @@ title: Insights-and-Activity
 type: note
 permalink: scarf-wiki/insights-and-activity
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-26
 ---
 
 # Insights & Activity
@@ -27,17 +27,20 @@ Aggregated analytics with a time-period selector (7 / 30 / 90 days / all time):
 
 All queries are aggregations over the same `sessions`, `messages`, `tool_calls` tables that drive the other views — no separate analytics pipeline.
 
+**Two populations, on purpose** _(Hermes v0.21.5 audit, R11)_. Usage figures — messages, tool calls, tokens, cost, the model and platform breakdowns, the user-message count and the top-tools chart — sum **every session row in the period**, exactly as `hermes insights` does (`agent/insights.py` @ v2026.9.24): delegate subagents, compression continuations, hidden and archived rows all carry real spend. On v0.20+ hosts each session's token/cost counters are also reconciled against `session_model_usage` (the larger of the session counter and the sum of its per-model rows), so auxiliary vision/compression/title calls count too. Conversation figures — the session count, active time and average duration, the activity heatmap and Notable Sessions — stay on the conversations the session list shows. The Dashboard stat cards follow the same split.
+
 ## Sessions
 
 The full conversation history browser:
 
-- **List** — every session, ordered by start date DESC. Subagent sessions (those with a `parent_session_id`) are filtered from the main list and accessible by drilling into the parent.
+- **List** — the sessions Hermes's own listings show, ordered by start date DESC: roots plus branch and reset children. Subagent runs are filtered out and reachable by drilling into the parent; rows the user **archived** (`hermes sessions archive`, v0.16+), rows Hermes marks **hidden**, and orphaned delegate rows (`_delegate_from`) are filtered out too. A **rotated compression chain** (compression with `in_place: false`, or an older Hermes) is listed once, under its live tip's id and fields, and its detail view shows the whole chain's transcript — as Hermes does.
 - **Project filter** _(v2.5+)_ — Menu above the list picks **All projects / Unattributed / one entry per registered project**. Each row carries a tinted folder chip when the session is attributed to a project. The filter and the badges share the same `SessionAttributionService` ScarfGo's Sessions tab uses, so cross-platform parity is by construction. See [Projects & Profiles](Projects-and-Profiles).
 - **Detail panel** — full message stream: user → assistant → tool calls → tool results, with markdown rendering. **Reasoning blocks** (v0.7+) render in a collapsed section. v0.11+ `messages.reasoning_content` (when present) is preferred over the legacy `reasoning` blob.
 - **API call counter** _(v2.5+)_ — each row carries a network-icon chip showing `sessions.api_call_count` (v0.11+). Distinct from `tool_call_count`; counts per-turn API round-trips.
 - **Tool call inspector** — pretty-printed arguments, function name, result. Categorized by `toolKind` (read / edit / execute / fetch / browser / other).
 - **Search** — full-text via SQLite's `messages_fts` FTS5 virtual table. Limit defaults to 50 hits.
-- **Actions** — rename (`hermes sessions rename`), delete (`hermes sessions delete`), JSONL export (`hermes sessions export`). Right-click any row in the v2.5 chat sessions sidebar exposes the same Rename / Delete actions inline.
+- **Hidden display rows** — messages Hermes tags `display_kind = 'hidden'` (interrupted-reply placeholders, muted diagnostic replies; v0.19.1+) never appear in transcripts, search hits or previews, matching every Hermes display.
+- **Actions** — rename (`hermes sessions rename`), delete (`hermes sessions delete`), JSONL export (`hermes sessions export`). Right-click any row in the v2.5 chat sessions sidebar exposes the same Rename / Delete actions inline. Deleting a row that stands for a compressed conversation (several linked segments) deletes every segment, newest first, and the confirmation says how many; a search hit in an archived or subagent session opens directly, with a note saying why the list doesn't show it.
 
 Click a session in the Dashboard's "Recent" card to land here with that session pre-selected.
 

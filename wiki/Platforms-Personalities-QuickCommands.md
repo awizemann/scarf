@@ -27,7 +27,11 @@ Connectivity dots next to each platform reflect the gateway's last reported stat
 - **Green** — connected and healthy.
 - **Orange** — configured but offline.
 - **Grey** — not configured.
-- **Red** — error.
+- **Red** — error (a `fatal` platform, or one retrying with a reason; the reason is shown).
+
+The dots read the per-platform `state` / `error_message` Hermes writes to `gateway_state.json`. For a named profile served by the default profile's multiplexer (the normal v0.21.x setup), Scarf reads the root `~/.hermes/gateway_state.json` and uses that profile's `<profile>:<platform>` entries, as Hermes does.
+
+**WhatsApp Cloud** reads its credentials from both `.env` (`WHATSAPP_CLOUD_*`, where `hermes whatsapp-cloud` puts them) and `platforms.whatsapp_cloud.extra` in config.yaml, and saves new credentials to `.env`. It never writes `enabled: false` because a field is blank, and it leaves the allowlist and DM policy where they already live. **Webhook** writes both `WEBHOOK_ENABLED` and `platforms.webhook.enabled`; the `hermes webhook` commands (and Scarf's Webhooks tab) check only the config key.
 
 The platform list is data-driven, so platforms Hermes added after 1.6 — Feishu, Microsoft Teams, Tencent Yuanbao, Google Chat, LINE Messaging API, SimpleX Chat, and now **ntfy** — auto-appear when the connected host advertises them.
 
@@ -50,15 +54,15 @@ A personality is a `SOUL.md` file that shapes Hermes's voice, defaults, and inte
 **What you can do here:**
 
 - List defined personalities.
-- Pick the active one — written to `personality:` in `config.yaml`.
+- Pick the active one — written to `display.personality` in `config.yaml`.
 - Edit `SOUL.md` inline with markdown preview. ⌘S saves.
 - Create / rename / delete personalities.
 
-Switching personality takes effect on the next agent turn — no restart needed.
+Switching personality takes effect on the next agent turn in the **Hermes CLI, TUI and messaging gateways** — no restart needed. **It does not change Scarf chat**: Hermes applies the personality overlay only on those surfaces (`resolve_ephemeral_system_prompt`, `hermes_cli/personality.py:118-124`, read by `cli_init_mixin.py:249`, `gateway/run_config_loaders.py:99`, `tui_gateway/server.py:2384-2385` @ v2026.9.24), and the ACP adapter Scarf chats through builds its agent without it (`acp_adapter/session.py:487-530`). The screen says so under the picker. `SOUL.md` is part of every system prompt, so editing it does shape Scarf chats.
 
 ## Quick Commands
 
-Custom `/command_name` shell shortcuts. You define a name, a shell command (with optional arg substitution), and an optional description; the command becomes invocable from anywhere Hermes accepts commands.
+Custom `/command_name` shell shortcuts. You define a name, a shell command (with optional arg substitution), and an optional description. Hermes runs them from the CLI (`hermes chat`), the TUI and the messaging gateways (`cli.py:1219-1233`, `gateway/run_inbound.py:812,1033` @ v2026.9.24). **Scarf chat does not run them**: its ACP adapter has no quick-command lookup, so a typed `/name` reaches the model as an ordinary prompt. Scarf's chat slash menu therefore doesn't list them.
 
 **Safety:** the editor scans for dangerous patterns (`rm -rf`, `mkfs`, fork bombs, sudo, suspicious eval) and warns before saving. The check is heuristic — it's a guard against typos, not a sandbox.
 
@@ -71,4 +75,4 @@ Quick Commands live in `config.yaml` under the `quick_commands` key.
 - [Hermes Paths](Hermes-Paths) — where `.env`, `config.yaml`, and `personalities/` live.
 
 ---
-_Last updated: 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_
+_Last updated: 2026-09-26 — Quick Commands run in the Hermes CLI, TUI and gateways, not in Scarf chat. Previously 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_

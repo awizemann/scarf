@@ -3,7 +3,7 @@ title: MCP-Servers-Plugins-Webhooks-Tools
 type: note
 permalink: scarf-wiki/mcp-servers-plugins-webhooks-tools
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-26
 ---
 
 # MCP Servers / Plugins / Webhooks / Tools
@@ -21,15 +21,25 @@ Manage Model Context Protocol servers Hermes connects to. Two ways to add:
 
 - Enable / disable toggle.
 - Environment variable + header editor — written through [`HermesEnvService`](Core-Services) so existing comments and blanks are preserved.
-- Tool include / exclude filters (whitelist / blacklist what the server exposes).
+- Tool include / exclude filters (whitelist / blacklist what the server exposes). A non-empty include list is a whitelist and wins over exclude; `include: []` registers **no** tools (shown as "(none — no tools registered)"). The editor rewrites the `tools:` block only when you change a filter.
 - Resources / prompts toggles.
-- Request and connect timeouts.
-- OAuth token detection and clearing.
-- **Test Connection** runs `hermes mcp test` and surfaces the discovered tool list inline.
+- Request and connect timeouts, in seconds. Hermes stores them as floats (`connect_timeout: 45.0`); Scarf shows `45` and only rewrites a timeout you edited.
+- OAuth token detection and clearing, and **Sign in** (`hermes mcp login`, Hermes v0.18+).
+- **Test Connection** runs `hermes mcp test` and surfaces the discovered tool list inline. Scarf allows `max(30, connect_timeout) + 20` seconds, above Hermes's own probe budget.
 
 A gateway-restart banner appears after config changes that require a reload.
 
 MCP servers are stored in `config.yaml` under the `mcp_servers` key; the model is `HermesMCPServer`.
+
+### Adding OAuth servers _(Hermes v0.17+)_
+
+`hermes mcp add --auth oauth` needs a terminal: without one Hermes refuses to set up OAuth and saves nothing. So on Hermes v0.17 and later Scarf adds OAuth servers itself (gated on `HermesCapabilities.hasMCPOAuthAddNeedsDirectWrite`; older hosts keep the `mcp add` path):
+
+- **Catalog entries** picked with *Browse Catalog…* and left unedited are installed with `hermes mcp install <name>`, which brings the manifest's own OAuth client settings and tool defaults. If the host's catalog doesn't have the entry, Scarf falls back to the next step.
+- **Custom and preset OAuth servers** are written straight into `config.yaml` as `url`, `auth: oauth` (and `transport: sse` for SSE) with `enabled: true`, using the same safe writer as every other MCP edit (backup, read-back, restore on mismatch). Unusual `mcp_servers` layouts are refused rather than guessed at.
+- Scarf then offers **Sign in** so Hermes can fetch a token; until then the server has no tools.
+
+On a remote (SSH) host the browser sign-in can't redirect back to Hermes. The sign-in sheet shows a field for the address of the browser tab that fails to load after you approve; Scarf passes that URL to `hermes mcp login`, which finishes the flow.
 
 ### mTLS client certificates _(v2.10.0+, Hermes v0.15+)_
 
@@ -56,7 +66,8 @@ Create, list, test-fire, and remove webhook subscriptions:
 
 - Endpoint URL, event filter, optional secret.
 - **Test fire** sends a synthetic event so you can verify the receiver before going live.
-- Detects the "platform not enabled" state and links to the gateway setup.
+- Detects the "platform not enabled" state. `hermes webhook` checks only `platforms.webhook.enabled` in config.yaml, so turn it on in Platforms → Webhook (which writes that key as well as `WEBHOOK_ENABLED`); `hermes gateway setup` writes only the `.env` flag.
+- ScarfGo lists subscriptions read-only with the same parser as the Mac.
 
 ## Tools
 
@@ -82,4 +93,4 @@ Enable / disable Hermes toolsets per platform.
 - [Hermes Paths](Hermes-Paths) — `~/.hermes/plugins/`, `config.yaml` `mcp_servers` key.
 
 ---
-_Last updated: 2026-05-28 — Scarf v2.10.0 (MCP mTLS client certs for HTTP + SSE servers + read-only `hermes mcp catalog` browse sheet)_
+_Last updated: 2026-09-26 — Hermes v0.21.5 audit R01 (OAuth add without a terminal, remote sign-in paste, tool-filter and timeout round trips)_

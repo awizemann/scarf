@@ -69,7 +69,7 @@ When a mini-app calls `scarf.prompt(...)`, Scarf spawns it a **dedicated `hermes
 - **`scarf.onEvent(cb)`** streams the session's events as they arrive — `message` (text chunk), `thought`, `tool` / `tool_update`, and `complete` (turn end). Use it to render live agent output.
 - **Rate limit:** a sliding window of **8 prompts per 60 seconds** caps runaway loops (e.g., a buggy generated mini-app). The 9th is rejected with `rateLimited` before it reaches Hermes.
 - **Unsupervised, so tool permissions are auto-denied.** Because no human is watching a mini-app's agent turn-by-turn, any tool-permission request the agent raises mid-turn is automatically cancelled. In v1, a mini-app's agent can run reasoning and produce text but cannot perform permissioned tool actions.
-- **No project context files.** Unlike a project [chat](Chat), a mini-app's agent session deliberately does **not** load the project's `AGENTS.md` / `CLAUDE.md` / `.cursorrules` — the web content driving it is less trusted than a chat you opened yourself.
+- **Project context files load.** The mini-app's agent session runs in the project folder, and Hermes loads the project's `AGENTS.md` / `CLAUDE.md` / `.cursorrules` into it from that folder, the same as a project [chat](Chat). (Earlier docs said mini-apps skip them; that was not true on current Hermes.) Treat a project's context files like its code. What limits a mini-app is the `prompt` permission you grant, every agent permission request being denied automatically, Hermes's prompt-injection scan of context files, and the rate limit.
 
 ## The sandbox
 
@@ -114,5 +114,5 @@ This release wires the **read + prompt** surfaces. A few declared permissions ar
 
 - [Projects & Profiles](Projects-&-Profiles) — the cockpit, Upgrade Project, first-class project object
 - [Fleet & Portfolio](Fleet-&-Portfolio) — your project across multiple machines
-- [Chat](Chat) — project chats and how they load `AGENTS.md` (and why mini-apps don't)
+- [Chat](Chat) — project chats and how they load `AGENTS.md` (mini-apps load the same files, from the same project folder)
 - [Project Templates](Project-Templates) — `.scarftemplate` bundles can ship hand-authored mini-apps

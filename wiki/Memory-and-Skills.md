@@ -31,7 +31,7 @@ Edits are written through `ServerContext.writeText` — local: atomic temp + swa
 
 Browse and manage Hermes skills:
 
-- **Installed** — every skill under `~/.hermes/skills/`, grouped by category, with a file content viewer and required-config warnings (skill says it needs `OPENAI_API_KEY` in `.env`? It tells you).
+- **Installed** — every skill under `~/.hermes/skills/`, found the way Hermes finds them (any folder holding a `SKILL.md`, at any depth, following symlinks), grouped by the folder path between `skills/` and the skill — flat hub installs appear under **Uncategorized** — with a file content viewer and required-config warnings (skill says it needs `OPENAI_API_KEY` in `.env`? It tells you).
 - **Hub** — search the registry catalog (official, skills.sh, well-known, GitHub, ClawHub, LobeHub). Install, check for updates, uninstall.
 
 Operations are wrappers around the `hermes skills` CLI invoked via `context.runHermes(...)`, so they work identically against local and remote servers.
@@ -50,7 +50,7 @@ All four are gated on `HermesCapabilities.hasCurator` / `hasSkillURLInstall` so 
   - **Direct-URL install** via `hermes skills install <https-url>` — Mac SkillsView gains an "Install from URL…" toolbar button opening a sheet with URL field plus optional `--category` / `--name` overrides.
   - **Reload** via `hermes skills audit` — toolbar button next to install on Mac. Equivalent to the `/reload-skills` slash command for non-ACP contexts.
   - **Enabled / disabled state** — `skills.disabled` in config.yaml is read at scan time; disabled skills render strikethrough + an "OFF" pill on Mac and iOS rows. iOS detail view explains the state in plain text. The disable-toggle write path is deferred to v2.7 — Hermes only exposes `hermes skills config` as an interactive verb today, and we'd rather read accurately than risk clobbering a half-tested write.
-  - **Curator pin badge.** Pinned skills are protected from auto-archive and rewrites. Pin state is read from `~/.hermes/skills/.curator_state` and surfaced as a pin glyph on each row across Mac sidebar and iOS list, plus an explanatory chip on iOS detail view.
+  - **Curator pin badge.** Pinned skills are protected from auto-archive and rewrites. Pin state is read from the `pinned` field of each skill's record in `~/.hermes/skills/.usage.json` (where `hermes curator pin` writes it; `.curator_state` holds only scheduler keys) and surfaced as a pin glyph on each row across Mac sidebar and iOS list, plus an explanatory chip on iOS detail view.
 
 ### v2.5 additions
 

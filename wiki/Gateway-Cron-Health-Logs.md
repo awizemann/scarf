@@ -15,10 +15,13 @@ The Manage section's operational tools, grouped because they're what you reach f
 Start, stop, and restart the messaging gateway. Live status:
 
 - **PID, uptime, connected platforms.**
-- Per-platform connection state mirrors the dot you see throughout the app.
+- Per-platform connection state mirrors the dot you see throughout the app. A named profile served by the default multiplexer shows its platforms from the root `gateway_state.json`.
+- "Hermes Running" and the PID come from `pgrep`, scoped to the profile the window shows (`--profile <name>` gateways for a named profile). A served profile reports the multiplexer's PID. On macOS launchd installs the PID is the gateway's own, not the `osascript` wrapper's, and the stop fallback only ever signals the profile's own gateway.
 - **Pairing management** — view approved users, approve new pairing requests, revoke existing approvals.
 
 The gateway is what brings Hermes onto Telegram / Discord / Slack / etc. Stop it to take the agent offline without quitting Hermes itself.
+
+**Restart and a gateway you started by hand.** If the gateway isn't installed as a service (you ran `hermes gateway run` in a terminal, tmux or with nohup), Hermes's own restart stops it and runs the new one inside the command Scarf launched, which can't stay running. So Scarf checks `hermes gateway status` first and, in that state, doesn't restart — here, in Platforms, in MCP Servers, in Health or from the menu bar — and says why: restart it where it runs, or install it as a service with `hermes gateway install`. Service-managed gateways (launchd, systemd, Windows, s6 containers), profiles served by the default multiplexer, and (Hermes 0.21.4+) gateways run with `--external-supervisor` restart as before.
 
 ## Cron Manager
 
@@ -46,6 +49,8 @@ Edits go through [`ServerContext.writeText`](Architecture-Overview) — atomic, 
 ## Health
 
 Component-level status and diagnostics. Mirrors `hermes status` and `hermes doctor`:
+
+- **Status tab** reads each `hermes status` row by its own mark: ✓ passes, ⚠ warns, and ✗ shows as a grey "off" row (an unset API key, an unconfigured platform, a stopped gateway, sudo disabled) that counts as neither passing nor failing. A ✗ under `--deep`'s Deep Checks is a real failure. Judging what is actually broken is the Doctor tab's job.
 
 - API key validation per provider.
 - Auth provider status.
@@ -90,7 +95,7 @@ Real-time tail for the three main logs at `~/.hermes/logs/`:
 - **Session** — clickable session-ID pills filter the view to one session.
 - **Text search.**
 
-Local windows tail with `FileHandle`. Remote windows run `ssh host tail -F` with partial-line buffering so you don't see half-arrived JSON. See [`HermesLogService`](Core-Services).
+Local windows tail with `FileHandle` and check on every poll whether the path still names the same file: Hermes rotates `agent.log` by renaming it (`RotatingFileHandler`, 5 MB), so after a rotation the viewer drains the old file and reopens the new one from its start, and a truncated log is re-read from byte 0. Remote windows load the last 500 lines with a one-shot `tail -n 500`, then follow with `ssh host tail -n 0 -F` (starting at the end, so the loaded window isn't shown twice) with partial-line buffering so you don't see half-arrived JSON. See [`HermesLogService`](Core-Services).
 
 ## Settings
 
@@ -114,7 +119,7 @@ Restructured in 1.6 into a 10-tab layout exposing ~60 previously hidden config f
 
 > **Fixed 2026-09-13 (round-6 decision 1, commits `018194b7` + `acefd89a`).** Restore **never once worked** into a live Hermes home before this. `run_import` gates on `not args.force and not _confirm_import_overwrite(...)` (`hermes_cli/backup.py:942` @ `v2026.9.7`), and that confirm calls a bare `input()` (`:836`) on the closed stdin a GUI child inherits — `EOFError` → `Aborted.` → exit 1. Scarf now passes `--force`; its own restore sheet **is** the consent, and it deliberately does not pipe `y` (that would be Scarf consenting on the user's behalf). Both verbs are judged on their output rather than their exit code, in three states — success, failure, and a neutral "Hermes printed no result I can read" (`Backup incomplete:` / `Warnings (N skipped):` / `No files to back up.` all used to render as "Backup saved").
 
-ScarfGo's Settings tab is **read view + Quick Edits** — see [ScarfGo](ScarfGo) and [Platform Differences](Platform-Differences). The 7 quick-edit keys (`model.default` / `provider`, `agent.approval_mode` / `max_turns`, `display.streaming` / `show_cost` / `show_reasoning`) shell out to `hermes config set`. Other keys remain read-only on iOS.
+ScarfGo's Settings tab is **read view + Quick Edits** — see [ScarfGo](ScarfGo) and [Platform Differences](Platform-Differences). The 7 quick-edit keys (`model.default` / `provider`, `approvals.mode`, `agent.max_turns`, `display.streaming` / `show_cost` / `show_reasoning`) shell out to `hermes config set`. Other keys remain read-only on iOS.
 
 ## Related pages
 

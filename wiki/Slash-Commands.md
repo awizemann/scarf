@@ -16,11 +16,11 @@ Scarf surfaces three layers of slash commands in the chat menu:
 2. **Project-scoped** — `.md` files you author at `<project>/.scarf/slash-commands/`. Available only in chats scoped to that project. Win over global commands of the same name.
 3. **Global `/scarf-*` commands** (v2.10.1+) — bundled Scarf-specific commands installed to `~/.hermes/scarf/slash-commands/` on launch. Available in **every** chat (pre-session, global, project-scoped). Documented below under "Bundled global commands".
 
-All three are Scarf primitives expanded client-side and forwarded as a plain `session/prompt`; the agent only sees the rendered body with a `<!-- scarf-slash:<name> -->` marker. Hermes has no project-scoped slash-command concept of its own. Works uniformly on Mac + iOS, local + remote SSH, against any Hermes version.
+All three are Scarf primitives expanded client-side and forwarded as a plain `session/prompt`; the agent only sees the rendered body with a `<!-- scarf-slash:<name> -->` marker. Hermes has no project-scoped slash-command concept of its own. Works uniformly on Mac + iOS, local + remote SSH, against any Hermes version (for a remote host, the global `/scarf-*` set appears once a Mac window has connected to it — see below).
 
 ## Bundled global commands (v2.10.1+)
 
-Scarf ships six `/scarf-*` commands inside the app bundle. On every launch, `SlashCommandBootstrapService` copies them into `~/.hermes/scarf/slash-commands/` if missing OR if the bundled version is newer than the installed one. Hand-edits to a newer version number (e.g. you bump your local copy to `1.5.0`) are preserved.
+Scarf ships six `/scarf-*` commands inside the app bundle. On every launch, `SlashCommandBootstrapService` copies them into `~/.hermes/scarf/slash-commands/` if missing OR if the bundled version is newer than the installed one. A remote host gets the same install the first time a Mac window connects to it in a session (off the main thread, only when that Hermes home exists), so remote windows — and ScarfGo on that host — list them too. Hand-edits to a newer version number (e.g. you bump your local copy to `1.5.0`) are preserved.
 
 | Command | What it does |
 |---|---|
@@ -28,7 +28,7 @@ Scarf ships six `/scarf-*` commands inside the app bundle. On every launch, `Sla
 | `/scarf-help` | Concise tour of Scarf's feature surface (dashboard widgets, Kanban, model presets, slash commands, cron, etc.) and where to dig in next. |
 | `/scarf-dashboard <change>` | Design or edit the active project's `dashboard.json`. Reads the active project from the chat's `<!-- scarf-project -->` AGENTS.md block; asks the user if no project is active. |
 | `/scarf-widget <kind>` | Add a single widget to the active dashboard. Narrower scope than `/scarf-dashboard` — surgical add, doesn't redesign the file. |
-| `/scarf-cron <description>` | Schedule a recurring `hermes cron` job for the active project. Walks the user through prompt, schedule, delivery channel, and registers the job with `--workdir <project.path>` so the spawned agent inherits AGENTS.md. |
+| `/scarf-cron <description>` | Schedule a recurring `hermes cron` job for the active project. Walks the user through prompt, schedule, delivery channel, and registers the job with `hermes cron create --name "[proj:<id>] <label>" --workdir <project.path> "<schedule>" "<prompt>"` so the spawned agent inherits AGENTS.md and the job is attributed to the project. |
 | `/scarf-export` | Prepare + run the `.scarftemplate` export of the active project. Lists what the export will include (and exclude — secrets, session files, machine-specific paths) before pointing the user at Scarf's right-click → "Export as Template…" flow. |
 
 Per-project commands of the same name win — author a `<project>/.scarf/slash-commands/scarf-help.md` and it overrides the bundled one for that project's chats. Use this when a project needs a domain-specific `/scarf-help` (e.g. for a template that has its own Getting Started pattern).
@@ -94,9 +94,10 @@ Files are plain Markdown, so you can also author them outside Scarf — any edit
 
 In any chat scoped to that project, type `/`. The slash menu shows:
 
-- **Hermes-advertised commands** (`/compress`, `/clear`, etc.) at the top.
-- **User `quick_commands:` from `~/.hermes/config.yaml`** in the middle.
+- **Hermes-advertised commands** (`/compress`, `/reset`, etc.) at the top.
 - **Project-scoped slash commands** at the bottom under a "**Project commands**" subheading.
+
+User `quick_commands:` from `~/.hermes/config.yaml` are not offered: Hermes's ACP adapter has no quick-command lookup (`acp_adapter/commands.py:53-80,103-104` @ v2026.9.24), so over chat a `/name` is sent to the model as an ordinary prompt and nothing runs. They work in the Hermes CLI, TUI and messaging gateways.
 
 Pick one with ↑/↓ + Enter or Tab. Commands with `argumentHint` insert a trailing space so you can start typing the argument immediately. Hit Enter again to send. Scarf expands the body, prepends the `<!-- scarf-slash:<name> -->` marker, and sends the result to Hermes.
 
@@ -155,4 +156,4 @@ Implementing them at the client makes the slash a pure UI concern: Hermes never 
 - [ScarfGo](ScarfGo) — iOS read-only browser.
 
 ---
-_Last updated: 2026-04-25 — Scarf v2.5.0 (initial publication)_
+_Last updated: 2026-09-26 — quick_commands removed from the chat menu (Hermes ACP never runs them). Previously 2026-04-25 — Scarf v2.5.0 (initial publication)_

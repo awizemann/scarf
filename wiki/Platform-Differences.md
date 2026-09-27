@@ -25,7 +25,7 @@ Both clients talk to the same Hermes host with the same paths and the same data.
 | **Cron editor (write)** | Yes | No | Mac builds a richer editor sheet; iOS read-only in v1. Coming. |
 | **Skills tree** | Yes | Yes (read-only) | iOS won't grow a skill editor — too cramped. |
 | **Settings (read)** | Yes (full YAML) | Yes (full YAML) | — |
-| **Settings (write)** | Yes (full YAML editor) | **Quick Edits (7 keys)** | iOS exposes a curated `hermes config set <key> <value>` shell-out for `model.default`, `model.provider`, `agent.approval_mode`, `agent.max_turns`, `display.show_cost`, `display.show_reasoning`, `display.streaming`. Other keys stay read-only — Mac is the canonical full-YAML editor. |
+| **Settings (write)** | Yes (full YAML editor) | **Quick Edits (7 keys)** | iOS exposes a curated `hermes config set <key> <value>` shell-out for `model.default`, `model.provider`, `approvals.mode`, `agent.max_turns`, `display.show_cost`, `display.show_reasoning`, `display.streaming`. Other keys stay read-only — Mac is the canonical full-YAML editor. |
 | **Slash commands — author** _(v2.5)_ | Yes (per-project tab + live preview) | **No** | Multi-line markdown editing on a phone keyboard is its own UX problem; iOS gets a read-only browser instead. |
 | **Slash commands — invoke / browse** _(v2.5)_ | Yes (slash menu) | Yes (read-only browser sheet) | — |
 | **Templates — install** | Yes | No | Templates are a content-creation surface; iOS won't get a UI for it in v1. Use Mac. |
@@ -71,7 +71,7 @@ Those belong on Mac, where you have a keyboard, real screen, and the full Hermes
 These are gaps without a fundamental reason; they just need engineering time:
 
 - **Cron editor.** Add / remove jobs from the phone. The data model is shared; only the editor sheet is missing.
-- ~~**Scoped Settings editor.**~~ ✅ Shipped in v2.5 — the **Quick Edits** sheet covers the 7 keys most users actually change (`model.default`, `model.provider`, `agent.approval_mode`, `agent.max_turns`, `display.show_cost`, `display.show_reasoning`, `display.streaming`). Listed here for history; arbitrary-key editing remains future work.
+- ~~**Scoped Settings editor.**~~ ✅ Shipped in v2.5 — the **Quick Edits** sheet covers the 7 keys most users actually change (`model.default`, `model.provider`, `approvals.mode`, `agent.max_turns`, `display.show_cost`, `display.show_reasoning`, `display.streaming`). Listed here for history; arbitrary-key editing remains future work.
 - **Health summary card.** A reduced version of the Mac Health view — just enough to answer "is the gateway running, is the DB reachable, is the agent crashy?"
 - **Localization.** Translate the strings the Mac app already has; reuse the `.strings` files.
 - **iPad layout pass.** Probably one afternoon's verification.
