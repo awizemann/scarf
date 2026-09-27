@@ -83,6 +83,9 @@ struct SkillBootstrapService: Sendable {
             } catch {
                 Self.logger.warning("couldn't bootstrap skill \(skillName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
+            if let bundled = try? Data(contentsOf: skillDir.appendingPathComponent("SKILL.md")) {
+                syncTemplateCopies(of: skillName, bundledData: bundled, transport: transport)
+            }
         }
 
         // ONE event per bootstrap run that actually wrote something, not one
@@ -268,18 +271,16 @@ struct SkillBootstrapService: Sendable {
 
     // MARK: - Per-skill install
 
-    /// Hermes treats `~/.hermes/skills/<dir>/` as either a category folder
-    /// containing skill subdirectories OR a skill itself; Scarf's
-    /// `SkillsScanner` only recognizes the two-level layout
-    /// (`<category>/<skill>/SKILL.md`). v2.7.0 of this service installed
-    /// bundled skills FLAT (`~/.hermes/skills/<skill>/SKILL.md`), which
-    /// Hermes accepts (so the agent still loaded them) but Scarf's
-    /// Skills view ignored — leaving users wondering why
-    /// `scarf-template-author` was missing from the GUI. v2.10.1 fixes
-    /// the layout by installing under a `scarf/` category folder
-    /// (`~/.hermes/skills/scarf/<skill>/SKILL.md`) and migrating any
-    /// flat install in place. The migration is one-way; once the user
-    /// is on the new layout, the flat path is never re-created.
+    /// Bundled skills live under a `scarf/` category folder
+    /// (`~/.hermes/skills/scarf/<skill>/SKILL.md`). v2.7.0 of this service
+    /// installed them FLAT (`~/.hermes/skills/<skill>/SKILL.md`); v2.10.1
+    /// moved them under `scarf/` because `SkillsScanner` then only
+    /// recognised the two-level layout. The scanner now finds a `SKILL.md`
+    /// at any depth, as Hermes does (S10-F1), so the flat copy would show
+    /// up too — but the category stays: it is the namespace Scarf owns,
+    /// and `pruneKnownBadSkills` is only allowed to delete inside it. Any
+    /// flat install a prior version left is still migrated in place, and
+    /// the flat path is never re-created.
     private nonisolated static let bundledSkillCategory = "scarf"
 
     /// - Returns: `true` when this call actually wrote the skill (missing or
@@ -318,8 +319,8 @@ struct SkillBootstrapService: Sendable {
                 try transport.removeFile(flatSkillMd)
                 // Best-effort cleanup of companion files + the now-empty
                 // directory. Failures here are non-fatal — leaving a
-                // stale dir is benign (SkillsScanner ignores it because
-                // it has no SKILL.md inside any subdirectory).
+                // stale dir is benign (with its SKILL.md gone, neither
+                // Hermes nor SkillsScanner treats it as a skill).
                 if let companions = try? transport.listDirectory(flatDir) {
                     for entry in companions where entry != "SKILL.md" {
                         try? transport.removeFile(flatDir + "/" + entry)
@@ -441,6 +442,65 @@ struct SkillBootstrapService: Sendable {
             "bootstrapped skill \(skillName, privacy: .public) at v\(bundledVersion, privacy: .public) (was: \(installedVersion ?? "missing", privacy: .public))"
         )
         return true
+    }
+
+    // MARK: - Template-installed copies
+
+    /// Bring older copies of a bundled skill that a Scarf template installed
+    /// (`skills/templates/<slug>/<name>/SKILL.md`, written by the Template
+    /// Author catalog template) up to the bundled bytes.
+    ///
+    /// **Why.** Hermes finds a skill by name at any depth, and when two
+    /// copies share a name it picks one only if they are byte-identical
+    /// (`_provably_same_skill`, `tools/skills_tool.py:491-535` @ v2026.9.24);
+    /// otherwise `skill_view` refuses with "Ambiguous skill name". The
+    /// template's copy and the bundled copy used to be the same bytes, so
+    /// Hermes quietly chose the shallower `scarf/` one. Any change to the
+    /// bundled skill (S10-F5 dropped `platforms: [macos]`) makes them
+    /// differ, and the skill the New Project hand-off names would stop
+    /// loading for everyone who installed that template.
+    ///
+    /// Deliberately narrow: only the bundled skill's own name, only inside
+    /// `skills/templates/`, only a copy that passes `isScarfAuthoredSkill`,
+    /// and only when its version is OLDER than the bundled one — the same
+    /// rule `installSkill` applies to `scarf/`. Uninstalling the template
+    /// still removes its whole namespace dir, so nothing is orphaned.
+    /// - Returns: the SKILL.md paths rewritten, for the tests.
+    @discardableResult
+    nonisolated func syncTemplateCopies(
+        of skillName: String,
+        bundledData: Data,
+        transport: any ServerTransport
+    ) -> [String] {
+        let templatesRoot = context.paths.skillsDir + "/templates"
+        guard let bundledVersion = Self.parseVersion(bundledData),
+              let slugs = try? transport.listDirectory(templatesRoot)
+        else { return [] }
+        let guarded = GuardedJSONStore(transport: transport, label: "SKILL.md")
+        var rewritten: [String] = []
+        for slug in slugs.sorted() where !slug.hasPrefix(".") {
+            let dir = templatesRoot + "/" + slug + "/" + skillName
+            let skillMd = dir + "/SKILL.md"
+            guard Self.isScarfAuthoredSkill(at: dir, transport: transport) else { continue }
+            let inspection = guarded.inspect(skillMd, maxBytes: Self.maxBootstrapBytes)
+            guard case .present = inspection.state,
+                  let bytes = inspection.bytes, bytes != bundledData
+            else { continue }
+            let installed = Self.parseVersion(bytes) ?? "0.0.0"
+            guard Self.semverCompare(installed, bundledVersion) < 0 else { continue }
+            do {
+                try guarded.write(bundledData, to: skillMd, after: inspection)
+                rewritten.append(skillMd)
+                Self.logger.info(
+                    "updated template copy of \(skillName, privacy: .public) at \(skillMd, privacy: .public) to v\(bundledVersion, privacy: .public)"
+                )
+            } catch {
+                Self.logger.warning(
+                    "couldn't update template copy \(skillMd, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+        return rewritten
     }
 
     // MARK: - Frontmatter version parse

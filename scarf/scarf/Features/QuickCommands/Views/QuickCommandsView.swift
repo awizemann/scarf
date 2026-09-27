@@ -53,7 +53,7 @@ struct QuickCommandsView: View {
     private var header: some View {
         ScarfPageHeader(
             "Quick Commands",
-            subtitle: "Shell shortcuts hermes exposes in chat as `/command_name`."
+            subtitle: "Shell shortcuts you run as `/command_name` in the Hermes CLI, TUI and messaging gateways. Scarf chat doesn't run them."
         ) {
             HStack(spacing: ScarfSpace.s2) {
                 // The editor sheet dismisses on Save, so the busy state has

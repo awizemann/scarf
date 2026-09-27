@@ -155,7 +155,7 @@ struct HermesFileService: Sendable {
     // MARK: - Gateway State
 
     nonisolated func loadGatewayState() -> GatewayState? {
-        guard let data = readFileData(context.paths.gatewayStateJSON) else { return nil }
+        guard let data = gatewayStateData(own: readFileData(context.paths.gatewayStateJSON)) else { return nil }
         do {
             return try JSONDecoder().decode(GatewayState.self, from: data)
         } catch {
@@ -171,20 +171,43 @@ struct HermesFileService: Sendable {
     nonisolated func loadGatewayStateResult() -> Result<GatewayState?, Error> {
         // Distinguish "file doesn't exist yet" (normal, returns .success(nil))
         // from "file exists but we can't read or parse it" (error).
-        if !transport.fileExists(context.paths.gatewayStateJSON) {
+        var own: Data?
+        var ownFailure: Error?
+        if transport.fileExists(context.paths.gatewayStateJSON) {
+            switch readFileDataResult(context.paths.gatewayStateJSON) {
+            case .success(let data): own = data
+            case .failure(let err): ownFailure = err
+            }
+        }
+        // A multiplexer-served named profile has no file of its own; its
+        // record is the root one, projected (S07-F2). That answer stands even
+        // when the profile's own (stale) file could not be read.
+        guard let data = gatewayStateData(own: own) else {
+            if let ownFailure { return .failure(ownFailure) }
             return .success(nil)
         }
-        switch readFileDataResult(context.paths.gatewayStateJSON) {
-        case .success(let data):
-            do {
-                return .success(try JSONDecoder().decode(GatewayState.self, from: data))
-            } catch {
-                Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
-                return .failure(error)
-            }
-        case .failure(let err):
-            return .failure(err)
+        do {
+            return .success(try JSONDecoder().decode(GatewayState.self, from: data))
+        } catch {
+            Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
+            return .failure(error)
         }
+    }
+
+    /// The root home's `gateway_state.json` — where a multiplexer-served
+    /// named profile's platform states live.
+    nonisolated var rootGatewayStateJSON: String {
+        HermesProfileScope.rootHome(forHome: context.paths.home) + "/gateway_state.json"
+    }
+
+    /// The record that describes this window's profile: its own file, or —
+    /// for a named profile the default multiplexer serves — the root record
+    /// with that profile's `<profile>:<platform>` entries (S07-F2). Reads
+    /// the root file only for a named profile.
+    nonisolated func gatewayStateData(own: Data?) -> Data? {
+        guard let profile = HermesProfileScope.profileName(forHome: context.paths.home) else { return own }
+        return HermesGatewayStateProjection.effectiveRecord(
+            ownData: own, rootData: readFileData(rootGatewayStateJSON), profile: profile)
     }
 
     // MARK: - Memory
@@ -2930,36 +2953,39 @@ struct HermesFileService: Sendable {
     /// `.failure` means we couldn't probe at all (pgrep missing, connection
     /// down, permission issue) — a *different* UX from "not running".
     ///
-    /// The regex narrows the match to the gateway daemon shape so unrelated
-    /// commands that happen to contain "hermes" — `hermes acp` chat sessions,
-    /// `hermes -z` one-shots, log tails, README readers — don't get flagged
-    /// as "Hermes is running" in the dashboard banner. Two alternations cover
-    /// both invocation forms: the python-module path (`python -m
-    /// hermes_cli.main gateway run …`) and the script-path form
-    /// (`/usr/local/bin/hermes gateway run …`). All callers semantically
-    /// want the gateway PID specifically — `stopHermes()` issues
-    /// `hermes gateway stop` first and only falls back to killing this
-    /// PID, and the dashboard health probe only cares about the gateway.
+    /// Scoped to the profile this window views; see
+    /// ``HermesGatewayProcessMatch`` for the pattern (named-profile flag,
+    /// profile scoping, and the launchd wrappers it must skip). A named
+    /// profile with no gateway of its own that the default profile's
+    /// multiplexer serves reports the multiplexer's PID: the profile IS
+    /// running, through that process. Only this display answer borrows it —
+    /// ``stopHermes()`` signals nothing but the profile's own gateway.
     nonisolated func hermesPIDResult() -> Result<pid_t?, Error> {
+        let profile = HermesProfileScope.profileName(forHome: context.paths.home)
+        let own = gatewayPIDResult(profile: profile)
+        guard let profile, case .success(nil) = own,
+              isServedByMultiplexer(profile: profile) else { return own }
+        return gatewayPIDResult(profile: nil)
+    }
+
+    /// `pgrep` for one profile's own gateway process.
+    nonisolated private func gatewayPIDResult(profile: String?) -> Result<pid_t?, Error> {
         do {
             let result = try transport.runProcess(
                 executable: "/usr/bin/pgrep",
-                args: ["-f", #"(^|[[:space:]])-m[[:space:]]+hermes_cli\.main[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)|(^|[[:space:]/])hermes[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)"#],
+                args: ["-f", HermesGatewayProcessMatch.pgrepPattern(profile: profile)],
                 stdin: nil,
                 timeout: 5
             )
             // pgrep exits 1 when nothing matches — that's "not running", NOT an
             // error. Anything else (127=command not found, 255=ssh failure) is.
             if result.exitCode == 0 {
-                if let firstLine = result.stdoutString
-                    .components(separatedBy: "\n")
-                    .first(where: { !$0.isEmpty }),
-                   let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) {
-                    return .success(pid)
-                }
-                return .success(nil)
+                return .success(HermesGatewayProcessMatch.firstPID(inPgrepOutput: result.stdoutString))
             } else if result.exitCode == 1 {
-                return .success(nil)   // genuinely not running
+                // Nothing on the command line — but a named profile's gateway
+                // started with `HERMES_HOME` in its environment has no `-p`
+                // flag to match. Its own `gateway.pid` still names it.
+                return .success(profile == nil ? nil : pidFromProfilePidFile(profile: profile))
             } else {
                 let err = TransportError.commandFailed(exitCode: result.exitCode, stderr: result.stderrString)
                 Self.logger.warning("pgrep failed (exit \(result.exitCode)): \(result.stderrString, privacy: .public)")
@@ -2969,6 +2995,44 @@ struct HermesFileService: Sendable {
             Self.logger.warning("pgrep transport error: \(error.localizedDescription, privacy: .public)")
             return .failure(error)
         }
+    }
+
+    /// The PID in this profile's own `gateway.pid`, accepted only when that
+    /// process is alive and its command line is a gateway this profile can
+    /// own (`ps -o command=`), so a stale file whose PID was reused by
+    /// something else is refused. Read-only; `nil` whenever anything is in
+    /// doubt (no file, `ps` unavailable, a different command line).
+    nonisolated private func pidFromProfilePidFile(profile: String?) -> pid_t? {
+        guard let data = readFileData(context.paths.home + "/gateway.pid"),
+              let pid = HermesGatewayProcessMatch.pid(fromPidFile: data, profile: profile),
+              let ps = try? transport.runProcess(
+                  executable: "/bin/ps", args: ["-p", String(pid), "-o", "command="],
+                  stdin: nil, timeout: 5),
+              ps.exitCode == 0
+        else { return nil }
+        let commandLine = ps.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard HermesGatewayProcessMatch.commandLineIsGateway(commandLine, profile: profile) else { return nil }
+        // Hermes's own PID-reuse guard: where the host has `/proc` (Linux)
+        // the record's `start_time` is that process's stat field 22, so a
+        // mismatch means the PID now belongs to a different process. macOS
+        // records psutil centiseconds, which no read here reproduces; there
+        // the command line and `hermes_home` checks above are the guard.
+        if let recorded = HermesGatewayProcessMatch.startTime(fromPidFile: data),
+           let stat = readFileData("/proc/\(pid)/stat"),
+           let live = HermesGatewayProcessMatch.procStatStartTime(String(decoding: stat, as: UTF8.self)),
+           live != recorded {
+            return nil
+        }
+        return pid
+    }
+
+    /// Does the ROOT home's `gateway_state.json` list `profile` in
+    /// `served_profiles`? See ``HermesGatewayStateProjection``.
+    nonisolated private func isServedByMultiplexer(profile: String) -> Bool {
+        guard let data = readFileData(rootGatewayStateJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return HermesGatewayStateProjection.servedProfiles(in: root).contains(profile)
     }
 
     /// Stop the gateway, judged by what `hermes gateway stop` PRINTED.
@@ -3014,7 +3078,11 @@ struct HermesFileService: Sendable {
         func fallback(_ ok: Bool) -> HermesCLIOutcome {
             ok ? HermesCLIOutcome(succeeded: true, detail: nil) : outcome
         }
-        guard let pid = hermesPID() else { return fallback(false) }
+        // The profile's OWN gateway only: a multiplexer-served profile must
+        // never SIGTERM the default profile's gateway, which serves the rest.
+        let profile = HermesProfileScope.profileName(forHome: context.paths.home)
+        guard case .success(let found) = gatewayPIDResult(profile: profile),
+              let pid = found else { return fallback(false) }
         // For remote we can't issue a raw `kill(2)` — route through `kill(1)`
         // via the transport. Local uses the syscall for its minimal overhead.
         if context.isRemote {
@@ -3043,14 +3111,19 @@ struct HermesFileService: Sendable {
     /// resolves AI provider auth by reading env vars — a GUI-launched Scarf
     /// subprocess sees none of the `export ANTHROPIC_API_KEY=…` lines from
     /// the user's shell init files.
+    ///
+    /// The credential keys are Hermes' own provider env-var table
+    /// (``HermesProviderCredentials/providerEnvVars``) rather than a
+    /// hand-picked few, so a DeepSeek or Kimi key exported in `.zshrc`
+    /// reaches a Scarf-spawned `hermes` just as it would from a terminal,
+    /// and counts for the chat's credential hint (S15-F4).
     nonisolated private static let shellEnvKeys: [String] = [
         "PATH",
-        "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "GEMINI_API_KEY", "GOOGLE_API_KEY",
-        "GROQ_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        // Not in Hermes' provider table, but Scarf forwarded them before
+        // and a user may rely on that for a tool or plugin.
+        "GROQ_API_KEY", "MISTRAL_API_KEY",
+    ] + HermesProviderCredentials.providerEnvVars + [
         // SSH agent socket — set by 1Password / Secretive / a manual
         // `ssh-add` in the user's shell rc. GUI-launched apps don't inherit
         // these by default, so without harvesting them here, `ssh` spawned
@@ -3203,14 +3276,16 @@ struct HermesFileService: Sendable {
         return env
     }
 
-    /// True if any known AI-provider credential is reachable. Hermes itself
-    /// resolves credentials from four locations at runtime, so the preflight
-    /// mirrors that set to avoid false "no credentials" warnings:
+    /// True if any AI-provider credential is reachable. Mirrors the parts of
+    /// Hermes' own `_has_any_provider_configured` (`hermes_cli/main.py:1052`
+    /// @ v2026.9.24) that can be read from files, so the preflight doesn't
+    /// warn about a setup Hermes will happily run:
     ///   1. Current process env + login-shell env (queried once at startup)
-    ///   2. `~/.hermes/.env`
-    ///   3. `~/.hermes/auth.json` — Credential Pools (v1.6+ blessed flow)
-    ///   4. `~/.hermes/config.yaml` — embedded `api_key:` for auxiliary /
-    ///      delegation tasks
+    ///   2. `~/.hermes/.env`, against Hermes' provider env-var table
+    ///   3. `~/.hermes/auth.json` — Credential Pools and OAuth providers
+    ///   4. `~/.hermes/config.yaml` — a keyless endpoint for the main model
+    ///      (`model.base_url`, a `custom:` provider, Bedrock/Vertex/LM
+    ///      Studio), or an embedded `api_key:`
     /// Used by Chat to warn the user before `hermes acp` fails on send with
     /// "No Anthropic credentials found".
     ///
@@ -3219,33 +3294,26 @@ struct HermesFileService: Sendable {
     /// do with the remote `hermes acp`'s runtime env. The remote `.env` /
     /// `auth.json` / `config.yaml` are still checked through the transport.
     nonisolated func hasAnyAICredential() -> Bool {
-        let credentialKeys = Self.shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
+        hasAnyAICredential(environment: context.isRemote ? nil : Self.enrichedEnvironment())
+    }
 
-        if !context.isRemote {
-            let env = Self.enrichedEnvironment()
-            for key in credentialKeys {
-                if let value = env[key], !value.isEmpty {
-                    return true
-                }
-            }
+    /// The check itself, with the process environment passed in (`nil` for
+    /// a remote context) so tests can run it without the developer's shell.
+    nonisolated func hasAnyAICredential(environment: [String: String]?) -> Bool {
+        // The main model's provider decides whether a general-purpose token
+        // (GITHUB_TOKEN, HF_TOKEN) counts; see `providerScopedVars`.
+        let configText = readFile(context.paths.configYAML)
+        let config = configText.map { HermesConfig(yaml: $0) }
+        let provider = config?.provider
+        if let environment,
+           HermesProviderCredentials.environmentHasProviderKey(environment, provider: provider) {
+            return true
         }
-        // Scan .env (via transport — local file or scp) for KEY= lines.
-        // Uses a simple substring check — good enough for a preflight hint;
-        // hermes itself does the real parse.
-        if let envText = readFile(context.paths.envFile) {
-            for line in envText.split(separator: "\n") {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-                for key in credentialKeys where trimmed.hasPrefix("\(key)=") || trimmed.hasPrefix("export \(key)=") {
-                    // Must have a non-empty value after `=`
-                    if let eq = trimmed.firstIndex(of: "="),
-                       trimmed.index(after: eq) < trimmed.endIndex {
-                        let value = trimmed[trimmed.index(after: eq)...]
-                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-                        if !value.isEmpty { return true }
-                    }
-                }
-            }
+        // `.env` via the transport (local file or scp), parsed with Hermes'
+        // own `_dotenv_has_provider_key` rule.
+        if let envText = readFile(context.paths.envFile),
+           HermesProviderCredentials.dotEnvHasProviderKey(envText, provider: provider) {
+            return true
         }
         // Scan auth.json. Two shapes need to count as "credential present":
         //
@@ -3306,7 +3374,14 @@ struct HermesFileService: Sendable {
         // Scan config.yaml for `api_key:` lines with a non-empty value.
         // Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
         // without needing to parse YAML structure.
-        if let text = readFile(context.paths.configYAML) {
+        if let text = configText, let config {
+            // A local or custom endpoint may need no key at all (Ollama,
+            // LM Studio, vLLM): Hermes counts it as configured, so the hint
+            // must not tell that user to go add ANTHROPIC_API_KEY.
+            if HermesProviderCredentials.modelUsesKeylessEndpoint(
+                provider: config.provider, baseURL: config.modelBaseURL) {
+                return true
+            }
             for line in text.split(separator: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 guard trimmed.hasPrefix("api_key:") else { continue }

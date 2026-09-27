@@ -573,13 +573,10 @@ public struct ProjectStore: Sendable {
     /// Ids of cron jobs attributed to this project — either the new
     /// `[proj:<uuid>]` tag or the legacy template `[tmpl:<id>]` prefix.
     private nonisolated func cronJobIds(projectId: UUID, templateId: String?) -> [String] {
-        let jobs = loadCronJobs()
-        let projPrefix = "[proj:\(projectId.uuidString)]"
-        let tmplPrefix = templateId.map { "[tmpl:\($0)]" }
-        return jobs.compactMap { job in
-            if job.name.hasPrefix(projPrefix) { return job.id }
-            if let tmplPrefix, job.name.hasPrefix(tmplPrefix) { return job.id }
-            return nil
+        loadCronJobs().compactMap { job in
+            ProjectCronAttribution.isAttributed(
+                jobName: job.name, projectID: projectId, templateId: templateId
+            ) ? job.id : nil
         }
     }
 

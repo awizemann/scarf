@@ -130,7 +130,7 @@ struct BotConversationView: View {
         // (`MessageGroupView`, `RichMessageBubble`, the composer) at the
         // bot's session instead of the window's main chat, which is
         // injected at the app root. `serverContext` re-points the
-        // composer's own reads — slash commands, quick commands — at the
+        // composer's own reads — slash commands — at the
         // BOT's profile home, so it can't offer the user's commands under
         // the bot's name.
         .environment(viewModel.chat)

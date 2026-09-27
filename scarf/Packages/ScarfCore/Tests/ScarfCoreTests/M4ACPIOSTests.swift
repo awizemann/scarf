@@ -125,7 +125,7 @@ import Foundation
 
         let events = await eventsCollected.value
         let chunks = events.compactMap { e -> String? in
-            if case .messageChunk(_, let text, _, _) = e { return text }
+            if case .messageChunk(_, let text, _, _, _) = e { return text }
             return nil
         }
         #expect(chunks == ["Hel", "lo!"])

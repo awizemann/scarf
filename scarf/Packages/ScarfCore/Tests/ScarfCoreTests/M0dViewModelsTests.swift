@@ -165,7 +165,8 @@ import Foundation
         #expect(vm.isAgentWorking == false)
         #expect(vm.hasMessages == false)
         // Nothing is loaded from a session or from disk at init: every
-        // session/ACP/project/global/quick command source is empty. We
+        // session/ACP/project/global command source is empty (quick_commands
+        // are not a chat-menu source at all — Hermes ACP never runs them). We
         // assert those *loaded* sources rather than the derived menu size,
         // because `availableCommands` is NOT empty at start — it always
         // surfaces the static `/new` + `/steer` fallbacks (the latter is
@@ -173,7 +174,6 @@ import Foundation
         #expect(vm.acpCommands.isEmpty)
         #expect(vm.projectScopedCommands.isEmpty)
         #expect(vm.globalScopedCommands.isEmpty)
-        #expect(vm.quickCommands.isEmpty)
         // The compress command is in the static fallback list on EVERY host
         // (the ACP spelling varies at the 0.19.1 floor; `supportsCompress`
         // accepts either), so a fresh VM reports it — the

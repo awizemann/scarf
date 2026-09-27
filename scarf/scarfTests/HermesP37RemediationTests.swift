@@ -200,10 +200,11 @@ struct HermesP37RefusedReadTests {
         #expect(vm.messageIsFailure, "the refusal was not surfaced")
     }
 
-    /// The config-ONLY worst case, which was already safe and is pinned so
-    /// it stays that way: WhatsApp Cloud keeps every credential in
-    /// config.yaml, and `FormSnapshot.config` is nil on a refusal, which its
-    /// `apply` already reads as "leave the fields alone". This test does NOT
+    /// The both-files-refused case, which was already safe and is pinned so
+    /// it stays that way: WhatsApp Cloud reads `.env` and config.yaml (R07;
+    /// it was config-only when this was written), a refused `.env` read
+    /// skips `apply` entirely, and `FormSnapshot.config` is nil on a refused
+    /// config read — so the fields are left alone. This test does NOT
     /// fail against the pre-fix `apply(snapshot)` — the hole was specific to
     /// the `.env` half, whose `env` is `[:]` rather than nil, so every
     /// `env["…"] ?? ""` blanked a field. Kept as the boundary of the bug.

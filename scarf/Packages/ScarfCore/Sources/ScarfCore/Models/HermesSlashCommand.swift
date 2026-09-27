@@ -1,7 +1,7 @@
 import Foundation
 
-/// A slash command available in chat. Sourced from one of four places —
-/// see `Source` for which.
+/// A slash command available in chat. See `Source` for where each one
+/// comes from.
 public struct HermesSlashCommand: Identifiable, Sendable, Equatable {
     /// Where this command came from. Drives the slash-menu badge and the
     /// chat view model's invocation path (literal-send vs client-side
@@ -10,9 +10,9 @@ public struct HermesSlashCommand: Identifiable, Sendable, Equatable {
         /// Advertised by the ACP server via `available_commands_update`.
         /// Sent to the agent as the literal slash text.
         case acp
-        /// User-defined `quick_commands.<name>` in `~/.hermes/config.yaml`
-        /// (legacy). Sent to the agent as the literal slash text.
-        case quickCommand
+        // No `quickCommand` source: Hermes's ACP adapter never runs
+        // `quick_commands` (see `RichChatViewModel.acpCommands`), so the
+        // chat menu does not offer them.
         /// Project-scoped, Scarf-managed command at
         /// `<project>/.scarf/slash-commands/<name>.md`. Scarf intercepts
         /// the invocation, expands `{{argument}}` substitution against the

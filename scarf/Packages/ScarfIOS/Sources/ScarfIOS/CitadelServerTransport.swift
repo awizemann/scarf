@@ -284,7 +284,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// Same PATH guard `asyncRunProcess` uses, so `head` and `sh` resolve on
     /// hosts with a stripped exec PATH.
     nonisolated static func streamScriptCommand(byteCount: Int) -> String {
-        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + "head -c \(byteCount) | /bin/sh"
     }
 
@@ -846,10 +846,13 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // scan), none of whose output is verdict-matched, and the Mac twin
         // (`SSHTransport.streamScript` → `SSHScriptRunner`) does not carry it
         // either. Parity is the point in both directions.
+        // The Mac's directories (`HermesConfigReader.hermesInstallDirs`),
+        // with `~/.hermes/bin` AFTER the host's PATH: it holds Hermes' own
+        // `uv`/`uvx`, which must not shadow the user's.
         let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
-            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+            + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + hermesHome
-            + Self.shellJoin([executable] + args)
+            + Self.commandLine(executable: executable, args: args, binaryHint: config.hermesBinaryHint)
         // Citadel's `executeCommand` discards captured output when the
         // remote exits non-zero (it throws `CommandFailed` and the
         // accumulated ByteBuffer is lost). That breaks legitimate cases
@@ -877,6 +880,18 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     }
 
     // MARK: - Shell helpers
+
+    /// `shellJoin([executable] + args)`, except that a "Hermes binary"
+    /// override which is a shell fragment (`docker compose exec hermes
+    /// hermes`) goes in as the words the user typed rather than as one
+    /// quoted command name. Same rule as the Mac's
+    /// `SSHTransport.composedRemoteCommand` (S15-F3).
+    nonisolated static func commandLine(executable: String, args: [String], binaryHint: String?) -> String {
+        let fragment = HermesPathSet.binaryHintIsShellFragment(binaryHint) ? binaryHint : nil
+        return ([executable] + args).map { token in
+            token == fragment ? token : shellJoin([token])
+        }.joined(separator: " ")
+    }
 
     /// Minimal shell-argument joiner. Handles spaces + quotes; sufficient
     /// for the commands we actually pass (`echo`, `stat`, `tail`, `sqlite3`).

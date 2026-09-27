@@ -78,7 +78,10 @@ struct InstallFromURLSheet: View {
                         Text("Category")
                             .scarfStyle(.captionUppercase)
                             .foregroundStyle(ScarfColor.foregroundMuted)
-                        ScarfTextField("e.g. productivity (defaults to `local`)", text: $category)
+                        // Left empty, Hermes installs the skill flat at
+                        // `skills/<name>/` (`--yes` skips its category
+                        // prompt; `hermes_cli/skills_hub.py:700-708`).
+                        ScarfTextField("e.g. productivity (leave empty for no category)", text: $category)
                             .accessibilityLabel("Category")
                         if let problem = categoryProblem {
                             Text(problem.userMessage)

@@ -79,25 +79,36 @@ struct WebhooksView: View {
         isLoading = true
         defer { isLoading = false }
         let ctx = context
-        let result = await Self.runHermesList(context: ctx)
-        if Self.detectNotEnabled(result) {
+        guard let result = await Self.runHermesList(context: ctx) else {
+            // The command never ran (SSH down, timeout) — not "no webhooks".
+            self.notEnabled = false
+            self.webhooks = []
+            self.lastError = "Couldn't run hermes webhook list on this server"
+            return
+        }
+        // The shared Mac parser (S07-F5): `webhook list` indents EVERY line
+        // (`  ◆ name`, `    URL: …`), which the old private parser here —
+        // opening a record only on an unindented line — never matched, so
+        // every host showed "Couldn't parse" with an empty list.
+        switch HermesWebhookList.listing(result) {
+        case .notEnabled:
             self.notEnabled = true
             self.webhooks = []
             self.lastError = nil
-            return
+        case .entries(let entries):
+            self.notEnabled = false
+            self.webhooks = entries.map(WebhookRow.init)
+            self.lastError = nil
+        case .unparsed:
+            // Text came back but it is neither a listing nor the empty
+            // state — say so rather than show a silent empty list.
+            self.notEnabled = false
+            self.webhooks = []
+            self.lastError = "Couldn't parse webhook list output"
         }
-        self.notEnabled = false
-        let parsed = Self.parse(result)
-        self.webhooks = parsed
-        // When the CLI returned text but the parser produced nothing, the
-        // user otherwise sees a silent empty list. Surface a parse-failure
-        // message so they know to dig deeper.
-        self.lastError = (parsed.isEmpty && !result.isEmpty)
-            ? "Couldn't parse webhook list output"
-            : nil
     }
 
-    nonisolated private static func runHermesList(context: ServerContext) async -> String {
+    nonisolated private static func runHermesList(context: ServerContext) async -> String? {
         let transport = context.makeTransport()
         do {
             let r = try await transport.asyncRunProcess(
@@ -108,70 +119,8 @@ struct WebhooksView: View {
             )
             return r.stdoutString + r.stderrString
         } catch {
-            return ""
+            return nil
         }
-    }
-
-    nonisolated private static func detectNotEnabled(_ output: String) -> Bool {
-        let lower = output.lowercased()
-        return lower.contains("webhook platform is not enabled")
-            || lower.contains("run the gateway setup wizard")
-            || lower.contains("webhook_enabled=true")
-    }
-
-    /// Tolerant block-parser. Each subscription begins on a non-indented
-    /// line; description / deliver / events / url details follow as
-    /// indented `key: value` lines. Mirrors the Mac parser shape so
-    /// future drift only has to be fixed in one canonical place if/when
-    /// we promote this VM into ScarfCore.
-    nonisolated private static func parse(_ output: String) -> [WebhookRow] {
-        var results: [WebhookRow] = []
-        var name = ""
-        var desc = ""
-        var deliver = ""
-        var events: [String] = []
-        var route = ""
-
-        func flush() {
-            if !name.isEmpty {
-                results.append(WebhookRow(
-                    name: name,
-                    description: desc,
-                    deliver: deliver,
-                    events: events,
-                    routeSuffix: route.isEmpty ? "/webhooks/\(name)" : route
-                ))
-            }
-            name = ""; desc = ""; deliver = ""; events = []; route = ""
-        }
-
-        for raw in output.components(separatedBy: "\n") {
-            let line = raw
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            if !line.hasPrefix(" ") && !line.hasPrefix("\t") {
-                flush()
-                let candidate = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-                // \A…\z, not ^…$: ICU's $ matches before a trailing line
-                // terminator (SEC-L1); the name feeds a rendered route path.
-                if candidate.range(of: "\\A[A-Za-z0-9_-]+\\z", options: .regularExpression) != nil {
-                    name = candidate
-                }
-                continue
-            }
-            if trimmed.lowercased().hasPrefix("description:") {
-                desc = String(trimmed.dropFirst("description:".count)).trimmingCharacters(in: .whitespaces)
-            } else if trimmed.lowercased().hasPrefix("deliver:") {
-                deliver = String(trimmed.dropFirst("deliver:".count)).trimmingCharacters(in: .whitespaces)
-            } else if trimmed.lowercased().hasPrefix("events:") {
-                let list = String(trimmed.dropFirst("events:".count)).trimmingCharacters(in: .whitespaces)
-                events = list.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            } else if trimmed.lowercased().hasPrefix("url:") || trimmed.lowercased().hasPrefix("route:") {
-                route = trimmed.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-            }
-        }
-        flush()
-        return results
     }
 
     private struct WebhookRow: Identifiable {
@@ -181,5 +130,15 @@ struct WebhooksView: View {
         let deliver: String
         let events: [String]
         let routeSuffix: String
+
+        init(_ entry: HermesWebhookEntry) {
+            name = entry.name
+            description = entry.description
+            deliver = entry.deliver
+            events = entry.events
+            // The CLI prints the full URL; the route is its path.
+            let path = URL(string: entry.url)?.path ?? ""
+            routeSuffix = path.isEmpty ? "/webhooks/\(entry.name)" : path
+        }
     }
 }

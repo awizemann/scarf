@@ -4,11 +4,14 @@ import ScarfDesign
 
 /// iOS read-only Plugins view (v2.6).
 ///
-/// Walks `~/.hermes/plugins/` (each subdirectory is one plugin) and
-/// reads the optional `plugin.json` / `plugin.yaml` manifest for each.
-/// Mirrors the Mac PluginsViewModel's filesystem-first source-of-truth
-/// approach — `hermes plugins list`'s box-drawn output is fragile to
-/// parse from a phone form-factor.
+/// Same sources as the Mac Plugins pane: `hermes plugins list --json` on
+/// v0.16+ hosts (`hasPluginsListJSON`), otherwise the shared
+/// `HermesPluginDirectoryScanner` walk with activation read from
+/// config.yaml's `plugins.enabled` / `plugins.disabled` — the lists
+/// `_plugin_status` reads (`hermes_cli/plugins_cmd.py:1638-1651` @
+/// v2026.9.24). This used to derive state from a `.disabled` marker file
+/// Hermes never writes, so every plugin, including ones Hermes does not
+/// load, showed "Enabled" (S10-F4).
 ///
 /// Install / update / remove / enable / disable verbs stay on Mac for
 /// v2.6 — installing a plugin from a phone is an unusual flow.
@@ -45,7 +48,7 @@ struct PluginsView: View {
                 ForEach(plugins) { plugin in
                     Section(plugin.name) {
                         HStack {
-                            statusBadge(plugin.enabled)
+                            statusBadge(plugin.activation)
                             if !plugin.version.isEmpty {
                                 Text("v\(plugin.version)")
                                     .font(ScarfFont.monoSmall)
@@ -57,10 +60,18 @@ struct PluginsView: View {
                             LabeledContent("Source", value: plugin.source)
                                 .font(.caption.monospaced())
                         }
-                        Text(plugin.path)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        if !plugin.description.isEmpty {
+                            Text(plugin.description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        // The `--json` roster carries no path.
+                        if !plugin.path.isEmpty {
+                            Text(plugin.path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
             }
@@ -71,66 +82,75 @@ struct PluginsView: View {
         .task { await load() }
     }
 
-    private func statusBadge(_ enabled: Bool) -> some View {
-        ScarfBadge(enabled ? "Enabled" : "Disabled", kind: enabled ? .success : .neutral)
+    /// Three states, as Hermes reports them. "Not enabled" is installed
+    /// but in neither config list, so the runtime never loads it.
+    @ViewBuilder
+    private func statusBadge(_ activation: HermesPluginActivation) -> some View {
+        switch activation {
+        case .enabled: ScarfBadge("Enabled", kind: .success)
+        case .disabled: ScarfBadge("Disabled", kind: .danger)
+        case .notEnabled: ScarfBadge("Not enabled", kind: .warning)
+        }
     }
 
     private func load() async {
         isLoading = true
         defer { isLoading = false }
         let ctx = context
-        let entries = await Task.detached {
-            Self.scan(context: ctx)
+        let caps = await HermesVersionCache.shared.capabilities(for: ctx)
+        var rows: [PluginRow]?
+        if caps.hasPluginsListJSON {
+            let transport = ctx.makeTransport()
+            // `parseJSON` returns nil (not []) for output it can't read, so a
+            // failed or odd call falls through to the directory walk rather
+            // than rendering "no plugins".
+            if let result = try? await transport.asyncRunProcess(
+                executable: ctx.paths.hermesBinary,
+                args: ["plugins", "list", "--json"],
+                stdin: nil,
+                timeout: 45
+            ), result.exitCode == 0,
+               let entries = HermesPluginList.parseJSON(result.stdoutString) {
+                rows = entries.map { entry in
+                    PluginRow(
+                        name: entry.name,
+                        version: entry.version,
+                        source: entry.source,
+                        description: entry.description,
+                        path: "",
+                        activation: entry.status
+                    )
+                }
+            }
+        }
+        if let rows {
+            self.plugins = rows
+            return
+        }
+        let dir = ctx.paths.pluginsDir
+        self.plugins = await Task.detached {
+            HermesPluginDirectoryScanner.walk(dir: dir, context: ctx).map { entry in
+                PluginRow(
+                    name: entry.name,
+                    version: entry.version,
+                    source: entry.source,
+                    description: "",
+                    path: entry.path,
+                    activation: entry.activation
+                )
+            }
         }.value
-        self.plugins = entries
     }
 
-    nonisolated private static func scan(context: ServerContext) -> [PluginRow] {
-        let transport = context.makeTransport()
-        let dir = context.paths.pluginsDir
-        guard let entries = try? transport.listDirectory(dir) else { return [] }
-        var results: [PluginRow] = []
-        for entry in entries.sorted() where !entry.hasPrefix(".") {
-            let path = dir + "/" + entry
-            guard transport.stat(path)?.isDirectory == true else { continue }
-            let manifest = readManifest(path: path, context: context)
-            let disabled = transport.fileExists(path + "/.disabled")
-            results.append(PluginRow(
-                name: entry,
-                version: manifest.version,
-                source: manifest.source,
-                path: path,
-                enabled: !disabled
-            ))
-        }
-        return results
-    }
-
-    /// Read `plugin.json` first; fall back to `plugin.yaml` for plugins
-    /// that author manifest in YAML. Same shape as the Mac VM so
-    /// parsing stays consistent across targets.
-    nonisolated private static func readManifest(path: String, context: ServerContext) -> (source: String, version: String) {
-        if let data = context.readData(path + "/plugin.json"),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let source = (obj["source"] as? String) ?? (obj["repository"] as? String) ?? (obj["url"] as? String) ?? ""
-            let version = (obj["version"] as? String) ?? ""
-            return (source, version)
-        }
-        if let yaml = context.readText(path + "/plugin.yaml") {
-            let parsed = HermesYAML.parseNestedYAML(yaml)
-            let source = HermesYAML.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
-            let version = HermesYAML.stripYAMLQuotes(parsed.values["version"] ?? "")
-            return (source, version)
-        }
-        return ("", "")
-    }
-
-    private struct PluginRow: Identifiable {
-        var id: String { name }
+    private struct PluginRow: Identifiable, Sendable {
+        // Names can repeat in the `--json` roster (a user plugin and a
+        // bundled one), and that path carries no directory to tell them apart.
+        let id = UUID()
         let name: String
         let version: String
         let source: String
+        let description: String
         let path: String
-        let enabled: Bool
+        let activation: HermesPluginActivation
     }
 }

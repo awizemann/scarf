@@ -273,7 +273,10 @@ final class MessagingGatewayViewModel {
         run: HermesCLIRunner,
         capabilities: HermesCapabilities
     ) -> MessagingGatewayInfo {
-        let stateJSON = context.readData(context.paths.gatewayStateJSON)
+        // A named profile the default multiplexer serves has no file of its
+        // own: its platforms are the root record's `<profile>:` entries.
+        let stateJSON = HermesFileService(context: context)
+            .gatewayStateData(own: context.readData(context.paths.gatewayStateJSON))
         var pid: Int?
         var state = "unknown"
         var exitReason: String?

@@ -2195,10 +2195,16 @@ final class ChatController {
         }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);
-        // Hermes receives the expanded prompt template body. Other
-        // command sources (ACP, quick_commands) keep going to Hermes
-        // literally. v2.5.
+        // Hermes receives the expanded prompt template body. ACP
+        // commands keep going to Hermes as typed. v2.5.
         let wireText = idleQueueText ?? expandIfProjectScoped(text)
+        // Reconcile the echo against what Hermes will store for THIS wire
+        // text (S02-F1), not the typed text or the image-only placeholder.
+        vm.notePromptWire(
+            displayText: text.isEmpty ? "[image attached]" : text,
+            wireText: wireText,
+            imageCount: images.count
+        )
         await startPrompt(
             client: client,
             sessionId: sessionId,
@@ -3660,7 +3666,10 @@ private struct ToolCallCard: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(call.arguments)
+                // A live built-in call has no arguments on the wire (Hermes
+                // sends `rawInput` only for unknown tools) — show Hermes's
+                // own preview instead of a bare `{}`.
+                Text(call.hasNoArguments ? (call.livePreview ?? call.arguments) : call.arguments)
                     .font(.caption2.monospaced())
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .textSelection(.enabled)

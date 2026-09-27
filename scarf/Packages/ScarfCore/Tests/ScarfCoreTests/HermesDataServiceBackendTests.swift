@@ -401,7 +401,7 @@ import Foundation
             ("c4", .integer(2000)), // totalOutputTokens
             ("c5", .real(1.25))   // totalCostUSD
         ])
-        await mock._seedRow(forSQLPrefix: "SELECT COUNT(*),", columns: statsRow.columnIndex, values: statsRow.values)
+        await mock._seedRow(forSQLPrefix: "SELECT (SELECT COUNT(*)", columns: statsRow.columnIndex, values: statsRow.values)
 
         // Recent sessions: one base session row.
         await mock._seedRows(forSQLPrefix: "SELECT id, source", [makeBaseSessionRow(id: "sess-A")])

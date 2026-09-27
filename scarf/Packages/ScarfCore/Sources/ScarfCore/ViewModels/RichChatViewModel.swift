@@ -282,9 +282,14 @@ public struct MessageGroup: Identifiable {
             for call in msg.toolCalls {
                 total += 1
                 kindCounts[call.toolKind, default: 0] += 1
+                // `livePreview` is part of the key: a live built-in call
+                // has no arguments on the wire (always "{}"), so reads of
+                // a.swift, b.swift and c.swift differ only in Hermes's
+                // title preview and must stay three cards, not "×3".
                 if var last = entries.last,
                    last.call.functionName == call.functionName,
-                   last.call.arguments == call.arguments {
+                   last.call.arguments == call.arguments,
+                   last.call.livePreview == call.livePreview {
                     // Identical consecutive call → collapse, keeping the
                     // LATEST call's identity so inspector focus and the
                     // in-flight spinner track the most recent attempt.
@@ -345,11 +350,6 @@ public final class RichChatViewModel {
     public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
-        // Quick-commands load happens in `reset()`, which every chat-start
-        // path calls before the user can interact (iOS: ChatController.start;
-        // Mac: ChatViewModel.startNewSession/resumeSession/continueLastSession).
-        // Calling it here too caused two parallel SFTP reads of config.yaml
-        // on iOS chat startup.
     }
 
 
@@ -669,9 +669,16 @@ public final class RichChatViewModel {
     public private(set) var acpCompressionCount = 0
 
     /// Slash commands advertised by the ACP server via `available_commands_update`.
+    ///
+    /// `quick_commands` from `config.yaml` are deliberately NOT a menu
+    /// source. Hermes's ACP adapter never reads them: its command table is
+    /// `acp_adapter/commands.py:53-80` and an unknown name returns `None`
+    /// (`:103-104`), so the literal `/name` falls through to the model as an
+    /// ordinary prompt (`acp_adapter/server.py:827-837` @ v2026.9.24). Only
+    /// the CLI (`cli.py:1219-1233`), the messaging gateway
+    /// (`gateway/run_inbound.py:812,1033`) and the TUI gateway run them. The
+    /// menu used to offer them as "Run: <cmd>", which never ran anything.
     public private(set) var acpCommands: [HermesSlashCommand] = []
-    /// User-defined commands parsed from `config.yaml` `quick_commands`.
-    public private(set) var quickCommands: [HermesSlashCommand] = []
     /// Project-scoped, Scarf-managed commands at
     /// `<project>/.scarf/slash-commands/<name>.md`. Loaded by
     /// `loadProjectScopedCommands(at:)` when a project chat starts; cleared
@@ -965,7 +972,8 @@ public final class RichChatViewModel {
     }
 
     /// Merged slash-menu list. Precedence: **ACP > project-scoped >
-    /// global Scarf > quick_commands** (most specific source wins).
+    /// global Scarf** (most specific source wins). No `quick_commands` —
+    /// see `acpCommands`.
     /// De-duplicated by name. Non-interruptive ACP commands (`/steer`)
     /// are always appended at the end so they don't crowd the more
     /// frequently-used options.
@@ -1000,15 +1008,9 @@ public final class RichChatViewModel {
                 )
             }
         let globalNames = Set(globalAsHermes.map(\.name))
-        let quicks = quickCommands.filter {
-            !acpNames.contains($0.name)
-                && !projectNames.contains($0.name)
-                && !globalNames.contains($0.name)
-        }
         let occupied = acpNames
             .union(projectNames)
             .union(globalNames)
-            .union(Set(quicks.map(\.name)))
         // Capability gate: BOTH non-interruptive rows are v0.13 ACP
         // surfaces — `steer` and `queue` are adjacent lines in the
         // adapter's command dict and arrived at the same tag
@@ -1045,7 +1047,7 @@ public final class RichChatViewModel {
         noteSlashCommandFallbackIfNeeded()
         let alwaysAvailable = Self.alwaysAvailableCommands(capabilities: capabilitiesGate)
             .filter { !occupied.contains($0.name) }
-        return acpCommands + projectAsHermes + globalAsHermes + quicks + nonInterruptive + alwaysAvailable
+        return acpCommands + projectAsHermes + globalAsHermes + nonInterruptive + alwaysAvailable
     }
 
     /// Publish a fresh capabilities snapshot from the controller.
@@ -1550,8 +1552,9 @@ public final class RichChatViewModel {
 
     /// Expand `/<name> args` when `<name>` matches a loaded project-
     /// scoped command. Falls through (returns the input unchanged) for
-    /// non-slash input, unknown names, ACP-advertised commands, and
-    /// quick_commands — those go to Hermes literally. The caller
+    /// non-slash input, unknown names and ACP-advertised commands — those
+    /// go to Hermes as typed (Hermes dispatches its own commands; any other
+    /// `/name` reaches the model as an ordinary prompt). The caller
     /// provides the `ServerContext` so the expansion service can read
     /// the project sidecar through the right transport.
     public func expandIfProjectScoped(
@@ -1628,12 +1631,43 @@ public final class RichChatViewModel {
     /// renders blank or vanishes on return. We hold a per-session
     /// copy here that survives `reset()` so `loadSessionHistory` can
     /// re-inject anything still in flight, and clean entries out as
-    /// soon as a matching DB row appears.
-    private var pendingLocalUserMessages: [String: [HermesMessage]] = [:]
+    /// soon as a matching DB row appears (see `settledEchoIds`).
+    private var pendingLocalUserMessages: [String: [PendingEcho]] = [:]
+
+    /// The data-service close `reset()` started; awaited by the history
+    /// loads so it can never land after their open.
+    @ObservationIgnored
+    private var pendingDataServiceClose: Task<Void, Never>?
+
+    /// A locally echoed user prompt and what its state.db row will look
+    /// like. The bubble shows what the user TYPED; Hermes stores something
+    /// else for many ordinary sends, so display-text equality both
+    /// duplicated bubbles (the echo re-injected beside the real row on
+    /// every reopen) and resurrected orphans (commands Hermes never
+    /// stores). Matching runs on the wire text instead, bounded by the
+    /// send's position in the transcript.
+    struct PendingEcho {
+        let message: HermesMessage
+        /// Highest persisted row id on screen when the prompt was sent.
+        /// state.db `messages.id` is a global rowid, so this prompt's row —
+        /// if Hermes writes one — lands above it; an older row with the
+        /// same text can never be mistaken for it.
+        let watermark: Int
+        /// Trimmed texts one of which the stored row contains. Empty when
+        /// Hermes writes no user row for this prompt at all.
+        var matchKeys: [String]
+    }
 
     private var streamingAssistantText = ""
     private var streamingThinkingText = ""
     private var streamingToolCalls: [HermesToolCall] = []
+    /// Hermes `messageId` of the reply the streaming buffers hold (see
+    /// `ACPEvent.messageChunk`). A chunk under a different id — including
+    /// nil after an id, or an id after nil — is a different reply and gets
+    /// its own bubble. Hosts that never send ids stay nil == nil: one
+    /// buffer, as before.
+    @ObservationIgnored
+    private var streamingReplyId: String?
 
     /// Ids of tool calls whose `tool_call` start this VM processed and
     /// whose `tool_call_update` has not arrived yet. Separate from
@@ -1836,7 +1870,10 @@ public final class RichChatViewModel {
         hydrationTask = nil
         isHydratingTools = false
         stopActivePolling()
-        Task { await dataService.close() }
+        // Kept so the next history load can wait for it: fire-and-forget,
+        // the close could land AFTER a quick switch-back's `refresh()` and
+        // shut the DB under it (the reload then painted nothing).
+        pendingDataServiceClose = Task { await dataService.close() }
         messages = []
         messageGroups = []
         renderWindow = RenderWindow.initial
@@ -1856,6 +1893,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         openToolCallIds = []
         turnCancelRequested = false
         cancelStreamingFlush()
@@ -1906,7 +1944,6 @@ public final class RichChatViewModel {
         // scoped; a fresh chat starts back at the default "ask before
         // edits" posture rather than carrying the previous session's mode.
         activeApprovalMode = .default
-        loadQuickCommands()
     }
 
     public func setSessionId(_ id: String?) {
@@ -1935,6 +1972,160 @@ public final class RichChatViewModel {
             }
             await dataService.close()
         }
+    }
+
+    /// Tell the transcript what the send path actually put on the wire for
+    /// the prompt just echoed with `addUserMessage(text: displayText)`, so
+    /// the echo is retired against the row Hermes really stores (a
+    /// `/scarf-*` expansion, an idle `/queue` argument, an image prompt)
+    /// or not re-injected at all when Hermes stores none (`/help`,
+    /// `/model`, …). No-op when no echo for `displayText` is pending in
+    /// this session.
+    public func notePromptWire(displayText: String, wireText: String, imageCount: Int) {
+        guard let sid = sessionId else { return }
+        let keys = Self.persistedUserRowKeys(
+            wireText: wireText,
+            imageCount: imageCount,
+            dispatchedSlashNames: hermesDispatchedSlashNames
+        )
+        var list = pendingLocalUserMessages[sid] ?? []
+        if let idx = list.lastIndex(where: { $0.message.content == displayText }) {
+            list[idx].matchKeys = keys
+        } else if let local = messages.last(where: { $0.id < 0 && $0.isUser && $0.content == displayText }) {
+            // Echoed before this session had its id: autostart echoes while
+            // `sessionId` is nil (not cached at all) or still the session
+            // it is about to load, and `session/load` can fall back to a
+            // new session. Adopt the echo here, and drop any copy cached
+            // under another session so it is never re-injected there.
+            for (other, entries) in pendingLocalUserMessages where other != sid {
+                let kept = entries.filter { $0.message.id != local.id || $0.message.content != local.content }
+                pendingLocalUserMessages[other] = kept.isEmpty ? nil : kept
+            }
+            let position = messages.lastIndex(where: { $0.id == local.id }) ?? messages.endIndex
+            let watermark = messages[..<position].lazy.map(\.id).filter { $0 > 0 }.max() ?? 0
+            list.append(PendingEcho(message: local, watermark: watermark, matchKeys: keys))
+        } else {
+            return
+        }
+        pendingLocalUserMessages[sid] = list
+    }
+
+    /// Slash names this host's ACP adapter answers itself (no agent turn,
+    /// so no user row): what it advertised, plus the static roster Scarf
+    /// knows it always dispatches (`alwaysAvailableCommands`, minus the
+    /// client-side `/new`) and the capability-gated `/steer` / `/queue`.
+    var hermesDispatchedSlashNames: Set<String> {
+        var names = Set(acpCommands.map { $0.name.lowercased() })
+        for cmd in Self.alwaysAvailableCommands(capabilities: capabilitiesGate) where cmd.name != "new" {
+            names.insert(cmd.name)
+        }
+        for cmd in Self.nonInterruptiveCommands
+        where Self.nonInterruptiveSlashIsDispatched(cmd.name, capabilities: capabilitiesGate) {
+            names.insert(cmd.name)
+        }
+        return names
+    }
+
+    /// Texts one of which the state.db user row for this prompt contains,
+    /// or `[]` when Hermes writes no user row for it. Hermes @ v2026.9.24:
+    ///  - `session/prompt` strips the text and persists it
+    ///    (`acp_adapter/server.py:805,818`), after
+    ///    `_rewrite_prompt_for_interrupt` (`:701-723`) may have wrapped it
+    ///    as "<cancelled prompt>\n\nUser correction/guidance after
+    ///    interrupt: <text>" (`:201-202`) or unwrapped an idle `/steer`.
+    ///  - With an image the plain-text override is refused
+    ///    (`agent/session_persistence.py:69-77`) and the row is the text
+    ///    parts joined with `"[screenshot]"` (`:108-119`): "look at
+    ///    this\n[screenshot]", or just "[screenshot]" when there is no text.
+    ///  - A slash name in the adapter's table is answered without a turn
+    ///    (`server.py:827-837`), so no row — except `/steer` and `/queue`,
+    ///    whose argument later lands as its own row (a steer-marker row,
+    ///    `agent/prompt_builder.py:550-564`, or the queued prompt's turn).
+    ///  - A mid-turn plain prompt is redirected (row = the text,
+    ///    `agent/conversation_loop.py:319`) or queued (row when it runs).
+    /// So the row CONTAINS the wire text in every shape; matching is by
+    /// containment.
+    static func persistedUserRowKeys(
+        wireText: String,
+        imageCount: Int,
+        dispatchedSlashNames: Set<String>
+    ) -> [String] {
+        let wire = wireText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Slash commands are text-only on Hermes's side: with media the
+        // prompt goes to the agent even if it starts with "/".
+        if imageCount == 0, wire.hasPrefix("/") {
+            // Hermes splits on any whitespace and lower-cases the name
+            // (`text.split(maxsplit=1)`, `acp_adapter/commands.py:99-101`).
+            let body = wire.dropFirst()
+            let nameEnd = body.firstIndex(where: \.isWhitespace) ?? body.endIndex
+            let name = body[..<nameEnd].lowercased()
+            if dispatchedSlashNames.contains(name) {
+                guard name == "steer" || name == "queue" else { return [] }
+                let args = body[nameEnd...].trimmingCharacters(in: .whitespacesAndNewlines)
+                return args.isEmpty ? [] : [args]
+            }
+        }
+        if wire.isEmpty {
+            // "[Image attachment]" is the `persist_user_message` fallback
+            // (`server.py:805`) a host that honoured the override stores.
+            return imageCount > 0 ? ["[screenshot]", "[Image attachment]"] : []
+        }
+        return [wire]
+    }
+
+    /// Local ids of the echoes state.db has caught up with, plus every echo
+    /// that expects no row. Echoes are taken in send order and each claims
+    /// one unclaimed user row above its watermark; standalone compaction
+    /// summaries (Hermes-authored user-role rows) never count. Two passes:
+    /// first the shapes Hermes is known to store (`rowMatches(strict:)`),
+    /// then plain containment for what is left — so a short prompt whose
+    /// row never landed cannot claim a later prompt's row that merely
+    /// contains its text while that prompt's own echo goes unmatched.
+    static func settledEchoIds(_ echoes: [PendingEcho], persisted: [HermesMessage]) -> Set<Int> {
+        var settled = Set<Int>()
+        var rows = persisted
+            .filter { $0.isUser && $0.id > 0 && !$0.isCompactionSummary }
+            .sorted { $0.id < $1.id }
+            .map { (id: $0.id, text: $0.content.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        var open: [PendingEcho] = []
+        for echo in echoes {
+            if echo.matchKeys.isEmpty {
+                settled.insert(echo.message.id)
+            } else {
+                open.append(echo)
+            }
+        }
+        for strict in [true, false] {
+            var unmatched: [PendingEcho] = []
+            for echo in open {
+                if let idx = rows.firstIndex(where: { row in
+                    row.id > echo.watermark
+                        && echo.matchKeys.contains { rowMatches(row.text, key: $0, strict: strict) }
+                }) {
+                    settled.insert(echo.message.id)
+                    rows.remove(at: idx)
+                } else {
+                    unmatched.append(echo)
+                }
+            }
+            open = unmatched
+        }
+        return settled
+    }
+
+    /// Strict: the row IS the key, or one of the shapes Hermes wraps it in —
+    /// "key\n[screenshot]" (image), "…\n[Additional user correction]\nkey"
+    /// (stacked redirects, `agent/interrupt_control.py:298-300`), "…after
+    /// interrupt: key" (`acp_adapter/server.py:201-202`), or the steer
+    /// marker with the key on its own line (`agent/prompt_builder.py:550-552`).
+    /// Loose: the row contains the key anywhere.
+    private static func rowMatches(_ text: String, key: String, strict: Bool) -> Bool {
+        guard strict else { return text.contains(key) }
+        return text == key
+            || text.hasPrefix(key + "\n")
+            || text.hasSuffix("\n" + key)
+            || text.hasSuffix(": " + key)
+            || text.contains("\n" + key + "\n")
     }
 
     // MARK: - ACP Event Handling
@@ -1973,6 +2164,7 @@ public final class RichChatViewModel {
         }
         let id = nextLocalId
         nextLocalId -= 1
+        let watermark = messages.lazy.map(\.id).filter { $0 > 0 }.max() ?? 0
         let message = HermesMessage(
             id: id,
             sessionId: sessionId ?? "",
@@ -1990,8 +2182,16 @@ public final class RichChatViewModel {
         // Track the local message in the pending-user-messages cache
         // so a reset/resume cycle on this session before Hermes
         // persists the row can still re-inject it on return (#63).
+        // Until the send path says what went on the wire
+        // (`notePromptWire`), the typed text is the best guess.
         if let sid = sessionId {
-            pendingLocalUserMessages[sid, default: []].append(message)
+            pendingLocalUserMessages[sid, default: []].append(PendingEcho(
+                message: message,
+                watermark: watermark,
+                matchKeys: Self.persistedUserRowKeys(
+                    wireText: text, imageCount: 0, dispatchedSlashNames: []
+                )
+            ))
         }
         // Per-turn stopwatch (v2.5): record the start time only when
         // we're entering a fresh agent turn. /steer-style mid-run sends
@@ -2010,6 +2210,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         cancelStreamingFlush()
         buildMessageGroups()
         // User just submitted — jump to the bottom so they see their message
@@ -2155,7 +2356,8 @@ public final class RichChatViewModel {
             }
         }
         switch event {
-        case .messageChunk(_, let text, _, _):
+        case .messageChunk(_, let text, _, _, let messageId):
+            startNewReplyIfIdChanged(messageId)
             appendMessageChunk(text: text)
         case .userMessageChunk:
             // `user_message_chunk` only ever carries replayed history
@@ -2164,7 +2366,8 @@ public final class RichChatViewModel {
             // post-engagement is defensively ignored — the DB-hydrated
             // history owns replayed user turns.
             break
-        case .thoughtChunk(_, let text):
+        case .thoughtChunk(_, let text, let messageId):
+            startNewReplyIfIdChanged(messageId)
             appendThoughtChunk(text: text)
         case .toolCallStart(_, let call):
             handleToolCallStart(call)
@@ -2219,29 +2422,6 @@ public final class RichChatViewModel {
         return result
     }
 
-    /// Load `quick_commands` from `config.yaml` off the main actor and publish
-    /// them as slash commands. Safe to call repeatedly — replaces the existing list.
-    public func loadQuickCommands() {
-        let ctx = context
-        Task.detached { [weak self] in
-            let loaded = Self.loadQuickCommands(context: ctx)
-            let mapped = loaded.map { (name, command) -> HermesSlashCommand in
-                let truncated = command.count > 60
-                    ? String(command.prefix(60)) + "…"
-                    : command
-                return HermesSlashCommand(
-                    name: name,
-                    description: "Run: \(truncated)",
-                    argumentHint: nil,
-                    source: .quickCommand
-                )
-            }
-            await MainActor.run { [weak self] in
-                self?.quickCommands = mapped
-            }
-        }
-    }
-
     /// Load project-scoped slash commands from
     /// `<projectPath>/.scarf/slash-commands/` off the main actor and
     /// publish them. Safe to call repeatedly — replaces the existing
@@ -2281,21 +2461,21 @@ public final class RichChatViewModel {
         }
     }
 
-    /// Parse `quick_commands` from `<context>/config.yaml`. Returns
-    /// `[(name, command)]` for every well-formed `type: exec` entry.
-    /// Mac-side `QuickCommandsViewModel` uses a richer model + adds
-    /// an `isDangerous` check; here we only need the slash-menu
-    /// projection, so we keep the parser minimal and ScarfCore-local.
-    nonisolated static func loadQuickCommands(context: ServerContext) -> [(name: String, command: String)] {
-        guard let yaml = context.readText(context.paths.configYAML) else { return [] }
-        // Shared parser (HermesQuickCommandsYAML) so dotted names like
-        // `v1.2_deploy` survive on this side too — the naive
-        // `split(separator: ".", maxSplits: 2)` this used dropped them
-        // from the iOS slash menu while the Mac list showed them.
-        return HermesQuickCommandsYAML.entries(inYAML: yaml).compactMap { entry in
-            guard entry.type == "exec", !entry.command.isEmpty else { return nil }
-            return (name: entry.name, command: entry.command)
+    /// Finalize the streaming bubble when a chunk belongs to a different
+    /// Hermes reply than the one being streamed. Hermes answers a mid-turn
+    /// send with an id-less status line ("⏩ Steer queued for the active
+    /// turn: …", "Queued for the next turn. (1 queued)" —
+    /// `acp_adapter/commands.py:290-310`, `server.py:827-843` @ v2026.9.24)
+    /// while the resumed turn streams under its own UUID
+    /// (`events.py:185-236`); without this the two were glued into one
+    /// bubble with no separator.
+    private func startNewReplyIfIdChanged(_ messageId: String?) {
+        if messageId != streamingReplyId,
+           !streamingAssistantText.isEmpty || !streamingThinkingText.isEmpty {
+            finalizeStreamingMessage()
+            buildMessageGroups()
         }
+        streamingReplyId = messageId
     }
 
     private func appendMessageChunk(text: String) {
@@ -2361,7 +2541,8 @@ public final class RichChatViewModel {
             callId: call.toolCallId,
             functionName: call.functionName,
             arguments: call.argumentsJSON,
-            startedAt: Date()
+            startedAt: Date(),
+            livePreview: call.livePreview
         )
         streamingToolCalls.append(toolCall)
         openToolCallIds.insert(call.toolCallId)
@@ -2809,6 +2990,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        streamingReplyId = nil
         cancelStreamingFlush()
     }
 
@@ -2836,6 +3018,7 @@ public final class RichChatViewModel {
         // transcript that has moved on (or moves on during the awaits
         // below) must never receive another session's rows.
         guard self.sessionId == sessionId else { return }
+        if let close = pendingDataServiceClose { await close.value }
         let opened = await dataService.open()
         guard opened else { return }
 
@@ -2868,12 +3051,31 @@ public final class RichChatViewModel {
             messages.filter { $0.id > 0 && $0.sessionId == sessionId && $0.id < floor }
         } ?? []
 
-        // Find local-only user messages not yet in DB.
-        // Local messages have negative IDs; DB messages have positive IDs.
-        let dbUserContents = Set(dbMessages.filter(\.isUser).map(\.content))
-        let localOnlyMessages = messages.filter { msg in
-            msg.id < 0 && msg.isUser && !dbUserContents.contains(msg.content)
+        // Find local-only user messages not yet in DB (negative ids are
+        // local, positive ids are DB rows). Each local bubble is matched
+        // through its cached echo record; a bubble with none (echoed before
+        // the session had an id) gets one from its position — the highest
+        // DB id above it — and its own text.
+        let cached = pendingLocalUserMessages[sessionId] ?? []
+        var echoes: [PendingEcho] = []
+        var highestRowId = 0
+        for msg in messages {
+            if msg.id > 0 {
+                highestRowId = max(highestRowId, msg.id)
+            } else if msg.id < 0, msg.isUser {
+                echoes.append(cached.first { $0.message.id == msg.id } ?? PendingEcho(
+                    message: msg,
+                    watermark: highestRowId,
+                    matchKeys: Self.persistedUserRowKeys(
+                        wireText: msg.content, imageCount: 0, dispatchedSlashNames: []
+                    )
+                ))
+            }
         }
+        let settled = Self.settledEchoIds(echoes, persisted: dbMessages)
+        let localOnlyMessages = echoes.map(\.message).filter { !settled.contains($0.id) }
+        let stillPending = cached.filter { !settled.contains($0.message.id) }
+        pendingLocalUserMessages[sessionId] = stillPending.isEmpty ? nil : stillPending
 
         // Build reconciled list: DB messages + unmatched local user messages
         var reconciled = olderLoaded + dbMessages
@@ -2943,6 +3145,7 @@ public final class RichChatViewModel {
         // `forceFresh: true` refuses the stale-snapshot fallback the data
         // service grew in M11 — falling back here would silently hide
         // messages the agent streamed during the user's offline window.
+        if let close = pendingDataServiceClose { await close.value }
         let opened = await dataService.refresh(forceFresh: true)
         guard opened else { return }
         // Race-check #1: session id may have changed during refresh.
@@ -3007,32 +3210,34 @@ public final class RichChatViewModel {
         //   2. The DB-resume path on first load — a previously-pending
         //      message Hermes is still mid-write may not appear in
         //      this fetch. We merge it in, and drop it from the cache
-        //      as soon as a matching DB row (same content, persisted
-        //      id ≥ 0) shows up.
-        let pendingForSession = pendingLocalUserMessages[sessionId] ?? []
+        //      as soon as its DB row shows up (`settledEchoIds` —
+        //      matched on the wire text, not the typed text). An echo
+        //      Hermes stores no row for (`/help`, `/model`, …) is
+        //      dropped here too: its reply was never persisted either,
+        //      so re-injecting it would leave an orphan bubble.
+        // Echoes are cached under the session the chat is attached to —
+        // the ACP id when it differs from the origin being merged in.
+        let pendingKey = self.sessionId ?? sessionId
+        let pendingForSession = pendingLocalUserMessages[pendingKey] ?? []
         if pendingForSession.isEmpty {
             messages = allMessages
         } else {
+            let settled = Self.settledEchoIds(pendingForSession, persisted: allMessages)
             var merged = allMessages
-            var stillPending: [HermesMessage] = []
-            for local in pendingForSession {
-                let persisted = merged.contains { msg in
-                    msg.isUser && msg.id >= 0 && msg.content == local.content
-                }
-                if persisted {
-                    continue // DB caught up — drop the local copy
-                }
+            var stillPending: [PendingEcho] = []
+            for echo in pendingForSession where !settled.contains(echo.message.id) {
+                let local = echo.message
                 if !merged.contains(where: { $0.id == local.id }) {
                     merged.append(local)
                 }
-                stillPending.append(local)
+                stillPending.append(echo)
             }
             merged.sort(by: HermesMessage.chronologicalOrder)
             messages = merged
             if stillPending.isEmpty {
-                pendingLocalUserMessages.removeValue(forKey: sessionId)
+                pendingLocalUserMessages.removeValue(forKey: pendingKey)
             } else {
-                pendingLocalUserMessages[sessionId] = stillPending
+                pendingLocalUserMessages[pendingKey] = stillPending
             }
         }
         currentSession = session
@@ -3431,7 +3636,23 @@ public final class RichChatViewModel {
         fetched: [HermesMessage],
         currentLocal: [HermesMessage]
     ) -> [HermesMessage] {
-        let dbUserContents = Set(fetched.filter(\.isUser).map(\.content))
+        // Local user bubbles settle through the same matcher as the reopen
+        // and reconnect paths, each bounded by the highest DB row above it
+        // — so a re-sent text is not dropped because an OLDER row has it.
+        var echoes: [PendingEcho] = []
+        var highestRowId = 0
+        for msg in currentLocal {
+            if msg.id > 0 {
+                highestRowId = max(highestRowId, msg.id)
+            } else if msg.id < 0, msg.isUser {
+                echoes.append(PendingEcho(
+                    message: msg,
+                    watermark: highestRowId,
+                    matchKeys: persistedUserRowKeys(wireText: msg.content, imageCount: 0, dispatchedSlashNames: [])
+                ))
+            }
+        }
+        let settledEchoes = settledEchoIds(echoes, persisted: fetched)
         let dbToolCallIds = Set(fetched.compactMap { $0.role == "tool" ? $0.toolCallId : nil })
         var merged = fetched
         for msg in currentLocal {
@@ -3446,7 +3667,7 @@ public final class RichChatViewModel {
                 merged.append(msg)
                 continue
             }
-            if msg.isUser, !dbUserContents.contains(msg.content) {
+            if msg.isUser, !settledEchoes.contains(msg.id) {
                 merged.append(msg)
                 continue
             }
