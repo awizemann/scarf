@@ -123,7 +123,7 @@ import Foundation
         // As an argument too (`env PYTHONUNBUFFERED=1 <hermes> auth add …`).
         let viaEnv = Self.transport(hint: hint).composedRemoteCommand(
             executable: "/usr/bin/env", args: ["PYTHONUNBUFFERED=1", hint, "auth", "add", "nous"])
-        #expect(viaEnv == "COLUMNS=400 \"/usr/bin/env\" \"PYTHONUNBUFFERED=1\" docker compose exec hermes hermes \"auth\" \"add\" \"nous\"")
+        #expect(viaEnv == "COLUMNS=400 \"/usr/bin/env\" \"PYTHONUNBUFFERED=1\" docker compose exec hermes hermes \"-p\" \"default\" \"auth\" \"add\" \"nous\"")
     }
 
     @Test func aSingleWordHintIsStillQuotedAsOnePath() {
