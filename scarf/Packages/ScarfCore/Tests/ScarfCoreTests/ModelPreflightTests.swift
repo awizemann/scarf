@@ -140,20 +140,53 @@ import Foundation
     }
 
     @Test func detectMismatchSurfacesPrefixVsActiveProvider() {
-        // The dogfooding scenario: Anthropic-prefixed model still sitting
-        // in config.yaml after the user OAuth'd into Nous via Credential
-        // Pools. Hermes can't reconcile and chats die with -32603 at
-        // first prompt. The banner offers a one-click fix in either
-        // direction; this test pins the data the banner reads.
+        // A stale vendor prefix under a DIRECT provider: Gemini's API
+        // takes bare ids, so `anthropic/claude-sonnet-4.6` under
+        // `gemini` is genuinely broken. The banner offers a one-click fix
+        // in either direction; this test pins the data the banner reads.
         var cfg = HermesConfig.empty
         cfg.model = "anthropic/claude-sonnet-4.6"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         let mismatch = ModelPreflight.detectMismatch(cfg)
         #expect(mismatch != nil)
         #expect(mismatch?.prefixProvider == "anthropic")
-        #expect(mismatch?.activeProvider == "nous")
+        #expect(mismatch?.activeProvider == "gemini")
         #expect(mismatch?.modelDefault == "anthropic/claude-sonnet-4.6")
         #expect(mismatch?.bareModel == "claude-sonnet-4.6")
+    }
+
+    @Test func detectMismatchReturnsNilForNousVendorPrefixedModels() {
+        // S06-F1. This test used to pin the OPPOSITE — `anthropic/…`
+        // under `nous` as a mismatch — which was the bug. Nous is in
+        // Hermes's `model_normalize._AGGREGATOR_PROVIDERS` ("Providers
+        // whose APIs consume vendor/model slugs", model_normalize.py:30-32
+        // @ v2026.9.24) and its own catalog ids are vendor-prefixed, so
+        // this is a valid, working config. The banner's "Use anthropic"
+        // button would have moved the user off Nous.
+        for model in ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-5.5",
+                      "openai/gpt-6-astra", "moonshotai/kimi-k2"] {
+            var cfg = HermesConfig.empty
+            cfg.model = model
+            cfg.provider = "nous"
+            #expect(ModelPreflight.detectMismatch(cfg) == nil, "false mismatch for nous + \(model)")
+            // A detected host resolves the same way.
+            let host = HermesHost.caps("Hermes Agent v0.21.5 (2026.9.24)")
+            #expect(ModelPreflight.detectMismatch(cfg, capabilities: host) == nil)
+        }
+    }
+
+    @Test func aggregatorProvidersCoverModelNormalizeAggregators() {
+        // Every provider in Hermes's `model_normalize._AGGREGATOR_PROVIDERS`
+        // (`openrouter`, `nous`, `ai-gateway`, `kilocode`), under the
+        // spelling Hermes uses there, must skip the mismatch check once
+        // canonicalised. check-hermes-tables.py lane 2 enforces the same
+        // against the tagged source.
+        for provider in ["openrouter", "nous", "ai-gateway", "kilocode"] {
+            var cfg = HermesConfig.empty
+            cfg.model = "anthropic/claude-opus-5.5"
+            cfg.provider = provider
+            #expect(ModelPreflight.detectMismatch(cfg) == nil, "false mismatch for \(provider)")
+        }
     }
 
     @Test func detectMismatchIsCaseInsensitiveOnPrefixMatch() {
@@ -168,13 +201,13 @@ import Foundation
 
     @Test func detectMismatchHandlesNonAnthropicProviders() {
         // The mismatch banner needs to work for any provider pair —
-        // not just the dogfooding case. Pin the openai+nous shape.
+        // not just the dogfooding case. Pin the openai+gemini shape.
         var cfg = HermesConfig.empty
         cfg.model = "openai/gpt-5"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         let mismatch = ModelPreflight.detectMismatch(cfg)
         #expect(mismatch?.prefixProvider == "openai")
-        #expect(mismatch?.activeProvider == "nous")
+        #expect(mismatch?.activeProvider == "gemini")
         #expect(mismatch?.bareModel == "gpt-5")
     }
 
@@ -185,7 +218,7 @@ import Foundation
         // rather than emit a useless fix button.
         var cfg = HermesConfig.empty
         cfg.model = "anthropic/"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         #expect(ModelPreflight.detectMismatch(cfg) == nil)
     }
 
@@ -194,7 +227,7 @@ import Foundation
         // prefix. Don't fire.
         var cfg = HermesConfig.empty
         cfg.model = "/claude-sonnet-4.6"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         #expect(ModelPreflight.detectMismatch(cfg) == nil)
     }
 
@@ -317,11 +350,13 @@ import Foundation
 
     @Test func detectMismatchStillFiresForNonAggregatorProviders() {
         // The original dogfooding failure mode must keep working: a
-        // stale `anthropic/` prefix under direct provider `nous` is a
-        // real mismatch that kills chats at first prompt.
+        // stale `anthropic/` prefix under a direct provider is a real
+        // mismatch that kills chats at first prompt. (Until S06-F1 this
+        // used `nous`, which is an aggregator in Hermes — see
+        // `detectMismatchReturnsNilForNousVendorPrefixedModels`.)
         var cfg = HermesConfig.empty
         cfg.model = "anthropic/claude-sonnet-4.6"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         #expect(ModelPreflight.detectMismatch(cfg) != nil)
     }
 
@@ -356,8 +391,8 @@ import Foundation
         // Hermes has — the UI must not offer "Use foo".
         var cfg = HermesConfig.empty
         cfg.model = "foo/bar-model"
-        cfg.provider = "nous"
-        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["anthropic", "xai", "nous"])
+        cfg.provider = "gemini"
+        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["anthropic", "xai", "gemini"])
         #expect(mismatch != nil)
         #expect(mismatch?.prefixIsKnownProvider == false)
     }
@@ -365,8 +400,8 @@ import Foundation
     @Test func detectMismatchMarksKnownPrefixWithRoster() {
         var cfg = HermesConfig.empty
         cfg.model = "anthropic/claude-sonnet-4.6"
-        cfg.provider = "nous"
-        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["anthropic", "nous"])
+        cfg.provider = "gemini"
+        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["anthropic", "gemini"])
         #expect(mismatch?.prefixIsKnownProvider == true)
     }
 
@@ -376,8 +411,8 @@ import Foundation
         // work, so the prefix counts as known.
         var cfg = HermesConfig.empty
         cfg.model = "grok/grok-4"
-        cfg.provider = "nous"
-        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["xai", "nous"])
+        cfg.provider = "gemini"
+        let mismatch = ModelPreflight.detectMismatch(cfg, knownProviders: ["xai", "gemini"])
         #expect(mismatch?.prefixIsKnownProvider == true)
     }
 
@@ -386,7 +421,7 @@ import Foundation
         // prefix is trusted and both fix buttons render.
         var cfg = HermesConfig.empty
         cfg.model = "foo/bar-model"
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         let mismatch = ModelPreflight.detectMismatch(cfg)
         #expect(mismatch?.prefixIsKnownProvider == true)
     }

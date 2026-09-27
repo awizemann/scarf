@@ -78,7 +78,7 @@ public enum ModelPreflight: Sendable {
     public struct Mismatch: Sendable, Equatable {
         /// The provider prefix found in `model.default` (e.g. `"anthropic"`).
         public let prefixProvider: String
-        /// The standalone `model.provider` value (e.g. `"nous"`).
+        /// The standalone `model.provider` value (e.g. `"openai"`).
         public let activeProvider: String
         /// The full `model.default` string as configured.
         public let modelDefault: String
@@ -87,19 +87,36 @@ public enum ModelPreflight: Sendable {
         public let bareModel: String
         /// False when the caller supplied a known-provider roster and
         /// the prefix (after alias resolution) isn't on it — e.g.
-        /// `foo/bar` under provider `nous`. The banner then hides the
+        /// `foo/bar` under provider `openai`. The banner then hides the
         /// "Use foo" button: writing `model.provider = foo` would
         /// swap one broken config for another. True when no roster
         /// was supplied (catalog unavailable) — trust the prefix.
         public let prefixIsKnownProvider: Bool
     }
 
-    /// Providers Hermes defines with `is_aggregator = True`
-    /// (hermes_cli/providers.py). Their model IDs are natively
-    /// `org/model` namespaced (e.g. openrouter's `xiaomi/mimo-v2.5`),
-    /// so a slash in `model.default` is part of the model ID — never a
-    /// stale provider prefix. Reconcile on every Hermes bump alongside
-    /// the ModelCatalogService provider tables (GH issue #121).
+    /// Providers whose model IDs are natively `org/model` namespaced
+    /// (e.g. openrouter's `xiaomi/mimo-v2.5`), so a slash in
+    /// `model.default` is part of the model ID — never a stale provider
+    /// prefix. Reconcile on every Hermes bump alongside the
+    /// ModelCatalogService provider tables (GH issue #121).
+    ///
+    /// Two Hermes sources, unioned:
+    /// - `HERMES_OVERLAYS` entries with `is_aggregator=True`
+    ///   (`hermes_cli/providers.py`);
+    /// - `_AGGREGATOR_PROVIDERS` in `hermes_cli/model_normalize.py:30-32`
+    ///   @ `v2026.9.24` — "Providers whose APIs consume vendor/model slugs":
+    ///   `openrouter`, `nous`, `ai-gateway`, `kilocode` (canonically
+    ///   `openrouter`, `nous`, `vercel`, `kilo`). That set has named `nous`
+    ///   since the file first appeared (≤ v2026.4.8), and `agent_init.py`
+    ///   skips model-name normalization for those providers.
+    ///
+    /// `nous` is only in the second one — `providers.py` gives it an overlay
+    /// without `is_aggregator` — and was missing here until S06-F1. Nous's
+    /// own catalog ids are vendor-prefixed (`anthropic/claude-opus-5.5`,
+    /// `website/static/api/model-catalog.json` providers.nous), so every
+    /// Nous user saw a false "Chats will fail" banner whose "Use anthropic"
+    /// button moved them off Nous. `scripts/check-hermes-tables.py` lane 2
+    /// diffs this set against both sources.
     ///
     /// Entries are **canonical** IDs as `canonicalProviderID(_:)` returns
     /// them, not Hermes's display slugs. That's why OpenCode Zen appears
@@ -116,6 +133,7 @@ public enum ModelPreflight: Sendable {
     static let aggregatorProviders: Set<String> = [
         "openrouter", "opencode", "opencode-go",
         "kilo", "huggingface", "novita", "vercel",
+        "nous",
     ]
 
     /// `aggregatorProviders` entries for a provider Hermes removed at a

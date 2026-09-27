@@ -8,7 +8,13 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      (identity entries like "lmstudio": "lmstudio" are skipped on the Hermes
      side — Scarf deliberately omits them)
   2. ModelPreflight.aggregatorProviders    <->  HERMES_OVERLAYS entries with
-     is_aggregator=True
+     is_aggregator=True, UNION hermes_cli/model_normalize.py
+     _AGGREGATOR_PROVIDERS ("Providers whose APIs consume vendor/model
+     slugs") canonicalised through ALIASES. The second source is the one
+     that names `nous`, which providers.py does not mark is_aggregator —
+     mirroring providers.py alone is how Nous users got a false mismatch
+     banner (S06-F1). An absent model_normalize.py (pre-v2026.4.8) SKIPs;
+     a present one whose set can't be parsed exits.
   3. ModelCatalogService.overlayOnlyProviders keys
                                            <->  HERMES_OVERLAYS keys that are
      absent from the models.dev cache (~/.hermes/models_dev_cache.json).
@@ -228,6 +234,44 @@ def parse_hermes(src):
         sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from "
                  f"{PROVIDERS_PY} at {src.mode}")
     return aliases, overlay_keys, aggregators
+
+
+MODEL_NORMALIZE_PY = "hermes_cli/model_normalize.py"
+
+
+def parse_normalize_aggregators(src):
+    """``_AGGREGATOR_PROVIDERS`` from hermes_cli/model_normalize.py — a
+    ``frozenset({...})`` literal (`:30-32` at v2026.9.24; `:60-65` at
+    v2026.4.8, where the file first appears).
+
+    Returns ``None`` when the file does not exist at this read (an older
+    Hermes: a SKIP, not a pass). FAILS CLOSED like `parse_hermes`: a file
+    that exists but whose set is renamed, reshaped or non-literal exits
+    rather than quietly checking against an empty set.
+    """
+    text = src.read(MODEL_NORMALIZE_PY)
+    if text is None:
+        return None
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.AnnAssign):
+            name, value = getattr(node.target, "id", ""), node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            name, value = getattr(node.targets[0], "id", ""), node.value
+        else:
+            continue
+        if name != "_AGGREGATOR_PROVIDERS":
+            continue
+        # frozenset({...}) / frozenset([...]) / a bare set literal.
+        if (isinstance(value, ast.Call) and getattr(value.func, "id", "") == "frozenset"
+                and len(value.args) == 1):
+            value = value.args[0]
+        if isinstance(value, (ast.Set, ast.List, ast.Tuple)) and value.elts and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return {e.value for e in value.elts}
+        break
+    sys.exit(f"error: _AGGREGATOR_PROVIDERS in {MODEL_NORMALIZE_PY} at {src.mode} "
+             f"is missing or not a literal set of strings — its shape changed and "
+             f"this script must be updated, not guessed past")
 
 
 MODELS_DEV_PY = "agent/models_dev.py"
@@ -497,12 +541,25 @@ def main(argv=None):
         failures.append(f"[aliases] '{k}' maps to '{got}' in Swift but '{want}' in Hermes")
 
     # Lane 2: aggregatorProviders <-> is_aggregator=True overlays
+    #         UNION model_normalize._AGGREGATOR_PROVIDERS (canonicalised)
     swift_aggs = set(
         re.findall(r'"([^"]+)"',
                    "\n".join(swift_block(PREFLIGHT_SWIFT, "let aggregatorProviders"))))
-    check("aggregators", swift_aggs, aggregators,
+    normalize_aggs = parse_normalize_aggregators(src)
+    expected_aggs = set(aggregators)
+    if normalize_aggs is None:
+        skipped.append(f"lane 2 (aggregators, model_normalize half): "
+                       f"{MODEL_NORMALIZE_PY} does not exist at {src.mode}")
+    else:
+        # model_normalize spells them as Hermes's runtime provider ids
+        # (`ai-gateway`, `kilocode`); Swift's set is keyed on CANONICAL ids,
+        # so resolve through ALIASES first (ai-gateway -> vercel,
+        # kilocode -> kilo).
+        expected_aggs |= {aliases.get(p, p) for p in normalize_aggs}
+    check("aggregators", swift_aggs, expected_aggs,
           "Hermes aggregators missing from ModelPreflight.aggregatorProviders",
-          "aggregatorProviders entries Hermes doesn't mark is_aggregator")
+          "aggregatorProviders entries Hermes marks neither is_aggregator nor "
+          "lists in model_normalize._AGGREGATOR_PROVIDERS")
 
     # Plugin-registered providers are lane 4's subject, but lane 3 needs the set
     # too: `overlayOnlyProviders` deliberately mirrors them, and they are not
