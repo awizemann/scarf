@@ -163,6 +163,10 @@ import Foundation
         let lower = base.path + "/work/app"
         let volumeFoldsCase = FileManager.default.fileExists(atPath: lower)
         #expect(ProjectIdentity.isSameLocalItem(work.path, lower) == volumeFoldsCase)
+        // The add doors' bounded form only stats name matches: a symlink
+        // under another name is left to the doctor's duplicate check.
+        #expect(!ProjectIdentity.mayBeSameLocalItem(work.path, link.path))
+        #expect(ProjectIdentity.mayBeSameLocalItem(work.path, lower) == volumeFoldsCase)
         // And the frozen id normalization never folds.
         #expect(ProjectIdentity.normalizedPath(work.path) != ProjectIdentity.normalizedPath(lower))
     }

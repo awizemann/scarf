@@ -22,8 +22,9 @@ import os
 /// launch, in place, so the user's own edits to the entry — tool filters,
 /// timeouts, env — survive; remove-and-re-add would discard them.
 ///
-/// **Pinned to the profile that owns the entry.** Registered with
-/// `--args --hermes-home <that profile's home>`. Hermes launches stdio MCP
+/// **Pinned to the profile that owns the entry.** The entry's `args` are
+/// `--hermes-home <that profile's home>` (written by the in-place patcher,
+/// not `mcp add --args` — see the add path for why). Hermes launches stdio MCP
 /// servers with a filtered environment — PATH/HOME/USER/LANG/LC_ALL/TERM/
 /// SHELL/TMPDIR and `XDG_*` only (`tools/mcp_tool_config.py:74,111-119` @
 /// v2026.9.24) — so `HERMES_HOME` never reaches the server, and without the
@@ -258,12 +259,19 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
             // already ships and has verified against Hermes's argparse
             // (`hermes mcp add <name> --command <cmd>`, v0.21.0) — not a
             // second hand-written YAML entry writer.
-            // `--args` is `nargs=REMAINDER` (`hermes_cli/subcommands/mcp.py:34`
-            // @ v2026.9.24), so the pin rides through to the entry verbatim.
+            //
+            // Added WITHOUT args, then pinned by the in-place patcher. The
+            // pin can't ride on `--args`: it only became `nargs=REMAINDER`
+            // in v2026.6.19 (v0.17.0, commit dca11b6650); before that it was
+            // `nargs="*"`, and `--args --hermes-home <p>` fails argparse with
+            // "unrecognized arguments". The bare add is the argv every
+            // supported host already accepted; the probe it runs starts the
+            // server unpinned, which falls back to the local home and still
+            // answers the handshake.
             let result = fileService.addMCPServerStdio(
                 name: Self.serverName,
                 command: path,
-                args: expectedArgs
+                args: []
             )
             guard result.exitCode == 0 else {
                 Self.logger.warning(
@@ -281,6 +289,13 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
             }
             Self.logger.info("registered \(Self.serverName, privacy: .public) at \(path, privacy: .public)")
             unmanageableMarker.clear()
+            if !fileService.setMCPServerArgs(name: Self.serverName, args: expectedArgs) {
+                // The entry exists and works unpinned; the next launch takes
+                // the re-pin path below and tries again.
+                Self.logger.warning(
+                    "registered \(Self.serverName, privacy: .public) but couldn't pin it to \(self.context.paths.home, privacy: .public)"
+                )
+            }
             return .added(path: path)
         }
 
@@ -292,6 +307,8 @@ nonisolated struct ProjectsMCPRegistrar: Sendable {
                 "an MCP server named \(Self.serverName) already exists and is not a stdio server"
             )
         }
+        // Exact match: the entry is Scarf's, and the server accepts no other
+        // arguments, so anything else in `args` is replaced by the pin.
         let argsPinned = existing.args == expectedArgs
         guard currentCommand != path || !argsPinned else {
             unmanageableMarker.clear()

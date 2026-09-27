@@ -184,6 +184,18 @@ public enum ProjectIdentity {
         return lhs == rhs
     }
 
+    /// ``isSameLocalItem(_:_:)``, stat-ing only when the two folder NAMES
+    /// match case-insensitively — the case variant and the usual symlinked
+    /// parent. The add doors run it against every registry row, and a row
+    /// on an unmounted network volume can make a stat hang; this keeps the
+    /// disk out of it for every row that can't be the same folder by name.
+    public static func mayBeSameLocalItem(_ a: String, _ b: String) -> Bool {
+        let nameA = (normalize(a) as NSString).lastPathComponent
+        let nameB = (normalize(b) as NSString).lastPathComponent
+        guard nameA.caseInsensitiveCompare(nameB) == .orderedSame else { return false }
+        return isSameLocalItem(a, b)
+    }
+
     private static func normalize(_ path: String) -> String {
         let isAbsolute = path.hasPrefix("/")
         var segments: [String] = []

@@ -213,7 +213,7 @@ public struct ProjectMCPTools: Sendable {
         // the path is on.
         if let existing = loaded.registry.projects.first(where: {
             ProjectIdentity.normalizedPath($0.path) == path
-                || (!context.isRemote && ProjectIdentity.isSameLocalItem($0.path, path))
+                || (!context.isRemote && ProjectIdentity.mayBeSameLocalItem($0.path, path))
         }) {
             return .failure(
                 "\(path) is already registered as “\(existing.name)”. Use project_get to inspect "

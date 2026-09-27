@@ -1244,7 +1244,7 @@ struct HermesFileService: Sendable {
                 end = index
                 break
             }
-            if indent == 4, trimmed == "args:" || trimmed.hasPrefix("args:") {
+            if indent == 4, trimmed.hasPrefix("args:") {
                 start = index
                 continue
             }

@@ -157,6 +157,27 @@ import ScarfCore
         #expect(plan.projectFilesToRemove.allSatisfy { $0.hasPrefix(f.remoteHome + "/projects/site/") })
     }
 
+    /// Once the home is known, a row that expands to the host's home or its
+    /// Hermes home is refused by the root policy — before this change such a
+    /// row was only harmless because every `~` path failed the guard.
+    @Test(arguments: ["~", "~/.hermes", "~/"])
+    func rowsThatExpandToTheHomeOrHermesHomeAreRefused(row: String) throws {
+        let f = try Self.remoteFixture()
+        defer { try? FileManager.default.removeItem(atPath: f.scratch) }
+        let rowRoot = row == "~/.hermes" ? f.scratch + "/.hermes" : f.scratch
+        try Self.writeLock(
+            Self.lock(projectFiles: [row + "/.hermes/state.db", "~/.hermes/config.yaml"], skillsDir: nil),
+            at: rowRoot + "/.scarf/template.lock.json"
+        )
+        let uninstaller = ProjectTemplateUninstaller(
+            context: f.context, userHome: f.remoteHome, transport: f.transport
+        )
+        let plan = try uninstaller.loadUninstallPlan(for: ProjectEntry(name: "Evil", path: row))
+        #expect(plan.rootRefused)
+        #expect(plan.totalRemoveCount == 0)
+        #expect(throws: ProjectTemplateError.self) { try uninstaller.uninstall(plan: plan) }
+    }
+
     /// No resolved home → nothing can be proved inside the project, so the
     /// plan removes nothing and says why; executing it throws before any
     /// deletion. This is the state every remote uninstall used to be in.

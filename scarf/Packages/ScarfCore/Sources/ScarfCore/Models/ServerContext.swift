@@ -351,25 +351,39 @@ public extension ServerContext {
 private actor UserHomeCache {
     static let shared = UserHomeCache()
     private var cache: [ServerID: String] = [:]
+    /// When each server's last probe FAILED. A failure is remembered only
+    /// briefly: caching the `~` fallback for good kept every later caller on
+    /// it for the rest of the app's life, so a caller that refuses to act
+    /// without an absolute home (template uninstall) could never recover by
+    /// trying again — while not remembering it at all made every caller
+    /// against a dead host pay the probe's 10 s timeout again.
+    private var failedAt: [ServerID: Date] = [:]
+    static let failureTTL: TimeInterval = 30
 
     func resolve(for context: ServerContext) async -> String {
         if let cached = cache[context.id] { return cached }
+        if let failed = failedAt[context.id],
+           Date().timeIntervalSince(failed) < Self.failureTTL {
+            return "~"
+        }
         let resolved = await probe(context: context)
-        // Only a real answer is remembered. The `~` fallback means the probe
-        // failed (a dropped connection, a host still waking up); caching it
-        // kept every later caller on the fallback for the rest of the app's
-        // life, so a caller that refuses to act without an absolute home
-        // (template uninstall) could never recover by trying again.
-        if resolved.hasPrefix("/") { cache[context.id] = resolved }
+        if resolved.hasPrefix("/") {
+            cache[context.id] = resolved
+            failedAt.removeValue(forKey: context.id)
+        } else {
+            failedAt[context.id] = Date()
+        }
         return resolved
     }
 
     func invalidate(contextID: ServerID) {
         cache.removeValue(forKey: contextID)
+        failedAt.removeValue(forKey: contextID)
     }
 
     func seed(_ home: String, contextID: ServerID) {
         cache[contextID] = home
+        failedAt.removeValue(forKey: contextID)
     }
 
     private func probe(context: ServerContext) async -> String {

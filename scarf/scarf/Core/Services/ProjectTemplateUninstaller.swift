@@ -91,6 +91,25 @@ struct ProjectTemplateUninstaller: Sendable {
         )
     }
 
+    /// The root policy, told about the remote host's real home. For an SSH
+    /// context `ProjectRootPolicy.refusalAtUse` can only use the universal
+    /// rules — it has no absolute home, and `~/.hermes` can't be compared —
+    /// so a registry row of `~` or `~/.hermes` would expand to the host's
+    /// home or Hermes home and pass. Once the home is probed those are
+    /// nameable, so they are refused here (lexically; there is no remote
+    /// realpath).
+    nonisolated private func rootRefusal(_ root: String) -> ProjectRootPolicy.Refusal? {
+        if context.isRemote, let userHome {
+            return ProjectRootPolicy.refusal(
+                for: root,
+                hermesHome: expanded(context.paths.home),
+                userHome: userHome,
+                resolveSymlinks: false
+            )
+        }
+        return ProjectRootPolicy.refusalAtUse(for: root, context: context)
+    }
+
     // MARK: - Detection
 
     /// Is the given project installed from a template that we can
@@ -153,7 +172,7 @@ struct ProjectTemplateUninstaller: Sendable {
             )
             return Self.refusedPlan(lock: lock, project: project, reason: unresolvedHomeReason, context: context)
         }
-        if let refusal = ProjectRootPolicy.refusalAtUse(for: root, context: context) {
+        if let refusal = rootRefusal(root) {
             Self.logger.error(
                 "refusing to build an uninstall plan for \(project.path, privacy: .public): \(refusal.message, privacy: .public)"
             )
@@ -604,7 +623,7 @@ struct ProjectTemplateUninstaller: Sendable {
             )
             throw ProjectTemplateError.inadmissibleProjectRoot(unresolvedHomeReason)
         }
-        if let refusal = ProjectRootPolicy.refusalAtUse(for: root, context: context) {
+        if let refusal = rootRefusal(root) {
             Self.logger.error(
                 "refusing to uninstall from \(plan.project.path, privacy: .public): \(refusal.message, privacy: .public)"
             )
@@ -700,13 +719,17 @@ struct ProjectTemplateUninstaller: Sendable {
         if transport.fileExists(root + "/.scarf") {
             removeProjectDirIfEmpty(root + "/.scarf", transport: transport)
         }
-        if plan.projectDirBecomesEmpty, transport.fileExists(root) {
-            removeProjectDirIfEmpty(root, transport: transport)
+        // Decided by what actually happened, not from the plan: its "becomes
+        // empty" was a prediction, and a folder that survived (a file we
+        // couldn't delete, something written since) must not be reported
+        // as gone. Nor is a `fileExists` false after the fact proof — over
+        // SSH a dropped connection answers false too — so "removed" means
+        // this run removed it (or it was already absent before we started).
+        if plan.projectDirBecomesEmpty {
+            outcome.projectDirRemoved = transport.fileExists(root)
+                ? removeProjectDirIfEmpty(root, transport: transport)
+                : true
         }
-        // Decided by looking, not from the plan: the plan's "becomes empty"
-        // was a prediction, and a folder that survived (a file we couldn't
-        // delete, something written since) must not be reported as gone.
-        outcome.projectDirRemoved = !transport.fileExists(root)
         if plan.projectDirBecomesEmpty, !outcome.projectDirRemoved {
             outcome.leftovers.append(String(
                 localized: "The project folder is still there: \(root)"
@@ -971,24 +994,26 @@ struct ProjectTemplateUninstaller: Sendable {
     /// and the registry row still has to come out. The residue is logged and
     /// left, which is the honest outcome — files the user can see and delete
     /// beat a silent partial success.
+    @discardableResult
     nonisolated private func removeProjectDirIfEmpty(
         _ path: String,
         transport: any ServerTransport
-    ) {
+    ) -> Bool {
         guard let remaining = try? transport.listDirectory(path) else {
             Self.logger.warning(
                 "couldn't list \(path, privacy: .public) to confirm it is empty; leaving it in place"
             )
-            return
+            return false
         }
         guard remaining.isEmpty else {
             Self.logger.warning(
                 "leaving \(path, privacy: .public) in place — it still holds \(remaining.count) entries the uninstall did not track"
             )
-            return
+            return false
         }
         do {
             try transport.removeFile(path)
+            return true
         } catch {
             // `rm -f` on a directory. Retry with the verb that means it.
             if transport.isRemote {
@@ -998,11 +1023,12 @@ struct ProjectTemplateUninstaller: Sendable {
                     stdin: nil,
                     timeout: 20
                 )
-                if rmdir?.exitCode == 0 { return }
+                if rmdir?.exitCode == 0 { return true }
             }
             Self.logger.warning(
                 "couldn't remove empty project dir \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
+            return false
         }
     }
 

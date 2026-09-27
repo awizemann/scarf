@@ -444,7 +444,7 @@ public final class ProjectsViewModel {
         let normalized = ProjectIdentity.normalizedPath(path)
         if let existing = registry.projects.first(where: {
             ProjectIdentity.normalizedPath($0.path) == normalized
-                || (!context.isRemote && ProjectIdentity.isSameLocalItem($0.path, path))
+                || (!context.isRemote && ProjectIdentity.mayBeSameLocalItem($0.path, path))
         }) {
             fail("Couldn't add “\(name)”", reason: "That folder is already in the list as “\(existing.name)”.")
             return false

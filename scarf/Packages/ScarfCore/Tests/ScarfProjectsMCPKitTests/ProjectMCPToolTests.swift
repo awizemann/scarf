@@ -146,7 +146,10 @@ import Foundation
             ])
             #expect(caseVariant.isError)
 
-            let link = h.projectRoot.deletingLastPathComponent().appendingPathComponent("alias")
+            // A symlinked parent: the folder keeps its name, reached another way.
+            let links = h.projectRoot.deletingLastPathComponent().appendingPathComponent("links")
+            try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+            let link = links.appendingPathComponent(h.projectRoot.lastPathComponent)
             try FileManager.default.createSymbolicLink(at: link, withDestinationURL: h.projectRoot)
             let viaLink = h.tools.call(name: "project_register", arguments: [
                 "name": .string("Demo alias"), "path": .string(link.path),
