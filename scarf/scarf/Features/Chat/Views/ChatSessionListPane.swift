@@ -190,7 +190,10 @@ struct ChatSessionListPane: View {
         // Chat) would otherwise just appear to do nothing.
         let title = renameText
         Task {
-            if await chatViewModel.renameSession(session.id, to: title) {
+            // Close only the sheet this rename came from: the user may have
+            // cancelled and opened another one while the CLI ran.
+            if await chatViewModel.renameSession(session.id, to: title),
+               renameTarget?.id == session.id {
                 renameTarget = nil
             }
         }
