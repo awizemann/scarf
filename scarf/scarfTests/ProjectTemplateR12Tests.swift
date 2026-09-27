@@ -293,7 +293,7 @@ import ScarfCore
             Issue.record("exported \(tree)")
         } catch ProjectTemplateError.unsafeSkillLink(let link, let why) {
             #expect(link == "config")
-            #expect(why.contains("outside the skill folder"), "\(why)")
+            #expect(why.contains("points outside the skill folder"), "\(why)")
         }
     }
 

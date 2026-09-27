@@ -378,16 +378,16 @@ struct ProjectTemplateExporter: Sendable {
             if resolvedRoot == nil {
                 guard let r = try resolvedPaths([root], transport: transport).first ?? nil else {
                     throw ProjectTemplateError.unsafeSkillLink(
-                        rel, "Scarf couldn't resolve the skill folder \(root) on the server to check where it points")
+                        rel, "Scarf couldn't resolve the skill folder \(root) on the server to check whether it links outside the skill")
                 }
                 resolvedRoot = r
             }
             let base = resolvedRoot ?? root
             guard let target = try resolvedPaths([link], transport: transport).first ?? nil else {
-                throw ProjectTemplateError.unsafeSkillLink(rel, "Scarf couldn't check where it points")
+                throw ProjectTemplateError.unsafeSkillLink(rel, "Scarf couldn't check whether it links outside the skill folder")
             }
             guard target == base || target.hasPrefix(base.hasSuffix("/") ? base : base + "/") else {
-                throw ProjectTemplateError.unsafeSkillLink(rel, "it points outside the skill folder, to \(target)")
+                throw ProjectTemplateError.unsafeSkillLink(rel, "it's a link that points outside the skill folder, to \(target)")
             }
         }
         func walk(_ relative: String, depth: Int) throws {
@@ -404,6 +404,11 @@ struct ProjectTemplateExporter: Sendable {
                 let full = root + "/" + rel
                 let info = stats[full]
                 var isDirectory = info?.isDirectory == true
+                // No stat answer: it might be a link, and `readFile` would
+                // follow it. Check where it leads before anything is read.
+                if info == nil {
+                    try requireInside(full, rel)
+                }
                 if info?.isSymbolicLink == true {
                     if (try? transport.readFile(full)) != nil {
                         isDirectory = false

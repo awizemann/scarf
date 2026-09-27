@@ -453,7 +453,7 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
         case .memoryFileNotText(let p):
             return "\(p) is not valid UTF-8 text; refusing to install a memory block over it."
         case .unsafeSkillLink(let link, let why):
-            return "Can't export the skill file “\(link)”: it's a link, and \(why). Templates are made to be shared, so Scarf only bundles files that live inside the skill. Copy the file into the skill folder or remove the link, then export again."
+            return "Can't export the skill file “\(link)”: \(why). Templates are made to be shared, so Scarf only bundles files that live inside the skill. Copy the file into the skill folder or remove the link, then export again."
         }
     }
 }
