@@ -118,7 +118,7 @@ struct ToolCallCard: View {
 
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    if !call.arguments.isEmpty && call.arguments != "{}" {
+                    if !call.hasNoArguments {
                         Text("ARGUMENTS")
                             .scarfStyle(.captionUppercase)
                             .foregroundStyle(ScarfColor.foregroundMuted)

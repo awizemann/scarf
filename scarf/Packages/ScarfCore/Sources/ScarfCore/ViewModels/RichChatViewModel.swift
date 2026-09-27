@@ -282,9 +282,14 @@ public struct MessageGroup: Identifiable {
             for call in msg.toolCalls {
                 total += 1
                 kindCounts[call.toolKind, default: 0] += 1
+                // `livePreview` is part of the key: a live built-in call
+                // has no arguments on the wire (always "{}"), so reads of
+                // a.swift, b.swift and c.swift differ only in Hermes's
+                // title preview and must stay three cards, not "×3".
                 if var last = entries.last,
                    last.call.functionName == call.functionName,
-                   last.call.arguments == call.arguments {
+                   last.call.arguments == call.arguments,
+                   last.call.livePreview == call.livePreview {
                     // Identical consecutive call → collapse, keeping the
                     // LATEST call's identity so inspector focus and the
                     // in-flight spinner track the most recent attempt.
@@ -2318,7 +2323,8 @@ public final class RichChatViewModel {
             callId: call.toolCallId,
             functionName: call.functionName,
             arguments: call.argumentsJSON,
-            startedAt: Date()
+            startedAt: Date(),
+            livePreview: call.livePreview
         )
         streamingToolCalls.append(toolCall)
         openToolCallIds.insert(call.toolCallId)

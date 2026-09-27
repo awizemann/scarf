@@ -269,8 +269,15 @@ public struct ACPToolCallEvent: @unchecked Sendable {
     public let kind: String
     public let status: String
     public let content: String
+    /// Tool arguments. Hermes sends `rawInput` ONLY for unknown/plugin
+    /// tools (`acp_adapter/tools.py:797-815` @ v2026.9.24, and every built-in
+    /// has had `raw_input=None` since at least v2026.7.7.2); for terminal,
+    /// read_file, patch, web_search and the other built-ins the target lives
+    /// in `title` and `locations` instead.
     public let rawInput: [String: Any]?
-
+    /// `locations[].path` in wire order (`extract_locations`,
+    /// `acp_adapter/tools.py:850-854` — the tool's `path` argument).
+    public let locationPaths: [String]
 
     public init(
         toolCallId: String,
@@ -278,7 +285,8 @@ public struct ACPToolCallEvent: @unchecked Sendable {
         kind: String,
         status: String,
         content: String,
-        rawInput: [String: Any]?
+        rawInput: [String: Any]?,
+        locationPaths: [String] = []
     ) {
         self.toolCallId = toolCallId
         self.title = title
@@ -286,6 +294,7 @@ public struct ACPToolCallEvent: @unchecked Sendable {
         self.status = status
         self.content = content
         self.rawInput = rawInput
+        self.locationPaths = locationPaths
     }
     public var functionName: String {
         // title format is "functionName: summary" or just "functionName"
@@ -307,6 +316,21 @@ public struct ACPToolCallEvent: @unchecked Sendable {
               let str = String(data: data, encoding: .utf8) else { return "{}" }
         return str
     }
+
+    /// A one-line label for a call that arrived without `rawInput`: the
+    /// first location path (the tool's full `path` argument — the same
+    /// value `HermesToolCall.argumentsSummary` shows once the call is
+    /// reloaded from state.db), else the title's preview
+    /// (`build_tool_title` → `"<name>: <preview>"`, the per-tool preview
+    /// the CLI/TUI render, `acp_adapter/tools.py:193-198` — the command for
+    /// `terminal`, the query for `web_search`). The path comes first because
+    /// read_file's preview is only the basename. Nil when the start event
+    /// carries neither.
+    public var livePreview: String? {
+        if let path = locationPaths.first(where: { !$0.isEmpty }) { return path }
+        let preview = argumentsSummary
+        return preview.isEmpty ? nil : preview
+    }
 }
 
 /// `@unchecked Sendable` for the same reason as `ACPToolCallEvent`:
@@ -319,10 +343,13 @@ public struct ACPToolCallUpdateEvent: @unchecked Sendable {
     public let content: String
     public let rawOutput: String?
     /// Tool-call arguments as carried on the `tool_call_update`
-    /// notification. Hermes sometimes omits `rawInput` on the initial
-    /// `tool_call` event and only populates it here — used to backfill
-    /// the stored call's `"{}"` placeholder. Defaulted so existing
-    /// call sites (and tests) compile unchanged.
+    /// notification. No Hermes tag sends this today —
+    /// `build_tool_complete` never sets `raw_input`
+    /// (`acp_adapter/tools.py:818-835` @ v2026.9.24) — so the live card's
+    /// label comes from the start event's title instead
+    /// (`ACPToolCallEvent.livePreview`). Kept as a backfill for the
+    /// stored call's `"{}"` placeholder should a host ever send it.
+    /// Defaulted so existing call sites (and tests) compile unchanged.
     public let rawInput: [String: Any]?
 
     public init(
@@ -447,7 +474,9 @@ public enum ACPEventParser {
                 kind: update["kind"] as? String ?? "other",
                 status: update["status"] as? String ?? "pending",
                 content: extractContentArrayText(from: update),
-                rawInput: update["rawInput"] as? [String: Any]
+                rawInput: update["rawInput"] as? [String: Any],
+                locationPaths: (update["locations"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["path"] as? String }
             )
             return .toolCallStart(sessionId: sessionId, call: event)
 

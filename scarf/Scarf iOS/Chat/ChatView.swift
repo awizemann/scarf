@@ -3659,7 +3659,10 @@ private struct ToolCallCard: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(call.arguments)
+                // A live built-in call has no arguments on the wire (Hermes
+                // sends `rawInput` only for unknown tools) — show Hermes's
+                // own preview instead of a bare `{}`.
+                Text(call.hasNoArguments ? (call.livePreview ?? call.arguments) : call.arguments)
                     .font(.caption2.monospaced())
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .textSelection(.enabled)
