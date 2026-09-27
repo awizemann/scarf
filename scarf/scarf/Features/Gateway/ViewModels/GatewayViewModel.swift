@@ -580,7 +580,8 @@ final class MessagingGatewayViewModel {
                     switch HermesGatewayRestartGuard.decide(
                         run: { args, timeout in let r = run(args, timeout); return (r.output, r.exitCode) },
                         stateJSON: { ctx.readData(ctx.paths.gatewayStateJSON) },
-                        capabilities: caps, timeout: Self.probeTimeout
+                        capabilities: caps, timeout: Self.probeTimeout,
+                        profileName: HermesProfileScope.profileName(forHome: ctx.paths.home)
                     ) {
                     case .refuse(let refusal): return (refusal, true)
                     case .restart(let externallySupervised): supervised = externallySupervised

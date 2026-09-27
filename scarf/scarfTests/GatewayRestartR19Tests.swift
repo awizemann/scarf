@@ -79,7 +79,7 @@ struct GatewayRestartR19Tests {
         let state = try JSONSerialization.data(withJSONObject: [
             "pid": 4242, "argv": ["hermes", "gateway", "run", "--external-supervisor"]])
         let vm = try Self.viewModel(
-            status: HermesGatewayRestartGuardFixtures.manualRunning, restart: ("", -1),
+            status: HermesGatewayRestartGuardFixtures.manualRunning, restart: ("Command timed out after 60s.", -1),
             caps: HermesCapabilities.parseLine("Hermes Agent v0.21.4 (2026.9.21)"), state: state, calls: calls)
         vm.restartGateway()
         await Self.until(timeout: 10) { vm.actionMessage != nil }

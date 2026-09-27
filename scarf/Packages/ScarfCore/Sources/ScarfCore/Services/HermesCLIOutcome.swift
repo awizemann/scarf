@@ -1861,6 +1861,10 @@ public enum HermesGatewayServiceVerdict {
         }
     }
 
+    /// The line `runHermesCLI` ends a timed-out run with
+    /// (`TransportError.timeout`'s description, never localized).
+    public static let transportTimeoutPrefix = "Command timed out after"
+
     /// What a supervised restart that outlasted Scarf's wait says. See
     /// ``judge(verb:output:exitCode:externallySupervised:)``.
     public static let supervisedRestartPendingNote = String(
@@ -1896,7 +1900,10 @@ public enum HermesGatewayServiceVerdict {
            let lifecycle = profileLifecycleOutcome(verb: verb, lines: lines, exitCode: exitCode) {
             return lifecycle
         }
-        if verb == .restart, externallySupervised, !verdict.succeeded, exitCode == -1, !sawServiceRefusal(lines) {
+        // Only Scarf's own timer: `runHermesCLI` answers -1 for a missing
+        // binary or an SSH failure too, and then no signal was ever sent.
+        if verb == .restart, externallySupervised, !verdict.succeeded, exitCode == -1,
+           lines.last?.hasPrefix(transportTimeoutPrefix) == true, !sawServiceRefusal(lines) {
             return HermesCLIOutcome(
                 succeeded: false, detail: supervisedRestartPendingNote, warning: nil, confidence: .unconfirmed)
         }

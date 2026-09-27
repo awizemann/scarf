@@ -30,10 +30,11 @@ import Foundation
     final class Calls: @unchecked Sendable { var argvs: [[String]] = [] }
 
     static func decide(status: String, stopThenStart: Bool = false, state: Data? = nil,
-                       caps: HermesCapabilities = .empty, calls: Calls = Calls()) -> HermesGatewayRestartGuard.Decision {
+                       caps: HermesCapabilities = .empty, calls: Calls = Calls(),
+                       profileName: String? = nil) -> HermesGatewayRestartGuard.Decision {
         HermesGatewayRestartGuard.decide(
             run: { args, _ in calls.argvs.append(args); return args == ["gateway", "status"] ? (status, 0) : ("", 0) },
-            stateJSON: { state }, capabilities: caps, stopThenStart: stopThenStart)
+            stateJSON: { state }, capabilities: caps, stopThenStart: stopThenStart, profileName: profileName)
     }
 
     @Test func aParkedProfileIsNotRestarted() {
@@ -92,11 +93,39 @@ import Foundation
     /// Scarf's timeout cut a supervised hand-back short: the gateway goes on
     /// restarting, so the answer is "still restarting", not a failure.
     @Test func aSupervisedRestartPastTheTimeoutIsStillRestarting() {
+        // `runHermesCLI`'s timeout shape: whatever was printed, then
+        // `TransportError.timeout`'s line.
         let outcome = HermesGatewayServiceVerdict.judge(
-            verb: .restart, output: "", exitCode: -1, externallySupervised: true)
+            verb: .restart, output: "Command timed out after 60s.", exitCode: -1, externallySupervised: true)
         #expect(outcome.succeeded == false)
         #expect(outcome.confidence == .unconfirmed)
         #expect(outcome.detail == HermesGatewayServiceVerdict.supervisedRestartPendingNote)
+    }
+
+    /// `runHermesCLI` also answers -1 when the run never started (SSH down,
+    /// no binary): no signal was sent, so that is a failure, not "still
+    /// restarting".
+    @Test func aTransportFailureIsNotStillRestarting() {
+        for output in ["", "Can't reach host. Check the hostname, network, and SSH config.",
+                       "Connection to host is paused after repeated failures. Retrying in 30s."] {
+            let outcome = HermesGatewayServiceVerdict.judge(
+                verb: .restart, output: output, exitCode: -1, externallySupervised: true)
+            #expect(outcome.confidence == .failed, "\(output)")
+        }
+    }
+
+    /// When Scarf knows the profile, only its own parked line counts —
+    /// a stray line merged in from stderr doesn't hide it, and a sibling's
+    /// line doesn't block the default profile.
+    @Test func aKnownProfileMatchesItsOwnParkedLine() {
+        let noisy = "/usr/lib/python3/site.py:1: DeprecationWarning: something\n" + Self.parked
+        #expect(HermesGatewayRestartGuard.mode(statusOutput: noisy) == .restartable, "unknown profile: parked lines only")
+        #expect(HermesGatewayRestartGuard.mode(statusOutput: noisy, profileName: "work") == .parkedProfile)
+        #expect(HermesGatewayRestartGuard.mode(statusOutput: Self.parked, profileName: "other") == .restartable)
+        #expect(HermesGatewayRestartGuard.mode(statusOutput: Self.defaultWithParkedSibling, profileName: "work") == .parkedProfile,
+                "a named home's status never lists siblings, so its name there is its own")
+        #expect(Self.decide(status: noisy, profileName: "work")
+            == .refuse(HermesCLIOutcome(succeeded: false, detail: HermesGatewayRestartGuard.parkedProfileNote)))
     }
 
     /// The same timeout on any other restart stays a failure, and the

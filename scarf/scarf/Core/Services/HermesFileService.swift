@@ -1468,7 +1468,8 @@ struct HermesFileService: Sendable {
             },
             stateJSON: { readFileData(context.paths.gatewayStateJSON) },
             capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
-            stopThenStart: stopThenStart
+            stopThenStart: stopThenStart,
+            profileName: HermesProfileScope.profileName(forHome: context.paths.home)
         )
     }
 

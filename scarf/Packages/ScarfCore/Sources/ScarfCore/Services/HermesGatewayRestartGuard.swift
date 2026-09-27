@@ -120,16 +120,27 @@ public enum HermesGatewayRestartGuard {
             && line.hasSuffix(" gateway start)")
     }
 
-    public static func mode(statusOutput: String) -> Mode {
+    /// - Parameter profileName: the named profile this home is
+    ///   (``HermesProfileScope/profileName(forHome:)``), when Scarf knows it.
+    ///   Then only a parked line naming it counts, whatever else the run
+    ///   printed (a stray warning on stderr, which the runner merges in). A
+    ///   default home never takes the early return: the default profile
+    ///   lists each parked SIBLING above its own status
+    ///   (`gateway_profile_lifecycle.py:89-98`), which says nothing about
+    ///   it. `nil` (not known — a local window follows the sticky
+    ///   `active_profile`): the output must be parked lines only.
+    public static func mode(statusOutput: String, profileName: String? = nil) -> Mode {
         let text = HermesCLIVerdict.stripANSI(statusOutput)
-        // The named-profile early return prints the parked line and nothing
-        // else. The default profile prints the same line for each parked
-        // profile ABOVE its own status, so a parked line beside anything
-        // else says nothing about this home.
         let lines = text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        if !lines.isEmpty, lines.allSatisfy(isParkedLine) { return .parkedProfile }
+        if let profileName {
+            if lines.contains(where: { isParkedLine($0) && $0.hasPrefix("Profile '\(profileName)': parked (") }) {
+                return .parkedProfile
+            }
+        } else if !lines.isEmpty, lines.allSatisfy(isParkedLine) {
+            return .parkedProfile
+        }
         if text.contains(manualRunningMarker) { return .runningWithoutService }
         if text.contains("✗ Gateway is not running"), text.contains(manualStoppedMarker) {
             return .stoppedWithoutService
@@ -177,7 +188,8 @@ public enum HermesGatewayRestartGuard {
         stateJSON: () -> Data?,
         capabilities: HermesCapabilities,
         stopThenStart: Bool = false,
-        timeout: TimeInterval = 30
+        timeout: TimeInterval = 30,
+        profileName: String? = nil
     ) -> Decision {
         let status = run(["gateway", "status"], timeout)
         guard status.exitCode != -1,
@@ -185,7 +197,7 @@ public enum HermesGatewayRestartGuard {
         else {
             return .refuse(HermesCLIOutcome(succeeded: false, detail: statusUnreadableNote))
         }
-        let mode = mode(statusOutput: status.output)
+        let mode = mode(statusOutput: status.output, profileName: profileName)
         if mode == .restartable { return .restart(externallySupervised: false) }
         if stopThenStart, mode == .stoppedWithoutService || mode == .parkedProfile {
             return .restart(externallySupervised: false)
@@ -199,7 +211,7 @@ public enum HermesGatewayRestartGuard {
         return decision(
             statusOutput: status.output, statusExitCode: status.exitCode,
             stateJSON: stopThenStart ? nil : stateJSON(), capabilities: capabilities,
-            managerStatusOutput: manager.exitCode == -1 ? nil : manager.output)
+            managerStatusOutput: manager.exitCode == -1 ? nil : manager.output, profileName: profileName)
     }
 
     /// ``decide(run:stateJSON:capabilities:stopThenStart:timeout:)`` for a
@@ -210,11 +222,12 @@ public enum HermesGatewayRestartGuard {
         stateJSON: () -> Data?,
         capabilities: HermesCapabilities,
         stopThenStart: Bool = false,
-        timeout: TimeInterval = 30
+        timeout: TimeInterval = 30,
+        profileName: String? = nil
     ) -> HermesCLIOutcome? {
         if case .refuse(let outcome) = decide(
             run: run, stateJSON: stateJSON, capabilities: capabilities,
-            stopThenStart: stopThenStart, timeout: timeout) {
+            stopThenStart: stopThenStart, timeout: timeout, profileName: profileName) {
             return outcome
         }
         return nil
@@ -258,7 +271,7 @@ public enum HermesGatewayRestartGuard {
     /// ``refusal(statusOutput:statusExitCode:stateJSON:capabilities:managerStatusOutput:)``.
     public static func decision(
         statusOutput: String, statusExitCode: Int32, stateJSON: Data?, capabilities: HermesCapabilities,
-        managerStatusOutput: String? = nil
+        managerStatusOutput: String? = nil, profileName: String? = nil
     ) -> Decision {
         let trimmed = statusOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         // No answer at all: a restart might be the destructive kind, so it
@@ -266,7 +279,7 @@ public enum HermesGatewayRestartGuard {
         if statusExitCode == -1 || (trimmed.isEmpty && statusExitCode != 0) {
             return .refuse(HermesCLIOutcome(succeeded: false, detail: statusUnreadableNote))
         }
-        let mode = mode(statusOutput: statusOutput)
+        let mode = mode(statusOutput: statusOutput, profileName: profileName)
         switch mode {
         case .restartable:
             return .restart(externallySupervised: false)
