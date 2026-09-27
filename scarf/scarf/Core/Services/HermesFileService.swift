@@ -666,6 +666,236 @@ struct HermesFileService: Sendable {
         return addResult
     }
 
+    /// Creates an OAuth MCP server on a host where `hermes mcp add --auth
+    /// oauth` cannot (S09-F2, ``HermesCapabilities/hasMCPOAuthAddNeedsDirectWrite``).
+    ///
+    /// Without a TTY that command never builds the OAuth provider, never
+    /// writes `auth: oauth`, and its "Save config anyway?" default then
+    /// drops the entry altogether. So:
+    ///
+    /// 1. `catalogIdentifier` set (the form still describes the catalog
+    ///    entry the user picked, over HTTP): `hermes mcp install <id>`,
+    ///    which writes the entry with the manifest's own `oauth:` client
+    ///    block and tool defaults before it probes.
+    /// 2. Otherwise, or when the host's catalog does not carry that entry:
+    ///    the entry is written directly (``writeMCPServerOAuthEntry``).
+    ///
+    /// Either way the server has no token yet; the caller offers
+    /// `hermes mcp login` next. `installedViaCatalog` tells the caller the
+    /// manifest's tool defaults are already applied.
+    nonisolated func addMCPServerOAuth(
+        name: String,
+        url: String,
+        sse: Bool,
+        catalogIdentifier: String?,
+        overwriteConfirmed: Bool = false
+    ) -> (exitCode: Int32, output: String, installedViaCatalog: Bool) {
+        // Authoritative re-check: `mcp install` replaces an existing entry
+        // without asking, so the overwrite decision has to be made here.
+        let exists = loadMCPServers().contains { $0.name == name }
+        if exists, !overwriteConfirmed {
+            let refusal = Self.describe(HermesMCPAdd.PlanError.serverAlreadyExists(name: name), name: name)
+            return (refusal.exitCode, refusal.output, false)
+        }
+        if let identifier = catalogIdentifier, !sse {
+            let result = runHermesCLI(
+                args: HermesMCPInstallVerdict.argv(identifier: identifier),
+                timeout: 120
+            )
+            switch HermesMCPInstallVerdict.judge(
+                output: result.output, exitCode: result.exitCode, identifier: identifier
+            ) {
+            case .installed:
+                return (0, result.output, true)
+            case .notInCatalog:
+                break  // An older catalog: write the entry ourselves.
+            case .failed, .unconfirmed:
+                return (1, result.output, false)
+            }
+        }
+        let written = writeMCPServerOAuthEntry(
+            name: name, url: url, sse: sse, replacing: exists
+        )
+        return (written.ok ? 0 : 1, written.message, false)
+    }
+
+    /// Writes `mcp_servers.<name>` as `url` + `auth: oauth` (+ `transport:
+    /// sse`) + `enabled: true` — the same keys `mcp add --auth oauth` saves
+    /// when it can build the provider (`hermes_cli/mcp_config.py:545-547,
+    /// 650-688` @ v2026.9.24) — without a probe, which cannot succeed before
+    /// the user has signed in.
+    ///
+    /// Same guard rails as ``patchMCPServerField``: config.yaml's write lock,
+    /// a refusal for any layout the line writer was not built for (tabs, a
+    /// non-2-space block, a flow-style `mcp_servers:` value), a per-launch
+    /// backup, and an independent read-back that restores the original
+    /// bytes when the entry list or the new entry is not what we wrote.
+    /// `replacing` swaps an existing entry of that name wholesale, which is
+    /// what `mcp add`'s confirmed overwrite does too.
+    nonisolated func writeMCPServerOAuthEntry(
+        name: String,
+        url: String,
+        sse: Bool,
+        replacing: Bool
+    ) -> (ok: Bool, message: String) {
+        let refusal = String(
+            localized: "Scarf couldn’t add “\(name)” to config.yaml safely, so nothing was changed. Add it with `hermes mcp add \(name) --url <url> --auth oauth` in a terminal on that host.",
+            comment: "Direct OAuth MCP entry write refused or failed verification"
+        )
+        guard !name.isEmpty, !url.isEmpty,
+              !YAMLScalar.containsControlCharacter(name),
+              !YAMLScalar.containsControlCharacter(url),
+              !YAMLScalar.exceedsSimpleKeyLimit(name)
+        else { return (false, refusal) }
+
+        let configFile = GuardedTextFile(context: context, label: "config.yaml")
+        let ok = (try? configFile.withLock(context.paths.configYAML) { () -> Bool in
+            guard let loaded = try? configFile.load(context.paths.configYAML), loaded.exists else {
+                return false
+            }
+            let yaml = loaded.text
+            guard let newYAML = Self.insertingOAuthEntry(
+                into: yaml, name: name, url: url, sse: sse, replacing: replacing
+            ) else {
+                Self.logger.warning(
+                    "refusing to write OAuth MCP entry \(name, privacy: .public): unfamiliar mcp_servers layout"
+                )
+                return false
+            }
+            backUpConfigOnceForThisLaunch(originalText: yaml)
+            do {
+                try configFile.write(newYAML, to: context.paths.configYAML, after: loaded)
+            } catch {
+                Self.logger.warning(
+                    "Failed to write \(self.context.paths.configYAML, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            // Independent read-back, as in `patchMCPServerFieldLocked`.
+            var expectedNames = Self.entryNames(inYAML: yaml)
+            if !expectedNames.contains(name) { expectedNames.append(name) }
+            guard let written = readFile(context.paths.configYAML),
+                  Self.verifyPatchedConfig(
+                    text: written, name: name,
+                    expecting: Self.oauthEntryLines(url: url, sse: sse),
+                    namesBefore: expectedNames
+                  ) == nil
+            else {
+                Self.logger.error(
+                    "OAuth MCP entry \(name, privacy: .public) failed verification; restoring \(self.context.paths.configYAML, privacy: .public)"
+                )
+                try? configFile.write(yaml, to: context.paths.configYAML, after: loaded)
+                return false
+            }
+            return true
+        }) ?? false
+        guard ok else { return (false, refusal) }
+        return (true, String(
+            localized: "Saved “\(name)” with OAuth. Sign in to finish connecting it.",
+            comment: "OAuth MCP server entry written; the user still has to sign in"
+        ))
+    }
+
+    /// The entry's own key lines, at indent 4, in the order written.
+    nonisolated static func oauthEntryLines(url: String, sse: Bool) -> [String] {
+        var lines = ["    url: \(yamlScalar(url))", "    auth: oauth"]
+        if sse { lines.append("    transport: sse") }
+        lines.append("    enabled: true")
+        return lines
+    }
+
+    /// `yaml` with the OAuth entry added (or swapped in for an existing one
+    /// when `replacing`), or `nil` when the `mcp_servers` block has a
+    /// layout the line writer must not touch. Pure, so the layouts can be
+    /// tested without a file.
+    nonisolated static func insertingOAuthEntry(
+        into yaml: String,
+        name: String,
+        url: String,
+        sse: Bool,
+        replacing: Bool
+    ) -> String? {
+        var lines = yaml.components(separatedBy: "\n")
+        // Keep a CRLF file CRLF.
+        let eol = lines.first.map { $0.hasSuffix("\r") } == true ? "\r" : ""
+        let entry = (["  \(YAMLScalar.quoteIfNeeded(name)):"] + oauthEntryLines(url: url, sse: sse))
+            .map { $0 + eol }
+
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("mcp_servers:") }) else {
+            // No block at all: append one at the end of the file.
+            if replacing { return nil }
+            while let last = lines.last, trimYAMLLine(last).isEmpty { lines.removeLast() }
+            lines.append("mcp_servers:" + eol)
+            lines.append(contentsOf: entry)
+            return lines.joined(separator: "\n") + "\n"
+        }
+        // The header's value: empty (a block follows), or an empty flow map
+        // / null that we may turn into a block. Anything else is a flow
+        // mapping with content, which this writer does not edit.
+        let headerValue = stripInlineComment(
+            trimYAMLLine(String(lines[start].dropFirst("mcp_servers:".count)))
+        )
+        guard ["", "{}", "~", "null", "Null", "NULL"].contains(headerValue) else { return nil }
+        if !headerValue.isEmpty { lines[start] = "mcp_servers:" + eol }
+
+        // The block runs to the next line with no leading whitespace.
+        var end = lines.count
+        for index in (start + 1)..<lines.count {
+            let line = lines[index]
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            if !(line.first.map { $0 == " " || $0 == "\t" } ?? false) {
+                end = index
+                break
+            }
+        }
+        // Every entry header must sit at exactly two spaces, and no line in
+        // the block may be tab-indented — the shape every other MCP writer
+        // here requires.
+        var existingStart: Int?
+        var existingEnd: Int?
+        var sawEntry = false
+        for index in (start + 1)..<end {
+            let line = lines[index]
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let leading = line.prefix(while: { $0 == " " || $0 == "\t" })
+            if leading.contains("\t") { return nil }
+            let indent = leading.count
+            if indent < 2 { return nil }
+            // The first entry fixes the block's indent; it must be two.
+            if existingStart == nil, !sawEntry, indent != 2 { return nil }
+            if indent == 2 {
+                sawEntry = true
+                if existingStart != nil, existingEnd == nil { existingEnd = index }
+                guard trimmed.hasSuffix(":") else { return nil }
+                if unquote(String(trimmed.dropLast())) == name { existingStart = index }
+            } else if indent == 3 {
+                return nil
+            }
+        }
+        if let existingStart {
+            guard replacing else { return nil }
+            var stop = existingEnd ?? end
+            // Leave trailing comments/blank lines with whatever follows.
+            while stop > existingStart + 1, trimYAMLLine(lines[stop - 1]).isEmpty
+                    || trimYAMLLine(lines[stop - 1]).hasPrefix("#") {
+                stop -= 1
+            }
+            lines.replaceSubrange(existingStart..<stop, with: entry)
+            return lines.joined(separator: "\n")
+        }
+        if replacing { return nil }
+        // Insert after the block's last real line, ahead of trailing
+        // comments that belong to whatever follows.
+        var insertAt = end
+        while insertAt > start + 1 {
+            let trimmed = trimYAMLLine(lines[insertAt - 1])
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { insertAt -= 1 } else { break }
+        }
+        lines.insert(contentsOf: entry, at: insertAt)
+        return lines.joined(separator: "\n")
+    }
+
     /// Updates the v0.14 `supports_parallel_tool_calls` scalar on an MCP
     /// server entry. Pass `nil` to drop the key (Hermes default applies);
     /// pass `true` / `false` to opt this server in or out explicitly.

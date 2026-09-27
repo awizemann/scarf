@@ -2005,6 +2005,70 @@ public enum HermesMCPTestVerdict {
     }
 }
 
+/// `hermes mcp install <identifier>` — install a Nous catalog entry by name
+/// (S09-F2). Used for OAuth catalog entries, which `mcp add` cannot create
+/// without a TTY (see ``HermesCapabilities/hasMCPOAuthAddNeedsDirectWrite``).
+///
+/// `install_entry` writes the entry (`url`, `auth: oauth`, and the
+/// manifest's pre-registered `oauth:` client block when it has one) BEFORE it
+/// probes, and a failed probe only prints `Probe failed:` and applies the
+/// manifest's tool defaults (`hermes_cli/mcp_catalog.py:522-541, 569-672,
+/// 721-790` @ v2026.9.24). With no TTY the OAuth probe fails fast, so the
+/// install completes and the user signs in afterwards.
+///
+/// Outcomes, all through `_say` at a two-space indent with one glyph
+/// (`hermes_cli/mcp_picker.py:104-111, 209-220`; the same text at every tag
+/// from `v2026.5.28`, where the verb first exists):
+/// - `✓ Installed '<name>' (enabled). …` (`mcp_catalog.py:782`).
+/// - `✗ '<identifier>' is not in the catalog. …` — the host's catalog does
+///   not carry the entry (an older Hermes, or a manifest that needs a newer
+///   one). Reported separately so the caller can fall back.
+/// - `✗ install failed: <reason>`, and the managed-install refusal under
+///   `save_config`, which `install_entry` does not notice before printing
+///   its success line — so refusals win.
+///
+/// Exit status is not relied on: before v2026.9.7 the dispatcher discarded
+/// `install_by_name`'s return code.
+public enum HermesMCPInstallVerdict {
+    public enum Result: Equatable, Sendable {
+        case installed
+        case notInCatalog
+        case failed(String?)
+        case unconfirmed(String?)
+    }
+
+    /// `identifier` is the subparser's only positional and nothing follows
+    /// it (`hermes_cli/subcommands/mcp.py:73-75` @ v2026.9.24), so `--` is
+    /// safe here for the same reason as ``HermesMCPRemoveVerdict/argv(name:)``.
+    public static func argv(identifier: String) -> [String] {
+        ["mcp", "install", "--", identifier]
+    }
+
+    public static func judge(output: String, exitCode: Int32, identifier: String) -> Result {
+        let notInCatalog = "'\(identifier)' is not in the catalog"
+        let outcome = HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: ["Installed '\(identifier)'"],
+            anchoredFailureMarkers: HermesCLIMarkers.managedRefusalAnchored + [
+                notInCatalog,
+                "install failed:",
+            ],
+            failureWins: true,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+        if outcome.succeeded { return .installed }
+        if let detail = outcome.detail,
+           HermesCLIVerdict.unglyphed(detail).hasPrefix(notInCatalog) {
+            return .notInCatalog
+        }
+        return outcome.confidence == .unconfirmed
+            ? .unconfirmed(outcome.detail)
+            : .failed(outcome.detail)
+    }
+}
+
 // MARK: - plugins update — hermes_cli/plugins_cmd.py
 
 /// `hermes plugins update <name>`, which has THREE outcomes rather than two.

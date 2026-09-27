@@ -946,6 +946,26 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// (opt-in presence label) per-platform config keys (v0.17+).
     public var hasTelegramRichMessages: Bool { atLeastSemver(0, 17, 0) }
 
+    /// `hermes mcp add --auth oauth` cannot create an OAuth server without a
+    /// TTY (S09-F2), so Scarf creates those entries itself: a catalog entry
+    /// through `hermes mcp install <name>`, anything else by writing the
+    /// `url` + `auth: oauth` entry directly, followed by `hermes mcp login`.
+    ///
+    /// **Floor v0.17.0, source-verified by a tag walk.** From `v2026.6.19`
+    /// (0.17.0) `MCPOAuthManager.get_or_build_provider` RAISES
+    /// `OAuthNonInteractiveError` when stdin is not a TTY and no token is
+    /// cached (`tools/mcp_oauth_manager.py:427-434` @ v2026.6.19;
+    /// `:316-319` @ v2026.9.24). `_configure_http_auth` catches it, never
+    /// sets `auth: oauth`, the unauthenticated probe fails, and "Save config
+    /// anyway?" defaults to No, so nothing is saved. Through `v2026.6.5`
+    /// (0.16.0) the same check only logged a warning and the provider was
+    /// still built, so older hosts keep the `mcp add` path unchanged
+    /// (charter C1). `mcp install <identifier>` itself exists from
+    /// `v2026.5.28` (0.15.0, ``hasMCPCatalog``) and prints the same
+    /// `✓ Installed '<name>'` / `✗ install failed:` / `is not in the
+    /// catalog` lines at every tag since.
+    public var hasMCPOAuthAddNeedsDirectWrite: Bool { atLeastSemver(0, 17, 0) }
+
     // MARK: v0.18 (v2026.7.1) flags
     //
     // v0.18's client-relevant surface is deliberately thin: the

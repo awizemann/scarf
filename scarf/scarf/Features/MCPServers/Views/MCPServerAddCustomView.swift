@@ -30,6 +30,12 @@ struct MCPServerAddCustomView: View {
     @State private var apiKey: String = ""
     /// See `clearCatalogDefaultsIfRetargeted`.
     @State private var appliedCatalogIdentity: String?
+    /// The catalog entry the form still describes, if any. An OAuth entry is
+    /// installed with `hermes mcp install <name>` on hosts where `mcp add`
+    /// cannot create OAuth servers (S09-F2), so the manifest's own `oauth:`
+    /// client block comes with it. Cleared with the other catalog state
+    /// once the user retargets the form.
+    @State private var appliedCatalogEntryName: String?
 
     /// `.sse` is a v0.13+ surface; pre-v0.13 hosts only see stdio + http.
     /// Iterating `MCPTransport.allCases` directly would render the SSE
@@ -149,6 +155,7 @@ struct MCPServerAddCustomView: View {
         }
         pendingDefaultExcludedTools = entry.defaultExcludedTools
         pendingDefaultEnabledTools = entry.defaultEnabledTools
+        appliedCatalogEntryName = entry.name
         appliedCatalogIdentity = currentIdentity
     }
 
@@ -174,6 +181,7 @@ struct MCPServerAddCustomView: View {
     private func clearCatalogDefaults() {
         pendingDefaultExcludedTools = []
         pendingDefaultEnabledTools = []
+        appliedCatalogEntryName = nil
         appliedCatalogIdentity = nil
     }
 
@@ -283,7 +291,8 @@ struct MCPServerAddCustomView: View {
                 auth: resolvedAuth,
                 apiKey: apiKey,
                 defaultEnabledTools: pendingDefaultEnabledTools,
-                defaultExcludedTools: pendingDefaultExcludedTools
+                defaultExcludedTools: pendingDefaultExcludedTools,
+                catalogIdentifier: appliedCatalogEntryName
             )
         case .sse:
             viewModel.addCustomSSE(

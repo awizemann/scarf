@@ -120,6 +120,25 @@ struct MCPServersView: View {
         } message: {
             Text(viewModel.activeError ?? "")
         }
+        // S09-F2: an OAuth server added without a TTY has no token yet, and
+        // Hermes cannot load its tools until someone signs in.
+        .alert(
+            "Sign in to “\(viewModel.pendingSignIn ?? "")”?",
+            isPresented: Binding(
+                get: { viewModel.pendingSignIn != nil },
+                set: { if !$0 { viewModel.pendingSignIn = nil } }
+            ),
+            presenting: viewModel.pendingSignIn
+        ) { name in
+            Button("Sign In") {
+                viewModel.pendingSignIn = nil
+                loginServer = viewModel.servers.first { $0.name == name }
+                    ?? Self.placeholderOAuthServer(name: name)
+            }
+            Button("Later", role: .cancel) { viewModel.pendingSignIn = nil }
+        } message: { name in
+            Text("“\(name)” was added with OAuth. Hermes can’t load its tools until you sign in. You can also sign in later from the server’s detail pane.")
+        }
         .alert("Server added", isPresented: Binding(
             get: { viewModel.activeNotice != nil },
             set: { if !$0 { viewModel.activeNotice = nil } }
@@ -148,6 +167,18 @@ struct MCPServersView: View {
         } message: { pending in
             Text("An MCP server named “\(pending.name)” is already in your config. Replacing it overwrites that entry's command, URL, auth and tool filters. Its OAuth token file and any saved API key in ~/.hermes/.env are kept.")
         }
+    }
+
+    /// Stand-in for a server the post-add reload has not delivered yet. The
+    /// login sheet reads only the name and `oauth.flow`, and a new entry
+    /// written by Scarf has no flow.
+    static func placeholderOAuthServer(name: String) -> HermesMCPServer {
+        HermesMCPServer(
+            name: name, transport: .http, command: nil, args: [], url: nil,
+            auth: "oauth", env: [:], headers: [:], timeout: nil, connectTimeout: nil,
+            enabled: true, toolsInclude: [], toolsExclude: [],
+            resourcesEnabled: true, promptsEnabled: true, hasOAuthToken: false
+        )
     }
 
     private var pageHeader: some View {
