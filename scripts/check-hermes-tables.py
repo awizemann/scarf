@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Diff Scarf's hand-mirrored Hermes provider tables against hermes_cli source.
 
-Scarf mirrors three tables out of hermes_cli/providers.py by hand; this script
+Scarf mirrors provider tables out of hermes_cli by hand; this script
 turns the "reconcile on every Hermes bump" chore into a mechanical gate:
 
   1. ModelCatalogService.providerAliases   <->  ALIASES
@@ -46,6 +46,16 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      static CANONICAL_PROVIDERS slug is skipped (Hermes does not auto-append
      it), and reachability resolves through BOTH alias tables in either
      direction.
+  6. HermesProviderCredentials.providerEnvVars  <->  the env vars Hermes'
+     `_has_any_provider_configured` (hermes_cli/main.py) counts: its literal
+     `provider_env_vars` set, plus the `api_key_env_vars` of every `api_key`
+     row in hermes_cli/auth.py `_REGISTRY_ROWS`, plus what
+     `register_plugin_provider` (hermes_cli/auth_plugin_providers.py) mirrors
+     in from bundled plugins: api_key profiles whose name is neither a
+     built-in row nor in `_REGISTRY_PLUGIN_SKIP`, with `*_URL` vars dropped.
+     This is the chat's "No AI provider credentials" hint (S15-F4). FAILs
+     both ways; a table whose shape changed exits; a plugin registration it
+     can't read statically is a WARN, like lane 4.
 
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
@@ -85,6 +95,8 @@ CATALOG_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift")
 PREFLIGHT_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift")
+CREDENTIALS_SWIFT = os.path.join(
+    REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift")
 LOCAL_PROVIDERS_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift")
 DEFAULT_HERMES = os.environ.get(
@@ -456,6 +468,142 @@ def parse_static_catalog(src):
     return slugs, aliases
 
 
+AUTH_PY = "hermes_cli/auth.py"
+MAIN_PY = "hermes_cli/main.py"
+AUTH_PLUGIN_PY = "hermes_cli/auth_plugin_providers.py"
+
+
+def _str_tuple(node):
+    """A tuple/list/set literal of string constants as a list, else None."""
+    if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return None
+    out = []
+    for elt in node.elts:
+        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+            return None
+        out.append(elt.value)
+    return out
+
+
+def _find_assign(tree, name):
+    """Value node of the first `name = …` / `name: T = …` anywhere in `tree`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == name:
+            return node.value
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and getattr(node.targets[0], "id", "") == name):
+            return node.value
+    return None
+
+
+def parse_provider_env_vars(src):
+    """Lane 6: the env-var set `_has_any_provider_configured` checks.
+
+    Returns (vars, builtin_ids, warn_plugins). Static AST only. FAILS CLOSED:
+    a missing file, a renamed/reshaped `provider_env_vars` / `_REGISTRY_ROWS` /
+    `_REGISTRY_PLUGIN_SKIP`, or a registry row it can't read exits rather than
+    answering from a partial set.
+    """
+    main_text, auth_text, plug_text = (src.read(MAIN_PY), src.read(AUTH_PY),
+                                       src.read(AUTH_PLUGIN_PY))
+    for path, text in ((MAIN_PY, main_text), (AUTH_PY, auth_text),
+                       (AUTH_PLUGIN_PY, plug_text)):
+        if text is None:
+            sys.exit(f"error: {path} not found at {src.mode} — lane 6 needs it")
+
+    fn = next((n for n in ast.walk(ast.parse(main_text))
+               if isinstance(n, ast.FunctionDef) and n.name == "_has_any_provider_configured"),
+              None)
+    base = _str_tuple(_find_assign(fn, "provider_env_vars")) if fn else None
+    if not base:
+        sys.exit(f"error: `provider_env_vars` literal in _has_any_provider_configured "
+                 f"({MAIN_PY}) not found at {src.mode} — its shape changed")
+    env_vars = set(base)
+
+    rows = _find_assign(ast.parse(auth_text), "_REGISTRY_ROWS")
+    if not isinstance(rows, ast.Tuple) or not rows.elts:
+        sys.exit(f"error: `_REGISTRY_ROWS` tuple not found in {AUTH_PY} at {src.mode}")
+    builtin_ids = set()
+    for row in rows.elts:
+        if isinstance(row, ast.Tuple):
+            # _api_key_provider(id, name, base_url, api_key_env_vars[, url_var[, auth_type]])
+            if len(row.elts) < 4 or not isinstance(row.elts[0], ast.Constant):
+                sys.exit(f"error: unreadable _REGISTRY_ROWS tuple row in {AUTH_PY}")
+            pid, keys = row.elts[0].value, _str_tuple(row.elts[3])
+            auth = "api_key"
+            if len(row.elts) >= 6:
+                if not isinstance(row.elts[5], ast.Constant):
+                    sys.exit(f"error: non-literal auth_type for '{pid}' in {AUTH_PY}")
+                auth = row.elts[5].value
+        elif isinstance(row, ast.Call) and getattr(row.func, "id", "") == "ProviderConfig":
+            if len(row.args) < 3 or not all(isinstance(a, ast.Constant) for a in row.args[:3]):
+                sys.exit(f"error: unreadable ProviderConfig row in {AUTH_PY}")
+            pid, auth = row.args[0].value, row.args[2].value
+            kw = {k.arg: k.value for k in row.keywords}
+            keys = _str_tuple(kw["api_key_env_vars"]) if "api_key_env_vars" in kw else []
+        else:
+            sys.exit(f"error: unknown _REGISTRY_ROWS row shape in {AUTH_PY} at {src.mode}")
+        if keys is None:
+            sys.exit(f"error: non-literal api_key_env_vars for '{pid}' in {AUTH_PY}")
+        builtin_ids.add(pid)
+        if auth == "api_key":
+            env_vars |= set(keys)
+
+    skip_node = _find_assign(ast.parse(plug_text), "_REGISTRY_PLUGIN_SKIP")
+    skip = (_str_tuple(skip_node.args[0])
+            if isinstance(skip_node, ast.Call) and len(skip_node.args) == 1 else None)
+    if skip is None:
+        sys.exit(f"error: `_REGISTRY_PLUGIN_SKIP` frozenset literal not found in "
+                 f"{AUTH_PLUGIN_PY} at {src.mode}")
+
+    warn_plugins = set()
+    root = "plugins/model-providers"
+    for entry in src.listdir(root):
+        init = src.read(f"{root}/{entry}/__init__.py")
+        if init is None:
+            continue
+        try:
+            tree = ast.parse(init)
+        except SyntaxError:
+            warn_plugins.add(entry)
+            continue
+        assigned = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned[target.id] = node.value
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and node.args):
+                continue
+            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if fname != "register_provider":
+                continue
+            call = assigned.get(getattr(node.args[0], "id", None))
+            kw = {k.arg: k.value for k in call.keywords} if call else {}
+            name = kw.get("name")
+            if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                warn_plugins.add(entry)
+                continue
+            if name.value in builtin_ids or name.value in skip:
+                continue  # never mirrored (sync skips existing rows)
+            auth = kw.get("auth_type")
+            auth = auth.value if isinstance(auth, ast.Constant) else ("api_key" if auth is None else None)
+            if auth is None:
+                warn_plugins.add(entry)
+                continue
+            if auth != "api_key":
+                continue
+            profile_vars = _str_tuple(kw["env_vars"]) if "env_vars" in kw else []
+            if profile_vars is None:
+                warn_plugins.add(entry)
+                continue
+            # `_api_key_env_fields`: drop *_URL vars (keep all if nothing is left).
+            keys = [v for v in profile_vars if not v.endswith("_URL")] or profile_vars
+            env_vars |= set(keys)
+    return env_vars, builtin_ids, warn_plugins
+
+
 def swift_block(path, header, close_pattern=r"^\s*\]\s*$"):
     """Return the source lines between a declaration header and its closing bracket.
 
@@ -675,6 +823,21 @@ def main(argv=None):
         skipped.append(f"lane 5 (models-dev): {MODELS_DEV_PY} does not exist at "
                        f"{src.mode} — pre-v0.21 Hermes")
 
+    # Lane 6: providerEnvVars <-> _has_any_provider_configured's env-var set
+    hermes_env_vars, _, env_warn_plugins = parse_provider_env_vars(src)
+    swift_env_vars = set(re.findall(
+        r'"([A-Z][A-Z0-9_]*)"',
+        "\n".join(swift_block(CREDENTIALS_SWIFT, "public static let providerEnvVars"))))
+    if not swift_env_vars:
+        sys.exit(f"error: no entries parsed from providerEnvVars in {CREDENTIALS_SWIFT}")
+    check("provider-env-vars", swift_env_vars, hermes_env_vars,
+          "Hermes provider env vars missing from HermesProviderCredentials.providerEnvVars",
+          "providerEnvVars entries Hermes' _has_any_provider_configured does not count")
+    if env_warn_plugins:
+        warnings.append(
+            f"[provider-env-vars] {len(env_warn_plugins)} plugin(s) skipped (registration "
+            f"not readable statically): {', '.join(sorted(env_warn_plugins))}")
+
     for w in warnings:
         print(f"WARN  {w}")
     for s_ in skipped:
@@ -682,12 +845,13 @@ def main(argv=None):
     for f in failures:
         print(f"FAIL  {f}")
     counts = (f"aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
-              f"overlays={len(swift_overlays)} lanes={5 - len(skipped)}/5")
+              f"overlays={len(swift_overlays)} env-vars={len(swift_env_vars)} "
+              f"lanes={6 - len(skipped)}/6")
     if failures:
         print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against "
               f"{PROVIDERS_PY} at {src.mode}")
         sys.exit(1)
-    # A skipped lane is NOT a pass. Two of five lanes silently disabled is how
+    # A skipped lane is NOT a pass. Two of six lanes silently disabled is how
     # an OK verdict becomes worthless on a fresh machine; say so and exit 2
     # unless the caller has explicitly accepted a partial run.
     if skipped and not args.allow_skip:

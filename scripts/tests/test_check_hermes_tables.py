@@ -11,7 +11,7 @@ all about the ways it used to say OK when it should not have:
   * lane 5 returning `{}` for a table that changed SHAPE (the v0.21.1 `ALIASES`
     dict-comprehension trap, one table over);
   * lanes 3 and 4 WARN-skipping on a machine with no models.dev cache while the
-    script still printed OK and exited 0 — two of five lanes silently off;
+    script still printed OK and exited 0 — two of the lanes silently off;
   * reading the hermes checkout's WORKING TREE, so the verdict described
     whatever someone had left checked out rather than the tag Scarf targets.
 """
@@ -352,7 +352,7 @@ class SkippedLaneIsNotAPass(unittest.TestCase):
             self.fail(reason)
         code, text = self._run()
         self.assertEqual(code, 0, text)
-        self.assertIn("lanes=5/5", text)
+        self.assertIn("lanes=6/6", text)
         self.assertIn(f"tag {cht.HERMES_TARGET_TAG}", text)
 
 
@@ -384,6 +384,132 @@ class LaneTwoCatchesAMissingNous(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1, out.getvalue())
         self.assertIn("[aggregators] Hermes aggregators missing", out.getvalue())
         self.assertIn("nous", out.getvalue())
+
+
+class LaneSixProviderEnvVars(unittest.TestCase):
+    """`parse_provider_env_vars` rebuilds `_has_any_provider_configured`'s set
+    statically, and exits on any shape it can't read."""
+
+    MAIN = textwrap.dedent("""
+        def _has_any_provider_configured(*, strict_profile_scope=False):
+            provider_env_vars = {
+                "OPENROUTER_API_KEY",
+                "OPENAI_BASE_URL",
+            }
+            for pconfig in PROVIDER_REGISTRY.values():
+                pass
+    """)
+    AUTH = textwrap.dedent("""
+        _REGISTRY_ROWS: Tuple[Any, ...] = (
+            ProviderConfig("nous", "Nous", "oauth_device_code", inference_base_url="x"),
+            ("deepseek", "DeepSeek", "https://x", ("DEEPSEEK_API_KEY",), "DEEPSEEK_BASE_URL"),
+            ("bedrock", "AWS", "https://x", ("AWS_THING",), "BEDROCK_BASE_URL", "aws_sdk"),
+        )
+    """)
+    PLUG = '_REGISTRY_PLUGIN_SKIP = frozenset({"openrouter", "custom"})\n'
+
+    class DirSource(FakeSource):
+        def __init__(self, files, dirs):
+            super().__init__(files)
+            self.dirs = dirs
+
+        def listdir(self, relpath):
+            return self.dirs.get(relpath, [])
+
+    def _src(self, main=None, auth=None, plug=None, plugins=None):
+        files = {cht.MAIN_PY: self.MAIN if main is None else main,
+                 cht.AUTH_PY: self.AUTH if auth is None else auth,
+                 cht.AUTH_PLUGIN_PY: self.PLUG if plug is None else plug}
+        plugins = plugins or {}
+        for name, text in plugins.items():
+            files[f"plugins/model-providers/{name}/__init__.py"] = text
+        return self.DirSource(files, {"plugins/model-providers": sorted(plugins)})
+
+    def test_builtin_rows_and_literal_set(self):
+        vars_, ids, warn = cht.parse_provider_env_vars(self._src())
+        # aws_sdk rows are not counted; the literal set is.
+        self.assertEqual(vars_, {"OPENROUTER_API_KEY", "OPENAI_BASE_URL", "DEEPSEEK_API_KEY"})
+        self.assertEqual(ids, {"nous", "deepseek", "bedrock"})
+        self.assertEqual(warn, set())
+
+    def test_plugin_mirroring_rules(self):
+        plugins = {
+            "fireworks": 'p = ProviderProfile(name="fireworks", env_vars=("FIREWORKS_API_KEY", "FIREWORKS_BASE_URL"))\nregister_provider(p)\n',
+            # Already a built-in row: never mirrored, even with new vars.
+            "deepseek": 'p = ProviderProfile(name="deepseek", env_vars=("OTHER_KEY",))\nregister_provider(p)\n',
+            # In _REGISTRY_PLUGIN_SKIP.
+            "openrouter": 'p = ProviderProfile(name="openrouter", env_vars=("OR_ONLY",))\nregister_provider(p)\n',
+            # Not api_key.
+            "oauthy": 'p = P(name="oauthy", auth_type="oauth_external", env_vars=("OAUTHY_KEY",))\nregister_provider(p)\n',
+            # Factory: reported, not guessed.
+            "kimi": 'k = _kimi("kimi", (), ("KIMI_API_KEY",), "x")\nregister_provider(k)\n',
+        }
+        vars_, _, warn = cht.parse_provider_env_vars(self._src(plugins=plugins))
+        self.assertIn("FIREWORKS_API_KEY", vars_)
+        self.assertNotIn("FIREWORKS_BASE_URL", vars_)
+        for absent in ("OTHER_KEY", "OR_ONLY", "OAUTHY_KEY"):
+            self.assertNotIn(absent, vars_)
+        self.assertEqual(warn, {"kimi"})
+
+    def _exits(self, **kw):
+        with self.assertRaises(SystemExit):
+            cht.parse_provider_env_vars(self._src(**kw))
+
+    def test_renamed_literal_set_exits(self):
+        self._exits(main=self.MAIN.replace("provider_env_vars", "provider_vars"))
+
+    def test_missing_function_exits(self):
+        self._exits(main="def something_else():\n    pass\n")
+
+    def test_unknown_row_shape_exits(self):
+        self._exits(auth="_REGISTRY_ROWS = (make_row('x'),)\n")
+
+    def test_nonliteral_key_tuple_exits(self):
+        self._exits(auth='_REGISTRY_ROWS = (("x", "X", "u", KEYS),)\n')
+
+    def test_missing_skip_set_exits(self):
+        self._exits(plug="SOMETHING = 1\n")
+
+    def test_missing_file_exits(self):
+        with self.assertRaises(SystemExit):
+            cht.parse_provider_env_vars(FakeSource({cht.MAIN_PY: self.MAIN}))
+
+
+class LaneSixCatchesDrift(unittest.TestCase):
+    """End to end at the target tag: dropping a var Hermes counts, or adding
+    one it doesn't, must FAIL the provider-env-vars lane."""
+
+    def setUp(self):
+        _require_target_checkout(self)
+        self.real = cht.CREDENTIALS_SWIFT
+        self.text = open(self.real).read()
+        self.addCleanup(setattr, cht, "CREDENTIALS_SWIFT", self.real)
+
+    def _run_with(self, text):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False)
+        tmp.write(text)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        cht.CREDENTIALS_SWIFT = tmp.name
+        out = StringIO()
+        with redirect_stdout(out), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cht.main([HERMES_CHECKOUT, "--tag", cht.HERMES_TARGET_TAG, "--allow-skip"])
+        return ctx.exception.code, out.getvalue()
+
+    def test_a_missing_var_fails(self):
+        self.assertIn('"DEEPSEEK_API_KEY", ', self.text)
+        code, out = self._run_with(self.text.replace('"DEEPSEEK_API_KEY", ', "", 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[provider-env-vars] Hermes provider env vars missing", out)
+        self.assertIn("DEEPSEEK_API_KEY", out)
+
+    def test_an_extra_var_fails(self):
+        code, out = self._run_with(self.text.replace(
+            '"ACTUAL_API_KEY", ', '"ACTUAL_API_KEY", "GROQ_API_KEY", ', 1))
+        self.assertEqual(code, 1, out)
+        self.assertIn("[provider-env-vars] providerEnvVars entries", out)
+        self.assertIn("GROQ_API_KEY", out)
 
 
 if __name__ == "__main__":
