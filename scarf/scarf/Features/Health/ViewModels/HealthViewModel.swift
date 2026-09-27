@@ -442,7 +442,7 @@ final class HealthViewModel {
                 return HealthCheck(
                     label: "Signed in to Nous Portal",
                     status: .ok,
-                    detail: "Tools your Nous plan covers can route through the Tool Gateway, whichever provider runs the model."
+                    detail: "Tools your Nous plan covers can use the Tool Gateway. Which tools do is set per tool, not by the model provider."
                 )
             }
             return HealthCheck(

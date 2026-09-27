@@ -22,9 +22,11 @@ nonisolated struct NousSubscriptionState: Sendable, Hashable {
     ///
     /// Hermes routes a tool through the gateway when the Portal account is
     /// signed in AND entitled (`tools/tool_backend_helpers.py:18-28` @
-    /// v2026.9.24). The inference provider plays no part, and it never did:
-    /// the gateway has been gated on sign-in (or, before v2026.4.16, an env
-    /// flag) since it shipped. This used to also require auth.json's
+    /// v2026.9.24). The inference provider is not part of that gate, and
+    /// never was (before v2026.4.16 the gate was an env flag). It only
+    /// decides whether Hermes offers and auto-applies the gateway defaults
+    /// (`hermes_cli/nous_subscription.py:494,557`); each tool's own
+    /// selection decides whether it routes. This used to also require auth.json's
     /// `active_provider == "nous"`, so a user who signed in and then chose
     /// another provider was told their tools would not route (T3-F2). The
     /// entitlement is a live Portal lookup Scarf does not make, so the UI
