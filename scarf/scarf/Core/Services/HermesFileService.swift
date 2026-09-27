@@ -3261,7 +3261,20 @@ struct HermesFileService: Sendable {
         //        after a successful Nous sign-in.
         //
         // Defensive parse: malformed input falls through to the next check.
-        if let data = readFileData(context.paths.authJSON),
+        //
+        // Under a named profile Hermes also uses the ROOT auth.json per
+        // provider (S06-F3), so a profile whose credentials live only there
+        // is not "missing credentials". `HermesAuthFallback` reads only the
+        // profile's own file on default-profile and undetected hosts.
+        let authData: Data? = HermesProfileScope.isProfileHome(context.paths.home)
+            ? HermesAuthFallback.load(
+                authJSONPath: context.paths.authJSON,
+                home: context.paths.home,
+                capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+                transport: context.makeTransport()
+            ).data
+            : readFileData(context.paths.authJSON)
+        if let data = authData,
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {
             if let pool = root["credential_pool"] as? [String: Any] {

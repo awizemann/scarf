@@ -498,9 +498,17 @@ final class OAuthFlowController {
     ///
     /// Priority order:
     ///   1. URLs containing `client_id=` — real OAuth auth URLs always have this.
-    ///   2. URLs containing `/authorize` — fallback for providers that don't
+    ///   2. URLs containing `code_challenge=` — a PKCE authorization URL
+    ///      without a client_id. OpenRouter's is exactly this:
+    ///      `https://openrouter.ai/auth?callback_url=…&code_challenge=…`
+    ///      (`OPENROUTER_AUTH_URL`, `hermes_cli/auth_constants.py:116`;
+    ///      printed at `hermes_cli/auth_openrouter.py:60-64,77-79` @
+    ///      v2026.9.24), which matched none of the other rules, so the sheet
+    ///      sat on "Waiting for authorization URL…" (S06-F6). Hermes prints
+    ///      a docs URL beside it, which carries no `code_challenge`.
+    ///   3. URLs containing `/authorize` — fallback for providers that don't
     ///      include client_id in the query (unusual but possible).
-    ///   3. URLs containing `/oauth/` — last resort.
+    ///   4. URLs containing `/oauth/` — last resort.
     ///
     /// Docs URLs and generic callback URLs are filtered out by these checks.
     nonisolated static func extractAuthURL(from text: String) -> String? {
@@ -513,6 +521,7 @@ final class OAuthFlowController {
         // Prefer the strongest signal so we don't accidentally surface the
         // redirect callback URL when both appear unencoded in output.
         if let url = urls.first(where: { $0.contains("client_id=") }) { return url }
+        if let url = urls.first(where: { $0.contains("code_challenge=") }) { return url }
         if let url = urls.first(where: { $0.contains("/authorize") }) { return url }
         if let url = urls.first(where: { $0.contains("/oauth/") }) { return url }
         return nil

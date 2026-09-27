@@ -64,10 +64,15 @@ struct NousSubscriptionService: Sendable {
     private let logger = Logger(subsystem: "com.scarf", category: "NousSubscriptionService")
     let authJSONPath: String
     let transport: any ServerTransport
+    /// Set for a real server: used to decide whether Hermes would fall back
+    /// to the root `auth.json` (named profile, S06-F3). `nil` for the
+    /// fixture initializer, which reads exactly one file.
+    private let context: ServerContext?
 
     nonisolated init(context: ServerContext = .local) {
         self.authJSONPath = context.paths.authJSON
         self.transport = context.makeTransport()
+        self.context = context
     }
 
     /// Escape hatch for tests — point at a fixture `auth.json` without
@@ -76,6 +81,7 @@ struct NousSubscriptionService: Sendable {
     init(path: String) {
         self.authJSONPath = path
         self.transport = LocalTransport()
+        self.context = nil
     }
 
     /// Load the current subscription state. Returns ``NousSubscriptionState/absent``
@@ -83,7 +89,22 @@ struct NousSubscriptionService: Sendable {
     /// read" the same in UI (show a "not subscribed" CTA).
     nonisolated func loadState() -> NousSubscriptionState {
         ScarfMon.measure(.diskIO, "nous.subscription.loadState") {
-            guard let data = try? transport.readFile(authJSONPath) else {
+            // Under a named profile Hermes reads `providers.nous` from the
+            // ROOT auth.json when the profile has none (S06-F3). Off-main:
+            // `loadState` runs through OffPool, and a version-cache miss
+            // probes the host.
+            let data: Data?
+            if let context {
+                data = HermesAuthFallback.load(
+                    authJSONPath: authJSONPath,
+                    home: context.paths.home,
+                    capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+                    transport: transport
+                ).data
+            } else {
+                data = try? transport.readFile(authJSONPath)
+            }
+            guard let data else {
                 return .absent
             }
             guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

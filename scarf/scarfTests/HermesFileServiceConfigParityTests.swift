@@ -277,7 +277,8 @@ struct SettingsWriteReadParityTests {
     // MARK: Interpolated-writer enumeration (Auxiliary tab)
 
     /// Aux task names the Auxiliary tab writes — `AuxiliaryTab.baseTasks`
-    /// plus the two capability-gated rows (flush_memories, curator). These
+    /// plus the capability-gated rows (web_extract, session_search,
+    /// flush_memories, curator). These
     /// must match the `aux(_:)` names in `HermesConfig+YAML.swift`.
     private static let auxTasks = [
         "vision", "web_extract", "compression", "session_search",

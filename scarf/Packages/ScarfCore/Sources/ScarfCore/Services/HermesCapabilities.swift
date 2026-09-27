@@ -118,6 +118,42 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s < SemVer(major: 0, minor: 12, patch: 0) // pre-v0.12 only
     }
 
+    /// Whether the host still reads the `auxiliary.session_search.*` block.
+    /// **Inverse semantics** — `true` means the Auxiliary tab's "Session
+    /// Search" row should still be shown.
+    ///
+    /// Session search stopped using an auxiliary LLM in hermes-agent commit
+    /// abf1af5401 (#27590), first released at v2026.5.28 (0.15.0): the block
+    /// is in `DEFAULT_CONFIG` at v2026.5.16 (0.14.0,
+    /// `hermes_cli/config.py:875`) and gone at v2026.5.28, which carries a
+    /// tombstone comment instead (`:1048-1050`). At v2026.9.24 the same
+    /// tombstone sits at `hermes_cli/config_defaults.py:737-738,754-756`
+    /// ("leftover blocks in user config are ignored"), and `config set` on
+    /// the key only warns that it is not recognised. Same shape and
+    /// unknown-version policy as `hasFlushMemoriesAux` / `hasWebExtractAux`.
+    public var hasSessionSearchAux: Bool {
+        guard let s = semver else { return false }        // unknown → hide
+        return s < SemVer(major: 0, minor: 15, patch: 0)  // pre-v0.15.0 only
+    }
+
+    /// Hermes strips ANY vendor prefix off the model id before sending it
+    /// for the GitHub Copilot providers, so `anthropic/claude-sonnet-4.6`
+    /// under `copilot` / `copilot-acp` works: `normalize_model_for_provider`
+    /// calls `normalize_copilot_model_id`, whose fallback drops one leading
+    /// `vendor/` (`hermes_cli/model_normalize.py:232-238` @ v2026.9.24).
+    /// That call first appears at v2026.4.23 (0.11.0, commit 29d5d36b14;
+    /// absent at v2026.4.16), and the main agent normalises every
+    /// non-aggregator model (`agent/agent_init.py:460-462`). Older and
+    /// undetected hosts keep the mismatch banner. See ``ModelPreflight``.
+    public var hasVendorPrefixStrippingForCopilot: Bool { atLeastSemver(0, 11, 0) }
+
+    /// Hermes strips `openai/` off the model id for `openai-codex`
+    /// (`_STRIP_VENDOR_ONLY_PROVIDERS`, `hermes_cli/model_normalize.py:242-246`
+    /// @ v2026.9.24), applied by the main agent. Both the strip and the
+    /// agent-side normalise call are present at v2026.4.13 (0.9.0) and absent
+    /// at v2026.4.8 (0.8.0). See ``ModelPreflight``.
+    public var hasOpenAIPrefixStrippingForCodex: Bool { atLeastSemver(0, 9, 0) }
+
     /// `auxiliary.curator` aux task is configurable (v0.12+).
     public var hasCuratorAux: Bool { atLeastSemver(0, 12, 0) }
 
@@ -196,6 +232,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and because a future tag could add the name
     /// to the ACP table — the follow-on P55 filed is `t-e9c464a9`.
     public var hasGoals: Bool { atLeastSemver(0, 13, 0) }
+
+    /// Under a named profile, `credential_pool.<provider>` falls back to the
+    /// ROOT `auth.json` when the profile has no entries for that provider
+    /// (hermes-agent 33bf5f6292, first released at v2026.5.7; absent at
+    /// v2026.4.30). `read_credential_pool`, `hermes_cli/auth.py:870-893` @
+    /// v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthPoolFallback: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes kanban` task board CLI.
     ///
@@ -697,6 +740,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     // modes. Catalog-sync changes (the `openai-api` overlay, Krea image
     // models, xAI retired-model aliases, Vercel removal) are unconditional
     // and carry no flag.
+
+    /// Under a named profile, `providers.<provider>` OAuth state (e.g. Nous)
+    /// falls back to the ROOT `auth.json` when the profile has none.
+    /// `_load_provider_state` reads the profile only at v2026.5.16 (0.14.0,
+    /// `hermes_cli/auth.py:1054-1059`) and falls back at v2026.5.28;
+    /// `auth.py:755-766` @ v2026.9.24. See ``HermesAuthFallback``.
+    public var hasProfileAuthProviderStateFallback: Bool { atLeastSemver(0, 15, 0) }
 
     /// Kanban tasks carry an originating ACP `session_id`, and
     /// `hermes kanban list --session <id>` filters by it (v0.15+). The
@@ -1995,6 +2045,38 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `cron doctor`). Absent at v2026.8.31, where `plugins_cmd.py` has no
     /// `compat` verb at all, so an older host fails argparse.
     public var hasPluginsCompat: Bool { isV0211OrLater }
+
+    /// `hermes config set` coerces the word `none` (any case) to YAML null
+    /// for a key whose `DEFAULT_CONFIG` default is not a string — the
+    /// `_SCALAR_WORDS` table gained `'none': None` in hermes-agent commit
+    /// 5d4b97939e, first released at v2026.9.7 (`hermes_cli/config.py:3303`,
+    /// applied by `_coerce_config_set_value` at `:3306`; `:3245` at
+    /// v2026.9.24). Absent at v2026.8.31, where only true/false words are
+    /// coerced and `none` is stored as the string.
+    ///
+    /// It matters for `agent.reasoning_effort`, which has no default: from
+    /// this floor on, `config set agent.reasoning_effort none` stores null,
+    /// which `parse_reasoning_effort` reads as "use the default" rather than
+    /// "reasoning off". See
+    /// ``HermesReasoningEffort/configSetValue(for:capabilities:)``.
+    public var configSetCoercesNoneToNull: Bool { isV0211OrLater }
+
+    /// `model.provider: llamacpp` IGNORES `model.base_url`. From v2026.9.7
+    /// the llama.cpp aliases resolve to Hermes's managed local runtime
+    /// whenever no explicit base_url is passed in
+    /// (`hermes_cli/runtime_provider_custom.py:461` @ v2026.9.7, `:537-540`
+    /// @ v2026.9.24 → `_resolve_llamacpp_runtime` `:427-452`), which uses the
+    /// supervised server or a probe of `127.0.0.1:8080` only, and otherwise
+    /// raises "The local model server is turned off…". Config's
+    /// `model.base_url` never counts as explicit there (ACP passes none,
+    /// `acp_adapter/session.py:502-503`). Absent at v2026.8.31, where
+    /// llamacpp followed the generic custom path and honoured base_url.
+    ///
+    /// Reproduced at v2026.9.24 against a scratch HERMES_HOME:
+    /// `provider: llamacpp` + `base_url: http://127.0.0.1:8081/v1` raises,
+    /// while `provider: custom` with the same base_url resolves to it. See
+    /// ``LocalModelProvider/configProviderID(capabilities:)``.
+    public var llamaCppProviderIgnoresBaseURL: Bool { isV0211OrLater }
 
     /// `hermes cron create --paused [--paused-reason <text>]` — create a job
     /// already paused, instead of create-then-`cron pause` (v0.21.1+,

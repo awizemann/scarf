@@ -75,21 +75,53 @@ import Foundation
         #expect(url.absoluteString == "https://portal.nousresearch.com/billing")
     }
 
+    @Test func parsesSubscriptionRequiredAtV2026_9_24() throws {
+        // S06-F4. What `auth_nous.py:1387-1393` @ v2026.9.24 prints:
+        // `format_auth_error(exc)` (here the generic entitlement text,
+        // `auth.py:448`), then the billing + follow-up lines. The old
+        // "does not have an active subscription" sentence is gone, and
+        // requiring it hid the Subscribe button on every current host.
+        let text = """
+        Login successful!
+
+        No active paid subscription found. Please purchase/activate a subscription, then retry.
+          Subscribe here: https://portal.nousresearch.com/billing
+
+        After subscribing, run `hermes model` again to finish setup.
+        """
+        let url = try #require(NousAuthFlow.parseSubscriptionRequired(from: text))
+        #expect(url.absoluteString == "https://portal.nousresearch.com/billing")
+    }
+
+    @Test func parsesSubscriptionRequiredWithAccountMessage() throws {
+        // The Portal-aware wording (`nous_account.py:277`), which itself
+        // carries a URL mid-sentence — the billing line still wins.
+        let text = """
+        Your Nous Portal account has no active subscription or usable credits, so inference is unavailable. Subscribe or add credits at https://portal.nousresearch.com/billing.
+          Subscribe here: https://portal.example.test/billing
+
+        After subscribing, run `hermes model` again to finish setup.
+        """
+        let url = try #require(NousAuthFlow.parseSubscriptionRequired(from: text))
+        #expect(url.absoluteString == "https://portal.example.test/billing")
+    }
+
     @Test func subscriptionRequiredReturnsNilWithoutMarker() {
         let text = """
         hermes: something else went wrong
         Subscribe here: https://example.com/billing
         """
         // The "Subscribe here:" URL alone isn't enough — we require the
-        // specific subscription-required sentinel so we don't misclassify
-        // unrelated errors as subscription failures.
+        // follow-up line Hermes prints only on the subscription-required
+        // path, so we don't misclassify unrelated errors.
         #expect(NousAuthFlow.parseSubscriptionRequired(from: text) == nil)
     }
 
     @Test func subscriptionRequiredReturnsNilWhenBillingURLMissing() {
         let text = """
-        Your Nous Portal account does not have an active subscription.
+        No active paid subscription found.
         (no subscribe here line)
+        After subscribing, run `hermes model` again to finish setup.
         """
         #expect(NousAuthFlow.parseSubscriptionRequired(from: text) == nil)
     }
