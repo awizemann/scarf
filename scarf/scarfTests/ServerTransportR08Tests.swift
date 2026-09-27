@@ -65,6 +65,40 @@ import ScarfCore
         let copilot = "model:\n  default: gpt-5\n  provider: copilot\n"
         #expect(try Self.hasCredential(env: "GITHUB_TOKEN=ghp_real\n", config: anthropic) == false)
         #expect(try Self.hasCredential(env: "GITHUB_TOKEN=ghp_real\n", config: copilot))
+        // R16c F3: Hermes' aliases for Copilot / Hugging Face count too.
+        let github = "model:\n  default: gpt-5\n  provider: github\n"
+        let hf = "model:\n  default: m\n  provider: hf\n"
+        #expect(try Self.hasCredential(env: "GITHUB_TOKEN=ghp_real\n", config: github))
+        #expect(try Self.hasCredential(env: "HF_TOKEN=hf_real\n", config: hf))
+        #expect(try Self.hasCredential(env: "HF_TOKEN=hf_real\n", config: github) == false)
+    }
+
+    // MARK: - R16c F2: what Add Server saves
+
+    /// A path the probe found is saved marked as a path (one word, spaces
+    /// and all); a typed value — or a probe that only echoed a typed value
+    /// back — is not.
+    @MainActor @Test func aProbedPathIsSavedAsAPath() {
+        let vm = AddServerViewModel()
+        vm.host = "box"
+        vm.testResult = .success(hermesPath: "/Users/Jane Doe/.local/bin/hermes", dbFound: true, suggestedRemoteHome: nil)
+        let probed = vm.configForSave()
+        #expect(probed.hermesBinaryHint == "/Users/Jane Doe/.local/bin/hermes")
+        #expect(probed.hermesBinaryHintIsPath == true)
+        #expect(probed.hermesBinaryHintFragment == nil)
+
+        vm.hermesBinary = "docker compose exec hermes hermes"
+        let typed = vm.configForSave()
+        #expect(typed.hermesBinaryHint == "docker compose exec hermes hermes")
+        #expect(typed.hermesBinaryHintIsPath == nil)
+        #expect(typed.hermesBinaryHintFragment == "docker compose exec hermes hermes")
+
+        // Tested WITH the wrapper, then the field cleared: the "path" in the
+        // result is the wrapper echoed back, so it keeps the typed reading.
+        vm.hermesBinary = ""
+        vm.testedWithTypedBinary = true
+        vm.testResult = .success(hermesPath: "docker compose exec hermes hermes", dbFound: true, suggestedRemoteHome: nil)
+        #expect(vm.configForSave().hermesBinaryHintIsPath == nil)
     }
 
     @Test func theProcessEnvironmentUsesTheSameTable() throws {
@@ -165,5 +199,95 @@ import ScarfCore
         defer { home.cleanup() }
         await SlashCommandBootstrapService.bootstrapRemoteIfNeeded(context: home.context)
         #expect(!FileManager.default.fileExists(atPath: home.context.paths.globalSlashCommandsDir))
+    }
+
+    // The positive paths (R16c). A REMOTE-shaped context whose Hermes home is
+    // a local temp dir, driven through `LocalTransport` — the same file
+    // operations SSH would run, minus the network — and a fixture bundle of
+    // two commands. Each test uses a fresh server id, so the once-per-session
+    // set is never shared between them.
+
+    private struct RemoteFixture {
+        let home: URL
+        let bundle: URL
+        let context: ServerContext
+        var commandsDir: String { context.paths.globalSlashCommandsDir }
+
+        init(withHermesHome: Bool = true) throws {
+            let base = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("scarf-r16c-slash-\(UUID().uuidString)")
+            home = base.appendingPathComponent("hermes")
+            bundle = base.appendingPathComponent("BuiltinSlashCommands.bundle")
+            try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            if withHermesHome {
+                try "model:\n  default: x\n".write(
+                    to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+            }
+            for name in ["scarf-help", "scarf-cron"] {
+                try "---\nname: \(name)\nversion: 1.2.0\n---\nBody of \(name).\n".write(
+                    to: bundle.appendingPathComponent(name + ".md"), atomically: true, encoding: .utf8)
+            }
+            context = ServerContext(id: UUID(), displayName: "Box", kind: .ssh(SSHConfig(
+                host: "box.invalid", remoteHome: home.path)))
+        }
+
+        func bootstrap() async -> Bool {
+            let id = context.id
+            return await SlashCommandBootstrapService.bootstrapRemoteIfNeeded(
+                context: context,
+                makeTransport: { _ in LocalTransport(contextID: id) },
+                bundleCommandsDir: bundle)
+        }
+
+        func cleanup() { try? FileManager.default.removeItem(at: home.deletingLastPathComponent()) }
+    }
+
+    @Test func aRemoteHostGetsTheBundledCommands() async throws {
+        let fx = try RemoteFixture()
+        defer { fx.cleanup() }
+        #expect(await fx.bootstrap())
+        let installed = try FileManager.default.contentsOfDirectory(atPath: fx.commandsDir).sorted()
+        #expect(installed == ["scarf-cron.md", "scarf-help.md"])
+        let text = try String(contentsOfFile: fx.commandsDir + "/scarf-help.md", encoding: .utf8)
+        #expect(text.contains("version: 1.2.0"))
+    }
+
+    /// Once per host per app session: a second window on the same host runs
+    /// nothing, so a command deleted after the first run stays deleted.
+    @Test func aHostIsBootstrappedOncePerSession() async throws {
+        let fx = try RemoteFixture()
+        defer { fx.cleanup() }
+        #expect(await fx.bootstrap())
+        try FileManager.default.removeItem(atPath: fx.commandsDir + "/scarf-help.md")
+        #expect(await fx.bootstrap() == false)
+        #expect(!FileManager.default.fileExists(atPath: fx.commandsDir + "/scarf-help.md"))
+    }
+
+    /// A failed run is forgotten, so the next window on the host retries.
+    /// The failure here is a real one: `scarf` is a FILE, so the commands
+    /// directory can't be created.
+    @Test func aFailedRunIsRetriedByTheNextWindow() async throws {
+        let fx = try RemoteFixture()
+        defer { fx.cleanup() }
+        let blocker = fx.home.appendingPathComponent("scarf")
+        try "not a directory".write(to: blocker, atomically: true, encoding: .utf8)
+        #expect(await fx.bootstrap() == false)
+        try FileManager.default.removeItem(at: blocker)
+        #expect(await fx.bootstrap())
+        #expect(FileManager.default.fileExists(atPath: fx.commandsDir + "/scarf-cron.md"))
+    }
+
+    /// No `config.yaml` and no `state.db`: a wrong `remoteHome` or a deleted
+    /// profile. Nothing is created (a stray `profiles/<name>/` would show up
+    /// as a profile on older Hermes), and the host is retried later, when the
+    /// home may exist.
+    @Test func aMissingHermesHomeIsSkippedAndRetried() async throws {
+        let fx = try RemoteFixture(withHermesHome: false)
+        defer { fx.cleanup() }
+        #expect(await fx.bootstrap() == false)
+        #expect(!FileManager.default.fileExists(atPath: fx.home.appendingPathComponent("scarf").path))
+        try "".write(to: fx.home.appendingPathComponent("state.db"), atomically: true, encoding: .utf8)
+        #expect(await fx.bootstrap())
     }
 }
