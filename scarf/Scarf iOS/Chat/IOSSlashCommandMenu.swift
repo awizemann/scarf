@@ -88,15 +88,6 @@ private struct IOSSlashCommandRow: View {
                             .font(.caption.monospaced())
                             .foregroundStyle(ScarfColor.foregroundFaint)
                     }
-                    if command.source == .quickCommand {
-                        Text("user")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(ScarfColor.backgroundTertiary)
-                            .clipShape(Capsule())
-                            .foregroundStyle(ScarfColor.foregroundMuted)
-                    }
                 }
                 if !command.description.isEmpty {
                     Text(command.description)

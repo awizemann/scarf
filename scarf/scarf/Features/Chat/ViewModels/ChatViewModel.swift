@@ -574,7 +574,7 @@ final class ChatViewModel {
     /// profile and the prompt would never reach the bot. Routing at the
     /// `sendText` choke point (rather than only the bot composer's `onSend`)
     /// also covers every other UI path that funnels into `sendText` — the
-    /// goal pill's clear button, quick commands, the compress sheet.
+    /// goal pill's clear button, the compress sheet.
     /// Nil (production main-Chat default) = unchanged behavior. Returning
     /// `false` lets the ordinary pipeline proceed.
     @ObservationIgnored
@@ -1430,6 +1430,9 @@ final class ChatViewModel {
         )
         let wireText = idleQueueText
             ?? richChatViewModel.expandIfProjectScoped(text, context: context)
+        // Reconcile the echo against what Hermes will store for THIS wire
+        // text (S02-F1), not the typed text.
+        richChatViewModel.notePromptWire(displayText: text, wireText: wireText, imageCount: images.count)
 
         // Non-interruptive slash commands keep the "Agent working…"
         // indicator off and surface a transient toast confirming the
@@ -2109,7 +2112,7 @@ final class ChatViewModel {
                     // Pull any project-scoped slash commands the user has
                     // authored at <path>/.scarf/slash-commands/ so the
                     // chat slash menu surfaces them. Async + non-fatal —
-                    // the menu degrades to ACP + quick commands only on
+                    // the menu degrades to the ACP commands only on
                     // any failure (logged inside the service).
                     self.richChatViewModel.loadProjectScopedCommands(at: path)
                     // Also refresh global Scarf slash commands so the
