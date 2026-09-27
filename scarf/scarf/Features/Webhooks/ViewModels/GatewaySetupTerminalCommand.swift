@@ -1,0 +1,65 @@
+import Foundation
+import ScarfCore
+
+/// The Terminal.app command line that runs `hermes gateway setup` against
+/// the WINDOW's host and profile.
+///
+/// The Webhooks tab's button used to run the LOCAL `hermes` with no profile
+/// pin, so a remote window configured this Mac, and a named-profile window
+/// configured whatever `active_profile` pointed at. A remote window now goes
+/// through `ssh -t`, built the same way `ChatViewModel.launchTerminal` builds
+/// its remote argv: `env` + the PATH fallback (a non-login shell), the
+/// `HERMES_HOME=` pin for a named profile or `-p default` for the root.
+///
+/// Every argv word is single-quoted for the LOCAL shell Terminal runs, so the
+/// remote words (`PATH="$PATH:…"`, the already remote-quoted `HERMES_HOME=`)
+/// reach ssh unexpanded and the remote shell parses them as the chat path's
+/// argv does.
+enum GatewaySetupTerminalCommand {
+
+    static func argv(for context: ServerContext) -> [String] {
+        let home = context.paths.home
+        let hermes = context.paths.hermesBinary
+        let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+            .trimmingCharacters(in: .whitespaces)
+        if context.isRemote, case .ssh(let cfg) = context.kind {
+            let host = cfg.user.map { "\($0)@\(cfg.host)" } ?? cfg.host
+            var args: [String] = ["/usr/bin/ssh", "-t"]
+            if let port = cfg.port { args += ["-p", String(port)] }
+            if let id = cfg.identityFile, !id.isEmpty { args += ["-i", id] }
+            args += ["-o", "StrictHostKeyChecking=accept-new", host, "--", "env", HermesConfigReader.pathFallback]
+            if !assignment.isEmpty { args.append(assignment) }
+            args.append(hermes)
+            args += HermesProfileScope.pinnedRemoteArguments(
+                executable: hermes, args: ["gateway", "setup"], home: home,
+                configuredBinary: cfg.hermesBinaryHint)
+            return args
+        }
+        // Local: the same pin, but the assignment is for THIS shell, so it
+        // goes in as `env HERMES_HOME=<home>` with the path unquoted by us
+        // (the argv word is quoted as a whole below).
+        var args: [String] = []
+        if HermesProfileScope.isProfileHome(home) { args += ["/usr/bin/env", "HERMES_HOME=" + home] }
+        args.append(hermes)
+        args += HermesProfileScope.pinnedRemoteArguments(
+            executable: hermes, args: ["gateway", "setup"], home: home)
+        return args
+    }
+
+    /// `argv` as one line for the local shell.
+    static func shellLine(for context: ServerContext) -> String {
+        argv(for: context).map(singleQuote).joined(separator: " ")
+    }
+
+    /// An AppleScript that opens Terminal and runs `shellLine`.
+    static func appleScript(for context: ServerContext) -> String {
+        let line = shellLine(for: context)
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "tell application \"Terminal\"\n  activate\n  do script \"\(line)\"\nend tell"
+    }
+
+    static func singleQuote(_ word: String) -> String {
+        "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}

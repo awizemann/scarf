@@ -155,7 +155,7 @@ struct HermesFileService: Sendable {
     // MARK: - Gateway State
 
     nonisolated func loadGatewayState() -> GatewayState? {
-        guard let data = readFileData(context.paths.gatewayStateJSON) else { return nil }
+        guard let data = gatewayStateData(own: readFileData(context.paths.gatewayStateJSON)) else { return nil }
         do {
             return try JSONDecoder().decode(GatewayState.self, from: data)
         } catch {
@@ -171,20 +171,43 @@ struct HermesFileService: Sendable {
     nonisolated func loadGatewayStateResult() -> Result<GatewayState?, Error> {
         // Distinguish "file doesn't exist yet" (normal, returns .success(nil))
         // from "file exists but we can't read or parse it" (error).
-        if !transport.fileExists(context.paths.gatewayStateJSON) {
+        var own: Data?
+        var ownFailure: Error?
+        if transport.fileExists(context.paths.gatewayStateJSON) {
+            switch readFileDataResult(context.paths.gatewayStateJSON) {
+            case .success(let data): own = data
+            case .failure(let err): ownFailure = err
+            }
+        }
+        // A multiplexer-served named profile has no file of its own; its
+        // record is the root one, projected (S07-F2). That answer stands even
+        // when the profile's own (stale) file could not be read.
+        guard let data = gatewayStateData(own: own) else {
+            if let ownFailure { return .failure(ownFailure) }
             return .success(nil)
         }
-        switch readFileDataResult(context.paths.gatewayStateJSON) {
-        case .success(let data):
-            do {
-                return .success(try JSONDecoder().decode(GatewayState.self, from: data))
-            } catch {
-                Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
-                return .failure(error)
-            }
-        case .failure(let err):
-            return .failure(err)
+        do {
+            return .success(try JSONDecoder().decode(GatewayState.self, from: data))
+        } catch {
+            Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
+            return .failure(error)
         }
+    }
+
+    /// The root home's `gateway_state.json` — where a multiplexer-served
+    /// named profile's platform states live.
+    nonisolated var rootGatewayStateJSON: String {
+        HermesProfileScope.rootHome(forHome: context.paths.home) + "/gateway_state.json"
+    }
+
+    /// The record that describes this window's profile: its own file, or —
+    /// for a named profile the default multiplexer serves — the root record
+    /// with that profile's `<profile>:<platform>` entries (S07-F2). Reads
+    /// the root file only for a named profile.
+    nonisolated func gatewayStateData(own: Data?) -> Data? {
+        guard let profile = HermesProfileScope.profileName(forHome: context.paths.home) else { return own }
+        return HermesGatewayStateProjection.effectiveRecord(
+            ownData: own, rootData: readFileData(rootGatewayStateJSON), profile: profile)
     }
 
     // MARK: - Memory
@@ -2930,36 +2953,39 @@ struct HermesFileService: Sendable {
     /// `.failure` means we couldn't probe at all (pgrep missing, connection
     /// down, permission issue) — a *different* UX from "not running".
     ///
-    /// The regex narrows the match to the gateway daemon shape so unrelated
-    /// commands that happen to contain "hermes" — `hermes acp` chat sessions,
-    /// `hermes -z` one-shots, log tails, README readers — don't get flagged
-    /// as "Hermes is running" in the dashboard banner. Two alternations cover
-    /// both invocation forms: the python-module path (`python -m
-    /// hermes_cli.main gateway run …`) and the script-path form
-    /// (`/usr/local/bin/hermes gateway run …`). All callers semantically
-    /// want the gateway PID specifically — `stopHermes()` issues
-    /// `hermes gateway stop` first and only falls back to killing this
-    /// PID, and the dashboard health probe only cares about the gateway.
+    /// Scoped to the profile this window views; see
+    /// ``HermesGatewayProcessMatch`` for the pattern (named-profile flag,
+    /// profile scoping, and the launchd wrappers it must skip). A named
+    /// profile with no gateway of its own that the default profile's
+    /// multiplexer serves reports the multiplexer's PID: the profile IS
+    /// running, through that process. Only this display answer borrows it —
+    /// ``stopHermes()`` signals nothing but the profile's own gateway.
     nonisolated func hermesPIDResult() -> Result<pid_t?, Error> {
+        let profile = HermesProfileScope.profileName(forHome: context.paths.home)
+        let own = gatewayPIDResult(profile: profile)
+        guard let profile, case .success(nil) = own,
+              isServedByMultiplexer(profile: profile) else { return own }
+        return gatewayPIDResult(profile: nil)
+    }
+
+    /// `pgrep` for one profile's own gateway process.
+    nonisolated private func gatewayPIDResult(profile: String?) -> Result<pid_t?, Error> {
         do {
             let result = try transport.runProcess(
                 executable: "/usr/bin/pgrep",
-                args: ["-f", #"(^|[[:space:]])-m[[:space:]]+hermes_cli\.main[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)|(^|[[:space:]/])hermes[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)"#],
+                args: ["-f", HermesGatewayProcessMatch.pgrepPattern(profile: profile)],
                 stdin: nil,
                 timeout: 5
             )
             // pgrep exits 1 when nothing matches — that's "not running", NOT an
             // error. Anything else (127=command not found, 255=ssh failure) is.
             if result.exitCode == 0 {
-                if let firstLine = result.stdoutString
-                    .components(separatedBy: "\n")
-                    .first(where: { !$0.isEmpty }),
-                   let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) {
-                    return .success(pid)
-                }
-                return .success(nil)
+                return .success(HermesGatewayProcessMatch.firstPID(inPgrepOutput: result.stdoutString))
             } else if result.exitCode == 1 {
-                return .success(nil)   // genuinely not running
+                // Nothing on the command line — but a named profile's gateway
+                // started with `HERMES_HOME` in its environment has no `-p`
+                // flag to match. Its own `gateway.pid` still names it.
+                return .success(profile == nil ? nil : pidFromProfilePidFile(profile: profile))
             } else {
                 let err = TransportError.commandFailed(exitCode: result.exitCode, stderr: result.stderrString)
                 Self.logger.warning("pgrep failed (exit \(result.exitCode)): \(result.stderrString, privacy: .public)")
@@ -2969,6 +2995,44 @@ struct HermesFileService: Sendable {
             Self.logger.warning("pgrep transport error: \(error.localizedDescription, privacy: .public)")
             return .failure(error)
         }
+    }
+
+    /// The PID in this profile's own `gateway.pid`, accepted only when that
+    /// process is alive and its command line is a gateway this profile can
+    /// own (`ps -o command=`), so a stale file whose PID was reused by
+    /// something else is refused. Read-only; `nil` whenever anything is in
+    /// doubt (no file, `ps` unavailable, a different command line).
+    nonisolated private func pidFromProfilePidFile(profile: String?) -> pid_t? {
+        guard let data = readFileData(context.paths.home + "/gateway.pid"),
+              let pid = HermesGatewayProcessMatch.pid(fromPidFile: data, profile: profile),
+              let ps = try? transport.runProcess(
+                  executable: "/bin/ps", args: ["-p", String(pid), "-o", "command="],
+                  stdin: nil, timeout: 5),
+              ps.exitCode == 0
+        else { return nil }
+        let commandLine = ps.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard HermesGatewayProcessMatch.commandLineIsGateway(commandLine, profile: profile) else { return nil }
+        // Hermes's own PID-reuse guard: where the host has `/proc` (Linux)
+        // the record's `start_time` is that process's stat field 22, so a
+        // mismatch means the PID now belongs to a different process. macOS
+        // records psutil centiseconds, which no read here reproduces; there
+        // the command line and `hermes_home` checks above are the guard.
+        if let recorded = HermesGatewayProcessMatch.startTime(fromPidFile: data),
+           let stat = readFileData("/proc/\(pid)/stat"),
+           let live = HermesGatewayProcessMatch.procStatStartTime(String(decoding: stat, as: UTF8.self)),
+           live != recorded {
+            return nil
+        }
+        return pid
+    }
+
+    /// Does the ROOT home's `gateway_state.json` list `profile` in
+    /// `served_profiles`? See ``HermesGatewayStateProjection``.
+    nonisolated private func isServedByMultiplexer(profile: String) -> Bool {
+        guard let data = readFileData(rootGatewayStateJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return HermesGatewayStateProjection.servedProfiles(in: root).contains(profile)
     }
 
     /// Stop the gateway, judged by what `hermes gateway stop` PRINTED.
@@ -3014,7 +3078,11 @@ struct HermesFileService: Sendable {
         func fallback(_ ok: Bool) -> HermesCLIOutcome {
             ok ? HermesCLIOutcome(succeeded: true, detail: nil) : outcome
         }
-        guard let pid = hermesPID() else { return fallback(false) }
+        // The profile's OWN gateway only: a multiplexer-served profile must
+        // never SIGTERM the default profile's gateway, which serves the rest.
+        let profile = HermesProfileScope.profileName(forHome: context.paths.home)
+        guard case .success(let found) = gatewayPIDResult(profile: profile),
+              let pid = found else { return fallback(false) }
         // For remote we can't issue a raw `kill(2)` — route through `kill(1)`
         // via the transport. Local uses the syscall for its minimal overhead.
         if context.isRemote {

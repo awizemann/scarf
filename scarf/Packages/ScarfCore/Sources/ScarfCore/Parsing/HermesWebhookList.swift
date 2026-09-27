@@ -110,6 +110,37 @@ public enum HermesWebhookList {
             .contains("No dynamic webhook subscriptions.")
     }
 
+    /// What one `hermes webhook list` run says, for a surface that renders
+    /// it directly (ScarfGo's Webhooks screen).
+    public enum Listing: Sendable, Equatable {
+        /// `_setup_hint()` — `platforms.webhook.enabled` is not set.
+        case notEnabled
+        /// Subscriptions, possibly none (`No dynamic webhook subscriptions.`
+        /// or no output at all).
+        case entries([HermesWebhookEntry])
+        /// Output that is neither — a changed format or an error.
+        case unparsed
+    }
+
+    /// Classify a `webhook list` run. The not-enabled markers are the same
+    /// three the Mac `WebhooksViewModel` checks (`_setup_hint`,
+    /// `hermes_cli/webhook.py` @ v2026.9.24).
+    public static func listing(_ output: String) -> Listing {
+        let lower = output.lowercased()
+        if lower.contains("webhook platform is not enabled")
+            || lower.contains("run the gateway setup wizard")
+            || lower.contains("webhook_enabled=true") {
+            return .notEnabled
+        }
+        let parsed = parse(output)
+        if !parsed.isEmpty { return .entries(parsed) }
+        if isEmptyListing(output)
+            || output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .entries([])
+        }
+        return .unparsed
+    }
+
     public static func parse(_ output: String) -> [HermesWebhookEntry] {
         var results: [HermesWebhookEntry] = []
 

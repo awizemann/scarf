@@ -93,8 +93,8 @@ final class PlatformsViewModel: OutcomeMessageHosting {
 
     func connectivity(for platform: HermesToolPlatform) -> PlatformConnectivity {
         if let pState = gatewayState?.platforms?[platform.name] {
-            if let err = pState.error, !err.isEmpty { return .error(err) }
-            if pState.connected == true { return .connected }
+            if let err = pState.errorText { return .error(err) }
+            if pState.isConnected { return .connected }
         }
         return hasConfigBlock(for: platform) ? .configured : .notConfigured
     }
@@ -229,11 +229,15 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // writes `SIMPLEX_WS_URL` (`SimpleXSetupViewModel.swift:65`); those
         // are the keys each form's own LOAD treats as the primary field, so
         // they are the honest "setup has started" signal. `whatsapp_cloud`
-        // deliberately has no arm — its form writes config.yaml only
-        // (`WhatsAppCloudSetupViewModel.swift:86-97`), and the nested-block
-        // check above is what finds it. Same for the five form-less rows.
+        // keeps its credentials in `.env` when Hermes's own wizard set it up
+        // (`hermes_cli/setup_whatsapp_cloud.py:144-150` @ v2026.9.24), and
+        // Scarf's form now writes them there too; the access token is one of
+        // the pair the gateway requires (`gateway/config_env.py:523-525`).
+        // A config.yaml-only setup is still found by the nested-block check
+        // above. The five form-less rows have no arm.
         case "ntfy": return "NTFY_TOPIC"
         case "simplex": return "SIMPLEX_WS_URL"
+        case "whatsapp_cloud": return "WHATSAPP_CLOUD_ACCESS_TOKEN"
         default: return nil
         }
     }

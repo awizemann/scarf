@@ -2277,21 +2277,87 @@ public struct GatewayState: Sendable, Codable {
     }
 }
 
+/// One entry of `gateway_state.json`'s `platforms` map.
+///
+/// Hermes writes `state` (`connecting` / `connected` / `retrying` / `paused` /
+/// `fatal` / `disconnected` / `disabled`), `error_code` and `error_message`
+/// per platform (`gateway/status.py:1106-1111` @ v2026.9.24, and the same
+/// three keys since v2026.3.17, below Scarf's 0.6 floor). It clears both
+/// error keys when a platform connects (`gateway/platforms/base.py:2119`).
+/// Scarf used to decode `connected` / `error`, keys no Hermes release writes,
+/// so the Platforms dots could never turn green or red. Those two are still
+/// decoded as a fallback for any hand-made or third-party record.
 public struct PlatformState: Sendable, Codable {
+    public nonisolated let state: String?
+    public nonisolated let errorCode: String?
+    public nonisolated let errorMessage: String?
+    /// Legacy keys (never written by Hermes; see the type doc).
     public nonisolated let connected: Bool?
     public nonisolated let error: String?
 
-    public enum CodingKeys: String, CodingKey { case connected, error }
+    public enum CodingKeys: String, CodingKey {
+        case state
+        case errorCode = "error_code"
+        case errorMessage = "error_message"
+        case connected, error
+    }
+
+    public nonisolated init(
+        state: String? = nil,
+        errorCode: String? = nil,
+        errorMessage: String? = nil,
+        connected: Bool? = nil,
+        error: String? = nil
+    ) {
+        self.state = state
+        self.errorCode = errorCode
+        self.errorMessage = errorMessage
+        self.connected = connected
+        self.error = error
+    }
 
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.connected = try c.decodeIfPresent(Bool.self, forKey: .connected)
-        self.error     = try c.decodeIfPresent(String.self, forKey: .error)
+        // `try?` per key: one odd value (a number where a string was
+        // expected) must not throw away the whole gateway record.
+        self.state        = try? c.decodeIfPresent(String.self, forKey: .state)
+        self.errorCode    = try? c.decodeIfPresent(String.self, forKey: .errorCode)
+        self.errorMessage = try? c.decodeIfPresent(String.self, forKey: .errorMessage)
+        self.connected    = try? c.decodeIfPresent(Bool.self, forKey: .connected)
+        self.error        = try? c.decodeIfPresent(String.self, forKey: .error)
     }
 
     public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(state, forKey: .state)
+        try c.encodeIfPresent(errorCode, forKey: .errorCode)
+        try c.encodeIfPresent(errorMessage, forKey: .errorMessage)
         try c.encodeIfPresent(connected, forKey: .connected)
         try c.encodeIfPresent(error, forKey: .error)
+    }
+
+    /// The gateway reports this platform online.
+    public nonisolated var isConnected: Bool {
+        if let state { return state == "connected" }
+        return connected == true
+    }
+
+    /// The error to show for this platform, or `nil` when there is none.
+    ///
+    /// A `fatal` platform always counts, falling back to its `error_code`
+    /// (or the state itself) when Hermes left no message. Any other
+    /// not-connected state counts only when it carries a message — a
+    /// `retrying` adapter says why it is retrying. A connected platform
+    /// never shows an error.
+    public nonisolated var errorText: String? {
+        if isConnected { return nil }
+        let message = (errorMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !message.isEmpty { return message }
+        if state == "fatal" {
+            let code = (errorCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return code.isEmpty ? "fatal" : code
+        }
+        let legacy = (error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return legacy.isEmpty ? nil : legacy
     }
 }

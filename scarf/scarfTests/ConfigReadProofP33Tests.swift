@@ -13,7 +13,8 @@ import ScarfCore
 /// wide open on the other file: a blipped config.yaml read rendered a blank
 /// form over live values, and a Save from there writes those blanks back.
 ///
-/// `whatsapp_cloud` is the worst case because it is CONFIG-ONLY: the access
+/// `whatsapp_cloud` was the worst case because it was CONFIG-ONLY (until R07
+/// moved new credentials to `.env`): the access
 /// token, app secret and verify token all live in config.yaml, so one failed
 /// read plus one Save issues `config set platforms.whatsapp_cloud.extra
 /// .access_token ""` and `enabled false`. Signal and Email are the same shape
@@ -166,10 +167,14 @@ struct ConfigReadProofP33Tests {
         vm.accessToken = "fresh-token"
         vm.save()
         await Self.until(timeout: 10) { vm.message != nil }
-        #expect(log.count(of: "config") == 10)
-        #expect(log.calls.contains {
-            $0 == ["config", "set", "--", "platforms.whatsapp_cloud.extra.access_token", "fresh-token"]
-        })
+        // R07 (S07-F3): a fresh setup keeps its credentials in `.env`, where
+        // Hermes's own wizard puts them, so the only config write is the
+        // enable flag — and the token never crosses argv. (This pinned ten
+        // `config set` calls, credentials included, before.)
+        #expect(log.calls == [["config", "set", "--", "platforms.whatsapp_cloud.enabled", "true"]])
+        let env = (try? String(contentsOfFile: ctx.paths.envFile, encoding: .utf8)) ?? ""
+        #expect(env.contains("WHATSAPP_CLOUD_ACCESS_TOKEN=fresh-token"))
+        #expect(env.contains("WHATSAPP_CLOUD_PHONE_NUMBER_ID=1234567890"))
     }
 
     // MARK: - 3. `saveDirectYAML` on the write chain
