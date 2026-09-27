@@ -1458,16 +1458,10 @@ struct HermesFileService: Sendable {
         return ok
     }
 
-    /// Restart the gateway, judged by what the backend PRINTED (P40). Same
-    /// walk as ``stopHermes()``: `cmd_gateway` discards `gateway_command`'s
-    /// return (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `_cmd_restart`
-    /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
-    @discardableResult
-    /// ``HermesGatewayRestartGuard/check(run:stateJSON:capabilities:stopThenStart:timeout:)``
-    /// against this server: `nil` when a restart may go ahead. Spawns — call
-    /// it off the main actor.
-    nonisolated func restartRefusal(stopThenStart: Bool) -> HermesCLIOutcome? {
-        HermesGatewayRestartGuard.check(
+    /// ``HermesGatewayRestartGuard/decide(run:stateJSON:capabilities:stopThenStart:timeout:)``
+    /// against this server. Spawns — call it off the main actor.
+    nonisolated func restartDecision(stopThenStart: Bool) -> HermesGatewayRestartGuard.Decision {
+        HermesGatewayRestartGuard.decide(
             run: { args, timeout in
                 let result = runHermesCLI(args: args, timeout: timeout)
                 return (result.output, result.exitCode)
@@ -1478,14 +1472,35 @@ struct HermesFileService: Sendable {
         )
     }
 
+    /// The refusal half of ``restartDecision(stopThenStart:)``: `nil` when a
+    /// restart may go ahead. Spawns — call it off the main actor.
+    nonisolated func restartRefusal(stopThenStart: Bool) -> HermesCLIOutcome? {
+        if case .refuse(let outcome) = restartDecision(stopThenStart: stopThenStart) { return outcome }
+        return nil
+    }
+
+    /// Restart the gateway, judged by what the backend PRINTED (P40). Same
+    /// walk as ``stopHermes()``: `cmd_gateway` discards `gateway_command`'s
+    /// return (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `_cmd_restart`
+    /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
+    ///
+    /// Waits as long as the Gateway view does (60 s). The v0.21.4+ hand-back
+    /// to an external supervisor can still take longer (in-flight runs drain
+    /// first); a timeout there is reported as still restarting, not failed.
+    @discardableResult
     nonisolated func restartGateway() -> HermesCLIOutcome {
         // Never into a gateway with no service behind it: Hermes would stop
         // it and run the replacement inside this spawn, which the timeout
         // below then kills (see ``HermesGatewayRestartGuard``).
-        if let refusal = restartRefusal(stopThenStart: false) { return refusal }
-        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 30)
+        let supervised: Bool
+        switch restartDecision(stopThenStart: false) {
+        case .refuse(let refusal): return refusal
+        case .restart(let externallySupervised): supervised = externallySupervised
+        }
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 60)
         return HermesGatewayServiceVerdict.judge(
-            verb: .restart, output: result.output, exitCode: result.exitCode
+            verb: .restart, output: result.output, exitCode: result.exitCode,
+            externallySupervised: supervised
         )
     }
 

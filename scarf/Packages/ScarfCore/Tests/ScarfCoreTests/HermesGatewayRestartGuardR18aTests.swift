@@ -86,9 +86,9 @@ import Foundation
     }
 
     @Test func serviceManagedHostsRestartAsBefore() {
-        // The parked line is `print_parked_status`'s
-        // (`gateway_profile_lifecycle.py:85` @ v2026.9.24).
-        for output in [Self.launchd, Self.satellite, "", "Profile 'work': parked (hermes -p work gateway start)"] {
+        // (A parked profile used to be in this list; R19 refuses it — see
+        // `aParkedProfileIsNotRestarted`.)
+        for output in [Self.launchd, Self.satellite, ""] {
             #expect(HermesGatewayRestartGuard.refusal(
                 statusOutput: output, statusExitCode: 0, stateJSON: nil, capabilities: .empty) == nil)
         }
