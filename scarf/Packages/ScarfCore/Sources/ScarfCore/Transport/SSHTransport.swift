@@ -676,8 +676,19 @@ public struct SSHTransport: ServerTransport {
         // the remote `rich` would otherwise take its 80-column non-TTY
         // default and wrap the lines Scarf's verdicts match on. Same value
         // and same reason as ``LocalTransport/wideColumns``.
+        //
+        // A "Hermes binary" override that is a shell fragment
+        // (`docker compose exec hermes hermes`) goes in as the words the
+        // user typed. Quoting it as one name made the shell look for a
+        // command literally called `docker compose exec hermes hermes`
+        // (S15-F3). It can appear as the executable or as an argument
+        // (`env PYTHONUNBUFFERED=1 <hermes> …` in the OAuth flows).
+        let hint = config.hermesBinaryHint
+        let fragment = HermesPathSet.binaryHintIsShellFragment(hint) ? hint : nil
         var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
-            + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+            + ([executable] + args).map { token in
+                token == fragment ? token : Self.remotePathArg(token)
+            }.joined(separator: " ")
         // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes
         // reads project context files from the process cwd, not the ACP
         // session cwd). `;` (not `&&`) is deliberate: a stale/missing dir
@@ -690,9 +701,38 @@ public struct SSHTransport: ServerTransport {
         return cmd
     }
 
+    /// Where a remote command runs, which decides how `hermes` is found.
+    enum RemoteShell {
+        /// Plain `sh -c`: no profile or rc file is read, so PATH is the
+        /// bare system one.
+        case nonLogin
+        /// `bash -lc`: the user's login profile has already set PATH.
+        case login
+    }
+
+    /// ``composedRemoteCommand(executable:args:cwd:)`` with the PATH line
+    /// every remote hermes call needs in front.
+    ///
+    /// A non-login `sh -c` never sees `~/.local/bin`, where Hermes' own
+    /// installer puts the command for a normal user, so a server saved
+    /// without Test Connection (no binary hint) failed every one-shot CLI
+    /// call with exit 127 while chat, in a login shell, worked (S15-F1).
+    /// It gets ``HermesConfigReader/pathPrelude`` — the same line iOS and
+    /// the Mac's config probes already use, so all of them find the same
+    /// `hermes`. A login shell gets ``HermesConfigReader/pathFallback``
+    /// instead: the user's PATH stays first, and the install directories
+    /// only matter when nothing on it is `hermes` (a remote Mac whose
+    /// Homebrew PATH lives in `.zprofile`, which bash doesn't read).
+    func remoteShellCommand(
+        executable: String, args: [String], cwd: String? = nil, shell: RemoteShell
+    ) -> String {
+        let path = shell == .nonLogin ? HermesConfigReader.pathPrelude : HermesConfigReader.pathFallback
+        return path + "; " + composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+    }
+
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
         // Wrap in `sh -c '<exe> <arg> <arg>'`.
-        let cmd = composedRemoteCommand(executable: executable, args: args)
+        let cmd = remoteShellCommand(executable: executable, args: args, shell: .nonLogin)
         var sshArgv = sshArgs()
         sshArgv.append(hostSpec)
         sshArgv.append("sh")
@@ -715,7 +755,7 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        let cmd = composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+        let cmd = remoteShellCommand(executable: executable, args: args, cwd: cwd, shell: .login)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)
@@ -754,7 +794,7 @@ public struct SSHTransport: ServerTransport {
                 // `makeProcess` above. Streaming consumers (log tails)
                 // don't tolerate a missing-binary failure any better than
                 // ACP does.
-                let cmd = composedRemoteCommand(executable: executable, args: args)
+                let cmd = remoteShellCommand(executable: executable, args: args, shell: .login)
                 var sshArgv = sshArgs()
                 sshArgv.insert("-T", at: 0)
                 sshArgv.append(hostSpec)

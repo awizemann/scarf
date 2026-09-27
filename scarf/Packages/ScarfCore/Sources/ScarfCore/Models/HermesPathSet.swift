@@ -151,6 +151,19 @@ public struct HermesPathSet: Sendable, Hashable {
     ///
     /// Remote: returns `binaryHint` (populated at connect time) or bare
     /// `"hermes"` as a last-resort default that relies on the remote `$PATH`.
+    /// True when a "Hermes binary" override is a shell fragment rather than
+    /// one path — `docker compose exec hermes hermes`, `env FOO=1 hermes`.
+    /// The Add Server sheet promises anything `/bin/sh -c "<value> …"` can
+    /// run, so remote transports emit such a value as shell words, exactly
+    /// as the user typed it, instead of quoting it as one command name
+    /// (S15-F3). A single path with a space in it has to be quoted by the
+    /// user in that case, the same as in a terminal.
+    public nonisolated static func binaryHintIsShellFragment(_ hint: String?) -> Bool {
+        guard let hint else { return false }
+        return hint.trimmingCharacters(in: .whitespaces)
+            .contains(where: { $0 == " " || $0 == "\t" })
+    }
+
     public nonisolated var hermesBinary: String {
         if isRemote {
             return binaryHint ?? "hermes"

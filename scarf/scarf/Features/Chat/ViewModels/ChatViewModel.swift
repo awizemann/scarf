@@ -3132,6 +3132,11 @@ final class ChatViewModel {
             let home = context.paths.home
             let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
                 .trimmingCharacters(in: .whitespaces)
+            // ssh runs this in a NON-login shell, which never reads the rc
+            // file that puts `~/.local/bin` on PATH, so a server with no
+            // binary hint got "hermes: not found" here (S15-F1). Same PATH
+            // line as `SSHTransport.runProcess`.
+            sshArgs.append(HermesConfigReader.pathPrelude)
             if !assignment.isEmpty { sshArgs.append(assignment) }
             sshArgs.append(context.paths.hermesBinary)
             sshArgs.append(contentsOf: HermesProfileScope.pinnedRemoteArguments(

@@ -473,6 +473,10 @@ extension ServerContext {
     /// because the pre-flight gate was a literal `test -e hermes`.
     public nonisolated func hermesBinaryProbablyResolvable() -> Bool {
         let bin = paths.hermesBinary
+        // A wrapper override (`docker compose exec hermes hermes`) is a
+        // command line, not a file: testing it as a path always failed and
+        // showed "Hermes Not Found" for a setup that works (S15-F3).
+        if HermesPathSet.binaryHintIsShellFragment(bin) { return true }
         if bin.contains("/") {
             return fileExists(bin)
         }

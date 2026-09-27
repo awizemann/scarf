@@ -26,8 +26,23 @@ public enum HermesConfigReader {
     /// .saveValue`, the iOS chat preflight's `config set`) so remote
     /// non-interactive shells find `hermes` even when it lives in
     /// `~/.local/bin` or `/opt/homebrew/bin`.
-    public static let pathPrelude =
-        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\""
+    public static let pathPrelude = "PATH=\"\(hermesInstallDirs):$PATH\""
+
+    /// The same directories as ``pathPrelude``, added AFTER the existing
+    /// PATH instead of before it. Used for login shells (`bash -lc`), whose
+    /// PATH the user's profile already set up: this only helps when that
+    /// PATH has no `hermes` at all (a remote Mac whose Homebrew lives in
+    /// `.zprofile`, which bash never reads), and never changes a lookup
+    /// that already worked.
+    public static let pathFallback = "PATH=\"$PATH:\(hermesInstallDirs)\""
+
+    /// Where Hermes' installer and Homebrew put the `hermes` command, as a
+    /// shell PATH fragment. The non-root install links it into
+    /// `~/.local/bin` (`scripts/install.sh:487-494` @ v2026.9.24) and adds
+    /// that to PATH only from the rc files, which a non-login `sh -c` never
+    /// reads (`install.sh:2269-2313`).
+    public static let hermesInstallDirs =
+        "$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin"
 
     /// `-p default ` for a remote root home, else `""`. These probes run
     /// hermes inside `sh -c`, where the transport can't add the pin, so the
