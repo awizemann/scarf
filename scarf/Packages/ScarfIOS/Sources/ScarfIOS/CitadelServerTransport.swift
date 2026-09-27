@@ -852,7 +852,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         let cmd = "COLUMNS=\(LocalTransport.wideColumns) "
             + "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:$HOME/.hermes/bin\" "
             + hermesHome
-            + Self.commandLine(executable: executable, args: args, binaryHint: config.hermesBinaryHint)
+            + Self.commandLine(executable: executable, args: args, fragment: config.hermesBinaryHintFragment)
         // Citadel's `executeCommand` discards captured output when the
         // remote exits non-zero (it throws `CommandFailed` and the
         // accumulated ByteBuffer is lost). That breaks legitimate cases
@@ -885,10 +885,11 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// override which is a shell fragment (`docker compose exec hermes
     /// hermes`) goes in as the words the user typed rather than as one
     /// quoted command name. Same rule as the Mac's
-    /// `SSHTransport.composedRemoteCommand` (S15-F3).
-    nonisolated static func commandLine(executable: String, args: [String], binaryHint: String?) -> String {
-        let fragment = HermesPathSet.binaryHintIsShellFragment(binaryHint) ? binaryHint : nil
-        return ([executable] + args).map { token in
+    /// `SSHTransport.composedRemoteCommand` (S15-F3). `fragment` is
+    /// `SSHConfig.hermesBinaryHintFragment`: nil for a path Test Connection
+    /// found, which is quoted as one word even with a space in it.
+    nonisolated static func commandLine(executable: String, args: [String], fragment: String?) -> String {
+        ([executable] + args).map { token in
             token == fragment ? token : shellJoin([token])
         }.joined(separator: " ")
     }

@@ -147,6 +147,19 @@ public enum ModelPreflight: Sendable {
     /// check-hermes-tables lane 2.
     static let vendorStrippingProviders: Set<String> = ["github-copilot", "copilot-acp"]
 
+    /// Direct providers whose own API serves `vendor/model` ids, so a slash
+    /// in `model.default` is the model id, not a stale provider prefix.
+    /// NVIDIA NIM (build.nvidia.com) serves `nvidia/nemotron-…`,
+    /// `meta/llama-…` and third-party `z-ai/glm-…`; Hermes sends an id that
+    /// already has a slash unchanged — `nvidia` is in no prefix-stripping set
+    /// and falls to `_repair_prefix_from_catalogue`, which only touches BARE
+    /// ids (`hermes_cli/model_normalize.py:72-82,171-175,257-258` @ v2026.9.24). No
+    /// tag ever stripped for it (the file first appears at v2026.4.8; before
+    /// that every id went out as typed), so this needs no floor.
+    /// Kept apart from `aggregatorProviders`, which `check-hermes-tables.py`
+    /// lane 2 diffs against Hermes' aggregator tables.
+    static let vendorNamespacedProviders: Set<String> = ["nvidia"]
+
     /// `aggregatorProviders` entries for a provider Hermes removed at a
     /// version floor — added back only below that floor. See
     /// `HermesCapabilities.hasOpenCodeFreeProvider`.
@@ -237,6 +250,7 @@ public enum ModelPreflight: Sendable {
         // and refuses to second-guess `custom`/`custom:*` configs (#48305).
         guard canonicalActive != "custom",
               !canonicalActive.hasPrefix("custom:") else { return nil }
+        guard !vendorNamespacedProviders.contains(canonicalActive) else { return nil }
         guard let slash = modelDefault.firstIndex(of: "/") else { return nil }
         let prefix = String(modelDefault[..<slash])
         let bare = String(modelDefault[modelDefault.index(after: slash)...])

@@ -34,7 +34,16 @@ public enum HermesConfigReader {
     /// `hermes` at all (a non-login `sh -c` on a `~/.local/bin` install, or
     /// a remote Mac whose Homebrew lives in `.zprofile`), and never changes
     /// a lookup that already worked.
-    public static let pathFallback = "PATH=\"$PATH:\(hermesInstallDirs)\""
+    ///
+    /// The quote closes right after the variable — `"$PATH"":<dirs>"` —
+    /// because the Terminal launches hand this word to the user's LOGIN shell
+    /// unwrapped (`env PATH=… hermes …`), and the obvious spellings each
+    /// break one of them: csh/tcsh read `$PATH:` as the start of a variable
+    /// modifier (`:h`, `:t`, …) and died with "Bad : modifier in $" before
+    /// hermes ran, while fish rejects the braced `${PATH}` outright. Two
+    /// adjacent quoted strings are one word to sh, bash, zsh, dash, csh, tcsh
+    /// and fish alike.
+    public static let pathFallback = "PATH=\"$PATH\"\":\(hermesInstallDirs)\""
 
     /// Where Hermes' installer and Homebrew put the `hermes` command, as a
     /// shell PATH fragment. The non-root install links it into
@@ -67,7 +76,7 @@ public enum HermesConfigReader {
     /// PATH.
     static func readViaConfigPath(context: ServerContext) -> String? {
         guard context.isRemote else { return nil }
-        let hermes = context.paths.hermesBinary
+        let hermes = context.paths.hermesBinaryShellWord
         let pin = rootPin(context)
         let script = "\(pathPrelude); p=\"$(\(hermes) \(pin)config path 2>/dev/null)\" && [ -n \"$p\" ] && cat \"$p\""
         guard let result = try? context.makeTransport().runProcess(
@@ -87,7 +96,7 @@ public enum HermesConfigReader {
     /// only the model section.
     public static func probeModelConfig(context: ServerContext) -> HermesConfig? {
         guard context.isRemote else { return nil }
-        let hermes = context.paths.hermesBinary
+        let hermes = context.paths.hermesBinaryShellWord
         let script = "\(pathPrelude); \(hermes) \(rootPin(context))config show 2>/dev/null"
         guard let result = try? context.makeTransport().runProcess(
             executable: "/bin/sh",
@@ -129,7 +138,7 @@ public enum HermesConfigReader {
     /// probes it explains.
     public static func diagnoseProbeFailure(context: ServerContext) -> CLIProbeDiagnosis? {
         guard context.isRemote else { return nil }
-        let hermes = context.paths.hermesBinary
+        let hermes = context.paths.hermesBinaryShellWord
         let script = "\(pathPrelude); command -v \(hermes) >/dev/null 2>&1 || exit 127; \(hermes) \(rootPin(context))config show"
         do {
             let result = try context.makeTransport().runProcess(

@@ -59,7 +59,7 @@ import Foundation
         let cmd = Self.transport().remoteShellCommand(executable: "hermes", args: ["cron", "list"])
         #expect(cmd == HermesConfigReader.pathFallback + "; "
             + "COLUMNS=400 \"hermes\" \"-p\" \"default\" \"cron\" \"list\"")
-        #expect(cmd.hasPrefix("PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin\"; "))
+        #expect(cmd.hasPrefix("PATH=\"$PATH\"\":$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin\"; "))
         // The PATH line goes before the `cd`, so it covers the whole line.
         let withCwd = Self.transport().remoteShellCommand(executable: "hermes", args: ["acp"], cwd: "/srv/p")
         #expect(withCwd.hasPrefix(HermesConfigReader.pathFallback + "; cd \"/srv/p\"; "))

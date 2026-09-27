@@ -831,6 +831,7 @@ final class ChatViewModel {
     /// switch their active provider and the stale prefix is the bug.
     func stripPrefixFromModelDefault(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task.detached { [weak self] in
             // Same plan seam as `alignProviderToModelPrefix`, but this
             // action KEEPS the active provider — the plan sees
@@ -843,7 +844,8 @@ final class ChatViewModel {
             let ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: mismatch.bareModel,
                 provider: mismatch.activeProvider,
-                current: svc.loadConfig()
+                current: svc.loadConfig(),
+                capabilities: capabilities
             )
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
@@ -3436,27 +3438,11 @@ final class ChatViewModel {
             sshArgs.append(host)
             sshArgs.append("--")
             // Pin the window's profile the same way `SSHTransport` does
-            // (S13-F1): a named profile via a `HERMES_HOME=` assignment, a
-            // root home via `-p default`. This path builds its own ssh argv,
-            // so it doesn't get the transport's pin for free. ssh joins the
-            // words into one remote shell command, and the assignment is
-            // already shell-quoted.
-            let home = context.paths.home
-            let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
-                .trimmingCharacters(in: .whitespaces)
-            // ssh runs this in a NON-login shell, which never reads the rc
-            // file that puts `~/.local/bin` on PATH, so a server with no
-            // binary hint got "hermes: not found" here (S15-F1). Same PATH
-            // line as `SSHTransport`. The assignments go through `env`
-            // because this line is parsed by the user's own login shell,
-            // and csh/tcsh have no `VAR=value command` syntax.
-            sshArgs.append("env")
-            sshArgs.append(HermesConfigReader.pathFallback)
-            if !assignment.isEmpty { sshArgs.append(assignment) }
-            sshArgs.append(context.paths.hermesBinary)
-            sshArgs.append(contentsOf: HermesProfileScope.pinnedRemoteArguments(
-                executable: context.paths.hermesBinary, args: arguments, home: home,
-                configuredBinary: cfg.hermesBinaryHint))
+            // (S13-F1) and put the install dirs on PATH (S15-F1). This path
+            // builds its own ssh argv, so it gets neither from the transport;
+            // ssh hands the words to the user's own shell (csh/tcsh too)
+            // unwrapped — see `remoteLoginShellHermesWords`.
+            sshArgs += context.remoteLoginShellHermesWords(args: arguments) ?? []
             argv = sshArgs
         } else {
             exe = context.paths.hermesBinary

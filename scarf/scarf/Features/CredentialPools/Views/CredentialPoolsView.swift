@@ -1193,6 +1193,7 @@ private struct AddCredentialSheet: View {
                 Button("Switch to \(swap.newProvider)") {
                     let target = swap.newProvider
                     let ctx = viewModel.context
+                    let capabilities = capabilitiesStore?.capabilities ?? .empty
                     pendingProviderSwap = nil
                     Task.detached {
                         let svc = HermesFileService(context: ctx)
@@ -1213,7 +1214,8 @@ private struct AddCredentialSheet: View {
                         let ops = LocalModelConfigPlan.operations(
                             selectingRemoteModel: "",
                             provider: target,
-                            current: svc.loadConfig()
+                            current: svc.loadConfig(),
+                            capabilities: capabilities
                         )
                         _ = !ops.isEmpty && svc.applyModelConfigPlan(ops)
                         await MainActor.run {

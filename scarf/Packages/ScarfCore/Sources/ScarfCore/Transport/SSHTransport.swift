@@ -688,8 +688,9 @@ public struct SSHTransport: ServerTransport {
         // command literally called `docker compose exec hermes hermes`
         // (S15-F3). It can appear as the executable or as an argument
         // (`env PYTHONUNBUFFERED=1 <hermes> …` in the OAuth flows).
-        let hint = config.hermesBinaryHint
-        let fragment = HermesPathSet.binaryHintIsShellFragment(hint) ? hint : nil
+        // A path Test Connection found is never a fragment, even with a
+        // space in it: it is quoted as one word like any other token.
+        let fragment = config.hermesBinaryHintFragment
         var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
             + ([executable] + args).map { token in
                 token == fragment ? token : Self.remotePathArg(token)

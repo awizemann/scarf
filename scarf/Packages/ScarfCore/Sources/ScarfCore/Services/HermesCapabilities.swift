@@ -707,8 +707,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasFileMutationVerifier: Bool { atLeastSemver(0, 14, 0) }
 
     /// Hermes surfaces a YOLO mode warning in its banner + status bar
-    /// when `agent.approval_mode = yolo` (v0.14+). Scarf mirrors with
-    /// a chat-header warning badge when the user's config opts in.
+    /// when approvals are off — `approvals.mode: off`, which YAML may also
+    /// hand over as boolean `false` (`_normalize_approval_mode` /
+    /// `_get_approval_mode`, `tools/approval_context.py:200-236` @
+    /// v2026.9.24) (v0.14+). Scarf mirrors with a chat-header warning badge
+    /// (`SessionInfoBar.showsApprovalsOffWarning`).
     public var hasYOLOWarning: Bool { atLeastSemver(0, 14, 0) }
 
     /// Alibaba Cloud display name has been renamed to "Qwen Cloud" in

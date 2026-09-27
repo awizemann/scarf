@@ -12,27 +12,22 @@ import ScarfCore
 /// `HERMES_HOME=` pin for a named profile or `-p default` for the root.
 ///
 /// Every argv word is single-quoted for the LOCAL shell Terminal runs, so the
-/// remote words (`PATH="$PATH:…"`, the already remote-quoted `HERMES_HOME=`)
-/// reach ssh unexpanded and the remote shell parses them as the chat path's
-/// argv does.
+/// remote words (`PATH="$PATH"":…"`, the already remote-quoted `HERMES_HOME=`,
+/// the binary as `HermesPathSet.hermesBinaryShellWord`) reach ssh unexpanded
+/// and the remote login shell — which may be csh/tcsh — parses them as the
+/// chat path's argv does.
 enum GatewaySetupTerminalCommand {
 
     static func argv(for context: ServerContext) -> [String] {
         let home = context.paths.home
         let hermes = context.paths.hermesBinary
-        let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
-            .trimmingCharacters(in: .whitespaces)
-        if context.isRemote, case .ssh(let cfg) = context.kind {
+        if case .ssh(let cfg) = context.kind,
+           let remote = context.remoteLoginShellHermesWords(args: ["gateway", "setup"]) {
             let host = cfg.user.map { "\($0)@\(cfg.host)" } ?? cfg.host
             var args: [String] = ["/usr/bin/ssh", "-t"]
             if let port = cfg.port { args += ["-p", String(port)] }
             if let id = cfg.identityFile, !id.isEmpty { args += ["-i", id] }
-            args += ["-o", "StrictHostKeyChecking=accept-new", host, "--", "env", HermesConfigReader.pathFallback]
-            if !assignment.isEmpty { args.append(assignment) }
-            args.append(hermes)
-            args += HermesProfileScope.pinnedRemoteArguments(
-                executable: hermes, args: ["gateway", "setup"], home: home,
-                configuredBinary: cfg.hermesBinaryHint)
+            args += ["-o", "StrictHostKeyChecking=accept-new", host, "--"] + remote
             return args
         }
         // Local: the same pin, but the assignment is for THIS shell, so it

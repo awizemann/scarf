@@ -30,6 +30,67 @@ public enum HermesGatewayStateProjection {
         (root["served_profiles"] as? [Any])?.compactMap { $0 as? String } ?? []
     }
 
+    /// Whether the root multiplexer serves `profile`: the record's
+    /// `served_profiles` when it has the key, else `configDerived()`.
+    ///
+    /// Hermes does the same (`multiplexer_liveness_for_profile`,
+    /// `gateway/status.py:1283-1287` → `named_profile_served_by_running_multiplexer`,
+    /// `hermes_cli/gateway.py:3672-3687` @ v2026.9.24): only a record WITHOUT
+    /// the key falls through to config. An empty list is an authoritative
+    /// "serves nobody else". The multiplexer writes the key once its
+    /// secondary profiles are up (`gateway/run_adapters.py:940-950`), so a
+    /// record without it is one written just before that, or by an older
+    /// writer. `configDerived` is evaluated only in that case — it costs a
+    /// config read and a process probe.
+    public static func serves(
+        profile: String, root: [String: Any], configDerived: () -> Bool
+    ) -> Bool {
+        guard profile != "default" else { return false }
+        if root["served_profiles"] is [Any] { return servedProfiles(in: root).contains(profile) }
+        return configDerived()
+    }
+
+    /// Hermes' config-derived answer for a root record with no
+    /// `served_profiles`: the DEFAULT profile's `config.yaml` explicitly opts
+    /// in to multiplexing (`explicit_multiplex_flag`,
+    /// `hermes_cli/gateway_multiplex_mode.py:53-76` @ v2026.9.24) and the
+    /// default profile's gateway is alive. An unset key never counts ("the
+    /// gateway settled it at boot; a CLI process must not guess it on").
+    ///
+    /// `false` below ``HermesCapabilities/hasMultiplexByDefault`` (v0.21.4,
+    /// where `explicit_multiplex_flag` landed), so an older host reads exactly
+    /// as before. v0.21.2 and v0.21.3 had an earlier config fallback of their
+    /// own (a truthy flag, the env override, the allowlist, the root
+    /// `gateway.pid`); those hosts knowingly keep the old "not served" answer
+    /// rather than a second approximation. `GATEWAY_MULTIPLEX_PROFILES` in
+    /// the asking process's environment also counts for Hermes; Scarf can't
+    /// see the gateway's environment and doesn't model it.
+    ///
+    /// Both inputs are closures and are evaluated in order, only as far as
+    /// needed: an older host reads no config and runs no probe.
+    public static func configDerivedServes(
+        capabilities: HermesCapabilities,
+        rootConfigYAML: () -> String?,
+        rootGatewayIsLive: () -> Bool
+    ) -> Bool {
+        guard capabilities.hasMultiplexByDefault,
+              let yaml = rootConfigYAML(),
+              explicitMultiplexFlag(configYAML: yaml) == true
+        else { return false }
+        return rootGatewayIsLive()
+    }
+
+    /// `explicit_multiplex_flag` over one config file: `nil` when neither
+    /// `multiplex_profiles` nor `gateway.multiplex_profiles` carries a value
+    /// (top-level wins when not null); an explicit boolish false is `false`;
+    /// any other value is `true` — Hermes' `_bool_token` falls back to True
+    /// for an unrecognised string, and `bool(value)` for any other type.
+    static func explicitMultiplexFlag(configYAML: String) -> Bool? {
+        let routes = ProfileRoutesYAML.parse(configYAML)
+        guard routes.multiplexIsSet else { return nil }
+        return !routes.multiplexIsExplicitFalse
+    }
+
     /// The `platforms` map a served `profile` gets from the root record —
     /// `profile_platforms_from_multiplexer`. Its own `<profile>:` entries win
     /// over a mirrored default listener entry of the same name.
@@ -62,11 +123,17 @@ public enum HermesGatewayStateProjection {
     ///   profile's own file is at least as recent, which means the profile has
     ///   since started a gateway of its own and the root's roster is stale.
     /// - Otherwise: `ownData` unchanged.
-    public static func effectiveRecord(ownData: Data?, rootData: Data?, profile: String?) -> Data? {
+    ///
+    /// `configDerived` is ``serves(profile:root:configDerived:)``'s fallback
+    /// for a root record with no `served_profiles` key.
+    public static func effectiveRecord(
+        ownData: Data?, rootData: Data?, profile: String?,
+        configDerived: () -> Bool = { false }
+    ) -> Data? {
         guard let profile, profile != "default",
               let rootData,
               let root = try? JSONSerialization.jsonObject(with: rootData) as? [String: Any],
-              servedProfiles(in: root).contains(profile)
+              serves(profile: profile, root: root, configDerived: configDerived)
         else { return ownData }
         if let ownData,
            let own = try? JSONSerialization.jsonObject(with: ownData) as? [String: Any],

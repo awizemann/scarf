@@ -207,7 +207,21 @@ struct HermesFileService: Sendable {
     nonisolated func gatewayStateData(own: Data?) -> Data? {
         guard let profile = HermesProfileScope.profileName(forHome: context.paths.home) else { return own }
         return HermesGatewayStateProjection.effectiveRecord(
-            ownData: own, rootData: readFileData(rootGatewayStateJSON), profile: profile)
+            ownData: own, rootData: readFileData(rootGatewayStateJSON), profile: profile,
+            configDerived: { configDerivedMultiplexServes() })
+    }
+
+    /// Hermes' fallback for a root record with no `served_profiles`: the
+    /// root config explicitly multiplexes and the root gateway is alive.
+    /// See ``HermesGatewayStateProjection/configDerivedServes(capabilities:rootConfigYAML:rootGatewayIsLive:)``.
+    nonisolated private func configDerivedMultiplexServes() -> Bool {
+        HermesGatewayStateProjection.configDerivedServes(
+            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+            rootConfigYAML: { readFile(HermesProfileScope.rootHome(forHome: context.paths.home) + "/config.yaml") },
+            rootGatewayIsLive: {
+                if case .success(let pid) = gatewayPIDResult(profile: nil), pid != nil { return true }
+                return false
+            })
     }
 
     // MARK: - Memory
@@ -3026,13 +3040,15 @@ struct HermesFileService: Sendable {
         return pid
     }
 
-    /// Does the ROOT home's `gateway_state.json` list `profile` in
-    /// `served_profiles`? See ``HermesGatewayStateProjection``.
+    /// Does the ROOT multiplexer serve `profile` — its `gateway_state.json`
+    /// lists it in `served_profiles`, or (a record without that key) the
+    /// config-derived fallback holds? See ``HermesGatewayStateProjection``.
     nonisolated private func isServedByMultiplexer(profile: String) -> Bool {
         guard let data = readFileData(rootGatewayStateJSON),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return false }
-        return HermesGatewayStateProjection.servedProfiles(in: root).contains(profile)
+        return HermesGatewayStateProjection.serves(
+            profile: profile, root: root, configDerived: { configDerivedMultiplexServes() })
     }
 
     /// Stop the gateway, judged by what `hermes gateway stop` PRINTED.
