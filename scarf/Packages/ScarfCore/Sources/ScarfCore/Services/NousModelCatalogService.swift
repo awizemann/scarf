@@ -259,7 +259,10 @@ public struct NousModelCatalogService: Sendable {
     /// the caller can log + fall back.
     public func fetchModels() async throws -> [NousModel] {
         try await ScarfMon.measureAsync(.transport, "nous.fetchModels") {
-            guard let token = bearerToken() else {
+            // `bearerToken()` reads auth.json over the transport and may
+            // probe the host version — a thread of its own, not the pool.
+            let service = self
+            guard let token = await OffPool.run({ service.bearerToken() }) else {
                 throw NousModelCatalogError.notAuthenticated
             }
             var request = URLRequest(url: Self.baseURL)

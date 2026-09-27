@@ -395,7 +395,13 @@ struct CredentialPoolsView: View {
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderless)
-                    .help(Text("Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
+                    // S06-F3: logout in this profile only clears the
+                    // profile's own state, so an inherited provider cannot
+                    // be removed from here.
+                    .disabled(provider.inheritedFromRoot)
+                    .help(provider.inheritedFromRoot
+                          ? Text("This provider is signed in on the default profile. Remove it there.")
+                          : Text("Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -438,7 +444,6 @@ struct CredentialPoolsView: View {
         }
     }
 
-    @ViewBuilder
     /// S06-F3: shown on a pool or OAuth provider that Hermes reads from the
     /// ROOT auth.json because this named profile has none of its own.
     private var inheritedBadge: some View {
@@ -452,6 +457,7 @@ struct CredentialPoolsView: View {
             .help(Text("This profile has no credentials of its own for this provider, so Hermes uses the ones in the default profile's auth.json. Adding one here makes this profile use its own instead."))
     }
 
+    @ViewBuilder
     private func poolSection(_ pool: HermesCredentialPool) -> some View {
         SettingsSection(title: LocalizedStringKey(pool.provider), icon: "key.horizontal") {
             if pool.inheritedFromRoot {
@@ -513,11 +519,24 @@ struct CredentialPoolsView: View {
                         }
                     }
                     Spacer()
-                    if supportsAuthPriority {
+                    // S06-F3: every action here writes the PROFILE's pool
+                    // from a root-fallback read, forking the root entries into
+                    // the profile (and Refresh Tokens could spend the root's
+                    // single-use refresh token). Hidden on inherited rows.
+                    if supportsAuthPriority && !pool.inheritedFromRoot {
                         credentialActionsMenu(pool: pool, cred: cred)
                     }
+                    // S06-F3: an inherited credential lives in the ROOT
+                    // auth.json. `hermes auth remove` run in this profile
+                    // never touches that file — it copies the remaining
+                    // root entries into the profile (or writes an empty list
+                    // Hermes then ignores), so the row would come back.
                     Button("Remove", role: .destructive) { pendingRemove = cred }
                         .controlSize(.small)
+                        .disabled(pool.inheritedFromRoot)
+                        .help(pool.inheritedFromRoot
+                              ? Text("This credential belongs to the default profile. Remove it there.")
+                              : Text("Remove this credential from the pool."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -527,7 +546,7 @@ struct CredentialPoolsView: View {
                 Spacer()
                 Button("Reset Cooldowns") { viewModel.resetProvider(pool.provider) }
                     .controlSize(.small)
-                    .disabled(viewModel.isMutating)
+                    .disabled(viewModel.isMutating || pool.inheritedFromRoot)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
