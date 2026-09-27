@@ -41,11 +41,16 @@ public enum ProjectModelPresetApplier {
         client: ACPClient,
         sessionId: String,
         projectPath: String,
-        context: ServerContext
+        context: ServerContext,
+        readBinding: @escaping @Sendable (ServerContext, String) -> String? = { ctx, path in
+            ProjectModelPresetReader(context: ctx).presetID(forProjectPath: path)
+        }
     ) async -> Outcome {
-        let idString = await Task.detached {
-            ProjectModelPresetReader(context: context).presetID(forProjectPath: projectPath)
-        }.value
+        // `OffPool.run`, not `Task.detached` (P60, same as
+        // `CuratorService.status`): on a remote host the manifest read is a
+        // blocking SFTP / SSH round trip, and `Task.detached` would park a
+        // cooperative-pool thread through it (charter C10).
+        let idString = await OffPool.run { readBinding(context, projectPath) }
         guard let idString, let presetID = UUID(uuidString: idString) else {
             return .noBinding
         }
