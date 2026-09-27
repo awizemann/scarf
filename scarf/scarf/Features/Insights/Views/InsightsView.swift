@@ -152,11 +152,11 @@ struct InsightsView: View {
                 InsightCard(
                     label: "Avg Msgs/Session",
                     // Messages are summed over every session row (see
-                    // `InsightsViewModel.usageSessions`), so divide by that
+                    // `InsightsViewModel.usageAggregates`), so divide by that
                     // same population, as `hermes insights` does.
-                    value: viewModel.usageSessions.isEmpty
+                    value: viewModel.usageSessionCount == 0
                         ? "0"
-                        : (Double(viewModel.totalMessages) / Double(viewModel.usageSessions.count))
+                        : (Double(viewModel.totalMessages) / Double(viewModel.usageSessionCount))
                             .formatted(.number.precision(.fractionLength(1)))
                 )
             }

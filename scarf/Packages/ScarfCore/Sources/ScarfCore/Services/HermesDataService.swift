@@ -568,32 +568,135 @@ public actor HermesDataService {
 
     // MARK: - Usage population (what `hermes insights` sums)
 
-    /// Every session row started at or after `since`, newest first, capped
-    /// at `limit` — the population Hermes's own analytics sum spend over.
+    /// One group of the usage population's sums: every session row in the
+    /// window sharing a model, a source and a cost state. Insights folds
+    /// these into its totals and its model / platform breakdowns.
+    public struct UsageAggregate: Sendable, Equatable {
+        public let model: String?
+        public let source: String
+        /// The group's `cost_status` (nil on a host without the column).
+        public let costStatus: String?
+        /// Whether the host's `sessions` table has `cost_status` — the same
+        /// probe `HermesSession.hasCostStatusColumn` records.
+        public let hasCostStatusColumn: Bool
+        /// Whether the group's rows carry a positive usable cost (the
+        /// first branch of `SessionCostDisplay`'s rule).
+        public let hasPositiveCost: Bool
+        public let sessions: Int
+        public let messages: Int
+        public let toolCalls: Int
+        public let inputTokens: Int
+        public let outputTokens: Int
+        public let cacheReadTokens: Int
+        public let cacheWriteTokens: Int
+        public let reasoningTokens: Int
+        /// Sum of `actual_cost_usd ?? estimated_cost_usd` per row — the same
+        /// preference order as `HermesSession.displayCostUSD`.
+        public let costUSD: Double
+
+        public init(
+            model: String?, source: String, costStatus: String?,
+            hasCostStatusColumn: Bool, hasPositiveCost: Bool, sessions: Int,
+            messages: Int, toolCalls: Int, inputTokens: Int, outputTokens: Int,
+            cacheReadTokens: Int, cacheWriteTokens: Int, reasoningTokens: Int,
+            costUSD: Double
+        ) {
+            self.model = model
+            self.source = source
+            self.costStatus = costStatus
+            self.hasCostStatusColumn = hasCostStatusColumn
+            self.hasPositiveCost = hasPositiveCost
+            self.sessions = sessions
+            self.messages = messages
+            self.toolCalls = toolCalls
+            self.inputTokens = inputTokens
+            self.outputTokens = outputTokens
+            self.cacheReadTokens = cacheReadTokens
+            self.cacheWriteTokens = cacheWriteTokens
+            self.reasoningTokens = reasoningTokens
+            self.costUSD = costUSD
+        }
+
+        public var totalTokens: Int {
+            inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + reasoningTokens
+        }
+
+        /// How many of this group's sessions Hermes never priced. The ONE
+        /// cost rule (`SessionCostDisplay`) decides; every row in a group
+        /// shares the inputs it reads, so the answer is all or none.
+        public var unknownCostSessions: Int {
+            let display = SessionCostDisplay(
+                actualCostUSD: hasPositiveCost ? 1 : nil,
+                estimatedCostUSD: nil,
+                costStatus: costStatus,
+                hasCostStatusColumn: hasCostStatusColumn
+            )
+            return display.isUnknown ? sessions : 0
+        }
+    }
+
+    /// The usage population's sums for every session row started at or
+    /// after `since`, aggregated IN SQL and uncapped.
     ///
-    /// `hermes insights` selects every row in the window with no listing
-    /// filter at all (`InsightsEngine._GET_SESSIONS_ALL`,
+    /// `hermes insights` sums every row in the window with no listing
+    /// filter and no row cap (`InsightsEngine._GET_SESSIONS_ALL`,
     /// agent/insights.py:92-96 @ v2026.9.24): delegate subagents (their own
     /// session rows, `tools/delegate_tool.py:246,277`), rotated compression
     /// continuations, hidden and archived rows all carry real tokens and
-    /// cost. Summing only `sessionListPredicate` rows under-reported spend
-    /// for anyone whose agent delegates. Counts of conversations stay on the
-    /// list population; this is for the usage sums.
+    /// cost. This used to fetch the rows themselves, capped at
+    /// `QueryDefaults.periodSessionLimit` (2000) to bound the wire payload,
+    /// so a busy host's "All Time" spend silently stopped at its newest
+    /// 2000 rows — sooner for anyone whose agent delegates. A GROUP BY
+    /// returns a handful of rows however large the window is.
     ///
     /// Counters come from `usageSessionsSource`, so on a v0.20+ host they
     /// include the auxiliary usage Hermes records only per model.
-    public func fetchUsageSessionsInPeriod(
-        since: Date,
-        limit: Int = QueryDefaults.periodSessionLimit
-    ) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM \(usageSessionsSource) WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?"
+    public func fetchUsageAggregatesInPeriod(since: Date) async -> [UsageAggregate] {
+        let hasStatus = hasV07Schema
+        // `SessionCostDisplay.usableAmount`: finite and non-negative, and
+        // the actual figure wins over the estimate when it is usable.
+        // SQLite has no NaN; 9e999 is its infinity.
+        func usable(_ column: String) -> String {
+            "(\(column) IS NOT NULL AND \(column) >= 0 AND \(column) < 9e999)"
+        }
+        let positive = hasStatus
+            ? "CASE WHEN \(usable("actual_cost_usd")) THEN actual_cost_usd > 0 ELSE (\(usable("estimated_cost_usd")) AND estimated_cost_usd > 0) END"
+            : "(\(usable("estimated_cost_usd")) AND estimated_cost_usd > 0)"
+        let status = hasStatus ? "cost_status" : "NULL"
+        let cost = hasStatus ? "COALESCE(actual_cost_usd, estimated_cost_usd)" : "estimated_cost_usd"
+        let reasoning = hasStatus ? "COALESCE(SUM(reasoning_tokens),0)" : "0"
+        let sql = """
+            SELECT model, COALESCE(source, ''), \(status) AS cost_state, (\(positive)) AS has_positive,
+                   COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
+                   COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                   COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+                   \(reasoning), COALESCE(SUM(\(cost)),0)
+            FROM \(usageSessionsSource)
+            WHERE started_at >= ?
+            GROUP BY model, COALESCE(source, ''), cost_state, has_positive
+            """
         do {
-            let rows = try await backend.query(
-                sql,
-                params: [.real(since.timeIntervalSince1970), .integer(Int64(limit))]
-            )
-            return rows.map { sessionFromRow($0) }
+            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
+            return rows.map { row in
+                UsageAggregate(
+                    model: row.optionalString(at: 0),
+                    source: row.string(at: 1),
+                    costStatus: row.optionalString(at: 2),
+                    hasCostStatusColumn: hasStatus,
+                    hasPositiveCost: row.int(at: 3) != 0,
+                    sessions: row.int(at: 4),
+                    messages: row.int(at: 5),
+                    toolCalls: row.int(at: 6),
+                    inputTokens: row.int(at: 7),
+                    outputTokens: row.int(at: 8),
+                    cacheReadTokens: row.int(at: 9),
+                    cacheWriteTokens: row.int(at: 10),
+                    reasoningTokens: row.int(at: 11),
+                    costUSD: row.double(at: 12)
+                )
+            }
         } catch {
+            Self.logger.warning("fetchUsageAggregatesInPeriod failed: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }
@@ -2043,7 +2146,7 @@ public actor HermesDataService {
     ///   list of 96 is a different question, not a rounding difference.
     ///   The SUMS (messages, tool calls, tokens, cost) are over every
     ///   session row in the window, as `hermes insights` sums them
-    ///   (`fetchUsageSessionsInPeriod`): spend recorded on a delegate
+    ///   (`fetchUsageAggregatesInPeriod`): spend recorded on a delegate
     ///   subagent or a compression continuation is still spend, and
     ///   dropping it under-reported cost for anyone whose agent delegates.
     ///   Parameters: the `since` bound binds twice when present (count
@@ -2364,7 +2467,7 @@ public actor HermesDataService {
     /// it runs over `sessionListPredicate` — the identical predicate
     /// `fetchSessionsInPeriod` uses. The user-message count and the tool
     /// histogram measure USAGE, so they run over every session row in the
-    /// window, like `fetchUsageSessionsInPeriod` and like `hermes
+    /// window, like `fetchUsageAggregatesInPeriod` and like `hermes
     /// insights`: a delegate subagent's tool calls happened. (Pre-2026-09
     /// all three used a hand-rolled `parent_session_id IS NULL`, which
     /// matched neither population.)
@@ -2383,7 +2486,7 @@ public actor HermesDataService {
             // `hermes insights` counts messages and tool calls
             // (agent/insights.py:108-137 @ v2026.9.24 — a plain
             // `JOIN sessions s … WHERE s.started_at >= ?`). See
-            // `fetchUsageSessionsInPeriod`.
+            // `fetchUsageAggregatesInPeriod`.
             (
                 """
                 SELECT COUNT(*) FROM messages m
