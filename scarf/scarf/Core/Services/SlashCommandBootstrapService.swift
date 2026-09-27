@@ -87,6 +87,45 @@ struct SlashCommandBootstrapService: Sendable {
         }
     }
 
+    // MARK: - Remote hosts
+
+    /// Homes already bootstrapped (or being bootstrapped) this app session,
+    /// keyed by server id + Hermes home, so each remote host is visited once
+    /// however many windows open on it.
+    private nonisolated static let remoteHomesDone = OSAllocatedUnfairLock(initialState: Set<String>())
+
+    /// Install the bundled commands on a REMOTE host's Hermes home, once per
+    /// app session. The launch-time bootstrap only ever wrote the local
+    /// home, so a remote window's `/scarf-*` menu read an empty directory
+    /// (S03-F5). Called when a remote window connects; runs off the main
+    /// actor (it is several SSH round-trips, each with the transport's own
+    /// timeout) and is safe to repeat — the per-file version gate above
+    /// leaves current and user-edited copies alone. A failed run is
+    /// forgotten so the next window on that host tries again.
+    ///
+    /// ScarfGo reads the same remote directory, so an iPhone connected to a
+    /// host that a Mac window has opened sees the commands too.
+    nonisolated static func bootstrapRemoteIfNeeded(context: ServerContext) async {
+        guard context.isRemote else { return }
+        let key = "\(context.id)|\(context.paths.home)"
+        let isNew = remoteHomesDone.withLock { $0.insert(key).inserted }
+        guard isNew else { return }
+        let succeeded = await Task.detached(priority: .utility) { () -> Bool in
+            do {
+                try SlashCommandBootstrapService(context: context).ensureBundledCommandsInstalled()
+                return true
+            } catch {
+                logger.warning(
+                    "remote slash command bootstrap failed: \(error.localizedDescription, privacy: .public)"
+                )
+                return false
+            }
+        }.value
+        if !succeeded {
+            _ = remoteHomesDone.withLock { $0.remove(key) }
+        }
+    }
+
     // MARK: - Per-command install
 
     /// `internal` (not `private`) for the same reason
