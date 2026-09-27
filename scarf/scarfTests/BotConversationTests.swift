@@ -30,12 +30,45 @@ struct BotConversationTests {
         #expect(ACPClient.acpArguments(profile: nil) == ["acp"])
     }
 
-    /// `-p default` is a no-op Hermes special-cases, and emitting it would
-    /// make every ordinary chat's argv differ for no reason.
-    @Test("the default profile emits no flag")
-    func defaultProfileEmitsNoFlag() {
-        #expect(ACPClient.acpArguments(profile: "default") == ["acp"])
-        #expect(ACPClient.acpArguments(profile: "  default  ") == ["acp"])
+    /// S13-F2 / S01-F1. This test used to pin the opposite (`default` →
+    /// bare `acp`, on the belief that `-p default` is a no-op). It is not:
+    /// with no `-p`, Hermes follows the sticky `active_profile`
+    /// (`hermes_cli/main.py:607-619` @ v2026.9.24), so the default bot's ACP
+    /// process ran in whatever profile was active while its Bot Chat lives
+    /// in the root home. Ordinary chats pass `nil` and stay bare (above).
+    @Test("the default bot is pinned with -p default")
+    func defaultProfileIsPinned() {
+        #expect(ACPClient.acpArguments(profile: "default") == ["-p", "default", "acp"])
+        #expect(ACPClient.acpArguments(profile: "  default  ") == ["-p", "default", "acp"])
+    }
+
+    // MARK: - Canonical Bot Chat creation argv
+
+    @Test("the default bot can create its Bot Chat, pinned to the root with -p default")
+    func defaultBotChatCreationIsPinned() {
+        let argv = BotConversationViewModel.canonicalBotChatArguments(profile: "default", queryFile: "/tmp/q")
+        #expect(argv == ["-p", "default", "chat", "--in", "~", "-c", BotChatSession.canonicalTitle,
+                         "--create-if-missing", "-Q", "--query-file", "/tmp/q"])
+    }
+
+    @Test("a named bot's Bot Chat creation keeps -p <bot> first")
+    func namedBotChatCreationIsPinned() {
+        let argv = BotConversationViewModel.canonicalBotChatArguments(profile: "scout", queryFile: "/tmp/q")
+        #expect(argv?.prefix(3) == ["-p", "scout", "chat"])
+    }
+
+    @Test(arguments: ["../escape", "Has Spaces", "UPPER", "", "-rf", "work\n"])
+    func malformedBotNamesBuildNoCreationArgv(name: String) {
+        #expect(BotConversationViewModel.canonicalBotChatArguments(profile: name, queryFile: "/tmp/q") == nil)
+    }
+
+    /// The failure path: an invalid name is refused before anything is
+    /// staged or spawned, so this needs no Hermes and touches no host.
+    @Test("an invalid bot name fails creation with the invalid-name message")
+    func invalidBotNameFailsCreationWithoutSpawning() async {
+        let failure = await BotConversationViewModel.createCanonicalBotChat(
+            context: .local, profile: "../escape", text: "hi")
+        #expect(failure == "“../escape” isn’t a valid Hermes profile name.")
     }
 
     /// Hermes rejects a malformed `-p` value and silently falls back to
@@ -79,6 +112,27 @@ struct BotConversationTests {
         // two must name the SAME profile or the agent and its state.db
         // would diverge.
         #expect(command.contains("profiles/scout"))
+    }
+
+    /// The default bot over SSH: its own `-p default` rides the transport,
+    /// and the transport's root-home pin does not add a second one.
+    @Test("the default bot's SSH command carries exactly one -p default")
+    func sshDefaultBotCarriesOnePin() {
+        let ctx = ServerContext(
+            id: UUID(),
+            displayName: "box",
+            kind: .ssh(SSHConfig(host: "box", remoteHome: "~/.hermes/profiles/work"))
+        )
+        let pinned = ctx.pinnedToProfile("default")
+        let proc = pinned.makeTransport().makeProcess(
+            executable: pinned.paths.hermesBinary,
+            args: ACPClient.acpArguments(profile: "default"),
+            cwd: nil
+        )
+        let command = proc.arguments?.last ?? ""
+        #expect(command.contains(#""hermes" "-p" "default" "acp""#), "\(command)")
+        #expect(command.components(separatedBy: #""-p""#).count == 2, "exactly one -p: \(command)")
+        #expect(!command.contains("HERMES_HOME="), "root home is pinned by -p, not HERMES_HOME")
     }
 
     // MARK: - Lifecycle

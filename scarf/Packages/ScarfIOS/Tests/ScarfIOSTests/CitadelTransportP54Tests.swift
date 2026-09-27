@@ -85,4 +85,17 @@ struct CitadelTransportColumnsP54Tests {
         #expect(body.contains("PATH=\\\"$HOME/.local/bin"), "the twin still exists and still guards PATH")
         #expect(!body.contains("COLUMNS"), "if this gained COLUMNS, update the rationale rather than the test")
     }
+    /// S13-F1: the iOS exec path pins a root home with `-p default` using
+    /// the same shared rule as `SSHTransport.composedRemoteCommand`
+    /// (`HermesProfileScope.pinnedRemoteArguments`, behaviour-tested in
+    /// ScarfCore's `HermesProfileScopeTests`), and it joins the PINNED args,
+    /// not the caller's originals.
+    @Test func asyncRunProcessPinsARootHomeWithTheSharedRule() throws {
+        let code = Self.codeOnly(try Self.source("Sources/ScarfIOS/CitadelServerTransport.swift"))
+        let body = try Self.asyncRunProcessBody(code)
+        let pin = try #require(body.range(of: "let args = HermesProfileScope.pinnedRemoteArguments("))
+        let join = try #require(body.range(of: "Self.shellJoin([executable] + args)"))
+        #expect(pin.lowerBound < join.lowerBound)
+        #expect(body.contains("configuredBinary: config.hermesBinaryHint"))
+    }
 }

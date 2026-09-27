@@ -3123,8 +3123,20 @@ final class ChatViewModel {
             sshArgs += ["-o", "BatchMode=yes"]
             sshArgs.append(host)
             sshArgs.append("--")
+            // Pin the window's profile the same way `SSHTransport` does
+            // (S13-F1): a named profile via a `HERMES_HOME=` assignment, a
+            // root home via `-p default`. This path builds its own ssh argv,
+            // so it doesn't get the transport's pin for free. ssh joins the
+            // words into one remote shell command, and the assignment is
+            // already shell-quoted.
+            let home = context.paths.home
+            let assignment = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+                .trimmingCharacters(in: .whitespaces)
+            if !assignment.isEmpty { sshArgs.append(assignment) }
             sshArgs.append(context.paths.hermesBinary)
-            sshArgs.append(contentsOf: arguments)
+            sshArgs.append(contentsOf: HermesProfileScope.pinnedRemoteArguments(
+                executable: context.paths.hermesBinary, args: arguments, home: home,
+                configuredBinary: cfg.hermesBinaryHint))
             argv = sshArgs
         } else {
             exe = context.paths.hermesBinary

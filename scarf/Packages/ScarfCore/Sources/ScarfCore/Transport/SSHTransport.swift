@@ -649,15 +649,25 @@ public struct SSHTransport: ServerTransport {
     /// profile when `config.remoteHome` points at one (#126, the Mac
     /// counterpart of `CitadelServerTransport`'s #120 injection). Set
     /// unconditionally (not just when the executable is hermes) because it
-    /// is `""` for a default/root home — legacy `active_profile` resolution
-    /// and pre-profile hosts are untouched — and harmless for non-hermes
+    /// is `""` for a default/root home and harmless for non-hermes
     /// executables, which ignore it. Without it, every CLI-backed action
     /// (chat, cron run, config set, …) would resolve the server's
     /// `active_profile` while the window's file reads show the viewing
     /// profile — a silent cross-profile split.
+    ///
+    /// A root home needs the same pin, but `HERMES_HOME=<root>` doesn't
+    /// give it (Hermes ignores a root value and still follows
+    /// `active_profile`), so for a root home a hermes argv gets `-p default`
+    /// in front instead (S13-F1; see
+    /// `HermesProfileScope.pinnedRemoteArguments`). That is the only change
+    /// this layer makes to the argv; non-hermes executables and argv that
+    /// already carry `-p` pass through untouched.
     func composedRemoteCommand(executable: String, args: [String], cwd: String? = nil) -> String {
-        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
-            forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
+        let home = config.remoteHome ?? HermesPathSet.defaultRemoteHome
+        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
+        let args = HermesProfileScope.pinnedRemoteArguments(
+            executable: executable, args: args, home: home,
+            configuredBinary: config.hermesBinaryHint)
         // `~/`-rewritten paths so home-relative args expand on the remote.
         // The executable might be `~/.local/bin/hermes` or just `hermes`;
         // either survives.

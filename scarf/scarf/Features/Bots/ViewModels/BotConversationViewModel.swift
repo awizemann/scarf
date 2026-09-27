@@ -448,6 +448,29 @@ final class BotConversationViewModel {
         }
     }
 
+    /// The argv that creates (or continues) `profile`'s canonical Bot Chat,
+    /// or `nil` when `profile` isn't a valid Hermes profile id. Pure, so the
+    /// composition is testable without spawning anything.
+    ///
+    /// `isValidName`, not `normalize`: `normalize` maps `default` to nil (it
+    /// means "the root home"), which left the default profile's bot unable
+    /// to start a conversation at all (S13-F2). `default` is a valid bot and
+    /// gets `-p default`: ``HermesProfileScope/profileFlag(_:)`` always
+    /// emits the flag, because without it the default bot would follow the
+    /// host's sticky `active_profile`. Hermes' own Bot Mode passes it the
+    /// same way (`tools/bot_mode_dm.py:282` @ v2026.9.24).
+    nonisolated static func canonicalBotChatArguments(profile: String, queryFile: String) -> [String]? {
+        guard HermesProfileScope.isValidName(profile) else { return nil }
+        return HermesProfileScope.profileFlag(profile) + [
+            "chat",
+            "--in", "~",
+            "-c", BotChatSession.canonicalTitle,
+            "--create-if-missing",
+            "-Q",
+            "--query-file", queryFile
+        ]
+    }
+
     /// Create the profile's canonical Bot Chat by running the transport
     /// Hermes itself documents for Bot Mode delivery
     /// (`tools/bot_mode_dm.py:32-33`, argv verified against the v2026.8.31
@@ -497,9 +520,10 @@ final class BotConversationViewModel {
         profile: String,
         text: String
     ) async -> String? {
-        guard let name = HermesProfileScope.normalize(profile) else {
-            return "“\(profile)” isn’t a valid Hermes profile name."
-        }
+        let name = profile.trimmingCharacters(in: .whitespacesAndNewlines)
+        let invalid = "“\(profile)” isn’t a valid Hermes profile name."
+        // Checked before anything is staged; the argv builder re-checks.
+        guard HermesProfileScope.isValidName(name) else { return invalid }
         return await OffPool.run {
             let transport = context.makeTransport()
             // A file, not an argument: the body is arbitrary user text and
@@ -534,18 +558,10 @@ final class BotConversationViewModel {
                 return "Couldn’t stage the message for \(name): \(error.localizedDescription)"
             }
             _ = try? transport.runProcess(executable: "/bin/chmod", args: ["600", path], stdin: nil, timeout: 15)
-            let result = context.runHermes(
-                [
-                    "-p", name,
-                    "chat",
-                    "--in", "~",
-                    "-c", BotChatSession.canonicalTitle,
-                    "--create-if-missing",
-                    "-Q",
-                    "--query-file", path
-                ],
-                timeout: 300
-            )
+            guard let argv = canonicalBotChatArguments(profile: name, queryFile: path) else {
+                return invalid
+            }
+            let result = context.runHermes(argv, timeout: 300)
             guard result.exitCode == 0 else {
                 let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 return detail.isEmpty

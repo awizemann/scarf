@@ -29,6 +29,14 @@ public enum HermesConfigReader {
     public static let pathPrelude =
         "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\""
 
+    /// `-p default ` for a remote root home, else `""`. These probes run
+    /// hermes inside `sh -c`, where the transport can't add the pin, so the
+    /// script carries it (S13-F1: without it a root-home window would read
+    /// the config of whatever profile the host's `active_profile` names).
+    static func rootPin(_ context: ServerContext) -> String {
+        HermesProfileScope.rootPinShellFragment(forHome: context.paths.home)
+    }
+
     /// Steps 1 + 2. Nil when the file is invisible to both the transport
     /// and the host shell (pure in-container Hermes, or no Hermes at all).
     public static func readRawConfig(context: ServerContext) -> String? {
@@ -45,7 +53,8 @@ public enum HermesConfigReader {
     static func readViaConfigPath(context: ServerContext) -> String? {
         guard context.isRemote else { return nil }
         let hermes = context.paths.hermesBinary
-        let script = "\(pathPrelude); p=\"$(\(hermes) config path 2>/dev/null)\" && [ -n \"$p\" ] && cat \"$p\""
+        let pin = rootPin(context)
+        let script = "\(pathPrelude); p=\"$(\(hermes) \(pin)config path 2>/dev/null)\" && [ -n \"$p\" ] && cat \"$p\""
         guard let result = try? context.makeTransport().runProcess(
             executable: "/bin/sh",
             args: ["-c", script],
@@ -64,7 +73,7 @@ public enum HermesConfigReader {
     public static func probeModelConfig(context: ServerContext) -> HermesConfig? {
         guard context.isRemote else { return nil }
         let hermes = context.paths.hermesBinary
-        let script = "\(pathPrelude); \(hermes) config show 2>/dev/null"
+        let script = "\(pathPrelude); \(hermes) \(rootPin(context))config show 2>/dev/null"
         guard let result = try? context.makeTransport().runProcess(
             executable: "/bin/sh",
             args: ["-c", script],
@@ -106,7 +115,7 @@ public enum HermesConfigReader {
     public static func diagnoseProbeFailure(context: ServerContext) -> CLIProbeDiagnosis? {
         guard context.isRemote else { return nil }
         let hermes = context.paths.hermesBinary
-        let script = "\(pathPrelude); command -v \(hermes) >/dev/null 2>&1 || exit 127; \(hermes) config show"
+        let script = "\(pathPrelude); command -v \(hermes) >/dev/null 2>&1 || exit 127; \(hermes) \(rootPin(context))config show"
         do {
             let result = try context.makeTransport().runProcess(
                 executable: "/bin/sh",
