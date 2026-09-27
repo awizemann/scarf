@@ -165,7 +165,9 @@ struct BotRoutinesView: View {
                 Text(routineTitle(job))
                     .scarfStyle(.bodyEmph)
                     .lineLimit(1)
-                Text(job.schedule.display ?? job.schedule.expression ?? job.schedule.kind)
+                Text(CronScheduleFormatter.withZoneNote(
+                    job.schedule.display ?? job.schedule.expression ?? job.schedule.kind,
+                    for: job.schedule, zoneNote: viewModel.cron.scheduleZoneNote))
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 ScarfBadge(verbatim: job.stateDisplay, kind: badgeKind(for: job.stateDisplay))

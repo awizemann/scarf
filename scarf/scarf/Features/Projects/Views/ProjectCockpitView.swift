@@ -343,7 +343,11 @@ struct ProjectCockpitView: View {
         case .context:
             CockpitContextPanel(block: viewModel?.contextBlock, isLoading: viewModel?.isLoading ?? true)
         case .cron:
-            CockpitCronPanel(jobs: viewModel?.cronJobs ?? [], isLoading: viewModel?.isLoading ?? true)
+            CockpitCronPanel(
+                jobs: viewModel?.cronJobs ?? [],
+                zoneNote: viewModel?.cronZoneNote,
+                isLoading: viewModel?.isLoading ?? true
+            )
         case .memory:
             CockpitMemoryPanel(
                 namespace: viewModel?.scarfProject?.memoryNamespace,
@@ -507,6 +511,9 @@ private struct CockpitContextPanel: View {
 /// Cron jobs attributed to this project (`[proj:<id>]` / `[tmpl:<id>]`).
 private struct CockpitCronPanel: View {
     let jobs: [HermesCronJob]
+    /// The host zone for time-of-day schedules (S08-F3), `nil` when it is
+    /// this Mac's.
+    let zoneNote: String?
     let isLoading: Bool
 
     var body: some View {
@@ -543,7 +550,9 @@ private struct CockpitCronPanel: View {
     }
 
     private func scheduleText(_ job: HermesCronJob) -> String {
-        job.schedule.display ?? job.schedule.expression ?? job.schedule.kind
+        CronScheduleFormatter.withZoneNote(
+            job.schedule.display ?? job.schedule.expression ?? job.schedule.kind,
+            for: job.schedule, zoneNote: zoneNote)
     }
 }
 

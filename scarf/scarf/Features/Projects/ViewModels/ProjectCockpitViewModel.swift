@@ -38,6 +38,8 @@ final class ProjectCockpitViewModel {
     var contextBlock: String?
     /// Cron jobs attributed to this project (`[proj:<id>]` or `[tmpl:]`).
     var cronJobs: [HermesCronJob] = []
+    /// The host zone to name next to time-of-day schedules (S08-F3).
+    var cronZoneNote: String?
     /// The project's MEMORY.md block, when it owns one.
     var memoryBlock: String?
     /// Installed-template id + version for the Templates panel.
@@ -319,10 +321,19 @@ final class ProjectCockpitViewModel {
             let needsUpgrade = ProjectUpgradeService(context: context).needsUpgrade(project)
             let health = shouldDiagnose ? ProjectDoctorService(context: context).diagnose() : nil
 
+            // The zone Hermes reads cron times in, only when there is a job
+            // to show it next to (two more reads; SSH round trips on a remote).
+            let zoneNote = jobs.isEmpty ? nil : CronScheduleFormatter.hostZoneNote(
+                configTimezone: CronScheduleFormatter.configuredZone(
+                    envText: context.readText(context.paths.envFile),
+                    configTimezone: context.readText(context.paths.configYAML).map { HermesConfig(yaml: $0).timezone }),
+                isRemote: context.isRemote)
+
             return Loaded(
                 project: sp,
                 block: block,
                 jobs: jobs,
+                zoneNote: zoneNote,
                 memory: memory,
                 templateID: tmpl?.id,
                 templateVersion: tmpl?.version,
@@ -336,6 +347,7 @@ final class ProjectCockpitViewModel {
         scarfProject = result.project
         contextBlock = result.block
         cronJobs = result.jobs
+        cronZoneNote = result.zoneNote
         memoryBlock = result.memory
         templateID = result.templateID
         templateVersion = result.templateVersion
@@ -415,6 +427,7 @@ final class ProjectCockpitViewModel {
         let project: ScarfProject
         let block: String?
         let jobs: [HermesCronJob]
+        let zoneNote: String?
         let memory: String?
         let templateID: String?
         let templateVersion: String?

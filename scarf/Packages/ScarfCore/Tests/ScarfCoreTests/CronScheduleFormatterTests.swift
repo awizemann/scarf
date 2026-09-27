@@ -152,6 +152,19 @@ struct CronScheduleFormatterTests {
         #expect(CronScheduleFormatter.hostZoneNote(configTimezone: "Not/AZone", isRemote: false, localZone: pst) == nil)
     }
 
+    /// R16a (S08-F3 residual): the raw expression the Cron row, Bot
+    /// Routines and the project cockpit show is a host-zone time too.
+    @Test func rawScheduleTextGetsTheSameZoneNote() {
+        let note = "host time"
+        #expect(CronScheduleFormatter.withZoneNote("0 9 * * *", for: cron("0 9 * * *"), zoneNote: note)
+                == "0 9 * * * (host time)")
+        #expect(CronScheduleFormatter.withZoneNote("*/15 * * * *", for: cron("*/15 * * * *"), zoneNote: note)
+                == "*/15 * * * *")
+        #expect(CronScheduleFormatter.withZoneNote("0 9 * * *", for: cron("0 9 * * *"), zoneNote: nil) == "0 9 * * *")
+        #expect(CronScheduleFormatter.withZoneNote("Morning digest", for: cron("0 9 * * *", display: "Morning digest"), zoneNote: note)
+                == "Morning digest")
+    }
+
     @Test func zoneNoteIsAppendedOnlyToTimeOfDayPhrases() {
         let note = "UTC"
         #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * *"), zoneNote: note) == "Daily at 9 AM (UTC)")
