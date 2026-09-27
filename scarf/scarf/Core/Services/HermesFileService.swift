@@ -1454,6 +1454,17 @@ struct HermesFileService: Sendable {
     /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
     @discardableResult
     nonisolated func restartGateway() -> HermesCLIOutcome {
+        // Never into a gateway with no service behind it: Hermes would stop
+        // it and run the replacement inside this spawn, which the timeout
+        // below then kills (see ``HermesGatewayRestartGuard``).
+        let status = runHermesCLI(args: ["gateway", "status"], timeout: 30)
+        if let refusal = HermesGatewayRestartGuard.refusal(
+            statusOutput: status.output, statusExitCode: status.exitCode,
+            stateJSON: readFileData(context.paths.gatewayStateJSON),
+            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context)
+        ) {
+            return refusal
+        }
         let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 30)
         return HermesGatewayServiceVerdict.judge(
             verb: .restart, output: result.output, exitCode: result.exitCode

@@ -562,22 +562,48 @@ final class MessagingGatewayViewModel {
         invalidateInFlightLoads()
         let generation = actionGeneration
         let run = cliRunner
+        let ctx = context
+        let caps = capabilities
 
         Task { [weak self] in
             // `hermes gateway start|stop|restart` is a process spawn against a
             // possibly-remote host; running it inline froze the whole app for
             // the duration. Detached, exactly like `load()` above.
-            let result = await Task.detached {
-                run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+            let (outcome, refused) = await Task.detached { () -> (HermesCLIOutcome, Bool) in
+                // A restart of a gateway with no service behind it stops the
+                // gateway and runs its replacement inside this very spawn,
+                // which the timeout then kills (see
+                // ``HermesGatewayRestartGuard``). Ask first; never send it
+                // into that state.
+                if verb == .restart {
+                    let status = run(["gateway", "status"], Self.probeTimeout)
+                    if let refusal = HermesGatewayRestartGuard.refusal(
+                        statusOutput: status.output, statusExitCode: status.exitCode,
+                        stateJSON: ctx.readData(ctx.paths.gatewayStateJSON), capabilities: caps
+                    ) {
+                        return (refusal, true)
+                    }
+                }
+                let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+                return (HermesGatewayServiceVerdict.judge(
+                    verb: verb, output: result.output, exitCode: result.exitCode
+                ), false)
             }.value
-            let outcome = HermesGatewayServiceVerdict.judge(
-                verb: verb, output: result.output, exitCode: result.exitCode
-            )
             guard let self else { return }
             self.isBusy = false
             // A newer action superseded this one while the CLI ran — its
             // message and its reload own the UI now.
             guard self.actionGeneration == generation else { return }
+
+            // Scarf declined to send the restart. The note says why and what
+            // to do; it stays until the next action, like a failure, and the
+            // reload shows the gateway exactly as it was.
+            if refused {
+                self.actionFailed = true
+                self.actionMessage = outcome.detail
+                self.load(force: true)
+                return
+            }
 
             // The third arm (P40c): a `.unconfirmed` verdict is not a
             // failure. Neutral wording, `actionFailed` stays false, and the

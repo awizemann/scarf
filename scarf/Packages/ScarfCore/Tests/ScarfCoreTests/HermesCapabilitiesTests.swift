@@ -1697,6 +1697,7 @@ import Foundation
         #expect(caps.hasOpenAINativeWebSearchBackend)
         #expect(caps.hasCompressionThresholdTokensDefault256K)
         #expect(caps.hasWhatsAppUnauthorizedDMDecline)
+        #expect(caps.hasSupervisedGatewayRestart)
         // v0.21.5 is a later group, not yet reached at the v0.21.4 floor.
         #expect(!caps.hasMCPBoolishNumericTruthiness)
     }
@@ -1715,6 +1716,8 @@ import Foundation
         #expect(!caps.hasOpenAINativeWebSearchBackend)
         #expect(!caps.hasCompressionThresholdTokensDefault256K)
         #expect(!caps.hasWhatsAppUnauthorizedDMDecline)
+        // `gateway_supervised_restart.py` is absent at v2026.9.14.
+        #expect(!caps.hasSupervisedGatewayRestart)
     }
 
     // MARK: - v0.21.5 capability flags
@@ -1726,6 +1729,7 @@ import Foundation
         // Every v0.21.4 flag stays on for a patch bump.
         #expect(!caps.hasOpenCodeFreeProvider)
         #expect(caps.hasChatGPTCodexAliases)
+        #expect(caps.hasSupervisedGatewayRestart)
     }
 
     @Test func v0214HostHidesTheV0215Flag() {

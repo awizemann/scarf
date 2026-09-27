@@ -2468,6 +2468,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// output itself is recognised by its bytes, which no older host prints.
     public var hasPeerDMNoResendOutcomes: Bool { isV0214OrLater }
 
+    /// `hermes gateway restart` hands a gateway launched with
+    /// `gateway run --external-supervisor` (a custom launchd agent or
+    /// systemd unit Hermes did not install) back to its supervisor instead of
+    /// stopping it and running a replacement in the CLI's own foreground —
+    /// `hermes_cli/gateway.py:4904-4911` @ v2026.9.21
+    /// (`gateway_declares_external_supervisor`, `restart_externally_supervised_gateway`
+    /// in `hermes_cli/gateway_supervised_restart.py`). Absent at v2026.9.14,
+    /// where such a restart takes the foreground path like any hand-run
+    /// gateway. See ``HermesGatewayRestartGuard``.
+    public var hasSupervisedGatewayRestart: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
