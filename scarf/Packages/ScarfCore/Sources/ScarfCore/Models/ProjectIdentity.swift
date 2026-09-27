@@ -148,12 +148,41 @@ public enum ProjectIdentity {
     ///   so a second spelling of a case-insensitive path is a different
     ///   registry row's problem, not this function's. Folding would also make
     ///   ids differ between the case-sensitive and case-insensitive volumes
-    ///   Scarf talks to.
+    ///   Scarf talks to. The add doors catch a second spelling of a LOCAL
+    ///   folder with ``isSameLocalItem(_:_:)`` instead.
     /// The lexical normalization `deterministicID` seeds on, exposed so
     /// callers that compare paths for *identity* (the doctor's duplicate-path
     /// and orphan-scan set arithmetic) agree with the id derivation instead of
     /// re-implementing the rules. Same frozen contract as `deterministicID`.
     public static func normalizedPath(_ path: String) -> String { normalize(path) }
+
+    /// Do two LOCAL paths name the same existing file or folder?
+    ///
+    /// Answered by file identity (volume + file number, after following
+    /// symlinks), never by folding text. That is what lets it be right on
+    /// both kinds of volume: on a case-insensitive APFS volume `/Work/App`
+    /// and `/work/app` are one folder and compare equal; on a case-sensitive
+    /// volume they are two folders with two identities and compare unequal.
+    /// Case folding the path would get the second case wrong, and folding is
+    /// out of the question for ``normalizedPath(_:)`` anyway — it seeds
+    /// ``deterministicID(forProjectPath:hostKey:)``, a frozen wire format.
+    ///
+    /// LOCAL ONLY: it stats this Mac's disk. A remote path must never be
+    /// passed here — the answer would describe the wrong machine. `false`
+    /// when either path doesn't exist or can't be read.
+    public static func isSameLocalItem(_ a: String, _ b: String) -> Bool {
+        func identity(_ path: String) -> (Int, Int)? {
+            guard path.hasPrefix("/") else { return nil }
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: resolved),
+                  let volume = (attrs[.systemNumber] as? NSNumber)?.intValue,
+                  let file = (attrs[.systemFileNumber] as? NSNumber)?.intValue
+            else { return nil }
+            return (volume, file)
+        }
+        guard let lhs = identity(a), let rhs = identity(b) else { return false }
+        return lhs == rhs
+    }
 
     private static func normalize(_ path: String) -> String {
         let isAbsolute = path.hasPrefix("/")

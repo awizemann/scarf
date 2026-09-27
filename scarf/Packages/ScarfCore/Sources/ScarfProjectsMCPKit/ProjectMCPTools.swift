@@ -207,9 +207,14 @@ public struct ProjectMCPTools: Sendable {
                     + "The registry keys the sidebar on the display name, so names must be unique."
             )
         }
-        if let existing = loaded.registry.projects.first(
-            where: { ProjectIdentity.normalizedPath($0.path) == path }
-        ) {
+        // Same folder, different spelling (`/Work/App` vs `/work/app` on a
+        // case-insensitive volume, a symlinked parent) is caught by file
+        // identity — local contexts only, where the disk we stat is the one
+        // the path is on.
+        if let existing = loaded.registry.projects.first(where: {
+            ProjectIdentity.normalizedPath($0.path) == path
+                || (!context.isRemote && ProjectIdentity.isSameLocalItem($0.path, path))
+        }) {
             return .failure(
                 "\(path) is already registered as “\(existing.name)”. Use project_get to inspect "
                     + "it, or rename it in Scarf — re-registering the same path under a second "

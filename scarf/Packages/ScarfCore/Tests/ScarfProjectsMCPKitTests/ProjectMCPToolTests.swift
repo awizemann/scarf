@@ -130,6 +130,34 @@ import Foundation
         }
     }
 
+    /// t-14157321: `/…/demo` and `/…/DEMO` are one folder on a
+    /// case-insensitive volume and must not become two projects; on a
+    /// case-sensitive volume the second spelling doesn't exist and the
+    /// register is refused for that instead. Symlinked spellings too.
+    @Test("register refuses another spelling of an already-registered local folder")
+    func registerRefusesAnotherSpellingOfTheSameFolder() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let upper = h.projectRoot.deletingLastPathComponent().path + "/DEMO"
+            let caseVariant = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo upper"), "path": .string(upper),
+            ])
+            #expect(caseVariant.isError)
+
+            let link = h.projectRoot.deletingLastPathComponent().appendingPathComponent("alias")
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: h.projectRoot)
+            let viaLink = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo alias"), "path": .string(link.path),
+            ])
+            #expect(viaLink.isError)
+            #expect(viaLink.text.contains("two identities"))
+
+            #expect(ProjectDashboardService(context: h.context).loadRegistry().projects.count == 1)
+        }
+    }
+
     @Test("register refuses a relative path, a tilde path, and a directory that isn't there")
     func registerRefusesBadPaths() throws {
         try Self.withHarness { h in

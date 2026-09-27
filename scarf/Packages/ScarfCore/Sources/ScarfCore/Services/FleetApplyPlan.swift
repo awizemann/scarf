@@ -280,10 +280,16 @@ public struct FleetApplyPlan: Sendable, Equatable {
 
     /// Partition `jobs` (a host's full `jobs.json`) into the fleet-copy set
     /// for `projectID`. Pure.
+    ///
+    /// "The project's jobs" is ``ProjectCronAttribution/namesProject(jobName:projectID:)``
+    /// — the rule every other project surface applies — so a template
+    /// install's `[tmpl:<id>] [proj:<uuid>] …` jobs are copied along with
+    /// plain `[proj:<uuid>] …` ones. A legacy `[tmpl:<id>] …` job with no
+    /// project tag is still left out: every install of that template shares
+    /// it, so nothing on it says it is this project's.
     public static func copyableCronJobs(from jobs: [HermesCronJob], projectID: UUID) -> CronCopySet {
-        let tag = projectCronTag(projectID)
         var set = CronCopySet()
-        for job in jobs where job.name.hasPrefix(tag) {
+        for job in jobs where ProjectCronAttribution.namesProject(jobName: job.name, projectID: projectID) {
             if job.noAgent == true {
                 set.scriptOnly.append(job)
             } else if shouldSkipMonitorJob(job) {
