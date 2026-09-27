@@ -115,6 +115,16 @@ struct ServerBackupRestoreSafetyTests {
         return (proc, stdin)
     }
 
+    /// Stop a holder without `waitUntilExit`, which can park forever in a
+    /// Swift Testing task when the child has already been reaped.
+    static func stopHolder(_ proc: Process, _ stdin: Pipe) {
+        try? stdin.fileHandleForWriting.close()
+        if proc.isRunning { proc.terminate() }
+        let deadline = Date().addingTimeInterval(5)
+        while proc.isRunning, Date() < deadline { usleep(20_000) }
+        if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
+    }
+
     // MARK: - S14-F2: backup is read-only and complete
 
     @Test("backup leaves a live WAL database byte-identical and archives the WAL-only rows")
@@ -140,15 +150,17 @@ struct ServerBackupRestoreSafetyTests {
         #expect(Self.bytes(URL(fileURLWithPath: dbPath + "-wal")) == walBefore)
         // No snapshot staging left behind in the home.
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: home.path)
-            .filter { $0.hasPrefix(RemoteBackupService.snapshotDirPrefix) }
+            .filter { $0.hasPrefix(HermesDatabaseScripts.snapshotDirPrefix) }
         #expect(leftovers.isEmpty)
 
         // The manifest tells the truth.
         let manifest = result.manifest
         #expect(manifest.schemaVersion == 2)
         #expect(manifest.options.checkpointedWAL == false)
-        let state = try #require(manifest.stateDB)
-        #expect(state.method == "sqlite3")
+        let state = try #require(manifest.databases)
+        #expect(state.entries.map(\.path) == ["state.db"])
+        #expect(state.entries.first?.method == "sqlite3")
+        #expect(state.skipped.isEmpty)
 
         // Unpack and look inside.
         let unpacked = root.appendingPathComponent("unpacked")
@@ -211,18 +223,18 @@ struct ServerBackupRestoreSafetyTests {
             if withWAL {
                 #expect(Self.bytes(URL(fileURLWithPath: db.path + "-wal")) == walBefore)
             }
-            let state = try #require(result.manifest.stateDB)
+            let state = try #require(result.manifest.databases)
             let unpacked = root.appendingPathComponent("unpacked")
             try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
             try await RemoteRestoreService.unzipArchive(at: result.archiveURL, into: unpacked)
             try Self.untar(unpacked.appendingPathComponent(state.tarballPath), into: unpacked)
             let snapshot = try Self.inspect(unpacked.appendingPathComponent("state.db").path)
-            #expect(snapshot.count == 250, "withWAL: \(withWAL), method: \(state.method)")
+            #expect(snapshot.count == 250, "withWAL: \(withWAL), method: \(state.entries.map(\.method))")
             #expect(snapshot.integrity == "ok")
         }
     }
 
-    @Test("a home with no state.db backs up without a snapshot entry")
+    @Test("a home with no database backs up without a snapshot entry")
     func backupWithoutStateDB() async throws {
         let root = try Self.scratch("nodb")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -230,12 +242,12 @@ struct ServerBackupRestoreSafetyTests {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: home.appendingPathComponent("SOUL.md"))
         let result = try await Self.backUp(home: home, into: root)
-        #expect(result.manifest.stateDB == nil)
+        #expect(result.manifest.databases == nil)
     }
 
-    @Test("the snapshot script never checkpoints and fails loudly on a bad path")
+    @Test("the snapshot pass never checkpoints, reports unreadable databases, and never writes them")
     func snapshotScriptShape() async throws {
-        let script = RemoteBackupService.snapshotScript(stateDB: "/h/state.db", snapshotDir: "/h/.snap")
+        let script = HermesDatabaseScripts.snapshotAll(home: "/h", snapshotDir: "/h/.snap", prunedDirs: ["logs"])
         #expect(script.contains("sqlite3 -readonly"))
         #expect(script.contains("mode=ro"))
         // The only writable connection is gated on proving no_ckpt_on_close
@@ -246,24 +258,126 @@ struct ServerBackupRestoreSafetyTests {
 
         let root = try Self.scratch("badsnap")
         defer { try? FileManager.default.removeItem(at: root) }
-        func run(_ db: URL) async throws -> ProcessResult {
-            try await LocalTransport().asyncRunProcess(
-                executable: "/bin/bash",
-                args: ["-lc", RemoteBackupService.snapshotScript(
-                    stateDB: db.path, snapshotDir: root.appendingPathComponent("snap").path)],
-                stdin: nil, timeout: 60)
-        }
-        // No database: said so explicitly, never a silent success.
-        let absent = try await run(root.appendingPathComponent("missing/state.db"))
-        #expect(absent.exitCode == 0)
-        #expect(absent.stdoutString.contains("SCARF_SNAPSHOT_ABSENT"))
-        // A file no method can read: a loud failure.
-        let garbage = root.appendingPathComponent("state.db")
+        let home = root.appendingPathComponent(".hermes")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent("plugins/x"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent("logs"), withIntermediateDirectories: true)
+        let garbage = home.appendingPathComponent("plugins/x/cache.db")
         try Data(repeating: 0x41, count: 8192).write(to: garbage)
-        let broken = try await run(garbage)
-        #expect(broken.exitCode != 0)
-        #expect(!broken.stdoutString.contains("SCARF_SNAPSHOT_OK"))
+        let seed = try Self.openWALWriter(home.appendingPathComponent("logs/pruned.db").path, rows: 1)
+        sqlite3_close(seed)
+        let result = try await LocalTransport().asyncRunProcess(
+            executable: "/bin/bash",
+            args: ["-lc", HermesDatabaseScripts.snapshotAll(
+                home: home.path, snapshotDir: root.appendingPathComponent("snap").path, prunedDirs: ["logs"])],
+            stdin: nil, timeout: 60)
+        let report = HermesDatabaseScripts.parseSnapshotReport(result.stdoutString)
+        #expect(report.finished)
+        #expect(report.failed == ["plugins/x/cache.db"])
+        #expect(report.ok.isEmpty, "a pruned directory's databases are not snapshotted")
         #expect(Self.bytes(garbage) == Data(repeating: 0x41, count: 8192))
+        #expect(result.stderrString.contains("cache.db"))
+    }
+
+    /// The finding's follow-up: every `*.db` Hermes itself snapshots, not
+    /// just the root state.db.
+    @Test("every database in the home is snapshotted, none is archived live, and restore publishes them all")
+    func everyDatabaseRoundTrips() async throws {
+        let root = try Self.scratch("alldb")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("src/.hermes")
+        for dir in ["profiles/work", "cron"] {
+            try FileManager.default.createDirectory(at: source.appendingPathComponent(dir), withIntermediateDirectories: true)
+        }
+        try Data("model: x\n".utf8).write(to: source.appendingPathComponent("config.yaml"))
+        // Live writers with rows only in their WALs, as a running gateway leaves them.
+        let writers = try [
+            ("state.db", 11), ("profiles/work/state.db", 22), ("kanban.db", 33), ("cron/executions.db", 44),
+        ].map { (path, rows) in (path, rows, try Self.openWALWriter(source.appendingPathComponent(path).path, rows: rows)) }
+        let before = writers.map { Self.bytes(source.appendingPathComponent($0.0)) }
+        let backup = try await Self.backUp(home: source, into: root)
+        // C3 for every database, not just state.db.
+        #expect(writers.map { Self.bytes(source.appendingPathComponent($0.0)) } == before)
+        for writer in writers { sqlite3_close(writer.2) }
+
+        let dbs = try #require(backup.manifest.databases)
+        #expect(Set(dbs.entries.map(\.path)) == Set(writers.map(\.0)))
+        // The home tarball holds no database and no sidecar at any depth.
+        let listing = try Self.capture("/usr/bin/tar", ["-tzf", Self.unzipped(backup.archiveURL, in: root)
+            .appendingPathComponent(backup.manifest.hermes.tarballPath).path])
+        #expect(!listing.split(separator: "\n").contains { $0.hasSuffix(".db") || $0.contains(".db-") })
+
+        // Target: a stopped Hermes with its own profile DB and a stale WAL there.
+        let target = root.appendingPathComponent("dst/.hermes")
+        try Self.makeUnheldHome(target, rows: 5, withWAL: true)
+        try Self.makeUnheldHome(target.appendingPathComponent("profiles/work"), rows: 6, withWAL: true)
+        let service = RemoteRestoreService(context: .local(home: target))
+        let inspection = try await service.inspect(archiveURL: backup.archiveURL)
+        _ = try await service.run(inspection: inspection, options: .init(targetProjectsRoot: root.path), progress: { _ in })
+
+        for (path, rows, _) in writers {
+            let db = target.appendingPathComponent(path).path
+            #expect(!FileManager.default.fileExists(atPath: db + "-wal"), "\(path) kept a foreign WAL")
+            let restored = try Self.inspect(db)
+            #expect(restored.count == rows, "\(path)")
+            #expect(restored.integrity == "ok")
+        }
+    }
+
+    @Test("restore refuses while a process holds a profile database, not only state.db")
+    func restoreRefusesHeldProfileDatabase() async throws {
+        let root = try Self.scratch("heldprofile")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("src/.hermes")
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("profiles/work"), withIntermediateDirectories: true)
+        let w = try Self.openWALWriter(source.appendingPathComponent("profiles/work/state.db").path, rows: 3)
+        let backup = try await Self.backUp(home: source, into: root)
+        sqlite3_close(w)
+
+        let target = root.appendingPathComponent("dst/.hermes")
+        try Self.makeUnheldHome(target.appendingPathComponent("profiles/work"), rows: 9, withWAL: false)
+        let profileDB = target.appendingPathComponent("profiles/work/state.db").path
+        let dbBefore = Self.bytes(URL(fileURLWithPath: profileDB))
+        let (holder, holderStdin) = try Self.spawnHolder(profileDB)
+        try #require(holder.isRunning, "the holder must still have the database open")
+        defer {
+            Self.stopHolder(holder, holderStdin)
+        }
+        let service = RemoteRestoreService(context: .local(home: target))
+        let inspection = try await service.inspect(archiveURL: backup.archiveURL)
+        #expect(inspection.stateDBHolders == .held([holder.processIdentifier]))
+        await #expect(throws: RemoteRestoreService.RestoreError.self) {
+            _ = try await service.run(inspection: inspection, options: .init(targetProjectsRoot: root.path), progress: { _ in })
+        }
+        #expect(Self.bytes(URL(fileURLWithPath: profileDB)) == dbBefore)
+    }
+
+    @Test("leftover Scarf directories from a killed run are swept; fresh ones and non-Scarf ones are kept")
+    func leftoversAreSwept() async throws {
+        let root = try Self.scratch("leftover")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        let stale = home.appendingPathComponent(HermesDatabaseScripts.snapshotDirPrefix + "old")
+        let staleStaging = home.appendingPathComponent(HermesDatabaseScripts.stagingDirPrefix + "old")
+        let fresh = home.appendingPathComponent(HermesDatabaseScripts.snapshotDirPrefix + "busy")
+        let foreign = home.appendingPathComponent(".scarf-something-else")
+        for dir in [stale, staleStaging, fresh, foreign] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: dir.appendingPathComponent("state.db"))
+        }
+        let old = Date(timeIntervalSinceNow: -3 * 3600)
+        for dir in [stale, staleStaging, foreign] {
+            for url in [dir.appendingPathComponent("state.db"), dir] {
+                try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
+            }
+        }
+        let result = try await LocalTransport().asyncRunProcess(
+            executable: "/bin/bash", args: ["-lc", HermesDatabaseScripts.leftoverCleanup(home: home.path)],
+            stdin: nil, timeout: 60)
+        #expect(result.exitCode == 0)
+        #expect(!FileManager.default.fileExists(atPath: stale.path))
+        #expect(!FileManager.default.fileExists(atPath: staleStaging.path))
+        #expect(FileManager.default.fileExists(atPath: fresh.path), "a run in progress elsewhere must survive")
+        #expect(FileManager.default.fileExists(atPath: foreign.path), "only Scarf's own prefixes are swept")
     }
 
     // MARK: - S14-F1 / S14-F3: restore
@@ -331,7 +445,7 @@ struct ServerBackupRestoreSafetyTests {
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try Data("model: new\n".utf8).write(to: source.appendingPathComponent("config.yaml"))
         let backup = try await Self.backUp(home: source, into: root)
-        #expect(backup.manifest.stateDB == nil)
+        #expect(backup.manifest.databases == nil)
 
         // Target: a stopped Hermes whose newest sessions are still in its WAL.
         let target = root.appendingPathComponent("dst/.hermes")
@@ -371,9 +485,7 @@ struct ServerBackupRestoreSafetyTests {
 
         let (holder, holderStdin) = try Self.spawnHolder(targetDB)
         defer {
-            try? holderStdin.fileHandleForWriting.close()
-            holder.terminate()
-            holder.waitUntilExit()
+            Self.stopHolder(holder, holderStdin)
         }
 
         let service = RemoteRestoreService(context: .local(home: target))
@@ -408,6 +520,10 @@ struct ServerBackupRestoreSafetyTests {
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
         let seed = try Self.openWALWriter(stage.appendingPathComponent("state.db").path, rows: 42)
         sqlite3_close(seed)  // checkpointed into the file, WAL gone
+        // v1 tarred every other database live WITH its WAL (only the root
+        // state.db's sidecars were excluded): rows only in that WAL must
+        // survive the lift.
+        try Self.makeUnheldHome(stage.appendingPathComponent("profiles/p"), rows: 17, withWAL: true)
         let work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         let tarball = work.appendingPathComponent(BackupArchiveLayout.hermesTarballPath)
@@ -437,6 +553,9 @@ struct ServerBackupRestoreSafetyTests {
         let restored = try Self.inspect(db)
         #expect(restored.count == 42)
         #expect(restored.integrity == "ok")
+        let profile = target.appendingPathComponent("profiles/p/state.db").path
+        #expect(!FileManager.default.fileExists(atPath: profile + "-wal"))
+        #expect(try Self.inspect(profile).count == 17, "the archived WAL's rows were folded in")
     }
 
     @Test("a v1 home tarball without a database lifts to nil, not an error")
@@ -448,8 +567,8 @@ struct ServerBackupRestoreSafetyTests {
         try Data("x".utf8).write(to: stage.appendingPathComponent("SOUL.md"))
         let tarball = root.appendingPathComponent("h.tar.gz")
         try Self.run("/usr/bin/tar", ["-czf", tarball.path, "-C", stage.deletingLastPathComponent().path, ".hermes"])
-        let lifted = try await RemoteRestoreService.liftLegacyStateDB(
-            from: tarball, member: ".hermes/state.db", workDir: root)
+        let lifted = try await RemoteRestoreService.liftLegacyDatabases(
+            from: tarball, leaf: ".hermes", workDir: root)
         #expect(lifted == nil)
     }
 
@@ -481,43 +600,41 @@ struct ServerBackupRestoreSafetyTests {
         #expect(RemoteRestoreService.parseHolderOutput("nothing") == nil)
     }
 
-    /// The Linux branch reads `ls -l /proc/[0-9]*/fd`. Feed the awk program a
-    /// captured-shape listing so it is exercised on a Mac too.
-    @Test("the /proc fd scan finds holders, including an unlinked WAL, and nothing else")
-    func procScanAwk() throws {
-        let listing = """
-        /proc/1/fd:
-        total 0
-        lrwx------ 1 root root 64 Sep 26 10:00 0 -> /dev/null
+    /// The Linux branch, run on a Mac against a fake `/proc` of symlinks.
+    /// Names that would break an `ls -l` parse (a ` -> ` in the path, a
+    /// space) must still be found, through `find -lname` and through the
+    /// `readlink` fallback alike.
+    @Test("the /proc scan finds holders by link target, including unlinked sidecars, whatever the names look like",
+          arguments: [false, true])
+    func procScan(forceReadlink: Bool) async throws {
+        let root = try Self.scratch("proc")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("odd -> home [1]/.hermes")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent("profiles/w"), withIntermediateDirectories: true)
+        // What `/proc` links name: the real path (`/private/var/…` on a Mac;
+        // Foundation's resolvingSymlinksInPath strips `/private`).
+        let real = try #require(realpath(home.path, nil).map { p in defer { free(p) }; return String(cString: p) })
+        let proc = root.appendingPathComponent("proc")
+        func link(_ pid: Int, _ fd: Int, _ target: String) throws {
+            let dir = proc.appendingPathComponent("\(pid)/fd")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("\(fd)").path, withDestinationPath: target)
+        }
+        try link(1, 0, "/dev/null")
+        try link(812, 5, real + "/state.db")
+        try link(812, 6, real + "/state.db-wal")
+        try link(913, 7, real + "/profiles/w/state.db-shm (deleted)")
+        try link(999, 3, real + "/state.db.bak")
+        try link(999, 4, "/other/state.db")
+        try link(4242, 1, real + "/state.db")   // "our own" pid, excluded
 
-        /proc/812/fd:
-        total 0
-        lrwx------ 1 hermes hermes 64 Sep 26 10:00 5 -> /var/lib/hermes/.hermes/state.db
-        lrwx------ 1 hermes hermes 64 Sep 26 10:00 6 -> /var/lib/hermes/.hermes/state.db-wal
-
-        /proc/913/fd:
-        total 0
-        lrwx------ 1 hermes hermes 64 Sep 26 10:00 7 -> /var/lib/hermes/.hermes/state.db-shm (deleted)
-
-        /proc/999/fd:
-        total 0
-        lrwx------ 1 hermes hermes 64 Sep 26 10:00 3 -> /var/lib/hermes/.hermes/state.db.bak
-        lrwx------ 1 hermes hermes 64 Sep 26 10:00 4 -> /other/state.db
-        """
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/awk")
-        proc.arguments = [RemoteRestoreService.procFDAwkProgram]
-        proc.environment = ["SCARF_DB": "/var/lib/hermes/.hermes/state.db"]
-        let input = Pipe(), output = Pipe()
-        proc.standardInput = input
-        proc.standardOutput = output
-        try proc.run()
-        input.fileHandleForWriting.write(Data(listing.utf8))
-        try input.fileHandleForWriting.close()
-        let out = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        proc.waitUntilExit()
-        let pids = Set(out.split(whereSeparator: \.isNewline).map(String.init))
-        #expect(pids == ["812", "913"])
+        let script = HermesDatabaseScripts.holderScan(
+            databases: [home.path + "/state.db", home.path + "/profiles/w/state.db"],
+            ownPID: 4242, procRoot: proc.path, forceReadlink: forceReadlink) + "\necho \"SCARF_HOLDERS:$holders\""
+        let result = try await LocalTransport().asyncRunProcess(
+            executable: "/bin/bash", args: ["-lc", script], stdin: nil, timeout: 60)
+        #expect(RemoteRestoreService.parseHolderOutput(result.stdoutString) == .held([812, 913]),
+                "\(result.stdoutString) \(result.stderrString)")
     }
 
     @Test("backup excludes follow the home's own directory name")
@@ -525,8 +642,8 @@ struct ServerBackupRestoreSafetyTests {
         let ex = RemoteBackupService.hermesExcludes(
             leaf: "hermes-data",
             options: .init(includeAuth: false, includeMcpTokens: true, includeLogs: true, checkpointedWAL: false))
-        #expect(ex.contains("hermes-data/state.db"))
-        #expect(ex.contains("hermes-data/state.db-wal"))
+        #expect(ex.contains("*.db"))
+        #expect(ex.contains("*.db-wal"))
         #expect(ex.contains("hermes-data/auth.json"))
         #expect(!ex.contains { $0.hasPrefix(".hermes/") })
     }
@@ -540,6 +657,25 @@ struct ServerBackupRestoreSafetyTests {
         try p.run()
         p.waitUntilExit()
         guard p.terminationStatus == 0 else { throw TestError("\(exe) exited \(p.terminationStatus)") }
+    }
+
+    static func capture(_ exe: String, _ args: [String]) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        let out = Pipe()
+        p.standardOutput = out
+        try p.run()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        return text
+    }
+
+    static func unzipped(_ archive: URL, in root: URL) throws -> URL {
+        let dir = root.appendingPathComponent("unzipped-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try run("/usr/bin/unzip", ["-q", archive.path, "-d", dir.path])
+        return dir
     }
 
     static func untar(_ tarball: URL, into dir: URL) throws {

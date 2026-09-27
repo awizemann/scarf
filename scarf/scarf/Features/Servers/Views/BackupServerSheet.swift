@@ -175,6 +175,15 @@ struct BackupServerSheet: View {
             row(label: "Size", value: Self.formatBytes(result.archiveSize))
             row(label: "Hermes version", value: result.manifest.source.hermesVersion ?? "(unknown)")
             row(label: "Projects", value: "\(result.manifest.projects.count)")
+            if let skipped = result.manifest.databases?.skipped, !skipped.isEmpty {
+                // Hermes's own backup reports the same case as incomplete.
+                Label {
+                    Text("These databases couldn't be copied safely and are not in this backup: \(skipped.joined(separator: ", "))")
+                        .font(.caption)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+            }
             HStack {
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([result.archiveURL])

@@ -235,8 +235,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // Hash-verify every inner tarball before any remote bytes are
         // pushed.
         try await Self.verifyHash(file: workDir.appendingPathComponent(manifest.hermes.tarballPath), expected: manifest.hermes.tarballSHA256)
-        if let state = manifest.stateDB {
-            try await Self.verifyHash(file: workDir.appendingPathComponent(state.tarballPath), expected: state.tarballSHA256)
+        if let databases = manifest.databases, !databases.entries.isEmpty {
+            try await Self.verifyHash(file: workDir.appendingPathComponent(databases.tarballPath), expected: databases.tarballSHA256)
         }
         for project in manifest.projects {
             try await Self.verifyHash(file: workDir.appendingPathComponent(project.tarballPath), expected: project.tarballSHA256)
@@ -264,7 +264,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
         let hermesHome = Self.resolveTargetHermesHome(configured: context.paths.home, userHome: home)
         var holders: DBHolderProbe?
         if let hermesHome {
-            holders = await probeStateDBHolders(transport: transport, hermesHome: hermesHome)
+            holders = await probeDatabaseHolders(
+                transport: transport,
+                databases: Self.absolute(Self.databasePathsForProbe(manifest), in: hermesHome))
         }
 
         handedToCaller = true
@@ -304,28 +306,40 @@ public final class RemoteRestoreService: @unchecked Sendable {
             ?? (manifest.hermes.homePath as NSString).deletingLastPathComponent
         let projectsRoot = options.targetProjectsRoot ?? (userHome + "/projects")
 
-        // The archive's database as a one-member `state.db` tarball, whatever
-        // the schema. v2 ships it that way; for v1 it is lifted out of the
-        // home tarball HERE, on the Mac, before anything is written to the
-        // target. Either way the home extraction below never touches
-        // state.db, and the database is only ever replaced by the guarded
-        // publish in Stage 1b. `nil`: the archive has no database, and the
-        // target's own state.db and its WAL are left exactly as they are.
+        // The archive's databases as one tarball of `<relpath>` members,
+        // whatever the schema. v2 ships it that way; for v1 they are lifted
+        // out of the home tarball HERE, on the Mac, before anything is
+        // written to the target. Either way the home extraction below never
+        // touches a database, and databases are only ever replaced by the
+        // guarded publish in Stage 1b. A database the archive doesn't carry
+        // (and its WAL) is left exactly as it is on the target.
         let archiveLeaf = manifest.schemaVersion >= 2
             ? (manifest.hermes.homePath as NSString).lastPathComponent
             : ".hermes"   // v1 always archived `.hermes/`
         let hermesTar = inspection.workDir.appendingPathComponent(manifest.hermes.tarballPath)
-        let stateTarball: URL?
-        if let state = manifest.stateDB {
-            stateTarball = inspection.workDir.appendingPathComponent(state.tarballPath)
+        let dbBundle: (tarball: URL, paths: [String])?
+        if let databases = manifest.databases {
+            dbBundle = databases.entries.isEmpty ? nil : (
+                inspection.workDir.appendingPathComponent(databases.tarballPath),
+                databases.entries.map(\.path))
         } else {
-            stateTarball = try await Self.liftLegacyStateDB(
-                from: hermesTar, member: archiveLeaf + "/state.db", workDir: inspection.workDir)
+            dbBundle = try await Self.liftLegacyDatabases(
+                from: hermesTar, leaf: archiveLeaf, workDir: inspection.workDir)
         }
+        let targetDatabases = Self.absolute(dbBundle?.paths ?? ["state.db"], in: hermesHome)
 
-        // Refuse BEFORE writing anything when something holds state.db
-        // open. Checked again right before state.db itself is replaced.
-        try await requireStateDBUnheld(transport: transport, hermesHome: hermesHome)
+        // Refuse BEFORE writing anything when something holds a database
+        // this restore replaces (always including state.db) open. Checked
+        // again right before the databases themselves are replaced.
+        try await requireDatabasesUnheld(transport: transport, databases: targetDatabases)
+
+        // Clear Scarf directories a killed run left in the target home.
+        _ = try? await transport.asyncRunProcess(
+            executable: "/bin/bash",
+            args: ["-lc", HermesDatabaseScripts.leftoverCleanup(home: hermesHome)],
+            stdin: nil,
+            timeout: 60
+        )
 
         // Make sure the projects root exists so `tar -xzf` doesn't
         // fail on a missing -C target.
@@ -348,7 +362,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
             throw RestoreError.remoteCommandFailed("mkdir \(projectsRoot) failed: \(mkdirResult.stderrString)")
         }
 
-        // Stage 1: hermes home, minus state.db and its sidecars. The
+        // Stage 1: hermes home, minus every database and SQLite sidecar. The
         // tarball's single top-level directory is stripped so its contents
         // land directly in `hermesHome`, whatever that directory is called
         // on the target.
@@ -372,21 +386,23 @@ public final class RemoteRestoreService: @unchecked Sendable {
             paused = try await pauseAllCronJobs(transport: transport, hermesHome: hermesHome)
         }
 
-        // Stage 1b: the database. Extracted into a staging directory beside
-        // it (same filesystem, so the publish is a rename), then published
-        // after a last holder check, in the same shell as the replacement.
-        if let stateTarball {
+        // Stage 1b: the databases. Extracted into a staging directory in the
+        // home (same filesystem, so each publish is a rename), then
+        // published after a last holder check, in the same shell as the
+        // replacement.
+        if let dbBundle {
             try Task.checkCancellation()
-            let staging = hermesHome + "/" + Self.stagingDirPrefix + UUID().uuidString
+            let staging = hermesHome + "/" + HermesDatabaseScripts.stagingDirPrefix + UUID().uuidString
             do {
                 try await pushTarball(
                     transport: transport,
-                    tarball: stateTarball,
+                    tarball: dbBundle.tarball,
                     extractCommand: "mkdir -p \(Self.shellQuote(staging)) && tar -xzf - -C \(Self.shellQuote(staging))"
                 ) { _ in }
-                try await publishStateDB(
+                try await publishDatabases(
                     transport: transport,
-                    staged: staging + "/state.db",
+                    staging: staging,
+                    paths: dbBundle.paths,
                     hermesHome: hermesHome
                 )
             } catch {
@@ -940,14 +956,13 @@ public final class RemoteRestoreService: @unchecked Sendable {
 
     // MARK: - Target Hermes home + live-database guard
 
-    /// Prefix of the directory a v2 state.db snapshot is staged in, inside
-    /// the target Hermes home, before it is renamed over `state.db`.
-    public static let stagingDirPrefix = ".scarf-restore-staging-"
+    /// Prefix of the directory database snapshots are staged in, inside the
+    /// target Hermes home, before they are renamed into place.
+    public static let stagingDirPrefix = HermesDatabaseScripts.stagingDirPrefix
 
-    /// Ceiling on a holder probe or a guarded state.db publish (C10). The
-    /// `/proc` scan and `lsof` both finish in well under a second on a
-    /// normal host.
-    static let holderProbeTimeout: TimeInterval = 60
+    /// Ceiling on a holder probe or a guarded publish (C10). The `/proc`
+    /// scan and `lsof` both finish in seconds on a normal host.
+    static let holderProbeTimeout: TimeInterval = 120
 
     /// The Hermes home a restore targets: the server's configured home, with
     /// a leading `~` expanded against the target's `$HOME`. `nil` when the
@@ -964,73 +979,33 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// archive's single top-level directory (`archiveLeaf`) so the target
     /// directory's name doesn't have to match the source's.
     ///
-    /// state.db itself is never extracted here: it is published separately,
-    /// behind a holder check (``publishStateDB(transport:staged:hermesHome:)``).
-    /// Nor are its `-wal`/`-shm`/`-journal`, even from a hand-built or older
-    /// archive that carries them: they describe some other image of the
-    /// database, and SQLite would replay them over the restored one. Hermes's
-    /// own import skips them for the same reason
-    /// (`hermes_cli/backup.py:946-951` @ v2026.9.24).
+    /// No database is extracted here: they are published separately,
+    /// behind a holder check (``publishDatabases(transport:staging:paths:hermesHome:)``).
+    /// Nor is any SQLite `-wal`/`-shm`/`-journal`, even from a hand-built
+    /// or older archive that carries them: they describe some other image
+    /// of their database, and SQLite would replay them over the restored
+    /// one. Hermes's own import skips them for the same reason
+    /// (`hermes_cli/backup.py:946-951` @ v2026.9.24). The patterns are
+    /// unanchored, so they reach every subdirectory.
     static func hermesExtractCommand(hermesHome: String, archiveLeaf: String) -> String {
         let home = shellQuote(hermesHome)
-        let excludes = ["", "-wal", "-shm", "-journal"]
-            .map { "--exclude=\(shellQuote(archiveLeaf + "/state.db" + $0))" }
+        let excludes = ["*.db", "*.db-wal", "*.db-shm", "*.db-journal"]
+            .map { "--exclude=\(shellQuote($0))" }
             .joined(separator: " ")
         return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
     }
 
-    /// A bash snippet that sets `holders` to the PIDs of the processes
-    /// (other than `ownPID`) holding `<hermesHome>/state.db`, `-wal` or
-    /// `-shm` open, or to `UNKNOWN` when the host offers no way to tell.
-    ///
-    /// Linux: every `/proc/<pid>/fd` link, read with one `ls -l`; an
-    /// already-unlinked `(deleted)` target still counts as held, the
-    /// split-brain fingerprint Hermes checks for
-    /// (`hermes_cli/backup.py:469-506` @ v2026.9.24). The database path is
-    /// resolved with `pwd -P` first because `/proc` links name the real
-    /// path. Elsewhere (the Mac's own local server): `lsof -t` on the files
-    /// that exist. Other users' processes are invisible without root,
-    /// exactly as they are to Hermes's own check.
-    static func holderScanScript(hermesHome: String, ownPID: Int32?) -> String {
-        """
-        scarf_db_dir=\(shellQuote(hermesHome))
-        if [ -d "$scarf_db_dir" ]; then scarf_db_dir=$(cd "$scarf_db_dir" && pwd -P); fi
-        scarf_db="$scarf_db_dir/state.db"
-        scarf_own=\(ownPID.map(String.init) ?? "")
-        holders=""
-        scarf_found=""
-        if [ "$(uname -s 2>/dev/null)" = Linux ] && [ -d /proc/self/fd ]; then
-          scarf_found=$(ls -l /proc/[0-9]*/fd 2>/dev/null | SCARF_DB="$scarf_db" awk \(shellQuote(procFDAwkProgram)) | sort -u)
-        elif command -v lsof >/dev/null 2>&1 || [ -x /usr/sbin/lsof ]; then
-          scarf_lsof=$(command -v lsof 2>/dev/null || echo /usr/sbin/lsof)
-          set --
-          for f in "$scarf_db" "$scarf_db-wal" "$scarf_db-shm"; do [ -e "$f" ] && set -- "$@" "$f"; done
-          if [ $# -gt 0 ]; then scarf_found=$("$scarf_lsof" -t -- "$@" 2>/dev/null | sort -u); fi
-        else
-          holders=UNKNOWN
-        fi
-        if [ "$holders" != UNKNOWN ]; then
-          for p in $scarf_found; do [ "$p" = "$scarf_own" ] || holders="$holders $p"; done
-        fi
-        """
+    /// Home-relative database paths to look for holders of at inspect time:
+    /// the archive's own list, or state.db for a v1 archive (whose full list
+    /// is only read when the restore runs).
+    static func databasePathsForProbe(_ manifest: BackupManifest) -> [String] {
+        let listed = manifest.databases?.entries.map(\.path) ?? []
+        return listed.contains("state.db") ? listed : ["state.db"] + listed
     }
 
-    /// Reads `ls -l /proc/[0-9]*/fd` and prints the PID of every directory
-    /// holding a link to `$SCARF_DB`, `-wal` or `-shm` (a ` (deleted)`
-    /// suffix still matches). Kept separate so the tests can feed it a
-    /// captured `/proc` listing on a Mac.
-    static let procFDAwkProgram = #"""
-    /^\/proc\/[0-9]+\/fd:$/ { pid = $0; sub(/^\/proc\//, "", pid); sub(/\/fd:$/, "", pid); next }
-    {
-      i = index($0, " -> ")
-      if (i > 0) {
-        t = substr($0, i + 4)
-        sub(/ \(deleted\)$/, "", t)
-        db = ENVIRON["SCARF_DB"]
-        if (t == db || t == db "-wal" || t == db "-shm") print pid
-      }
+    static func absolute(_ relative: [String], in home: String) -> [String] {
+        relative.map { home + "/" + $0 }
     }
-    """#
 
     /// The PID Scarf itself runs as when the target is this Mac. Scarf's
     /// own read-only connection to the local state.db is not a Hermes
@@ -1050,10 +1025,10 @@ public final class RemoteRestoreService: @unchecked Sendable {
         return pids.isEmpty ? .clear : .held(pids)
     }
 
-    /// Look for processes holding the target's state.db open. Never throws:
-    /// a probe that could not run is `.unknown`.
-    func probeStateDBHolders(transport: any ServerTransport, hermesHome: String) async -> DBHolderProbe {
-        let script = Self.holderScanScript(hermesHome: hermesHome, ownPID: ownPIDIfLocal(transport))
+    /// Look for processes holding any of `databases` open. Never throws: a
+    /// probe that could not run is `.unknown`.
+    func probeDatabaseHolders(transport: any ServerTransport, databases: [String]) async -> DBHolderProbe {
+        let script = HermesDatabaseScripts.holderScan(databases: databases, ownPID: ownPIDIfLocal(transport))
             + "\necho \"SCARF_HOLDERS:$holders\""
         do {
             let result = try await transport.asyncRunProcess(
@@ -1069,40 +1044,45 @@ public final class RemoteRestoreService: @unchecked Sendable {
         }
     }
 
-    /// Throw unless nothing holds the target's state.db open.
-    private func requireStateDBUnheld(transport: any ServerTransport, hermesHome: String) async throws {
-        switch await probeStateDBHolders(transport: transport, hermesHome: hermesHome) {
+    /// Throw unless nothing holds any of `databases` open.
+    private func requireDatabasesUnheld(transport: any ServerTransport, databases: [String]) async throws {
+        switch await probeDatabaseHolders(transport: transport, databases: databases) {
         case .clear: return
         case .held(let pids): throw RestoreError.hermesRunning(pids: pids, homeRestored: false)
         case .unknown(let why): throw RestoreError.cannotConfirmHermesStopped(why, homeRestored: false)
         }
     }
 
-    /// Publish the staged snapshot over the target's state.db, in ONE host
-    /// command: re-check that nothing holds the database, confirm the staged
-    /// file is really there, make it owner-only (Hermes treats state.db as a
-    /// secret, `hermes_cli/backup.py:134`), remove the old
-    /// `-wal`/`-shm`/`-journal` (they describe the database being replaced;
-    /// SQLite would replay them over the new one), then rename it into
-    /// place. The check and the replacement share a shell, so nothing can
-    /// open the database in between unseen. Mirrors Hermes's own
-    /// unlink+move restore (`hermes_cli/backup.py:536-559` @ v2026.9.24).
-    private func publishStateDB(
+    /// Publish every staged snapshot over its database, in ONE host
+    /// command: re-check that nothing holds any of them, confirm every
+    /// staged file is really there, then for each: make it owner-only
+    /// (Hermes treats state.db as a secret, `hermes_cli/backup.py:134`),
+    /// remove the old `-wal`/`-shm`/`-journal` (they describe the database
+    /// being replaced; SQLite would replay them over the new one), and
+    /// rename it into place. The check and the replacements share a shell,
+    /// so nothing can open a database in between unseen. Mirrors Hermes's
+    /// own unlink+move restore (`hermes_cli/backup.py:536-559` @ v2026.9.24).
+    private func publishDatabases(
         transport: any ServerTransport,
-        staged: String,
+        staging: String,
+        paths: [String],
         hermesHome: String
     ) async throws {
-        let db = Self.shellQuote(hermesHome + "/state.db")
-        let stagedQ = Self.shellQuote(staged)
-        let lines = [
-            Self.holderScanScript(hermesHome: hermesHome, ownPID: ownPIDIfLocal(transport)),
+        var lines = [
+            HermesDatabaseScripts.holderScan(
+                databases: Self.absolute(paths, in: hermesHome), ownPID: ownPIDIfLocal(transport)),
             "if [ -n \"$holders\" ]; then echo \"SCARF_HOLDERS:$holders\"; exit 3; fi",
-            "[ -f \(stagedQ) ] || { echo 'the staged snapshot is missing' >&2; exit 1; }",
-            "chmod 600 \(stagedQ) || exit 1",
-            "rm -f \(db)-wal \(db)-shm \(db)-journal || exit 1",
-            "mv -f \(stagedQ) \(db) || exit 1",
-            "echo SCARF_GUARDED_OK",
         ]
+        for path in paths {
+            lines.append("[ -f \(Self.shellQuote(staging + "/" + path)) ] || { echo \(Self.shellQuote("the staged snapshot of " + path + " is missing")) >&2; exit 1; }")
+        }
+        for path in paths {
+            let staged = Self.shellQuote(staging + "/" + path)
+            let db = Self.shellQuote(hermesHome + "/" + path)
+            let dir = Self.shellQuote((hermesHome + "/" + path as NSString).deletingLastPathComponent)
+            lines.append("mkdir -p \(dir) && chmod 600 \(staged) && rm -f \(db)-wal \(db)-shm \(db)-journal && mv -f \(staged) \(db) || exit 1")
+        }
+        lines.append("echo SCARF_GUARDED_OK")
         let result: ProcessResult
         do {
             result = try await transport.asyncRunProcess(
@@ -1112,7 +1092,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
                 timeout: Self.holderProbeTimeout
             )
         } catch {
-            throw RestoreError.remoteCommandFailed("replacing state.db failed: \(error.localizedDescription)")
+            throw RestoreError.remoteCommandFailed("replacing the databases failed: \(error.localizedDescription)")
         }
         if result.exitCode == 0, result.stdoutString.contains("SCARF_GUARDED_OK") { return }
         switch Self.parseHolderOutput(result.stdoutString) {
@@ -1123,43 +1103,86 @@ public final class RemoteRestoreService: @unchecked Sendable {
         case .clear?, nil:
             let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
             throw RestoreError.remoteCommandFailed(
-                "replacing state.db failed (exit \(result.exitCode))" + (why.isEmpty ? "" : ": \(why)"))
+                "replacing the databases failed (exit \(result.exitCode))" + (why.isEmpty ? "" : ": \(why)"))
         }
     }
 
-    /// Lift `member` (the database) out of a v1 home tarball on the Mac and
-    /// re-pack it as a one-member `state.db` tarball, so a v1 restore
-    /// publishes its database through the same guarded path as v2. `nil`
-    /// when the archive has no database. Bounded (C10); Mac-only, like the
-    /// rest of restore.
-    static func liftLegacyStateDB(from tarball: URL, member: String, workDir: URL) async throws -> URL? {
+    /// Lift every `*.db` out of a v1 home tarball on the Mac and re-pack
+    /// them, at their home-relative paths, as one database tarball, so a v1
+    /// restore publishes its databases through the same guarded path as v2.
+    /// v1 archived databases other than state.db live, WITH their `-wal`
+    /// when there was one; such a WAL is folded into this scratch copy (a
+    /// checkpoint of Scarf's own temporary file on the Mac, never of a
+    /// Hermes database) so its committed frames aren't lost, and never
+    /// shipped. `nil` when the archive has no database. Bounded (C10);
+    /// Mac-only, like the rest of restore.
+    static func liftLegacyDatabases(from tarball: URL, leaf: String, workDir: URL) async throws -> (tarball: URL, paths: [String])? {
         #if os(iOS)
         return nil
         #else
-        let stage = workDir.appendingPathComponent("legacy-state", isDirectory: true)
+        let (listStatus, listing) = try await runLocalTar(["-tzf", tarball.path], capture: true)
+        guard listStatus == 0 else {
+            throw RestoreError.archiveUnreadable("couldn't list the backup's Hermes home (tar exit \(listStatus))")
+        }
+        let members = listing.split(whereSeparator: \.isNewline).map(String.init)
+        let prefix = leaf + "/"
+        let databases = members.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".db") && $0.count > prefix.count }
+        guard !databases.isEmpty else { return nil }
+        let wals = Set(members.filter { $0.hasSuffix(".db-wal") })
+
+        let stage = workDir.appendingPathComponent("legacy-databases", isDirectory: true)
         try? FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-        let (status, output) = try await runLocalTar(["-xzf", tarball.path, "-C", stage.path, member])
-        let extracted = stage.appendingPathComponent(member)
-        guard status == 0, FileManager.default.fileExists(atPath: extracted.path) else {
-            // bsdtar and GNU tar both say "Not found in archive" for a
-            // member that isn't there: an archive without a database.
-            if output.localizedCaseInsensitiveContains("not found in archive") { return nil }
-            throw RestoreError.archiveUnreadable("couldn't read state.db from the backup (tar exit \(status)): \(output)")
+        let wanted = databases + databases.map { $0 + "-wal" }.filter(wals.contains)
+        let (status, output) = try await runLocalTar(["-xzf", tarball.path, "-C", stage.path] + wanted)
+        guard status == 0 else {
+            throw RestoreError.archiveUnreadable("couldn't read the databases from the backup (tar exit \(status)): \(output)")
         }
-        let repacked = workDir.appendingPathComponent("legacy-state.tar.gz")
-        let (packStatus, packOutput) = try await runLocalTar(
-            ["-czf", repacked.path, "-C", extracted.deletingLastPathComponent().path, "state.db"])
+        for db in databases where wals.contains(db + "-wal") {
+            let copy = stage.appendingPathComponent(db).path
+            try await foldLocalWAL(copy)
+        }
+        let root = stage.appendingPathComponent(leaf)
+        let paths = databases.map { String($0.dropFirst(prefix.count)) }
+        let repacked = workDir.appendingPathComponent("legacy-databases.tar.gz")
+        let (packStatus, packOutput) = try await runLocalTar(["-czf", repacked.path, "-C", root.path] + paths)
         guard packStatus == 0 else {
-            throw RestoreError.localIO("couldn't repack state.db from the backup (tar exit \(packStatus)): \(packOutput)")
+            throw RestoreError.localIO("couldn't repack the databases from the backup (tar exit \(packStatus)): \(packOutput)")
         }
-        return repacked
+        return (repacked, paths)
         #endif
     }
 
     #if !os(iOS)
+    /// Checkpoint a v1 archive's WAL into Scarf's own scratch copy of the
+    /// database (in the restore's temp dir on this Mac) and delete the WAL.
+    private static func foldLocalWAL(_ path: String) async throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        proc.arguments = [path, "PRAGMA wal_checkpoint(TRUNCATE);"]
+        let errPipe = Pipe(), outPipe = Pipe()
+        proc.standardError = errPipe
+        proc.standardOutput = outPipe
+        do { try proc.run() } catch {
+            for pipe in [errPipe, outPipe] {
+                try? pipe.fileHandleForReading.close()
+                try? pipe.fileHandleForWriting.close()
+            }
+            throw RestoreError.localIO("Couldn't launch sqlite3: \(error.localizedDescription)")
+        }
+        let (exited, drained) = await proc.waitDrainingAsync(timeout: unzipTimeout, pipes: [errPipe, outPipe])
+        try? errPipe.fileHandleForWriting.close()
+        try? outPipe.fileHandleForWriting.close()
+        guard exited, proc.terminationStatus == 0 else {
+            throw RestoreError.archiveUnreadable(
+                "couldn't fold the archived WAL into \((path as NSString).lastPathComponent): \(outputTail(drained))")
+        }
+        for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+    }
+
     /// `/usr/bin/tar` on the Mac, bounded by ``unzipTimeout`` (it reads the
-    /// same multi-GB archive) and drained concurrently.
-    private static func runLocalTar(_ args: [String]) async throws -> (Int32, String) {
+    /// same multi-GB archive) and drained concurrently. `capture` returns
+    /// stdout whole (a listing); otherwise the output tail.
+    private static func runLocalTar(_ args: [String], capture: Bool = false) async throws -> (Int32, String) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
         proc.arguments = args
@@ -1184,6 +1207,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
         try? outPipe.fileHandleForWriting.close()
         guard exited else {
             throw RestoreError.archiveUnreadable("tar did not finish within \(Int(unzipTimeout))s and was stopped")
+        }
+        if capture {
+            return (proc.terminationStatus, String(decoding: drained.count > 1 ? drained[1] : Data(), as: UTF8.self))
         }
         return (proc.terminationStatus, outputTail(drained))
     }

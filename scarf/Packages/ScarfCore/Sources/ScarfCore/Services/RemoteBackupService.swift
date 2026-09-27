@@ -253,51 +253,60 @@ public final class RemoteBackupService: @unchecked Sendable {
         try Task.checkCancellation()
         progress(.preflight)
 
-        // Stage 1: a consistent snapshot of state.db, archived as its own
-        // tarball. This used to run `PRAGMA wal_checkpoint(TRUNCATE)` on
-        // the live database: a write to state.db (charter C3), and not a
-        // reliable one either. Under a busy gateway it checkpointed only
-        // partially, still exited 0, and the frames left in the (excluded)
-        // WAL were missing from the archive. The snapshot copies every
-        // committed page, WAL frames included, through a connection that
-        // cannot write the source (see ``snapshotScript(stateDB:snapshotDir:)``).
-        // Hermes's own `hermes backup` snapshots the same way
-        // (`hermes_cli/backup.py:101-104` @ v2026.9.24). The path comes from
-        // the already-expanded hermesHomePath, never `context.paths.stateDB`,
-        // which can still carry a literal `~`.
+        // Stage 1: consistent snapshots of every `*.db` in the home
+        // (state.db, each profile's state.db, kanban.db, response_store.db,
+        // cron/executions.db, …), archived as their own tarball. This used
+        // to run `PRAGMA wal_checkpoint(TRUNCATE)` on the live state.db: a
+        // write to state.db (charter C3), and not a reliable one either.
+        // Under a busy gateway it checkpointed only partially, still exited
+        // 0, and the frames left in the (excluded) WAL were missing from
+        // the archive; every other database was tarred live. Each snapshot
+        // copies every committed page, WAL frames included, through a
+        // connection that cannot write the source
+        // (``HermesDatabaseScripts/snapshotFunction``), which is how
+        // `hermes backup` snapshots every `*.db`
+        // (`hermes_cli/backup.py:101-104`, `:590-610` @ v2026.9.24). The
+        // paths come from the already-expanded hermesHomePath, never
+        // `context.paths`, which can still carry a literal `~`.
         //
-        // It always runs, whatever preflight saw: the script itself decides
-        // whether there is a state.db, so a probe that missed it can't
-        // produce a "successful" backup with no sessions in it.
+        // It always runs, whatever preflight saw: the script finds the
+        // databases itself, so a probe that missed one can't produce a
+        // "successful" backup without it.
         let hermesLeaf = (preflight.hermesHomePath as NSString).lastPathComponent
-        var stateEntry: BackupManifest.StateDBSnapshot?
+        var databases: BackupManifest.DatabaseSnapshots?
         try Task.checkCancellation()
         progress(.snapshottingDB)
         guard !preflight.snapshotUnavailable else {
             throw BackupError.snapshotFailed(
                 "neither sqlite3 nor python3 is available on the server. Install sqlite3 there and back up again.")
         }
-        let snapshotDir = preflight.hermesHomePath + "/" + Self.snapshotDirPrefix + UUID().uuidString
+        let snapshotDir = preflight.hermesHomePath + "/" + HermesDatabaseScripts.snapshotDirPrefix + UUID().uuidString
         do {
-            if let method = try await takeStateSnapshot(
+            let report = try await takeDatabaseSnapshots(
                 transport: transport,
-                stateDB: preflight.hermesHomePath + "/state.db",
-                snapshotDir: snapshotDir
-            ) {
+                home: preflight.hermesHomePath,
+                snapshotDir: snapshotDir,
+                options: options
+            )
+            if !report.ok.isEmpty {
                 try Task.checkCancellation()
-                let stateTarball = workDir.appendingPathComponent(BackupArchiveLayout.stateDBTarballPath)
-                let stateHash = try await streamToFile(
+                let tarball = workDir.appendingPathComponent(BackupArchiveLayout.databasesTarballPath)
+                let hash = try await streamToFile(
                     transport: transport,
-                    command: Self.tarCommand(workDir: snapshotDir, target: "state.db", excludes: []),
-                    destination: stateTarball
+                    command: Self.tarCommand(workDir: snapshotDir, target: ".", excludes: []),
+                    destination: tarball
                 ) { _ in }
-                let stateSize = (try? FileManager.default.attributesOfItem(atPath: stateTarball.path)[.size] as? Int64) ?? 0
-                stateEntry = BackupManifest.StateDBSnapshot(
-                    tarballPath: BackupArchiveLayout.stateDBTarballPath,
-                    tarballSize: stateSize,
-                    tarballSHA256: stateHash,
-                    method: method
+                let size = (try? FileManager.default.attributesOfItem(atPath: tarball.path)[.size] as? Int64) ?? 0
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: BackupArchiveLayout.databasesTarballPath,
+                    tarballSize: size,
+                    tarballSHA256: hash,
+                    entries: report.ok.map { .init(path: $0.path, method: $0.method) },
+                    skipped: report.failed
                 )
+            } else if !report.failed.isEmpty {
+                databases = BackupManifest.DatabaseSnapshots(
+                    tarballPath: "", tarballSize: 0, tarballSHA256: "", entries: [], skipped: report.failed)
             }
         } catch {
             await removeSnapshotDir(transport: transport, snapshotDir: snapshotDir)
@@ -387,7 +396,7 @@ public final class RemoteBackupService: @unchecked Sendable {
                 // was captured is recorded, truthfully, in `stateDB`.
                 checkpointedWAL: false
             ),
-            stateDB: stateEntry
+            databases: databases
         )
         let manifestData: Data
         do {
@@ -486,40 +495,44 @@ public final class RemoteBackupService: @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    /// Always-on Hermes-tree exclusions, regardless of options: the live
-    /// `state.db` (archived separately from a read-only snapshot) and its
-    /// SQLite sidecars, Scarf's own snapshot and restore staging
-    /// directories, and runtime state files (`gateway_state.json`).
+    /// Always-on Hermes-tree exclusions, regardless of options: every live
+    /// `*.db` (archived separately from consistent snapshots) and every
+    /// SQLite sidecar, Scarf's own snapshot and restore staging
+    /// directories, and runtime state files (`gateway_state.json`). The
+    /// `*.db` patterns are unanchored, so they reach `profiles/<name>/`,
+    /// `cron/` and every other subdirectory under both GNU tar and bsdtar.
     ///
     /// `leaf` is the home's own directory name: `.hermes` for a default
     /// install, something else for a server whose Hermes home was
     /// configured elsewhere.
     static func hermesExcludes(leaf: String, options: BackupManifest.Options) -> [String] {
         var excludes: [String] = [
-            "\(leaf)/state.db",
-            "\(leaf)/state.db-wal",
-            "\(leaf)/state.db-shm",
-            "\(leaf)/state.db-journal",
-            "\(leaf)/\(snapshotDirPrefix)*",
-            "\(leaf)/\(RemoteRestoreService.stagingDirPrefix)*",
+            "*.db",
+            "*.db-wal",
+            "*.db-shm",
+            "*.db-journal",
+            "\(leaf)/\(HermesDatabaseScripts.snapshotDirPrefix)*",
+            "\(leaf)/\(HermesDatabaseScripts.stagingDirPrefix)*",
             "\(leaf)/gateway_state.json",
         ]
+        excludes += prunedDirs(options: options).map { "\(leaf)/\($0)" }
         if !options.includeAuth { excludes.append("\(leaf)/auth.json") }
-        if !options.includeMcpTokens { excludes.append("\(leaf)/mcp-tokens") }
-        if !options.includeLogs { excludes.append("\(leaf)/logs") }
         return excludes
     }
 
-    // MARK: - state.db snapshot
+    /// Home-relative directories the backup leaves out entirely, so their
+    /// databases (if any) are not snapshotted either.
+    static func prunedDirs(options: BackupManifest.Options) -> [String] {
+        var dirs: [String] = []
+        if !options.includeMcpTokens { dirs.append("mcp-tokens") }
+        if !options.includeLogs { dirs.append("logs") }
+        return dirs
+    }
 
-    /// Prefix of the directory the snapshot is written into, inside the
-    /// Hermes home: the same filesystem as the database, and a directory
-    /// the Hermes user can always write. `/tmp` is often a small tmpfs
-    /// that a multi-GB state.db won't fit in.
-    static let snapshotDirPrefix = ".scarf-backup-snapshot-"
+    // MARK: - Database snapshots
 
-    /// Ceiling on the snapshot copy (charter C10). Generous: it copies the
-    /// whole database, which can be several GB on a long-lived host.
+    /// Ceiling on the snapshot pass (charter C10). Generous: it copies every
+    /// database, and state.db alone can be several GB on a long-lived host.
     static let snapshotTimeout: TimeInterval = 900
 
     /// Prints one `SCARF_TOOL:<name>` line per snapshot input that is
@@ -542,105 +555,45 @@ public final class RemoteBackupService: @unchecked Sendable {
         })
     }
 
-    /// The host-side snapshot script: a consistent copy of `stateDB` in
-    /// `<snapshotDir>/state.db`, taken so that nothing can write to the
-    /// source. Tried in order, first success wins:
-    ///
-    /// 1. `sqlite3 -readonly … VACUUM INTO` (SQLite 3.27+): one read
-    ///    transaction, so a busy writer can't make it start over.
-    /// 2. `sqlite3 -readonly … .backup`, for an older sqlite3.
-    /// 3. The same `.backup` on a READWRITE connection with
-    ///    `PRAGMA query_only=1` and `.dbconfig no_ckpt_on_close on`, for a
-    ///    sqlite3 that can't open a WAL database read-only when its `-wal`
-    ///    and `-shm` are gone (a stopped Hermes; Apple's `/usr/bin/sqlite3`
-    ///    is one). Only after the CLI proves on `:memory:` that it honours
-    ///    `no_ckpt_on_close`, exactly as `RemoteSQLiteBackend`'s relaxed
-    ///    reads do: a writable connection that is the last to close would
-    ///    otherwise checkpoint the WAL into state.db (charter C3).
-    /// 4. `python3`'s `sqlite3.Connection.backup()` (one step) from a
-    ///    `mode=ro` URI. Not on macOS, where `/usr/bin/python3` can be the
-    ///    Command Line Tools installer stub.
-    ///
-    /// Prints `SCARF_SNAPSHOT_OK:<tool>` on success,
-    /// `SCARF_SNAPSHOT_ABSENT` when there is no `state.db` to copy, and
-    /// exits non-zero otherwise.
-    static func snapshotScript(stateDB: String, snapshotDir: String) -> String {
-        let db = shellQuote(stateDB)
-        let destPath = snapshotDir + "/state.db"
-        let dest = shellQuote(destPath)
-        // SQL string literal: `'` doubled. Passed through bash single quotes.
-        let vacuum = shellQuote("VACUUM INTO '" + destPath.replacingOccurrences(of: "'", with: "''") + "'")
-        // `.backup` takes a dot-command argument: double-quoted for the
-        // sqlite3 shell, which reads `\` and `"` escapes inside it.
-        let dotBackup = shellQuote(".backup \"" + destPath
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"") + "\"")
-        let python = [
-            "import sqlite3,sys,urllib.request as u",
-            "s=sqlite3.connect('file:'+u.pathname2url(sys.argv[1])+'?mode=ro',uri=True,timeout=10)",
-            "d=sqlite3.connect(sys.argv[2])",
-            "s.backup(d)",
-            "d.close()",
-            "s.close()",
-        ].joined(separator: "\n")
-        let relaxed = "sqlite3 -cmd '.output /dev/null' -cmd '.dbconfig no_ckpt_on_close on' -cmd '.output stdout' -cmd 'PRAGMA query_only=1' -cmd '.timeout 10000'"
-        return [
-            "[ -f \(db) ] || { echo SCARF_SNAPSHOT_ABSENT; exit 0; }",
-            "mkdir -p \(shellQuote(snapshotDir)) || exit 1",
-            "if command -v sqlite3 >/dev/null 2>&1; then",
-            "  if sqlite3 -readonly -cmd '.timeout 10000' \(db) \(vacuum); then echo SCARF_SNAPSHOT_OK:sqlite3; exit 0; fi",
-            "  rm -f \(dest)",
-            "  if sqlite3 -readonly -cmd '.timeout 10000' \(db) \(dotBackup); then echo SCARF_SNAPSHOT_OK:sqlite3; exit 0; fi",
-            "  rm -f \(dest)",
-            "  case \"$(sqlite3 :memory: '.dbconfig no_ckpt_on_close on' 2>/dev/null)\" in",
-            "    *'no_ckpt_on_close on'*)",
-            "      if \(relaxed) \(db) \(dotBackup); then echo SCARF_SNAPSHOT_OK:sqlite3-query-only; exit 0; fi",
-            "      rm -f \(dest) ;;",
-            "  esac",
-            "fi",
-            "if [ \"$(uname -s 2>/dev/null)\" != Darwin ] && command -v python3 >/dev/null 2>&1 && python3 -c \(shellQuote(python)) \(db) \(dest); then echo SCARF_SNAPSHOT_OK:python3; exit 0; fi",
-            "rm -f \(dest)",
-            "exit 1",
-        ].joined(separator: "\n")
-    }
-
-    /// Run ``snapshotScript(stateDB:snapshotDir:)`` and return the tool
-    /// that produced the snapshot, or `nil` when the host has no state.db.
-    /// Throws ``BackupError/snapshotFailed(_:)`` with the host's own
-    /// explanation when no method succeeded.
-    private func takeStateSnapshot(
+    /// Snapshot every database under `home` into `snapshotDir`. The root
+    /// `state.db` is the one the backup cannot do without: if it exists and
+    /// could not be snapshotted, this throws. Any other database that could
+    /// not be snapshotted is reported back (and recorded in the manifest as
+    /// skipped), as `hermes backup` reports its own
+    /// (`hermes_cli/backup.py:723`).
+    private func takeDatabaseSnapshots(
         transport: any ServerTransport,
-        stateDB: String,
-        snapshotDir: String
-    ) async throws -> String? {
+        home: String,
+        snapshotDir: String,
+        options: BackupManifest.Options
+    ) async throws -> HermesDatabaseScripts.SnapshotReport {
         let result: ProcessResult
         do {
             result = try await transport.asyncRunProcess(
                 executable: "/bin/bash",
-                args: ["-lc", Self.snapshotScript(stateDB: stateDB, snapshotDir: snapshotDir)],
+                args: ["-lc", HermesDatabaseScripts.snapshotAll(
+                    home: home, snapshotDir: snapshotDir, prunedDirs: Self.prunedDirs(options: options))],
                 stdin: nil,
                 timeout: Self.snapshotTimeout
             )
         } catch {
             throw BackupError.snapshotFailed(error.localizedDescription)
         }
-        if result.exitCode == 0,
-           result.stdoutString.split(whereSeparator: \.isNewline).contains(where: { $0 == "SCARF_SNAPSHOT_ABSENT" }) {
-            return nil
-        }
-        guard result.exitCode == 0,
-              let marker = result.stdoutString
-                .split(whereSeparator: \.isNewline)
-                .last(where: { $0.hasPrefix("SCARF_SNAPSHOT_OK:") }) else {
-            let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let report = HermesDatabaseScripts.parseSnapshotReport(result.stdoutString)
+        let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.exitCode == 0, report.finished else {
             throw BackupError.snapshotFailed(why.isEmpty ? "exit \(result.exitCode)" : why)
         }
-        return String(marker.dropFirst("SCARF_SNAPSHOT_OK:".count))
+        if report.failed.contains("state.db") {
+            throw BackupError.snapshotFailed(why.isEmpty ? "no method could read state.db" : why)
+        }
+        return report
     }
 
     /// Best-effort removal of the snapshot directory. A leftover (a run
     /// killed mid-way) is excluded from later backups by
-    /// ``hermesExcludes(leaf:options:)``.
+    /// ``hermesExcludes(leaf:options:)`` and swept by the next run's
+    /// ``HermesDatabaseScripts/leftoverCleanup(home:)``.
     private func removeSnapshotDir(transport: any ServerTransport, snapshotDir: String) async {
         _ = try? await transport.asyncRunProcess(
             executable: "/bin/bash",
