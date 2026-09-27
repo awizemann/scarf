@@ -399,7 +399,8 @@ final class SessionsViewModel {
         // absence of project labels is a cosmetic degradation, not a
         // data-loss problem (matches the iOS Dashboard pattern).
         let ctx = context
-        let bundle: (names: [String: String], projects: [ProjectEntry], dbSize: String) = await Task.detached {
+        // A thread of its own: every read here is a transport call (C10).
+        let bundle: (names: [String: String], projects: [ProjectEntry], dbSize: String) = await OffPool.run {
             let attribution = SessionAttributionService(context: ctx)
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
             let pathToName = Dictionary(
@@ -422,7 +423,7 @@ final class SessionsViewModel {
                 dbSize = "unknown"
             }
             return (names: names, projects: registry.projects, dbSize: dbSize)
-        }.value
+        }
         // A rotated compression chain is listed under its tip id; carry the
         // root's project over so the row keeps its label and filter.
         sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: sessions)
@@ -922,9 +923,9 @@ final class SessionsViewModel {
     }
 
     /// Pipes the export out of the CLI and writes it to `url` on this Mac.
-    /// Detached because a remote export is an SSH round-trip streaming the
-    /// whole payload — running it inline would block the main actor for its
-    /// full duration.
+    /// Off the main actor because a remote export is an SSH round-trip
+    /// streaming the whole payload — running it inline would block the main
+    /// actor for its full duration.
     func performExport(to url: URL, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) {
         // `-` is the CLI's "write to stdout" sentinel — only valid for
         // stdout-capable formats (jsonl/trace).
@@ -932,19 +933,23 @@ final class SessionsViewModel {
             output: "-", sessionId: sessionId, format: format, redact: redact,
             traceNoRedactAvailable: traceNoRedactAvailable
         )
-        Task.detached { [sessionExportRunner, context, args, url, format, self] in
-            let result = sessionExportRunner(context, args)
-            let outcome = Self.writeExport(result: result, to: url, format: format)
-            await MainActor.run {
-                self.exportMessage = outcome.message
-                guard outcome.succeeded else { return }
-                let banner = outcome.message
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(5))
-                    // Only clear our own banner — a newer export may
-                    // have replaced it while we slept.
-                    if self?.exportMessage == banner { self?.exportMessage = nil }
-                }
+        let runner = sessionExportRunner
+        let ctx = context
+        Task { [weak self] in
+            // The CLI run and the file write block for the whole transfer:
+            // a thread of their own, not a cooperative-pool one (C10).
+            let outcome = await OffPool.run {
+                Self.writeExport(result: runner(ctx, args), to: url, format: format)
+            }
+            guard let self else { return }
+            self.exportMessage = outcome.message
+            guard outcome.succeeded else { return }
+            let banner = outcome.message
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(5))
+                // Only clear our own banner — a newer export may
+                // have replaced it while we slept.
+                if self?.exportMessage == banner { self?.exportMessage = nil }
             }
         }
     }
@@ -957,21 +962,23 @@ final class SessionsViewModel {
             output: url.path, sessionId: sessionId, format: format, redact: redact,
             traceNoRedactAvailable: traceNoRedactAvailable
         )
-        Task.detached { [sessionExportRunner, context, args, url, self] in
-            let result = sessionExportRunner(context, args)
+        let runner = sessionExportRunner
+        let ctx = context
+        Task { [weak self] in
+            // A CLI run for the whole export: a thread of its own (C10).
+            let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
-            await MainActor.run {
-                if outcome.succeeded {
-                    let banner = "Exported to \(url.path)"
-                    self.exportMessage = banner
-                    Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: .seconds(5))
-                        if self?.exportMessage == banner { self?.exportMessage = nil }
-                    }
-                } else {
-                    self.exportMessage = outcome.detail.map { "Export failed: \($0)" }
-                        ?? "Export failed (exit \(result.exitCode))."
+            guard let self else { return }
+            if outcome.succeeded {
+                let banner = "Exported to \(url.path)"
+                self.exportMessage = banner
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    if self?.exportMessage == banner { self?.exportMessage = nil }
                 }
+            } else {
+                self.exportMessage = outcome.detail.map { "Export failed: \($0)" }
+                    ?? "Export failed (exit \(result.exitCode))."
             }
         }
     }

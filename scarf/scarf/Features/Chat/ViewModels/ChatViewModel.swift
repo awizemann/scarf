@@ -42,7 +42,9 @@ final class ChatViewModel {
         // context that's a SSH `test -e` round-trip on every streaming
         // chunk, which manifests as the chat screen flashing or going
         // blank during prompts.
-        Task.detached(priority: .userInitiated) { [context] in
+        // The probe is a transport call (an SSH `test -e` on a remote), so
+        // it gets a thread of its own, not a cooperative-pool one (C10).
+        Task { [weak self, context] in
             // #100 — use the PATH-aware probe, not a raw fileExists. For a
             // remote server with no binaryHint, `paths.hermesBinary` is the
             // bare name "hermes"; `fileExists` would `test -e hermes` in the
@@ -50,10 +52,8 @@ final class ChatViewModel {
             // resolves it and the ACP login-shell launch works fine. The
             // helper presumes bare names resolvable and defers the real
             // check to launch (whose failure path surfaces a clear hint).
-            let exists = context.hermesBinaryProbablyResolvable()
-            await MainActor.run { [weak self] in
-                self?.hermesBinaryExists = exists
-            }
+            let exists = await OffPool.run { context.hermesBinaryProbablyResolvable() }
+            self?.hermesBinaryExists = exists
         }
         // Cross-feature seam (t-5f1d9008): react when the Sessions tab
         // deletes the session this window's chat is attached to. Same
@@ -652,13 +652,11 @@ final class ChatViewModel {
     /// debounced `scheduleCredentialPreflightRefresh()`, never this directly.
     func refreshCredentialPreflight() {
         let svc = fileService
-        Task.detached { [weak self] in
+        Task { [weak self] in
             // `hasAnyAICredential` reads over the transport and, under a named
             // profile, may probe the host version — a thread of its own (C10).
             let missing = await OffPool.run { !svc.hasAnyAICredential() }
-            await MainActor.run { [weak self] in
-                self?.missingCredentials = missing
-            }
+            self?.missingCredentials = missing
         }
     }
 
@@ -701,11 +699,13 @@ final class ChatViewModel {
         let svc = fileService
         let ctx = context
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            let config = svc.loadConfig()
+        // Each read (config, then the provider roster) on a thread of its
+        // own; the decisions and the publish on the main actor (C10).
+        Task { [weak self] in
+            let config = await OffPool.run { svc.loadConfig() }
             var mismatch = ModelPreflight.detectMismatch(config, capabilities: capabilities)
             if mismatch != nil {
-                var known = await MainActor.run { [weak self] in self?.knownProviderIDs }
+                var known = self?.knownProviderIDs
                 if known == nil {
                     // Only trust the roster when the models.dev catalog
                     // actually loaded — an overlay-only result (fresh
@@ -714,11 +714,13 @@ final class ChatViewModel {
                     // Empty set = "catalog unavailable", cached so the
                     // (possibly SSH-backed) read isn't retried every
                     // refresh.
-                    let infos = ModelCatalogService(context: ctx).loadProviders(capabilities: capabilities)
-                    let loaded = infos.contains(where: { !$0.isOverlay })
-                        ? Set(infos.map(\.providerID))
-                        : Set()
-                    await MainActor.run { [weak self] in self?.knownProviderIDs = loaded }
+                    let loaded = await OffPool.run { () -> Set<String> in
+                        let infos = ModelCatalogService(context: ctx).loadProviders(capabilities: capabilities)
+                        return infos.contains(where: { !$0.isOverlay })
+                            ? Set(infos.map(\.providerID))
+                            : Set()
+                    }
+                    self?.knownProviderIDs = loaded
                     known = loaded
                 }
                 if let known, !known.isEmpty {
@@ -733,13 +735,11 @@ final class ChatViewModel {
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
-            await MainActor.run { [weak self] in
-                self?.modelProviderMismatch = resolvedMismatch
-                self?.llamaCppBaseURLIgnored = llamaIgnored
-                self?.approvalMode = mode
-                self?.voiceChatModeRaw = voiceChatMode
-                self?.voiceTTSProviderRaw = ttsProvider
-            }
+            self?.modelProviderMismatch = resolvedMismatch
+            self?.llamaCppBaseURLIgnored = llamaIgnored
+            self?.approvalMode = mode
+            self?.voiceChatModeRaw = voiceChatMode
+            self?.voiceTTSProviderRaw = ttsProvider
         }
     }
 
@@ -752,28 +752,30 @@ final class ChatViewModel {
     func alignProviderToModelPrefix(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // We pass the bare model so config.yaml ends up with a
-            // clean (provider-prefix-free) model name alongside the
-            // matching provider — matches what `confirmModelPreflight`
-            // writes for a fresh setup.
-            //
-            // Routed through the write plan, NOT `setModelAndProvider`
-            // (t-9657430b): aligning is a provider SWITCH, so the
-            // clear-on-switch rule applies — switching away from e.g.
-            // provider=ollama must scrub the stale local-managed keys
-            // (model.base_url/api_key/api_mode/context_length) that
-            // would otherwise redirect the new provider (GH #27132
-            // class). Config is re-read so already-unset keys are
-            // skipped: a never-local user keeps the classic two-op
-            // write (T4 parity).
-            let ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: mismatch.bareModel,
-                provider: mismatch.prefixProvider,
-                current: svc.loadConfig(),
-                capabilities: capabilities
-            )
-            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // We pass the bare model so config.yaml ends up with a
+                // clean (provider-prefix-free) model name alongside the
+                // matching provider — matches what `confirmModelPreflight`
+                // writes for a fresh setup.
+                //
+                // Routed through the write plan, NOT `setModelAndProvider`
+                // (t-9657430b): aligning is a provider SWITCH, so the
+                // clear-on-switch rule applies — switching away from e.g.
+                // provider=ollama must scrub the stale local-managed keys
+                // (model.base_url/api_key/api_mode/context_length) that
+                // would otherwise redirect the new provider (GH #27132
+                // class). Config is re-read so already-unset keys are
+                // skipped: a never-local user keeps the classic two-op
+                // write (T4 parity).
+                let ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: mismatch.bareModel,
+                    provider: mismatch.prefixProvider,
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
+                )
+                return !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // A one-click banner fix is a `repaired` preflight outcome —
@@ -832,22 +834,24 @@ final class ChatViewModel {
     func stripPrefixFromModelDefault(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // Same plan seam as `alignProviderToModelPrefix`, but this
-            // action KEEPS the active provider — the plan sees
-            // provider == currentProvider and emits no clears, so a
-            // hand-maintained model.base_url (or a live local setup)
-            // survives, exactly the old `setModelAndProvider`
-            // semantics. Pinned by
-            // `bannerStripPrefixKeepsProviderAndNeverClears` in
-            // LocalModelConfigPlanTests.
-            let ops = LocalModelConfigPlan.operations(
-                selectingRemoteModel: mismatch.bareModel,
-                provider: mismatch.activeProvider,
-                current: svc.loadConfig(),
-                capabilities: capabilities
-            )
-            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // Same plan seam as `alignProviderToModelPrefix`, but this
+                // action KEEPS the active provider — the plan sees
+                // provider == currentProvider and emits no clears, so a
+                // hand-maintained model.base_url (or a live local setup)
+                // survives, exactly the old `setModelAndProvider`
+                // semantics. Pinned by
+                // `bannerStripPrefixKeepsProviderAndNeverClears` in
+                // LocalModelConfigPlanTests.
+                let ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: mismatch.bareModel,
+                    provider: mismatch.activeProvider,
+                    current: svc.loadConfig(),
+                    capabilities: capabilities
+                )
+                return !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 Analytics.record(.modelPreflightResult(outcome: .repairedOrFailed(ok)))
@@ -916,9 +920,10 @@ final class ChatViewModel {
     private func recoverRemoteTransportAfterFailure() async {
         let ctx = context
         guard ctx.isRemote else { return }
-        await Task.detached(priority: .utility) {
+        // Spawns `ssh -O check/exit` and waits on them: a thread of its own.
+        await OffPool.run {
             _ = (ctx.makeTransport() as? SSHTransport)?.recoverControlMasterIfDead()
-        }.value
+        }
     }
 
     // MARK: - Start watchdog + supersede (t-5451bd1b)
@@ -2724,39 +2729,40 @@ final class ChatViewModel {
         // Picks the `model.provider` a local row writes (llama.cpp →
         // `custom` on v0.21.1+, S06-F2).
         let capabilities = capabilitiesStore?.capabilities ?? .empty
-        Task.detached { [weak self] in
-            // Both branches route through the shared write plan (T4
-            // audit): local picks carry keys `setModelAndProvider` can't
-            // write (base_url et al.), and remote picks must scrub any
-            // stale local-managed keys when the provider changes — a
-            // provider=ollama config reached via preflight (e.g. its
-            // model.default got emptied) would otherwise keep its
-            // base_url into the new cloud provider. For a config with no
-            // local keys the remote ops are exactly the classic
-            // [set provider, set model] pair.
-            //
-            // Either overload may REFUSE with an empty plan (a switch
-            // to a local provider with no sourceable base_url —
-            // shouldn't be reachable through the picker, which
-            // requires the base URL, but belt-and-braces): that's a
-            // failed save, surfaced below.
-            let ok: Bool
-            if let local {
-                let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
-                ok = !ops.isEmpty && apply(ops)
-            } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
-                // Parity with setModelAndProvider's guard: the preflight
-                // must persist BOTH keys, so an empty provider is a
-                // failed save, not a model-only write.
-                ok = false
-            } else {
-                let ops = LocalModelConfigPlan.operations(
-                    selectingRemoteModel: model,
-                    provider: provider,
-                    current: svc.loadConfig(),
-                    capabilities: capabilities
-                )
-                ok = !ops.isEmpty && apply(ops)
+        Task { [weak self] in
+            let ok = await OffPool.run { () -> Bool in
+                // Both branches route through the shared write plan (T4
+                // audit): local picks carry keys `setModelAndProvider` can't
+                // write (base_url et al.), and remote picks must scrub any
+                // stale local-managed keys when the provider changes — a
+                // provider=ollama config reached via preflight (e.g. its
+                // model.default got emptied) would otherwise keep its
+                // base_url into the new cloud provider. For a config with no
+                // local keys the remote ops are exactly the classic
+                // [set provider, set model] pair.
+                //
+                // Either overload may REFUSE with an empty plan (a switch
+                // to a local provider with no sourceable base_url —
+                // shouldn't be reachable through the picker, which
+                // requires the base URL, but belt-and-braces): that's a
+                // failed save, surfaced below.
+                if let local {
+                    let ops = LocalModelConfigPlan.operations(selecting: local, capabilities: capabilities)
+                    return !ops.isEmpty && apply(ops)
+                } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // Parity with setModelAndProvider's guard: the preflight
+                    // must persist BOTH keys, so an empty provider is a
+                    // failed save, not a model-only write.
+                    return false
+                } else {
+                    let ops = LocalModelConfigPlan.operations(
+                        selectingRemoteModel: model,
+                        provider: provider,
+                        current: svc.loadConfig(),
+                        capabilities: capabilities
+                    )
+                    return !ops.isEmpty && apply(ops)
+                }
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
