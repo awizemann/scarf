@@ -425,8 +425,13 @@ public actor HermesDataService {
     /// conversations. Usage sums still cover every session row.
     private var internalListingSourcesClause: String {
         let column = hasListableChildSupport ? "s.source" : "source"
-        return "COALESCE(\(column), '') NOT IN ('kanban', 'tool', 'oneshot')"
+        let sources = Self.internalListingSources.map { "'\($0)'" }.joined(separator: ", ")
+        return "COALESCE(\(column), '') NOT IN (\(sources))"
     }
+
+    /// Hermes's `INTERNAL_LISTING_SOURCES` (see
+    /// `internalListingSourcesClause`).
+    public static let internalListingSources = ["kanban", "tool", "oneshot"]
 
     /// Hermes's non-throwing JSON marker lookup (`_sql_json_extract`,
     /// hermes_state_common.py:67-74 @ v2026.9.24): `json_extract` over the
@@ -1494,9 +1499,11 @@ public actor HermesDataService {
     /// (`_display_dedupe_key`, :866-878), and orders each group by its
     /// FIRST row's id. Scarf keeps that first row as the group's
     /// representative, so ordering by id — which every transcript page,
-    /// the "Load earlier" cursor and the reconcile window rely on — stays
-    /// exactly Hermes's display order. The copies carry the original's
-    /// columns, so the text shown is the same row Hermes would pick.
+    /// the "Load earlier" cursor and the reconcile window rely on — matches
+    /// Hermes's display order within a session. The key columns are
+    /// identical across a group, so the text shown is what Hermes shows;
+    /// only columns outside the key (reasoning, token_count,
+    /// finish_reason) come from the archived row rather than the live one.
     ///
     /// Only an archived (`active = 0, compacted = 1`) row can be the
     /// earlier copy: a compaction archives every active row before it
@@ -1505,9 +1512,19 @@ public actor HermesDataService {
     /// the probe on `(session_id, active, timestamp)`
     /// (`idx_messages_session_active`, hermes_state_common.py:585-586).
     ///
-    /// Known difference: Hermes also folds a user row whose live text sits
-    /// inside a handoff carrier (`split_user_originated_turn`); that needs
-    /// Python-side parsing and is not reproduced here.
+    /// Known differences:
+    /// - Hermes also folds a user row whose live text sits inside a handoff
+    ///   carrier (`split_user_originated_turn`); that needs Python-side
+    ///   parsing and is not reproduced here.
+    /// - Hermes's key has no session id and runs over a whole rotated
+    ///   lineage, so it also folds a tail a ROTATION copied into its
+    ///   continuation (the parent's copies stay `active = 1`). This clause
+    ///   is per session, so a lineage read still shows those twice, as it
+    ///   did before in-place compaction was handled.
+    /// - Hermes before v2026.9.21 could give a carried steer turn a fresh
+    ///   timestamp per generation (fixed by bb9058d7e8); such copies do not
+    ///   match on timestamp and show once per generation — as they did in
+    ///   Hermes's own display on those hosts.
     private var compactionGenerationDedupeClause: String {
         let key = ["content", "tool_call_id", "tool_calls", "tool_name"]
             .map { " AND _gen.\($0) IS messages.\($0)" }

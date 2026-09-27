@@ -498,14 +498,22 @@ final class SessionsViewModel {
         // show it.
         guard let lookup = await dataService.fetchSessionForDetail(id: id) else { return }
         await selectSession(lookup.session)
-        selectedSessionListingNote = Self.listingNote(isArchived: lookup.isArchived, isListed: lookup.isListed)
+        selectedSessionListingNote = Self.listingNote(
+            isArchived: lookup.isArchived, isListed: lookup.isListed, source: lookup.session.source)
     }
 
     /// Why a session opened from a search hit is not in the list; nil when
     /// the list would show it (it was just older than the rows loaded).
-    nonisolated static func listingNote(isArchived: Bool, isListed: Bool) -> String? {
+    ///
+    /// `source` names the kanban/tool/oneshot sessions Hermes keeps out of
+    /// every list (`HermesDataService.internalListingSources`), which are
+    /// neither subagent runs nor hidden.
+    nonisolated static func listingNote(isArchived: Bool, isListed: Bool, source: String? = nil) -> String? {
         if isArchived {
             return String(localized: "Archived — session lists don't show this session.")
+        }
+        if !isListed, let source, HermesDataService.internalListingSources.contains(source) {
+            return String(localized: "Not in the session list — Hermes keeps kanban worker, tool integration and one-shot sessions out of its lists.")
         }
         if !isListed {
             return String(localized: "Not in the session list — this is a subagent run or a hidden session.")
@@ -962,6 +970,9 @@ final class SessionsViewModel {
         /// One CLI run per segment, root first, payloads concatenated
         /// (`jsonl`: one session object per line, the same shape Hermes's
         /// own multi-session JSONL export writes, sessions_cmd.py:355-357).
+        /// Each segment carries its live rows only: Hermes's JSONL export
+        /// leaves out in-place-archived turns by design (it is the import
+        /// format), so Markdown is the complete-history export.
         case perSegment
         /// One run with `--lineage logical` (md/qmd).
         case logicalFlag
@@ -1002,8 +1013,20 @@ final class SessionsViewModel {
     }
 
     /// Suffix for a success banner when `latestSegmentOnly` applied.
-    nonisolated static func latestSegmentNote(segmentCount: Int, format: SessionExportFormat) -> String {
-        String(localized: " Only the latest of this conversation's \(segmentCount) compressed segments is in the \(format.displayName) export; choose JSONL to export all of it.")
+    ///
+    /// Points at Markdown where it is offered (local hosts): it is the
+    /// format that exports the whole conversation — every segment AND the
+    /// turns in-place compaction archived, since Hermes's JSONL export
+    /// omits those (`shown` is true only for `SAVE_TRANSCRIPT_FORMATS` =
+    /// md/html, hermes_cli/session_export.py:212; sessions_cmd.py:335 @
+    /// v2026.9.24). Remote hosts only offer JSONL and Trace, so there JSONL
+    /// is the way to get every segment.
+    nonisolated static func latestSegmentNote(
+        segmentCount: Int, format: SessionExportFormat, markdownAvailable: Bool
+    ) -> String {
+        markdownAvailable
+            ? String(localized: " Only the latest of this conversation's \(segmentCount) compressed segments is in the \(format.displayName) export; choose Markdown to export all of it.")
+            : String(localized: " Only the latest of this conversation's \(segmentCount) compressed segments is in the \(format.displayName) export; choose JSONL to export every segment.")
     }
 
     /// Pipes the export out of the CLI and writes it to `url` on this Mac.
@@ -1029,6 +1052,7 @@ final class SessionsViewModel {
         )
         let chain = sessionId != nil && lineageIds.count > 1 ? lineageIds : []
         let mode = Self.lineageExport(for: format)
+        let markdownAvailable = !context.isRemote
         let runner = sessionExportRunner
         let ctx = context
         Task { [self] in
@@ -1041,7 +1065,8 @@ final class SessionsViewModel {
                 return Self.writeExport(result: result, to: url, format: format)
             }
             if outcome.succeeded, !chain.isEmpty, mode == .latestSegmentOnly {
-                outcome.message += Self.latestSegmentNote(segmentCount: chain.count, format: format)
+                outcome.message += Self.latestSegmentNote(
+                    segmentCount: chain.count, format: format, markdownAvailable: markdownAvailable)
             }
             self.exportMessage = outcome.message
             guard outcome.succeeded else { return }
@@ -1077,7 +1102,7 @@ final class SessionsViewModel {
             logicalLineage: !chain.isEmpty && mode == .logicalFlag
         )
         let note = !chain.isEmpty && mode == .latestSegmentOnly
-            ? Self.latestSegmentNote(segmentCount: chain.count, format: format) : ""
+            ? Self.latestSegmentNote(segmentCount: chain.count, format: format, markdownAvailable: !context.isRemote) : ""
         let runner = sessionExportRunner
         let ctx = context
         Task { [self] in

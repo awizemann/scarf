@@ -9,7 +9,8 @@ import ScarfCore
 ///
 /// - `jsonl`: one `--session-id` export per segment, root first, joined
 ///   into one JSON Lines file (one session object per line — the shape
-///   Hermes's own multi-session JSONL export writes).
+///   Hermes's own multi-session JSONL export writes). Like Hermes's JSONL
+///   export, each segment holds its live rows only.
 /// - `md`/`qmd`: one run with `--lineage logical`
 ///   (hermes_cli/subcommands/sessions.py:95-96 @ v2026.9.24).
 /// - `trace`/`html`: the CLI has no lineage form, so the latest segment is
@@ -124,6 +125,32 @@ import ScarfCore
         #expect(recorder.recorded.count == 1)
         #expect(Self.sessionId(in: recorder.recorded.first ?? []) == "tip")
         #expect(vm.exportMessage?.contains("Only the latest of this conversation's 3 compressed segments") == true)
+        // Locally Markdown is offered and is the complete-history format
+        // (Hermes's JSONL export leaves out in-place-archived turns).
+        #expect(vm.exportMessage?.contains("choose Markdown") == true)
+    }
+
+    @Test func remoteTraceNoteNamesJSONLBecauseMarkdownIsNotOffered() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let remote = ServerContext(
+            id: ServerID(), displayName: "build-box",
+            kind: .ssh(SSHConfig(host: "build-box", user: "jon")))
+        let vm = SessionsViewModel(context: remote)
+        #expect(!vm.availableExportFormats.contains(.markdown))
+        vm.sessionExportRunner = { _, _ in (Data(#"{"type":"user"}"#.utf8), "", 0) }
+        vm.performExport(to: url, sessionId: "tip", format: .trace, redact: true, lineageIds: Self.chain)
+        await Self.settle(until: { vm.exportMessage != nil })
+        #expect(vm.exportMessage?.contains("choose JSONL to export every segment") == true)
+    }
+
+    @Test func searchOpenedInternalSessionsSayWhyTheyAreUnlisted() {
+        for source in HermesDataService.internalListingSources {
+            let note = SessionsViewModel.listingNote(isArchived: false, isListed: false, source: source)
+            #expect(note?.contains("kanban worker, tool integration and one-shot") == true, "\(source)")
+        }
+        #expect(SessionsViewModel.listingNote(isArchived: false, isListed: false, source: "cli")?.contains("subagent") == true)
+        #expect(SessionsViewModel.listingNote(isArchived: false, isListed: true, source: "kanban") == nil)
     }
 
     @Test func markdownPassesLogicalLineage() async {
