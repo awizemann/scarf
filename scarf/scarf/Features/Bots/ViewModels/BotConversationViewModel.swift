@@ -285,6 +285,13 @@ final class BotConversationViewModel {
         guard case .live = phase, delivery == .cliTransport else { return }
         let intent = generation
         let rich = chat.richChatViewModel
+        // No `notePromptWire` here, on purpose: its keys assume the ACP
+        // adapter's slash dispatch (`/help`, `/model`, … store no user row).
+        // The quiet CLI turn has none — `_run_quiet_single_query` hands the
+        // text straight to `run_conversation`
+        // (`hermes_cli/cli_single_query.py:180-204` @ v2026.9.24), so the
+        // row is the text as sent, which is exactly the key
+        // `addUserMessage` already records.
         rich.addUserMessage(text: text)
         rich.markPromptSent()
         rich.markAgentWorking()
