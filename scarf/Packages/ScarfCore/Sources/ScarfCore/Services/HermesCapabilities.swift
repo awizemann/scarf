@@ -136,6 +136,24 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s < SemVer(major: 0, minor: 15, patch: 0)  // pre-v0.15.0 only
     }
 
+    /// Hermes strips ANY vendor prefix off the model id before sending it
+    /// for the GitHub Copilot providers, so `anthropic/claude-sonnet-4.6`
+    /// under `copilot` / `copilot-acp` works: `normalize_model_for_provider`
+    /// calls `normalize_copilot_model_id`, whose fallback drops one leading
+    /// `vendor/` (`hermes_cli/model_normalize.py:232-238` @ v2026.9.24).
+    /// That call first appears at v2026.4.23 (0.11.0, commit 29d5d36b14;
+    /// absent at v2026.4.16), and the main agent normalises every
+    /// non-aggregator model (`agent/agent_init.py:460-462`). Older and
+    /// undetected hosts keep the mismatch banner. See ``ModelPreflight``.
+    public var hasVendorPrefixStrippingForCopilot: Bool { atLeastSemver(0, 11, 0) }
+
+    /// Hermes strips `openai/` off the model id for `openai-codex`
+    /// (`_STRIP_VENDOR_ONLY_PROVIDERS`, `hermes_cli/model_normalize.py:242-246`
+    /// @ v2026.9.24), applied by the main agent. Both the strip and the
+    /// agent-side normalise call are present at v2026.4.13 (0.9.0) and absent
+    /// at v2026.4.8 (0.8.0). See ``ModelPreflight``.
+    public var hasOpenAIPrefixStrippingForCodex: Bool { atLeastSemver(0, 9, 0) }
+
     /// `auxiliary.curator` aux task is configurable (v0.12+).
     public var hasCuratorAux: Bool { atLeastSemver(0, 12, 0) }
 

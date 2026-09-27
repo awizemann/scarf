@@ -121,7 +121,7 @@ import Foundation
     @Test func detectMismatchReturnsNilWhenModelDefaultIsUnset() {
         var cfg = HermesConfig.empty
         cfg.model = ""
-        cfg.provider = "nous"
+        cfg.provider = "gemini"
         #expect(ModelPreflight.detectMismatch(cfg) == nil)
     }
 

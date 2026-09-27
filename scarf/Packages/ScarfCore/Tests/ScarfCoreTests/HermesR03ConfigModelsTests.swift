@@ -347,3 +347,91 @@ import Testing
         #expect(v0215.count == ModelCatalogService.imageGenModels.count + 5)
     }
 }
+
+// MARK: - S06-F1 follow-up: Copilot / Codex vendor-prefix stripping
+
+@Suite struct VendorPrefixStrippingR03Tests {
+    let v0215 = HermesHost.caps("Hermes Agent v0.21.5 (2026.9.24)")
+    let v0110 = HermesHost.caps("Hermes Agent v0.11.0 (2026.4.23)")
+    let v0100 = HermesHost.caps("Hermes Agent v0.10.0 (2026.4.16)")
+    let v090 = HermesHost.caps("Hermes Agent v0.9.0 (2026.4.13)")
+    let v080 = HermesHost.caps("Hermes Agent v0.8.0 (2026.4.8)")
+
+    private func mismatch(_ model: String, _ provider: String, _ caps: HermesCapabilities) -> ModelPreflight.Mismatch? {
+        var cfg = HermesConfig.empty
+        cfg.model = model
+        cfg.provider = provider
+        return ModelPreflight.detectMismatch(cfg, capabilities: caps)
+    }
+
+    @Test func copilotAcceptsAnyVendorPrefix() {
+        // `normalize_model_for_provider("anthropic/claude-sonnet-4.6", "copilot")`
+        // returns `claude-sonnet-4.6` at v2026.9.24 — a working config.
+        for provider in ["copilot", "github-copilot", "copilot-acp", "github-copilot-acp"] {
+            for model in ["anthropic/claude-sonnet-4.6", "openai/gpt-5.5", "google/gemini-3.1-pro-preview"] {
+                #expect(mismatch(model, provider, v0215) == nil, "\(provider) + \(model)")
+                #expect(mismatch(model, provider, v0110) == nil, "\(provider) + \(model) at the floor")
+            }
+        }
+    }
+
+    @Test func codexAcceptsOnlyTheOpenAIPrefix() {
+        #expect(mismatch("openai/gpt-5.5", "openai-codex", v0215) == nil)
+        #expect(mismatch("openai/gpt-5.5", "openai-codex", v090) == nil)
+        #expect(mismatch("openai/gpt-5.5", "openai-codex", v080) != nil)
+        // Codex passes any OTHER vendor prefix through untouched, so that
+        // one is still a real mismatch.
+        #expect(mismatch("anthropic/claude-sonnet-4.6", "openai-codex", v0215) != nil)
+    }
+
+    @Test func olderAndUndetectedHostsKeepTheBanner() {
+        #expect(mismatch("anthropic/claude-sonnet-4.6", "copilot", v0100) != nil)
+        #expect(mismatch("anthropic/claude-sonnet-4.6", "copilot", .empty) != nil)
+    }
+
+    @Test func floor() {
+        #expect(!v0100.hasVendorPrefixStrippingForCopilot)
+        #expect(v0110.hasVendorPrefixStrippingForCopilot)
+        #expect(!v080.hasOpenAIPrefixStrippingForCodex)
+        #expect(v090.hasOpenAIPrefixStrippingForCodex)
+        #expect(ModelPreflight.vendorStrippingProviders.allSatisfy {
+            ModelCatalogService.canonicalProviderID($0) == $0
+        })
+    }
+}
+
+// MARK: - S06-F2 follow-up: existing llamacpp configs whose base_url is ignored
+
+@Suite struct LlamaCppBaseURLIgnoredR03Tests {
+    let v0211 = HermesHost.v0211
+
+    private func config(_ provider: String, _ base: String) -> HermesConfig {
+        var cfg = HermesConfig.empty
+        cfg.model = "qwen3"
+        cfg.provider = provider
+        cfg.modelBaseURL = base
+        return cfg
+    }
+
+    @Test func flagsAnAddressHermesWillNotUse() {
+        for base in ["http://127.0.0.1:8081/v1", "http://192.168.1.20:8080/v1", "http://localhost:9000", "https://llama.lan/v1"] {
+            #expect(ModelPreflight.llamaCppBaseURLIgnored(config("llamacpp", base), capabilities: v0211), "\(base)")
+        }
+        #expect(ModelPreflight.llamaCppBaseURLIgnored(config("llama.cpp", "http://10.0.0.2:8081/v1"), capabilities: v0211))
+    }
+
+    @Test func theProbedEndpointIsFine() {
+        for base in ["http://127.0.0.1:8080/v1", "http://localhost:8080", "http://LOCALHOST:8080/v1"] {
+            #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("llamacpp", base), capabilities: v0211), "\(base)")
+        }
+        #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("llamacpp", ""), capabilities: v0211))
+    }
+
+    @Test func onlyLlamacppOnAFloorHost() {
+        let odd = "http://127.0.0.1:8081/v1"
+        #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("custom", odd), capabilities: v0211))
+        #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("vllm", odd), capabilities: v0211))
+        #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("llamacpp", odd), capabilities: HermesHost.v021))
+        #expect(!ModelPreflight.llamaCppBaseURLIgnored(config("llamacpp", odd), capabilities: .empty))
+    }
+}

@@ -271,6 +271,38 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
+        } else if viewModel.llamaCppBaseURLIgnored && !viewModel.hasActiveProcess {
+            // S06-F2: on Hermes v0.21.1+ provider `llamacpp` ignores
+            // model.base_url and only reaches its own managed server (or
+            // 127.0.0.1:8080). Offer the switch; never migrate silently.
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("llama.cpp server address is ignored")
+                        .font(.callout)
+                    Text("This version of Hermes ignores `model.base_url` for provider `llamacpp` and only connects to its own llama.cpp server or 127.0.0.1:8080. Switch to a custom endpoint to use the address in config.yaml.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button("Switch to Custom endpoint") {
+                        viewModel.switchLlamaCppToCustom()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Set model.provider = custom and keep model.base_url and model.default.")
+                    .padding(.top, 2)
+                }
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .fill(Color.orange.opacity(0.25))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
         } else if let mismatch = viewModel.modelProviderMismatch, !viewModel.hasActiveProcess {
             // Provider/model mismatch — `model.default` carries one
             // provider prefix while `model.provider` names another.

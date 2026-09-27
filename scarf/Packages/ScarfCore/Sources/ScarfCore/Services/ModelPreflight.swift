@@ -136,6 +136,17 @@ public enum ModelPreflight: Sendable {
         "nous",
     ]
 
+    /// GitHub Copilot providers (canonical ids — `copilot` canonicalises to
+    /// `github-copilot`), for which Hermes strips ANY vendor prefix before
+    /// sending: `normalize_model_for_provider` →
+    /// `normalize_copilot_model_id` (`hermes_cli/model_normalize.py:232-238`
+    /// @ v2026.9.24). Verified: `anthropic/claude-sonnet-4.6` under
+    /// `copilot` sends `claude-sonnet-4.6`. Consulted only on hosts with
+    /// `hasVendorPrefixStrippingForCopilot`. Not an aggregator (the model
+    /// namespace is flat), so it is NOT in `aggregatorProviders` and not in
+    /// check-hermes-tables lane 2.
+    static let vendorStrippingProviders: Set<String> = ["github-copilot", "copilot-acp"]
+
     /// `aggregatorProviders` entries for a provider Hermes removed at a
     /// version floor — added back only below that floor. See
     /// `HermesCapabilities.hasOpenCodeFreeProvider`.
@@ -151,6 +162,46 @@ public enum ModelPreflight: Sendable {
         capabilities.hasOpenCodeFreeProvider
             ? aggregatorProviders.union(legacyAggregatorProviders)
             : aggregatorProviders
+    }
+
+    /// True when config.yaml selects `model.provider: llamacpp` (or a
+    /// spelling alias) with a `model.base_url` that a v0.21.1+ host will
+    /// IGNORE — Hermes resolves that provider to its managed llama.cpp
+    /// runtime, which only uses its own server or a probe of
+    /// `127.0.0.1:8080` (`hermes_cli/runtime_provider_custom.py:537-540`,
+    /// `hermes_cli/local_runtime/detect.py:16,40-43` @ v2026.9.24). So a
+    /// base URL on any other host or port makes the first prompt fail with
+    /// "The local model server is turned off". The chat banner offers a
+    /// one-click switch to `custom`, which honours the URL. Configs saved
+    /// by Scarf before R03 look exactly like this (S06-F2).
+    ///
+    /// `false` below the floor (llamacpp honoured base_url there), for
+    /// undetected hosts, with no base_url, and for a base_url that IS the
+    /// probed endpoint (`127.0.0.1`/`localhost` port 8080, any path).
+    ///
+    /// Deliberately approximate: Hermes also probes any extra ports listed in
+    /// `local_runtime.detect_ports` (`hermes_cli/local_runtime/endpoint.py:91`)
+    /// and prefers a `custom_providers` entry literally named `llamacpp`
+    /// (`runtime_provider_custom.py:538-540`); Scarf doesn't model either,
+    /// so such a config may see the banner needlessly. The offered switch to
+    /// `custom` works in every one of those cases, so a false positive costs
+    /// one click, not a broken config.
+    public static func llamaCppBaseURLIgnored(
+        _ config: HermesConfig,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        guard capabilities.llamaCppProviderIgnoresBaseURL,
+              LocalModelProvider.descriptor(for: config.provider)?.providerID == "llamacpp"
+        else { return false }
+        let base = config.modelBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return false }
+        if let url = URLComponents(string: base),
+           let host = url.host?.lowercased(),
+           host == "127.0.0.1" || host == "localhost",
+           (url.port ?? (url.scheme == "https" ? 443 : 80)) == 8080 {
+            return false
+        }
+        return true
     }
 
     /// Detect a `model.default` / `model.provider` mismatch. Returns
@@ -190,6 +241,13 @@ public enum ModelPreflight: Sendable {
         let prefix = String(modelDefault[..<slash])
         let bare = String(modelDefault[modelDefault.index(after: slash)...])
         guard !prefix.isEmpty, !bare.isEmpty else { return nil }
+        // Providers Hermes strips a vendor prefix for before sending — the
+        // prefix is harmless there, not a stale provider (see
+        // `hasVendorPrefixStrippingForCopilot` / `hasOpenAIPrefixStrippingForCodex`).
+        if capabilities.hasVendorPrefixStrippingForCopilot,
+           vendorStrippingProviders.contains(canonicalActive) { return nil }
+        if capabilities.hasOpenAIPrefixStrippingForCodex,
+           canonicalActive == "openai-codex", prefix.lowercased() == "openai" { return nil }
         let canonicalPrefix = ModelCatalogService.canonicalProviderID(
             prefix, capabilities: capabilities)
         guard canonicalPrefix != canonicalActive else { return nil }

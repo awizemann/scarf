@@ -80,3 +80,65 @@ import ScarfCore
                 == "https://claude.ai/oauth/authorize?code=true&client_id=abc&code_challenge=b")
     }
 }
+
+/// S06-F2 follow-up: an EXISTING `provider: llamacpp` config whose base_url
+/// a v0.21.1+ host ignores gets a banner and a one-click, plan-routed switch
+/// to `custom`. Never migrated silently.
+@Suite struct LlamaCppIgnoredBaseURLBannerR03Tests {
+    static func home(provider: String = "llamacpp", baseURL: String = "http://192.168.1.20:8081/v1") throws -> TempHermesHome {
+        let home = try TempHermesHome()
+        try "model:\n  default: qwen3\n  provider: \(provider)\n  base_url: \(baseURL)\n"
+            .write(toFile: home.path + "/config.yaml", atomically: true, encoding: .utf8)
+        return home
+    }
+
+    @MainActor
+    static func vm(_ home: TempHermesHome, version: String, suite: String) async -> ChatViewModel {
+        let vm = ChatViewModel(context: home.context)
+        vm.knownProviderIDs = ["anthropic", "custom"]
+        vm.capabilitiesStore = await ChatViewModelAutoAcceptEditsTests.capabilities(
+            version, context: home.context, suite: suite)
+        return vm
+    }
+
+    @Test @MainActor func bannerAppearsAndTheFixWritesCustomKeepingTheURL() async throws {
+        let home = try Self.home()
+        defer { home.cleanup() }
+        let vm = await Self.vm(home, version: "0.21.5 (2026.9.24)", suite: "r03-llama-\(UUID().uuidString)")
+        vm.refreshConfigDiagnostics()
+        let shown = await ChatViewModelStartLifecycleTests.waitUntil { vm.llamaCppBaseURLIgnored }
+        #expect(shown, "banner never raised for llamacpp + :8081 on v0.21.5")
+        // Not reported as a model/provider mismatch as well.
+        #expect(vm.modelProviderMismatch == nil)
+
+        let recorder = ChatViewModelMismatchChooseModelTests.PlanRecorder()
+        let configPath = home.path + "/config.yaml"
+        vm.modelConfigPlanApplier = { ops in
+            recorder.record(ops)
+            try? "model:\n  default: qwen3\n  provider: custom\n  base_url: http://192.168.1.20:8081/v1\n"
+                .write(toFile: configPath, atomically: true, encoding: .utf8)
+            return true
+        }
+        vm.switchLlamaCppToCustom()
+        let applied = await ChatViewModelStartLifecycleTests.waitUntil { !recorder.plans.isEmpty }
+        #expect(applied)
+        let ops = try #require(recorder.plans.first)
+        #expect(ops.contains(.set(key: "model.base_url", value: "http://192.168.1.20:8081/v1")))
+        #expect(ops.contains(.set(key: "model.default", value: "qwen3")))
+        #expect(ops.last == .set(key: "model.provider", value: "custom"))
+        // Same server and model: a context_length override is kept, not reset.
+        #expect(!ops.contains(.clear(key: "model.context_length")))
+        let cleared = await ChatViewModelStartLifecycleTests.waitUntil { !vm.llamaCppBaseURLIgnored }
+        #expect(cleared)
+    }
+
+    @Test @MainActor func olderHostGetsNoBanner() async throws {
+        let home = try Self.home()
+        defer { home.cleanup() }
+        let vm = await Self.vm(home, version: "0.21.0 (2026.8.31)", suite: "r03-llama-old-\(UUID().uuidString)")
+        vm.refreshConfigDiagnostics()
+        // Give the detached refresh time to land, then confirm nothing fired.
+        _ = await ChatViewModelStartLifecycleTests.waitUntil(timeoutSeconds: 1) { vm.llamaCppBaseURLIgnored }
+        #expect(vm.llamaCppBaseURLIgnored == false)
+    }
+}
