@@ -142,11 +142,16 @@ public enum TransportError: LocalizedError {
     /// to read as "SSH authentication failed" (T6-F3). Phrases only ssh
     /// prints — `Permission denied (publickey,…)`, the host-key banners,
     /// `ssh: connect to host …` — still count at any exit code, which covers
-    /// legacy `scp -O` (exit 1 on a failed connection).
+    /// legacy `scp -O` (exit 1 on a failed connection). ssh's form names its
+    /// auth methods in the parentheses; Rust tools print `Permission denied
+    /// (os error 13)`, which is a file error like any other.
     public static func classifySSHFailure(host: String, exitCode: Int32, stderr: String) -> TransportError {
         let s = stderr.lowercased()
         let sshExit = exitCode == 255
-        if s.contains("permission denied (") || s.contains("publickey") && s.contains("denied")
+        let sshAuthList = s.range(
+            of: #"permission denied \((publickey|password|keyboard-interactive|hostbased|gssapi)"#,
+            options: .regularExpression) != nil
+        if sshAuthList || s.contains("publickey") && s.contains("denied")
             || sshExit && (s.contains("permission denied") || s.contains("authentication failed")) {
             return .authenticationFailed(host: host, stderr: stderr)
         }
@@ -157,7 +162,8 @@ public enum TransportError: LocalizedError {
         let unreachable = s.contains("no route to host") || s.contains("connection refused")
             || s.contains("connection timed out") || s.contains("could not resolve hostname")
             || s.contains("connection closed by") && s.contains("port 22")
-        if unreachable && (sshExit || s.contains("ssh: ")) {
+        let sshOnly = s.contains("ssh: ") || s.contains("connection closed by") && s.contains("port 22")
+        if unreachable && (sshExit || sshOnly) {
             return .hostUnreachable(host: host, stderr: stderr)
         }
         return .commandFailed(exitCode: exitCode, stderr: stderr)
