@@ -604,6 +604,19 @@ final class HealthViewModel {
         let svc = fileService
         let ctx = context
         Task { [weak self] in
+            // Stop + start on a gateway run by hand kills it, and the start
+            // can't bring it back (it drives a service manager, or installs a
+            // launchd plist on macOS). Same rule as every `gateway restart`
+            // — see ``HermesGatewayRestartGuard``.
+            if let refusal = await Task.detached(operation: { svc.restartRefusal(stopThenStart: true) }).value {
+                guard let self else { return }
+                self.isControlBusy = false
+                // Kept on screen (no settle timer clears it): it says what
+                // to do instead. The next control action replaces it.
+                self.actionMessage = refusal.detail
+                self.refreshProcessStatus()
+                return
+            }
             let stop = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
             let start = await Task.detached { Self.runGateway(.start, ctx) }.value

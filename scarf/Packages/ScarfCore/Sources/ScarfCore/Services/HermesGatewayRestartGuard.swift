@@ -37,6 +37,19 @@ import Foundation
 /// for those `gateway restart` goes through the service manager or the host
 /// gateway, so it is sent as before.
 ///
+/// An s6 container (the official Hermes Docker image, Fly) is also a service
+/// Hermes's status can't see: `_cmd_status` picks its branch from
+/// `_installed_service_kind_for` (systemd unit, launchd plist, Windows task),
+/// so an s6-supervised gateway prints the no-service lines too — but
+/// `_cmd_restart` dispatches to s6 before any of that
+/// (`_dispatch_via_service_manager_if_s6`, `gateway.py:4925-4926`). The one
+/// output that names s6 is `hermes status`'s `Manager: s6 (container
+/// supervisor)` row (`status.py:232`, `gateway.py:1468-1469`), which arrives
+/// in the same tag as the s6 dispatch (v2026.5.28). So on the no-service
+/// branch Scarf asks `hermes status` too — through the same transport and
+/// wrapper as every other `hermes` call, so it runs where Hermes runs — and
+/// restarts when it names s6.
+///
 /// One no-service gateway restarts safely: one launched for an external
 /// supervisor (`gateway run --external-supervisor` under a custom launchd
 /// agent or systemd unit). From v0.21.4 `_cmd_restart` hands that one back
@@ -86,6 +99,56 @@ public enum HermesGatewayRestartGuard {
             .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 
+    /// `hermes status`'s service-manager row under s6.
+    static let s6ManagerMarker = "s6 (container supervisor)"
+
+    /// True when `hermes status` shows the s6 container supervisor.
+    static func isS6Supervised(statusOutput: String?) -> Bool {
+        guard let statusOutput else { return false }
+        return HermesCLIVerdict.stripANSI(statusOutput).contains(s6ManagerMarker)
+    }
+
+    /// Runs the probes and decides, in one place, for every caller.
+    ///
+    /// - Parameters:
+    ///   - run: a `hermes` runner with a timeout (the caller's own; it
+    ///     is called with `gateway status`, and with `status` only on the
+    ///     no-service branch).
+    ///   - stateJSON: reads this home's own `gateway_state.json`.
+    ///   - stopThenStart: the caller restarts by `gateway stop` + `gateway
+    ///     start` rather than `gateway restart` (Health, the menu bar). There
+    ///     a stopped no-service gateway is not a hazard — the stop finds
+    ///     nothing and the start does what Start does — so only a running
+    ///     one is refused: the stop would kill it and the start can't bring a
+    ///     hand-run gateway back.
+    ///
+    /// Call it off the main actor: it spawns (charter C10).
+    public static func check(
+        run: (_ args: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32),
+        stateJSON: () -> Data?,
+        capabilities: HermesCapabilities,
+        stopThenStart: Bool = false,
+        timeout: TimeInterval = 30
+    ) -> HermesCLIOutcome? {
+        let status = run(["gateway", "status"], timeout)
+        guard status.exitCode != -1,
+              !(status.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && status.exitCode != 0)
+        else {
+            return refusal(statusOutput: status.output, statusExitCode: status.exitCode,
+                           stateJSON: nil, capabilities: capabilities)
+        }
+        let mode = mode(statusOutput: status.output)
+        if mode == .restartable { return nil }
+        if stopThenStart, mode == .stoppedWithoutService { return nil }
+        let manager = run(["status"], timeout)
+        // The external-supervisor hand-back is `gateway restart`'s own arm;
+        // a stop + start never takes it, so there it proves nothing.
+        return refusal(
+            statusOutput: status.output, statusExitCode: status.exitCode,
+            stateJSON: stopThenStart ? nil : stateJSON(), capabilities: capabilities,
+            managerStatusOutput: manager.exitCode == -1 ? nil : manager.output)
+    }
+
     /// True when `gateway_state.json` records that one of the running PIDs
     /// was launched with `--external-supervisor`.
     static func isExternallySupervised(stateJSON: Data?, runningPIDs: [Int]) -> Bool {
@@ -106,8 +169,11 @@ public enum HermesGatewayRestartGuard {
     ///     external-supervisor case.
     ///   - capabilities: the host's; the supervisor hand-back exists from
     ///     v0.21.4 only.
+    ///   - managerStatusOutput: `hermes status`, for the s6 case; `nil`
+    ///     when it was not run or did not answer.
     public static func refusal(
-        statusOutput: String, statusExitCode: Int32, stateJSON: Data?, capabilities: HermesCapabilities
+        statusOutput: String, statusExitCode: Int32, stateJSON: Data?, capabilities: HermesCapabilities,
+        managerStatusOutput: String? = nil
     ) -> HermesCLIOutcome? {
         let trimmed = statusOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         // No answer at all: a restart might be the destructive kind, so it
@@ -115,7 +181,9 @@ public enum HermesGatewayRestartGuard {
         if statusExitCode == -1 || (trimmed.isEmpty && statusExitCode != 0) {
             return HermesCLIOutcome(succeeded: false, detail: statusUnreadableNote)
         }
-        switch mode(statusOutput: statusOutput) {
+        let mode = mode(statusOutput: statusOutput)
+        if mode != .restartable, isS6Supervised(statusOutput: managerStatusOutput) { return nil }
+        switch mode {
         case .restartable:
             return nil
         case .runningWithoutService:

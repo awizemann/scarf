@@ -20,7 +20,9 @@ struct GatewayRestartGuardR18aTests {
         var all: [[String]] { lock.lock(); defer { lock.unlock() }; return argvs }
     }
 
-    private static func viewModel(status: String, statusExit: Int32 = 0, calls: Calls) -> MessagingGatewayViewModel {
+    private static func viewModel(
+        status: String, statusExit: Int32 = 0, manager: String = "", calls: Calls
+    ) -> MessagingGatewayViewModel {
         let home = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("scarf-r18a-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -30,6 +32,7 @@ struct GatewayRestartGuardR18aTests {
             cliRunner: { args, _ in
                 calls.record(args)
                 if args == ["gateway", "status"] { return (status, statusExit) }
+                if args == ["status"] { return (manager, 0) }
                 if args == ["gateway", "restart"] { return ("✓ Service restarted", 0) }
                 return ("", 0)
             }
@@ -76,6 +79,37 @@ struct GatewayRestartGuardR18aTests {
         #expect(vm.actionMessage == "Gateway restarted")
     }
 
+    /// An s6 container's gateway prints the no-service lines, but `gateway
+    /// restart` goes to s6 (`gateway.py:4925-4926` @ v2026.9.24); `hermes
+    /// status` names the manager.
+    @Test func anS6ContainerGatewayStillRestarts() async throws {
+        let calls = Calls()
+        let vm = Self.viewModel(
+            status: HermesGatewayRestartGuardFixtures.manualRunning,
+            manager: "  Manager:      s6 (container supervisor)", calls: calls)
+        vm.restartGateway()
+        await Self.until(timeout: 10) { vm.actionMessage != nil }
+        #expect(calls.all.contains(["status"]))
+        #expect(calls.all.contains(["gateway", "restart"]))
+    }
+
+    /// Health and the menu bar restart by stop + start; pin that both ask
+    /// the guard before the stop.
+    @Test func stopThenStartRestartsAskFirst() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for (file, anchor) in [
+            ("scarf/Features/Health/ViewModels/HealthViewModel.swift", "func restartHermes() {"),
+            ("scarf/scarfApp.swift", "func restartHermes() {"),
+        ] {
+            let source = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
+            let body = try #require(source.range(of: anchor), "\(file)")
+            let rest = source[body.upperBound...]
+            let guardCall = try #require(rest.range(of: "restartRefusal(stopThenStart: true)"), "\(file)")
+            let stop = try #require(rest.range(of: "stopHermes()"), "\(file)")
+            #expect(guardCall.lowerBound < stop.lowerBound, "\(file)")
+        }
+    }
+
     @Test func aStatusTimeoutSendsNothing() async throws {
         let calls = Calls()
         let vm = Self.viewModel(status: "", statusExit: -1, calls: calls)
@@ -106,10 +140,8 @@ struct GatewayRestartGuardR18aTests {
             encoding: .utf8)
         let body = try #require(source.range(of: "nonisolated func restartGateway() -> HermesCLIOutcome {"))
         let rest = source[body.upperBound...]
-        let status = try #require(rest.range(of: "args: [\"gateway\", \"status\"]"))
-        let guardCall = try #require(rest.range(of: "HermesGatewayRestartGuard.refusal("))
+        let guardCall = try #require(rest.range(of: "restartRefusal(stopThenStart: false)"))
         let restart = try #require(rest.range(of: "HermesGatewayServiceVerdict.argv(.restart)"))
-        #expect(status.lowerBound < guardCall.lowerBound)
         #expect(guardCall.lowerBound < restart.lowerBound)
     }
 }

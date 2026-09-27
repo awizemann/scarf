@@ -86,7 +86,9 @@ import Foundation
     }
 
     @Test func serviceManagedHostsRestartAsBefore() {
-        for output in [Self.launchd, Self.satellite, "", "Gateway profile 'work' is parked."] {
+        // The parked line is `print_parked_status`'s
+        // (`gateway_profile_lifecycle.py:85` @ v2026.9.24).
+        for output in [Self.launchd, Self.satellite, "", "Profile 'work': parked (hermes -p work gateway start)"] {
             #expect(HermesGatewayRestartGuard.refusal(
                 statusOutput: output, statusExitCode: 0, stateJSON: nil, capabilities: .empty) == nil)
         }
@@ -120,6 +122,74 @@ import Foundation
         let plain = Self.state(pid: 4242, argv: ["hermes", "gateway", "run"])
         #expect(HermesGatewayRestartGuard.refusal(
             statusOutput: Self.manualRunning, statusExitCode: 0, stateJSON: plain, capabilities: Self.v0214) != nil)
+    }
+
+    /// `hermes status`'s Gateway Service section on an s6 container
+    /// (`status.py:231-234`, manager string `gateway.py:1469` @ v2026.9.24).
+    static let s6Status = """
+    ◆ Gateway Service
+      Status:       ✓ running
+      Manager:      s6 (container supervisor)
+      PID(s):       57
+    """
+
+    /// An s6 container's gateway prints the no-service lines (status picks
+    /// its branch from systemd/launchd/Windows only), yet `gateway restart`
+    /// goes to s6 first (`gateway.py:4925-4926`). Restartable.
+    @Test func anS6ContainerGatewayRestarts() {
+        #expect(HermesGatewayRestartGuard.refusal(
+            statusOutput: Self.manualRunning, statusExitCode: 0, stateJSON: nil, capabilities: .empty,
+            managerStatusOutput: Self.s6Status) == nil)
+        #expect(HermesGatewayRestartGuard.refusal(
+            statusOutput: Self.manualStopped, statusExitCode: 0, stateJSON: nil, capabilities: .empty,
+            managerStatusOutput: Self.s6Status) == nil)
+        // A host `hermes status` that names another manager proves nothing.
+        #expect(HermesGatewayRestartGuard.refusal(
+            statusOutput: Self.manualRunning, statusExitCode: 0, stateJSON: nil, capabilities: .empty,
+            managerStatusOutput: "  Manager:      Manual process") != nil)
+    }
+
+    final class Calls: @unchecked Sendable {
+        var argvs: [[String]] = []
+    }
+
+    static func check(
+        status: String, statusExit: Int32 = 0, manager: String = "", stopThenStart: Bool = false,
+        state: Data? = nil, caps: HermesCapabilities = .empty, calls: Calls = Calls()
+    ) -> HermesCLIOutcome? {
+        HermesGatewayRestartGuard.check(
+            run: { args, _ in
+                calls.argvs.append(args)
+                return args == ["gateway", "status"] ? (status, statusExit) : (manager, 0)
+            },
+            stateJSON: { state }, capabilities: caps, stopThenStart: stopThenStart)
+    }
+
+    /// `hermes status` is only asked on the no-service branch.
+    @Test func checkAsksStatusOnlyWhenItMatters() {
+        let service = Calls()
+        #expect(Self.check(status: Self.launchd, calls: service) == nil)
+        #expect(service.argvs == [["gateway", "status"]])
+
+        let manual = Calls()
+        #expect(Self.check(status: Self.manualRunning, calls: manual) != nil)
+        #expect(manual.argvs == [["gateway", "status"], ["status"]])
+
+        #expect(Self.check(status: Self.manualRunning, manager: Self.s6Status) == nil)
+        #expect(Self.check(status: "", statusExit: -1)?.detail == HermesGatewayRestartGuard.statusUnreadableNote)
+    }
+
+    /// Stop + start (Health, the menu bar) refuses only a RUNNING hand-run
+    /// gateway — a stopped one is what Start already handles — and never
+    /// takes the external-supervisor exception, which is `gateway
+    /// restart`'s own arm.
+    @Test func stopThenStartRefusesOnlyARunningHandRunGateway() {
+        #expect(Self.check(status: Self.manualStopped, stopThenStart: true) == nil)
+        #expect(Self.check(status: Self.manualRunning, stopThenStart: true)?.detail
+            == HermesGatewayRestartGuard.runningWithoutServiceNote)
+        let supervised = Self.state(pid: 4242, argv: ["hermes", "gateway", "run", "--external-supervisor"])
+        #expect(Self.check(status: Self.manualRunning, state: supervised, caps: Self.v0214) == nil)
+        #expect(Self.check(status: Self.manualRunning, stopThenStart: true, state: supervised, caps: Self.v0214) != nil)
     }
 
     @Test func runningPIDsParse() {

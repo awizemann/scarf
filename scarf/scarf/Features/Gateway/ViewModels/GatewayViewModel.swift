@@ -575,14 +575,12 @@ final class MessagingGatewayViewModel {
                 // which the timeout then kills (see
                 // ``HermesGatewayRestartGuard``). Ask first; never send it
                 // into that state.
-                if verb == .restart {
-                    let status = run(["gateway", "status"], Self.probeTimeout)
-                    if let refusal = HermesGatewayRestartGuard.refusal(
-                        statusOutput: status.output, statusExitCode: status.exitCode,
-                        stateJSON: ctx.readData(ctx.paths.gatewayStateJSON), capabilities: caps
-                    ) {
-                        return (refusal, true)
-                    }
+                if verb == .restart, let refusal = HermesGatewayRestartGuard.check(
+                    run: { args, timeout in let r = run(args, timeout); return (r.output, r.exitCode) },
+                    stateJSON: { ctx.readData(ctx.paths.gatewayStateJSON) },
+                    capabilities: caps, timeout: Self.probeTimeout
+                ) {
+                    return (refusal, true)
                 }
                 let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
                 return (HermesGatewayServiceVerdict.judge(

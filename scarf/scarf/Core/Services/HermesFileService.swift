@@ -1453,18 +1453,26 @@ struct HermesFileService: Sendable {
     /// return (`hermes_cli/main.py:1736-1742` @ v2026.9.7) and `_cmd_restart`
     /// has exit-0 refusal arms of its own (`hermes_cli/gateway.py:6047`).
     @discardableResult
+    /// ``HermesGatewayRestartGuard/check(run:stateJSON:capabilities:stopThenStart:timeout:)``
+    /// against this server: `nil` when a restart may go ahead. Spawns — call
+    /// it off the main actor.
+    nonisolated func restartRefusal(stopThenStart: Bool) -> HermesCLIOutcome? {
+        HermesGatewayRestartGuard.check(
+            run: { args, timeout in
+                let result = runHermesCLI(args: args, timeout: timeout)
+                return (result.output, result.exitCode)
+            },
+            stateJSON: { readFileData(context.paths.gatewayStateJSON) },
+            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+            stopThenStart: stopThenStart
+        )
+    }
+
     nonisolated func restartGateway() -> HermesCLIOutcome {
         // Never into a gateway with no service behind it: Hermes would stop
         // it and run the replacement inside this spawn, which the timeout
         // below then kills (see ``HermesGatewayRestartGuard``).
-        let status = runHermesCLI(args: ["gateway", "status"], timeout: 30)
-        if let refusal = HermesGatewayRestartGuard.refusal(
-            statusOutput: status.output, statusExitCode: status.exitCode,
-            stateJSON: readFileData(context.paths.gatewayStateJSON),
-            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context)
-        ) {
-            return refusal
-        }
+        if let refusal = restartRefusal(stopThenStart: false) { return refusal }
         let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 30)
         return HermesGatewayServiceVerdict.judge(
             verb: .restart, output: result.output, exitCode: result.exitCode

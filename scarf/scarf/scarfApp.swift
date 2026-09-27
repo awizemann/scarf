@@ -683,6 +683,14 @@ final class ServerLiveStatus: Identifiable {
 
     func restartHermes() {
         Task { [weak self, fileService, context] in
+            // A gateway run by hand would be stopped for good: the start
+            // below can't bring it back. The menu has nowhere to explain
+            // that, so it does nothing; Health and the Gateway view say why.
+            if await Task.detached(operation: { fileService.restartRefusal(stopThenStart: true) }).value != nil {
+                Analytics.record(.hermesControlAction(action: .restart, source: .menuBar, outcome: .init(.failed)))
+                self?.refresh()
+                return
+            }
             let stopped = await Task.detached { fileService.stopHermes() }.value
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let started = await Task.detached { Self.performStart(context) }.value
