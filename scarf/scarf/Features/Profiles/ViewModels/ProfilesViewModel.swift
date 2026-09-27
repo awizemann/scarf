@@ -254,7 +254,13 @@ final class ProfilesViewModel {
     func export(_ profile: HermesProfile, to url: URL) {
         let outputPath = HermesProfileArchive.normalizedOutputPath(url.path)
         guard context.isRemote else {
-            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: String(localized: "Exported"))
+            // When the name changed (`work.tgz` → `work.tar.gz`) say where the
+            // archive actually is, so the user doesn't look for the old name.
+            let fileName = URL(fileURLWithPath: outputPath).lastPathComponent
+            let success = outputPath == url.path
+                ? String(localized: "Exported")
+                : String(localized: "Exported as \(fileName)")
+            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: success)
             return
         }
         message = "Exporting \(profile.name)…"
