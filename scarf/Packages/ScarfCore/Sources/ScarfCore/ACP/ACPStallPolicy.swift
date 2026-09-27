@@ -12,8 +12,12 @@ import Foundation
 /// - **A permission prompt is open.** The agent thread blocks on the
 ///   answer with no output until `approvals.timeout` (300 s by default)
 ///   runs out (`acp_adapter/permissions.py:89-125`,
-///   `tools/approval_context.py:239-247` @ v2026.9.24). Never a stall:
-///   if the channel really died, answering fails and says so.
+///   `tools/approval_context.py:239-247` @ v2026.9.24). When it does,
+///   Hermes denies the tool itself and carries on without telling the
+///   client, so the sheet can outlive the wait. The prompt gets the same
+///   long ceiling as a tool call rather than an exemption: a live Hermes
+///   has spoken again long before it, and a socket that died behind an
+///   unanswered sheet is still caught.
 /// - **A tool call is running.** The adapter reports only a tool's start
 ///   and its completion (`make_tool_progress_cb`,
 ///   `acp_adapter/events.py:119-153`), so a two-minute build is silent.
@@ -25,8 +29,9 @@ import Foundation
 public enum ACPStallPolicy {
     /// Silence tolerated while the agent streams a turn outside a tool.
     public static let streamingSeconds: TimeInterval = 75
-    /// Silence tolerated while a tool call is open: the terminal tool's
-    /// 600 s foreground cap plus headroom.
+    /// Silence tolerated while a tool call is open or a permission prompt
+    /// waits: the terminal tool's 600 s foreground cap (and three times
+    /// the default approval timeout) plus headroom.
     public static let toolCallSeconds: TimeInterval = 900
 
     /// True when the silence means the channel is dead.
@@ -45,9 +50,9 @@ public enum ACPStallPolicy {
         permissionPending: Bool,
         toolCallInFlight: Bool
     ) -> Bool {
-        guard isAgentWorking, !permissionPending else { return false }
+        guard isAgentWorking else { return false }
         let silence = min(idleSeconds, secondsSincePermissionAnswered ?? .infinity)
-        let limit = toolCallInFlight ? toolCallSeconds : streamingSeconds
+        let limit = (toolCallInFlight || permissionPending) ? toolCallSeconds : streamingSeconds
         return silence > limit
     }
 }

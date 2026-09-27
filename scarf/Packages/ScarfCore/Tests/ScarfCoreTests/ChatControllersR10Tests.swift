@@ -84,15 +84,25 @@ import Foundation
             permissionPending: false, toolCallInFlight: false))
     }
 
-    /// The audit's scenario: the user hesitates 80 s over an approval.
-    /// Hermes is blocked on the answer and sends nothing.
-    @Test func pendingPermissionIsNeverAStall() {
+    /// The audit's scenario: the user hesitates 80 s — or the full 300 s
+    /// default approval timeout — over an approval. Hermes is blocked on
+    /// the answer and sends nothing.
+    @Test func pendingPermissionGetsTheLongCeiling() {
         #expect(!ACPStallPolicy.isStalled(
             idleSeconds: 80, isAgentWorking: true,
             permissionPending: true, toolCallInFlight: false))
         #expect(!ACPStallPolicy.isStalled(
-            idleSeconds: 10_000, isAgentWorking: true,
-            permissionPending: true, toolCallInFlight: true))
+            idleSeconds: 310, isAgentWorking: true,
+            permissionPending: true, toolCallInFlight: false))
+    }
+
+    /// Hermes denies an unanswered prompt itself after `approvals.timeout`
+    /// and never tells the client, so the sheet can stay up. A socket that
+    /// died behind it must still be caught, not exempted forever.
+    @Test func staleUnansweredPermissionDoesNotDisableDetection() {
+        #expect(ACPStallPolicy.isStalled(
+            idleSeconds: ACPStallPolicy.toolCallSeconds + 1, isAgentWorking: true,
+            permissionPending: true, toolCallInFlight: false))
     }
 
     /// A two-minute build is silent but alive; a socket that died mid-tool

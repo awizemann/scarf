@@ -2545,9 +2545,9 @@ final class ChatController {
     /// SSH socket can sit idle for minutes before the OS notices, and the
     /// user perceives this as "streaming just stopped" (TestFlight
     /// feedback AObiv7, 2026-05-07). `ACPStallPolicy` decides what "too
-    /// long" is: 75 s while a turn streams, a much longer ceiling while a
-    /// tool call runs, and never while a permission prompt waits for the
-    /// user (S01-F2), because Hermes is silent in both of those cases. No
+    /// long" is: 75 s while a turn streams, and a much longer ceiling
+    /// while a tool call runs or a permission prompt waits for the user
+    /// (S01-F2), because Hermes is silent in both of those cases. No
     /// threshold applies when the agent is idle — there's genuinely
     /// nothing for the channel to send.
     private func startHealthMonitor(client: ACPClient) {
