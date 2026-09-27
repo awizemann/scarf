@@ -10,7 +10,8 @@ import Testing
 /// zero. It shipped with no test at all, so nothing pinned that it counts the
 /// sessions Hermes never priced.
 ///
-/// These drive `computeAggregates()` over a hand-built `sessions` array. The
+/// These drive `computeAggregates()` over a hand-built `usageSessions` array
+/// (the cost totals sum the usage population, R11 / S04-F2). The
 /// aggregation is pure, so no state.db is opened; the view model is built
 /// against a temp Hermes home so nothing touches the developer's real one.
 /// Deliberately NOT `@MainActor` and it never shells out — see the ScarfCore
@@ -51,7 +52,7 @@ struct InsightsAggregatesTests {
     @Test("only the sessions Hermes never priced are counted as unknown")
     func countsOnlyUnpricedSessions() {
         let vm = Self.viewModel()
-        vm.sessions = [
+        vm.usageSessions = [
             Self.session(id: "a", estimated: 0.0, status: "unknown", hasColumn: true),
             Self.session(id: "b", estimated: 0.25, status: "estimated", hasColumn: true),
             Self.session(id: "c", estimated: 0.0, status: "included", hasColumn: true),
@@ -72,7 +73,7 @@ struct InsightsAggregatesTests {
     @Test("a NULL cost_status on a v0.7+ host counts as unknown")
     func nullStatusOnAModernHostIsCounted() {
         let vm = Self.viewModel()
-        vm.sessions = [
+        vm.usageSessions = [
             Self.session(id: "never-priced", status: nil, hasColumn: true),
             Self.session(id: "null-with-zero", estimated: 0.0, status: nil, hasColumn: true),
             Self.session(id: "priced", estimated: 0.25, status: "estimated", hasColumn: true),
@@ -91,7 +92,7 @@ struct InsightsAggregatesTests {
     @Test("a host with no cost_status column contributes no unknowns (C1)")
     func anOlderHostCountsNoUnknowns() {
         let vm = Self.viewModel()
-        vm.sessions = [
+        vm.usageSessions = [
             Self.session(id: "a", status: nil, hasColumn: false),
             Self.session(id: "b", estimated: 0.0, status: nil, hasColumn: false),
             Self.session(id: "c", estimated: 0.25, status: nil, hasColumn: false),
@@ -108,7 +109,7 @@ struct InsightsAggregatesTests {
     @Test("an all-unknown period yields a zero sum with a positive unknown count")
     func allUnknownDrivesTheEmDashState() {
         let vm = Self.viewModel()
-        vm.sessions = [
+        vm.usageSessions = [
             Self.session(id: "a", estimated: 0.0, status: "unknown", hasColumn: true),
             Self.session(id: "b", status: nil, hasColumn: true),
         ]
@@ -121,7 +122,7 @@ struct InsightsAggregatesTests {
     @Test("no sessions means no unknowns")
     func emptyPeriodIsNotPartial() {
         let vm = Self.viewModel()
-        vm.sessions = []
+        vm.usageSessions = []
         vm.computeAggregates()
 
         #expect(vm.unknownCostSessionCount == 0)

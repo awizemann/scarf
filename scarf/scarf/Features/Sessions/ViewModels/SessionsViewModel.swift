@@ -415,7 +415,9 @@ final class SessionsViewModel {
             }
             return (names: names, projects: registry.projects, dbSize: dbSize)
         }.value
-        sessionProjectNames = bundle.names
+        // A rotated compression chain is listed under its tip id; carry the
+        // root's project over so the row keeps its label and filter.
+        sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: sessions)
         allProjects = bundle.projects
 
         computeStats(dbSize: bundle.dbSize)
@@ -437,12 +439,23 @@ final class SessionsViewModel {
 
     func selectSession(_ session: HermesSession) async {
         selectedSession = session
-        messages = await dataService.fetchMessages(sessionId: session.id, limit: HistoryPageSize.macSessionDetail)
-        subagentSessions = await dataService.fetchSubagentSessions(parentId: session.id)
+        // A rotated compression chain spans several session rows; show the
+        // whole conversation, as Hermes does, not just the tip's segment.
+        messages = await dataService.fetchMessages(
+            sessionIds: session.allSessionIds,
+            limit: HistoryPageSize.macSessionDetail
+        )
+        var subagents: [HermesSession] = []
+        for segment in session.allSessionIds {
+            subagents += await dataService.fetchSubagentSessions(parentId: segment)
+        }
+        subagentSessions = subagents
     }
 
     func selectSessionById(_ id: String) async {
-        if let session = sessions.first(where: { $0.id == id }) {
+        // `covers`: a search hit can land on any segment of a compression
+        // chain, while the list shows the chain under its tip id.
+        if let session = sessions.first(where: { $0.covers(id) }) {
             await selectSession(session)
         }
     }

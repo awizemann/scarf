@@ -105,7 +105,10 @@ public final class ProjectSessionsViewModel {
         // accumulates more than 200 attributed sessions, we'll need
         // a paged query; roadmap item, not a v2.3 problem.
         let all = await dataService.fetchSessions(limit: 200)
-        let filtered = all.filter { attributed.contains($0.id) }
+        // `allSessionIds`: a rotated compression chain is listed under its
+        // tip id, while attribution was recorded against the id the chat
+        // started with.
+        let filtered = all.filter { $0.allSessionIds.contains(where: attributed.contains) }
         sessions = filtered
 
         if filtered.isEmpty {

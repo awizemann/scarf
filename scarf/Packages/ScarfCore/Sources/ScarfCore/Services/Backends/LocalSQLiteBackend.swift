@@ -48,6 +48,8 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasHiddenColumn = false
     private(set) public var hasLastReadAtColumn = false
     private(set) public var hasListableChildSupport = false
+    private(set) public var hasArchivedColumn = false
+    private(set) public var hasDisplayKindColumn = false
     private(set) public var lastOpenError: String?
 
     /// True when `open()` had to fall back to a READWRITE handle guarded by
@@ -291,6 +293,8 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         hasHiddenColumn = false
         hasLastReadAtColumn = false
         hasListableChildSupport = false
+        hasArchivedColumn = false
+        hasDisplayKindColumn = false
     }
 
     private func detectSchema() {
@@ -330,6 +334,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     case "last_activity_description": sawLastActivityDescription = true
                     // v0.20.4 additive columns.
                     case "hidden": hasHiddenColumn = true
+                    case "archived": hasArchivedColumn = true
                     case "last_read_at": hasLastReadAtColumn = true
                     case "model_config": sawModelConfig = true
                     case "session_key": sawSessionKey = true
@@ -400,6 +405,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     case "active":    hasMessagesActiveColumn = true
                     case "compacted": hasCompactedColumn = true
                     case "_compressed_summary": hasCompressedSummaryColumn = true
+                    case "display_kind": hasDisplayKindColumn = true
                     default:          break
                     }
                 }

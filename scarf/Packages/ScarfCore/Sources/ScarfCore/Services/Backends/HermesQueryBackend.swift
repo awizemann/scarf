@@ -128,6 +128,21 @@ public protocol HermesQueryBackend: Sendable {
     /// shows.
     var hasListableChildSupport: Bool { get async }
 
+    /// True iff `sessions.archived` exists (Hermes v0.16+, the soft-hide
+    /// flag `hermes sessions archive` and the desktop/web dashboard set).
+    /// When present the session-list predicate adds `archived = 0`, as
+    /// every default Hermes listing does (`_session_filter_where`,
+    /// hermes_state_sessions.py:124-127 @ v2026.9.24). Absent → the
+    /// clause is omitted and the list SQL is unchanged.
+    var hasArchivedColumn: Bool { get async }
+
+    /// True iff `messages.display_kind` exists (Hermes v0.19.1+). Rows
+    /// Hermes tags `display_kind = 'hidden'` are model-facing scaffolding
+    /// it never paints (hermes_state_common.py:113-114,
+    /// hermes_state_search.py:149-150 @ v2026.9.24); Scarf drops them from
+    /// transcripts, search and previews when the column exists.
+    var hasDisplayKindColumn: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.
