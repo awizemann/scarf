@@ -351,6 +351,70 @@ struct ServerBackupRestoreSafetyTests {
         #expect(Self.bytes(URL(fileURLWithPath: profileDB)) == dbBefore)
     }
 
+    /// Review follow-ups: a symlinked state.db, a directory named `*.db`, a
+    /// database with glob characters in its name, and a Hermes retired-WAL
+    /// capture, all through a real backup and restore.
+    @Test("symlinked state.db, *.db directories, odd names and retired-WAL captures survive the round trip correctly")
+    func awkwardHomeRoundTrip() async throws {
+        let root = try Self.scratch("awkward")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("src/.hermes")
+        let data = root.appendingPathComponent("data")
+        for dir in [source.appendingPathComponent("plug.db"), source.appendingPathComponent("state.db.retired-wal-1-2"), data] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        // state.db lives elsewhere, symlinked in.
+        let realState = try Self.openWALWriter(data.appendingPathComponent("real.db").path, rows: 31)
+        try FileManager.default.createSymbolicLink(
+            atPath: source.appendingPathComponent("state.db").path, withDestinationPath: data.appendingPathComponent("real.db").path)
+        let odd = try Self.openWALWriter(source.appendingPathComponent("odd [1].db").path, rows: 2)
+        try Data("notes".utf8).write(to: source.appendingPathComponent("plug.db/notes.txt"))
+        try Data("image".utf8).write(to: source.appendingPathComponent("state.db.retired-wal-1-2/image.db"))
+        try Data("frames".utf8).write(to: source.appendingPathComponent("state.db.retired-wal-1-2/image.db-wal"))
+
+        let backup = try await Self.backUp(home: source, into: root)
+        sqlite3_close(realState); sqlite3_close(odd)
+        let dbs = try #require(backup.manifest.databases)
+        #expect(Set(dbs.entries.map(\.path)) == ["state.db", "odd [1].db"], "the retired-WAL image is not snapshotted")
+        let listing = try Self.capture("/usr/bin/tar", ["-tzf", Self.unzipped(backup.archiveURL, in: root)
+            .appendingPathComponent(backup.manifest.hermes.tarballPath).path])
+        #expect(listing.contains(".hermes/plug.db/notes.txt"), "a directory named *.db is kept")
+        #expect(!listing.contains("retired-wal"), "retired-WAL captures are left out whole, as hermes backup does")
+        #expect(!listing.split(separator: "\n").contains { $0.hasSuffix("state.db") || $0.hasSuffix("odd [1].db") })
+
+        let target = root.appendingPathComponent("dst/.hermes")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let service = RemoteRestoreService(context: .local(home: target))
+        _ = try await service.run(
+            inspection: try await service.inspect(archiveURL: backup.archiveURL),
+            options: .init(targetProjectsRoot: root.path), progress: { _ in })
+        #expect(try Self.inspect(target.appendingPathComponent("state.db").path).count == 31)
+        #expect(try Self.inspect(target.appendingPathComponent("odd [1].db").path).count == 2)
+        #expect(FileManager.default.fileExists(atPath: target.appendingPathComponent("plug.db/notes.txt").path))
+    }
+
+    @Test("a backup whose state.db can't be snapshotted fails instead of leaving it out")
+    func unreadableRootStateFails() async throws {
+        let root = try Self.scratch("badroot")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".hermes")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data(repeating: 0x41, count: 8192).write(to: home.appendingPathComponent("state.db"))
+        await #expect(throws: RemoteBackupService.BackupError.self) {
+            _ = try await Self.backUp(home: home, into: root)
+        }
+    }
+
+    @Test("manifest database paths that could escape the home are refused")
+    func unsafeDatabasePaths() {
+        for bad in ["../x.db", "/etc/x.db", "a/../../x.db", "a//x.db", "x.txt", "./x.db", "a\nb.db"] {
+            #expect(!RemoteRestoreService.isSafeDatabasePath(bad), "\(bad)")
+        }
+        for good in ["state.db", "profiles/work/state.db", "odd [1].db"] {
+            #expect(RemoteRestoreService.isSafeDatabasePath(good), "\(good)")
+        }
+    }
+
     @Test("leftover Scarf directories from a killed run are swept; fresh ones and non-Scarf ones are kept")
     func leftoversAreSwept() async throws {
         let root = try Self.scratch("leftover")
@@ -364,7 +428,7 @@ struct ServerBackupRestoreSafetyTests {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try Data("x".utf8).write(to: dir.appendingPathComponent("state.db"))
         }
-        let old = Date(timeIntervalSinceNow: -3 * 3600)
+        let old = Date(timeIntervalSinceNow: -2 * 86_400)
         for dir in [stale, staleStaging, foreign] {
             for url in [dir.appendingPathComponent("state.db"), dir] {
                 try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: url.path)
@@ -524,6 +588,10 @@ struct ServerBackupRestoreSafetyTests {
         // state.db's sidecars were excluded): rows only in that WAL must
         // survive the lift.
         try Self.makeUnheldHome(stage.appendingPathComponent("profiles/p"), rows: 17, withWAL: true)
+        // bsdtar reads extract operands as patterns: a bracketed name must
+        // still be found.
+        let bracket = try Self.openWALWriter(stage.appendingPathComponent("k[1].db").path, rows: 4)
+        sqlite3_close(bracket)
         let work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         let tarball = work.appendingPathComponent(BackupArchiveLayout.hermesTarballPath)
@@ -556,6 +624,7 @@ struct ServerBackupRestoreSafetyTests {
         let profile = target.appendingPathComponent("profiles/p/state.db").path
         #expect(!FileManager.default.fileExists(atPath: profile + "-wal"))
         #expect(try Self.inspect(profile).count == 17, "the archived WAL's rows were folded in")
+        #expect(try Self.inspect(target.appendingPathComponent("k[1].db").path).count == 4)
     }
 
     @Test("a v1 home tarball without a database lifts to nil, not an error")
@@ -641,9 +710,13 @@ struct ServerBackupRestoreSafetyTests {
     func excludesUseLeaf() {
         let ex = RemoteBackupService.hermesExcludes(
             leaf: "hermes-data",
-            options: .init(includeAuth: false, includeMcpTokens: true, includeLogs: true, checkpointedWAL: false))
-        #expect(ex.contains("*.db"))
+            options: .init(includeAuth: false, includeMcpTokens: true, includeLogs: true, checkpointedWAL: false),
+            databases: ["state.db", "profiles/a [1]/state.db"])
+        #expect(ex.contains("hermes-data/state.db"))
+        #expect(ex.contains("hermes-data/profiles/a \\[1\\]/state.db"), "glob-escaped")
+        #expect(!ex.contains("*.db"), "a pattern would also drop a directory named x.db")
         #expect(ex.contains("*.db-wal"))
+        #expect(ex.contains("*.retired-wal-*"))
         #expect(ex.contains("hermes-data/auth.json"))
         #expect(!ex.contains { $0.hasPrefix(".hermes/") })
     }

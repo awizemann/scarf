@@ -113,7 +113,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
             case .localIO(let m): return "Local file I/O failed during restore: \(m)"
             case .hermesRunning(let pids, let homeRestored):
                 let list = pids.map(String.init).joined(separator: ", ")
-                return "Hermes is running on this server: process \(list) has state.db open. Restoring over a database that is in use can corrupt it or lose sessions. Stop the Hermes gateway and close any Hermes chats on this server (including Scarf chat windows), then restore again. \(Self.outcome(homeRestored))"
+                return "Hermes is running on this server: process \(list) has one of its databases (state.db, a profile's state.db, kanban.db, …) open. Restoring over a database that is in use can corrupt it or lose sessions. Stop the Hermes gateway and close any Hermes chats on this server (including Scarf chat windows), then restore again. \(Self.outcome(homeRestored))"
             case .cannotConfirmHermesStopped(let m, let homeRestored):
                 return "Couldn't confirm that Hermes is stopped on this server (\(m)). Stop the Hermes gateway and any Hermes chats there, then restore again. \(Self.outcome(homeRestored))"
             case .cancelled: return "Restore cancelled."
@@ -122,7 +122,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
 
         private static func outcome(_ homeRestored: Bool) -> String {
             homeRestored
-                ? "The rest of the Hermes home was restored, but state.db was left as it was."
+                ? "The rest of the Hermes home was restored, but its databases were left as they were."
                 : "Nothing was changed."
         }
     }
@@ -235,6 +235,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // Hash-verify every inner tarball before any remote bytes are
         // pushed.
         try await Self.verifyHash(file: workDir.appendingPathComponent(manifest.hermes.tarballPath), expected: manifest.hermes.tarballSHA256)
+        if let bad = manifest.databases?.entries.map(\.path).first(where: { !Self.isSafeDatabasePath($0) }) {
+            throw RestoreError.archiveUnreadable("the manifest lists an unsafe database path: \(bad)")
+        }
         if let databases = manifest.databases, !databases.entries.isEmpty {
             try await Self.verifyHash(file: workDir.appendingPathComponent(databases.tarballPath), expected: databases.tarballSHA256)
         }
@@ -370,7 +373,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         try await pushTarball(
             transport: transport,
             tarball: hermesTar,
-            extractCommand: Self.hermesExtractCommand(hermesHome: hermesHome, archiveLeaf: archiveLeaf)
+            extractCommand: Self.hermesExtractCommand(
+                hermesHome: hermesHome, archiveLeaf: archiveLeaf, databases: dbBundle?.paths ?? [])
         ) { written in
             progress(.restoringHermes(bytesPushed: written))
         }
@@ -397,7 +401,10 @@ public final class RemoteRestoreService: @unchecked Sendable {
                 try await pushTarball(
                     transport: transport,
                     tarball: dbBundle.tarball,
-                    extractCommand: "mkdir -p \(Self.shellQuote(staging)) && tar -xzf - -C \(Self.shellQuote(staging))"
+                    // `-m`: the staged files get "now" as their mtime, not the
+                    // backup's, so a concurrent run's leftover sweep can't
+                    // mistake this staging directory for an abandoned one.
+                    extractCommand: "mkdir -p \(Self.shellQuote(staging)) && tar -xmzf - -C \(Self.shellQuote(staging))"
                 ) { _ in }
                 try await publishDatabases(
                     transport: transport,
@@ -987,9 +994,14 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// one. Hermes's own import skips them for the same reason
     /// (`hermes_cli/backup.py:946-951` @ v2026.9.24). The patterns are
     /// unanchored, so they reach every subdirectory.
-    static func hermesExtractCommand(hermesHome: String, archiveLeaf: String) -> String {
+    static func hermesExtractCommand(hermesHome: String, archiveLeaf: String, databases: [String]) -> String {
         let home = shellQuote(hermesHome)
-        let excludes = ["*.db", "*.db-wal", "*.db-shm", "*.db-journal"]
+        // The databases by exact path (a `*.db` pattern would also drop a
+        // DIRECTORY named `x.db`); sidecars and retired-WAL captures by
+        // pattern.
+        let patterns = databases.map { HermesDatabaseScripts.globEscape(archiveLeaf + "/" + $0) }
+            + ["*.db-wal", "*.db-shm", "*.db-journal", HermesDatabaseScripts.retiredWALPattern]
+        let excludes = patterns
             .map { "--exclude=\(shellQuote($0))" }
             .joined(separator: " ")
         return "{ [ -d \(home) ] || { mkdir -p \(home) && chmod 700 \(home); }; } && tar -xzf - \(excludes) --strip-components=1 -C \(home)"
@@ -1069,6 +1081,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
         hermesHome: String
     ) async throws {
         var lines = [
+            // Defines `scarf_resolve` too: a symlinked database is replaced
+            // at its real path, as Hermes's page-copy restore writes through
+            // the link, rather than by swapping the link for a file.
             HermesDatabaseScripts.holderScan(
                 databases: Self.absolute(paths, in: hermesHome), ownPID: ownPIDIfLocal(transport)),
             "if [ -n \"$holders\" ]; then echo \"SCARF_HOLDERS:$holders\"; exit 3; fi",
@@ -1080,7 +1095,9 @@ public final class RemoteRestoreService: @unchecked Sendable {
             let staged = Self.shellQuote(staging + "/" + path)
             let db = Self.shellQuote(hermesHome + "/" + path)
             let dir = Self.shellQuote((hermesHome + "/" + path as NSString).deletingLastPathComponent)
-            lines.append("mkdir -p \(dir) && chmod 600 \(staged) && rm -f \(db)-wal \(db)-shm \(db)-journal && mv -f \(staged) \(db) || exit 1")
+            lines.append("scarf_db=$(scarf_resolve \(db))")
+            lines.append("mkdir -p \(dir) && chmod 600 \(staged) && rm -f \"$scarf_db-wal\" \"$scarf_db-shm\" \"$scarf_db-journal\" && mv -f \(staged) \"$scarf_db\" || exit 1")
+            lines.append("printf 'SCARF_PUBLISHED\\t%s\\n' \(Self.shellQuote(path))")
         }
         lines.append("echo SCARF_GUARDED_OK")
         let result: ProcessResult
@@ -1102,9 +1119,26 @@ public final class RemoteRestoreService: @unchecked Sendable {
             throw RestoreError.cannotConfirmHermesStopped(why, homeRestored: true)
         case .clear?, nil:
             let why = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let published = result.stdoutString.split(separator: "\n")
+                .filter { $0.hasPrefix("SCARF_PUBLISHED\t") }
+                .map { String($0.dropFirst("SCARF_PUBLISHED\t".count)) }
+            let pending = paths.filter { !published.contains($0) }
+            let progress = published.isEmpty
+                ? " No database was replaced."
+                : " Replaced: \(published.joined(separator: ", ")). Not replaced: \(pending.joined(separator: ", "))."
             throw RestoreError.remoteCommandFailed(
-                "replacing the databases failed (exit \(result.exitCode))" + (why.isEmpty ? "" : ": \(why)"))
+                "replacing the databases failed (exit \(result.exitCode))" + (why.isEmpty ? "" : ": \(why)") + "." + progress)
         }
+    }
+
+    /// A database path from an archive's manifest (or a v1 tarball) is only
+    /// trusted when it is a plain home-relative `*.db` path: it is spliced
+    /// into `rm` and `mv` on the target.
+    static func isSafeDatabasePath(_ path: String) -> Bool {
+        guard path.hasSuffix(".db"), !path.hasPrefix("/"),
+              !path.contains("\n"), !path.contains("\r"), !path.contains("\0") else { return false }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return !parts.contains { $0.isEmpty || $0 == "." || $0 == ".." }
     }
 
     /// Lift every `*.db` out of a v1 home tarball on the Mac and re-pack
@@ -1126,14 +1160,21 @@ public final class RemoteRestoreService: @unchecked Sendable {
         }
         let members = listing.split(whereSeparator: \.isNewline).map(String.init)
         let prefix = leaf + "/"
-        let databases = members.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".db") && $0.count > prefix.count }
+        // Hermes's retired-WAL captures move whole or not at all; the
+        // restore leaves them out, as `hermes import` never sees them.
+        let databases = members.filter {
+            $0.hasPrefix(prefix) && $0.hasSuffix(".db") && !$0.contains(".retired-wal-")
+                && isSafeDatabasePath(String($0.dropFirst(prefix.count)))
+        }
         guard !databases.isEmpty else { return nil }
         let wals = Set(members.filter { $0.hasSuffix(".db-wal") })
 
         let stage = workDir.appendingPathComponent("legacy-databases", isDirectory: true)
         try? FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
         let wanted = databases + databases.map { $0 + "-wal" }.filter(wals.contains)
-        let (status, output) = try await runLocalTar(["-xzf", tarball.path, "-C", stage.path] + wanted)
+        // bsdtar reads member operands as patterns: escape them.
+        let (status, output) = try await runLocalTar(
+            ["-xzf", tarball.path, "-C", stage.path] + wanted.map(HermesDatabaseScripts.globEscape))
         guard status == 0 else {
             throw RestoreError.archiveUnreadable("couldn't read the databases from the backup (tar exit \(status)): \(output)")
         }
@@ -1144,6 +1185,7 @@ public final class RemoteRestoreService: @unchecked Sendable {
         let root = stage.appendingPathComponent(leaf)
         let paths = databases.map { String($0.dropFirst(prefix.count)) }
         let repacked = workDir.appendingPathComponent("legacy-databases.tar.gz")
+        // `-C root` + plain operands: creation reads paths literally.
         let (packStatus, packOutput) = try await runLocalTar(["-czf", repacked.path, "-C", root.path] + paths)
         guard packStatus == 0 else {
             throw RestoreError.localIO("couldn't repack the databases from the backup (tar exit \(packStatus)): \(packOutput)")

@@ -23,10 +23,52 @@ enum HermesDatabaseScripts {
 
     /// How long a Scarf staging directory must have been untouched (it and
     /// everything in it) before a later run treats it as left behind by a
-    /// killed run and removes it. Well above the longest single step that
-    /// writes into one (the 15-minute snapshot ceiling), so a run still in
-    /// progress in another Scarf window is never swept.
-    static let leftoverAgeMinutes = 60
+    /// killed run and removes it. A day: far above any single run, including
+    /// a multi-GB snapshot streaming over a slow link for hours without
+    /// touching the directory, so a run still in progress in another Scarf
+    /// window is never swept.
+    static let leftoverAgeMinutes = 24 * 60
+
+    /// Hermes's retired-WAL capture directories
+    /// (`<db>.retired-wal-<ts>-<pid>/`: an image, its captured `-wal` and a
+    /// manifest; `RETIRED_GENERATION_DIR_SUFFIX`,
+    /// `hermes_state_dbfile.py:377` @ v2026.9.24). An operator-recovery
+    /// artifact that must move as a unit or not at all; `hermes backup`
+    /// leaves it out whole (`hermes_cli/backup.py:110-119`), and so do we:
+    /// snapshotting the image inside would reinterpret the captured WAL,
+    /// and the sidecar exclusions would drop that WAL, its only copy.
+    static let retiredWALPattern = "*.retired-wal-*"
+
+    /// Glob-escape a path for a tar `--exclude` / member pattern and for
+    /// `find -lname`: `[`, `]`, `*`, `?` and `\` match themselves.
+    static func globEscape(_ path: String) -> String {
+        var out = ""
+        for ch in path {
+            if "[]*?\\".contains(ch) { out.append("\\") }
+            out.append(ch)
+        }
+        return out
+    }
+
+    /// A bash function `scarf_resolve PATH` that prints PATH with its
+    /// directory resolved (`pwd -P`) and a symlinked final component followed
+    /// (up to 8 levels): the real file a process holds and the real file a
+    /// restore must replace. Portable: no `readlink -f` / `realpath`.
+    static let resolveFunction = """
+    scarf_resolve() {
+      scarf_r=$1; scarf_n=0
+      while :; do
+        scarf_rd=$(dirname "$scarf_r"); scarf_rb=$(basename "$scarf_r")
+        if [ -d "$scarf_rd" ]; then scarf_rd=$(cd "$scarf_rd" && pwd -P); fi
+        scarf_r="$scarf_rd/$scarf_rb"
+        [ -L "$scarf_r" ] && [ $scarf_n -lt 8 ] || break
+        scarf_rl=$(readlink "$scarf_r") || break
+        case "$scarf_rl" in /*) scarf_r=$scarf_rl ;; *) scarf_r="$scarf_rd/$scarf_rl" ;; esac
+        scarf_n=$((scarf_n + 1))
+      done
+      printf '%s\n' "$scarf_r"
+    }
+    """
 
     /// Single-quote for bash.
     static func q(_ s: String) -> String {
@@ -102,33 +144,40 @@ enum HermesDatabaseScripts {
         """
     }()
 
-    /// Snapshot every `*.db` regular file under `home` into the same
-    /// relative path under `snapshotDir`, skipping Scarf's own directories
-    /// and the subtrees the backup excludes (`prunedDirs`, relative to the
-    /// home). Hermes's own backup snapshots every `*.db` the same way
+    /// Snapshot every `*.db` file under `home` (a symlink to a file
+    /// included) into the same relative path under `snapshotDir`, skipping
+    /// Scarf's own directories, Hermes's retired-WAL captures, and the
+    /// subtrees the backup excludes (`prunedDirs`, relative to the home).
+    /// Hermes's own backup snapshots every `*.db` the same way
     /// (`hermes_cli/backup.py:590-610` @ v2026.9.24).
     ///
     /// Output, one line each: `SCARF_DB_OK<TAB>method<TAB>relpath`,
-    /// `SCARF_DB_FAIL<TAB>relpath`, then `SCARF_SNAPSHOT_DONE`.
+    /// `SCARF_DB_FAIL<TAB>relpath` (a name with a tab or newline in it is
+    /// reported as `SCARF_DB_UNNAMEABLE`, never silently dropped),
+    /// `SCARF_ROOT_STATEDB` when the home has a state.db at all, then
+    /// `SCARF_SNAPSHOT_DONE`.
     static func snapshotAll(home: String, snapshotDir: String, prunedDirs: [String]) -> String {
-        var prunes = ["-path './\(snapshotDirPrefix)*'", "-path './\(stagingDirPrefix)*'"]
+        var prunes = ["-path './\(snapshotDirPrefix)*'", "-path './\(stagingDirPrefix)*'",
+                      "-name '\(retiredWALPattern)'"]
         prunes += prunedDirs.map { "-path \(q("./" + $0))" }
         return """
         \(leftoverCleanup(home: home))
         cd \(q(home)) || exit 1
         scarf_out=\(q(snapshotDir))
         mkdir -p "$scarf_out" || exit 1
+        [ -f state.db ] && echo SCARF_ROOT_STATEDB
         \(snapshotFunction)
         while IFS= read -r -d '' scarf_f; do
+          [ -f "$scarf_f" ] || continue
           scarf_rel=${scarf_f#./}
-          case "$scarf_rel" in *$'\\n'*|*$'\\t'*) continue ;; esac
+          case "$scarf_rel" in *$'\\n'*|*$'\\t'*|*$'\\r'*) echo SCARF_DB_UNNAMEABLE; continue ;; esac
           mkdir -p "$scarf_out/$(dirname "$scarf_rel")" || { printf 'SCARF_DB_FAIL\\t%s\\n' "$scarf_rel"; continue; }
           if scarf_m=$(scarf_snap "$scarf_f" "$scarf_out/$scarf_rel"); then
             printf 'SCARF_DB_OK\\t%s\\t%s\\n' "$scarf_m" "$scarf_rel"
           else
             printf 'SCARF_DB_FAIL\\t%s\\n' "$scarf_rel"
           fi
-        done < <(find . \\( \(prunes.joined(separator: " -o ")) \\) -prune -o -type f -name '*.db' -print0)
+        done < <(find . \\( \(prunes.joined(separator: " -o ")) \\) -prune -o \\( -type f -o -type l \\) -name '*.db' -print0)
         echo SCARF_SNAPSHOT_DONE
         """
     }
@@ -137,21 +186,30 @@ enum HermesDatabaseScripts {
         var ok: [(path: String, method: String)]
         var failed: [String]
         var finished: Bool
+        /// The home had a root state.db (so it must be in `ok`).
+        var rootStateDB = false
+        /// Databases whose names can't be carried through the report.
+        var unnameable = 0
 
         static func == (a: SnapshotReport, b: SnapshotReport) -> Bool {
             a.ok.map(\.path) == b.ok.map(\.path) && a.ok.map(\.method) == b.ok.map(\.method)
                 && a.failed == b.failed && a.finished == b.finished
+                && a.rootStateDB == b.rootStateDB && a.unnameable == b.unnameable
         }
     }
 
     static func parseSnapshotReport(_ stdout: String) -> SnapshotReport {
         var report = SnapshotReport(ok: [], failed: [], finished: false)
-        for line in stdout.split(whereSeparator: \.isNewline) {
+        // Split on "\n" only: a path may legitimately hold a "\r" or a
+        // Unicode line separator, which `isNewline` would cut through.
+        for line in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             switch fields.first {
             case "SCARF_DB_OK" where fields.count == 3: report.ok.append((fields[2], fields[1]))
             case "SCARF_DB_FAIL" where fields.count == 2: report.failed.append(fields[1])
             case "SCARF_SNAPSHOT_DONE": report.finished = true
+            case "SCARF_ROOT_STATEDB": report.rootStateDB = true
+            case "SCARF_DB_UNNAMEABLE": report.unnameable += 1
             default: break
             }
         }
@@ -195,10 +253,10 @@ enum HermesDatabaseScripts {
         holders=""
         scarf_found=""
         scarf_targets=()
+        \(resolveFunction)
         for scarf_d in "${scarf_dbs[@]}"; do
-          scarf_dir=$(dirname "$scarf_d"); scarf_base=$(basename "$scarf_d")
-          if [ -d "$scarf_dir" ]; then scarf_dir=$(cd "$scarf_dir" && pwd -P); fi
-          scarf_targets+=("$scarf_dir/$scarf_base" "$scarf_dir/$scarf_base-wal" "$scarf_dir/$scarf_base-shm")
+          scarf_real=$(scarf_resolve "$scarf_d")
+          scarf_targets+=("$scarf_real" "$scarf_real-wal" "$scarf_real-shm")
         done
         if \(useProc); then
           if [ \(forceReadlink ? "0" : "1") = 1 ] && find / -maxdepth 0 -lname scarf-probe >/dev/null 2>&1; then
