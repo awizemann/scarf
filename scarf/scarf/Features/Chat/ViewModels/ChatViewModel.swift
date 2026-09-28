@@ -455,6 +455,10 @@ final class ChatViewModel {
     /// the original `startACPSession` call from `pendingStartArgs`.
     /// Nil when no preflight is pending.
     var modelPreflightReason: String?
+    /// config.yaml's custom providers, from the last off-main config read —
+    /// handed to the preflight sheet's picker so it doesn't treat a custom
+    /// endpoint as unroutable.
+    private(set) var customProviders: ModelPreflight.CustomProviders = .none
 
     /// Stash of the original `startACPSession` arguments while we wait
     /// for the user to pick a model. Replayed verbatim once
@@ -764,6 +768,7 @@ final class ChatViewModel {
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
             let unroutable = ModelPreflight.unroutableProvider(config, capabilities: capabilities)
+            self?.customProviders = ModelPreflight.CustomProviders(config)
             self?.modelProviderMismatch = resolvedMismatch
             self?.llamaCppBaseURLIgnored = llamaIgnored
             self?.unroutableProvider = unroutable
@@ -2234,6 +2239,7 @@ final class ChatViewModel {
             Analytics.record(.modelPreflightResult(outcome: .passed))
         } else {
             pendingStartArgs = (sessionId, projectPath, initialPrompt)
+            customProviders = ModelPreflight.CustomProviders(config)
             modelPreflightReason = preflight.reason
             acpStatus = ""
             hasActiveProcess = false

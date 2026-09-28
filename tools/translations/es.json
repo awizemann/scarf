@@ -3302,5 +3302,6 @@
   "config.yaml sets an empty prefix, so replies carry no header. Use Hermes Default to bring the header back.": "config.yaml define un prefijo vacío, así que las respuestas no llevan encabezado. Usa Predeterminado de Hermes para recuperarlo.",
   "cron job %@": "tarea cron %@",
   "display name": "nombre visible",
-  "• skills.config.%@": "• skills.config.%@"
+  "• skills.config.%@": "• skills.config.%@",
+  "Saved to config.yaml, but couldn't remove %@ from .env": "Guardado en config.yaml, pero no se pudo quitar %@ de .env"
 }

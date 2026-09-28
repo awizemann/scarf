@@ -21,6 +21,9 @@ final class ModelPresetsViewModel {
     private(set) var statusMessage: String?
     private(set) var statusIsError: Bool = false
     private(set) var isLoading = false
+    /// The main profile's config.yaml custom providers, for the preset
+    /// editor's model picker (same source as Settings → General).
+    private(set) var customProviders: ModelPreflight.CustomProviders = .none
 
     private let service: ModelPresetService
 
@@ -54,6 +57,23 @@ final class ModelPresetsViewModel {
                 self?.statusIsError = true
             }
             self?.isLoading = false
+        }
+    }
+
+    /// Re-read config.yaml's custom providers off the main actor (C10).
+    /// Runs on every appear — unlike the preset list it isn't cached, so a
+    /// provider added in Settings shows up the next time Models opens.
+    func refreshCustomProviders() {
+        let ctx = context
+        Task { @MainActor [weak self] in
+            let providers = await Self.readCustomProviders(in: ctx)
+            self?.customProviders = providers
+        }
+    }
+
+    nonisolated static func readCustomProviders(in context: ServerContext) async -> ModelPreflight.CustomProviders {
+        await OffPool.run {
+            ModelPreflight.CustomProviders(HermesFileService(context: context).loadConfig())
         }
     }
 

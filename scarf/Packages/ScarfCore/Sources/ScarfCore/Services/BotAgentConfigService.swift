@@ -203,7 +203,13 @@ public struct BotAgentConfigService: Sendable {
             modelBaseURL: scalar("model.base_url"),
             disabledSkills: disabled,
             platformToolsets: toolsets,
-            mcpServers: servers
+            mcpServers: servers,
+            customProviders: ModelPreflight.CustomProviders(
+                names: HermesConfig.namedCustomProviders(values: parsed.values, maps: parsed.maps),
+                hasUnread: HermesConfig.hasUnreadCustomProviders(
+                    yaml: yaml, values: parsed.values, lists: parsed.lists, maps: parsed.maps
+                )
+            )
         )
     }
 

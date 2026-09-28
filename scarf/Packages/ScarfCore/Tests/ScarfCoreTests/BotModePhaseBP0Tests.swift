@@ -292,6 +292,30 @@ import Foundation
         #expect(below.disabledSkills == ["hermes-agent", "noisy"])
     }
 
+    /// B12: the bot's picker judges its pin against the bot profile's OWN
+    /// custom providers (block `providers:` and legacy `custom_providers:`).
+    @Test func customProvidersComeFromTheBotsOwnConfig() {
+        let block = BotAgentConfigService.parseAgentConfig(
+            yaml: "model:\n  provider: my-lab\n  default: m\nproviders:\n  my-lab:\n    base_url: http://lab:8000/v1\n",
+            profileName: "scout", configPath: "/x", configExists: true,
+            essentialHermesAgentSkill: true)
+        #expect(block.customProviders.names == ["my-lab"])
+        #expect(!ModelPreflight.isUnroutable(
+            "my-lab", customProviders: block.customProviders,
+            capabilities: HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)")))
+
+        let legacy = BotAgentConfigService.parseAgentConfig(
+            yaml: "custom_providers:\n  - name: lab\n    base_url: http://lab\n",
+            profileName: "scout", configPath: "/x", configExists: true,
+            essentialHermesAgentSkill: true)
+        #expect(legacy.customProviders.hasUnread)
+
+        let bare = BotAgentConfigService.parseAgentConfig(
+            yaml: "model:\n  provider: my-lab\n", profileName: "scout",
+            configPath: "/x", configExists: true, essentialHermesAgentSkill: true)
+        #expect(bare.customProviders == .none)
+    }
+
     /// Hand-edited configs use the flow form; Hermes' own writer uses bullets.
     @Test func bothSkillsDisabledSpellingsParse() {
         let flow = BotAgentConfigService.parseAgentConfig(

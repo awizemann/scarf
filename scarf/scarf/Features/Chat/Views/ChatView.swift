@@ -693,6 +693,7 @@ struct ChatView: View {
             ChatModelPreflightSheet(
                 reason: viewModel.modelPreflightReason ?? "",
                 serverDisplayName: viewModel.context.displayName,
+                customProviders: viewModel.customProviders,
                 onSelect: { model, provider in
                     viewModel.confirmModelPreflight(model: model, provider: provider)
                 },

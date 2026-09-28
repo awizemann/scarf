@@ -114,12 +114,13 @@ final class MattermostSetupViewModel: PlatformSetupForm {
 
     func save() {
         let plan = savePlan()
-        commitSave(envPairs: plan.env, configKV: plan.config)
+        commitSave(envPairs: plan.env, configKV: plan.config,
+                   envUnsetAfterConfig: plan.envUnsetAfterConfig)
     }
 
     /// The `.env` pairs and config.yaml keys a Save writes.
-    func savePlan() -> (env: [String: String], config: [String: String]) {
-        var envPairs: [String: String] = [
+    func savePlan() -> (env: [String: String], config: [String: String], envUnsetAfterConfig: [String]) {
+        let envPairs: [String: String] = [
             "MATTERMOST_URL": serverURL,
             "MATTERMOST_TOKEN": token,
             "MATTERMOST_ALLOWED_USERS": allowedUsers,
@@ -132,14 +133,13 @@ final class MattermostSetupViewModel: PlatformSetupForm {
         // shared-key bridge resolves the spelling (`bridgeResolvedKeys`);
         // removing the env line is what makes that value the one the adapter
         // reads on BOTH sides of the v0.21.3 flip (see
-        // ``resolveRequireMention``). An empty pair is an `unset` (the line is
-        // commented out); only sent when the line exists.
-        if requireMentionEnvLine {
-            envPairs["MATTERMOST_REQUIRE_MENTION"] = ""
-        }
+        // ``resolveRequireMention``). The line is commented out only AFTER
+        // the config write succeeds, so a failed save keeps the one copy
+        // Hermes still reads; only sent when the line exists.
+        let unsetAfter = requireMentionEnvLine ? ["MATTERMOST_REQUIRE_MENTION"] : []
         let configKV: [String: String] = [
             "mattermost.require_mention": PlatformSetupHelpers.envBool(requireMention)
         ]
-        return (envPairs, configKV)
+        return (envPairs, configKV, unsetAfter)
     }
 }

@@ -3298,5 +3298,6 @@
   "config.yaml sets an empty prefix, so replies carry no header. Use Hermes Default to bring the header back.": "config.yaml 设置了空前缀，因此回复没有标题。使用“Hermes 默认值”可恢复标题。",
   "cron job %@": "定时任务 %@",
   "display name": "显示名称",
-  "• skills.config.%@": "• skills.config.%@"
+  "• skills.config.%@": "• skills.config.%@",
+  "Saved to config.yaml, but couldn't remove %@ from .env": "已保存到 config.yaml,但无法从 .env 中移除 %@"
 }
