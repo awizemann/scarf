@@ -330,8 +330,9 @@ public struct SSHTransport: ServerTransport {
     /// and every remote write under a spaced folder failed (S15-F1, checked
     /// against OpenSSH 10.3's scp and `sftp-server`). With no shell there is
     /// also nothing to inject into: `$(…)`, quotes and backticks are just
-    /// characters in the name. A leading `~/` is expanded by the server
-    /// (the `expand-path` extension), as it was before.
+    /// characters in the name. A leading `~/` still lands in the remote
+    /// home: scp resolves it (as a home-relative path, or through the
+    /// server's `expand-path` extension), as it did before.
     nonisolated static func scpRemoteSpec(_ path: String) -> String {
         path
     }
