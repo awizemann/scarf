@@ -43,6 +43,10 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     var personalities: [HermesPersonality] = []
     var activeName: String = ""
     var soulMarkdown: String = ""
+    /// True once a load has actually read SOUL.md (or confirmed it is
+    /// absent). Until then `soulMarkdown` is a placeholder, not the file,
+    /// and the editor must not open or save over the real file (S03-F1).
+    private(set) var soulLoaded = false
     var soulPath: String { context.paths.soulMD }
     var message: String?
     /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
@@ -76,12 +80,22 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
                 yaml: yaml,
                 hasBuiltinPersonalitiesInCode: inCodeBuiltins
             )
-            let soul = ctx.readText(path) ?? ""
+            let soulText = ctx.readText(path)
+            // `readText` is nil both for "absent" and "couldn't read". Only
+            // the first is a real empty SOUL.md; a failed read must not
+            // look like an empty file the editor can then save over.
+            let soulTrusted = soulText != nil || !ctx.fileExists(path)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.activeName = config.personality
                 self.personalities = parsed
-                self.soulMarkdown = soul
+                if soulTrusted {
+                    self.soulMarkdown = soulText ?? ""
+                    self.soulLoaded = true
+                } else {
+                    self.soulLoaded = false
+                    self.showSaveFailure(String(localized: "Couldn’t read SOUL.md, so editing is off until Reload succeeds."))
+                }
             }
         }
     }
@@ -141,8 +155,26 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
         }
     }
 
-    func saveSOUL(_ content: String) {
+    /// What Save should do with an editor draft (S03-F1). A draft is only
+    /// saveable once the real file was loaded, and blanking a non-empty
+    /// SOUL.md needs the user's confirmation first.
+    enum SoulSaveDecision: Equatable { case save, confirmClearing, refuse }
+
+    nonisolated static func soulSaveDecision(draft: String, loaded: Bool, current: String) -> SoulSaveDecision {
+        guard loaded else { return .refuse }
+        let draftEmpty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let currentEmpty = current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return draftEmpty && !currentEmpty ? .confirmClearing : .save
+    }
+
+    /// `confirmedClearing` is set only by the view's confirmation dialog.
+    func saveSOUL(_ content: String, confirmedClearing: Bool = false) {
         guard !isSaving else { return }
+        switch Self.soulSaveDecision(draft: content, loaded: soulLoaded, current: soulMarkdown) {
+        case .refuse: return
+        case .confirmClearing where !confirmedClearing: return
+        default: break
+        }
         isSaving = true
         let ctx = context
         // Named `soulPath`, not `path`: the config-writer parity gate

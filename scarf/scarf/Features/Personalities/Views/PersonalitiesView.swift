@@ -6,6 +6,7 @@ struct PersonalitiesView: View {
     @State private var viewModel: PersonalitiesViewModel
     @State private var soulDraft = ""
     @State private var editingSOUL = false
+    @State private var confirmingClearSOUL = false
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     init(context: ServerContext) {
@@ -31,7 +32,6 @@ struct PersonalitiesView: View {
                         viewModel.hasBuiltinPersonalitiesInCode =
                             capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
                         viewModel.load()
-                        soulDraft = viewModel.soulMarkdown
                     }
                         .buttonStyle(ScarfSecondaryButton())
                 }
@@ -49,13 +49,25 @@ struct PersonalitiesView: View {
         }
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Personalities")
+        .confirmationDialog(
+            "Clear SOUL.md?",
+            isPresented: $confirmingClearSOUL,
+            titleVisibility: .visible
+        ) {
+            Button("Clear SOUL.md", role: .destructive) {
+                viewModel.saveSOUL(soulDraft, confirmedClearing: true)
+                editingSOUL = false
+            }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("The editor is empty. Saving replaces the current SOUL.md with an empty file.")
+        }
         .onAppear {
             // Push the host capability in before the load: it decides whether
             // Hermes' in-code built-ins are unioned into the list at all.
             viewModel.hasBuiltinPersonalitiesInCode =
                 capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
             viewModel.load()
-            soulDraft = viewModel.soulMarkdown
         }
     }
 
@@ -130,15 +142,32 @@ struct PersonalitiesView: View {
                     }
                     .controlSize(.small)
                     Button("Save") {
-                        viewModel.saveSOUL(soulDraft)
-                        editingSOUL = false
+                        switch PersonalitiesViewModel.soulSaveDecision(
+                            draft: soulDraft, loaded: viewModel.soulLoaded, current: viewModel.soulMarkdown
+                        ) {
+                        case .save:
+                            viewModel.saveSOUL(soulDraft)
+                            editingSOUL = false
+                        case .confirmClearing:
+                            confirmingClearSOUL = true
+                        case .refuse:
+                            break
+                        }
                     }
                     .controlSize(.small)
                     .disabled(viewModel.isSaving)
                     .keyboardShortcut("s", modifiers: .command)
                 } else {
-                    Button("Edit") { editingSOUL = true }
-                        .controlSize(.small)
+                    // `load()` is asynchronous: seed the draft from the file
+                    // as loaded now, not from whatever was there at onAppear
+                    // (S03-F1 — that was an empty string, and Save then
+                    // replaced the real SOUL.md with it).
+                    Button("Edit") {
+                        soulDraft = viewModel.soulMarkdown
+                        editingSOUL = true
+                    }
+                    .controlSize(.small)
+                    .disabled(!viewModel.soulLoaded)
                 }
             }
             Text("SOUL.md describes the agent's voice, values, and personality at ~/.hermes/SOUL.md. It is injected into every session's context.")
