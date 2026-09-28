@@ -616,7 +616,7 @@ struct KanbanBoardView: View {
                     .scarfStyle(.captionStrong)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                 if toolsetPrompt == .unavailableInChat {
-                    Text("Kanban tools in Scarf chat need Hermes 0.21.5 or later. The board itself works as usual.")
+                    Text("Kanban tools in Scarf's rich chat need Hermes 0.21.5 or later. The board itself works as usual.")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 } else {

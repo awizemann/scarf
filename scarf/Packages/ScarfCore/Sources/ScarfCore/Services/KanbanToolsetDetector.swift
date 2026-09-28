@@ -25,8 +25,8 @@ public enum KanbanToolsetState: Sendable, Equatable {
     /// than as a hard error: the rest of the app shouldn't grind to a
     /// halt because the YAML is briefly weird mid-edit.
     case unknown(reason: String)
-    /// Scarf's chats CANNOT get kanban tools on this host, whatever the
-    /// config says. Every Scarf chat is an ACP session, and before 0.21.5
+    /// Scarf's rich chat CANNOT get kanban tools on this host, whatever the
+    /// config says. Rich chat is an ACP session, and before 0.21.5
     /// ACP builds its tools from `["hermes-acp"]` alone
     /// (`acp_adapter/session.py:484-485` @ `v2026.9.21`, `:637-638` @
     /// `v2026.8.31`, `:598-599` @ `v2026.5.7`), a composite that has never
@@ -133,7 +133,7 @@ public actor KanbanToolsetDetector {
     /// Pure read — no side effects, no caching at this layer (the VM
     /// caches). Cheap enough to call on view appear + on file-change
     /// signals.
-    public func detect(platform: String = "cli") async -> KanbanToolsetState {
+    public func detect(platform: String) async -> KanbanToolsetState {
         let context = self.context
         let path = context.paths.configYAML
         let yaml: String? = await OffPool.run {

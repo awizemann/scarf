@@ -54,18 +54,51 @@ struct TempHermesHome {
     /// `BotConversationCLITransportE2ETests` pins its CLI. Prefer a scripted
     /// transport where the code under test takes one (see
     /// `KanbanDispatchConfirmP56Tests`).
+    ///
+    /// `HERMES_HOME` is process-wide and the body suspends, so pins are
+    /// serialized through `ProcessHermesHomePinLock` across ALL suites: two
+    /// interleaved pins would otherwise restore each other's value and let a
+    /// spawn reach the real home. (An async lock, not an `NSLock`, which
+    /// deadlocks `@MainActor` suites.)
     func pinningProcessHermesHome<T>(_ body: () async throws -> T) async rethrows -> T {
+        await ProcessHermesHomePinLock.shared.acquire()
         let saved = ProcessInfo.processInfo.environment["HERMES_HOME"]
         setenv("HERMES_HOME", path, 1)
-        defer {
+        func restore() async {
             if let saved { setenv("HERMES_HOME", saved, 1) } else { unsetenv("HERMES_HOME") }
+            await ProcessHermesHomePinLock.shared.release()
         }
-        return try await body()
+        do {
+            let result = try await body()
+            await restore()
+            return result
+        } catch {
+            await restore()
+            throw error
+        }
     }
 
     /// Recursively remove the temp home. Safe in a `defer`; ignores the
     /// "already gone" case.
     func cleanup() {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+/// Serializes every test that sets the process-wide `HERMES_HOME`
+/// (`TempHermesHome.pinningProcessHermesHome`,
+/// `BotConversationCLITransportE2ETests`). FIFO; never blocks a thread.
+actor ProcessHermesHomePinLock {
+    static let shared = ProcessHermesHomePinLock()
+    private var held = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard held else { held = true; return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty { held = false } else { waiters.removeFirst().resume() }
     }
 }

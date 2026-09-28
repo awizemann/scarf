@@ -60,12 +60,12 @@ struct ChatKanbanOnboardingSheet: View {
 
     private var body_: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-            Text("Goals and Kanban are two separate mechanisms in Hermes. Goals lock the agent onto a target across turns inside a single chat. Kanban gives the agent a shared task board it can fan work out onto — but only when the chat platform's toolset includes `kanban`.")
-                .scarfStyle(.body)
-                .foregroundStyle(ScarfColor.foregroundPrimary)
-                .fixedSize(horizontal: false, vertical: true)
             switch prompt {
             case .offerEnable(let platform):
+                Text("Goals and Kanban are two separate mechanisms in Hermes. Goals lock the agent onto a target across turns inside a single chat. Kanban gives the agent a shared task board it can fan work out onto — but only when the chat platform's toolset includes `kanban`.")
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("Right now your config has the kanban toolset disabled for chat. The agent in this chat has zero kanban tools, so it can't create tasks for you to watch.")
                     .scarfStyle(.body)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -75,7 +75,11 @@ struct ChatKanbanOnboardingSheet: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
             case .unavailableInChat:
-                Text("Kanban tools in Scarf chat need Hermes 0.21.5 or later. On this Hermes version, chats never get kanban tools, whatever the config says. The Kanban board itself works as usual.")
+                Text("Goals and Kanban are two separate mechanisms in Hermes. Goals lock the agent onto a target across turns inside a single chat; Kanban is a shared task board.")
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Kanban tools in Scarf's rich chat need Hermes 0.21.5 or later. On this Hermes version, rich chat sessions never get kanban tools, whatever the config says. The Kanban board itself works as usual.")
                     .scarfStyle(.body)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -3334,6 +3334,14 @@ final class ChatViewModel {
         "scarf.kanbanOnboarding.dismissed.\(context.id.uuidString)"
     }
 
+    /// The dismissal key for what the sheet showed. The Enable offer keeps
+    /// the original key; the pre-0.21.5 explanation has its own.
+    private func kanbanOnboardingDismissedKey(for prompt: KanbanChatToolsetPrompt?) -> String {
+        prompt == .unavailableInChat
+            ? kanbanOnboardingDismissedKey + ".pre0215"
+            : kanbanOnboardingDismissedKey
+    }
+
     /// Whether a `/goal` argument tail reads as "here is my target" rather
     /// than a clear. The only surviving reader of a `/goal` argument: it
     /// decides whether the kanban teaching sheet is worth raising, never
@@ -3346,15 +3354,11 @@ final class ChatViewModel {
     /// The version + dismissal half of the decision, pure so it can be tested
     /// without a host (the detector half needs a live config.yaml).
     ///
-    /// **`hasKanban`, not "has a version".** The sheet's button runs
-    /// `hermes tools enable kanban --platform cli`
-    /// (`KanbanToolsetEnabler`), and on a host below the flag's floor
-    /// `kanban` is not a toolset — Hermes routes the unknown argv to the
-    /// AGENT and exits 0, which charter C5 exists to stop. The detector
-    /// cannot save us: it reads `config.yaml`, and a 0.12 config has no
-    /// `kanban` in its toolsets for exactly the reason the sheet must not
-    /// offer to add one, so `.disabled` is precisely the answer a pre-floor
-    /// host gives.
+    /// **`hasKanban`, not "has a version".** Below the flag's floor there is
+    /// no kanban at all, so the sheet has nothing to teach. (Its Enable
+    /// button writes `platform_toolsets.acp` via `KanbanToolsetEnabler`, and
+    /// only on 0.21.5+; below that the sheet explains instead — see
+    /// `KanbanChatToolsetPrompt`.)
     ///
     /// `.empty` capabilities (not yet detected, or detection failed) are
     /// `false` on every flag, so an unwired window stays quiet rather than
@@ -3381,20 +3385,22 @@ final class ChatViewModel {
     ///   detector couldn't classify, in which case we silently skip
     ///   rather than nag with a misleading banner).
     private func maybeTriggerKanbanOnboarding() {
-        let dismissedKey = kanbanOnboardingDismissedKey
-        guard Self.shouldOfferKanbanOnboarding(
-            capabilities: capabilitiesStore?.capabilities ?? .empty,
-            dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
-        ) else { return }
-        let context = self.context
         let capabilities = capabilitiesStore?.capabilities ?? .empty
+        // Dismissal is recorded per prompt: acknowledging "needs 0.21.5" on
+        // an older host must not suppress the Enable offer after an upgrade.
+        guard Self.shouldOfferKanbanOnboarding(capabilities: capabilities, dismissed: false) else { return }
+        let context = self.context
+        let enableKey = kanbanOnboardingDismissedKey
+        let unavailableKey = kanbanOnboardingDismissedKey(for: .unavailableInChat)
         Task { [weak self] in
-            // Scarf chats are ACP sessions: on 0.21.5+ they read
-            // `platform_toolsets.acp`; below that no config gives them
-            // kanban tools, and the sheet says so instead of offering Enable.
+            // Rich chat runs over ACP: on 0.21.5+ it reads
+            // `platform_toolsets.acp`; below that no config gives it kanban
+            // tools, and the sheet says so instead of offering Enable.
             let state = await KanbanToolsetDetector(context: context)
                 .detectForChat(capabilities: capabilities)
             guard let prompt = KanbanChatToolsetPrompt.forState(state) else { return }
+            let key = prompt == .unavailableInChat ? unavailableKey : enableKey
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
             await MainActor.run {
                 guard let self else { return }
                 self.kanbanOnboardingPrompt = prompt
@@ -3437,7 +3443,8 @@ final class ChatViewModel {
     /// `AppCoordinator` via `@Environment`); the VM only persists the
     /// per-host suppression flag.
     func dismissKanbanToolsetOnboarding() {
-        UserDefaults.standard.set(true, forKey: kanbanOnboardingDismissedKey)
+        UserDefaults.standard.set(
+            true, forKey: kanbanOnboardingDismissedKey(for: kanbanOnboardingPrompt))
     }
 
     // MARK: - Voice (terminal mode only)
