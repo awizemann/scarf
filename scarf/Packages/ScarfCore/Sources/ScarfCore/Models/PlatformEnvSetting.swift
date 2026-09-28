@@ -152,9 +152,16 @@ public struct PlatformEnvAllowlist: Sendable, Equatable {
         }
     }
 
-    /// Comma-separated env value → entries (the adapters' `split(",")`).
+    /// Env value → entries: a JSON list literal (`decode_json_list_literal`,
+    /// `gateway/platforms/_shared.py` @ v2026.9.24) or the adapters'
+    /// comma-separated form.
     public static func items(fromEnv raw: String) -> [String] {
-        raw.split(separator: ",")
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("["),
+           let list = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [Any] {
+            return list.map { "\($0)".trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        return raw.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }

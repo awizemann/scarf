@@ -115,4 +115,9 @@ import Testing
         #expect(cfg.telegram.presentKeys == ["require_mention"])
         #expect(HermesConfig(yaml: "model:\n  default: x\n").discord.presentKeys.isEmpty)
     }
+
+    @Test func envListAcceptsJSONLiteral() {
+        #expect(PlatformEnvAllowlist.items(fromEnv: #"["-100", "-200"]"#) == ["-100", "-200"])
+        #expect(PlatformEnvAllowlist.items(fromEnv: "1, 2,,") == ["1", "2"])
+    }
 }
