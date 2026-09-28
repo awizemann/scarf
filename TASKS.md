@@ -103,11 +103,11 @@
 - [ ] Upstream P9: resume fallback mints a new ACP id — old-id kanban tasks vanish silently (id: t-e875803c) (added: 2026-09-21)
 - [ ] ScarfGo accepts any SSH host key — design trust-on-first-use known-hosts (id: t-93ddfdc4) (added: 2026-09-26) (priority: high)
 - [ ] Charter C3: allow user-initiated Server Restore to swap Hermes .db files (id: t-b4cfc798) (added: 2026-09-26)
-- [ ] Bot Chat CLI turns: add a Stop control (24 h ceiling otherwise) (id: t-14157321) (added: 2026-09-27)
 - [ ] Backup: profiles/*/ excludes cross '/' under GNU tar (id: t-55229e05) (added: 2026-09-27) (priority: low)
 
 ## Doing
 
+- [ ] B13 Env-first platform settings: forms show/write values Hermes reads from .env first (id: t-d83fc37d) (added: 2026-09-27)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
@@ -115,6 +115,20 @@
 
 ## Done
 
+- [x] Blind re-audit remediation (B01–B12) (id: t-f54a80d5) (added: 2026-09-27) (priority: high)
+- [x] B12 Touched-surface audit + follow-ups (blind remediation) (id: t-f9da0584) (added: 2026-09-27)
+- [x] B11 Orchestrator audit: plan conformance, memory audit, fresh-eyes (blind remediation) (id: t-50748d49) (added: 2026-09-27)
+- [x] B10 i18n pass + full test gate (blind remediation) (id: t-0a1f7a7a) (added: 2026-09-27)
+- [x] B06 Chat: Stop control (main + Bot Chat, Mac + iOS), mode chip, tool output, queue, badge, quick cmd case, /new name (id: t-4111cb69) (added: 2026-09-27) (priority: high)
+- [x] Bot Chat CLI turns: add a Stop control (24 h ceiling otherwise) (id: t-14157321) (added: 2026-09-27)
+- [x] B08 Cron, MCP & skills: monitor output file, schedule zone note, Run Now refresh, Clear Token UI, plugin update, hub search, skill keys (id: t-1df802f0) (added: 2026-09-27)
+- [x] B09 Servers & transport: scp quoting, Edit hints, removeServer main actor, iOS ~ paths, local env probe, git chip (id: t-dbf6ddc0) (added: 2026-09-27)
+- [x] B01 Transcript & sessions data: compacted history, remote JSON probe, export lineage (id: t-a16aae07) (added: 2026-09-27) (priority: urgent)
+- [x] B07 Health, memory, voice & settings: Python discovery, iOS memory conflict, log filters, terminal settings, managed marker (id: t-c2cbb8d4) (added: 2026-09-27) (priority: high)
+- [x] B05 Gateway & platforms: Slack, WhatsApp, restart drain, Mattermost, iMessage, Spotify, defaults, webhooks (id: t-6d767ade) (added: 2026-09-27) (priority: high)
+- [x] B04 Kanban, bots & profiles: comments decode, stats, complete, acp toolset, routing, export, bot rename (id: t-a7bbd63d) (added: 2026-09-27) (priority: high)
+- [x] B03 Templates & projects: remote uninstall paths, projects MCP profile, main-actor work, fleet, doctor (id: t-b03a736b) (added: 2026-09-27) (priority: urgent)
+- [x] B02 Models & providers: hide unroutable providers, Nous date, Anthropic OAuth, DeepSeek aliases (id: t-314cbfc4) (added: 2026-09-27) (priority: urgent)
 - [x] Hermes v0.21.5 audit remediation (R01–R15) (id: t-a1cb2b18) (added: 2026-09-26) (priority: urgent)
 - [x] R15 Touched-surface re-audit and follow-up phases (id: t-86bb3d9f) (added: 2026-09-26)
 - [x] R19 Final leftovers + i18n for R18 strings (id: t-32eabb16) (added: 2026-09-27) (priority: high)
