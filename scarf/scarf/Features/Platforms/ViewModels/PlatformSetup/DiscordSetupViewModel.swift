@@ -174,7 +174,7 @@ final class DiscordSetupViewModel: PlatformSetupForm {
     /// still reads — the Mattermost pattern (B05).
     static func envLinesToMove(_ lines: Set<String>, configKV: [String: String]) -> [String] {
         envSettings
-            .filter { lines.contains($0.setting.envKey) && configKV[$0.configKey] != nil }
+            .filter { lines.contains($0.setting.envKey) && configKV.keys.contains($0.configKey) }
             .map(\.setting.envKey)
     }
 }

@@ -159,7 +159,7 @@ final class TelegramSetupViewModel: PlatformSetupForm {
             configKV["platforms.telegram.extra.status_indicator"] = PlatformSetupHelpers.envBool(statusIndicator)
         }
         let moved = Self.envSettings
-            .filter { envLines.contains($0.setting.envKey) && configKV[$0.configKey] != nil }
+            .filter { envLines.contains($0.setting.envKey) && configKV.keys.contains($0.configKey) }
             .map(\.setting.envKey)
         return (envPairs, configKV, moved)
     }
