@@ -57,18 +57,69 @@ struct HermesRoutableProvidersB02Tests {
         #expect(ids.isSuperset(of: ["nous", "openai-codex", "moa", "openai-api"]))
     }
 
-    /// The table was derived at v2026.9.21 and v2026.9.24 only (identical
-    /// there), so v0.21.4 filters; below that — and for an undetected host —
-    /// the roster is the full catalog, as before.
-    @Test func rosterFilterStartsAtV0214() throws {
+    /// Older hosts had the same bug, so they are filtered too, by their own
+    /// band (S06-F1 follow-up): at v0.21.3 `openai` did not route yet (the
+    /// `_DIRECT_API_BASE_URLS` expansion is v2026.9.21) but `mistral` was
+    /// still unknown. Undetected hosts keep the full catalog.
+    @Test func olderHostsAreFilteredByTheirOwnBand() throws {
         let (svc, tmp) = try Self.catalog()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        #expect(Set(svc.loadProviders(capabilities: Self.v0214).map(\.providerID)).contains("anthropic"))
-        #expect(!Set(svc.loadProviders(capabilities: Self.v0214).map(\.providerID)).contains("mistral"))
-        for caps in [Self.v0213, HermesCapabilities.empty] {
-            let ids = Set(svc.loadProviders(capabilities: caps).map(\.providerID))
-            #expect(ids.isSuperset(of: ["mistral", "groq", "cerebras", "anthropic"]))
+        let v0213 = Set(svc.loadProviders(capabilities: Self.v0213).map(\.providerID))
+        #expect(v0213.isSuperset(of: ["anthropic", "google", "vercel", "deepseek"]))
+        #expect(v0213.isDisjoint(with: ["mistral", "groq", "cerebras", "openai"]))
+        let v0214 = Set(svc.loadProviders(capabilities: Self.v0214).map(\.providerID))
+        #expect(v0214.contains("openai") && !v0214.contains("mistral"))
+        let undetected = Set(svc.loadProviders(capabilities: .empty).map(\.providerID))
+        #expect(undetected.isSuperset(of: ["mistral", "groq", "cerebras", "anthropic", "openai"]))
+    }
+
+    /// Spot checks per band, each against what that tag's own
+    /// `resolve_runtime_provider` answered (scripts/probe-hermes-routable-bands.py).
+    @Test func bandsMatchWhatEachTagRouted() {
+        func caps(_ v: String) -> HermesCapabilities { .parse("Hermes Agent v\(v) (2026.1.1)") }
+        func routes(_ id: String, _ v: String) -> Bool? { HermesRoutableProviders.isRoutable(id, capabilities: caps(v)) }
+        // Below the oldest band (v0.6.0) nothing is judged.
+        #expect(routes("mistral", "0.5.0") == nil)
+        // v0.6.0 (v2026.3.30): the base registry.
+        #expect(routes("anthropic", "0.6.0") == true)
+        #expect(routes("ollama", "0.6.0") == true)
+        #expect(routes("google", "0.6.0") == false)       // gemini arrives in v0.8.0
+        #expect(routes("mistral", "0.6.0") == false)
+        #expect(routes("google", "0.8.0") == true)
+        #expect(routes("amazon-bedrock", "0.9.0") == false)
+        #expect(routes("amazon-bedrock", "0.10.0") == true)
+        // Vercel AI Gateway: removed at v0.15.0, back at v0.19.1.
+        #expect(routes("vercel", "0.14.0") == true)
+        #expect(routes("vercel", "0.15.0") == false)
+        #expect(routes("vercel", "0.19.0") == false)
+        #expect(routes("vercel", "0.19.1") == true)
+        // MoA / Vertex arrive at v0.18.0.
+        #expect(routes("moa", "0.17.0") == false)
+        #expect(routes("google-vertex", "0.18.0") == true)
+        // opencode-free: v0.20.5 up to (not including) v0.21.4.
+        #expect(routes("opencode-free", "0.20.4") == false)
+        #expect(routes("opencode-free", "0.21.3") == true)
+        #expect(routes("opencode-free", "0.21.4") == false)
+        // A patch between tags takes the band at or below it.
+        #expect(routes("nebius", "0.20.6") == false)
+        #expect(routes("nebius", "0.21.2") == true)
+        // `custom:<name>` is never judged by the table.
+        #expect(routes("custom:lab", "0.6.0") == true)
+    }
+
+    /// The bands must rebuild to a set at every floor — never drop below the
+    /// v0.6 base or reference a name twice in one delta.
+    @Test func bandsAreWellFormed() {
+        var previous = HermesRoutableProviders.oldestBandVersion
+        for band in HermesRoutableProviders.olderBands.reversed() {
+            #expect(band.below > previous, "\(band.tag) out of order")
+            #expect(Set(band.added).isDisjoint(with: band.removed), "\(band.tag)")
+            previous = band.below
         }
+        let base = HermesRoutableProviders.providerIDs(for: HermesRoutableProviders.oldestBandVersion)
+        #expect(base?.count == 56)
+        #expect(HermesRoutableProviders.providerIDs(
+            for: .init(major: 0, minor: 21, patch: 5)) == HermesRoutableProviders.providerIDs)
     }
 
     /// Every overlay Scarf adds by hand must be a name Hermes routes, or the
@@ -96,7 +147,7 @@ struct HermesRoutableProvidersB02Tests {
                    "moonshotai", "zhipuai", "venice", "siliconflow", "chutes", ""] {
             #expect(!HermesRoutableProviders.isRoutable(id), "\(id)")
         }
-        #expect(HermesRoutableProviders.isRoutable("mistral", capabilities: Self.v0213) == nil)
+        #expect(HermesRoutableProviders.isRoutable("mistral", capabilities: Self.v0213) == false)
         #expect(HermesRoutableProviders.isRoutable("mistral", capabilities: .empty) == nil)
         #expect(HermesRoutableProviders.isRoutable("mistral", capabilities: Self.v0215) == false)
     }
@@ -113,8 +164,9 @@ struct HermesRoutableProvidersB02Tests {
         #expect(ModelPreflight.check(cfg) == .configured)
         // …the routability check is what catches it.
         #expect(ModelPreflight.unroutableProvider(cfg, capabilities: Self.v0215) == "mistral")
-        // C1: no warning where the table doesn't apply.
-        #expect(ModelPreflight.unroutableProvider(cfg, capabilities: Self.v0213) == nil)
+        // Older hosts had the same bug, so they warn too; only an
+        // undetected host (or one older than v0.6) stays quiet.
+        #expect(ModelPreflight.unroutableProvider(cfg, capabilities: Self.v0213) == "mistral")
         #expect(ModelPreflight.unroutableProvider(cfg, capabilities: .empty) == nil)
     }
 

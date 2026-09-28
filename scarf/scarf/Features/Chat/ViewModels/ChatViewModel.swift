@@ -429,7 +429,8 @@ final class ChatViewModel {
     /// (`ModelPreflight.unroutableProvider`, S06-F1) — e.g. `mistral` saved
     /// by an older Scarf picker that listed every models.dev provider.
     /// Drives a warning banner with a "Choose model…" button. Nil when the
-    /// provider routes, is unset, or the host predates the table.
+    /// provider routes, is unset, or Scarf has no table for the host
+    /// (older than v0.6, or undetected).
     var unroutableProvider: String?
 
     /// The `approvals.mode` stored in config.yaml, read the way Hermes

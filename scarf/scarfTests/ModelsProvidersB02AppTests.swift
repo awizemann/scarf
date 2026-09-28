@@ -17,14 +17,15 @@ struct ModelsProvidersB02AppTests {
 
     /// A config saved by an older picker names `mistral`, which a v0.21.5
     /// roster no longer lists. Restoring it as the selection would let Save
-    /// write it straight back; on hosts the table doesn't cover, the old
-    /// "leave it unchanged" behaviour stays.
+    /// write it straight back. Only an undetected host keeps the old
+    /// "leave it unchanged" behaviour.
     @Test func unroutableSavedProviderIsNotRestored() {
         let providers = [Self.provider("anthropic"), Self.provider("openai")]
         let v0215 = HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)")
         let v0213 = HermesCapabilities.parse("Hermes Agent v0.21.3 (2026.9.14)")
         #expect(ModelPickerSheet.resolveInitialProviderID("mistral", in: providers, capabilities: v0215) == "")
-        #expect(ModelPickerSheet.resolveInitialProviderID("mistral", in: providers, capabilities: v0213) == "mistral")
+        // Older hosts had the same bug and are judged by their own band.
+        #expect(ModelPickerSheet.resolveInitialProviderID("mistral", in: providers, capabilities: v0213) == "")
         #expect(ModelPickerSheet.resolveInitialProviderID("mistral", in: providers, capabilities: .empty) == "mistral")
         // A routable provider with a row still restores.
         #expect(ModelPickerSheet.resolveInitialProviderID("anthropic", in: providers, capabilities: v0215) == "anthropic")

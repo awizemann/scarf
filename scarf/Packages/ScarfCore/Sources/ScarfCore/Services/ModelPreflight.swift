@@ -75,7 +75,8 @@ public enum ModelPreflight: Sendable {
     /// an older Scarf picker (which offered every models.dev provider) chats
     /// into an error, or onto some other provider. Nil — no warning — when
     /// the provider is unset, when the host is not one
-    /// ``HermesRoutableProviders`` applies to (older or undetected), and
+    /// ``HermesRoutableProviders`` has a band for (older than v0.6, or
+    /// undetected), and
     /// when config.yaml defines a custom endpoint under that name, or has
     /// custom-provider entries Scarf can't read (Hermes may route the name
     /// through them). A warning, not a block: a user plugin on the

@@ -135,7 +135,8 @@ public struct ModelCatalogService: Sendable {
     /// (``HermesRoutableProviders``): most models.dev providers (`mistral`,
     /// `groq`, `cerebras`, …) fail at `auth.resolve_provider` with "Unknown
     /// provider", so offering them only produces a config that can't chat
-    /// (S06-F1). Older and undetected hosts get the full list, as before.
+    /// (S06-F1). The set is banded by Hermes version back to v0.6; hosts older
+    /// than that and undetected hosts get the full list, as before.
     public func loadProviders(capabilities: HermesCapabilities = .empty) -> [HermesProviderInfo] {
         let catalog = loadCatalog() ?? [:]
         var byID: [String: HermesProviderInfo] = [:]

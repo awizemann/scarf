@@ -2389,21 +2389,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// unknown provider verbatim rather than resolving to `openai-codex`.
     public var hasChatGPTCodexAliases: Bool { isV0214OrLater }
 
-    /// Whether Scarf's table of provider names Hermes can route
-    /// (``HermesRoutableProviders``) applies to this host (S06-F1). The
-    /// table is `resolve_runtime_provider`'s accepted set:
-    /// `auth.resolve_provider` (`hermes_cli/auth.py:1500-1509` @
-    /// `v2026.9.24`) over `PROVIDER_REGISTRY` plus the plugin rows
-    /// `hermes_cli/auth_plugin_providers.py` mirrors in, the
-    /// `_PROVIDER_ALIASES` table, and the name-only shortcuts in
-    /// `hermes_cli/runtime_provider.py` / `runtime_provider_custom.py`.
-    /// `scripts/check-hermes-tables.py` lane 8 derives it statically and
-    /// yields the same 194 names at `v2026.9.21` and `v2026.9.24`; below
-    /// `v2026.9.21` `auth_plugin_providers.py` does not exist and plugin
-    /// providers registered differently, so the table was never derived
-    /// there. Older and undetected hosts keep the unfiltered roster and no
-    /// "can't route" warning, exactly as before.
-    public var hasRoutableProviderTable: Bool { isV0214OrLater }
+    /// Whether Scarf has a table of provider names this Hermes can route
+    /// (``HermesRoutableProviders``, S06-F1). The bug it guards against — a
+    /// models.dev-only provider such as `mistral` saved as `model.provider`
+    /// and failing with "Unknown provider" — exists at every tag Scarf
+    /// supports: `auth.resolve_provider` raises for any name outside its
+    /// registry and aliases from v2026.3.30 (`hermes_cli/auth.py`) through
+    /// `v2026.9.24` (`:1500-1509`). The accepted set differs by version, so
+    /// the table is banded (``HermesRoutableProviders/olderBands``), each
+    /// band measured against that tag's own resolver. Floor v0.6.0
+    /// (v2026.3.30), Scarf's oldest supported Hermes; older and undetected
+    /// hosts keep the unfiltered roster.
+    public var hasRoutableProviderTable: Bool { atLeastSemver(0, 6, 0) }
 
     /// Whether Hermes rewrites DeepSeek's retired `deepseek-chat` /
     /// `deepseek-reasoner` to `deepseek-flash` (`_DEEPSEEK_RETIRED_ALIASES`,
