@@ -136,7 +136,9 @@ struct ChatTranscriptPane: View {
                 isAgentWorking: richChat.isAgentWorking,
                 hasActiveSession: richChat.sessionId != nil,
                 activeModelPreset: chatViewModel.currentModelPreset,
-                voiceLive: voiceLiveEntry
+                voiceLive: voiceLiveEntry,
+                canStop: richChat.isAgentWorking && chatViewModel.canStopCurrentTurn,
+                onStop: { chatViewModel.stopCurrentTurn() }
             )
             .id(richChat.sessionId ?? "scarf.chat.no-session")
         }
