@@ -34,6 +34,9 @@ struct BotAgentView: View {
                 initialProvider: viewModel.config?.provider.pinned ?? "",
                 initialModel: viewModel.config?.model.pinned ?? "",
                 initialBaseURL: viewModel.config?.modelBaseURL ?? "",
+                // The bot's own providers, read with its config off-main —
+                // a profile doesn't inherit the main profile's.
+                customProviders: viewModel.config?.customProviders ?? .none,
                 onSelect: { model, provider in
                     showModelPicker = false
                     viewModel.setModelPin(model: model, provider: provider)

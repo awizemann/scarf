@@ -127,6 +127,11 @@ public struct BotAgentConfig: Sendable, Equatable {
     /// Every server under `mcp_servers:`, with its enablement origin.
     public let mcpServers: [BotMCPServerState]
 
+    /// Custom endpoints named in the bot's OWN `config.yaml` (`providers:` /
+    /// `custom_providers:`). A profile doesn't inherit the main profile's
+    /// providers, so the bot's model picker must judge its pin against these.
+    public let customProviders: ModelPreflight.CustomProviders
+
     public init(
         profileName: String,
         configPath: String,
@@ -137,7 +142,8 @@ public struct BotAgentConfig: Sendable, Equatable {
         modelBaseURL: String?,
         disabledSkills: Set<String>,
         platformToolsets: [String: [String]],
-        mcpServers: [BotMCPServerState]
+        mcpServers: [BotMCPServerState],
+        customProviders: ModelPreflight.CustomProviders = .none
     ) {
         self.profileName = profileName
         self.configPath = configPath
@@ -149,6 +155,7 @@ public struct BotAgentConfig: Sendable, Equatable {
         self.disabledSkills = disabledSkills
         self.platformToolsets = platformToolsets
         self.mcpServers = mcpServers
+        self.customProviders = customProviders
     }
 
     /// Toolsets enabled for `platform`, or `nil` when the bot's file pins no

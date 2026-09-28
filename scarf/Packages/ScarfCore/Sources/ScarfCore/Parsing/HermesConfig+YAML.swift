@@ -1155,7 +1155,7 @@ public extension HermesConfig {
     /// See ``HermesConfig/namedCustomProviders``. Reads block form
     /// (`providers.<name>.base_url`) and per-entry flow form
     /// (`providers:\n  <name>: {base_url: …}`).
-    private static func namedCustomProviders(
+    internal static func namedCustomProviders(
         values: [String: String], maps: [String: [String: String]]
     ) -> Set<String> {
         func norm(_ raw: String) -> String {
@@ -1185,7 +1185,7 @@ public extension HermesConfig {
 
     /// See ``HermesConfig/hasUnreadCustomProviders``. Hermes's own default,
     /// `providers: {}` / `custom_providers: []`, is not a custom provider.
-    private static func hasUnreadCustomProviders(
+    internal static func hasUnreadCustomProviders(
         yaml: String,
         values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
     ) -> Bool {
