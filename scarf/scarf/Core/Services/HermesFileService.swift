@@ -384,9 +384,9 @@ struct HermesFileService: Sendable {
 
     /// Read the most-recent run output for a cron job. Hermes writes
     /// `~/.hermes/cron/output/<jobId>/<YYYY-MM-DD_HH-MM-SS>.md` per run
-    /// (one file per execution); we resolve the per-job subdir, take
-    /// the lexicographically-last filename (which is the newest given
-    /// the timestamp prefix), and return its contents. Returns nil
+    /// (one file per execution); we take the newest `*.md` name (a monitor
+    /// job's `monitor_last_output.txt` snapshot lives there too and is
+    /// not run output, `cron/monitor.py:30`), and return its contents. Returns nil
     /// when the subdir is missing, empty, or the read fails — the cron
     /// detail surface treats nil as "no output yet."
     ///
@@ -397,7 +397,7 @@ struct HermesFileService: Sendable {
         let dir = context.paths.cronOutputDir
         let perJobDir = dir + "/" + jobId
         if let runs = try? transport.listDirectory(perJobDir),
-           let latest = runs.sorted().last {
+           let latest = runs.filter({ $0.hasSuffix(".md") }).sorted().last {
             if let content = readFile(perJobDir + "/" + latest) {
                 return content
             }

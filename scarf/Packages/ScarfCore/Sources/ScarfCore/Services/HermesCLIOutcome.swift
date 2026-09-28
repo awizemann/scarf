@@ -2223,6 +2223,36 @@ public enum HermesPluginsUpdateVerdict {
     }
 }
 
+// MARK: - cron create/edit/pause/resume/remove — hermes_cli/cron.py
+
+/// The refusal lines `hermes cron` prints for a job mutation that did not
+/// happen. Up to v2026.8.31, `cmd_cron` dropped `cron_command`'s return value
+/// (`hermes_cli/main.py:5626-5630` @ v2026.8.31), so every one of these
+/// exited 0; from v2026.9.7 the return code is forwarded and they exit 1
+/// (`cmd_cron = _forward_command(..., forward_return=True)`). The wording is
+/// the same on every band (`Failed to {action} job:` at `hermes_cli/cron.py:
+/// 788` @ v2026.9.24, v2026.4.16:242), so matching it only ever turns a
+/// refusal into a failure — a successful run prints none of these.
+public enum HermesCronMutationVerdict {
+    static let refusalPrefixes = [
+        "Failed to create job:",
+        "Failed to update job:",
+        "Failed to pause job:",
+        "Failed to resume job:",
+        "Failed to remove job:",
+        "Failed to re-arm job:",
+        "Job not found:",
+        "Use exactly one of --at or --run-now.",
+    ]
+
+    /// The refusal line an exit-0 run printed, or nil when it printed none.
+    public static func exitZeroRefusal(output: String) -> String? {
+        HermesCLIVerdict.significantLines(output).first { line in
+            refusalPrefixes.contains { line.hasPrefix($0) }
+        }
+    }
+}
+
 // MARK: - auth logout — hermes_cli/auth.py
 
 /// `hermes auth logout <provider>`, judged by output.
