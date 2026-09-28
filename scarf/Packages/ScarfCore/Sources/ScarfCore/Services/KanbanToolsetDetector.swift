@@ -116,7 +116,7 @@ public actor KanbanToolsetDetector {
     /// `.unavailableInChat` below 0.21.5 without reading the config.
     public func detectForChat(capabilities: HermesCapabilities) async -> KanbanToolsetState {
         guard capabilities.detected else {
-            return .unknown(reason: "Hermes version not detected yet")
+            return .unknown(reason: String(localized: "Hermes version not detected yet"))
         }
         guard let platform = Self.chatPlatform(for: capabilities) else {
             return .unavailableInChat

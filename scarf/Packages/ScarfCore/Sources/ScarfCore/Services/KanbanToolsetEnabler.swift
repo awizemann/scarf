@@ -423,7 +423,7 @@ public actor KanbanToolsetEnabler {
         }
 
         guard location.entry == .absent else {
-            return .refuse(reason: "Couldn't locate `platform_toolsets.acp` in config.yaml.")
+            return .refuse(reason: String(localized: "Couldn't locate `platform_toolsets.acp` in config.yaml."))
         }
         if let blockEnd = location.blockEnd {
             let key = String(repeating: " ", count: location.keyIndent)

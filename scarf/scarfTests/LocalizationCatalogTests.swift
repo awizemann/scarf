@@ -277,6 +277,16 @@ struct LocalizationCatalogTests {
         "`hermes profile list` failed (exit %lld).",
         "Couldn't reach `hermes profile list` on this server.",
         "The webhook platform isn't enabled on this server. Turn on Webhook in the Mac app's Platforms → Webhook, or set platforms.webhook.enabled: true in config.yaml. The hermes webhook commands check only that key, not WEBHOOK_ENABLED in .env.",
+        // B10 (t-0a1f7a7a): iOS-only call sites added by the blind re-audit
+        // remediation (memory editor conflict, chat Stop/rename, skill detail).
+        "%@ changed on the server",
+        "Couldn't name this chat “%@”.",
+        "Hermes updated this file after you opened it. Reload discards your edits and shows the new version; Overwrite replaces the new version with yours.",
+        "Set these in config.yaml, or run `hermes config migrate` on that host:",
+        "Skill settings not set",
+        "Stops the running turn. The chat stays open.",
+        "This skill is in `skills.disabled` in `~/.hermes/config.yaml`. Hermes won't load it. Re-enable it with `hermes skills config` in a terminal on that host.",
+        "• skills.config.%@",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")

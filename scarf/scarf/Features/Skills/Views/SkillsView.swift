@@ -333,7 +333,7 @@ struct SkillsView: View {
                         }
                         Label("\(skill.files.count) files", systemImage: "doc")
                         if !skill.requiredConfig.isEmpty {
-                            Label("\(skill.requiredConfig.count) settings", systemImage: "gearshape")
+                            Label("^[\(skill.requiredConfig.count) setting](inflect: true)", systemImage: "gearshape")
                         }
                     }
                     .font(.caption)
