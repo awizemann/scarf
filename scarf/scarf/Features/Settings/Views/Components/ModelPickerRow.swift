@@ -21,6 +21,8 @@ struct ModelPickerRow: View {
     var currentBaseURL: String = ""
     var currentAPIKey: String = ""
     var currentAPIMode: String = ""
+    /// config.yaml's custom-provider names, passed through to the sheet.
+    var customProviders: ModelPreflight.CustomProviders = .none
     let onChange: (_ modelID: String, _ providerID: String) -> Void
     var onLocalChange: ((LocalModelSelection) -> Void)? = nil
     /// Optional UI-test handle for the button that opens the sheet.
@@ -69,6 +71,7 @@ struct ModelPickerRow: View {
                 initialBaseURL: currentBaseURL,
                 initialAPIKey: currentAPIKey,
                 initialAPIMode: currentAPIMode,
+                customProviders: customProviders,
                 onSelect: { modelID, providerID in
                     onChange(modelID, providerID)
                     showSheet = false

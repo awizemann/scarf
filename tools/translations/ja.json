@@ -3296,6 +3296,7 @@
   "Waiting for the current turn to finish — Hermes restarts the gateway as soon as it ends.": "現在のターンが終わるのを待っています — 終わり次第、Hermes がゲートウェイを再起動します。",
   "Waiting since %@. Hermes stops waiting after agent.restart_after_turn_timeout (30 minutes by default).": "%@ から待機中。Hermes は agent.restart_after_turn_timeout（既定では 30 分）を過ぎると待機をやめます。",
   "You stopped this turn. Anything Hermes finished before the stop is kept.": "このターンを停止しました。停止前に Hermes が完了した内容は保持されます。",
+  "You stopped this turn. Anything Hermes finished before the stop is kept. Your next text message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.": "このターンを停止しました。停止前に Hermes が完了した内容は保持されます。次のテキストメッセージは、停止したリクエストの続きとして Hermes に送信されます。破棄するには新しいチャットを開始してください。",
   "^[%lld setting](inflect: true)": "%lld 件の設定",
   "`model.provider` is `%@`, which this version of Hermes doesn't recognize. Chats will fail with \"Unknown provider\" (or use another provider) until you choose a supported one.": "`model.provider` は `%@` ですが、この Hermes バージョンでは認識されません。対応するプロバイダを選ぶまで、チャットは「Unknown provider」で失敗します（または別のプロバイダを使用します）。",
   "chat turn": "チャットのターン",

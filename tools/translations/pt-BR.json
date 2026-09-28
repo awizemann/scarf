@@ -3320,6 +3320,7 @@
   "Waiting for the current turn to finish — Hermes restarts the gateway as soon as it ends.": "Aguardando o turno atual terminar — o Hermes reinicia o gateway assim que ele acabar.",
   "Waiting since %@. Hermes stops waiting after agent.restart_after_turn_timeout (30 minutes by default).": "Aguardando desde %@. O Hermes para de esperar após agent.restart_after_turn_timeout (30 minutos por padrão).",
   "You stopped this turn. Anything Hermes finished before the stop is kept.": "Você parou este turno. Tudo o que o Hermes concluiu antes da parada foi mantido.",
+  "You stopped this turn. Anything Hermes finished before the stop is kept. Your next text message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.": "Você parou este turno. Tudo o que o Hermes concluiu antes da parada foi mantido. Sua próxima mensagem de texto é enviada ao Hermes como continuação da solicitação interrompida; inicie um novo chat para descartá-la.",
   "^[%lld setting](inflect: true)": "^[%lld configuração](inflect: true)",
   "`model.provider` is `%@`, which this version of Hermes doesn't recognize. Chats will fail with \"Unknown provider\" (or use another provider) until you choose a supported one.": "`model.provider` é `%@`, que esta versão do Hermes não reconhece. Os chats vão falhar com \"Unknown provider\" (ou usar outro provedor) até você escolher um compatível.",
   "chat turn": "turno de chat",

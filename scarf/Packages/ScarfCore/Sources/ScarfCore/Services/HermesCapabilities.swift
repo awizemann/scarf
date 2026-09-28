@@ -1348,6 +1348,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `"shared_metrics": {`, `:2629` `"enabled": False,`.
     public var hasSharedMetricsTelemetry: Bool { isV0191OrLater }
 
+    /// After an ACP `session/cancel`, Hermes keeps the stopped prompt and
+    /// prepends it to the next plain-text prompt as "User
+    /// correction/guidance after interrupt" (`acp_adapter/server.py:643-644`,
+    /// `:721-722`, `:201-202` @ v2026.9.24). The plain-text branch (commit
+    /// 34d0de80e6) is first at v2026.7.30; v2026.7.20 only did it for
+    /// `/steer`. Floor v0.19.1 (v2026.7.30 `pyproject.toml` = `0.19.1`).
+    /// Drives the wording of Scarf's "you stopped this turn" note.
+    public var hasACPStoppedPromptCarriedForward: Bool { isV0191OrLater }
+
     /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
     /// SQLite journal mode + WAL sizing pragmas applied by every Hermes
     /// database opener (`journal_mode` via commit 91351b7b7

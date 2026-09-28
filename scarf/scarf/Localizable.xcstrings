@@ -139088,6 +139088,47 @@
         }
       }
     },
+    "You stopped this turn. Anything Hermes finished before the stop is kept. Your next text message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it." : {
+      "comment" : "String(localized:) in ScarfCore; hand-added (the app extractor does not see package sources).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du hast diesen Turn gestoppt. Alles, was Hermes vor dem Stopp erledigt hat, bleibt erhalten. Deine nächste Textnachricht geht als Nachtrag zur gestoppten Anfrage an Hermes; starte einen neuen Chat, um sie zu verwerfen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detuviste este turno. Se conserva todo lo que Hermes terminó antes de la detención. Tu próximo mensaje de texto se envía a Hermes como continuación de la solicitud detenida; inicia un chat nuevo para descartarla."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous avez arrêté ce tour. Tout ce que Hermes a terminé avant l’arrêt est conservé. Votre prochain message texte est envoyé à Hermes comme suite de la requête arrêtée ; démarrez une nouvelle discussion pour l’abandonner."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターンを停止しました。停止前に Hermes が完了した内容は保持されます。次のテキストメッセージは、停止したリクエストの続きとして Hermes に送信されます。破棄するには新しいチャットを開始してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Você parou este turno. Tudo o que o Hermes concluiu antes da parada foi mantido. Sua próxima mensagem de texto é enviada ao Hermes como continuação da solicitação interrompida; inicie um novo chat para descartá-la."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你已停止此轮次。Hermes 在停止前完成的内容会保留。你的下一条文本消息会作为已停止请求的后续发送给 Hermes；如需放弃该请求，请开始新的聊天。"
+          }
+        }
+      }
+    },
     "^[%lld setting](inflect: true)" : {
       "localizations" : {
         "de" : {

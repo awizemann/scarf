@@ -68,6 +68,32 @@ import SQLite3
         #expect(vm.messages.contains { $0.isAssistant && $0.content == "Partial" }, "the partial reply was dropped")
     }
 
+    /// B11: from v0.19.1 Hermes prepends the stopped request to the next
+    /// plain prompt (`acp_adapter/server.py:721-722` @ v2026.9.24), so the
+    /// note says so there; older or undetected hosts keep the plain note.
+    @Test @MainActor func stoppedNoteWordingFollowsTheHostBand() {
+        let bands: [(String?, Bool)] = [
+            ("Hermes Agent v0.21.5 (2026.9.24)", true),
+            ("Hermes Agent v0.19.1 (2026.7.30)", true),
+            ("Hermes Agent v0.19.0 (2026.7.20)", false),
+            (nil, false),
+        ]
+        for (version, carries) in bands {
+            let vm = Self.engagedVM()
+            if let version { vm.publishCapabilities(HermesCapabilities.parse(version)) }
+            vm.noteTurnStopRequestedByUser()
+            vm.handleACPEvent(.promptComplete(sessionId: "s", response: Self.result("cancelled")))
+            let note = vm.messages.last { $0.role == "system" }?.content ?? ""
+            #expect(note.hasPrefix("You stopped this turn."), "\(version ?? "undetected")")
+            #expect(note.contains("follow-up to the stopped request") == carries, "\(version ?? "undetected")")
+        }
+        // A CLI-driven turn (bot chat) never carries the prompt forward.
+        let vm = Self.engagedVM()
+        vm.publishCapabilities(HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)"))
+        vm.appendTurnStoppedNote()
+        #expect(vm.messages.last?.content.contains("follow-up") == false)
+    }
+
     /// The stop marker belongs to one turn: a stop Hermes raced (the turn
     /// finished anyway) adds no note and does not mark the next turn.
     @Test @MainActor func stopMarkerDoesNotLeakIntoTheNextTurn() async {
