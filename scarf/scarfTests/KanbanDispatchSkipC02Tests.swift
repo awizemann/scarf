@@ -96,4 +96,19 @@ import ScarfCore
         #expect(vm.transientNotice == nil)
         #expect(vm.tasks(in: .running).map(\.id) == ["t_a"])
     }
+
+    /// This pass skipped the task, but another dispatcher (the gateway's own
+    /// tick) already started it: no "wasn't started" notice, and it stays
+    /// in Running.
+    @Test func aTaskStartedElsewhereIsNotReportedAsSkipped() async {
+        let vm = Self.board(DispatchTransport(
+            dispatchJSON: #"{"promoted":0,"spawned":[],"skipped_locked":true}"#, listStatus: "running"))
+        vm.attemptMove(taskId: "t_a", to: .running, confirmed: true)
+        for _ in 0..<300 where vm.tasks.first?.status != "running" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(vm.transientNotice == nil)
+        #expect(vm.tasks(in: .running).map(\.id) == ["t_a"])
+    }
 }

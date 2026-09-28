@@ -382,18 +382,21 @@ final class KanbanBoardViewModel {
                         dispatchSummary = summary
                     }
                 }
-                // `kanban dispatch` exits 0 whether or not it started this
-                // task (S13a-F1). If it didn't, say why and drop the Running
-                // override so the card goes back to where Hermes has it —
-                // otherwise the poll (ready/todo ≠ Running) never clears it.
-                if let dispatchSummary,
-                   let why = dispatchSummary.notStartedReason(for: taskId) {
-                    clearStatusOverride(for: taskId)
-                    transientNotice = Self.notStartedMessage(why)
-                }
                 // Refresh once on success so the polled state catches up
                 // without waiting for the 5s tick.
                 await refresh()
+                // `kanban dispatch` exits 0 whether or not it started this
+                // task (S13a-F1). If this pass didn't, and the poll doesn't
+                // show it running either (another dispatcher may have started
+                // it), say why and drop the Running override — otherwise the
+                // poll (ready/todo ≠ Running) never clears it.
+                if let dispatchSummary,
+                   let why = dispatchSummary.notStartedReason(for: taskId),
+                   let row = tasks.first(where: { $0.id == taskId }),
+                   columnFromStatus(row.status) != .running {
+                    clearStatusOverride(for: taskId)
+                    transientNotice = Self.notStartedMessage(why)
+                }
             } catch let err as KanbanError {
                 clearStatusOverride(for: taskId)
                 lastError = err.errorDescription
