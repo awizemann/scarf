@@ -632,9 +632,17 @@ struct SettingsView: View {
     @ViewBuilder
     private var platformsSection: some View {
         Section("Platforms") {
-            yesNoRow("Discord: require mention", vm.config.discord.requireMention)
-            yesNoRow("Discord: auto-thread", vm.config.discord.autoThread)
-            yesNoRow("Telegram: require mention", vm.config.telegram.requireMention)
+            // B13: the value the gateway uses — a `.env` line can override
+            // config.yaml (`PlatformEnvSetting`).
+            yesNoRow("Discord: require mention", platformBool(
+                .discordRequireMention, "require_mention", vm.config.discord.presentKeys,
+                vm.config.discord.requireMention))
+            yesNoRow("Discord: auto-thread", platformBool(
+                .discordAutoThread, "auto_thread", vm.config.discord.presentKeys,
+                vm.config.discord.autoThread))
+            yesNoRow("Telegram: require mention", platformBool(
+                .telegramRequireMention, "require_mention", vm.config.telegram.presentKeys,
+                vm.config.telegram.requireMention))
             // `reply_in_thread`, not `reply_to_mode`: the Slack adapter never
             // reads `reply_to_mode` (S07-F1 — only Discord, Telegram and Buzz
             // do @ `v2026.9.24`), so showing it named a setting with no effect.
@@ -767,13 +775,24 @@ struct SettingsView: View {
     /// belongs to without an extra DisclosureGroup level.
     private func gatewayAllowlistEntries(kind: GatewayAllowlistKind) -> [String] {
         var out: [String] = []
-        for (platform, settings) in vm.config.gatewayPlatforms.sorted(by: { $0.key < $1.key }) {
+        // Discord/Telegram join even without a config block: their list can
+        // live only in `.env` (B13).
+        let platforms = Set(vm.config.gatewayPlatforms.keys).union(["discord", "telegram"])
+        for platform in platforms.sorted() {
             guard GatewayAllowlistKind.kind(for: platform) == kind else { continue }
-            for item in settings.items(for: kind) where !item.isEmpty {
+            let configItems = vm.config.gatewayPlatforms[platform]?.items(for: kind) ?? []
+            let items = vm.effectiveAllowlist(platform: platform, configItems: configItems, capabilities: caps)
+            for item in items where !item.isEmpty {
                 out.append("\(platform): \(item)")
             }
         }
         return out
+    }
+
+    private func platformBool(
+        _ setting: PlatformEnvSetting, _ key: String, _ present: Set<String>, _ value: Bool
+    ) -> Bool {
+        vm.effectivePlatformBool(setting, configValue: present.contains(key) ? value : nil, capabilities: caps)
     }
 
     /// Diagnostics → Performance entry point. Hidden from the

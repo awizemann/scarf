@@ -332,6 +332,166 @@
         }
       }
     },
+    "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ in .env legt dies derzeit fest. Beim Speichern wird der Wert nach config.yaml verschoben und die Zeile aus .env entfernt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ en .env define esto ahora. Al guardar se mueve a config.yaml y se quita la línea de .env."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ dans .env définit actuellement ce réglage. L’enregistrement le déplace dans config.yaml et retire la ligne de .env."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env の %@ が現在この設定を決めています。保存すると値を config.yaml に移し、.env の行を削除します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ no .env define isto agora. Salvar move o valor para config.yaml e remove a linha do .env."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env 中的 %@ 目前决定此设置。保存会将其移到 config.yaml 并删除 .env 中的该行。"
+          }
+        }
+      }
+    },
+    "Saving removes the unused %@ line from .env." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Speichern wird die ungenutzte Zeile %@ aus .env entfernt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al guardar se quita la línea %@ sin usar de .env."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’enregistrement retire la ligne %@ inutilisée de .env."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存すると、使われていない %@ の行を .env から削除します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvar remove a linha %@ não usada do .env."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存会从 .env 中删除未使用的 %@ 行。"
+          }
+        }
+      }
+    },
+    "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ in .env schränkt diese Plattform weiterhin ein. Entferne diese Zeile aus .env, um alles zuzulassen, oder behalte hier mindestens einen Eintrag."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ en .env todavía limita esta plataforma. Quita esa línea de .env para permitirlo todo, o deja al menos una entrada aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ dans .env limite toujours cette plateforme. Retirez cette ligne de .env pour tout autoriser, ou gardez au moins une entrée ici."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env の %@ がまだこのプラットフォームを制限しています。すべて許可するには .env からその行を削除するか、ここに少なくとも 1 件のエントリを残してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ no .env ainda limita esta plataforma. Remova essa linha do .env para permitir tudo, ou mantenha pelo menos uma entrada aqui."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env 中的 %@ 仍在限制此平台。要允许全部，请从 .env 中删除该行，或在此至少保留一个条目。"
+          }
+        }
+      }
+    },
+    "Couldn't read .env, so the allowlist wasn't saved." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env konnte nicht gelesen werden, daher wurde die Zulassungsliste nicht gespeichert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer .env, así que la lista de permitidos no se guardó."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de lire .env ; la liste autorisée n’a donc pas été enregistrée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ".env を読み取れなかったため、許可リストは保存されませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler o .env, então a lista de permissões não foi salva."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取 .env,因此未保存允许列表。"
+          }
+        }
+      }
+    },
     "Saved to config.yaml, but couldn't remove %@ from .env" : {
       "localizations" : {
         "de" : {

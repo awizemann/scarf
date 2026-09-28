@@ -3300,5 +3300,9 @@
   "cron job %@": "Cron-Job %@",
   "display name": "Anzeigename",
   "• skills.config.%@": "• skills.config.%@",
-  "Saved to config.yaml, but couldn't remove %@ from .env": "In config.yaml gespeichert, aber %@ konnte nicht aus .env entfernt werden"
+  "Saved to config.yaml, but couldn't remove %@ from .env": "In config.yaml gespeichert, aber %@ konnte nicht aus .env entfernt werden",
+  "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": "%@ in .env legt dies derzeit fest. Beim Speichern wird der Wert nach config.yaml verschoben und die Zeile aus .env entfernt.",
+  "Saving removes the unused %@ line from .env.": "Beim Speichern wird die ungenutzte Zeile %@ aus .env entfernt.",
+  "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": "%@ in .env schränkt diese Plattform weiterhin ein. Entferne diese Zeile aus .env, um alles zuzulassen, oder behalte hier mindestens einen Eintrag.",
+  "Couldn't read .env, so the allowlist wasn't saved.": ".env konnte nicht gelesen werden, daher wurde die Zulassungsliste nicht gespeichert."
 }

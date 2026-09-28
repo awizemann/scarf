@@ -82,17 +82,55 @@ final class DiscordSetupViewModel: PlatformSetupForm {
             allowBots = env["DISCORD_ALLOW_BOTS"] ?? "none"
             replyToMode = env["DISCORD_REPLY_TO_MODE"] ?? "first"
 
-            guard let cfg = snapshot.config?.discord else { return }
-            requireMention = cfg.requireMention
+            // No early return on a missing config half: the `.env` side of
+            // the four env-overridable toggles must still show (P37 finding
+            // 5's shape). The latched `loadRefusal` still refuses the Save.
+            let cfg = snapshot.config?.discord
+            let caps = capabilities
+            var fromEnv = Set<String>()
+            envLines = Set(Self.envSettings.map(\.setting.envKey).filter { env[$0] != nil })
+            func resolve(_ spec: PlatformEnvSetting, _ key: String, _ configValue: Bool?) -> Bool {
+                let r = spec.resolve(envValue: env[spec.envKey], configValue: configValue, capabilities: caps)
+                if r.fromEnv { fromEnv.insert(spec.envKey) }
+                return r.value
+            }
+            func present(_ key: String, _ value: Bool?) -> Bool? {
+                cfg?.presentKeys.contains(key) == true ? value : nil
+            }
+            requireMention = resolve(.discordRequireMention, "require_mention",
+                                     present("require_mention", cfg?.requireMention))
+            autoThread = resolve(.discordAutoThread, "auto_thread", present("auto_thread", cfg?.autoThread))
+            reactions = resolve(.discordReactions, "reactions", present("reactions", cfg?.reactions))
+            historyBackfill = resolve(.discordHistoryBackfill, "history_backfill",
+                                      present("history_backfill", cfg?.historyBackfill))
+            envDecides = fromEnv
+            guard let cfg else { return }
             freeResponseChannels = cfg.freeResponseChannels
-            autoThread = cfg.autoThread
-            reactions = cfg.reactions
-            historyBackfill = cfg.historyBackfill
             allowAnyAttachment = cfg.allowAnyAttachment
         }
     }
 
-    func save() {
+    /// The four toggles an env var can override, with their config.yaml key.
+    static let envSettings: [(setting: PlatformEnvSetting, configKey: String)] = [
+        (.discordRequireMention, "discord.require_mention"),
+        (.discordAutoThread, "discord.auto_thread"),
+        (.discordReactions, "discord.reactions"),
+        (.discordHistoryBackfill, "discord.history_backfill")
+    ]
+
+    /// Env keys with a line in `.env` (any value). A Save removes them.
+    private(set) var envLines: Set<String> = []
+    /// Env keys whose `.env` value is what the gateway uses right now.
+    private(set) var envDecides: Set<String> = []
+
+    /// Caption under a toggle while `.env` holds its env var.
+    func envCaption(for envKey: String) -> String? {
+        PlatformSetupHelpers.envOverrideCaption(
+            envKey: envKey, hasLine: envLines.contains(envKey), decides: envDecides.contains(envKey))
+    }
+
+    /// The `.env` pairs, config.yaml keys and moved `.env` lines a Save writes.
+    func savePlan() -> (env: [String: String], config: [String: String], envUnsetAfterConfig: [String]) {
         let envPairs: [String: String] = [
             "DISCORD_BOT_TOKEN": botToken,
             "DISCORD_ALLOWED_USERS": allowedUsers,
@@ -120,6 +158,23 @@ final class DiscordSetupViewModel: PlatformSetupForm {
         if capabilities.hasDiscordAllowAnyAttachment {
             configKV["platforms.discord.extra.allow_any_attachment"] = PlatformSetupHelpers.envBool(allowAnyAttachment)
         }
-        commitSave(envPairs: envPairs, configKV: configKV)
+        return (envPairs, configKV, Self.envLinesToMove(envLines, configKV: configKV))
+    }
+
+    func save() {
+        let plan = savePlan()
+        commitSave(envPairs: plan.env, configKV: plan.config,
+                   envUnsetAfterConfig: plan.envUnsetAfterConfig)
+    }
+
+    /// `.env` lines to drop once config.yaml holds the value: only for a
+    /// toggle this Save actually writes (a hidden `history_backfill` row on
+    /// a pre-v0.14 host keeps its line). Removed only AFTER every config
+    /// write succeeded (`saveForm`), so a failed Save keeps the copy Hermes
+    /// still reads — the Mattermost pattern (B05).
+    static func envLinesToMove(_ lines: Set<String>, configKV: [String: String]) -> [String] {
+        envSettings
+            .filter { lines.contains($0.setting.envKey) && configKV[$0.configKey] != nil }
+            .map(\.setting.envKey)
     }
 }

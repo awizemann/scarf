@@ -3304,5 +3304,9 @@
   "cron job %@": "cron ジョブ %@",
   "display name": "表示名",
   "• skills.config.%@": "• skills.config.%@",
-  "Saved to config.yaml, but couldn't remove %@ from .env": "config.yaml に保存しましたが、.env から %@ を削除できませんでした"
+  "Saved to config.yaml, but couldn't remove %@ from .env": "config.yaml に保存しましたが、.env から %@ を削除できませんでした",
+  "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": ".env の %@ が現在この設定を決めています。保存すると値を config.yaml に移し、.env の行を削除します。",
+  "Saving removes the unused %@ line from .env.": "保存すると、使われていない %@ の行を .env から削除します。",
+  "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": ".env の %@ がまだこのプラットフォームを制限しています。すべて許可するには .env からその行を削除するか、ここに少なくとも 1 件のエントリを残してください。",
+  "Couldn't read .env, so the allowlist wasn't saved.": ".env を読み取れなかったため、許可リストは保存されませんでした。"
 }

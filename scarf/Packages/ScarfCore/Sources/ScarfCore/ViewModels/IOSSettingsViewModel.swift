@@ -25,6 +25,10 @@ public final class IOSSettingsViewModel {
     /// for diagnosing parse failures (our parser is forgiving but
     /// lossy on malformed input).
     public private(set) var rawYAML: String = ""
+    /// The `.env` values of the platform settings that can override
+    /// config.yaml (``PlatformEnvSetting/envKeys``) — so the read-only
+    /// platform rows show what the gateway actually uses (B13).
+    public private(set) var platformEnv: [String: String] = [:]
 
     public private(set) var isLoading: Bool = true
     public private(set) var lastError: String?
@@ -115,7 +119,32 @@ public final class IOSSettingsViewModel {
 
         rawYAML = text
         config = HermesConfig(yaml: text)
+        // Blocking transport read: off the pool (C10). An unreadable `.env`
+        // leaves the rows on config.yaml, as before.
+        platformEnv = await OffPool.run {
+            PlatformEnvSetting.envValues(
+                fromEnvText: ctx.readText(ctx.paths.envFile), keys: PlatformEnvSetting.envKeys)
+        }
         isLoading = false
+    }
+
+    /// The value a platform toggle has on the gateway: the `.env` override
+    /// when it is in force, else config.yaml (`configValue` nil = key absent).
+    public func effectivePlatformBool(
+        _ setting: PlatformEnvSetting, configValue: Bool?, capabilities: HermesCapabilities
+    ) -> Bool {
+        setting.resolve(envValue: platformEnv[setting.envKey], configValue: configValue,
+                        capabilities: capabilities).value
+    }
+
+    /// A platform's allowlist as the gateway uses it (`.env` or config.yaml).
+    public func effectiveAllowlist(
+        platform: String, configItems: [String], capabilities: HermesCapabilities
+    ) -> [String] {
+        guard let spec = PlatformEnvAllowlist.forPlatform(platform) else { return configItems }
+        return spec.resolve(envValue: platformEnv[spec.envKey],
+                            configItems: configItems.isEmpty ? nil : configItems,
+                            capabilities: capabilities).items
     }
 
     /// The Settings banner when neither the file transport nor the Hermes

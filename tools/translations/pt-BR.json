@@ -3328,5 +3328,9 @@
   "cron job %@": "tarefa cron %@",
   "display name": "nome de exibição",
   "• skills.config.%@": "• skills.config.%@",
-  "Saved to config.yaml, but couldn't remove %@ from .env": "Salvo em config.yaml, mas não foi possível remover %@ do .env"
+  "Saved to config.yaml, but couldn't remove %@ from .env": "Salvo em config.yaml, mas não foi possível remover %@ do .env",
+  "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": "%@ no .env define isto agora. Salvar move o valor para config.yaml e remove a linha do .env.",
+  "Saving removes the unused %@ line from .env.": "Salvar remove a linha %@ não usada do .env.",
+  "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": "%@ no .env ainda limita esta plataforma. Remova essa linha do .env para permitir tudo, ou mantenha pelo menos uma entrada aqui.",
+  "Couldn't read .env, so the allowlist wasn't saved.": "Não foi possível ler o .env, então a lista de permissões não foi salva."
 }
