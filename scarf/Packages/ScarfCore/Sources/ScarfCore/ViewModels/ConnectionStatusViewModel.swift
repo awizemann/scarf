@@ -356,7 +356,7 @@ public final class ConnectionStatusViewModel {
         case .homeMissing:
             return (
                 "Hermes not installed on remote",
-                "`\(hermesHome)` doesn't exist on the remote. Install Hermes for the SSH user, or — if Hermes is already installed under a different path — set this server's Hermes home in Manage Servers."
+                "`\(hermesHome)` doesn't exist on the remote. Install Hermes for the SSH user, or — if Hermes is already installed under a different path — remove this server in Manage Servers and add it again with that path as its Hermes data directory."
             )
         case .configMissing:
             return (
@@ -371,7 +371,7 @@ public final class ConnectionStatusViewModel {
         case .profileActive(let name):
             return (
                 "Hermes profile \"\(name)\" is active",
-                "The remote is using Hermes profile `\(name)` — its state lives at `~/.hermes/profiles/\(name)/state.db`, not `\(hermesHome)/state.db`. Either set this server's Hermes home to `~/.hermes/profiles/\(name)` in Manage Servers → Edit, or run `hermes profile use default` on the remote to revert."
+                "The remote is using Hermes profile `\(name)` — its state lives at `~/.hermes/profiles/\(name)/state.db`, not `\(hermesHome)/state.db`. Either run `hermes profile use default` on the remote to revert, or remove this server in Manage Servers and add it again with `~/.hermes/profiles/\(name)` as its Hermes data directory."
             )
         case .unknown:
             return (
