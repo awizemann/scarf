@@ -3291,6 +3291,7 @@
   "Waiting for the current turn to finish — Hermes restarts the gateway as soon as it ends.": "正在等待当前轮次结束——结束后 Hermes 会立即重启网关。",
   "Waiting since %@. Hermes stops waiting after agent.restart_after_turn_timeout (30 minutes by default).": "自 %@ 起等待。Hermes 会在 agent.restart_after_turn_timeout（默认 30 分钟）后停止等待。",
   "You stopped this turn. Anything Hermes finished before the stop is kept.": "你已停止此轮次。Hermes 在停止前完成的内容会保留。",
+  "You stopped this turn. Anything Hermes finished before the stop is kept. Your next message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.": "你已停止此轮次。Hermes 在停止前完成的内容会保留。你的下一条消息会作为已停止请求的后续发送给 Hermes；如需放弃该请求，请开始新的聊天。",
   "^[%lld setting](inflect: true)": "%lld 项设置",
   "`model.provider` is `%@`, which this version of Hermes doesn't recognize. Chats will fail with \"Unknown provider\" (or use another provider) until you choose a supported one.": "`model.provider` 为 `%@`，此版本的 Hermes 无法识别。在你选择受支持的提供商之前，聊天会以“Unknown provider”失败（或使用其他提供商）。",
   "chat turn": "聊天轮次",

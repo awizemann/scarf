@@ -1840,14 +1840,18 @@ public final class RichChatViewModel {
     private var turnStoppedByUser = false
 
     /// Append the local "stopped" note for a turn the user ended.
-    public func appendTurnStoppedNote() {
+    /// `carriesForward`: the host keeps the stopped request and sends it
+    /// again with the next plain message (ACP on v0.19.1+, see
+    /// `HermesCapabilities.hasACPStoppedPromptCarriedForward`), so the note
+    /// says so. False for CLI-driven turns, which don't.
+    public func appendTurnStoppedNote(carriesForward: Bool = false) {
         let id = nextLocalId
         nextLocalId -= 1
         messages.append(HermesMessage(
             id: id,
             sessionId: sessionId ?? "",
             role: "system",
-            content: String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept."),
+            content: Self.turnStoppedNoteText(carriesForward: carriesForward),
             toolCallId: nil,
             toolCalls: [],
             toolName: nil,
@@ -1857,6 +1861,12 @@ public final class RichChatViewModel {
             reasoning: nil
         ))
         buildMessageGroups()
+    }
+
+    nonisolated static func turnStoppedNoteText(carriesForward: Bool) -> String {
+        carriesForward
+            ? String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept. Your next message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.")
+            : String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept.")
     }
 
     nonisolated static func isCancelledStopReason(_ stopReason: String) -> Bool {
@@ -3024,7 +3034,8 @@ public final class RichChatViewModel {
         }
 
         if isCancelled && stoppedByUser {
-            appendTurnStoppedNote()
+            appendTurnStoppedNote(
+                carriesForward: capabilitiesGate.hasACPStoppedPromptCarriedForward)
         }
 
         // Accumulate token usage from this prompt
