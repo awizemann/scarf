@@ -1507,7 +1507,12 @@ struct HermesFileService: Sendable {
         case .refuse(let refusal): return (refusal, nil, nil)
         case .restart(let externallySupervised): supervised = externallySupervised
         }
-        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 60)
+        // 60 s, or longer on a pre-0.21 launchd host whose restart is the
+        // CLI's own drain-then-kickstart (see `restartSpawnTimeout`).
+        let timeout = HermesGatewayRestartDrain.restartSpawnTimeout(
+            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+            configYAML: readFileData(context.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) })
+        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: timeout)
         // Only a run Scarf's own timer ended is worth a second look: then the
         // gateway itself says whether it is draining.
         let drain = HermesGatewayRestartDrain.afterTimeout(

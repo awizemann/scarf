@@ -201,6 +201,28 @@ public enum HermesGatewayRestartDrain {
         return Int(seconds("restart_drain_timeout", 0) + seconds("restart_after_turn_timeout", 1800) + 15)
     }
 
+    /// The ceiling for Scarf's `gateway restart` spawn.
+    ///
+    /// 60 s where the restart is in band (the service manager, not the CLI,
+    /// starts the replacement — killing the CLI then cancels nothing). Below
+    /// ``HermesCapabilities/hasLaunchdInBandRestart`` a launchd restart is
+    /// SIGTERM, a wait of `agent.restart_drain_timeout`, then the CLI's own
+    /// `launchctl kickstart -k` (90 s cap) — a spawn killed before that left
+    /// the gateway stopped. There the ceiling covers the configured drain
+    /// (180 s when the key is absent — the default up to v2026.5.7, a safe
+    /// upper bound after) plus the kickstart and a margin. A ceiling, not a
+    /// wait: the CLI still returns as soon as it is done.
+    public static func restartSpawnTimeout(capabilities: HermesCapabilities, configYAML: String?) -> TimeInterval {
+        let inBand: TimeInterval = 60
+        guard !capabilities.hasLaunchdInBandRestart else { return inBand }
+        let values = configYAML.map { HermesYAML.parseNestedYAML($0).values } ?? [:]
+        let drain = values["agent.restart_drain_timeout"]
+            .map(HermesYAML.stripYAMLQuotes)
+            .flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            .map { max(0, $0) } ?? 180
+        return max(inBand, drain + 120)
+    }
+
     /// Hermes's default wait: `restart_drain_timeout` (0) +
     /// `restart_after_turn_timeout` (1800, `hermes_cli/config_defaults.py:103`)
     /// + 15 s headroom (`gateway/restart.py:358-361`) @ v2026.9.24.

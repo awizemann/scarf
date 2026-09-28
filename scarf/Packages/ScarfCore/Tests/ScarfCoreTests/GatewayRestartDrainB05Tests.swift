@@ -161,6 +161,26 @@ import Foundation
         #expect(HermesGatewayRestartDrain.budgetSeconds(configYAML: "agent:\n  restart_after_turn_timeout: \"120\"\n") == 135)
     }
 
+    // MARK: - Older hosts: the restart is the CLI's own drain + kickstart
+
+    /// Below v0.21.0 `launchd_restart` SIGTERMs, waits
+    /// `agent.restart_drain_timeout`, then kickstarts (`gateway.py:5537-5584`
+    /// @ v2026.8.27) — Scarf's 60 s kill mid-wait left the gateway stopped.
+    @Test func olderHostsGetACeilingThatCoversTheDrain() {
+        let current = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        let v0206 = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)")
+        let v0210 = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(current.hasLaunchdInBandRestart && v0210.hasLaunchdInBandRestart)
+        #expect(!v0206.hasLaunchdInBandRestart)
+        #expect(HermesGatewayRestartDrain.restartSpawnTimeout(capabilities: current, configYAML: nil) == 60)
+        #expect(HermesGatewayRestartDrain.restartSpawnTimeout(capabilities: v0210, configYAML: nil) == 60)
+        #expect(HermesGatewayRestartDrain.restartSpawnTimeout(capabilities: v0206, configYAML: nil) == 300)
+        #expect(HermesGatewayRestartDrain.restartSpawnTimeout(
+            capabilities: v0206, configYAML: "agent:\n  restart_drain_timeout: 0\n") == 120)
+        #expect(HermesGatewayRestartDrain.restartSpawnTimeout(
+            capabilities: v0206, configYAML: "agent:\n  restart_drain_timeout: 600\n") == 720)
+    }
+
     // MARK: - The announced budget
 
     @Test func budgetIsReadFromEachBackendsAnnouncement() {

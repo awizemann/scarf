@@ -595,7 +595,15 @@ final class MessagingGatewayViewModel {
                     case .restart(let externallySupervised): supervised = externallySupervised
                     }
                 }
-                let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+                // A restart on a pre-0.21 launchd host is the CLI's own
+                // drain-then-kickstart; its ceiling covers that wait there
+                // (see `HermesGatewayRestartDrain.restartSpawnTimeout`).
+                let timeout = verb == .restart
+                    ? HermesGatewayRestartDrain.restartSpawnTimeout(
+                        capabilities: caps,
+                        configYAML: ctx.readData(ctx.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) })
+                    : Self.mutationTimeout
+                let result = run(HermesGatewayServiceVerdict.argv(verb), timeout)
                 // S07-F3: a restart that outlived the timer while the gateway
                 // is draining is waiting for the current turn, not failed.
                 // The gateway's own state file says so (the CLI's buffered
