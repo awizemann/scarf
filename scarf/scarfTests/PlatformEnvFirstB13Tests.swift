@@ -35,6 +35,10 @@ private final class ScriptedCLI: @unchecked Sendable {
     }
 }
 
+/// The v0.21.5 reference checkout the round-trip tests run Hermes from.
+private let hermesRefAvailable = FileManager.default.isExecutableFile(
+    atPath: NSHomeDirectory() + "/.hermes/hermes-agent-v0215/.venv/bin/python")
+
 private let v0215 = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
 private let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
 
@@ -166,7 +170,7 @@ struct AllowlistEnvFirstB13Tests {
     /// Scarf writes the list and drops the `.env` line; Hermes's own loader
     /// then reads the list from config.yaml. Runs Hermes from the v0.21.5
     /// reference checkout's venv when present.
-    @Test func roundTripThroughHermesLoader() async throws {
+    @Test(.enabled(if: hermesRefAvailable, "needs ~/.hermes/hermes-agent-v0215")) func roundTripThroughHermesLoader() async throws {
         let ctx = scratchContext("rt")
         try "DISCORD_BOT_TOKEN=t\nDISCORD_ALLOWED_CHANNELS=111,222\n"
             .write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
@@ -310,7 +314,7 @@ struct AllowlistEnvFirstB13bTests {
 
     /// Scarf writes each list + publish_topic stays in config and drops the
     /// `.env` lines; Hermes's own loader then reads the config values.
-    @Test func roundTripThroughHermesLoader() async throws {
+    @Test(.enabled(if: hermesRefAvailable, "needs ~/.hermes/hermes-agent-v0215")) func roundTripThroughHermesLoader() async throws {
         let ctx = scratchContext("rt2")
         try "MATRIX_ALLOWED_ROOMS=!a:x\nSLACK_ALLOWED_CHANNELS=C1\nMATTERMOST_ALLOWED_CHANNELS=m1\nNTFY_PUBLISH_TOPIC=old\nMATRIX_AUTO_THREAD=true\n"
             .write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
