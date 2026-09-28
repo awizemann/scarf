@@ -569,12 +569,11 @@ final class MCPServerEditorViewModel {
     func clearOAuthToken(completion: @escaping (Bool) -> Void) {
         let service = fileService
         let name = server.name
-        Task.detached { [weak self] in
-            let ok = service.deleteMCPOAuthToken(name: name)
-            await MainActor.run {
-                if ok { self?.tokenCleared = true }
-                completion(ok)
-            }
+        Task { [weak self] in
+            // File deletes run off the main actor (C10); the result lands back here.
+            let ok = await Task.detached { service.deleteMCPOAuthToken(name: name) }.value
+            if ok { self?.tokenCleared = true }
+            completion(ok)
         }
     }
 }

@@ -765,7 +765,7 @@ final class HealthViewModel {
                 // `--deep`'s section is the exception to ✗-means-off: its
                 // rows are live probes (`OpenRouter: ✗ error (401)`,
                 // status.py:330-345), and a ✗ there is a real failure.
-                if row.status == .off, currentTitle == "Deep Checks" {
+                if case .off = row.status, currentTitle == "Deep Checks" {
                     row = HealthCheck(label: row.label, status: .error, detail: row.detail)
                 }
                 currentChecks.append(row)

@@ -61,8 +61,6 @@ final class TemplateExporterViewModel {
 
     func load() {
         let ctx = context
-        let exporter = exporter
-        let projectDir = project.path
         rescanFiles()
         Task.detached { [weak self] in
             let service = HermesFileService(context: ctx)
