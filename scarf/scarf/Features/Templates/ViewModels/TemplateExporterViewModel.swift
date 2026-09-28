@@ -78,21 +78,29 @@ final class TemplateExporterViewModel {
     /// Re-check the project folder off the main actor (C10) — the author may
     /// add README.md / AGENTS.md while the sheet is open. The sheet calls
     /// this when the app regains focus and from its "Check Again" button.
-    /// A call while one is already running is dropped.
+    /// A call while one is already running queues one more pass, so a file
+    /// that lands after the running scan read the folder isn't missed.
     @discardableResult
     func rescanFiles() -> Task<Void, Never>? {
-        guard !isRescanning else { return nil }
+        guard !isRescanning else {
+            rescanQueued = true
+            return nil
+        }
         isRescanning = true
         let exporter = exporter
         let projectDir = project.path
         return Task { [weak self] in
-            let scan = await Task.detached {
-                exporter.scanProjectFiles(projectDir: projectDir)
-            }.value
-            self?.fileScan = scan
+            repeat {
+                self?.rescanQueued = false
+                let scan = await Task.detached {
+                    exporter.scanProjectFiles(projectDir: projectDir)
+                }.value
+                self?.fileScan = scan
+            } while self?.rescanQueued == true
             self?.isRescanning = false
         }
     }
+    @ObservationIgnored private var rescanQueued = false
 
     /// Whether the required files are present, as of the last scan. `false`
     /// until the scan lands — Export stays disabled rather than guessing.
