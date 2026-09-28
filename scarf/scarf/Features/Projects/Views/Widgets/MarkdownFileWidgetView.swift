@@ -11,6 +11,7 @@ struct MarkdownFileWidgetView: View {
 
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
+    @Environment(\.selectedProjectHostHomes) private var hostHomes
     @Environment(HermesFileWatcher.self) private var fileWatcher
     /// The dashboard-wide batched stat, when this widget is rendered inside a
     /// panel that installs one. `nil` elsewhere — the widget then stats for
@@ -26,7 +27,7 @@ struct MarkdownFileWidgetView: View {
 
     var body: some View {
         Group {
-            switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot) {
+            switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot, hostHomes: hostHomes) {
             case .failure(let err):
                 WidgetErrorCard(
                     verbatimReason: err.userMessage,

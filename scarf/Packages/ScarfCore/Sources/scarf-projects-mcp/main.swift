@@ -7,7 +7,10 @@ import ScarfProjectsMCPKit
 // hand-appending rows to ~/.hermes/scarf/projects.json.
 //
 // Usage: read from stdin, write to stdout. There are no subcommands.
-//   --hermes-home <path>   Hermes home to operate on (tests, multi-home).
+//   --hermes-home <path>   Hermes home to operate on. Scarf's registration
+//                          always passes it: Hermes strips HERMES_HOME from
+//                          a stdio MCP server's environment
+//                          (tools/mcp_tool_config.py:74,111-119 @ v2026.9.24).
 //   SCARF_PROJECTS_MCP_HOME  Same, as an environment variable.
 //   --version              Print the version and exit.
 
@@ -28,11 +31,13 @@ if arguments.contains("--help") || arguments.contains("-h") {
 
         Options:
           --hermes-home <path>   Hermes home to operate on. Must be absolute and
-                                 already exist. Defaults to the resolved local
+                                 already exist. Scarf registers the server with
+                                 the owning profile's home here, because Hermes
+                                 does not pass HERMES_HOME to MCP servers. Without
+                                 it the server falls back to the resolved local
                                  home, which honours active_profile AS OF
-                                 PROCESS START — Hermes respawns this server, so
-                                 a profile switch mid-session is not picked up
-                                 until it does.
+                                 PROCESS START, not the `-p` profile of the
+                                 agent that launched it.
           --version              Print version and exit.
 
         Environment:

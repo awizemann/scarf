@@ -351,20 +351,39 @@ public extension ServerContext {
 private actor UserHomeCache {
     static let shared = UserHomeCache()
     private var cache: [ServerID: String] = [:]
+    /// When each server's last probe FAILED. A failure is remembered only
+    /// briefly: caching the `~` fallback for good kept every later caller on
+    /// it for the rest of the app's life, so a caller that refuses to act
+    /// without an absolute home (template uninstall) could never recover by
+    /// trying again — while not remembering it at all made every caller
+    /// against a dead host pay the probe's 10 s timeout again.
+    private var failedAt: [ServerID: Date] = [:]
+    static let failureTTL: TimeInterval = 30
 
     func resolve(for context: ServerContext) async -> String {
         if let cached = cache[context.id] { return cached }
+        if let failed = failedAt[context.id],
+           Date().timeIntervalSince(failed) < Self.failureTTL {
+            return "~"
+        }
         let resolved = await probe(context: context)
-        cache[context.id] = resolved
+        if resolved.hasPrefix("/") {
+            cache[context.id] = resolved
+            failedAt.removeValue(forKey: context.id)
+        } else {
+            failedAt[context.id] = Date()
+        }
         return resolved
     }
 
     func invalidate(contextID: ServerID) {
         cache.removeValue(forKey: contextID)
+        failedAt.removeValue(forKey: contextID)
     }
 
     func seed(_ home: String, contextID: ServerID) {
         cache[contextID] = home
+        failedAt.removeValue(forKey: contextID)
     }
 
     private func probe(context: ServerContext) async -> String {
@@ -429,6 +448,25 @@ extension ServerContext {
     /// or user path to a process that runs on the target host.
     public func resolvedUserHome() async -> String {
         await UserHomeCache.shared.resolve(for: self)
+    }
+
+    /// `path` with a leading `~` (`~` alone or `~/…`) replaced by `home`.
+    /// Anything else — an absolute path, `~user/…`, or a `home` that is not
+    /// absolute (the failed-probe fallback is `~`) — comes back unchanged,
+    /// so a failed probe can never produce a half-expanded path.
+    ///
+    /// Remote defaults are `~`-rooted (`~/.hermes`, `~/projects`) and the
+    /// transports let the remote shell expand them, which is fine for I/O
+    /// but useless for any check that compares paths: containment, "is this
+    /// the same folder", matching Hermes's own resolved `workdir`. Those
+    /// callers expand first with this and `resolvedUserHome()`.
+    public nonisolated static func expandingTilde(_ path: String, home: String) -> String {
+        var base = home
+        while base.count > 1, base.hasSuffix("/") { base.removeLast() }
+        guard base.hasPrefix("/") else { return path }
+        if path == "~" { return base }
+        if path.hasPrefix("~/") { return (base == "/" ? "" : base) + String(path.dropFirst(1)) }
+        return path
     }
 
     /// Called when a server is removed from the registry, so the process-wide
