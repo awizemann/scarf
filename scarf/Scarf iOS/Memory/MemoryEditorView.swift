@@ -115,12 +115,32 @@ struct MemoryEditorView: View {
                 AttributedString(String(localized: "Save failed: \(new)"))
             ).post()
         }
+        // The file changed on the server while this editor was open (the
+        // agent writes its own memory). Nothing was saved; the user picks.
+        .alert(
+            String(localized: "\(vm.kind.displayName) changed on the server"),
+            isPresented: Binding(
+                get: { vm.conflictOnDisk != nil },
+                set: { if !$0 { vm.dismissConflict() } }
+            )
+        ) {
+            Button(String(localized: "Reload"), role: .destructive) { vm.acceptOnDiskVersion() }
+            Button(String(localized: "Overwrite"), role: .destructive) {
+                Task {
+                    vm.dismissConflict()
+                    await performSave(force: true)
+                }
+            }
+            Button(String(localized: "Keep Editing"), role: .cancel) { vm.dismissConflict() }
+        } message: {
+            Text("Hermes updated this file after you opened it. Reload discards your edits and shows the new version; Overwrite replaces the new version with yours.")
+        }
         .task { await vm.load() }
         .onDisappear { savedHideTask?.cancel() }
     }
 
-    private func performSave() async {
-        let ok = await vm.save()
+    private func performSave(force: Bool = false) async {
+        let ok = await vm.save(force: force)
         guard ok else { return }
         // Cancel any in-flight hide task so rapid saves don't drop
         // the pill mid-fade (the previous implementation stacked
