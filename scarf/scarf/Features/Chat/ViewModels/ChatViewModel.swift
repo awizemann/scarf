@@ -910,7 +910,7 @@ final class ChatViewModel {
     @MainActor
     func chooseModelForUnroutableProvider(_ provider: String) {
         pendingStartArgs = nil
-        modelPreflightReason = "This version of Hermes can't route the configured provider (\(provider))."
+        modelPreflightReason = String(localized: "This version of Hermes can't route the configured provider (\(provider)).")
     }
 
     /// Same escape hatch as `chooseModelForUnroutableProvider`, for the

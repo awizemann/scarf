@@ -173,8 +173,8 @@ struct TemplateUninstallSheet: View {
         section(
             title: plan.rootRefused ? "Nothing will be removed" : "Skipped — outside this project",
             subtitle: plan.rootRefused
-                ? "Scarf can't safely check which files belong to this project. The first line says why; the rest is what the template installed."
-                : "The lock file lists these, but they aren't inside the project. Scarf won't touch them."
+                ? String(localized: "Scarf can't safely check which files belong to this project. The first line says why; the rest is what the template installed.")
+                : String(localized: "The lock file lists these, but they aren't inside the project. Scarf won't touch them.")
         ) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(plan.refusedEntries, id: \.self) { entry in

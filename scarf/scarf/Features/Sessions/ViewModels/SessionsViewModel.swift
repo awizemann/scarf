@@ -1176,7 +1176,7 @@ final class SessionsViewModel {
             let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
             if outcome.succeeded {
-                var banner = "Exported to \(url.path)" + note
+                var banner = String(localized: "Exported to \(url.path)") + note
                 // md/qmd with `--lineage logical` cover the whole chain.
                 if let sessionId,
                    await self.hasArchivedTurns(chain.isEmpty || mode == .latestSegmentOnly ? [sessionId] : chain),
@@ -1188,7 +1188,7 @@ final class SessionsViewModel {
                 }
                 self.exportMessage = banner
                 // A banner carrying a caveat stays until the next export.
-                guard banner == "Exported to \(url.path)" else { return }
+                guard banner == String(localized: "Exported to \(url.path)") else { return }
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(5))
                     if self?.exportMessage == banner { self?.exportMessage = nil }
