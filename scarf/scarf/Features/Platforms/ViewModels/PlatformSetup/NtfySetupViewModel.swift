@@ -48,7 +48,7 @@ final class NtfySetupViewModel: PlatformSetupForm {
 
     /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        loadSnapshot { [weak self] snapshot in
+        loadSnapshot(includeCapabilities: true) { [weak self] snapshot in
             guard let self else { return }
             let env = snapshot.env
             // NOT a `guard … else { return }`. `loadSnapshot` already bounced
@@ -72,13 +72,42 @@ final class NtfySetupViewModel: PlatformSetupForm {
             // These two have no `.env` spelling at all, so an unreadable
             // config.yaml leaves them at whatever the form already holds
             // rather than at a fabricated default.
+            // B13: `NTFY_PUBLISH_TOPIC` in `.env` can override config.yaml
+            // (`PlatformEnvString`). Resolved before the config guard so
+            // the `.env` half still shows.
+            let envPublish = env[PlatformEnvString.ntfyPublishTopicEnvKey]
+            publishTopicEnvLine = envPublish != nil
+            let resolved = PlatformEnvString.resolve(
+                envValue: envPublish, configValue: cfg?.publishTopic ?? "",
+                capabilities: snapshot.capabilities ?? .empty)
+            publishTopic = resolved.value
+            publishTopicFromEnv = resolved.fromEnv
             guard let cfg else { return }
-            publishTopic = cfg.publishTopic
             markdown = cfg.markdown
         }
     }
 
+    /// `.env` carries a `NTFY_PUBLISH_TOPIC` line; a Save moves it.
+    private(set) var publishTopicEnvLine = false
+    /// That line is what the gateway uses right now.
+    private(set) var publishTopicFromEnv = false
+
+    var publishTopicCaption: String? {
+        PlatformSetupHelpers.envOverrideCaption(
+            envKey: PlatformEnvString.ntfyPublishTopicEnvKey,
+            hasLine: publishTopicEnvLine, decides: publishTopicFromEnv)
+    }
+
     func save() {
+        let plan = savePlan()
+        commitSave(envPairs: plan.env, configKV: plan.config,
+                   envUnsetAfterConfig: plan.envUnsetAfterConfig)
+    }
+
+    /// The `.env` pairs, config.yaml keys and moved `.env` lines a Save
+    /// writes. `publish_topic` is always written, so its `.env` line goes —
+    /// after the config writes succeed (`saveForm`).
+    func savePlan() -> (env: [String: String], config: [String: String], envUnsetAfterConfig: [String]) {
         let envPairs: [String: String] = [
             "NTFY_TOPIC": topic,
             // Don't persist the default server as an env override.
@@ -101,6 +130,6 @@ final class NtfySetupViewModel: PlatformSetupForm {
             "platforms.ntfy.extra.token": "",
             "platforms.ntfy.extra.markdown": PlatformSetupHelpers.envBool(markdown)
         ]
-        commitSave(envPairs: envPairs, configKV: configKV)
+        return (envPairs, configKV, publishTopicEnvLine ? [PlatformEnvString.ntfyPublishTopicEnvKey] : [])
     }
 }

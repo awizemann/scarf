@@ -991,6 +991,9 @@ public struct MatrixSettings: Sendable, Equatable {
     public var dmMentionThreads: Bool
 
 
+    /// Keys PRESENT in config.yaml — see ``DiscordSettings/presentKeys``.
+    public var presentKeys: Set<String> = []
+
     public init(
         requireMention: Bool,
         autoThread: Bool,

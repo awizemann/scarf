@@ -14,6 +14,8 @@ public struct PlatformEnvSetting: Sendable, Equatable {
         case offWords(Set<String>)
         /// On only when the lowercased value is `true`/`1`/`yes`/`on`.
         case onWords
+        /// On only when the lowercased value is one of these words.
+        case onlyWords(Set<String>)
     }
 
     public let envKey: String
@@ -56,13 +58,35 @@ public struct PlatformEnvSetting: Sendable, Equatable {
         switch parse {
         case .offWords(let words): return !words.contains(text)
         case .onWords: return ["true", "1", "yes", "on"].contains(text)
+        case .onlyWords(let words): return words.contains(text)
         }
     }
+
+    // MARK: - Matrix (`plugins/platforms/matrix/adapter.py` @ v2026.9.24)
+
+    /// `_parse_require_mention` (:947-951). Env-first from v0.21.3; at
+    /// v2026.9.11 config.extra was read first (:922-927).
+    public static let matrixRequireMention = PlatformEnvSetting(
+        envKey: "MATRIX_REQUIRE_MENTION", parse: .offWords(["false", "0", "no", "off"]),
+        defaultValue: true, envAlwaysWins: false)
+    /// `_extra_truthy("auto_thread", ...)` (:875, helper :930-933). Env-only
+    /// before v0.21.3 (`_env_truthy`, v2026.9.11 :856).
+    public static let matrixAutoThread = PlatformEnvSetting(
+        envKey: "MATRIX_AUTO_THREAD", parse: .onlyWords(["true", "1", "yes"]),
+        defaultValue: true, envAlwaysWins: true)
+    /// `_extra_truthy("dm_mention_threads", ...)` (:877). Env-only before
+    /// v0.21.3 (v2026.9.11 :858).
+    public static let matrixDMMentionThreads = PlatformEnvSetting(
+        envKey: "MATRIX_DM_MENTION_THREADS", parse: .onlyWords(["true", "1", "yes"]),
+        defaultValue: false, envAlwaysWins: true)
 
     /// Every `.env` key B13 resolves — what the iOS Settings read keeps.
     public static let envKeys: Set<String> = [
         discordRequireMention.envKey, discordReactions.envKey, discordAutoThread.envKey,
         discordHistoryBackfill.envKey, telegramRequireMention.envKey, telegramReactions.envKey,
+        matrixRequireMention.envKey, matrixAutoThread.envKey, matrixDMMentionThreads.envKey,
+        PlatformEnvAllowlist.matrixAllowedRooms.envKey, PlatformEnvAllowlist.slackAllowedChannels.envKey,
+        PlatformEnvAllowlist.mattermostAllowedChannels.envKey,
         PlatformEnvAllowlist.discordAllowedChannels.envKey, PlatformEnvAllowlist.telegramAllowedChats.envKey
     ]
 
@@ -143,11 +167,28 @@ public struct PlatformEnvAllowlist: Sendable, Equatable {
     public static let telegramAllowedChats = PlatformEnvAllowlist(
         envKey: "TELEGRAM_ALLOWED_CHATS", envAlwaysWins: false)
 
+    /// `MATRIX_ALLOWED_ROOMS`: `_extra_csv_set` (`matrix/adapter.py:535-537,
+    /// 873`) — env-first from v0.21.3; config first at v2026.9.11 (:498-501).
+    public static let matrixAllowedRooms = PlatformEnvAllowlist(
+        envKey: "MATRIX_ALLOWED_ROOMS", envAlwaysWins: false)
+    /// `SLACK_ALLOWED_CHANNELS`: `_extra_or_env_channel_set` (`slack/adapter.py:
+    /// 6240-6260`) — env-first from v0.21.3; config first at v2026.9.11 (:5966-5972).
+    public static let slackAllowedChannels = PlatformEnvAllowlist(
+        envKey: "SLACK_ALLOWED_CHANNELS", envAlwaysWins: false)
+    /// `MATTERMOST_ALLOWED_CHANNELS`: `_apply_channel_gating`
+    /// (`mattermost/adapter.py:499`) — env-first from v0.21.3; config first
+    /// at v2026.9.11 (`_extra_or_env`, :497-506).
+    public static let mattermostAllowedChannels = PlatformEnvAllowlist(
+        envKey: "MATTERMOST_ALLOWED_CHANNELS", envAlwaysWins: false)
+
     /// The allowlist for a platform whose `.env` spelling Scarf handles.
     public static func forPlatform(_ platform: String) -> PlatformEnvAllowlist? {
         switch platform {
         case "discord": return .discordAllowedChannels
         case "telegram": return .telegramAllowedChats
+        case "matrix": return .matrixAllowedRooms
+        case "slack": return .slackAllowedChannels
+        case "mattermost": return .mattermostAllowedChannels
         default: return nil
         }
     }
@@ -178,5 +219,26 @@ public struct PlatformEnvAllowlist: Sendable, Equatable {
         if let configItems, !configItems.isEmpty { return (configItems, false) }
         if let env, !env.isEmpty { return (env, true) }
         return (configItems ?? [], false)
+    }
+}
+
+/// A string platform setting with an env override — `NTFY_PUBLISH_TOPIC`:
+/// `_extra_or_secret(extra, "publish_topic", "NTFY_PUBLISH_TOPIC")`
+/// (`plugins/platforms/ntfy/adapter.py:127` @ v2026.9.24) is env-first from
+/// v0.21.3; at v2026.9.11 `_setting` read `extra.get(key) or env` (:94-96,
+/// :128), so a non-empty config value won.
+public enum PlatformEnvString {
+    public static let ntfyPublishTopicEnvKey = "NTFY_PUBLISH_TOPIC"
+
+    /// The effective value and whether `.env` decides it (blank = unset on
+    /// both sides).
+    public static func resolve(
+        envValue: String?, configValue: String, capabilities: HermesCapabilities
+    ) -> (value: String, fromEnv: Bool) {
+        let env = PlatformEnvSetting.nonBlank(envValue)
+        if let env, capabilities.hasEnvFirstPlatformSettings { return (env, true) }
+        if !configValue.trimmingCharacters(in: .whitespaces).isEmpty { return (configValue, false) }
+        if let env { return (env, true) }
+        return (configValue, false)
     }
 }

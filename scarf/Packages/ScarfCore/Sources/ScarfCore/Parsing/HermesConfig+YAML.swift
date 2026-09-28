@@ -679,7 +679,7 @@ public extension HermesConfig {
             replyBroadcast: boolish("platforms.slack.extra.reply_broadcast", default: false)
         )
 
-        let matrix = MatrixSettings(
+        var matrix = MatrixSettings(
             requireMention: boolTrueDefault("matrix.require_mention"),
             // Default TRUE upstream — no `config_defaults.py` entry, the
             // default lives in the reader:
@@ -688,6 +688,8 @@ public extension HermesConfig {
             autoThread: boolTrueDefault("matrix.auto_thread"),
             dmMentionThreads: boolish("matrix.dm_mention_threads", default: false)
         )
+        matrix.presentKeys = Set(
+            ["require_mention", "auto_thread", "dm_mention_threads"].filter { values["matrix.\($0)"] != nil })
 
         let mattermost = MattermostSettings(
             // `require_mention` is a `_SHARED_KEYS` member

@@ -20,6 +20,7 @@ struct NtfySetupView: View {
                 EditableTextField(label: "Topic", value: viewModel.topic) { viewModel.topic = $0 }
                 EditableTextField(label: "Server URL", value: viewModel.server) { viewModel.server = $0 }
                 EditableTextField(label: "Publish Topic", value: viewModel.publishTopic) { viewModel.publishTopic = $0 }
+                EnvOverrideCaption(text: viewModel.publishTopicCaption)
             }
 
             SettingsSection(title: "Authentication", icon: "key") {

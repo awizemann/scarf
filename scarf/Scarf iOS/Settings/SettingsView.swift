@@ -647,7 +647,9 @@ struct SettingsView: View {
             // reads `reply_to_mode` (S07-F1 — only Discord, Telegram and Buzz
             // do @ `v2026.9.24`), so showing it named a setting with no effect.
             yesNoRow("Slack: reply in thread", vm.config.slack.replyInThread)
-            yesNoRow("Matrix: require mention", vm.config.matrix.requireMention)
+            yesNoRow("Matrix: require mention", platformBool(
+                .matrixRequireMention, "require_mention", vm.config.matrix.presentKeys,
+                vm.config.matrix.requireMention))
 
             // v0.13 additions: each is independently capability-gated
             // and read-only on iOS in v2.8.0. Editing lives on Mac.
@@ -775,9 +777,9 @@ struct SettingsView: View {
     /// belongs to without an extra DisclosureGroup level.
     private func gatewayAllowlistEntries(kind: GatewayAllowlistKind) -> [String] {
         var out: [String] = []
-        // Discord/Telegram join even without a config block: their list can
+        // Env-overridable platforms join even without a config block: their list can
         // live only in `.env` (B13).
-        let platforms = Set(vm.config.gatewayPlatforms.keys).union(["discord", "telegram"])
+        let platforms = Set(vm.config.gatewayPlatforms.keys).union(["discord", "telegram", "matrix", "slack", "mattermost"])
         for platform in platforms.sorted() {
             guard GatewayAllowlistKind.kind(for: platform) == kind else { continue }
             let configItems = vm.config.gatewayPlatforms[platform]?.items(for: kind) ?? []

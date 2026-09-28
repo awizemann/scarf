@@ -120,4 +120,32 @@ import Testing
         #expect(PlatformEnvAllowlist.items(fromEnv: #"["-100", "-200"]"#) == ["-100", "-200"])
         #expect(PlatformEnvAllowlist.items(fromEnv: "1, 2,,") == ["1", "2"])
     }
+
+    /// B13b. Expected values from Hermes's loader (v0.21.5): env + config
+    /// both set → env wins for every key below.
+    @Test func matrixNtfySlackMattermostCurrentHost() {
+        let c = Self.v0215
+        #expect(PlatformEnvSetting.matrixRequireMention.resolve(envValue: "false", configValue: true, capabilities: c) == (false, true))
+        #expect(PlatformEnvSetting.matrixAutoThread.resolve(envValue: "false", configValue: true, capabilities: c) == (false, true))
+        #expect(PlatformEnvSetting.matrixDMMentionThreads.resolve(envValue: "yes", configValue: nil, capabilities: c) == (true, true))
+        #expect(PlatformEnvAllowlist.matrixAllowedRooms.resolve(envValue: "!a:x,!b:x", configItems: ["!z:x"], capabilities: c).items == ["!a:x", "!b:x"])
+        #expect(PlatformEnvAllowlist.slackAllowedChannels.resolve(envValue: "C1", configItems: ["C9"], capabilities: c).items == ["C1"])
+        #expect(PlatformEnvAllowlist.mattermostAllowedChannels.resolve(envValue: "m1", configItems: ["m9"], capabilities: c).items == ["m1"])
+        #expect(PlatformEnvString.resolve(envValue: "envtopic", configValue: "cfgtopic", capabilities: c) == ("envtopic", true))
+    }
+
+    /// Before v0.21.3: config wins for require_mention, the three lists and
+    /// publish_topic; Matrix auto_thread / dm_mention_threads were env-only.
+    @Test func matrixNtfySlackMattermostOlderHost() {
+        let c = Self.v0212
+        #expect(PlatformEnvSetting.matrixRequireMention.resolve(envValue: "false", configValue: true, capabilities: c) == (true, false))
+        #expect(PlatformEnvSetting.matrixAutoThread.resolve(envValue: "false", configValue: true, capabilities: c) == (false, true))
+        // `_env_truthy` has no "on" in its word set.
+        #expect(!PlatformEnvSetting.matrixAutoThread.parsed("on"))
+        #expect(PlatformEnvAllowlist.slackAllowedChannels.resolve(envValue: "C1", configItems: ["C9"], capabilities: c).items == ["C9"])
+        #expect(PlatformEnvAllowlist.mattermostAllowedChannels.resolve(envValue: "m1", configItems: nil, capabilities: c).items == ["m1"])
+        #expect(PlatformEnvString.resolve(envValue: "e", configValue: "c", capabilities: c) == ("c", false))
+        #expect(PlatformEnvString.resolve(envValue: "e", configValue: "", capabilities: c) == ("e", true))
+        #expect(PlatformEnvString.resolve(envValue: " ", configValue: "", capabilities: c) == ("", false))
+    }
 }
