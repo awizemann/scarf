@@ -412,6 +412,166 @@
         }
       }
     },
+    "Clear SOUL.md" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md leeren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaciar SOUL.md"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vider SOUL.md"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を空にする"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esvaziar SOUL.md"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空 SOUL.md"
+          }
+        }
+      }
+    },
+    "Clear SOUL.md?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md leeren?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Vaciar SOUL.md?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vider SOUL.md ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を空にしますか？"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esvaziar o SOUL.md?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空 SOUL.md？"
+          }
+        }
+      }
+    },
+    "Couldn’t read SOUL.md, so editing is off until Reload succeeds." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md konnte nicht gelesen werden, daher ist die Bearbeitung aus, bis „Neu laden“ gelingt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer SOUL.md, así que la edición queda desactivada hasta que Recargar funcione."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de lire SOUL.md : la modification reste désactivée tant que Recharger n’a pas réussi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を読み込めなかったため、再読み込みが成功するまで編集できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler o SOUL.md, então a edição fica desativada até Recarregar funcionar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取 SOUL.md，在重新载入成功之前无法编辑。"
+          }
+        }
+      }
+    },
+    "Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-, Quarto- und Trace-Exporte umfassen jeweils eine Sitzung — verwenden Sie dafür das „Exportieren…“ der jeweiligen Sitzung."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las exportaciones Markdown, Quarto y de traza abarcan una sesión cada vez: usa el Exportar… de cada sesión para ellas."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les exports Markdown, Quarto et trace couvrent une session à la fois — utilisez l’Exporter… propre à chaque session."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown、Quarto、トレースのエクスポートは 1 セッションずつです。各セッションの「書き出す…」を使ってください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As exportações Markdown, Quarto e de trace cobrem uma sessão por vez — use o Exportar… da própria sessão para elas."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown、Quarto 和跟踪导出一次只涵盖一个会话——请使用各会话自己的“导出…”。"
+          }
+        }
+      }
+    },
     "Another dispatcher was already running on this board. It may start shortly." : {
       "localizations" : {
         "de" : {
@@ -4318,6 +4478,46 @@
         }
       }
     },
+    "Sign in first with `%@` if the adapter reports not authenticated." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Melde dich zuerst mit `%@` an, falls der Adapter „nicht authentifiziert“ meldet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia sesión primero con `%@` si el adaptador indica que no hay autenticación."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous d’abord avec `%@` si l’adaptateur signale une absence d’authentification."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アダプタが未認証と報告した場合は、先に `%@` でサインインしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entre primeiro com `%@` se o adaptador informar que não está autenticado."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果适配器报告未认证，请先运行 `%@` 登录。"
+          }
+        }
+      }
+    },
     "Sign in to “%@”?" : {
       "localizations" : {
         "de" : {
@@ -4760,6 +4960,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法移除定时任务“%@”,它仍在计划中。请从 Cron 列表中移除它。"
+          }
+        }
+      }
+    },
+    "The editor is empty. Saving replaces the current SOUL.md with an empty file." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Editor ist leer. Beim Sichern wird die aktuelle SOUL.md durch eine leere Datei ersetzt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El editor está vacío. Al guardar, el SOUL.md actual se sustituye por un archivo vacío."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’éditeur est vide. L’enregistrement remplace le SOUL.md actuel par un fichier vide."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エディタが空です。保存すると、現在の SOUL.md が空のファイルに置き換えられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O editor está vazio. Salvar substitui o SOUL.md atual por um arquivo vazio."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑器为空。保存会用空文件替换当前的 SOUL.md。"
           }
         }
       }
@@ -98424,48 +98664,6 @@
         }
       }
     },
-    "Sign in first with `hermes login %@` if the adapter reports not authenticated." : {
-      "comment" : "A caption below the usage instructions for the Hermes proxy.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Melde dich zuerst mit `hermes login %@` an, falls der Adapter „nicht authentifiziert“ meldet."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inicia sesión primero con `hermes login %@` si el adaptador informa que no está autenticado."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connectez-vous d'abord avec `hermes login %@` si l'adaptateur signale une absence d'authentification."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アダプターが未認証と報告する場合は、まず `hermes login %@` でサインインしてください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Faça login primeiro com `hermes login %@` se o adaptador reportar que não está autenticado."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "如果适配器报告未认证,请先使用 `hermes login %@` 登录。"
-          }
-        }
-      }
-    },
     "Sign in to Nous Portal" : {
       "localizations" : {
         "de" : {
@@ -130654,46 +130852,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要进行设置，请在 Hermes 主机上："
-          }
-        }
-      }
-    },
-    "Trace exports cover one session at a time — use a session's own Export… for that." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trace-Exporte umfassen jeweils eine Sitzung — verwenden Sie dafür das „Exportieren…“ der jeweiligen Sitzung."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Las exportaciones de trazas cubren una sesión a la vez: usa el «Exportar…» de la propia sesión para eso."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Les exports de traces couvrent une session à la fois — utilisez pour cela l’option « Exporter… » de la session concernée."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トレースのエクスポートは一度に 1 セッションずつです。そのためには各セッションの「書き出す…」を使ってください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "As exportações de rastreamento cobrem uma sessão por vez — use o “Exportar…” da própria sessão para isso."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跟踪导出一次只涵盖一个会话——请使用该会话自己的“导出…”。"
           }
         }
       }

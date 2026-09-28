@@ -179,6 +179,17 @@ struct HermesProxyView: View {
         }
     }
 
+    /// The sign-in command Hermes itself prints when an adapter isn't
+    /// authenticated (S06-F1): `auth_hint`, defaulting to
+    /// `hermes auth add <adapter>` (`hermes_cli/proxy/cli.py:34`,
+    /// `proxy/adapters/xai.py:26` @ v2026.9.24). `hermes login` takes no
+    /// provider positional on any proxy-capable host (`--provider` only at
+    /// v2026.5.16, a deprecated notice at the tag); `hermes auth add
+    /// <provider>` exists on every one of them.
+    nonisolated static func signInCommand(for provider: String) -> String {
+        provider == "xai" ? "hermes auth add xai-oauth --type oauth" : "hermes auth add \(provider)"
+    }
+
     private var helpCard: some View {
         ScarfCard {
             VStack(alignment: .leading, spacing: ScarfSpace.s2) {
@@ -187,7 +198,7 @@ struct HermesProxyView: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 Text("Point any OpenAI-compatible client (Codex CLI, Aider, Cline, VS Code Continue) at the endpoint above. The proxy attaches your Hermes-managed credentials, so any bearer token in the client is accepted.")
                     .scarfStyle(.body)
-                Text("Sign in first with `hermes login \(viewModel.providerSelection)` if the adapter reports not authenticated.")
+                Text("Sign in first with `\(Self.signInCommand(for: viewModel.providerSelection))` if the adapter reports not authenticated.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }

@@ -763,13 +763,18 @@ final class SessionsViewModel {
     /// flow). Local contexts keep all five formats — except that an "Export
     /// All" flow drops `trace` on either kind of context, because the CLI
     /// cannot produce a multi-session trace on stdout at all (see
-    /// `exportAllExcludesTrace`).
+    /// `exportAllExcludesTrace`), and `md`/`qmd`, which Hermes refuses to
+    /// bulk-export without a filter.
     var availableExportFormats: [SessionExportFormat] {
         var formats = context.isRemote
             ? SessionExportFormat.allCases.filter(\.usesStdout)
             : SessionExportFormat.allCases
         if pendingExportIsAllSessions {
-            formats.removeAll { $0 == .trace }
+            // Markdown/Quarto too (S04-F1): with no `--session-id` and no
+            // filter, `_export_markdown` prints "Refusing bulk export without
+            // a filter" and returns (`hermes_cli/sessions_cmd.py:504-507` @
+            // v2026.9.24), and Export All has no filter to pass.
+            formats.removeAll { $0 == .trace || $0 == .markdown || $0 == .quarto }
         }
         return formats
     }

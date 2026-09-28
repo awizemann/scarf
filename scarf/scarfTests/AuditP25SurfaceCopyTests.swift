@@ -137,8 +137,9 @@ import ScarfCore
         #expect(vm.showExportOptionsSheet)
         #expect(vm.exportAllExcludesTrace)
         #expect(!vm.availableExportFormats.contains(.trace))
-        // Everything else stays on a local context.
-        #expect(vm.availableExportFormats == [.jsonl, .markdown, .quarto, .html])
+        // S04-F1: md/qmd are withheld too — Hermes refuses a bulk md/qmd
+        // export without a filter (`sessions_cmd.py:504-507` @ v2026.9.24).
+        #expect(vm.availableExportFormats == [.jsonl, .html])
     }
 
     /// A single session's export still offers it — that path passes

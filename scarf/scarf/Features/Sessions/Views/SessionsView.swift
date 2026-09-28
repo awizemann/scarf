@@ -660,7 +660,7 @@ struct SessionsView: View {
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 if viewModel.exportAllExcludesTrace {
-                    Text("Trace exports cover one session at a time — use a session's own Export… for that.")
+                    Text("Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those.")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }

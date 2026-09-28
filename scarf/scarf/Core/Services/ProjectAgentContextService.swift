@@ -11,10 +11,13 @@ import ScarfCore
 /// passes only `(cwd, mcpServers)` at session create — extra params
 /// are silently dropped on Hermes's side. The documented hook for
 /// giving the agent context when cwd is set programmatically is the
-/// auto-load of `AGENTS.md` (or `.hermes.md` / `CLAUDE.md` /
-/// `.cursorrules`, in that priority) from the cwd. Scarf owns a
-/// managed region of the project's AGENTS.md; template-author content
-/// lives outside that region and is preserved.
+/// auto-load of a project-context file from the cwd. Hermes loads ONE
+/// type, first non-empty wins: `.hermes.md` → `AGENTS.md` → `CLAUDE.md` →
+/// `.cursorrules` (`agent/prompt_builder.py:1746-1747` @ v2026.9.24). Scarf
+/// owns a managed region inside whichever of those the project already
+/// uses, and creates AGENTS.md only when it has none — a new AGENTS.md
+/// would otherwise hide the user's CLAUDE.md (S11-F1). Content outside
+/// the region is preserved.
 ///
 /// **Marker contract.** The region sits between:
 ///
@@ -110,7 +113,7 @@ struct ProjectAgentContextService: Sendable {
         // AGENTS.md with the Scarf block. One writer, one proof-based
         // probe, one `.bak`.
         try ProjectContextBlock.writeBlock(block, forProjectAt: project.path, context: context)
-        Self.logger.info("wrote Scarf block into AGENTS.md for \(project.name, privacy: .public)")
+        Self.logger.info("wrote Scarf block into the project context file for \(project.name, privacy: .public)")
     }
 
     // MARK: - Marker splice (testable in isolation)
