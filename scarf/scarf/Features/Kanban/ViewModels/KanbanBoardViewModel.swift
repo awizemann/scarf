@@ -35,10 +35,13 @@ final class KanbanBoardViewModel {
         context: ServerContext = .local,
         tenantFilter: String? = nil,
         projectPath: String? = nil,
-        sessionScopeId: String? = nil
+        sessionScopeId: String? = nil,
+        service: KanbanService? = nil
     ) {
         self.context = context
-        self.service = KanbanService(context: context)
+        // `service` is a test seam (a KanbanService over a scripted
+        // transport); production always builds one from `context`.
+        self.service = service ?? KanbanService(context: context)
         self.tenantFilter = tenantFilter
         self.projectPath = projectPath
         self.sessionScopeId = sessionScopeId

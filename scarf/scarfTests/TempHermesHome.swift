@@ -42,6 +42,27 @@ struct TempHermesHome {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
+    /// Run `body` with `HERMES_HOME` pointing at this home in the process
+    /// environment, restored afterwards.
+    ///
+    /// `.local(home:)` redirects Scarf's own FILE reads and writes only. A
+    /// view model that spawns `hermes` still runs the developer's real binary,
+    /// and without `HERMES_HOME` that binary reads their real `~/.hermes`
+    /// (`get_default_hermes_root`, `hermes_constants.py:217-234` @
+    /// `v2026.9.24`, anchors `-p <name>` to `HERMES_HOME` too when it lies
+    /// outside `~/.hermes`). Use this around any such spawn, the way
+    /// `BotConversationCLITransportE2ETests` pins its CLI. Prefer a scripted
+    /// transport where the code under test takes one (see
+    /// `KanbanDispatchConfirmP56Tests`).
+    func pinningProcessHermesHome<T>(_ body: () async throws -> T) async rethrows -> T {
+        let saved = ProcessInfo.processInfo.environment["HERMES_HOME"]
+        setenv("HERMES_HOME", path, 1)
+        defer {
+            if let saved { setenv("HERMES_HOME", saved, 1) } else { unsetenv("HERMES_HOME") }
+        }
+        return try await body()
+    }
+
     /// Recursively remove the temp home. Safe in a `defer`; ignores the
     /// "already gone" case.
     func cleanup() {

@@ -757,8 +757,14 @@ struct BotsViewModelTests {
         )
 
         let agentVM = viewModel.agentViewModel(for: "scratch")
-        agentVM.load()
-        await Self.settle { agentVM.hasLoadedSoul }
+        // `load()` also spawns `hermes -p scratch tools list`; pin it to the
+        // scratch home so it never reads the real ~/.hermes.
+        await home.pinningProcessHermesHome {
+            agentVM.load()
+            // Hold the pin until the whole snapshot (toolsets included) has
+            // landed, not just the SOUL.md read.
+            await Self.settle { agentVM.hasLoadedSoul && !agentVM.isLoading }
+        }
         agentVM.soulText = "dirty edits, not saved"
         #expect(agentVM.isSoulDirty)
         #expect(viewModel.unsavedAgentEdits(forProfile: "scratch"))

@@ -34,10 +34,17 @@ public actor KanbanService {
     /// `prefix()`. `nil` (the default) keeps existing callers on the
     /// implicit default board — argv is byte-identical to before.
     private let board: String?
+    /// Test seam: the transport every verb runs through. `nil` (production)
+    /// builds `context.makeTransport()` per call, as before. A test hands in
+    /// a scripted transport so no real `hermes` is spawned against the
+    /// developer's own `~/.hermes` (a `.local(home:)` context redirects file
+    /// paths but not the binary or its `HERMES_HOME`).
+    private let transport: (any ServerTransport)?
 
-    public init(context: ServerContext, board: String? = nil) {
+    public init(context: ServerContext, board: String? = nil, transport: (any ServerTransport)? = nil) {
         self.context = context
         self.board = board
+        self.transport = transport
     }
 
     /// argv prefix shared by every verb: `["kanban"]` plus the global
@@ -756,8 +763,9 @@ public actor KanbanService {
         timeout: TimeInterval
     ) async -> (exitCode: Int32, stdout: String, stderr: String) {
         let context = self.context
+        let injected = self.transport
         return await Task.detached(priority: .utility) { () -> (Int32, String, String) in
-            let transport = context.makeTransport()
+            let transport = injected ?? context.makeTransport()
             let executable = context.paths.hermesBinary
             do {
                 let result = try transport.runProcess(
