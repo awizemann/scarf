@@ -55,6 +55,17 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             .map { HermesQuickCommand(name: $0.name, type: $0.type, command: $0.command) }
     }
 
+    /// The key a new command is saved under: lowercased, because every
+    /// Hermes surface lowercases the typed command before it looks one up
+    /// (CLI `cli.py:1213-1222`, gateway `get_command()` in
+    /// `gateway/platforms/event.py:105` @ v2026.9.24) while the config keys
+    /// keep their case — so "Deploy" could never run (S03-F4). Editing a
+    /// command that already exists keeps its key, so an edit never forks a
+    /// second entry.
+    nonisolated static func storedName(for name: String, existing: [String]) -> String {
+        existing.contains(name) ? name : name.lowercased()
+    }
+
     /// Check for obviously destructive shell strings. Display-only; we do not block.
     static func isDangerous(_ command: String) -> Bool {
         let lowered = command.lowercased()
@@ -73,7 +84,10 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
         // the shared helper so the write is always safe. Display name keeps
         // the raw dot; only the interpolated CLI segment is transformed.
         let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
-        let sanitizedName = ConfigDottedKeySegment.escaped(name, capabilities: caps)
+        let sanitizedName = ConfigDottedKeySegment.escaped(
+            Self.storedName(for: name, existing: commands.map(\.name)),
+            capabilities: caps
+        )
         isSaving = true
         let ctx = context
         Task { [weak self] in

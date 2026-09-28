@@ -600,7 +600,7 @@ final class SessionsViewModel {
     /// re-joins the list with a single space (`sessions_cmd.py:681`), so
     /// splitting here would collapse the user's internal spacing.
     nonisolated static func renameArgv(sessionId: String, title: String) -> [String] {
-        ["sessions", "rename", "--", sessionId, title]
+        HermesSessionRenameCommand.argv(sessionId: sessionId, title: title)
     }
 
     /// `sessions delete --yes -- <id>`. P47: the flag comes FIRST and the

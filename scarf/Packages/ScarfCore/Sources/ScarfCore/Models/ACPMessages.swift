@@ -505,6 +505,54 @@ public struct ACPSessionProvenance: Sendable, Equatable {
     }
 }
 
+// MARK: - Session mode and model
+
+/// The mode and model a session is in, read from a `session/new` or
+/// `session/load` response (`_session_response_fields`,
+/// acp_adapter/server.py:597-602 @ v2026.9.24): `modes.currentModeId` and
+/// `models.currentModelId`. Both are optional — a host without the field
+/// leaves it nil, and callers keep what they had.
+public struct ACPSessionState: Sendable, Equatable {
+    public let currentModeId: String?
+    /// Hermes's picker id: `provider:model` (`encode_model_choice`,
+    /// acp_adapter/model_catalog.py:146-152 @ v2026.9.24).
+    public let currentModelId: String?
+
+    public init(currentModeId: String? = nil, currentModelId: String? = nil) {
+        self.currentModeId = currentModeId
+        self.currentModelId = currentModelId
+    }
+
+    nonisolated init(response: [String: Any]) {
+        let modes = response["modes"] as? [String: Any]
+        let models = response["models"] as? [String: Any]
+        let mode = (modes?["currentModeId"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let model = (models?["currentModelId"] as? String)?.trimmingCharacters(in: .whitespaces)
+        self.init(
+            currentModeId: (mode?.isEmpty ?? true) ? nil : mode,
+            currentModelId: (model?.isEmpty ?? true) ? nil : model
+        )
+    }
+
+    /// The model half of a picker id. Hermes joins a lowercased provider
+    /// and the model with the first `:`; a `custom:<name>` provider carries
+    /// one colon of its own. Model names can contain colons (`llama3:8b`),
+    /// so only the provider prefix comes off.
+    public nonisolated static func modelName(fromPickerId id: String) -> String {
+        let parts = id.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        if parts.count >= 3, parts[0] == "custom" { return parts.dropFirst(2).joined(separator: ":") }
+        if parts.count >= 2 { return parts.dropFirst().joined(separator: ":") }
+        return id
+    }
+
+    /// The provider half of a picker id, or nil for a bare model name.
+    public nonisolated static func providerID(fromPickerId id: String) -> String? {
+        let parts = id.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        if parts.count >= 3, parts[0] == "custom" { return "custom:\(parts[1])" }
+        return parts.count >= 2 ? parts[0] : nil
+    }
+}
+
 // MARK: - Event Parsing
 
 public enum ACPEventParser {
@@ -561,7 +609,7 @@ public enum ACPEventParser {
                 toolCallId: update["toolCallId"] as? String ?? "",
                 kind: update["kind"] as? String ?? "other",
                 status: update["status"] as? String ?? "completed",
-                content: extractContentArrayText(from: update),
+                content: extractContentArrayText(from: update, includeDiffs: true),
                 rawOutput: update["rawOutput"] as? String,
                 rawInput: update["rawInput"] as? [String: Any]
             )
@@ -645,13 +693,62 @@ public enum ACPEventParser {
         return (isSummary, containsSummary)
     }
 
-    nonisolated private static func extractContentArrayText(from update: [String: Any]) -> String {
+    /// Text of a tool call's `content` array. With `includeDiffs`, a
+    /// `{type: "diff", path, oldText, newText}` block renders as a
+    /// unified-style diff: a completed `skill_manage` edit reports ONLY diff
+    /// blocks (`_build_tool_complete_content`, acp_adapter/tools.py:676-686
+    /// @ v2026.9.24) and sends no `rawOutput` (:834), so without this its
+    /// live result was empty. Start events keep the text-only reading.
+    nonisolated static func extractContentArrayText(
+        from update: [String: Any],
+        includeDiffs: Bool = false
+    ) -> String {
         if let contentArray = update["content"] as? [[String: Any]] {
             return contentArray.compactMap { item -> String? in
+                if includeDiffs, item["type"] as? String == "diff" {
+                    return renderDiffBlock(item)
+                }
                 guard let inner = item["content"] as? [String: Any] else { return nil }
                 return inner["text"] as? String
             }.joined(separator: "\n")
         }
         return ""
+    }
+
+    /// `--- path` / `+++ path`, then each line of the change marked
+    /// `-` (removed), `+` (added) or ` ` (unchanged). Hermes builds these
+    /// blocks from a unified diff, putting context lines in both texts
+    /// (`_parse_unified_diff_content`, tools.py:640-672), so the line
+    /// difference recovers the original hunk.
+    nonisolated static func renderDiffBlock(_ item: [String: Any]) -> String? {
+        let path = (item["path"] as? String) ?? ""
+        let oldText = (item["oldText"] as? String) ?? ""
+        let newText = (item["newText"] as? String) ?? ""
+        guard !path.isEmpty || !oldText.isEmpty || !newText.isEmpty else { return nil }
+        let oldLines = oldText.isEmpty ? [] : oldText.components(separatedBy: "\n")
+        let newLines = newText.isEmpty ? [] : newText.components(separatedBy: "\n")
+        let difference = newLines.difference(from: oldLines)
+        var removed = Set<Int>()
+        var inserted = Set<Int>()
+        for change in difference {
+            switch change {
+            case .remove(let offset, _, _): removed.insert(offset)
+            case .insert(let offset, _, _): inserted.insert(offset)
+            }
+        }
+        var lines = ["--- \(path)", "+++ \(path)"]
+        var i = 0, j = 0
+        while i < oldLines.count || j < newLines.count {
+            if i < oldLines.count, removed.contains(i) {
+                lines.append("-" + oldLines[i]); i += 1
+            } else if j < newLines.count, inserted.contains(j) {
+                lines.append("+" + newLines[j]); j += 1
+            } else if i < oldLines.count, j < newLines.count {
+                lines.append(" " + newLines[j]); i += 1; j += 1
+            } else {
+                break
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 }

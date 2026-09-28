@@ -1,5 +1,6 @@
 import Foundation
 import ScarfCore
+import os
 
 /// Drives one bot's canonical "Bot Chat" conversation (B3).
 ///
@@ -106,6 +107,30 @@ final class BotConversationViewModel {
     @ObservationIgnored
     var creator: @Sendable (ServerContext, String, String) async -> String?
 
+    /// Seam for one CLI-transport delivery: context, profile, text and the
+    /// staging directory the message file goes in. The directory is what
+    /// names the running process for Stop (`interruptCLITurn`). Built from
+    /// an injected `creator` in tests, so they keep working unchanged.
+    @ObservationIgnored
+    var cliDeliverer: @Sendable (ServerContext, String, String, String) async -> String?
+
+    /// Seam for Stop on a CLI-transport turn: context and the turn's
+    /// staging directory. Production interrupts the process on the host
+    /// that runs it (`interruptCLITurn`); tests record the call.
+    @ObservationIgnored
+    var cliTurnStopper: @Sendable (ServerContext, String) async -> Void = { ctx, dir in
+        await BotConversationViewModel.interruptCLITurn(context: ctx, stagingDirectory: dir)
+    }
+
+    /// Staging directories of the CLI-transport turns still running. Each
+    /// names its `hermes chat -Q` process through `--query-file`. Observed:
+    /// the composer's Stop button follows it.
+    private(set) var cliTurnDirectories: Set<String> = []
+
+    /// Turns the user stopped, so their non-zero exit reads as a stop, not
+    /// a failure. Observed, so Stop disappears as soon as it is pressed.
+    private var stoppedCLITurns: Set<String> = []
+
     /// How the bot's ACP client is built. **Always** goes through this — the
     /// production default and every test alike — so the profile wiring below
     /// is exercised rather than bypassed. (The audit's "test theater"
@@ -178,6 +203,13 @@ final class BotConversationViewModel {
         self.creator = creator ?? { ctx, profile, text in
             await Self.createCanonicalBotChat(context: ctx, profile: profile, text: text)
         }
+        if let creator {
+            self.cliDeliverer = { ctx, profile, text, _ in await creator(ctx, profile, text) }
+        } else {
+            self.cliDeliverer = { ctx, profile, text, dir in
+                await Self.createCanonicalBotChat(context: ctx, profile: profile, text: text, stagingDirectory: dir)
+            }
+        }
     }
 
     // MARK: - Lifecycle
@@ -215,6 +247,8 @@ final class BotConversationViewModel {
                     // full streaming stack applies.
                     self.delivery = .acpStreaming
                     self.chat.sendRouter = nil
+                    // ACP turns stop through the chat's own `session/cancel`.
+                    self.chat.stopRouter = nil
                     // A send with no ACP client (the reconnect ladder gave
                     // up) must not auto-start blind: that path falls back to
                     // `session/new` when the load fails and never checks
@@ -258,6 +292,7 @@ final class BotConversationViewModel {
                 self.canonical = nil
                 self.delivery = nil
                 self.chat.sendRouter = nil
+                self.chat.stopRouter = nil
                 self.chat.autoStartInterceptor = nil
                 self.phase = .noConversationYet
                 self.keepUnsent(pendingText)
@@ -300,6 +335,15 @@ final class BotConversationViewModel {
             self.deliverViaCLI(text)
             return true
         }
+        // The composer's Stop ends the running `hermes chat -Q` process
+        // instead of sending an ACP cancel (there is no ACP session here).
+        chat.stopRouter = (
+            canStop: { [weak self] in
+                guard let self else { return false }
+                return self.delivery == .cliTransport && !self.cliTurnDirectories.subtracting(self.stoppedCLITurns).isEmpty
+            },
+            stop: { [weak self] in self?.stopCLITurns() ?? false }
+        )
         let rich = chat.richChatViewModel
         rich.setSessionId(found.liveId)
         phase = .live
@@ -336,15 +380,33 @@ final class BotConversationViewModel {
         rich.markAgentWorking()
         let ctx = context
         let profile = profileName
-        let make = creator
+        let deliver = cliDeliverer
+        let dir = Self.newStagingDirectory()
+        cliTurnDirectories.insert(dir)
         // NOT `work`: a delivery must not be cancelled by a concurrent
         // resolve bookkeeping path the way lifecycle tasks are — the CLI
         // process is already running and the turn is already Hermes' —
         // but it must still notice `close()` via the generation check.
         Task { [weak self] in
-            let failure = await make(ctx, profile, text)
-            guard let self, self.generation == intent else { return }
+            let failure = await deliver(ctx, profile, text, dir)
+            guard let self else { return }
+            self.cliTurnDirectories.remove(dir)
+            // A turn that finished cleanly before the stop reached it is
+            // an ordinary reply, not a stopped turn.
+            let stopped = self.stoppedCLITurns.remove(dir) != nil && failure != nil
+            guard self.generation == intent else { return }
             let rich = self.chat.richChatViewModel
+            if stopped {
+                // The user stopped it. Show what Hermes saved before the
+                // interrupt (it persists the turn on the way out), then
+                // end the working state and say the turn was stopped.
+                // Not an error: no banner.
+                await rich.refreshMessages()
+                guard self.generation == intent, self.cliTurnDirectories.isEmpty else { return }
+                rich.cancelPendingSend()
+                rich.appendTurnStoppedNote()
+                return
+            }
             if let failure {
                 // The conversation itself is fine — the transcript is
                 // real and retrying is safe — so surface the failure in
@@ -363,6 +425,103 @@ final class BotConversationViewModel {
             }
         }
     }
+
+    /// Stop every CLI-transport turn still running (the composer's Stop).
+    /// Returns false when there is nothing to stop.
+    @discardableResult
+    func stopCLITurns() -> Bool {
+        guard delivery == .cliTransport else { return false }
+        let running = cliTurnDirectories.subtracting(stoppedCLITurns)
+        guard !running.isEmpty else { return false }
+        stoppedCLITurns.formUnion(running)
+        let ctx = context
+        let stopper = cliTurnStopper
+        for dir in running {
+            Task { await stopper(ctx, dir) }
+        }
+        return true
+    }
+
+    /// A fresh per-send staging directory. Its UUID is what makes the
+    /// process findable for Stop, so it is minted here, never taken from
+    /// input.
+    nonisolated static func newStagingDirectory() -> String {
+        "/tmp/scarf-bot-chat-\(UUID().uuidString)"
+    }
+
+    /// The `pkill -f` pattern for the turn staged in `stagingDirectory`:
+    /// the `--query-file <dir>/message.txt` pair only the `hermes chat -Q`
+    /// process carries — not the `chmod` helpers that touch the same
+    /// directory while the message is staged, which a Stop pressed in that
+    /// window would otherwise "stop" instead of the turn. The first `/`
+    /// sits in a bracket class so the pattern never matches the command
+    /// line of the shell that runs `pkill` (on a remote host that shell's
+    /// arguments contain the pattern text itself).
+    nonisolated static func cliTurnProcessPattern(stagingDirectory: String) -> String? {
+        guard stagingDirectory.hasPrefix("/tmp/scarf-bot-chat-"),
+              stagingDirectory.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "/" || $0 == "-" }) else { return nil }
+        return "query-file [/]" + stagingDirectory.dropFirst() + "/message[.]txt"
+    }
+
+    /// The shell line that interrupts one turn's process with `signal`.
+    nonisolated static func interruptCommand(stagingDirectory: String, signal: String) -> String? {
+        guard let pattern = cliTurnProcessPattern(stagingDirectory: stagingDirectory),
+              ["INT", "TERM", "KILL"].contains(signal) else { return nil }
+        return "pkill -\(signal) -f '\(pattern)'"
+    }
+
+    /// End the `hermes chat -Q` turn staged in `stagingDirectory`, on the
+    /// host it runs on (over SSH for a remote bot, where ending the local
+    /// `ssh` would leave the remote turn running). The process is found by
+    /// its unique `--query-file` path.
+    ///
+    /// SIGINT first: `hermes chat -Q` routes it through `agent.interrupt()`
+    /// with a grace period for tool subprocesses, then saves the session
+    /// and exits 130 (`_install_single_query_signal_handlers`,
+    /// hermes_cli/cli_single_query.py:365-416; the `KeyboardInterrupt` arm
+    /// at :205-211 @ v2026.9.24). A Hermes without that handler still gets
+    /// Python's own `KeyboardInterrupt` for SIGINT — but not for SIGTERM,
+    /// which kills it without saving. So SIGTERM, then SIGKILL, come only
+    /// after `escalationDelay` each, long enough for the save to finish.
+    ///
+    /// A Stop pressed while the message is still being staged finds no
+    /// process yet, so SIGINT is retried for a few seconds before giving up.
+    nonisolated static func interruptCLITurn(
+        context: ServerContext,
+        stagingDirectory: String,
+        escalationDelay: TimeInterval = stopEscalationDelay
+    ) async {
+        func send(_ signal: String) async -> Int32 {
+            guard let command = interruptCommand(stagingDirectory: stagingDirectory, signal: signal) else { return 1 }
+            return await OffPool.run { () -> Int32 in
+                let result = try? context.makeTransport().runProcess(
+                    executable: "/bin/sh", args: ["-c", command], stdin: nil, timeout: 15
+                )
+                return result?.exitCode ?? -1
+            }
+        }
+        // `pkill` exits 0 when it signalled something, 1 when nothing matched.
+        var interrupted = false
+        for attempt in 0..<5 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+            if await send("INT") == 0 { interrupted = true; break }
+        }
+        guard interrupted else {
+            logger.warning("Stop found no running Bot Chat turn to interrupt (pkill found nothing, is missing, or the host was unreachable)")
+            return
+        }
+        for signal in ["TERM", "KILL"] {
+            try? await Task.sleep(nanoseconds: UInt64(escalationDelay * 1_000_000_000))
+            if await send(signal) == 1 { return }
+        }
+    }
+
+    /// How long a stopped turn gets to save and exit before the next,
+    /// harder signal. Generous: SIGTERM raises inside Hermes's own
+    /// interrupt cleanup, which can include a memory-provider flush.
+    nonisolated static let stopEscalationDelay: TimeInterval = 30
+
+    private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "BotConversation")
 
     /// Confirm the ACP session Scarf actually ended up bound to is the
     /// canonical Bot Chat, and refuse the conversation if it is not.
@@ -449,6 +608,7 @@ final class BotConversationViewModel {
         // ordinary behavior.
         chat.richChatViewModel.cancelPendingSend()
         chat.sendRouter = nil
+        chat.stopRouter = nil
         chat.autoStartInterceptor = nil
         delivery = nil
         _ = acpHandle.take()
@@ -598,7 +758,8 @@ final class BotConversationViewModel {
     nonisolated static func createCanonicalBotChat(
         context: ServerContext,
         profile: String,
-        text: String
+        text: String,
+        stagingDirectory: String = newStagingDirectory()
     ) async -> String? {
         let name = profile.trimmingCharacters(in: .whitespacesAndNewlines)
         let invalid = "“\(profile)” isn’t a valid Hermes profile name."
@@ -619,7 +780,7 @@ final class BotConversationViewModel {
             // belt-and-braces) cannot be. Both `chmod`s are best-effort:
             // failing to tighten permissions must not break the send, but it
             // must also not be silent about which layer is load-bearing.
-            let dir = "/tmp/scarf-bot-chat-\(UUID().uuidString)"
+            let dir = stagingDirectory
             let path = "\(dir)/message.txt"
             defer {
                 try? transport.removeFile(path)
