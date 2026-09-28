@@ -33,7 +33,7 @@ import Foundation
         #expect(snap.isDraining)
         #expect(snap.exitReason == nil)
         let work = try #require(snap.activeWork)
-        #expect(work.count == 3)
+        try #require(work.count == 3)
         #expect(work[0].hasPrefix("chat turn"))
         #expect(work[0].contains("2m10s"))
         #expect(work[0].contains("terminal"))

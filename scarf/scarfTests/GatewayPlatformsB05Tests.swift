@@ -54,7 +54,7 @@ struct SlackReplyModeB05Tests {
             .filter { $0.starts(with: ["config", "set"]) }
             .map { $0.count >= 4 ? $0[3] : "" }
         #expect(!keys.contains { $0.contains("reply_to_mode") }, "\(keys)")
-        #expect(keys.contains("platforms.slack.extra.reply_in_thread"), "premise: the save ran: \(cli.calls)")
+        #expect(keys.contains("platforms.slack.reply_in_thread"), "premise: the save ran: \(cli.calls)")
     }
 }
 
