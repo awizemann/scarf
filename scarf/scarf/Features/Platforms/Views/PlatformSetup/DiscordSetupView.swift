@@ -29,7 +29,6 @@ struct DiscordSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
-                EnvFirstCaption(state: viewModel.envFirst)
                 EditableTextField(label: "Free-Response Channels", value: viewModel.freeResponseChannels) { viewModel.freeResponseChannels = $0 }
                 ToggleRow(label: "Auto-thread on mention", isOn: viewModel.autoThread) { viewModel.autoThread = $0 }
                 ToggleRow(label: "Reactions", isOn: viewModel.reactions) { viewModel.reactions = $0 }

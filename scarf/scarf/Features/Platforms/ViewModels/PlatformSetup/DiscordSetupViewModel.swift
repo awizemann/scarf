@@ -82,35 +82,15 @@ final class DiscordSetupViewModel: PlatformSetupForm {
             allowBots = env["DISCORD_ALLOW_BOTS"] ?? "none"
             replyToMode = env["DISCORD_REPLY_TO_MODE"] ?? "first"
 
-            if let cfg = snapshot.config?.discord {
-                requireMention = cfg.requireMention
-                freeResponseChannels = cfg.freeResponseChannels
-                autoThread = cfg.autoThread
-                reactions = cfg.reactions
-                historyBackfill = cfg.historyBackfill
-                allowAnyAttachment = cfg.allowAnyAttachment
-            }
-            // B05 sweep: these four are read `.env`-first by the adapter
-            // (`HermesEnvFirstSettings`), so show the value that decides.
-            // Hermes's parse per key: require_mention / reactions are "on
-            // unless false/0/no/off", auto_thread / history_backfill "on only
-            // for true/1/yes/on" (`discord/adapter.py:4765-4776`).
-            let caps = self.capabilities
-            let deny: (String) -> Bool = HermesEnvFirstSettings.denyFalse
-            let truthy: (String) -> Bool = HermesEnvFirstSettings.truthy
-            if let v = PlatformSetupHelpers.envFirstBool("discord.require_mention", env: env, capabilities: caps, deny) { requireMention = v }
-            if let v = PlatformSetupHelpers.envFirstBool("discord.reactions", env: env, capabilities: caps, deny) { reactions = v }
-            if let v = PlatformSetupHelpers.envFirstBool("discord.auto_thread", env: env, capabilities: caps, truthy) { autoThread = v }
-            if let v = PlatformSetupHelpers.envFirstBool("discord.history_backfill", env: env, capabilities: caps, truthy) { historyBackfill = v }
-            envFirst = PlatformSetupHelpers.envFirstState(
-                configKeys: Self.envFirstKeys, env: env, capabilities: caps)
+            guard let cfg = snapshot.config?.discord else { return }
+            requireMention = cfg.requireMention
+            freeResponseChannels = cfg.freeResponseChannels
+            autoThread = cfg.autoThread
+            reactions = cfg.reactions
+            historyBackfill = cfg.historyBackfill
+            allowAnyAttachment = cfg.allowAnyAttachment
         }
     }
-
-    /// B05: the env-first keys this form writes, and what `.env` holds for them.
-    static let envFirstKeys = ["discord.require_mention", "discord.reactions",
-                               "discord.auto_thread", "discord.history_backfill"]
-    private(set) var envFirst = PlatformSetupHelpers.EnvFirstState()
 
     func save() {
         let envPairs: [String: String] = [
@@ -140,6 +120,6 @@ final class DiscordSetupViewModel: PlatformSetupForm {
         if capabilities.hasDiscordAllowAnyAttachment {
             configKV["platforms.discord.extra.allow_any_attachment"] = PlatformSetupHelpers.envBool(allowAnyAttachment)
         }
-        commitSave(envPairs: PlatformSetupHelpers.removingEnvFirstLines(envPairs, envFirst), configKV: configKV)
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

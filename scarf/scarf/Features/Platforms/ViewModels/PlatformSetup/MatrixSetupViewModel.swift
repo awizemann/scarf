@@ -44,7 +44,7 @@ final class MatrixSetupViewModel: PlatformSetupForm {
 
     /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        loadSnapshot(includeCapabilities: true) { [weak self] snapshot in
+        loadSnapshot { [weak self] snapshot in
             guard let self else { return }
             let env = snapshot.env
             homeserver = env["MATRIX_HOMESERVER"] ?? ""
@@ -56,29 +56,12 @@ final class MatrixSetupViewModel: PlatformSetupForm {
             recoveryKey = env["MATRIX_RECOVERY_KEY"] ?? ""
             encryption = PlatformSetupHelpers.parseEnvBool(env["MATRIX_ENCRYPTION"])
 
-            if let cfg = snapshot.config?.matrix {
-                requireMention = cfg.requireMention
-                autoThread = cfg.autoThread
-                dmMentionThreads = cfg.dmMentionThreads
-            }
-            // B05 sweep: `.env`-first readers (`HermesEnvFirstSettings`).
-            // require_mention is "on unless false/0/no/off"
-            // (`matrix/adapter.py:950-952`); auto_thread / dm_mention_threads
-            // "on only for true/1/yes" (`_extra_truthy`, `:930-934`).
-            let caps = snapshot.capabilities ?? .empty
-            let yes: (String) -> Bool = { ["true", "1", "yes"].contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }
-            if let v = PlatformSetupHelpers.envFirstBool(
-                "matrix.require_mention", env: env, capabilities: caps, HermesEnvFirstSettings.denyFalse) { requireMention = v }
-            if let v = PlatformSetupHelpers.envFirstBool("matrix.auto_thread", env: env, capabilities: caps, yes) { autoThread = v }
-            if let v = PlatformSetupHelpers.envFirstBool("matrix.dm_mention_threads", env: env, capabilities: caps, yes) { dmMentionThreads = v }
-            envFirst = PlatformSetupHelpers.envFirstState(
-                configKeys: ["matrix.require_mention", "matrix.auto_thread", "matrix.dm_mention_threads"],
-                env: env, capabilities: caps)
+            guard let cfg = snapshot.config?.matrix else { return }
+            requireMention = cfg.requireMention
+            autoThread = cfg.autoThread
+            dmMentionThreads = cfg.dmMentionThreads
         }
     }
-
-    /// B05: what `.env` holds for this form's env-first keys.
-    private(set) var envFirst = PlatformSetupHelpers.EnvFirstState()
 
     func save() {
         let envPairs: [String: String] = [
@@ -96,6 +79,6 @@ final class MatrixSetupViewModel: PlatformSetupForm {
             "matrix.auto_thread": PlatformSetupHelpers.envBool(autoThread),
             "matrix.dm_mention_threads": PlatformSetupHelpers.envBool(dmMentionThreads)
         ]
-        commitSave(envPairs: PlatformSetupHelpers.removingEnvFirstLines(envPairs, envFirst), configKV: configKV)
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

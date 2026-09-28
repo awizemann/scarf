@@ -52,19 +52,14 @@ public enum HermesGatewayRestartDrain {
         /// path (`gateway/run_shutdown.py:1609-1617`, written by
         /// `_update_runtime_status`, `gateway/run.py:4012` @ v2026.9.24).
         public var restartRequested: Bool
-        /// `updated_at` as written — compared only with ITSELF across polls
-        /// (never with this Mac's clock, which may not match the host's).
-        public var updatedAt: String?
 
         public init(pid: Int?, state: String?, exitReason: String? = nil,
-                    activeWork: [String]? = nil, restartRequested: Bool = false,
-                    updatedAt: String? = nil) {
+                    activeWork: [String]? = nil, restartRequested: Bool = false) {
             self.pid = pid
             self.state = state
             self.exitReason = exitReason
             self.activeWork = activeWork
             self.restartRequested = restartRequested
-            self.updatedAt = updatedAt
         }
 
         /// The gateway is waiting on work before it stops, for any reason.
@@ -94,8 +89,7 @@ public enum HermesGatewayRestartDrain {
             state: json["gateway_state"] as? String,
             exitReason: json["exit_reason"] as? String,
             activeWork: work,
-            restartRequested: (json["restart_requested"] as? Bool) ?? false,
-            updatedAt: json["updated_at"] as? String
+            restartRequested: (json["restart_requested"] as? Bool) ?? false
         )
     }
 
@@ -164,26 +158,6 @@ public enum HermesGatewayRestartDrain {
               let snap = snapshot(stateJSON: stateJSON()), snap.isDrainingForRestart
         else { return nil }
         return (snap, budgetSeconds(fromOutput: output) ?? budgetSeconds(configYAML: configYAML()))
-    }
-
-    /// Hermes's own staleness window for `gateway_state.json`: the
-    /// housekeeping thread re-stamps `updated_at` every 60 s tick and a
-    /// record older than 2x that is suspect (`_RUNTIME_STATUS_STALE_TTL_S =
-    /// 120`, `gateway/status.py:1170-1175` @ v2026.9.24, since v2026.7.30).
-    /// Hermes itself treats a stale heartbeat as a health warning, NOT death
-    /// (`derive_gateway_busy`, `:1210-1212`), so the watcher only acts on it
-    /// when it cannot prove the process is alive.
-    public static let heartbeatStaleSeconds = 120
-
-    /// `sh -c 'kill -0 <pid>'` on the host: exit 0 = alive; "No such
-    /// process" = gone; anything else (a permission refusal, a transport
-    /// error) = unknown. POSIX `kill`, present on macOS and Linux.
-    public static func livenessArgv(pid: Int) -> [String] { ["-c", "kill -0 \(pid)"] }
-
-    public static func liveness(exitCode: Int32, stderr: String) -> Bool? {
-        if exitCode == 0 { return true }
-        if stderr.lowercased().contains("no such process") { return false }
-        return nil
     }
 
     /// True when a `gateway restart` run ended at Scarf's own timer — the

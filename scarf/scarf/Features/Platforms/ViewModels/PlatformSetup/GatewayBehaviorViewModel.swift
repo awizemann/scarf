@@ -71,40 +71,23 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
         let ctx = context
         let platform = platform
         let kind = kind
-        let caps = capabilities
         isLoading = true
         // `loadConfig()` is an SFTP read on a remote host. Detached, then
         // committed on MainActor — the same posture `save()` now takes.
         Task { [weak self] in
             let snapshot = await Task.detached {
-                () -> (items: [String], busyAck: Bool, restartNotification: Bool,
-                       envFirst: PlatformSetupHelpers.EnvFirstState) in
+                () -> (items: [String], busyAck: Bool, restartNotification: Bool) in
                 let cfg = HermesFileService(context: ctx).loadConfig()
                 let block = cfg.gatewayPlatforms[platform] ?? .empty
                 var items: [String] = []
-                var envFirst = PlatformSetupHelpers.EnvFirstState()
                 if let kind {
                     switch kind {
                     case .channels: items = block.allowedChannels
                     case .chats:    items = block.allowedChats
                     case .rooms:    items = block.allowedRooms
                     }
-                    // B05 sweep: several adapters read the allowlist's env
-                    // variable FIRST (`HermesEnvFirstSettings`), so a
-                    // `<PLATFORM>_ALLOWED_*` line decides over this list.
-                    // Show what decides; Save comments the line out. An
-                    // unreadable `.env` changes nothing here.
-                    let listKey = "\(platform).\(kind.yamlKey)"
-                    if let env = try? HermesEnvService(context: ctx).loadProven() {
-                        envFirst = PlatformSetupHelpers.envFirstState(
-                            configKeys: [listKey], env: env, capabilities: caps)
-                        if let v = HermesEnvFirstSettings.winningEnvValue(
-                            configKey: listKey, env: env, capabilities: caps) {
-                            items = HermesEnvFirstSettings.csv(v)
-                        }
-                    }
                 }
-                return (items, cfg.displayBusyAckEnabled, block.gatewayRestartNotification, envFirst)
+                return (items, cfg.displayBusyAckEnabled, block.gatewayRestartNotification)
             }.value
             guard let self else { return }
             // Never clobber the form under a save in flight — the values the
@@ -114,13 +97,9 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
             self.items = snapshot.items
             self.busyAckEnabled = snapshot.busyAck
             self.gatewayRestartNotification = snapshot.restartNotification
-            self.envFirst = snapshot.envFirst
             self.isLoading = false
         }
     }
-
-    /// B05: the allowlist's `.env` variable, when it decides or would.
-    private(set) var envFirst = PlatformSetupHelpers.EnvFirstState()
 
     /// True while the initial config read is in flight.
     private(set) var isLoading: Bool = false
@@ -182,9 +161,6 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let kv = configKV
-        // Only when the list itself is being written — the env line is what
-        // shadows it.
-        let envLines = listKey == nil ? [] : envFirst.lines
 
         // BOTH steps are I/O — a direct YAML rewrite (SCP round-trip on
         // remote) and one `hermes config set` process per key. Running them
@@ -207,14 +183,6 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
                     )
                     if !ok {
                         return .failure(String(localized: "Failed to write allowlist to config.yaml"))
-                    }
-                }
-                // B05: comment out an env variable that would override the
-                // list just written (Hermes reads it first).
-                if !envLines.isEmpty {
-                    let env = HermesEnvService(context: ctx)
-                    for name in envLines where !env.unset(name) {
-                        return .failure(String(localized: "Allowlist saved, but \(name) could not be removed from .env — it still overrides the list"))
                     }
                 }
                 // Step 2: scalar saves via `hermes config set`.

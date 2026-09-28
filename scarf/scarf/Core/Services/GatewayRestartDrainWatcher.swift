@@ -28,10 +28,6 @@ final class GatewayRestartDrainWatcher {
         /// The old gateway exited and nothing started a new one within
         /// ``revivalGraceSeconds`` — the service manager is not going to.
         case notRevived
-        /// The draining gateway is gone (or its record went stale with no
-        /// proof it is alive) while the file still says draining: it died
-        /// before finishing the restart.
-        case stoppedWithoutRestart
         /// The user stopped watching; Hermes carries on.
         case left
     }
@@ -45,8 +41,6 @@ final class GatewayRestartDrainWatcher {
     @ObservationIgnored var onFinished: (() -> Void)?
 
     @ObservationIgnored private let readState: @Sendable () -> Data?
-    @ObservationIgnored private let isAlive: @Sendable (Int) -> Bool?
-    @ObservationIgnored private let heartbeatStale: Duration
     @ObservationIgnored private let interval: Duration
     @ObservationIgnored private let graceSeconds: Int
     @ObservationIgnored private let revivalGraceSeconds: Int
@@ -58,19 +52,13 @@ final class GatewayRestartDrainWatcher {
     ///     actor. Tests inject a fake.
     ///   - interval: poll cadence. Hermes refreshes `active_work` every 30 s
     ///     while draining, so 10 s is plenty.
-    ///   - isAlive: whether a PID is still running on the host — `true`,
-    ///     `false`, or `nil` when it cannot tell. Runs off the main actor.
     init(
         readState: @escaping @Sendable () -> Data?,
-        isAlive: @escaping @Sendable (Int) -> Bool? = { _ in nil },
         interval: Duration = .seconds(10),
         graceSeconds: Int = 120,
-        revivalGraceSeconds: Int = 90,
-        heartbeatStaleSeconds: Int = HermesGatewayRestartDrain.heartbeatStaleSeconds
+        revivalGraceSeconds: Int = 90
     ) {
         self.readState = readState
-        self.isAlive = isAlive
-        self.heartbeatStale = .seconds(heartbeatStaleSeconds)
         self.interval = interval
         self.graceSeconds = graceSeconds
         self.revivalGraceSeconds = revivalGraceSeconds
@@ -78,28 +66,10 @@ final class GatewayRestartDrainWatcher {
 
     /// The production reader for `context`.
     convenience init(context: ServerContext) {
-        self.init(
-            readState: {
-                HermesFileService(context: context)
-                    .gatewayStateData(own: context.readData(context.paths.gatewayStateJSON))
-            },
-            isAlive: { pid in Self.probeLiveness(pid: pid, context: context) }
-        )
-    }
-
-    /// `kill -0` — locally a syscall, remotely one `sh -c` over the existing
-    /// SSH connection with a 10 s cap (C10: called off the main actor only).
-    nonisolated static func probeLiveness(pid: Int, context: ServerContext) -> Bool? {
-        guard pid > 0 else { return nil }
-        if !context.isRemote {
-            if kill(pid_t(pid), 0) == 0 { return true }
-            return errno == ESRCH ? false : nil
-        }
-        guard let result = try? context.makeTransport().runProcess(
-            executable: "/bin/sh", args: HermesGatewayRestartDrain.livenessArgv(pid: pid),
-            stdin: nil, timeout: 10)
-        else { return nil }
-        return HermesGatewayRestartDrain.liveness(exitCode: result.exitCode, stderr: result.stderrString)
+        self.init(readState: {
+            HermesFileService(context: context)
+                .gatewayStateData(own: context.readData(context.paths.gatewayStateJSON))
+        })
     }
 
     var isWatching: Bool {
@@ -118,14 +88,7 @@ final class GatewayRestartDrainWatcher {
         let read = readState
         let interval = interval
         let revivalGrace = Duration.seconds(revivalGraceSeconds)
-        let alive = isAlive
-        let staleAfter = heartbeatStale
         task = Task { [weak self] in
-            // The draining record's heartbeat: when `updated_at` last CHANGED,
-            // by this Mac's monotonic clock (host clocks may differ).
-            var lastStamp = snapshot.updatedAt
-            var stampChangedAt = ContinuousClock.now
-            var polls = 0
             // When the old gateway was first seen gone with no replacement.
             // launchd KeepAlive / systemd RestartForceExitStatus relaunch
             // within seconds; a unit without them relied on the CLI's own
@@ -136,29 +99,9 @@ final class GatewayRestartDrainWatcher {
                 if Task.isCancelled { return }
                 let data = await OffPool.run { read() }
                 if Task.isCancelled { return }
-                let snap = HermesGatewayRestartDrain.snapshot(stateJSON: data)
-                let phase = HermesGatewayRestartDrain.phase(of: snap, drainingPID: drainingPID)
-                polls += 1
-                if snap?.updatedAt != lastStamp {
-                    lastStamp = snap?.updatedAt
-                    stampChangedAt = ContinuousClock.now
-                }
-                // A draining record that outlives its process: the gateway
-                // crashed mid-drain and nothing will finish this restart.
-                // Liveness every third poll (a remote probe is an SSH exec);
-                // a stale heartbeat counts only when liveness is UNKNOWN,
-                // because Hermes treats a stale heartbeat with a live PID as
-                // a warning, not death.
-                if case .draining = phase, let pid = drainingPID, polls % 3 == 0 {
-                    let isLive = await OffPool.run { alive(pid) }
-                    if Task.isCancelled { return }
-                    let stale = ContinuousClock.now - stampChangedAt >= staleAfter
-                    if isLive == false || (isLive == nil && stale) {
-                        self?.finish(.stoppedWithoutRestart)
-                        return
-                    }
-                }
                 guard let self else { return }
+                let phase = HermesGatewayRestartDrain.phase(
+                    of: HermesGatewayRestartDrain.snapshot(stateJSON: data), drainingPID: drainingPID)
                 switch phase {
                 case .restarted:
                     self.finish(.restarted)
@@ -233,8 +176,6 @@ final class GatewayRestartDrainWatcher {
             return String(localized: "Stopped watching. Hermes still restarts the gateway when the current turn ends.")
         case .notRevived:
             return String(localized: "The old gateway stopped, but no new one has started. Start the gateway to bring it back.")
-        case .stoppedWithoutRestart:
-            return String(localized: "The old gateway stopped without restarting — it is no longer running. Check the status and start it if it isn't back.")
         }
     }
 
