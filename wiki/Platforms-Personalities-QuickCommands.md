@@ -55,6 +55,12 @@ v0.15 adds a handful of per-platform toggles surfaced in each platform's setup f
 - **Discord** — `allow_any_attachment` (accept attachment types beyond images).
 - **Signal** — group-only `require_mention` (only respond in group chats when explicitly mentioned).
 
+### Settings that `.env` can override
+
+Hermes reads some platform settings from `~/.hermes/.env` as well as `config.yaml`, and its own docs tell you to put them in `.env`. These are Discord `DISCORD_REQUIRE_MENTION`, `DISCORD_REACTIONS`, `DISCORD_AUTO_THREAD`, `DISCORD_HISTORY_BACKFILL` and `DISCORD_ALLOWED_CHANNELS`; Telegram `TELEGRAM_REQUIRE_MENTION`, `TELEGRAM_REACTIONS` and `TELEGRAM_ALLOWED_CHATS`; Matrix `MATRIX_REQUIRE_MENTION`, `MATRIX_AUTO_THREAD`, `MATRIX_DM_MENTION_THREADS` and `MATRIX_ALLOWED_ROOMS`; `NTFY_PUBLISH_TOPIC`; and `SLACK_ALLOWED_CHANNELS` and `MATTERMOST_ALLOWED_CHANNELS`. From Hermes v0.21.3, a non-blank `.env` value wins over `config.yaml` (`gateway/platforms/_shared.py:106-128` @ v2026.9.24). Reactions, auto-thread and the Discord channel allowlist always let `.env` win, on every version.
+
+The setup forms and the allowlist editor show the value the gateway actually uses. A caption appears when a `.env` line sets it. Saving writes the value to `config.yaml` and then comments the `.env` line out, but only after `config.yaml` took the value, so a failed save leaves the old one in place. The allowlist editor won't save an empty list while `.env` still lists entries, because that would silently open the platform to every channel. Remove the `.env` line yourself to do that. On iOS, the read-only platform rows and allowlists also show the value the gateway uses.
+
 ## Personalities
 
 A personality is a `SOUL.md` file that shapes Hermes's voice, defaults, and internal rules. Personalities live under `~/.hermes/personalities/<name>/`.
@@ -83,4 +89,4 @@ Quick Commands live in `config.yaml` under the `quick_commands` key. Scarf saves
 - [Hermes Paths](Hermes-Paths) — where `.env`, `config.yaml`, and `personalities/` live.
 
 ---
-_Last updated: 2026-09-28 — new Quick Command names are saved lowercase. Previously 2026-09-26 — Quick Commands run in the Hermes CLI, TUI and gateways, not in Scarf chat. Previously 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_
+_Last updated: 2026-09-28 — platform settings that `.env` can override (B13); new Quick Command names are saved lowercase. Previously 2026-09-26 — Quick Commands run in the Hermes CLI, TUI and gateways, not in Scarf chat. Previously 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_
