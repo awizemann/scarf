@@ -72,10 +72,14 @@ import ScarfCore
         // The spawned CLI resolves its home from HERMES_HOME. Scoped to
         // this suite (`.serialized`) and restored on exit; it never points
         // anywhere near ~/.hermes.
+        // Shared with every other test that pins HERMES_HOME (see
+        // `ProcessHermesHomePinLock`), so no two pins interleave.
+        await ProcessHermesHomePinLock.shared.acquire()
         let savedHome = ProcessInfo.processInfo.environment["HERMES_HOME"]
         setenv("HERMES_HOME", root.path, 1)
         defer {
             if let savedHome { setenv("HERMES_HOME", savedHome, 1) } else { unsetenv("HERMES_HOME") }
+            Task { await ProcessHermesHomePinLock.shared.release() }
         }
 
         let ctx = ServerContext.local(home: root)

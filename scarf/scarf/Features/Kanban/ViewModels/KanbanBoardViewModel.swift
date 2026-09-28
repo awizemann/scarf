@@ -35,10 +35,13 @@ final class KanbanBoardViewModel {
         context: ServerContext = .local,
         tenantFilter: String? = nil,
         projectPath: String? = nil,
-        sessionScopeId: String? = nil
+        sessionScopeId: String? = nil,
+        service: KanbanService? = nil
     ) {
         self.context = context
-        self.service = KanbanService(context: context)
+        // `service` is a test seam (a KanbanService over a scripted
+        // transport); production always builds one from `context`.
+        self.service = service ?? KanbanService(context: context)
         self.tenantFilter = tenantFilter
         self.projectPath = projectPath
         self.sessionScopeId = sessionScopeId
@@ -335,6 +338,18 @@ final class KanbanBoardViewModel {
             return
         }
 
+        // A completion Hermes will refuse is refused HERE, before any step
+        // runs. Blocked/Scheduled -> Done is `[.unblock, .complete]`: letting
+        // the unblock land and the complete fail left the card in Up Next, a
+        // column the user never chose. The board shows the Complete sheet for
+        // these drops, so this only trips for a caller that skipped it.
+        if plan.requiresCompleteResult,
+           Self.isBlank(completeResult),
+           !Self.hasStoredResult(task) {
+            lastError = Self.completionResultRequiredMessage
+            return
+        }
+
         // Round-6 decision 9. `.dispatch` is board-wide (see
         // `PendingDispatch`), so any plan that contains it needs the
         // confirmation — which is the PLAN's property, not the destination's.
@@ -376,6 +391,32 @@ final class KanbanBoardViewModel {
                 lastError = error.localizedDescription
             }
         }
+    }
+
+    /// Whether moving this task to Done must collect a result first: the
+    /// host refuses evidence-less completions from this column
+    /// (`HermesCapabilities.hasKanbanEmptyCompletionGate`) and the task has
+    /// no stored result that would satisfy Hermes on its own
+    /// (`_gate_empty_completion` also accepts `tasks.result`,
+    /// `hermes_cli/kanban_db.py:2880-2882` @ `v2026.9.24`).
+    func completionNeedsResult(taskId: String) -> Bool {
+        guard let task = tasks.first(where: { $0.id == taskId }) else { return false }
+        guard let plan = try? KanbanService.plan(
+            for: KanbanTransition(from: effectiveColumn(task), to: .done),
+            caps: capabilities
+        ) else { return false }
+        return plan.requiresCompleteResult && !Self.hasStoredResult(task)
+    }
+
+    nonisolated static let completionResultRequiredMessage =
+        String(localized: "Hermes needs a result to complete this task. Describe what was done, then complete it again.")
+
+    private nonisolated static func isBlank(_ text: String?) -> Bool {
+        (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private nonisolated static func hasStoredResult(_ task: HermesKanbanTask) -> Bool {
+        !isBlank(task.result)
     }
 
     /// Run the parked drop (round-6 decision 9). The ONLY caller that passes
@@ -681,13 +722,23 @@ final class KanbanBoardViewModel {
             }
             try await service.block(taskId: taskId, reason: reason)
         case .complete(let resultRequired):
-            let result = (completeResult?.isEmpty ?? true) ? nil : completeResult
+            var result = Self.isBlank(completeResult) ? nil : completeResult
+            let storedResult = tasks.first(where: { $0.id == taskId })
+                .flatMap { Self.hasStoredResult($0) ? $0.result : nil }
             if resultRequired && result == nil {
-                throw KanbanError.forbiddenTransition(
-                    from: "—",
-                    to: "Done",
-                    reason: "A result summary is required to complete this task."
-                )
+                guard let storedResult else {
+                    throw KanbanError.forbiddenTransition(
+                        from: "—",
+                        to: "Done",
+                        reason: Self.completionResultRequiredMessage
+                    )
+                }
+                // The stored result is what lets Hermes accept this blank
+                // completion, but `complete_task` writes `result = ?` with
+                // whatever it is given (`hermes_cli/kanban_db.py:2777-2789` @
+                // `v2026.9.24`), so sending nothing would erase it and child
+                // tasks would lose their upstream context. Send it back.
+                result = storedResult
             }
             try await service.complete(taskIds: [taskId], result: result, summary: nil, metadataJSON: nil)
         case .archive:

@@ -679,6 +679,57 @@ struct BotsViewModelTests {
         #expect(backend.lifecycleActions == [.rename(from: "scratch", to: "scratch-2")])
     }
 
+    /// S13-F7. `hermes profile rename default <text>` only sets the default
+    /// profile's display name — free text up to 64 characters — and the id
+    /// stays `default` (`hermes_cli/profiles.py:2255-2260`, `:913-921` @
+    /// `v2026.9.24`). Scarf used to refuse "Assistant Prime" as an invalid id,
+    /// and after `assistant` it selected a profile that does not exist.
+    @Test("renaming the default bot sets a free-text display name and keeps the selection on default")
+    func renameDefaultBotSetsDisplayName() async {
+        let identity = Self.bot("default", title: "Hermes")
+        let backend = MockBotsBackend([identity])
+        let viewModel = makeViewModel(backend, capabilities: HermesCapabilities(
+            versionLine: "hermes 0.20.5",
+            semver: .init(major: 0, minor: 20, patch: 5),
+            dateVersion: nil))
+        viewModel.selectedProfileName = "default"
+        let row = BotRow(identity: identity, avatar: nil)
+
+        viewModel.rename(row, to: "  Assistant Prime  ")
+        await waitForIdle(viewModel)
+        #expect(viewModel.errorMessage == nil)
+        #expect(backend.lifecycleActions == [.rename(from: "default", to: "Assistant Prime")])
+        #expect(viewModel.selectedProfileName == "default")
+
+        // Hermes's own limits: non-empty, at most 64 characters. Refused
+        // before anything spawns.
+        for bad in ["   ", String(repeating: "x", count: 65)] {
+            viewModel.errorMessage = nil
+            viewModel.rename(row, to: bad)
+            await waitForIdle(viewModel)
+            #expect(viewModel.errorMessage != nil, "\(bad.count) chars should be refused")
+        }
+        #expect(backend.lifecycleActions.count == 1)
+
+        // The mock skips BotsService's name guard, so check the real one: a
+        // display name is not refused as an invalid profile id.
+        #expect(BotsService.Lifecycle.rename(from: "default", to: "Assistant Prime").profileNames == ["default"])
+        #expect(BotsService.Lifecycle.rename(from: "work", to: "Bad Name").profileNames == ["work", "Bad Name"])
+    }
+
+    /// Below 0.20.5 `rename_profile` raises "Cannot rename the default
+    /// profile." (`hermes_cli/profiles.py` @ `v2026.8.18`), so nothing spawns.
+    @Test("renaming the default bot on a 0.20.3 host is refused before spawning")
+    func renameDefaultBotBelowFloorIsRefused() async {
+        let identity = Self.bot("default", title: "Hermes")
+        let backend = MockBotsBackend([identity])
+        let viewModel = makeViewModel(backend)
+        viewModel.rename(BotRow(identity: identity, avatar: nil), to: "Assistant Prime")
+        await waitForIdle(viewModel)
+        #expect(backend.lifecycleActions.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+    }
+
     @Test("rename is blocked while the outgoing name has an unsaved SOUL.md buffer, and clears once saved")
     func renameBlockedByUnsavedSoulEdits() async throws {
         // A real temp home: `agentViewModel(for:)` always builds a *live*
@@ -706,8 +757,14 @@ struct BotsViewModelTests {
         )
 
         let agentVM = viewModel.agentViewModel(for: "scratch")
-        agentVM.load()
-        await Self.settle { agentVM.hasLoadedSoul }
+        // `load()` also spawns `hermes -p scratch tools list`; pin it to the
+        // scratch home so it never reads the real ~/.hermes.
+        await home.pinningProcessHermesHome {
+            agentVM.load()
+            // Hold the pin until the whole snapshot (toolsets included) has
+            // landed, not just the SOUL.md read.
+            await Self.settle { agentVM.hasLoadedSoul && !agentVM.isLoading }
+        }
         agentVM.soulText = "dirty edits, not saved"
         #expect(agentVM.isSoulDirty)
         #expect(viewModel.unsavedAgentEdits(forProfile: "scratch"))

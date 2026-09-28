@@ -31,8 +31,51 @@ import ScarfCore
             priority: 0, createdAt: "2026-09-13T09:00:00Z")
     }
 
-    private static func board(_ tasks: [HermesKanbanTask]) -> KanbanBoardViewModel {
-        let vm = KanbanBoardViewModel(context: scratchContext())
+    /// Every verb the board runs goes through this, so no test here spawns
+    /// the real `hermes`. A `.local(home:)` context redirects file paths
+    /// only: the binary is still the developer's own, with no `HERMES_HOME`,
+    /// so a confirmed move used to run a real board-wide
+    /// `hermes kanban dispatch` against their `~/.hermes`. Answers exit 0
+    /// with an empty list, which is all `refresh()` needs.
+    final class RecordingTransport: ServerTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls: [[String]] = []
+        var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return _calls }
+
+        let contextID: ServerID = UUID()
+        var isRemote: Bool { false }
+        func readFile(_ path: String) throws -> Data { Data() }
+        func unguardedWriteFile(_ path: String, data: Data) throws {}
+        func fileExists(_ path: String) -> Bool { false }
+        func stat(_ path: String) -> FileStat? { nil }
+        func statAll(_ paths: [String]) -> [String: FileStat]? { nil }
+        func listDirectory(_ path: String) throws -> [String] { [] }
+        func createDirectory(_ path: String) throws {}
+        func removeFile(_ path: String) throws {}
+        func runProcess(
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
+        ) throws -> ProcessResult {
+            lock.lock(); _calls.append(args); lock.unlock()
+            return ProcessResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data())
+        }
+        func makeProcess(executable: String, args: [String]) -> Process { Process() }
+        func makeProcess(executable: String, args: [String], cwd: String?) -> Process { Process() }
+        func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> { AsyncStream { $0.finish() } }
+        func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
+            ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+    }
+
+    private static func board(
+        _ tasks: [HermesKanbanTask], transport: RecordingTransport = RecordingTransport()
+    ) -> KanbanBoardViewModel {
+        let context = scratchContext()
+        let vm = KanbanBoardViewModel(
+            context: context,
+            service: KanbanService(context: context, transport: transport))
         vm.tasks = tasks
         return vm
     }
@@ -61,14 +104,23 @@ import ScarfCore
 
     /// Confirming is the ONE path that proceeds. It clears the parked move
     /// and applies the optimistic mutation `attemptMove` was holding back.
-    @Test func confirmingProceedsWithTheMove() {
-        let vm = Self.board([Self.task("t_a", status: "ready")])
+    @Test func confirmingProceedsWithTheMove() async {
+        let transport = RecordingTransport()
+        let vm = Self.board([Self.task("t_a", status: "ready")], transport: transport)
         vm.attemptMove(taskId: "t_a", to: .running)
+        #expect(!transport.calls.contains { $0.contains("dispatch") },
+                "the drop dispatched before the user confirmed")
         vm.confirmPendingDispatch()
 
         #expect(vm.pendingDispatch == nil)
         #expect(vm.tasks(in: .running).map(\.id) == ["t_a"],
                 "the confirmed move never applied its optimistic override")
+        // And the confirmed move really runs the dispatcher pass — through
+        // the recording transport, never a real `hermes`.
+        for _ in 0..<200 where !transport.calls.contains(where: { $0.contains("dispatch") }) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(transport.calls.contains { $0.starts(with: ["kanban", "dispatch", "--json"]) })
     }
 
     /// Cancelling drops it, with nothing to undo.

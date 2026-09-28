@@ -229,7 +229,9 @@ struct HermesP28CrossPhaseRemediationTests {
             .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
 
         let tools = ToolsViewModel(context: home.context)
-        await tools.load()
+        // `load()` also spawns `hermes tools list` / `hermes mcp list`; pin
+        // them to the scratch home so they never read the real ~/.hermes.
+        await home.pinningProcessHermesHome { await tools.load() }
         #expect(tools.hasLoadedPlatforms)
         #expect(tools.configuredPlatformNames.contains("ntfy"))
         #expect(tools.configuredPlatformNames.contains("slack"))

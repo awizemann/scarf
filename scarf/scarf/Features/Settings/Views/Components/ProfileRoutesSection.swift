@@ -38,7 +38,7 @@ struct ProfileRoutesSection: View {
     /// Rows in the order Hermes evaluates them, with unmatched-forever rules
     /// (the ones Hermes drops) appended, unranked.
     private var rankedRows: [(rank: Int?, route: HermesProfileRoute)] {
-        let ordered = block.effectiveOrder
+        let ordered = block.effectiveOrder(capabilities: capabilities)
         var rows: [(Int?, HermesProfileRoute)] = ordered.enumerated().map { ($0.offset + 1, $0.element) }
         let rankedIDs = Set(ordered.map(\.id))
         rows += block.routes.filter { !rankedIDs.contains($0.id) }.map { (nil, $0) }
@@ -59,6 +59,7 @@ struct ProfileRoutesSection: View {
             ProfileRouteEditorSheet(
                 route: route,
                 isNew: editingIsNew,
+                capabilities: capabilities,
                 onSave: { edited in
                     if editingIsNew {
                         save(block.routes + [edited])
@@ -114,6 +115,7 @@ struct ProfileRoutesSection: View {
                 ProfileRouteRow(
                     rank: row.rank,
                     route: row.route,
+                    capabilities: capabilities,
                     // `gateway.multiplex_profile_allowlist` is only ever
                     // read in the v0.20.1 – v0.21.2 window
                     // (`hasMultiplexProfileAllowlist` — P7e re-floor; it is
@@ -178,8 +180,20 @@ struct ProfileRoutesSection: View {
             .background(ScarfColor.backgroundTertiary.opacity(0.5))
     }
 
+    /// The v0.21.4 copy adds the `user_id` weight and the v0.21.3
+    /// `bot_profile` scope; older hosts keep the original sentence.
+    private var explainerText: LocalizedStringKey {
+        if capabilities.hasProfileRouteUserID {
+            return "Routes are ranked by how specific they are (user + 16, thread + 8, channel + 4, server + 2) — not by list order. The highest-scoring rule that matches every field it declares wins; ties keep file order. A route only sees messages received by its `bot_profile`'s bot (the default profile's bot when unset). Without a match, the active profile handles the message."
+        }
+        if capabilities.hasProfileRouteBotScope {
+            return "Routes are ranked by how specific they are (thread + 8, channel + 4, server + 2) — not by list order. The highest-scoring rule that matches every field it declares wins; ties keep file order. A route only sees messages received by its `bot_profile`'s bot (the default profile's bot when unset). Without a match, the active profile handles the message."
+        }
+        return "Routes are ranked by how specific they are (thread + 8, channel + 4, server + 2) — not by list order. The highest-scoring rule that matches every field it declares wins; ties keep file order. Without a match, the active profile handles the message."
+    }
+
     private var explainer: some View {
-        Text("Routes are ranked by how specific they are (thread + 8, channel + 4, server + 2) — not by list order. The highest-scoring rule that matches every field it declares wins; ties keep file order. Without a match, the active profile handles the message.")
+        Text(explainerText)
             .scarfStyle(.caption)
             .foregroundStyle(ScarfColor.foregroundMuted)
             .fixedSize(horizontal: false, vertical: true)
@@ -305,6 +319,7 @@ struct ProfileRoutesSection: View {
 private struct ProfileRouteRow: View {
     let rank: Int?
     let route: HermesProfileRoute
+    let capabilities: HermesCapabilities
     /// v0.20.4+ — non-nil when this route's target profile isn't in
     /// `gateway.multiplex_profile_allowlist` and would never fire.
     var allowlistWarning: String? = nil
@@ -328,7 +343,7 @@ private struct ProfileRouteRow: View {
                             .font(ScarfFont.monoSmall)
                             .foregroundStyle(ScarfColor.accent)
                     }
-                    Text(route.scopeSummary)
+                    Text(route.scopeSummary(capabilities: capabilities))
                         .font(ScarfFont.monoSmall)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                         .lineLimit(1)
@@ -351,7 +366,7 @@ private struct ProfileRouteRow: View {
                 .buttonStyle(.plain)
                 .help("Remove this route")
             }
-            if let reason = route.rejectionReason {
+            if let reason = route.rejectionReason(capabilities: capabilities) {
                 warning(reason)
             } else if !route.enabled {
                 warning("Disabled — never matches.")
@@ -371,6 +386,14 @@ private struct ProfileRouteRow: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    private func rankHelp(_ rank: Int) -> LocalizedStringKey {
+        let weight = route.specificity(capabilities: capabilities)
+        if capabilities.hasProfileRouteUserID {
+            return "Match rank \(rank) — specificity \(weight) (user 16 + thread 8 + channel 4 + server 2)."
+        }
+        return "Match rank \(rank) — specificity \(weight) (thread 8 + channel 4 + server 2)."
+    }
+
     @ViewBuilder
     private var rankBadge: some View {
         if let rank {
@@ -382,7 +405,7 @@ private struct ProfileRouteRow: View {
                     RoundedRectangle(cornerRadius: ScarfRadius.sm, style: .continuous)
                         .fill(ScarfColor.backgroundSecondary)
                 )
-                .help("Match rank \(rank) — specificity \(route.specificity) (thread 8 + channel 4 + server 2).")
+                .help(rankHelp(rank))
         } else {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(ScarfColor.warning)
@@ -398,6 +421,7 @@ private struct ProfileRouteRow: View {
 private struct ProfileRouteEditorSheet: View {
     @State var route: HermesProfileRoute
     let isNew: Bool
+    let capabilities: HermesCapabilities
     let onSave: (HermesProfileRoute) -> Void
     let onCancel: () -> Void
 
@@ -508,7 +532,7 @@ private struct ProfileRouteEditorSheet: View {
     }
 
     private var previewSpecificity: Int {
-        normalizedRoute().specificity
+        normalizedRoute().specificity(capabilities: capabilities)
     }
 
     /// Trim every field — trailing whitespace in an id is a match failure

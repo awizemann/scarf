@@ -49,9 +49,13 @@ public struct HermesKanbanEvent: Sendable, Equatable, Identifiable, Codable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try c.decodeIfPresent(Int.self, forKey: .id) ?? 0
-        self.taskId = try c.decodeIfPresent(String.self, forKey: .taskId) ?? ""
-        self.runId = try c.decodeIfPresent(Int.self, forKey: .runId)
+        // `show --json` sends no event id (`_obj_dict(e, ("kind", "payload",
+        // "created_at", "run_id"))`, `hermes_cli/kanban.py:496` @
+        // `v2026.9.24`), so this is 0 on the wire and
+        // `HermesKanbanTaskDetail` assigns the real identity.
+        self.id = (try? c.decodeIfPresent(Int.self, forKey: .id)) ?? 0
+        self.taskId = (try? c.decodeIfPresent(String.self, forKey: .taskId)) ?? ""
+        self.runId = try? c.decodeIfPresent(Int.self, forKey: .runId)
         self.kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "unknown"
         if let unix = try? c.decodeIfPresent(Double.self, forKey: .createdAt) {
             let f = ISO8601DateFormatter()
@@ -73,6 +77,19 @@ public struct HermesKanbanEvent: Sendable, Equatable, Identifiable, Codable {
         } else {
             self.payloadJSON = nil
         }
+    }
+
+    /// Copy with a different id and, when this one has none, the owning
+    /// task's id. See `HermesKanbanTaskDetail`.
+    func withIdentity(id: Int, taskId fallbackTaskId: String) -> HermesKanbanEvent {
+        HermesKanbanEvent(
+            id: id,
+            taskId: taskId.isEmpty ? fallbackTaskId : taskId,
+            runId: runId,
+            kind: kind,
+            createdAt: createdAt,
+            payloadJSON: payloadJSON
+        )
     }
 
     public func encode(to encoder: any Encoder) throws {

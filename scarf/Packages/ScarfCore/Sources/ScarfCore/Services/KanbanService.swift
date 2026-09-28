@@ -34,10 +34,17 @@ public actor KanbanService {
     /// `prefix()`. `nil` (the default) keeps existing callers on the
     /// implicit default board — argv is byte-identical to before.
     private let board: String?
+    /// Test seam: the transport every verb runs through. `nil` (production)
+    /// builds `context.makeTransport()` per call, as before. A test hands in
+    /// a scripted transport so no real `hermes` is spawned against the
+    /// developer's own `~/.hermes` (a `.local(home:)` context redirects file
+    /// paths but not the binary or its `HERMES_HOME`).
+    private let transport: (any ServerTransport)?
 
-    public init(context: ServerContext, board: String? = nil) {
+    public init(context: ServerContext, board: String? = nil, transport: (any ServerTransport)? = nil) {
         self.context = context
         self.board = board
+        self.transport = transport
     }
 
     /// argv prefix shared by every verb: `["kanban"]` plus the global
@@ -693,6 +700,12 @@ public actor KanbanService {
                 : KanbanTransitionPlan(steps: [.reopenReview])
         }
 
+        // From any status but `review`, Hermes 0.21.4+ refuses a completion
+        // with no result, summary or stored result (`_gate_empty_completion`,
+        // `hermes_cli/kanban_db.py:2860-2891` @ `v2026.9.24`). The Review
+        // exit above stays exempt: approving review work needs no evidence.
+        let resultRequired = caps.hasKanbanEmptyCompletionGate
+
         switch (from, to) {
         case (.upNext, .running):
             return KanbanTransitionPlan(steps: [.dispatch])
@@ -700,11 +713,11 @@ public actor KanbanService {
             return KanbanTransitionPlan(steps: [.block(reasonRequired: true)])
         case (.upNext, .done):
             // Direct todo→done is unusual but allowed (manual checkoff).
-            return KanbanTransitionPlan(steps: [.complete(resultRequired: false)])
+            return KanbanTransitionPlan(steps: [.complete(resultRequired: resultRequired)])
         case (.running, .blocked):
             return KanbanTransitionPlan(steps: [.block(reasonRequired: true)])
         case (.running, .done):
-            return KanbanTransitionPlan(steps: [.complete(resultRequired: false)])
+            return KanbanTransitionPlan(steps: [.complete(resultRequired: resultRequired)])
         case (.running, .upNext):
             // Release back to ready — no direct verb. Closest is unblock,
             // which only works for blocked tasks. Forbid for now.
@@ -718,7 +731,7 @@ public actor KanbanService {
         case (.blocked, .running):
             return KanbanTransitionPlan(steps: [.unblock, .dispatch])
         case (.blocked, .done):
-            return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: false)])
+            return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: resultRequired)])
         // `scheduled` is a SOURCE state for `unblock`, exactly like
         // `blocked`. Verified at v2026.8.31 — `p_unblock`'s help reads
         // "Return blocked/scheduled tasks to ready…" and `_cmd_unblock`
@@ -730,7 +743,7 @@ public actor KanbanService {
         case (.scheduled, .running):
             return KanbanTransitionPlan(steps: [.unblock, .dispatch])
         case (.scheduled, .done):
-            return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: false)])
+            return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: resultRequired)])
         // No `scheduled → blocked`: `kanban_db.block_task` only updates
         // rows `WHERE status IN ('running', 'ready')`, so blocking a
         // parked task returns False and prints "cannot block <id>".
@@ -750,8 +763,9 @@ public actor KanbanService {
         timeout: TimeInterval
     ) async -> (exitCode: Int32, stdout: String, stderr: String) {
         let context = self.context
+        let injected = self.transport
         return await Task.detached(priority: .utility) { () -> (Int32, String, String) in
-            let transport = context.makeTransport()
+            let transport = injected ?? context.makeTransport()
             let executable = context.paths.hermesBinary
             do {
                 let result = try transport.runProcess(

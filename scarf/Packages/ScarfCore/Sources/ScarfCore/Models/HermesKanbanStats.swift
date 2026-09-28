@@ -5,7 +5,14 @@ import Foundation
 /// widget, and the column-count badges on the board header.
 public struct HermesKanbanStats: Sendable, Equatable, Codable {
     public let byStatus: [String: Int]
-    public let byAssignee: [String: Int]
+    /// `{assignee: {status: count}}` over non-archived tasks. Nested, not a
+    /// flat count: `_counts_by_assignee` (`hermes_cli/kanban_db.py:4225-4234`
+    /// @ `v2026.9.24`) has built it this way since the board shipped.
+    /// Decoding it as `[String: Int]` threw on every board with an assigned
+    /// task, which blanked the glance everywhere.
+    public let byAssignee: [String: [String: Int]]
+    /// Not emitted by `board_stats` at `v2026.9.24` (`:4217-4222`); kept for
+    /// callers and decoded leniently in case a host sends it.
     public let byTenant: [String: Int]
     /// Age in seconds of the oldest task currently in the `ready` status.
     /// `nil` when no tasks are ready. Helps surface a stuck dispatcher.
@@ -13,7 +20,7 @@ public struct HermesKanbanStats: Sendable, Equatable, Codable {
 
     public init(
         byStatus: [String: Int],
-        byAssignee: [String: Int] = [:],
+        byAssignee: [String: [String: Int]] = [:],
         byTenant: [String: Int] = [:],
         oldestReadyAgeSeconds: Double? = nil
     ) {
@@ -34,10 +41,13 @@ public struct HermesKanbanStats: Sendable, Equatable, Codable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // `by_status` drives the glance and must decode. The breakdowns
+        // below are secondary: a shape Scarf does not expect costs that
+        // breakdown only, never the whole stats read.
         self.byStatus = try c.decodeIfPresent([String: Int].self, forKey: .byStatus) ?? [:]
-        self.byAssignee = try c.decodeIfPresent([String: Int].self, forKey: .byAssignee) ?? [:]
-        self.byTenant = try c.decodeIfPresent([String: Int].self, forKey: .byTenant) ?? [:]
-        self.oldestReadyAgeSeconds = try c.decodeIfPresent(Double.self, forKey: .oldestReadyAgeSeconds)
+        self.byAssignee = (try? c.decodeIfPresent([String: [String: Int]].self, forKey: .byAssignee)) ?? [:]
+        self.byTenant = (try? c.decodeIfPresent([String: Int].self, forKey: .byTenant)) ?? [:]
+        self.oldestReadyAgeSeconds = try? c.decodeIfPresent(Double.self, forKey: .oldestReadyAgeSeconds)
     }
 
     /// "12 todo · 3 running · 5 blocked" formatted glance string. Skips

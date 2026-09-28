@@ -733,7 +733,10 @@ struct BotsView: View {
                 onDemote: { viewModel.demote(row) },
                 onChooseAvatar: { chooseAvatar(forProfile: row.identity.profileName) },
                 onRename: {
-                    renameText = row.identity.profileName
+                    // The default profile renames its display name, not its id.
+                    renameText = row.identity.isDefaultProfile
+                        ? row.identity.resolvedTitle
+                        : row.identity.profileName
                     renaming = row
                 },
                 onDelete: { pendingDelete = row },
@@ -797,8 +800,13 @@ struct BotsView: View {
                  : "This runs hermes profile rename, which moves the profile directory and updates its alias.")
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            ScarfTextField("new profile id", text: $renameText)
-                .accessibilityLabel("New profile id")
+            if row.identity.isDefaultProfile {
+                ScarfTextField("display name", text: $renameText)
+                    .accessibilityLabel("New display name")
+            } else {
+                ScarfTextField("new profile id", text: $renameText)
+                    .accessibilityLabel("New profile id")
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { renaming = nil }

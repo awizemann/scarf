@@ -209,12 +209,12 @@ final class ProfileRoutesTests: XCTestCase {
 
     func testSpecificityWeightsMirrorHermes() {
         // profile_routing.py:62-72 — guild 2, chat 4, thread 8, additive.
-        XCTAssertEqual(HermesProfileRoute(platform: "discord", profile: "p").specificity, 0)
-        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", guildID: "g").specificity, 2)
-        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", chatID: "c").specificity, 4)
-        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", threadID: "t").specificity, 8)
+        XCTAssertEqual(HermesProfileRoute(platform: "discord", profile: "p").specificity(capabilities: .empty), 0)
+        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", guildID: "g").specificity(capabilities: .empty), 2)
+        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", chatID: "c").specificity(capabilities: .empty), 4)
+        XCTAssertEqual(HermesProfileRoute(platform: "d", profile: "p", threadID: "t").specificity(capabilities: .empty), 8)
         XCTAssertEqual(
-            HermesProfileRoute(platform: "d", profile: "p", guildID: "g", chatID: "c", threadID: "t").specificity,
+            HermesProfileRoute(platform: "d", profile: "p", guildID: "g", chatID: "c", threadID: "t").specificity(capabilities: .empty),
             14
         )
     }
@@ -230,7 +230,7 @@ final class ProfileRoutesTests: XCTestCase {
             HermesProfileRoute(name: "chatB", platform: "d", profile: "d", chatID: "c2"),
         ]
         let block = HermesProfileRoutes(routes: routes, location: .gateway)
-        XCTAssertEqual(block.effectiveOrder.map(\.name), ["thread", "chatA", "chatB", "guild"])
+        XCTAssertEqual(block.effectiveOrder(capabilities: .empty).map(\.name), ["thread", "chatA", "chatB", "guild"])
     }
 
     func testEffectiveOrderExcludesRulesHermesDrops() {
@@ -240,7 +240,7 @@ final class ProfileRoutesTests: XCTestCase {
             HermesProfileRoute(name: "badProfile", platform: "d", profile: "Bad Name!", chatID: "c"),
         ]
         let block = HermesProfileRoutes(routes: routes, location: .gateway)
-        XCTAssertEqual(block.effectiveOrder.map(\.name), ["ok"])
+        XCTAssertEqual(block.effectiveOrder(capabilities: .empty).map(\.name), ["ok"])
     }
 
     func testProfileNameValidationMirrorsHermes() {
@@ -431,7 +431,7 @@ final class ProfileRoutesTests: XCTestCase {
         XCTAssertEqual(reparsed.name, "thread-route")
         XCTAssertEqual(reparsed.threadID, "3")
         XCTAssertFalse(reparsed.enabled)
-        XCTAssertEqual(reparsed.specificity, 14)
+        XCTAssertEqual(reparsed.specificity(capabilities: .empty), 14)
     }
 
     func testUnsetFieldsAreOmittedNotWrittenEmpty() {

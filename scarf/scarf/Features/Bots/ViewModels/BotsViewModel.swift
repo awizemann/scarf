@@ -1145,6 +1145,10 @@ final class BotsViewModel: OutcomeMessageHosting {
     func rename(_ row: BotRow, to newName: String) {
         guard hasBotMode, !isWorking else { return }
         let target = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if row.identity.isDefaultProfile {
+            renameDefaultDisplayName(to: target)
+            return
+        }
         guard HermesProfileScope.isValidName(target) else {
             errorMessage = "Profile names must be lowercase letters, digits, dashes or underscores (max 64)."
             return
@@ -1186,6 +1190,41 @@ final class BotsViewModel: OutcomeMessageHosting {
             self.selectedProfileName = target
         }
     }
+
+    /// The default profile's id can't change: `hermes profile rename default
+    /// <text>` only sets its presentation-only display name — free text,
+    /// stripped, at most 64 characters — and the id stays `default`
+    /// (`rename_profile`, `hermes_cli/profiles.py:2255-2260`, and
+    /// `set_profile_display_name`, `:913-921`, @ `v2026.9.24`). So the value
+    /// is not checked as a profile id, the selection stays on `default`, and
+    /// nothing keyed by the profile name is dropped: no directory moved.
+    private func renameDefaultDisplayName(to displayName: String) {
+        guard capabilities.hasDefaultProfileDisplayNameRename else {
+            errorMessage = String(localized: "This Hermes version can't rename the default profile. Setting its display name needs Hermes v0.20.5 or newer.")
+            return
+        }
+        guard !displayName.isEmpty else {
+            errorMessage = String(localized: "Display name can't be empty.")
+            return
+        }
+        guard displayName.count <= Self.maxDisplayNameLength else {
+            errorMessage = String(localized: "Display names can be at most 64 characters.")
+            return
+        }
+        runLifecycle(
+            .rename(from: "default", to: displayName),
+            success: String(localized: "Display name set to \(displayName)"),
+            analytics: { Analytics.record(.botUpdated(aspect: .identity, outcome: .init(succeeded: $0))) }
+        ) { [weak self] in
+            self?.selectedProfileName = "default"
+        }
+    }
+
+    /// `set_profile_display_name`'s limit (`hermes_cli/profiles.py:918` @
+    /// `v2026.9.24`). Python counts code points; Swift's `count` counts
+    /// grapheme clusters, which is never more, so anything Scarf lets through
+    /// by this check that Hermes rejects still comes back as its error.
+    nonisolated static let maxDisplayNameLength = 64
 
     /// **Destructive.** `hermes profile delete` removes the whole profile
     /// directory — sessions, memories, state.db, `.env`. The confirmation is
