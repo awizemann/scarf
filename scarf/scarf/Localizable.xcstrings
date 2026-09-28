@@ -332,6 +332,46 @@
         }
       }
     },
+    "Saved to config.yaml, but couldn't remove %@ from .env" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In config.yaml gespeichert, aber %@ konnte nicht aus .env entfernt werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardado en config.yaml, pero no se pudo quitar %@ de .env"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistré dans config.yaml, mais impossible de retirer %@ de .env"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "config.yaml に保存しましたが、.env から %@ を削除できませんでした"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salvo em config.yaml, mas não foi possível remover %@ do .env"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存到 config.yaml,但无法从 .env 中移除 %@"
+          }
+        }
+      }
+    },
     "`hermes profile list` failed (exit %lld)." : {
       "localizations" : {
         "de" : {

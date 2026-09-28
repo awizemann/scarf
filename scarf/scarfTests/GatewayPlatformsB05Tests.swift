@@ -228,7 +228,9 @@ struct MattermostPrecedenceB05Tests {
         vm.requireMention = false
         let plan = vm.savePlan()
         #expect(plan.config["mattermost.require_mention"] == "false")
-        #expect(plan.env["MATTERMOST_REQUIRE_MENTION"] == "")
+        // B12: the unset rides after the config write, not in the env batch.
+        #expect(plan.env["MATTERMOST_REQUIRE_MENTION"] == nil)
+        #expect(plan.envUnsetAfterConfig == ["MATTERMOST_REQUIRE_MENTION"])
         vm.save()
         await until(timeout: 10) { !vm.isSaving }
         let env = (try? String(contentsOfFile: ctx.paths.envFile, encoding: .utf8)) ?? ""
@@ -244,6 +246,7 @@ struct MattermostPrecedenceB05Tests {
         vm.load()
         await until(timeout: 10) { !vm.isLoading }
         #expect(vm.savePlan().env["MATTERMOST_REQUIRE_MENTION"] == nil)
+        #expect(vm.savePlan().envUnsetAfterConfig.isEmpty)
         #expect(vm.requireMentionCaption == nil)
     }
 }

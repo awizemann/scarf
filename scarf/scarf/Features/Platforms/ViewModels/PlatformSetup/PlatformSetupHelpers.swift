@@ -51,6 +51,10 @@ enum PlatformSetupHelpers {
     /// - `configKV`: scalar config.yaml paths to set via `hermes config set`.
     ///   Empty strings still produce a `config set <key> ""` call because
     ///   some fields accept an explicit empty string (e.g., `display.skin: ""`).
+    /// - `envUnsetAfterConfig`: `.env` keys to unset only once every config
+    ///   write has succeeded — for a value being MOVED from `.env` into
+    ///   config.yaml, where dropping the line first would lose the only copy
+    ///   if the config write fails (Mattermost `require_mention`).
     ///
     /// Returns a user-facing summary message and whether it is a failure.
     /// `nonisolated`: the body is pure transport I/O (env writes + one
@@ -62,6 +66,7 @@ enum PlatformSetupHelpers {
         context: ServerContext,
         envPairs: [String: String],
         configKV: [String: String],
+        envUnsetAfterConfig: [String] = [],
         runner: HermesCLIRunner? = nil
     ) -> SaveOutcome {
         let envService = HermesEnvService(context: context)
@@ -148,6 +153,11 @@ enum PlatformSetupHelpers {
         // the exact misreport GW-F4 exists to end.
         if !configFailures.isEmpty {
             return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
+        }
+        // The moved values are in config.yaml now — only now is it safe to
+        // drop their `.env` copies.
+        for key in envUnsetAfterConfig where !envService.unset(key) {
+            return .failure(String(localized: "Saved to config.yaml, but couldn't remove \(key) from .env"))
         }
         return .success(String(localized: "Saved — restart gateway to apply"))
     }
@@ -364,11 +374,13 @@ enum PlatformSetupHelpers {
         context: ServerContext,
         envPairs: [String: String],
         configKV: [String: String],
+        envUnsetAfterConfig: [String] = [],
         runner: HermesCLIRunner? = nil,
         then commit: @escaping @MainActor (SaveOutcome) -> Void
     ) {
         detached({
-            saveForm(context: context, envPairs: envPairs, configKV: configKV, runner: runner)
+            saveForm(context: context, envPairs: envPairs, configKV: configKV,
+                     envUnsetAfterConfig: envUnsetAfterConfig, runner: runner)
         }, then: commit)
     }
 
@@ -505,7 +517,8 @@ extension PlatformSetupForm {
     }
 
     /// Write this form off the main actor and put the outcome on the save bar.
-    func commitSave(envPairs: [String: String], configKV: [String: String]) {
+    func commitSave(envPairs: [String: String], configKV: [String: String],
+                    envUnsetAfterConfig: [String] = []) {
         guard !isBusy else { return }
         // The load landed but could not prove one of its two files, so the
         // fields below may be blanks over live values. Re-state the reason
@@ -553,6 +566,7 @@ extension PlatformSetupForm {
             context: context,
             envPairs: envPairs,
             configKV: configKV,
+            envUnsetAfterConfig: envUnsetAfterConfig,
             runner: cliRunner
         ) { [weak self] outcome in
             guard let self else { return }

@@ -3303,5 +3303,6 @@
   "config.yaml sets an empty prefix, so replies carry no header. Use Hermes Default to bring the header back.": "config.yaml で空のプレフィックスが設定されているため、返信にヘッダーは付きません。ヘッダーを戻すには「Hermes の既定」を使用してください。",
   "cron job %@": "cron ジョブ %@",
   "display name": "表示名",
-  "• skills.config.%@": "• skills.config.%@"
+  "• skills.config.%@": "• skills.config.%@",
+  "Saved to config.yaml, but couldn't remove %@ from .env": "config.yaml に保存しましたが、.env から %@ を削除できませんでした"
 }
