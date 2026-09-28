@@ -1490,19 +1490,39 @@ struct HermesFileService: Sendable {
     /// first); a timeout there is reported as still restarting, not failed.
     @discardableResult
     nonisolated func restartGateway() -> HermesCLIOutcome {
+        restartGatewayReport().outcome
+    }
+
+    /// ``restartGateway()`` plus what a timed-out run left behind: when the
+    /// gateway is draining (waiting for the current turn before it restarts,
+    /// S07-F3), `drain` is the state-file snapshot a caller watches from.
+    nonisolated func restartGatewayReport() -> (
+        outcome: HermesCLIOutcome, drain: HermesGatewayRestartDrain.Snapshot?, budgetSeconds: Int?
+    ) {
         // Never into a gateway with no service behind it: Hermes would stop
         // it and run the replacement inside this spawn, which the timeout
         // below then kills (see ``HermesGatewayRestartGuard``).
         let supervised: Bool
         switch restartDecision(stopThenStart: false) {
-        case .refuse(let refusal): return refusal
+        case .refuse(let refusal): return (refusal, nil, nil)
         case .restart(let externallySupervised): supervised = externallySupervised
         }
         let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 60)
-        return HermesGatewayServiceVerdict.judge(
+        // Only a run Scarf's own timer ended is worth a second look: then the
+        // gateway itself says whether it is draining.
+        var drain: HermesGatewayRestartDrain.Snapshot?
+        if HermesGatewayRestartDrain.timedOut(output: result.output, exitCode: result.exitCode),
+           let snap = HermesGatewayRestartDrain.snapshot(
+               stateJSON: gatewayStateData(own: readFileData(context.paths.gatewayStateJSON))),
+           snap.isDraining {
+            drain = snap
+        }
+        let outcome = HermesGatewayServiceVerdict.judge(
             verb: .restart, output: result.output, exitCode: result.exitCode,
-            externallySupervised: supervised
+            externallySupervised: supervised, drainingAfterTimeout: drain != nil
         )
+        return (outcome, outcome.confidence == .unconfirmed ? drain : nil,
+                HermesGatewayRestartDrain.budgetSeconds(fromOutput: result.output))
     }
 
     // MARK: - MCP YAML: block extractor + parser

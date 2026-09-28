@@ -132,12 +132,14 @@ final class MessagingGatewayViewModel {
     init(
         context: ServerContext = .local,
         capabilities: HermesCapabilities = .empty,
-        cliRunner: HermesCLIRunner? = nil
+        cliRunner: HermesCLIRunner? = nil,
+        drainWatcher: GatewayRestartDrainWatcher? = nil
     ) {
         self.context = context
         self.capabilities = capabilities
         self.cliRunner = cliRunner ?? context.cliRunner
         self.injectedRunner = cliRunner
+        self.drainWatcher = drainWatcher ?? GatewayRestartDrainWatcher(context: context)
     }
 
     var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isServedByMultiplexer: false, isRunning: false)
@@ -519,6 +521,10 @@ final class MessagingGatewayViewModel {
     /// the second action was wiped by the first action's timer.
     @ObservationIgnored private var actionGeneration = 0
 
+    /// Follows a restart Hermes is holding for the current turn (S07-F3).
+    /// Reads `gateway_state.json` off the main actor; never spawns.
+    @ObservationIgnored let drainWatcher: GatewayRestartDrainWatcher
+
     /// True while `actionMessage` is reporting a failure — the view paints it
     /// as an error and it is never auto-cleared.
     private(set) var actionFailed = false
@@ -555,6 +561,8 @@ final class MessagingGatewayViewModel {
     ) {
         guard !isBusy else { return }
         isBusy = true
+        // A new action owns the pane; an earlier restart's watch ends here.
+        drainWatcher.reset()
         // Bump BOTH tokens before the CLI runs: `actionGeneration` cancels an
         // earlier action's settle timer, `loadGeneration` cancels any load
         // already reading the pre-action state.
@@ -569,7 +577,7 @@ final class MessagingGatewayViewModel {
             // `hermes gateway start|stop|restart` is a process spawn against a
             // possibly-remote host; running it inline froze the whole app for
             // the duration. Detached, exactly like `load()` above.
-            let (outcome, refused) = await Task.detached { () -> (HermesCLIOutcome, Bool) in
+            let (outcome, refused, drain, budget) = await Task.detached { () -> (HermesCLIOutcome, Bool, HermesGatewayRestartDrain.Snapshot?, Int?) in
                 // A restart of a gateway with no service behind it stops the
                 // gateway and runs its replacement inside this very spawn,
                 // which the timeout then kills (see
@@ -583,17 +591,31 @@ final class MessagingGatewayViewModel {
                         capabilities: caps, timeout: Self.probeTimeout,
                         profileName: HermesProfileScope.profileName(forHome: ctx.paths.home)
                     ) {
-                    case .refuse(let refusal): return (refusal, true)
+                    case .refuse(let refusal): return (refusal, true, nil, nil)
                     case .restart(let externallySupervised): supervised = externallySupervised
                     }
                 }
                 let result = run(HermesGatewayServiceVerdict.argv(verb), Self.mutationTimeout)
+                // S07-F3: a restart that outlived the timer while the gateway
+                // is draining is waiting for the current turn, not failed.
+                // The gateway's own state file says so (the CLI's buffered
+                // output usually does not reach us) — read it only then.
+                var drain: HermesGatewayRestartDrain.Snapshot?
+                if verb == .restart,
+                   HermesGatewayRestartDrain.timedOut(output: result.output, exitCode: result.exitCode),
+                   let snap = HermesGatewayRestartDrain.snapshot(stateJSON: HermesFileService(context: ctx)
+                       .gatewayStateData(own: ctx.readData(ctx.paths.gatewayStateJSON))),
+                   snap.isDraining {
+                    drain = snap
+                }
                 // A supervised hand-back that outlasts the timeout is still
                 // restarting, not failed (see the verdict).
-                return (HermesGatewayServiceVerdict.judge(
+                let outcome = HermesGatewayServiceVerdict.judge(
                     verb: verb, output: result.output, exitCode: result.exitCode,
-                    externallySupervised: supervised
-                ), false)
+                    externallySupervised: supervised, drainingAfterTimeout: drain != nil
+                )
+                return (outcome, false, outcome.confidence == .unconfirmed ? drain : nil,
+                        HermesGatewayRestartDrain.budgetSeconds(fromOutput: result.output))
             }.value
             guard let self else { return }
             self.isBusy = false
@@ -614,6 +636,20 @@ final class MessagingGatewayViewModel {
             // The third arm (P40c): a `.unconfirmed` verdict is not a
             // failure. Neutral wording, `actionFailed` stays false, and the
             // settle-reload below still runs — the status is the authority.
+            // S07-F3: Hermes accepted the restart and is waiting for the
+            // current turn. Follow it from the state file rather than
+            // settling after a few seconds on a status that has not moved.
+            if let drain {
+                self.actionFailed = false
+                self.actionMessage = nil
+                self.drainWatcher.onFinished = { [weak self] in self?.load(force: true) }
+                self.drainWatcher.start(
+                    from: drain,
+                    budgetSeconds: budget)
+                self.load(force: true)
+                return
+            }
+
             if outcome.confidence == .unconfirmed {
                 self.actionFailed = false
                 self.actionMessage = GatewayActionBanner.unconfirmed(verb, detail: outcome.detail)

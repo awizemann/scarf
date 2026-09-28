@@ -16,6 +16,7 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     init(context: ServerContext = .local) {
         self.context = context
         self.fileService = HermesFileService(context: context)
+        self.drainWatcher = GatewayRestartDrainWatcher(context: context)
     }
 
 
@@ -273,7 +274,11 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             : .failure(Self.restartFailureMessage(outcome.detail))
     }
 
+    /// Follows a restart Hermes is holding for the current turn (S07-F3).
+    @ObservationIgnored let drainWatcher: GatewayRestartDrainWatcher
+
     func restartGateway() {
+        drainWatcher.reset()
         restartInProgress = true
         // In-progress, not an outcome: shown in the success style because
         // nothing has failed yet, and replaced the moment the CLI returns.
@@ -288,11 +293,23 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             // site — `_cmd_restart` has exit-0 refusal arms
             // (`hermes_cli/gateway.py:6047` @ v2026.9.7) and `cmd_gateway`
             // discards the return anyway (`hermes_cli/main.py:1736-1742`).
-            let outcome = fileService.restartGateway()
+            let report = fileService.restartGatewayReport()
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
-                self.applySaveOutcome(Self.restartBanner(outcome))
+                self.applySaveOutcome(Self.restartBanner(report.outcome))
+                // S07-F3: Hermes is waiting for the current turn before it
+                // restarts — follow it rather than leave a one-line guess.
+                if let drain = report.drain {
+                    self.drainWatcher.onFinished = { [weak self] in
+                        guard let self else { return }
+                        if case .restarted = self.drainWatcher.status {
+                            self.applySaveOutcome(.success(String(localized: "Gateway restarted")))
+                        }
+                        self.load(force: true)
+                    }
+                    self.drainWatcher.start(from: drain, budgetSeconds: report.budgetSeconds)
+                }
                 self.load(force: true)
             }
         }

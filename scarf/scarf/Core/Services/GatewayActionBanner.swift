@@ -26,6 +26,12 @@ enum GatewayActionBanner {
     /// verdict's own note when it has one — the live case is
     /// ``ScarfCore/HermesGatewayServiceVerdict/foregroundStartNote``.
     nonisolated static func unconfirmed(_ verb: HermesGatewayServiceVerdict.Verb, detail: String?) -> String {
+        // S07-F3: the gateway's own state file PROVED the restart was
+        // accepted and is waiting for the current turn — "could not confirm
+        // it from the output" would undersell what Scarf actually knows.
+        if verb == .restart, detail == HermesGatewayRestartDrain.pendingNote {
+            return String(localized: "Restart accepted") + " — " + HermesGatewayRestartDrain.pendingNote
+        }
         let stem: String = switch verb {
         case .start:
             String(localized: "Start sent; Scarf could not confirm it from the output — the status will update")
