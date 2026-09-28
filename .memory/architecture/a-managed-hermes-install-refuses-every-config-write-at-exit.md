@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-managed-hermes-install-refuses-every-config-writ
 tags: [hermes-cli, verification, capability-gating]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesManagedInstall.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: 05eabf021b7b7ec9739248f139e2a0f54619eeb7
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-11
-updated: 2026-09-12
-reviewed: 2026-09-18
+updated: 2026-09-27
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -36,7 +36,7 @@ The shape above holds; three of its details did not survive an independent audit
 
 - [gotcha] **The marker is matched ANCHORED now, not as a bare substring.** `set_config_value`'s success line echoes the user's VALUE (`✓ Set {key} = {value} in {config_path}`, `hermes_cli/config.py:3521` @ v2026.9.7), so `is managed by` inside a QuickCommands prompt or any platform-setup field turned a completed write into a reported failure — unconditionally, since these verdicts run `failureWins: true`. `HermesCLIVerdict.judge` gained `anchoredFailureMarkers`, and the shared marker is `managedRefusalAnchored`, which contains the FULL action prefixes — every refusal on these paths is at column 0 and opens with them (`format_managed_message` `:445-450`, `_env_write_blocked` `:2560-2565`, `_exit_if_key_managed` `:3363-3371`). The prefixes are `Cannot save configuration`, `Cannot set`, `Cannot unset`, and `Cannot remove`. The plugins sets keep their mid-sentence markers as substrings and carry the anchored list alongside #verification
 - [decision] **There are TEN arms on `set_config_value`, and the tenth is a partial write.** config.yaml is written (`:3508`); a `terminal.*` key's `.env` mirror is then refused by `_env_write_blocked`'s managed-SCOPE arm (`:3511`, `:2574-2578`) and `:3521` prints `✓ Set …` anyway. Alan's call: success with a warning, not a failure. `HermesConfigMirror` discriminates it from the `.env`-only branch (`:3461-3468`) by the file Hermes names on its own success line
-- [fact] **The `.managed` marker's contents are only READ from v0.20.5 (v2026.8.19).** Below that, `get_managed_system` is `if managed_marker.exists(): return "NixOS"` — so a `brew` marker means MANAGED there, the opposite of the target tag's answer. `hasManagedMarkerContents` gates it and is threaded into the probe on both platforms
+- [fact] **The `.managed` marker's contents are only READ from v0.20.5 (v2026.8.19).** Below that, `get_managed_system` is `if managed_marker.exists(): return "NixOS"` — so a `brew` marker means MANAGED there, the opposite of the target tag's answer. `hasManagedMarkerContents` gates it and is threaded into the probe on both platforms. From v0.21.3 (v2026.9.14, `_MANAGED_FALSE_VALUES`, hermes_constants.py:1089,1108 @ v2026.9.24) a marker holding `false`/`0`/`no`/`off` is an explicit opt-out (NOT managed); below that it names a manager literally called "false". `HermesManagedInstall.system(fromMarker:readsMarkerContents:honoursFalseOptOut:)` mirrors it behind `hasManagedMarkerFalseOptOut` (B07 / S05-F3)
 - [done] **iOS has the probe now** (`IOSSettingsViewModel`), and the read-only lock no longer blacks out the Advanced tab's reads — `.disabled` reaches every descendant, and it was taking Config Diagnostics' "Check", "Backup Now", the Raw Config disclosure, ScarfMon's "Copy as JSON" and all text selection with it
 
 

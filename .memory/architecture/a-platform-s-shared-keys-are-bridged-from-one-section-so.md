@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPlatform
 source_paths_inferred: false
 source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
 created: 2026-09-11
-updated: 2026-09-13
+updated: 2026-09-28
 reviewed: 2026-09-13
 reviewed_by: claude-opus-5
 ---
@@ -106,3 +106,25 @@ P20 modelled this on the READ side (`HermesConfig+YAML.sharedPlatformScalar`); t
   header is `{"slack.enabled": {…}}` to PyYAML, still not a `slack` dict, so its children are no
   better evidence than the key itself. No Scarf writer emits a dotted key, so this is hand-edited
   configs only #verification
+
+
+
+## B05 — the SECTION is not the only precedence: from v0.21.3 `.env` beats `extra`
+
+- [gotcha] **From v2026.9.14 (0.21.3) adapter settings read through `extra_or_secret`: a
+  NON-BLANK env var WINS over the bridged `config.extra[key]`, then the default**
+  (`gateway/platforms/_shared.py:106-128` @ v2026.9.24; commit 3dedb71f2f). Before that the
+  per-adapter `_extra_or_env` helpers read `extra` FIRST. So a Scarf form that writes config.yaml
+  for such a key is inert whenever `.env` still carries the variable (an older Scarf's write, a
+  hand edit). Mattermost `require_mention` was the live instance (S07-F4): the form now resolves
+  by host version (`isV0213OrLater`) and its Save comments the env line out. Any other form that
+  writes config for an `extra_or_secret` key needs the same check #platforms #verification
+
+
+
+## B13 — Discord + Telegram env-first settings (2026-09-28)
+
+- [decision] `PlatformEnvSetting` / `PlatformEnvAllowlist` (ScarfCore `Models/PlatformEnvSetting.swift`) model every B13 key: env key, the adapter's word set, default, and `envAlwaysWins`. Flag `HermesCapabilities.hasEnvFirstPlatformSettings` = v0.21.3 (v2026.9.14, commit 3dedb71f2f). Env-first on EVERY version (adapter read `os.getenv` only, config reached it via a first-writer-wins env bridge): Discord reactions/auto_thread/history_backfill/allowed_channels, Telegram reactions. From v0.21.3 only: Discord + Telegram require_mention, Telegram allowed_chats. Before the flip config wins when the key is present; env is the fallback for an absent key on every band (`DiscordSettings`/`TelegramSettings.presentKeys`) #platforms
+- [convention] Discord/Telegram forms show the effective value + caption, save to config.yaml and pass the `.env` line to `saveForm(envUnsetAfterConfig:)` only for keys this Save writes. Allowlist editor (`GatewayBehaviorViewModel`) shows the `.env` list and REFUSES to save an empty list while `.env` still holds entries (never drop the only allowlist). iOS read-only rows + allowlists resolve via `IOSSettingsViewModel.platformEnv` #platforms
+- [fact] Step 0: Hermes's `hermes gateway setup` and dashboard cards have HIDDEN `*_REQUIRE_MENTION`/`*_AUTO_THREAD`/`*_ALLOWED_CHANNELS` since v2026.7.30 (`hermes_cli/setup_hidden_env.py`, commit 339d968689); users get these into `.env` from Hermes's own docs (`website/docs/user-guide/messaging/discord.md:304-316`, `telegram.md:239,1329`, `matrix.md:107-115`, `mattermost.md:244`, `slack.md:849`), older wizards/dashboard cards (Matrix/Mattermost optional_env), and the ntfy dashboard card (NTFY_PUBLISH_TOPIC, still shown). DINGTALK_ALLOWED_CHATS: no wizard, no docs — out of scope #hermes
+- [todo] Not yet done (B13 follow-up): Matrix require_mention/auto_thread/dm_mention_threads/allowed_rooms, Ntfy publish_topic, Slack + Mattermost allowlists; blank `TELEGRAM_ALLOWED_CHATS=` beats config on v0.21.3+ (`blank_is_unset=False`) but Scarf treats blank as unset #roadmap

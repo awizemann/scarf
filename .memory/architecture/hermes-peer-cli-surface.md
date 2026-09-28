@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-peer-cli-surface
 tags: [hermes, peer, bot-mode, cli, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotPeersYAML.swift]
 source_paths_inferred: false
-source_sha: 3e64448e9c9e625348b929019a1050994b774e8a
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-01
 updated: 2026-09-26
-reviewed: 2026-09-10
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

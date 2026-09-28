@@ -23,7 +23,7 @@ reviewed_by: audit:claude-code (background)
 ## Drift-audit systemic finding (2026-07-14)
 - [fact] A full app-target-vs-ScarfCore duplication sweep confirmed the config parser was mostly a ONE-OFF, not a pervasive pattern: ACP wire encoding, path/home resolution (HermesPathSet/HermesProfileScope), capability gating (HermesCapabilities), ModelPreflight, and the YAML helpers (post-3e0184d) all have single owners with app-side delegation. Architecture is sound. #audit
 - [done] The DRIFT CLASS was: an app-target WRITE path (`SettingsViewModel.setSetting("x.y")`, 120 of them) paired with a ScarfCore READ path (`HermesConfig(yaml:)`) where key sets could silently diverge → saves-but-reloads-stale. Enforcement fix = a derived parity test (t-2d258871), implemented 2026-09-02 — now failing builds catch any new writes without matching readers. #enforcement
-- [gotcha] iOS `ChatView.confirmModelPreflight` is ALREADY divergent — writes model.provider/default raw, skipping LocalModelConfigPlan's clear-on-switch scrub → stale base_url routes iOS chat to wrong endpoint (GH#27132 class, the bug we fixed on Mac). Live on iOS, untracked until now → t-52f4564b. #ios-divergence
+- [gotcha] iOS `ChatView.confirmModelPreflight` is ALREADY divergent — writes model.provider/default raw via direct HermesConfigSet calls, skipping LocalModelConfigPlan's clear-on-switch scrub → stale base_url routes iOS chat to wrong endpoint (GH#27132 class, the bug we fixed on Mac). Live on iOS, untracked until now → t-52f4564b. #ios-divergence
 
 ## Relations
 - relates_to [[local-provider-config-keys-hermes-reader-verified-v0-17-0]]

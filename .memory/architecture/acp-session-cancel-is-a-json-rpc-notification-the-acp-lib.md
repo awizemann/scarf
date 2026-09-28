@@ -5,10 +5,10 @@ permalink: scarf/architecture/acp-session-cancel-is-a-json-rpc-notification-the-
 tags: [acp, hermes, cancel]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ACPMessages.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
-updated: 2026-09-26
-reviewed: 2026-09-26
+updated: 2026-09-28
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -24,3 +24,6 @@ Wire contract of the acp Python lib Hermes pins (agent-client-protocol ==0.9.0 a
 ## Relations
 - relates_to [[Chat session layer — mechanism map and 2026-07-13 diagnosis (four confirmed defects)]]
 - relates_to [[ACP turn completion is sendPrompt's return, not a stream .promptComplete event]]
+
+
+- [gotcha] After `session/cancel`, Hermes keeps the running prompt (`interrupted_prompt_text`) and prepends it to the NEXT plain-text prompt as "User correction/guidance after interrupt" (not slash commands or image prompts) (`acp_adapter/server.py:643-644`, `:721-722`, `:201-202` @ v2026.9.24; plain-text branch first at v2026.7.30 = 0.19.1, commit 34d0de80e6). Scarf's Stop note says so behind `HermesCapabilities.hasACPStoppedPromptCarriedForward` (B11); CLI bot turns keep the short note #gotcha

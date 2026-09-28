@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFi
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-04
-updated: 2026-09-10
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -25,7 +25,7 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] .env.bak carries the same secrets as .env; TransportPrivateMode.originalBasename already strips .bak/.corrupt- so LocalTransport still enforces 0600 on it #security
 
 - [convention] (GW-F2) The LOAD is the surface a caller must expose, not a `?? ""` convenience on top of it. `HermesFileService.loadMemoryFile`/`loadUserProfileFile` return the `Loaded`; `saveMemory(_:profile:after:)` takes it, so the Mac editor's conflict check and its write share ONE read and one inspection. A caller that re-reads between the check and the write reopens the window the token exists to close #guarded-write
-- [gotcha] (GW-F2) Do NOT thread a `Loaded` from an editor's INITIAL load into a save that happens minutes later (iOS `IOSMemoryViewModel` deliberately re-reads): the token's bytes become the `.bak`, so a stale one archives a version the file no longer holds. Thread it only when the read was taken immediately before the write #guarded-write
+- [gotcha] (GW-F2) Do NOT thread a `Loaded` from an editor's INITIAL load into a save that happens minutes later (iOS `IOSMemoryViewModel` deliberately re-reads): the token's bytes become the `.bak`, so a stale one archives a version the file no longer holds. Thread it only when the read was taken immediately before the write. Compare CONTENT instead: since B07 (S14-F2) iOS `save()` compares the under-lock read against `originalText` inside `mutate` and returns `nil` on mismatch (`conflictOnDisk` → Reload / Overwrite / Keep Editing alert; `save(force: true)` is Overwrite), mirroring the Mac `saveMemoryFile(ifMatches:)` — the agent writes MEMORY.md/USER.md itself (tools/memory_tool_store.py:526 @ v2026.9.24) #guarded-write
 
 
 ## Relations

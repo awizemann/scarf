@@ -5,9 +5,11 @@ permalink: scarf/conventions/capability-gated-panes-must-reload-on-re-detect-and
 tags: [capabilities, conventions, hermes-v0-21-5]
 source_paths: [scarf/scarf/Features/MCPServers/Views/MCPServersView.swift, scarf/scarf/Features/MCPServers/ViewModels/MCPServersViewModel.swift, scarf/scarf/Features/Settings/Views/Components/ModelPickerSheet.swift]
 source_paths_inferred: false
-source_sha: e6704ca507f389b431167557c7b2a28061c65757
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

@@ -3,7 +3,7 @@ title: Never run synchronous transport I/O on the MainActor from a file-watcher 
 type: note
 permalink: scarf/conventions/never-run-synchronous-transport-i/o-on-the-mainactor-from-a-file-watcher-tick-or-view-body
 created: 2026-06-21
-updated: 2026-09-07
+updated: 2026-09-27
 ---
 
 ## Observations
@@ -77,3 +77,6 @@ Commit 10c3475f. The E5 perf audit found the guarded-write arc had WIDENED two p
 - [constraint] ONE `Task.detached` FOR THE WHOLE READ-MODIFY-WRITE, never one per step: `RegistryWriteLock`'s reentrancy bookkeeping is THREAD-LOCAL, so a hold taken on the load's thread cannot cover a write running on another. Same rule `KanbanToolsetEnabler` documents; `saveDirectYAML` returns a `DirectYAMLOutcome` from inside the hold so every `@Observable` mutation happens back on the main actor.
 - [decision] `SettingsViewModel.mainActorLockWait` (the 2s acquire override) is GONE — the lock inherits the context bound like every other adopter now that the frame is off-main. `RegistryWriteLock.withAcquireTimeout` survives with no production caller, documented as a test seam and as the wrong reach: if you want it from a main-actor frame, move the frame instead.
 - [gotcha] AN ASYNC LOAD NEEDS LAST-SELECTION-WINS AND THE SAVE NEEDS A REENTRANCY GUARD. Clicking down a skill list starts one detached load per row and they finish out of order, so `contentToken` stamps each attempt and a stale result is dropped rather than painted under the current file's name; `isSavingContent` disables Save so a double-tap can't start a second write racing the first one's proof-token refresh. `isLoadingContent` is the spinner. Neither hazard existed while the work was synchronous — they are the cost of the move, and they are the first thing to check on the next one.
+
+
+- [gotcha] B03 examples (S12-F3/F4): `TemplateExportSheet` called a plan builder from `body` (7 `fileExists` + a jobs.json read, 3×/keystroke) — now one off-main `scanProjectFiles` in `load()`. `CatalogService` was MainActor by the app's default isolation; making it `nonisolated` is NOT enough under approachable concurrency (`NonisolatedNonsendingByDefault`: a `nonisolated async` func runs on its caller's actor), so its cache I/O hops to `Task.detached` explicitly, and its Codable cache type must be `nonisolated` too (isolated conformance). #concurrency

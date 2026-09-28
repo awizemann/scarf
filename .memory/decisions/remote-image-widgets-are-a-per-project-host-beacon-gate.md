@@ -5,10 +5,10 @@ permalink: scarf/decisions/remote-image-widgets-are-a-per-project-host-beacon-ga
 tags: [security, projects, widgets, consent]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ImageHostConsentStore.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppOpenURLPolicy.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift]
 source_paths_inferred: false
-source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-04
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

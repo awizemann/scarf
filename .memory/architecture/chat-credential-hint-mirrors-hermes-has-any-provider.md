@@ -5,9 +5,11 @@ permalink: scarf/architecture/chat-credential-hint-mirrors-hermes-has-any-provid
 tags: [chat, credentials, providers, hermes-release-audit]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-27
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 `HermesFileService.hasAnyAICredential` (the chat's "No AI provider credentials detected" hint) is built on `HermesProviderCredentials` in ScarfCore since R08 (S15-F4). The auth.json part (incl. the named-profile root fallback) is R03's and unchanged.
@@ -18,6 +20,7 @@ updated: 2026-09-27
 - [decision] GITHUB_TOKEN/GH_TOKEN/HF_TOKEN count only when `model.provider` is copilot/huggingface: they are everyday tokens and Hermes never auto-selects copilot (`_NO_AUTO_DETECT_PROVIDERS`, `auth.py:1453`). The provider is resolved the way Hermes does first (strip/lower + the `_PROVIDER_ALIASES` rows landing on copilot/huggingface/bedrock/lmstudio/copilot-acp/custom, `auth.py:1300-1335,1500-1501` @ v2026.9.24 — `HermesProviderCredentials.canonicalProvider`, R16c), so `github`/`github-models`/`hf` count and `aws`/`lm-studio`/`ollama` hit the keyless rule #scoped
 - [decision] A public `model.base_url` alone does NOT count as keyless — Hermes setup writes one for nearly every provider (`model_setup_flows.py:75,581`). Keyless = bedrock/vertex/copilot-acp/lmstudio, `custom:*`, `custom`+base_url, or a loopback/private/.local base_url #keyless
 - [convention] `.env` parse follows `_dotenv_has_provider_key` (`main.py:1012-1030`); the login-shell env harvest (`shellEnvKeys`) forwards the same table to Scarf-spawned hermes #env
+- [gotcha] The harvest runs the ACCOUNT's login shell (`HermesFileService.loginShell`: `pw_shell`, then `$SHELL`; zsh/bash/fish only, csh/tcsh/unknown → `/bin/zsh`), and falls back to the old `/bin/zsh` probe when that shell yields no PATH. Hard-coded zsh missed keys/PATH a bash or fish user keeps in `.bash_profile`/`config.fish` (blind re-audit S15-F5). `hermesBinaryPath()` falls back to the harvested PATH after the four fixed candidates (Nix/venv installs); on the main thread it reads `harvestedPATHIfReady()` so it never triggers the 5 s + 3 s `swift_once` there (C10). Worst case for a non-zsh shell that fails is now 4 probes (16 s) before the fallback. #env
 
 ## Relations
 - relates_to [[Named-profile auth.json falls back to the root per provider — read it the way Hermes does]]

@@ -2,20 +2,15 @@
 title: Hermes v0.18 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-18-compatibility-decisions
+tags: [hermes, v018, compatibility, capabilities, decisions]
 created: 2026-07-04
-updated: 2026-07-10
-tags:
-- hermes
-- v018
-- compatibility
-- capabilities
-- decisions
+updated: 2026-09-27
 ---
 
 Implemented on branch `feat/hermes-v018-parity` (commit 9338c59, 2026-07-04), built on [[Hermes v0.18.0 Audit Findings]]. Verified: Debug build green, 796/796 ScarfCore tests, touched app suites (CredentialPoolsGatingTests, ToolGatewayTests) green, `scripts/check-hermes-tables.py` exits 0 against the v2026.7.1 tag. Adversarial 8-angle review ran; two findings fixed pre-commit (memberwise web-default mismatch; withEnabled moved onto the model), two deliberate skips recorded below.
 
 ## Observations
-- [decision] Scarf targets Hermes v0.18.0 (v2026.7.1) as of 2026-07-04. The compacted-search surface is SCHEMA-detected (`hasCompactedColumn` via PRAGMA/table_info in both SQLite backends), not version-gated — same mechanism as v0.16's `messages.active`. Search widens to `(m.active = 1 OR m.compacted = 1)` only when the column exists; transcript/activity queries stay active-only on purpose (Hermes reloads only the active set — compacted rows are summarized away and must not resurface in the chat view, only in search). Tests pin both behaviors. #decision
+- [decision] Scarf targets Hermes v0.18.0 (v2026.7.1) as of 2026-07-04. The compacted-search surface is SCHEMA-detected (`hasCompactedColumn` via PRAGMA/table_info in both SQLite backends), not version-gated — same mechanism as v0.16's `messages.active`. Search widens to `(m.active = 1 OR m.compacted = 1)` only when the column exists; activity queries stay active-only. SUPERSEDED for transcripts (blind re-audit B01, 2026-09-27): the original premise "Hermes reloads only the active set" is true only for Hermes's MODEL projection. Its DISPLAY projection (`get_resume_conversations`, hermes_state_messages.py:1273-1293 @ v2026.9.24, #92080) includes `compacted = 1` rows, and 0.21.5 compacts in place by default, so Scarf transcript reads now use `(active = 1 OR compacted = 1)` + generation dedupe + model_only exclusion (`HermesDataService.transcriptVisibleClause`). See [[Transcript reads mirror Hermes's display projection]]. #decision
 - [decision] Provider tables: `moa` overlay added with new AuthType case `.virtual` (no credentials; model IDs are preset names — ModelPickerSheet shows a bespoke instruction, CredentialPoolsOAuthGate resolves .ok). `google-gemini-cli` overlay + gemini-cli/gemini-oauth aliases REMOVED unconditionally per the catalog-sync convention (like the v0.15 Vercel removal) — pre-v0.18 hosts lose the picker entry. Vertex needs NO Scarf entry: it's models.dev-backed (`google-vertex` in cache); its aliases live in Hermes models.py's picker table, which Scarf does NOT mirror — check-hermes-tables.py gates providerAliases against providers.py ALIASES only (adding the models.py vertex aliases made the script FAIL; reverted). #decision
 - [decision] `attach_to_session` (v0.18 per-job cron field) is a pure round-trip passthrough — decode/encode with nil→absent-key (Hermes only persists when explicitly set; encoding false would change job behavior). No editor UI this cycle; gate any future UI on `hasCronAttachToSession`. Also added `hasMCPReauth` + `isV018OrLater` with the standard 6-test cluster. #decision
 - [fixed] Pre-existing bug 1 — Web Tools tab was a DOUBLE-sided silent no-op since ≤v0.9: wrote and read dead `web_tools.*` keys while Hermes reads `web.backend`/`web.search_backend`/`web.extract_backend` (flat, under `web:`; split keys exist since ~v0.13-14, documented in config.py DEFAULT_CONFIG at v0.16). Fixed both sides; "" now means unset/inherit (matches Hermes fallback semantics; PickerRow renders "(none)"). DELIBERATE NO-MIGRATE of stale web_tools.* values: they were never in effect, silently activating them could change a working env-fallback setup, and Scarf writes per-key via `config set` so stale keys stay inert in config.yaml. #fixed

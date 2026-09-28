@@ -5,10 +5,10 @@ permalink: scarf/conventions/xcuitest-input-and-click-reliability-on-macos-what-
 tags: [testing, xcuitest, gotcha, a11y, swiftui]
 source_paths: [scarf/scarf/Features/Settings/Views/SettingsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift]
 source_paths_inferred: false
-source_sha: d0430e30da498e1f00d0377af026be5d7a4df731
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-14
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

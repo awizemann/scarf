@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
 created: 2026-05-29
-updated: 2026-09-18
+updated: 2026-09-27
 reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
@@ -17,6 +17,7 @@ reviewed_by: audit:claude-code (background)
 - [pattern] `HermesCapabilitiesStore` is injected on `ContextBoundRoot` (Mac) and `ScarfGoTabRoot` (iOS) via `.environment(_:)` and `.hermesCapabilities(_:)`. Gated UI reads it through the typed environment key. #dependency-injection
 - [convention] Capability flags grouped by Hermes release with MARK comments: `MARK: v0.14 (v2026.5.16) flags`, `MARK: v0.15 (v2026.5.28) flags`, etc. Add a new flag whenever Scarf gains a release-gated UI surface. #convention
 - [policy] Pre-target hosts gracefully hide new affordances rather than throwing on unknown CLI subcommands. Pre-v0.15 (and pre-v0.14) hosts must render byte-identical to the previous Scarf release. #compatibility
+- [policy] Alan (2026-09-27): "byte-identical on older hosts" protects NEW affordances — it is never a reason to keep a known bug. When Scarf misbehaves or makes a false claim on an older Hermes band (e.g. kanban onboarding saying tools are "enabled" for ACP chat on 0.21.1–0.21.4, where no config can reach ACP), fix it for that band with its own capability flag at the true floor, like any other gated behaviour. #compatibility
 - [policy] Before implementing a new gate, verify exact flag/config/wire shapes against the corresponding Hermes source tag (e.g., `v2026.5.28`). #verification
 
 ## Relations

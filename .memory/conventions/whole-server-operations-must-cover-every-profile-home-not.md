@@ -5,9 +5,11 @@ permalink: scarf/conventions/whole-server-operations-must-cover-every-profile-ho
 tags: [profiles, backup, restore, cron]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteBackupService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-27
 updated: 2026-09-27
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 Recurring issue class found in the v0.21.5 audit (R14 X2/X3, fixed in R16a): Server Back Up and Restore treated the Hermes home root as the only home. Each `profiles/<name>/` is a complete HERMES_HOME with its own credentials, tokens and cron store, so anything a whole-server operation does "for the home" has to be done for each profile too.

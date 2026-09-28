@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport
 source_paths_inferred: false
 source_sha: 834467ab2ab1d5523097d023b965211259223f3d
 created: 2026-09-04
-updated: 2026-09-07
+updated: 2026-09-27
 reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
@@ -18,6 +18,7 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] A CONSTANT staging name (`path + ".scarf.tmp"`) makes the publish atomic and the staging shared: two writers interleave bytes in one temp file and the second `mv` atomically publishes corruption. Every transport's temp name carries a per-write nonce. #transport
 - [constraint] `TransportPrivateMode.shouldEnforce` (public, ScarfCore) is the ONE 0600 basename list for all three transports, applied chmod-BEFORE-publish so the file is never observable at its real path in a loose mode. Citadel enforced no mode at all before t-a6f22379. LOCAL was the last holdout, fixed in GW-F5 (t-35e7593b): it used `Data.write(.atomic)` then a `try?`-swallowed chmod, so a fresh `.env`/`.env.bak` sat at 0644 for a window and a failed chmod left it there forever. It now stages to `<dir>/.scarf-write-<uuid>.tmp`, sets the mode on the STAGING file (0600 for private-mode paths — a hard throw, not `try?`; otherwise the destination's existing mode, best effort, which is how I2's existing-file-mode preservation survives), then publishes with POSIX `rename(2)`. Chmod ordering is uniform across all three transports now. `servers.json` joined the private list in the same batch (SEC F6) — host/user/port/key-path inventory — and `originalBasename` suffix-stripping covers its `.bak`/`.corrupt-` copies free.
 - [constraint] The publish is `rename(2)` onto the destination NAME, so a pre-planted symlink (including a DANGLING one) at a `.bak`/`.corrupt-`/live path is REPLACED, never followed — the secret-exfil-by-symlink attack E5 verified by hand and left unpinned. Now pinned for LocalTransport by `GuardMachineryF5Tests.symlinkAtDestinationIsReplaced`; SSH (`mv`) and Citadel (`SFTPRenamePublisher`) inherit it from the same primitive and are argued rather than tested, because they need a live host. #security Non-private remote replaces now carry the destination's existing mode over to the staged copy (best effort) so `scp`'s umask can't re-permission a file. #security
+- [gotcha] SSH staging uses `scp`, which on the macOS OpenSSH (10.x) runs in SFTP mode: NO remote shell. `scpRemoteSpec` used to shell-quote the path, so `~/'My Projects/x.tmp'` failed with `dest open "'My Projects/…'": No such file` and every remote write under a spaced folder failed (blind re-audit S15-F1, verified with `/usr/bin/scp -S <script exec'ing /usr/libexec/sftp-server>`). Now the path goes through unquoted and `scpUploadArgs` pins `-s` (SFTP); `~/` still resolves home-relative. The `mv` IS a shell command and keeps `remotePathArg` quoting. Pinned by `TransportAtomicityParityTests.scpUploadLandsAtASpacedQuotedNonASCIIPath` (real scp + sftp-server, no network). #transport #remote
 - [gotcha] Every SSH exec path needs `-T`; `runRemoteShell` (readFile/stat/ls/mv/watch) lacked it, so a user's `RequestTTY yes` or a chatty `~/.zshenv` interleaved banner text into `cat` output — read as corruption, quarantined a healthy registry, churned `.bak` per save. #remote
 
 ## Relations

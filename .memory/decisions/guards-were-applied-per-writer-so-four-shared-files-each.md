@@ -5,10 +5,10 @@ permalink: scarf/decisions/guards-were-applied-per-writer-so-four-shared-files-e
 tags: [dataloss, guarded-write, projects, transport]
 source_paths: [scarf/scarf/Core/Services/HermesEnvService.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Core/Services/SkillBootstrapService.swift]
 source_paths_inferred: false
-source_sha: 59fffa1977b7454a28cb7b72fd94baf09b565948
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-08
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

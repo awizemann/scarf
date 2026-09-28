@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectIdentity
 source_paths_inferred: false
 source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-27
 reviewed: 2026-09-04
 reviewed_by: audit:claude-code (background)
 ---
@@ -36,3 +36,6 @@ Phase 3 of projects-first-class (branch feat/projects-first-class, t-91050c08, c
 - [constraint] The governing asymmetry, which decides any future question here: **a COLLISION is catastrophic and a DIVERGENCE is cheap.** Two hosts seeded identically derive one id for two unrelated projects, `FleetService` groups them, and a fleet apply writes presets, tenants and cron jobs to the wrong machine. Two spellings of one host seeded differently cost one extra derived id — visible to the doctor, and moot the moment an id is persisted, since a minted or recorded id always beats a derived one. Normalize only what CANNOT denote a different machine. #fleet #dataloss
 - [gotcha] `hostKey` is never persisted or compared as a string anywhere; it is only ever fed into `deterministicID`. The blast radius of a change is derived UUIDs — which is exactly the `[proj:<uuid>]` cron tag / mini-app grant / fleet surface, so "only derived ids" is not a small blast radius.
 - Accepted residuals, all the cheap failure: alias vs real hostname, two case-spellings of one host, and a host registered once with an explicit user and once without, each derive a distinct key.
+
+
+- [decision] Same-folder-different-spelling at the ADD doors (t-14157321, B03): `ProjectIdentity.normalizedPath` stays frozen (no case folding — that would change derived ids and be wrong on case-sensitive volumes). Instead `ProjectsViewModel.addProject` and `project_register` refuse a LOCAL path that `ProjectIdentity.mayBeSameLocalItem` says is an already-listed folder: file identity (volume + file number after following symlinks), stat-ed only when the folder names match case-insensitively. `/Work/App` vs `/work/app` is one folder on case-insensitive APFS and two on a case-sensitive volume, and the answer follows the disk. Never applied to remote contexts. #identity

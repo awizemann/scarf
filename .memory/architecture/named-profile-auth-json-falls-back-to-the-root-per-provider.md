@@ -5,9 +5,11 @@ permalink: scarf/architecture/named-profile-auth-json-falls-back-to-the-root-per
 tags: [hermes, profiles, auth, capability-gating]
 source_paths: [scarf/scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift, scarf/scarf/Core/Services/NousSubscriptionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/NousModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesAuthFallback.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-27
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 Under a named profile (`<root>/profiles/<name>`) Hermes does not read only the profile's auth.json. Scarf's read-only auth views (Credential Pools, NousSubscriptionService, NousModelCatalogService bearer) go through `HermesAuthFallback.load` so they show what Hermes would actually use. Fixed in R03 (S06-F3).

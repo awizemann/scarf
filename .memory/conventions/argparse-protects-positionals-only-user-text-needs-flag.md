@@ -5,10 +5,10 @@ permalink: scarf/conventions/argparse-protects-positionals-only-user-text-needs-
 tags: [cli, argv, hermes, verification, cron, kanban]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesCLIOption.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanCreateRequest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanFilters.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetApplyPlan.swift, scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-11
 updated: 2026-09-11
-reviewed: 2026-09-26
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

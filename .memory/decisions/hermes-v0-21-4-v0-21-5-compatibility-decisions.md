@@ -2,12 +2,12 @@
 title: Hermes v0.21.4/v0.21.5 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-21-4-v0-21-5-compatibility-decisions
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/WebToolsBackendRoster.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/Features/Platforms/Views/PlatformSetup/WhatsAppSetupView.swift, scripts/check-hermes-tables.py]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Platforms/Views/PlatformSetup/WhatsAppSetupView.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-09-26
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 Scarf's v0.21.4 (v2026.9.21) + v0.21.5 (v2026.9.24) parity cycle, branch `feat/hermes-v0215-parity` (2026-09-26), shipping as Scarf 3.4.0. Plan + audit: `documents/plans/2026-09-26-hermes-v0-21-5-release-plan.md`, `documents/plans/2026-09-26-p6-surface-audit-findings-and-fix-plan.md`. Verdict: state.db columns Scarf reads unchanged; one new ACP event (approval closes); the big themes were multiplex-by-default gateways, CLI output/exit-code changes, and the FTS redesign.
@@ -37,9 +37,23 @@ Scarf's v0.21.4 (v2026.9.21) + v0.21.5 (v2026.9.24) parity cycle, branch `feat/h
 
 
 
+## Blind re-audit B04 (2026-09-27)
+- [decision] Profile routes: `user_id` adds +16 to specificity and a null/blank `user_id` drops the rule from v0.21.4 (`gateway/profile_routing.py:65-70`, `:140-143` @ v2026.9.24; absent at v2026.9.14) — `hasProfileRouteUserID`. `bot_profile` scopes a rule to that profile's bot (blank/`default` = the default bot) from v0.21.3 (`:64`, `:86-88`, `:101-104`; absent at v2026.9.11) — `hasProfileRouteBotScope`. Both keys stay in `HermesProfileRoute.extraLines` (round-trip verbatim); `userID`/`botProfile` read them, and `specificity`/`effectiveOrder`/`isAcceptedByHermes`/`rejectionReason`/`scopeSummary` now take `capabilities:` so older hosts rank exactly as before. Scarf's ranking was checked against `parse_profile_routes` from the tag venv. S13-F5 #profiles
+- [decision] Renaming the DEFAULT bot sets its display name: `rename_profile("default", x)` calls `set_profile_display_name` (free text, stripped, ≤64) and the id stays `default` (`hermes_cli/profiles.py:2255-2260`, `:913-921`; from v2026.8.19 = 0.20.5, where 0.20.4 refused "Cannot rename the default profile"). `BotsViewModel.renameDefaultDisplayName` skips profile-id validation and keeps `selectedProfileName = "default"`; gated `hasDefaultProfileDisplayNameRename = isV0205OrLater`. Gotcha: `BotsService.run` validates every `Lifecycle.profileNames` entry as a profile id, so `.rename(from: "default", …)` must list only `default` — a mock backend in a VM test hides this. S13-F7 #bots
+- [fact] New capability flags from B04: `hasKanbanEmptyCompletionGate` (0.21.4), `hasProfileRouteUserID` (0.21.4), `hasProfileRouteBotScope` (0.21.3), `hasACPPlatformToolsets` (0.21.5) — details in [[Kanban Board Architecture (v2.7.5)]]. #gating
+
+
+
 ## Relations
 - relates_to [[Hermes v0.21 Compatibility Decisions]]
 - relates_to [[Hermes v0.21.1 Compatibility Decisions]]
 - relates_to [[Aggregator providers must skip the model/provider mismatch preflight]]
 - relates_to [[Hermes gateway multiplex-by-default and parked profiles (v0.21.4 / v0.21.5)]]
 - relates_to [[Hermes v0.21.4 non-zero exits that are NOT failures (backup, profile delete, peer dm) and the optimize holder refusal]]
+- relates_to [[Kanban Board Architecture (v2.7.5)]]
+
+
+
+## Blind re-audit B08 (2026-09-27)
+- [decision] `hasSkillsSearchRegistryFallback` (isV0214OrLater): from v2026.9.21 `hermes skills search` falls back to the registries when the index misses a non-empty query (`_index_miss_fallback_sources`, tools/skills_hub_search.py:156,234-257 @ v2026.9.24; commit 13dcfc112b). The Hub's "All Sources" search now runs `skills search --source all --json -- <q>` there; older hosts keep the issue #79 client-side filter over the 40 browse rows, because their all-source search missed registry-only skills (e.g. honcho). An undetected host resolves capabilities first #skills #capability-gating
+- [gotcha] Hermes's fallback fires only when the index returns ZERO hits for the query (tools/skills_hub_search.py:170-171 @ v2026.9.24), and GitHub is never in the fallback set (:92). So on v0.21.4+ a query with at least one index hit still omits registry-only skills — a narrow reopening of #79 that Scarf accepts as upstream behaviour (plan default: use Hermes's own search) #skills

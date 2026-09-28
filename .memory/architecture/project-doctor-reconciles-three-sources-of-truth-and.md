@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDoctor
 source_paths_inferred: false
 source_sha: a5fb2eb0d5ab79996602b16419b9b44249680e53
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-27
 reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
@@ -46,3 +46,7 @@ Batch 2 of the fresh-eyes audit (t-1a1a9ce3). Every fix here is the same shape �
 - [decision] **`deadRootPath` is one finding per FOLDER, not per row**, keyed on the normalized path and carrying `affectedRowCount`. Removal matches rows by normalized path (converging with `ProjectStore.indexInRegistry`), so `/a/b` and `/a/b/` are one dead folder claimed twice; two findings meant a second button that could only ever throw `rowVanished`. The destructive confirm copy comes from the finding (`confirmTitle` / `confirmMessage`) rather than the sheet assuming one row. #ux
 - [gotcha] The `allowEmpty: removed == before` on that save is behaviourally identical to the `true` it replaced — `saveRegistry` consults the flag only when the list is empty, which is exactly when that condition holds. Kept as the condition because the condition is what we can justify; the real protection against blanking a misread list is the upstream lossy-load refusal. Documented in the code so nobody re-derives it as a fix.
 - [decision] **The `~`-home hole is closed structurally.** On SSH `paths.home` is the unexpanded `~/.hermes`, so the home exclusion and the `userHome` guard compared against a string no absolute path could equal — inert exactly where they mattered, and a row at `/home/alan/proj` turned `/home/alan` into a scan root (300 entries × 2 `fileExists`, over SSH, for one health check). With no expandable home we cannot NAME the home directory, so we decline to scan anything shallow enough to BE one: a scan root needs three absolute segments when the home is non-comparable. Extracted as the pure `ProjectDoctorService.scanRoots(rowPaths:home:defaultProjectsRoot:)` because the rule cannot be exercised through a local `ServerContext` — which is why it stayed broken. #remote #gotcha
+
+
+## B03 (blind re-audit S11-F4): workdirs are compared physically
+- [gotcha] Hermes stores a cron `workdir` expanded AND symlink-resolved (`cron/jobs.py:1580-1590` @ v2026.9.24, `Path.resolve()` — so `/tmp/x` becomes `/private/tmp/x`). The doctor now compares against every spelling of a row's root: `physicalRootSpellings` uses `realpath(3)` + `ProjectRootPolicy.physicalPath` locally, and ONE batched `cd -P`/`pwd -P` shell probe (20 s timeout, lexical fallback on any failure) remotely — which also resolves a `~/…` row. `resolvingSymlinksInPath` alone is not enough: it strips `/private`. The orphan `known` set includes these spellings; orphan candidates stay lexical, and the home exclusion checks the physical home spelling too — on SSH the Hermes home rides the same `cd -P` probe (so the literal `~/.hermes` no longer defeats it); `scanRoots` deliberately stays on the lexical home (a symlinked `~/.hermes` would make its parent the wrong "user home"). #remote #gotcha

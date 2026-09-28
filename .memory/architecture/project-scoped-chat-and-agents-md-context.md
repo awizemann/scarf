@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/project-scoped-chat-and-agents-md-context
 tags: [projects, chat, acp, agents-md]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift]
-source_sha: 2e1a26f6834951023226883f24f70a495897d440
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-05-29
 updated: 2026-09-27
-reviewed: 2026-09-04
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

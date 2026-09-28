@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit, scarf/Packa
 source_paths_inferred: false
 source_sha: f6fdb87f6cbf0de6dc3f7b0140ac9b4f6317ede8
 created: 2026-09-03
-updated: 2026-09-04
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -25,3 +25,9 @@ reviewed_by: audit:claude-code (background)
 - relates_to [[Project ids are derived from (host, path), never minted on a read]]
 - relates_to [[Projects registry is salvage-decoded, quarantined, and empty-save-guarded]]
 - relates_to [[Project Doctor reconciles three sources of truth and repairs only via existing writers]]
+
+
+## B03 (blind re-audit S12-F2): the entry is pinned to its profile's home
+- [gotcha] Hermes launches stdio MCP servers with a filtered env (PATH/HOME/USER/LANG/LC_ALL/TERM/SHELL/TMPDIR + XDG_* only — `tools/mcp_tool_config.py:74,111-119` @ v2026.9.24), so HERMES_HOME never reaches `scarf-projects-mcp`; unpinned, it fell back to the sticky `active_profile`, and a `hermes -p work` agent wrote into another profile's registry. `ProjectsMCPRegistrar` now pins `args: [--hermes-home, <profile home>]`. #mcp #profiles
+- [constraint] The pin is written by `HermesFileService.setMCPServerArgs` (in-place block-list patcher with read-back), NOT `hermes mcp add --args`: `--args` was `nargs="*"` until v2026.6.19 (commit dca11b6650) and rejects `--hermes-home` as an unrecognized argument on older hosts. Creation stays the bare `mcp add --command <path>` every supported host accepts. #C1 #C5
+- [decision] `hermes profile create --clone` copies config.yaml (`hermes_cli/profiles.py:35`), carrying the source's pin, so each launch also re-pins EXISTING `scarf-projects` entries in the other local profiles (only when the command is a `scarf-projects-mcp` binary; never adds one). #profiles

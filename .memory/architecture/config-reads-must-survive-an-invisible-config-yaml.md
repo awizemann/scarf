@@ -11,8 +11,6 @@ reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
 
-Docker-hosted Hermes keeps `~/.hermes` INSIDE the container; the host `hermes` is a wrapper (docker compose exec). Writes (`hermes config set`) always worked; every direct file read (SFTP/cat) failed → "config.yaml not found" Settings + the chat preflight "no models" sheet on every start. Fixed 2026-07-12, commit 5dc1c55.
-
 ## Observations
 
 - [fact] `HermesConfigReader` (ScarfCore/Services), remote-only (`guard context.isRemote`), fallback order: (1) direct `context.readText(paths.configYAML)`; (2) `cat "$(hermes config path)"` in ONE `/bin/sh -c` wrapper shell with the standard PATH prelude — path resolution AND the cat must run in the same shell; resolving then SFTP-reading the path does NOT work for containers; (3) `hermes config show` Model-line probe → synthesized minimal `model:` YAML through the normal parser. Step 3 is the only read that runs in-container; it unblocks the chat preflight gate but not full Settings.

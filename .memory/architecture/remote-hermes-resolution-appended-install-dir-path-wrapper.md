@@ -5,9 +5,11 @@ permalink: scarf/architecture/remote-hermes-resolution-appended-install-dir-path
 tags: [transport, ssh, hermes-cli, servers]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesConfigReader.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesPathSet.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift, scarf/scarf/Features/Servers/ViewModels/TestConnectionProbe.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-27
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 How the Mac finds and invokes a remote `hermes` after R08 (Hermes v0.21.5 audit S15-F1/F3). Hermes' non-root installer links the command into `~/.local/bin` (`scripts/install.sh:487-494` @ v2026.9.24) and adds it to PATH only from rc files a non-login `sh -c` never reads (`install.sh:2269-2313`).
@@ -18,6 +20,10 @@ How the Mac finds and invokes a remote `hermes` after R08 (Hermes v0.21.5 audit 
 - [gotcha] Never pass a multi-line script as an ssh argv word after `/bin/sh -c`: ssh space-joins argv for the login shell, so only the first line runs in the child sh. Test Connection now pipes its probe to `/bin/sh -s` on stdin (like SSHScriptRunner) #ssh
 - [gotcha] Never `.`-source rc files inside a `/bin/sh -s` probe: under dash (Ubuntu) one zsh-syntax line in `.zshrc` exits the whole script, and an rc `read` eats the script from stdin. The probe borrows `"$SHELL" -lc 'printf "__SCARF_PATH__%s" "$PATH"' </dev/null` instead. The line is shared as `TestConnectionProbe.loginPathBorrow`; Remote Diagnostics uses it too since R18c (T6-F2 — it used to source rc files and died under dash), and its hermes checks look for the saved `hermesBinaryHint` (probed path = one word, typed wrapper = first word) (T6-F4) #probe
 - [convention] The remote Terminal launches (chat Terminal, Webhooks `gateway setup`) are parsed by the user's own login shell UNWRAPPED, so they share `ServerContext.remoteLoginShellHermesWords(args:)`: PATH/HERMES_HOME go through `env` (csh/tcsh have no `VAR=value cmd`), the PATH word uses the csh/fish-safe quoting, the binary is `hermesBinaryShellWord`. Tests run the text under every shell on the Mac (AuditFollowupsR16cTests). iOS Citadel process/script exec strings and the ACP launch are now wrapped as ONE `/bin/sh -c '<cmd>'` word (`CitadelServerTransport.viaPOSIXShell`, R17), like the Mac's SSHTransport; residual on csh/tcsh (both platforms): `!` history expansion and a newline inside the single-quoted word still fail #terminal
+
+- [convention] Until an Edit Server sheet exists (t-83d2fe), every user-facing hint (Diagnostics `failureHint`, connection pill `describe(cause:)`, `HermesDataService.humanize`) says "remove this server and add it again with … as its Hermes data directory / Advanced → Hermes binary", never "Manage Servers → Edit" (blind re-audit S15-F2). Pinned by `BlindB09CoreTests.pillHintsPointAtRemoveAndReAdd` and `BlindB09MacTests.diagnosticsHintsNeverPointAtEdit`. #servers
+- [gotcha] iOS `CitadelServerTransport.commandLine` single-quotes argv tokens, so a `~/` token must go through `homeRelativeWord` (escaped, then `"$HOME/…"`), the Mac `remotePathArg` rule. Before S15-F4, `git -C '~/projects/x'` failed and ScarfGo never showed the branch chip for template-installed projects. `shellJoin` still treats `$` as safe (a `$FOO` arg expands) — seen, not fixed. #ios
+
 
 ## Relations
 - relates_to [[Multi-Server Architecture (Scarf 2.0+)]]

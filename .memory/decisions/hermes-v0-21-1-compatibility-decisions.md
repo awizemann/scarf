@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: e1e77724e4056341f29165bef3a5874528ee4174
 created: 2026-09-08
-updated: 2026-09-27
+updated: 2026-09-28
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -829,7 +829,10 @@ Commits `37497c16`, `f82ccb60` on `fix/whole-surface-audit-r2`.
   `merge_platform_sections` never merges a bare top-level `<plat>:` block into
   `platforms_data` (which is what `PlatformConfig.from_dict` reads it from,
   `gateway/config.py:437`), so top-level `slack.reply_to_mode` is read by no
-  Hermes version — the mattermost bug P13 fixed, third instance. Check the
+  Hermes version (and B05/S07-F1: the NESTED `platforms.slack.reply_to_mode` is parsed into
+  `PlatformConfig.reply_to_mode` but NO Slack code reads it — only the Discord/Telegram adapters
+  and Buzz's progress threading do, `gateway/run_turn.py:3145` @ v2026.9.24 — so Scarf's Slack
+  "Reply Mode" picker was removed; Slack threading is `extra.reply_in_thread`/`reply_broadcast`) — the mattermost bug P13 fixed, third instance. Check the
   plugin's own `apply_yaml_config_fn` hook too before declaring a key dead:
   slack's (`adapter.py:6449`) enumerates exactly what it translates
   #config-parsing #gateway
@@ -2143,7 +2146,10 @@ All thirteen fixed in one commit.
   `gateway status`; see `HermesGatewayRestartGuard` (s6 containers and v0.21.4+ `--external-supervisor`
   gateways still restart). R19: a v0.21.5 parked named profile (status prints only `Profile '<name>': parked (…)`)
   is refused for `gateway restart` too (it falls through `profile_lifecycle` to the foreground run); a supervised
-  hand-back that hits Scarf's timeout (last line `Command timed out after`) is `.unconfirmed` "still restarting";
+  hand-back that hits Scarf's timeout (last line `Command timed out after`) is `.unconfirmed` "still restarting"
+  (B05/S07-F3 extends this to launchd/systemd: a timed-out restart while `gateway_state.json` says
+  `draining` is `.unconfirmed` "waiting for the current turn" and the pane follows it — see
+  [[Gateway restart drains in-flight work; Scarf follows it from gateway_state.json]]);
   the menu bar relabels Restart "(running manually)"/"(status unknown)" instead of silently doing nothing
 - [fact] **`gateway restart` on Windows has no restart line at all.** `gateway_windows.restart()`
   (`hermes_cli/gateway_windows.py:1380-1399`) is `stop()`, an absence wait, then `start()` (`:1225`),
@@ -4431,7 +4437,13 @@ Round-5 decisions 14, 15, 16 and 17, plus the surface's MED and LOW residue.
   registered. Exactly the shape `HermesPlatformSharedKeyWriteP44Tests` has for the allowlist:
   a test that makes the NEXT step mandatory rather than optional #verification
 - [fact] **Mattermost's `require_mention` is config-first, env-fallback, and Scarf had it
-  inverted.** `_extra_or_env("require_mention", "MATTERMOST_REQUIRE_MENTION", "true")`
+  inverted.** (CORRECTED by B05/S07-F4: true only up to v0.21.2. From v2026.9.14 / v0.21.3 the
+  adapter reads it through `extra_or_secret` — a NON-BLANK `MATTERMOST_REQUIRE_MENTION` WINS over
+  config.yaml, `gateway/platforms/_shared.py:106-128`, `mattermost/adapter.py:503` @ v2026.9.24.
+  The form now resolves by host version and its Save writes config.yaml AND comments the `.env`
+  line out, so both sides of the flip read the chosen value. B12: the `.env` unset runs only AFTER every
+  config write succeeded — `PlatformSetupHelpers.saveForm(envUnsetAfterConfig:)`, Mattermost only — so a
+  failed config write keeps the one copy Hermes still reads.) `_extra_or_env("require_mention", "MATTERMOST_REQUIRE_MENTION", "true")`
   (`plugins/platforms/mattermost/adapter.py:504`, helper `:491-494` @ `v2026.9.7`) consults
   `config.extra` FIRST. The form READ config and WROTE `.env`, so the toggle snapped back on the
   next load AND the write was inert on any config carrying the key. One side both directions
@@ -6271,7 +6283,7 @@ runs; ScarfIOS `swift test` **60 tests / 12 suites**; Mac full serial `-only-tes
   #testing
 - [decision] **A version claim in a doc comment that no line implements is worse than none.**
   `maybeTriggerKanbanOnboarding` documented a "host pre-dates v0.12" skip and had NO gate at all,
-  while its button runs `hermes tools enable kanban --platform cli` — an unknown verb below the
+  while its button (per the sheet's then-copy; the enabler actually writes config.yaml directly, and from 0.21.5 targets `platform_toolsets.acp` — blind re-audit S03-F3) runs `hermes tools enable kanban --platform cli` — an unknown verb below the
   floor, which Hermes routes to the agent at exit 0 (C5). The detector could not stand in: it
   reads `config.yaml`, and a pre-floor config has no `kanban` toolset for exactly the reason the
   sheet must not offer to add one, so `.disabled` is what such a host answers. Gated on

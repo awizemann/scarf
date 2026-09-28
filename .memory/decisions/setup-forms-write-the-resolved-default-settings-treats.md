@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformS
 source_paths_inferred: false
 source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
 created: 2026-09-10
-updated: 2026-09-26
+updated: 2026-09-27
 reviewed: 2026-09-12
 reviewed_by: claude-opus-5
 ---
@@ -49,6 +49,14 @@ Round-5, P51. Three corrections to how far "writes the WHOLE block explicitly" r
   at `v2026.9.7` the key is a documented no-op. Count by CALL SITE — grepping the symbol puts
   the window's end three releases late. Retiring the row was rejected on C1: a v0.15–v0.17 host
   honours it #capability-gating
+- [exception] **B05 (S07-F2/F4/F5/F7): "resolved default" means HERMES's default, and a key
+  whose ABSENCE means something is never written blank.** WhatsApp `reply_prefix`: absent = the
+  built-in header, `""` = no header (`whatsapp_common.py:75-84` @ v2026.9.24), so the form writes it
+  only when typed or already present (presence via raw config text) and "Use Hermes Default" is a
+  gated `config unset`. BlueBubbles read receipts: absent env = on, so off writes `false`. Feishu
+  domain / WhatsApp mode now default to Hermes's `feishu` / `self-chat`. Mattermost: the adapter's
+  preferred side FLIPPED to env at v0.21.3 (next bullet is the pre-0.21.3 truth); the form now
+  writes config.yaml and comments the env line out so both bands agree.
 - [invariant] **A form must write the side the ADAPTER prefers, and read the other as a
   fallback.** `MattermostSetupViewModel` READ `mattermost.require_mention` from config.yaml and
   WROTE `MATTERMOST_REQUIRE_MENTION` to `.env`, so the toggle snapped back on the next load —

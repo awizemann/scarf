@@ -5,10 +5,10 @@ permalink: scarf/architecture/skills-update-prints-the-already-installed-warning
 tags: [hermes, skills, cli, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesSkillsHubParser.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-26
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 

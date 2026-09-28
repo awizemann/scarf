@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-voice-playback-runs-text-to-speech-tool-on-
 tags: [voice, tts, capabilities, security, multi-server]
 source_paths: [scarf/scarf/Core/Services/MessageSpeechService.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-18
-updated: 2026-09-19
-reviewed: 2026-09-26
+updated: 2026-09-27
+reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -19,7 +19,7 @@ Settings > Voice > Playback Engine "Hermes Voice" (P2 hardening, branch feat/voi
 - [decision] hasHermesSpeechSynthesis = v0.20.1 (v2026.8.13): first tag with the file_path+file_paths envelope and .chunkNNN/.partNN naming (tools/tts_tool.py:3669-3670, :3612-3613); provider kwarg is 0.19.1 but Scarf never passes it because an explicit provider bypasses Hermes's nous->openai mapping (_get_provider, tts_tool.py:140-144 @ v2026.9.14). Below the floor the picker is hidden and the system voice plays #capabilities #voice
 - [invariant] Path safety: the script writes into a private 0700 $TMPDIR/scarf-tts-<uid>/ (refused if symlink or foreign-owned), prints SCARF_TTS_BASE before Hermes runs (first line wins), and only paths Hermes derives from that base (suffix swap, .chunkNNN, .partNN, same dir) are read or deleted; any other envelope path aborts with nothing touched #security #voice
 - [gotcha] Hermes's default provider edge writes MP3 into a .wav output_path (_generate_edge_tts, tools/tts_tool_providers.py:196-204), so playback accepts WAV/MP3/FLAC/AIFF by magic bytes; WAV-only silently fell back to the system voice for most users #voice
-- [convention] Config paths in the script use HermesProfileScope.shellQuotePath (leading ~ is the only live $HOME); the interpreter is the hermes binary's shebang python, then python beside readlink -f; audio cache lives in ~/Library/Caches/scarf/tts keyed by server id + profile home #voice #security
+- [convention] Config paths in the script use HermesProfileScope.shellQuotePath (leading ~ is the only live $HOME); the interpreter comes from HermesPythonDiscovery (shebang python, then the install.sh launcher's `exec` line, then python beside readlink -f); a failed synthesis still falls back to the system voice but records `MessageSpeechService.fallbackNotice`, and the speaker button shows a warning glyph + tooltip with a case-derived reason (never the host's diagnostic tail, C9) (B07 / S03-F1); audio cache lives in ~/Library/Caches/scarf/tts keyed by server id + profile home #voice #security
 
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutc
 source_paths_inferred: false
 source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
 created: 2026-09-11
-updated: 2026-09-13
+updated: 2026-09-27
 reviewed: 2026-09-26
 reviewed_by: audit:claude-code (background)
 ---
@@ -66,6 +66,13 @@ P54 took the remainder of the round-5 enumeration (`t-4edfd804`, folded in): `ba
 - [gotcha] **`urllib.request` raises on any non-2xx**, so `hermes webhook test` can never print `Response (500)` — `HTTPErrorProcessor` sends it to `_cmd_test`'s `except Exception`, which prints `Error: HTTP Error 500: …` plus a misleading `Is the gateway running?`. A whole rationale and a test fixture were built on the unreachable line. **Before citing an output line as reachable, read the library call that would have to produce it**, not just the `print` #hermes-cli
 - [gotcha] **`--` is not universally safe on a verb with two list-valued parsers.** `kanban archive` carries BOTH `task_ids` (`nargs="*"`) and `--rm`/`purge_ids` (`nargs="+"`) — `hermes_cli/kanban_parser.py:335-338` — so `archive --rm -- a b` hands the ids to the POSITIONAL and leaves the destructive flag empty: an exit-2, or a silent ARCHIVE where the user asked for a permanent delete. The round-6 report listed this as `--` residue; it is the one place the separator must NOT go, and the absence is pinned by a test. The P47 rule ("safe wherever the parser is a plain positional") holds — this verb's parser is not one #hermes-cli
 - [convention] **A success may carry a `detail`, but only where the emitter's line is the RESULT.** Two documented exceptions now: `webhook test`'s `Response ({status}): {body}` (the gateway's own answer, the whole point of the button) and `backup`'s `Backup incomplete: {path}` (which archive is the partial one). Every other verdict leaves it `nil` on success, and the struct's doc names both so a consumer rendering `detail` unconditionally knows to check #conventions
+
+
+
+## Blind re-audit B08 (2026-09-27) — a whole CLI group that dropped its return code, and a second success shape
+
+- [gotcha] **`hermes cron` mutations exited 0 on EVERY refusal up to v2026.8.31.** `cmd_cron` called `cron_command(args)` and dropped the return (`hermes_cli/main.py:5626-5630` @ v2026.8.31); from v2026.9.7 it is `_forward_command(..., forward_return=True)`. So `Failed to {create|update|pause|resume|remove|re-arm} job:` / `Job not found:` came with exit 0 on older hosts, and both the Mac `CronViewModel.runAndReload` and iOS `IOSCronViewModel.runCronCLI` read them as success. `HermesCronMutationVerdict.exitZeroRefusal` matches those line prefixes (same wording on every band, so ungated). Lesson: when a verb's handler returns an int, also check that the DISPATCHER forwards it on the older tags #hermes-cli
+- [gotcha] **A verb can grow a second success shape on a new path.** `plugins update` on a catalog-installed plugin (v2026.9.11+) never runs `git pull`; `cmd_update_catalog` prints `✓ Plugin <name> updated to <sha8>.` / `is already at catalog pin <sha8>.` (`hermes_cli/plugins_cmd_catalog.py:405-406` @ v2026.9.24) and Scarf reported a false failure. The accepted pattern requires the short hex sha, so a git-pull body line cannot supply it (`HermesCLIMarkers.pluginsUpdateCatalogSuccessPattern`) #verification
 
 
 

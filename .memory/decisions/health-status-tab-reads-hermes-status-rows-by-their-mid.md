@@ -5,9 +5,11 @@ permalink: scarf/decisions/health-status-tab-reads-hermes-status-rows-by-their-m
 tags: [health, hermes-status, parsing]
 source_paths: [scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Health/Views/HealthView.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-09-27
+reviewed_by: audit:claude-code (background)
 ---
 
 R05 / S14-F4. `hermes status` prints `_row` as `  name  ✓|✗ text` (no colon) and `_kv_flag` as `  Label:  ✓|✗ text` (hermes_cli/status.py:35-52 @ v2026.9.24); the Status tab's parser (`HealthViewModel.parseOutputStatic`, shared with doctor) only knew glyph-first lines.
