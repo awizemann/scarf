@@ -161,8 +161,48 @@ import Foundation
         #expect(!Self.v0214.hasACPPlatformToolsets)
         #expect(Self.v0215.hasACPPlatformToolsets)
         #expect(KanbanToolsetDetector.chatPlatform(for: Self.v0215) == "acp")
-        #expect(KanbanToolsetDetector.chatPlatform(for: Self.v0214) == "cli")
-        #expect(KanbanToolsetDetector.chatPlatform(for: .empty) == "cli")
+        #expect(KanbanToolsetDetector.chatPlatform(for: Self.v0214) == nil)
+        #expect(KanbanToolsetDetector.chatPlatform(for: .empty) == nil)
+    }
+
+    /// Per Hermes band, what Scarf's chat surfaces conclude from the SAME
+    /// config — one that names kanban every way a user might have tried.
+    /// - 0.21.5+: the acp list decides.
+    /// - Every earlier kanban-capable band (0.13 – 0.21.4): ACP builds its
+    ///   tools from `["hermes-acp"]` alone, which never lists a kanban tool
+    ///   (`acp_adapter/session.py:598-599` @ v2026.5.7, `:637-638` @
+    ///   v2026.8.31, `:484-485` @ v2026.9.21; `toolsets.py:424-441` @
+    ///   v2026.8.31), so neither `platform_toolsets.*` nor the top-level
+    ///   `toolsets:` reaches it: never "enabled", never an Enable offer.
+    /// - Version not known yet: say nothing.
+    @Test func chatDetectionPerHermesBand() async throws {
+        let home = try B04TempHome()
+        defer { home.cleanup() }
+        let everything = "toolsets:\n- kanban\nplatform_toolsets:\n  cli:\n  - hermes-cli\n  - kanban\n"
+        try everything.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let detector = KanbanToolsetDetector(context: home.context)
+
+        for line in ["Hermes Agent v0.13.0 (2026.5.7)", "Hermes Agent v0.21.0 (2026.8.31)",
+                     "Hermes Agent v0.21.1 (2026.9.7)", "Hermes Agent v0.21.4 (2026.9.21)"] {
+            let caps = HermesCapabilities.parseLine(line)
+            #expect(caps.detected && caps.hasKanban)
+            let state = await detector.detectForChat(capabilities: caps)
+            #expect(state == .unavailableInChat, "\(line)")
+            #expect(!state.isEnabled)
+            #expect(KanbanChatToolsetPrompt.forState(state) == .unavailableInChat)
+        }
+
+        // 0.21.5: no acp list, so the legacy top-level opt-in applies.
+        #expect(await detector.detectForChat(capabilities: Self.v0215) == .enabled(via: .topLevelToolset))
+        #expect(KanbanChatToolsetPrompt.forState(.enabled(via: .topLevelToolset)) == nil)
+        try "model:\n  default: x\n".write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let off = await detector.detectForChat(capabilities: Self.v0215)
+        #expect(off == .disabled(platform: "acp"))
+        #expect(KanbanChatToolsetPrompt.forState(off) == .offerEnable(platform: "acp"))
+
+        let unknown = await detector.detectForChat(capabilities: .empty)
+        #expect(KanbanChatToolsetPrompt.forState(unknown) == nil)
     }
 
     /// Hermes's rule, checked against `_get_platform_tools(config, "acp")`

@@ -25,6 +25,18 @@ public enum KanbanToolsetState: Sendable, Equatable {
     /// than as a hard error: the rest of the app shouldn't grind to a
     /// halt because the YAML is briefly weird mid-edit.
     case unknown(reason: String)
+    /// Scarf's chats CANNOT get kanban tools on this host, whatever the
+    /// config says. Every Scarf chat is an ACP session, and before 0.21.5
+    /// ACP builds its tools from `["hermes-acp"]` alone
+    /// (`acp_adapter/session.py:484-485` @ `v2026.9.21`, `:637-638` @
+    /// `v2026.8.31`, `:598-599` @ `v2026.5.7`), a composite that has never
+    /// listed a `kanban_*` tool (`toolsets.py` `"hermes-acp"` at every tag;
+    /// `:424-441` @ `v2026.8.31`). Neither `platform_toolsets.<p>` nor the
+    /// top-level `toolsets:` changes that list; only a dispatcher worker
+    /// (`HERMES_KANBAN_TASK`) gets kanban added (`model_tools.py:428-440` @
+    /// `v2026.8.31`). The board itself works; the UI must not offer
+    /// "Enable" or report "enabled" here.
+    case unavailableInChat
 
     public enum Source: Sendable, Equatable {
         case platform(String)
@@ -40,6 +52,26 @@ public enum KanbanToolsetState: Sendable, Equatable {
     public var isEnabled: Bool {
         if case .enabled = self { return true }
         return false
+    }
+}
+
+/// What Scarf's chat surfaces (the `/goal` teaching sheet and the board's
+/// empty-state banner) should say for a detected state.
+public enum KanbanChatToolsetPrompt: Sendable, Equatable {
+    /// The chats lack kanban tools and adding `kanban` to
+    /// `platform_toolsets.<platform>` would give them some (0.21.5+).
+    case offerEnable(platform: String)
+    /// The chats cannot get kanban tools on this Hermes at all (before
+    /// 0.21.5). No Enable button, and never "enabled".
+    case unavailableInChat
+
+    /// `nil` = say nothing: already enabled, or unclassifiable.
+    public static func forState(_ state: KanbanToolsetState) -> KanbanChatToolsetPrompt? {
+        switch state {
+        case .disabled(let platform): return .offerEnable(platform: platform)
+        case .unavailableInChat: return .unavailableInChat
+        case .enabled, .unknown: return nil
+        }
     }
 }
 
@@ -66,24 +98,37 @@ public actor KanbanToolsetDetector {
         self.context = context
     }
 
-    /// The platform whose toolsets Scarf's chats run with on this host.
+    /// The platform whose toolsets Scarf's chats run with on this host, or
+    /// `nil` when no config can give them kanban tools.
     ///
     /// Every Scarf chat is an ACP session. From 0.21.5 ACP resolves its
     /// toolsets from `platform_toolsets.acp`, else the `hermes-acp` default,
     /// which has no kanban tools (`acp_adapter/session.py:480-486`,
-    /// `toolsets.py:70`, `:202-205` @ `v2026.9.24`). Older hosts hard-code
-    /// `hermes-acp` and never read the config for ACP, so they keep the
-    /// `cli` target Scarf has always used (see
-    /// `HermesCapabilities.hasACPPlatformToolsets`).
-    public nonisolated static func chatPlatform(for capabilities: HermesCapabilities) -> String {
-        capabilities.hasACPPlatformToolsets ? acpPlatform : "cli"
+    /// `toolsets.py:70`, `:202-205` @ `v2026.9.24`). Before that ACP
+    /// hard-codes `hermes-acp` and never reads the config
+    /// (see ``KanbanToolsetState/unavailableInChat``).
+    public nonisolated static func chatPlatform(for capabilities: HermesCapabilities) -> String? {
+        capabilities.hasACPPlatformToolsets ? acpPlatform : nil
+    }
+
+    /// Whether Scarf's chats will have kanban tools on this host.
+    /// `.unknown` until the host's version is known;
+    /// `.unavailableInChat` below 0.21.5 without reading the config.
+    public func detectForChat(capabilities: HermesCapabilities) async -> KanbanToolsetState {
+        guard capabilities.detected else {
+            return .unknown(reason: "Hermes version not detected yet")
+        }
+        guard let platform = Self.chatPlatform(for: capabilities) else {
+            return .unavailableInChat
+        }
+        return await detect(platform: platform)
     }
 
     public nonisolated static let acpPlatform = "acp"
 
     /// Inspect the config and return whether the `kanban` toolset is
-    /// active for the given platform. Chat surfaces pass
-    /// `chatPlatform(for:)`; the `cli` default is the pre-0.21.5 target.
+    /// active for the given platform. Chat surfaces use
+    /// `detectForChat(capabilities:)` instead.
     ///
     /// Pure read — no side effects, no caching at this layer (the VM
     /// caches). Cheap enough to call on view appear + on file-change

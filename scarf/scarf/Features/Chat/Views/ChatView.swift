@@ -678,12 +678,12 @@ struct ChatView: View {
             .environment(\.serverContext, viewModel.context)
         }
         // Kanban toolset onboarding — fires on the user's first `/goal`
-        // against a host whose chat platform (`acp` on 0.21.5+, `cli`
-        // before) lacks `kanban`. ChatViewModel sets the trigger flag; this
-        // sheet explains the gating + offers one-click enable.
+        // when Scarf's chats lack kanban tools. On 0.21.5+ it offers to add
+        // `kanban` to `platform_toolsets.acp`; below that it explains that
+        // chat kanban tools need Hermes 0.21.5 (no Enable button).
         .sheet(isPresented: kanbanOnboardingBinding) {
             ChatKanbanOnboardingSheet(
-                platform: viewModel.kanbanToolsetPlatform,
+                prompt: viewModel.kanbanOnboardingPrompt ?? .unavailableInChat,
                 onEnable: {
                     await viewModel.enableKanbanToolset()
                 },

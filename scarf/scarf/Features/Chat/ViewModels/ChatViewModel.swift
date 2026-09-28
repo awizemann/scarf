@@ -3387,28 +3387,24 @@ final class ChatViewModel {
             dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
         ) else { return }
         let context = self.context
-        // Scarf chats are ACP sessions: on 0.21.5+ they read
-        // `platform_toolsets.acp`, not `cli` (see `chatPlatform(for:)`).
-        let platform = KanbanToolsetDetector.chatPlatform(
-            for: capabilitiesStore?.capabilities ?? .empty)
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
         Task { [weak self] in
-            let detector = KanbanToolsetDetector(context: context)
-            let state = await detector.detect(platform: platform)
-            guard case .disabled = state else {
-                return
-            }
+            // Scarf chats are ACP sessions: on 0.21.5+ they read
+            // `platform_toolsets.acp`; below that no config gives them
+            // kanban tools, and the sheet says so instead of offering Enable.
+            let state = await KanbanToolsetDetector(context: context)
+                .detectForChat(capabilities: capabilities)
+            guard let prompt = KanbanChatToolsetPrompt.forState(state) else { return }
             await MainActor.run {
                 guard let self else { return }
+                self.kanbanOnboardingPrompt = prompt
                 self.showKanbanOnboardingSheet = true
             }
         }
     }
 
-    /// The platform the Kanban onboarding sheet names and writes:
-    /// `acp` on 0.21.5+, `cli` before.
-    var kanbanToolsetPlatform: String {
-        KanbanToolsetDetector.chatPlatform(for: capabilitiesStore?.capabilities ?? .empty)
-    }
+    /// What the onboarding sheet shows; set with `showKanbanOnboardingSheet`.
+    var kanbanOnboardingPrompt: KanbanChatToolsetPrompt?
 
     /// Called from the sheet's "Enable kanban tools" button. Adds `kanban`
     /// to the chat platform's list in config.yaml (`KanbanToolsetEnabler`
@@ -3417,8 +3413,11 @@ final class ChatViewModel {
     /// without having to re-open the sheet.
     func enableKanbanToolset() async {
         UserDefaults.standard.set(true, forKey: kanbanOnboardingDismissedKey)
+        // Only the offer-to-enable prompt carries a platform; below 0.21.5
+        // there is nothing to write.
+        guard case .offerEnable(let platform) = kanbanOnboardingPrompt else { return }
         let enabler = KanbanToolsetEnabler(context: context)
-        let result = await enabler.enable(platform: kanbanToolsetPlatform)
+        let result = await enabler.enable(platform: platform)
         await MainActor.run {
             switch result {
             case .enabled:

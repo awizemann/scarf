@@ -77,3 +77,45 @@ import ScarfCore
         #expect(!vm.completionNeedsResult(taskId: "t_b"))
     }
 }
+
+/// S03-F3 / S13-F4 per Hermes band, at the chat call site. Below 0.21.5 no
+/// config gives Scarf's (ACP) chats kanban tools, so the sheet's Enable path
+/// must write nothing; on 0.21.5+ it writes `platform_toolsets.acp`.
+@MainActor
+@Suite(.serialized) struct KanbanChatEnableBandB04Tests {
+
+    /// `enableKanbanToolset()` records the sheet's dismissal under the
+    /// context id, and a `.local(home:)` context shares the real local id,
+    /// so the test host's own defaults must be put back afterwards.
+    private static func preservingDismissal(_ body: () async throws -> Void) async rethrows {
+        let key = "scarf.kanbanOnboarding.dismissed.\(ServerContext.local.id.uuidString)"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+        try await body()
+    }
+
+    @Test func theUnavailablePromptWritesNothing() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let original = "model:\n  default: x\n"
+        try original.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let vm = ChatViewModel(context: home.context)
+        vm.kanbanOnboardingPrompt = .unavailableInChat
+        await Self.preservingDismissal { await vm.enableKanbanToolset() }
+        let after = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        #expect(after == original)
+    }
+
+    @Test func theOfferPromptWritesTheACPList() async throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        try "model:\n  default: x\n".write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let vm = ChatViewModel(context: home.context)
+        vm.kanbanOnboardingPrompt = .offerEnable(platform: "acp")
+        await Self.preservingDismissal { await vm.enableKanbanToolset() }
+        let after = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        #expect(after.contains("platform_toolsets:\n  acp:\n  - hermes-acp\n  - kanban\n"))
+        #expect(!after.contains("cli:"))
+    }
+}

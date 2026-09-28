@@ -67,9 +67,9 @@ public actor KanbanToolsetEnabler {
 
     /// Add `kanban` to the platform's toolset list, write the file
     /// atomically, then confirm the detector sees the change. Chat
-    /// surfaces pass `KanbanToolsetDetector.chatPlatform(for:)`: `acp` on
-    /// 0.21.5+, where Scarf's chats read `platform_toolsets.acp`; the `cli`
-    /// default is the pre-0.21.5 target.
+    /// surfaces pass `KanbanToolsetDetector.chatPlatform(for:)` (`acp`,
+    /// 0.21.5+ only) and never call this below 0.21.5, where no config
+    /// reaches Scarf's chats.
     ///
     /// Idempotent: if `kanban` is already in the right place (either
     /// the platform's list or the top-level `toolsets:`), returns

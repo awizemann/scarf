@@ -153,10 +153,12 @@ struct KanbanBoardView: View {
         }
         .onChange(of: hostCapabilities) { old, caps in
             viewModel.capabilities = caps
-            // The chat platform the toolset banner checks moves from `cli`
-            // to `acp` once a 0.21.5 host's version resolves.
-            if KanbanToolsetDetector.chatPlatform(for: old)
-                != KanbanToolsetDetector.chatPlatform(for: caps) {
+            // The banner's answer depends on the host's version (unknown,
+            // unavailable below 0.21.5, or the acp list), so re-check once
+            // it resolves or changes.
+            if old.detected != caps.detected
+                || KanbanToolsetDetector.chatPlatform(for: old)
+                    != KanbanToolsetDetector.chatPlatform(for: caps) {
                 Task { await refreshToolsetState() }
             }
         }
@@ -595,8 +597,14 @@ struct KanbanBoardView: View {
     /// since the user can clearly see kanban activity is happening
     /// somewhere — the gating is a teaching moment for the empty case.
     private var shouldShowToolsetDisabledHint: Bool {
-        guard case .disabled = toolsetState else { return false }
+        guard toolsetPrompt != nil else { return false }
         return viewModel.tasks.isEmpty
+    }
+
+    /// `.offerEnable` on 0.21.5+ hosts whose chats lack kanban;
+    /// `.unavailableInChat` below 0.21.5, where no config can add it.
+    private var toolsetPrompt: KanbanChatToolsetPrompt? {
+        toolsetState.flatMap(KanbanChatToolsetPrompt.forState)
     }
 
     private var toolsetDisabledBanner: some View {
@@ -607,11 +615,18 @@ struct KanbanBoardView: View {
                 Text("Agents in chat can't create Kanban tasks")
                     .scarfStyle(.captionStrong)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
-                Text("The `kanban` toolset isn't enabled for the chat platform, so the agent has zero kanban tools in its schema.")
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
+                if toolsetPrompt == .unavailableInChat {
+                    Text("Kanban tools in Scarf chat need Hermes 0.21.5 or later. The board itself works as usual.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                } else {
+                    Text("The `kanban` toolset isn't enabled for the chat platform, so the agent has zero kanban tools in its schema.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
             }
             Spacer(minLength: ScarfSpace.s2)
+            if case .offerEnable = toolsetPrompt {
             Button {
                 Task { await enableToolsetFromBanner() }
             } label: {
@@ -623,6 +638,7 @@ struct KanbanBoardView: View {
             }
             .buttonStyle(ScarfSecondaryButton())
             .disabled(isEnablingToolset)
+            }
         }
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, ScarfSpace.s2)
@@ -632,18 +648,18 @@ struct KanbanBoardView: View {
 
     private func refreshToolsetState() async {
         let detector = KanbanToolsetDetector(context: viewModel.context)
-        let state = await detector.detect(
-            platform: KanbanToolsetDetector.chatPlatform(for: viewModel.capabilities))
+        let state = await detector.detectForChat(capabilities: viewModel.capabilities)
         await MainActor.run {
             self.toolsetState = state
         }
     }
 
     private func enableToolsetFromBanner() async {
+        // Only offered on 0.21.5+; below that there is nothing to write.
+        guard case .offerEnable(let platform) = toolsetPrompt else { return }
         await MainActor.run { isEnablingToolset = true }
         let enabler = KanbanToolsetEnabler(context: viewModel.context)
-        let result = await enabler.enable(
-            platform: KanbanToolsetDetector.chatPlatform(for: viewModel.capabilities))
+        let result = await enabler.enable(platform: platform)
         await MainActor.run {
             isEnablingToolset = false
             switch result {
