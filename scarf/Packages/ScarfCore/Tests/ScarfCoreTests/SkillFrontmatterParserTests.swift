@@ -32,6 +32,41 @@ struct SkillFrontmatterParserTests {
         #expect(SkillFrontmatterParser.parseConfigKeys(md) == ["myplugin.path", "myplugin.mode"])
     }
 
+    /// Hermes's own reference template comments its keys
+    /// (`website/docs/developer-guide/creating-skills.md:56-69` @ v2026.9.24).
+    @Test func configKeysFromTheCommentedTemplate() {
+        let md = """
+        ---
+        name: my-skill
+        platforms: [macos, linux]          # Optional — restrict to specific OS platforms
+        metadata:  # m
+          hermes:  # h
+            tags: [Category, Subcategory, Keywords]
+            related_skills: [other-skill-name]
+            requires_toolsets: [web]            # Optional — only show when these toolsets are active
+            config:                              # Optional — config.yaml settings the skill needs
+              - key: my.setting
+                description: "What this setting controls"  # trailing comment
+                default: "sensible-default"
+                prompt: "Display prompt for setup"
+            blueprint:                              # Optional — marks this skill a runnable automation
+              schedule: "0 9 * * *"              #   cron expr / "every 2h" / ISO timestamp
+        ---
+        """
+        #expect(SkillFrontmatterParser.parseConfigKeys(md) == ["my.setting"])
+        // A description that is only a comment is empty, so the entry is skipped.
+        let empty = """
+        ---
+        metadata:
+          hermes:
+            config:
+              - key: k
+                description: # nothing
+        ---
+        """
+        #expect(SkillFrontmatterParser.parseConfigKeys(empty).isEmpty)
+    }
+
     @Test func configEntriesNeedKeyAndDescriptionAndAreDeduplicated() {
         let md = """
         ---

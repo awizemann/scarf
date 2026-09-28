@@ -46,8 +46,7 @@ public enum SkillFrontmatterParser: Sendable {
         func field(_ text: Substring) -> (String, String)? {
             guard let colon = text.firstIndex(of: ":") else { return nil }
             let key = text[..<colon].trimmingCharacters(in: .whitespaces)
-            let value = HermesYAML.stripYAMLQuotes(
-                text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+            let value = scalarValue(text[text.index(after: colon)...])
             return key.isEmpty ? nil : (key, value)
         }
 
@@ -131,5 +130,23 @@ public enum SkillFrontmatterParser: Sendable {
             .map { HermesYAML.stripYAMLQuotes($0.trimmingCharacters(in: .whitespaces)) }
             .filter { !$0.isEmpty }
         return items.isEmpty ? nil : items
+    }
+
+    /// A block-scalar value with its quotes and any trailing `# comment`
+    /// removed. Hermes's own template comments its keys
+    /// (`config:   # Optional — …`, `website/docs/developer-guide/
+    /// creating-skills.md:64` @ v2026.9.24), and PyYAML drops the comment.
+    static func scalarValue(_ raw: Substring) -> String {
+        let text = raw.trimmingCharacters(in: .whitespaces)
+        if let quote = text.first, quote == "\"" || quote == "'" {
+            let body = text.dropFirst()
+            if let close = body.firstIndex(of: quote) { return String(body[..<close]) }
+            return HermesYAML.stripYAMLQuotes(text)
+        }
+        if text.hasPrefix("#") { return "" }
+        if let hash = text.range(of: " #") {
+            return String(text[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
+        return text
     }
 }

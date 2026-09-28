@@ -140,14 +140,17 @@ struct SkillDetailView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Required config not set")
+                            Text("Skill settings not set")
                                 .font(.callout)
                                 .fontWeight(.semibold)
-                            Text("Add these keys to ~/.hermes/config.yaml:")
+                            // Hermes stores them under `skills.config.<key>`
+                            // (hermes_cli/config.py:897-899) and
+                            // `hermes config migrate` prompts for them.
+                            Text("Set these in config.yaml, or run `hermes config migrate` on that host:")
                                 .font(.caption)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                             ForEach(vm.missingConfig, id: \.self) { key in
-                                Text("• \(key)")
+                                Text("• skills.config.\(key)")
                                     .font(.caption.monospaced())
                             }
                         }
