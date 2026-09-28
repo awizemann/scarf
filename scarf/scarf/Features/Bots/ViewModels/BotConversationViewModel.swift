@@ -1,5 +1,6 @@
 import Foundation
 import ScarfCore
+import os
 
 /// Drives one bot's canonical "Bot Chat" conversation (B3).
 ///
@@ -127,8 +128,7 @@ final class BotConversationViewModel {
     private(set) var cliTurnDirectories: Set<String> = []
 
     /// Turns the user stopped, so their non-zero exit reads as a stop, not
-    /// a failure.
-    @ObservationIgnored
+    /// a failure. Observed, so Stop disappears as soon as it is pressed.
     private var stoppedCLITurns: Set<String> = []
 
     /// How the bot's ACP client is built. **Always** goes through this — the
@@ -449,14 +449,18 @@ final class BotConversationViewModel {
         "/tmp/scarf-bot-chat-\(UUID().uuidString)"
     }
 
-    /// The `pkill -f` pattern for the turn staged in `stagingDirectory`.
-    /// The first `/` sits in a bracket class so the pattern never matches
-    /// the command line of the shell that runs `pkill` — on a remote host
-    /// that shell's arguments contain the pattern text itself.
+    /// The `pkill -f` pattern for the turn staged in `stagingDirectory`:
+    /// the `--query-file <dir>/message.txt` pair only the `hermes chat -Q`
+    /// process carries — not the `chmod` helpers that touch the same
+    /// directory while the message is staged, which a Stop pressed in that
+    /// window would otherwise "stop" instead of the turn. The first `/`
+    /// sits in a bracket class so the pattern never matches the command
+    /// line of the shell that runs `pkill` (on a remote host that shell's
+    /// arguments contain the pattern text itself).
     nonisolated static func cliTurnProcessPattern(stagingDirectory: String) -> String? {
         guard stagingDirectory.hasPrefix("/tmp/scarf-bot-chat-"),
               stagingDirectory.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "/" || $0 == "-" }) else { return nil }
-        return "[/]" + stagingDirectory.dropFirst()
+        return "query-file [/]" + stagingDirectory.dropFirst() + "/message[.]txt"
     }
 
     /// The shell line that interrupts one turn's process with `signal`.
@@ -475,13 +479,18 @@ final class BotConversationViewModel {
     /// with a grace period for tool subprocesses, then saves the session
     /// and exits 130 (`_install_single_query_signal_handlers`,
     /// hermes_cli/cli_single_query.py:365-416; the `KeyboardInterrupt` arm
-    /// at :205-211 @ v2026.9.24) — and on any Hermes, Python turns SIGINT
-    /// into that same `KeyboardInterrupt`. If the process is still there
-    /// after `stopEscalationDelay`, SIGTERM, then SIGKILL.
+    /// at :205-211 @ v2026.9.24). A Hermes without that handler still gets
+    /// Python's own `KeyboardInterrupt` for SIGINT — but not for SIGTERM,
+    /// which kills it without saving. So SIGTERM, then SIGKILL, come only
+    /// after `escalationDelay` each, long enough for the save to finish.
     ///
     /// A Stop pressed while the message is still being staged finds no
     /// process yet, so SIGINT is retried for a few seconds before giving up.
-    nonisolated static func interruptCLITurn(context: ServerContext, stagingDirectory: String) async {
+    nonisolated static func interruptCLITurn(
+        context: ServerContext,
+        stagingDirectory: String,
+        escalationDelay: TimeInterval = stopEscalationDelay
+    ) async {
         func send(_ signal: String) async -> Int32 {
             guard let command = interruptCommand(stagingDirectory: stagingDirectory, signal: signal) else { return 1 }
             return await OffPool.run { () -> Int32 in
@@ -497,15 +506,22 @@ final class BotConversationViewModel {
             if attempt > 0 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
             if await send("INT") == 0 { interrupted = true; break }
         }
-        guard interrupted else { return }
+        guard interrupted else {
+            logger.warning("Stop found no running Bot Chat turn to interrupt (pkill found nothing, is missing, or the host was unreachable)")
+            return
+        }
         for signal in ["TERM", "KILL"] {
-            try? await Task.sleep(nanoseconds: UInt64(stopEscalationDelay * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(escalationDelay * 1_000_000_000))
             if await send(signal) == 1 { return }
         }
     }
 
-    /// How long a stopped turn gets to exit before the next, harder signal.
-    nonisolated static let stopEscalationDelay: TimeInterval = 10
+    /// How long a stopped turn gets to save and exit before the next,
+    /// harder signal. Generous: SIGTERM raises inside Hermes's own
+    /// interrupt cleanup, which can include a memory-provider flush.
+    nonisolated static let stopEscalationDelay: TimeInterval = 30
+
+    private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "BotConversation")
 
     /// Confirm the ACP session Scarf actually ended up bound to is the
     /// canonical Bot Chat, and refuse the conversation if it is not.

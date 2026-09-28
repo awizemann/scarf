@@ -176,9 +176,9 @@ import ScarfCore
     @Test func processPatternIsSelfExcludingAndStrict() {
         let dir = "/tmp/scarf-bot-chat-0A1B2C3D-0000-4000-8000-00000000ABCD"
         let pattern = BotConversationViewModel.cliTurnProcessPattern(stagingDirectory: dir)
-        #expect(pattern == "[/]tmp/scarf-bot-chat-0A1B2C3D-0000-4000-8000-00000000ABCD")
+        #expect(pattern == "query-file [/]tmp/scarf-bot-chat-0A1B2C3D-0000-4000-8000-00000000ABCD/message[.]txt")
         let command = BotConversationViewModel.interruptCommand(stagingDirectory: dir, signal: "INT")
-        #expect(command == "pkill -INT -f '[/]tmp/scarf-bot-chat-0A1B2C3D-0000-4000-8000-00000000ABCD'")
+        #expect(command == "pkill -INT -f 'query-file [/]tmp/scarf-bot-chat-0A1B2C3D-0000-4000-8000-00000000ABCD/message[.]txt'")
         #expect(command?.contains(dir) == false, "the command line would match itself")
         // Anything not minted by Scarf is refused.
         #expect(BotConversationViewModel.cliTurnProcessPattern(stagingDirectory: "/tmp/x'; rm -rf ~") == nil)
@@ -203,14 +203,21 @@ import ScarfCore
         }
         let target = try spawn(dir)
         let bystander = try spawn(other)
-        defer { bystander.terminate() }
+        // A staging helper touching the same directory (the `chmod`s run
+        // while the message is staged) is not the turn.
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        helper.arguments = ["-e", "$SIG{INT}='DEFAULT'; sleep 30", "--", "600", "\(dir)/message.txt"]
+        try helper.run()
+        defer { bystander.terminate(); helper.terminate() }
 
-        await BotConversationViewModel.interruptCLITurn(context: .local, stagingDirectory: dir)
+        await BotConversationViewModel.interruptCLITurn(context: .local, stagingDirectory: dir, escalationDelay: 0.2)
         for _ in 0..<50 where target.isRunning { try await Task.sleep(nanoseconds: 50_000_000) }
         #expect(!target.isRunning, "the turn's process survived Stop")
         #expect(target.terminationReason == .uncaughtSignal)
         #expect(target.terminationStatus == SIGINT)
         #expect(bystander.isRunning, "Stop hit another turn's process")
+        #expect(helper.isRunning, "Stop hit a staging helper instead of the turn")
     }
 }
 

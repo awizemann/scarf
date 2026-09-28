@@ -1950,13 +1950,23 @@ final class ChatViewModel {
     /// one on a resume, the config default on a new chat (S03-F2). A host
     /// without these fields: the mode chip keeps its value (as before) and
     /// the badge shows the global default.
-    private func adoptSessionState(from client: ACPClient, configModel: String?) async {
+    ///
+    /// `keepModelWhenUnreported`: the reconnect ladder reloads the SAME
+    /// session, so a host that sends no `models` keeps the badge it had
+    /// (as before); a new start clears it. Every write is dropped when a
+    /// newer start replaced `client` while this awaited.
+    private func adoptSessionState(
+        from client: ACPClient,
+        configModel: String?,
+        keepModelWhenUnreported: Bool = false
+    ) async {
         let state = await client.lastSessionState
+        guard acpClient === client else { return }
         if let modeId = state.currentModeId {
             richChatViewModel.activeApprovalMode = ACPApprovalMode(rawValue: modeId) ?? .default
         }
         guard let pickerId = state.currentModelId else {
-            currentModelPreset = nil
+            if !keepModelWhenUnreported { currentModelPreset = nil }
             return
         }
         let presets = (try? await ModelPresetService.shared(for: context).list()) ?? []
@@ -1966,6 +1976,7 @@ final class ChatViewModel {
             let svc = fileService
             defaultModel = await OffPool.run { svc.loadConfig().model }
         }
+        guard acpClient === client else { return }
         currentModelPreset = Self.badgePreset(pickerId: pickerId, presets: presets, configModel: defaultModel)
     }
 
@@ -2749,7 +2760,7 @@ final class ChatViewModel {
                     // The header shows what the reloaded session runs: a
                     // fresh `hermes acp` restores it at the `default` mode
                     // (S01-F1) and on its saved model (S03-F2).
-                    await adoptSessionState(from: client, configModel: nil)
+                    await adoptSessionState(from: client, configModel: nil, keepModelWhenUnreported: true)
 
                     // A reconnect is a fresh ACP session, so the
                     // session-scoped edit-approval mode is back at the
