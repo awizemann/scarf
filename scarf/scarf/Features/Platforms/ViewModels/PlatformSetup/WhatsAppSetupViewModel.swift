@@ -178,6 +178,12 @@ final class WhatsAppSetupViewModel: PlatformSetupForm {
             return
         }
         guard !isBusy else { return }
+        // Same latch `commitSave` honours: a config.yaml Scarf could not read
+        // means `replyPrefixInConfig` is not known either.
+        if let refusal = loadRefusal {
+            showSaveFailure(refusal)
+            return
+        }
         guard replyPrefixInConfig else {
             replyPrefix = ""
             return

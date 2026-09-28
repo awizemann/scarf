@@ -27,6 +27,9 @@ struct SpotifySignInSheet: View {
     /// What the sheet shows before (or instead of) the auth run — S07-F6.
     @State private var gate: Gate = .checking
     @State private var clientIDDraft = ""
+    /// The redirect URI Hermes will listen on — the host's own setting when
+    /// it has one, else Hermes's default.
+    @State private var redirectURI = SpotifyAuthFlow.redirectURI
 
     /// A first-time LOCAL sign-in needs a Client ID Hermes would otherwise
     /// ask for on a terminal; a REMOTE window cannot finish the OAuth
@@ -49,13 +52,13 @@ struct SpotifySignInSheet: View {
         .frame(minWidth: 440, idealWidth: 440, minHeight: 320)
         .task {
             guard flow == nil else { return }
-            if serverContext.isRemote {
-                gate = .remote
-                return
-            }
             let f = SpotifyAuthFlow(context: serverContext)
             flow = f
-            if await f.clientIDIsKnown() {
+            let setup = await f.loadSetup()
+            redirectURI = setup.redirectURI
+            if serverContext.isRemote {
+                gate = .remote
+            } else if setup.clientIDKnown {
                 gate = .running
                 f.start()
             } else {
@@ -133,12 +136,12 @@ struct SpotifySignInSheet: View {
                 Text("1. Open the Spotify developer dashboard and click Create app.")
                 Text("2. Add this Redirect URI and select Web API:")
                 HStack {
-                    Text(verbatim: SpotifyAuthFlow.redirectURI)
+                    Text(verbatim: redirectURI)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(SpotifyAuthFlow.redirectURI, forType: .string)
+                        NSPasteboard.general.setString(redirectURI, forType: .string)
                     }
                     .controlSize(.small)
                 }
@@ -179,9 +182,9 @@ struct SpotifySignInSheet: View {
     /// A remote window: the OAuth callback listens on the HOST's loopback,
     /// so sign-in has to run there, with the port forwarded to this Mac.
     private var remoteView: some View {
-        let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext)
+        let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext, redirectURI: redirectURI)
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort)) on that host, so Scarf can't complete it from this window.")
+            Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort(of: redirectURI))) on that host, so Scarf can't complete it from this window.")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")

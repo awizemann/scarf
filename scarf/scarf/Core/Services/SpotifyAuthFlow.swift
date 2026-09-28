@@ -527,17 +527,52 @@ final class SpotifyAuthFlow {
         return !id.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Off the main actor (C10): read `.env` and `auth.json` and answer
-    /// ``hasKnownClientID(env:authJSON:)``. An unreadable `.env` answers
-    /// from `auth.json` alone — the worst case is asking for an ID Hermes
-    /// already has, which still signs in.
-    func clientIDIsKnown() async -> Bool {
+    /// What the sheet needs before it can start: whether Hermes already
+    /// knows a client ID, and the redirect URI Hermes will listen on.
+    struct Setup: Equatable, Sendable {
+        var clientIDKnown: Bool
+        var redirectURI: String
+    }
+
+    /// Off the main actor (C10): read `.env` and `auth.json` once and answer
+    /// both questions. An unreadable `.env` answers from `auth.json` alone —
+    /// the worst case is asking for an ID Hermes already has, which still
+    /// signs in.
+    func loadSetup() async -> Setup {
         let context = self.context
         return await OffPool.run {
             let env = (try? HermesEnvService(context: context).loadProven()) ?? [:]
             let auth = try? context.makeTransport().readFile(context.paths.authJSON)
-            return Self.hasKnownClientID(env: env, authJSON: auth)
+            return Setup(
+                clientIDKnown: Self.hasKnownClientID(env: env, authJSON: auth),
+                redirectURI: Self.redirectURI(env: env, authJSON: auth)
+            )
         }
+    }
+
+    /// The redirect URI `hermes auth spotify` will listen on, from the same
+    /// sources in the same order as `_spotify_redirect_uri`
+    /// (`auth_spotify.py:67-70` @ v2026.9.24): `HERMES_SPOTIFY_REDIRECT_URI`,
+    /// `SPOTIFY_REDIRECT_URI`, the stored `providers.spotify.redirect_uri`,
+    /// then the default. The first-time wizard pins a non-default one in
+    /// `.env` (`:307-308`).
+    nonisolated static func redirectURI(env: [String: String], authJSON: Data?) -> String {
+        for key in ["HERMES_SPOTIFY_REDIRECT_URI", "SPOTIFY_REDIRECT_URI"] {
+            if let value = env[key]?.trimmingCharacters(in: .whitespaces), !value.isEmpty { return value }
+        }
+        if let authJSON,
+           let json = (try? JSONSerialization.jsonObject(with: authJSON)) as? [String: Any],
+           let spotify = (json["providers"] as? [String: Any])?["spotify"] as? [String: Any],
+           let uri = (spotify["redirect_uri"] as? String)?.trimmingCharacters(in: .whitespaces),
+           !uri.isEmpty {
+            return uri
+        }
+        return redirectURI
+    }
+
+    /// The loopback port in a redirect URI (Hermes requires an explicit one).
+    nonisolated static func callbackPort(of redirectURI: String) -> Int {
+        URL(string: redirectURI)?.port ?? callbackPort
     }
 
     /// Spotify's default loopback callback port
@@ -552,11 +587,12 @@ final class SpotifyAuthFlow {
     /// Scarf's own spawn cannot finish on a remote host — the browser on
     /// this Mac is redirected to this Mac's 127.0.0.1:43827, where nothing
     /// listens, and a first-time wizard needs a terminal (S07-F6).
-    static func remoteCommandLine(for context: ServerContext) -> String {
-        GatewaySetupTerminalCommand.shellLine(
+    static func remoteCommandLine(for context: ServerContext, redirectURI: String = redirectURI) -> String {
+        let port = callbackPort(of: redirectURI)
+        return GatewaySetupTerminalCommand.shellLine(
             for: context,
             hermesArgs: ["auth", "spotify", "--no-browser"],
-            localForwards: ["\(callbackPort):127.0.0.1:\(callbackPort)"]
+            localForwards: ["\(port):127.0.0.1:\(port)"]
         )
     }
 }
