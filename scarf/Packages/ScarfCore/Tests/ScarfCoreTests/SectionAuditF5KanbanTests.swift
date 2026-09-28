@@ -350,3 +350,42 @@ struct SectionAuditF5KanbanTests {
             == [.unblock, .dispatch])
     }
 }
+
+/// S13a-F1 — decode the dispatch summary Hermes really prints.
+@Suite struct KanbanDispatchSummaryC02Tests {
+    private func decode(_ json: String) throws -> KanbanDispatchSummary {
+        try JSONDecoder().decode(KanbanDispatchSummary.self, from: Data(json.utf8))
+    }
+
+    @Test func readsEveryBucket() throws {
+        let s = try decode(#"""
+        {"promoted":1,"spawned":[{"task_id":"a","assignee":"p","workspace":"/w"}],
+         "skipped_unassigned":["b"],"skipped_nonspawnable":["c"],
+         "skipped_per_profile_capped":[{"task_id":"d","assignee":"p","current":3}],
+         "respawn_guarded":[{"task_id":"e","reason":"active_pr"}],
+         "skipped_locked":false,"memory_pressure":null}
+        """#)
+        #expect(s.promoted == 1)
+        #expect(s.notStartedReason(for: "a") == nil)
+        #expect(s.notStartedReason(for: "b") == .unassigned)
+        #expect(s.notStartedReason(for: "c") == .assigneeNotAProfile)
+        #expect(s.notStartedReason(for: "d") == .profileAtCapacity(assignee: "p"))
+        #expect(s.notStartedReason(for: "e") == .respawnGuarded(reason: "active_pr"))
+        #expect(s.notStartedReason(for: "z") == .notReadyOrAtCapacity)
+    }
+
+    @Test func lockAndMemoryPressure() throws {
+        #expect(try decode(#"{"spawned":[],"skipped_locked":true}"#)
+            .notStartedReason(for: "a") == .dispatcherBusy)
+        #expect(try decode(#"{"spawned":[],"memory_pressure":"critical"}"#)
+            .notStartedReason(for: "a") == .memoryPressure(level: "critical"))
+    }
+
+    /// An older host (kanban since v2026.5.7) prints `spawned` but none of
+    /// the newer skip buckets.
+    @Test func olderPayloadStillDecodes() throws {
+        let s = try decode(#"{"reclaimed":0,"promoted":0,"spawned":[{"task_id":"a","assignee":"p","workspace":null}]}"#)
+        #expect(s.notStartedReason(for: "a") == nil)
+        #expect(s.notStartedReason(for: "b") == .notReadyOrAtCapacity)
+    }
+}

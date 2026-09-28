@@ -376,12 +376,27 @@ final class KanbanBoardViewModel {
         let svc = service
         Task {
             do {
+                var dispatchSummary: KanbanDispatchSummary?
                 for step in plan.steps {
-                    try await applyStep(step, taskId: taskId, blockReason: blockReason, completeResult: completeResult, service: svc)
+                    if let summary = try await applyStep(step, taskId: taskId, blockReason: blockReason, completeResult: completeResult, service: svc) {
+                        dispatchSummary = summary
+                    }
                 }
                 // Refresh once on success so the polled state catches up
                 // without waiting for the 5s tick.
                 await refresh()
+                // `kanban dispatch` exits 0 whether or not it started this
+                // task (S13a-F1). If this pass didn't, and the poll doesn't
+                // show it running either (another dispatcher may have started
+                // it), say why and drop the Running override — otherwise the
+                // poll (ready/todo ≠ Running) never clears it.
+                if let dispatchSummary,
+                   let why = dispatchSummary.notStartedReason(for: taskId),
+                   let row = tasks.first(where: { $0.id == taskId }),
+                   columnFromStatus(row.status) != .running {
+                    clearStatusOverride(for: taskId)
+                    transientNotice = Self.notStartedMessage(why)
+                }
             } catch let err as KanbanError {
                 clearStatusOverride(for: taskId)
                 lastError = err.errorDescription
@@ -678,13 +693,37 @@ final class KanbanBoardViewModel {
         }
     }
 
+    /// The notice shown when a drop onto Running did not start the task.
+    nonisolated static func notStartedMessage(_ reason: KanbanDispatchSummary.NotStartedReason) -> String {
+        let lead = String(localized: "The task wasn't started.")
+        let why: String
+        switch reason {
+        case .unassigned:
+            why = String(localized: "It has no assignee.")
+        case .assigneeNotAProfile:
+            why = String(localized: "Its assignee isn't a Hermes profile, so the dispatcher can't spawn a worker for it.")
+        case .profileAtCapacity(let assignee):
+            why = String(localized: "\(assignee) is already running as many tasks as kanban.max_in_progress_per_profile allows. Hermes will start it when a slot frees up.")
+        case .respawnGuarded(let guardReason):
+            why = String(localized: "Hermes's respawn guard held it back (\(guardReason)).")
+        case .dispatcherBusy:
+            why = String(localized: "Another dispatcher was already running on this board. It may start shortly.")
+        case .memoryPressure(let level):
+            why = String(localized: "Hermes held back new workers because memory pressure is \(level).")
+        case .notReadyOrAtCapacity:
+            why = String(localized: "It isn't ready yet (it may have unfinished parent tasks), or the board is at its in-progress limit.")
+        }
+        return lead + " " + why
+    }
+
+    /// Returns the dispatcher's summary for a `.dispatch` step, else nil.
     private func applyStep(
         _ step: KanbanTransitionStep,
         taskId: String,
         blockReason: String?,
         completeResult: String?,
         service: KanbanService
-    ) async throws {
+    ) async throws -> KanbanDispatchSummary? {
         switch step {
         case .dispatch:
             // The dispatcher silently skips tasks without an assignee.
@@ -699,7 +738,7 @@ final class KanbanBoardViewModel {
                     reason: "This task has no assignee. Hermes's dispatcher only spawns workers for assigned tasks. Open the task and assign a profile, or recreate it with an assignee."
                 )
             }
-            _ = try await service.dispatch(maxTasks: nil, dryRun: false)
+            return try await service.dispatch(maxTasks: nil, dryRun: false)
         case .unblock:
             try await service.unblock(taskIds: [taskId])
         case .reopenReview:
@@ -744,5 +783,6 @@ final class KanbanBoardViewModel {
         case .archive:
             try await service.archive(taskIds: [taskId])
         }
+        return nil
     }
 }

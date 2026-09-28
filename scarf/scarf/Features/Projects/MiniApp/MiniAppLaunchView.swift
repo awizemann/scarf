@@ -13,13 +13,28 @@ struct CockpitMiniAppsPanel: View {
     /// slide-in inspector (via `AppCoordinator.presentedMiniApp`).
     let onOpen: (MiniAppManifest) -> Void
 
+    /// Why Open is off on an SSH server. The asset handler serves files
+    /// from the Mac's disk only, so a remote project's mini-app never loads
+    /// (S12-F1); saying so beats a grant sheet followed by a blank page.
+    static let remoteUnsupportedNote = String(
+        localized: "Mini-apps run on local projects only. This project is on a remote server, so its mini-apps can't be opened from Scarf yet.")
+
     var body: some View {
         Group {
             if let project, !manifests.isEmpty {
-                List(manifests) { manifest in
-                    row(manifest, project: project)
+                VStack(alignment: .leading, spacing: 0) {
+                    if serverContext.isRemote {
+                        Label(Self.remoteUnsupportedNote, systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                    }
+                    List(manifests) { manifest in
+                        row(manifest, project: project)
+                    }
+                    .listStyle(.plain)
                 }
-                .listStyle(.plain)
             } else if project == nil {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -55,6 +70,8 @@ struct CockpitMiniAppsPanel: View {
             // next. The visible title stays "Open".
             Button("Open") { onOpen(manifest) }
                 .buttonStyle(ScarfSecondaryButton())
+                .disabled(serverContext.isRemote)
+                .help(serverContext.isRemote ? Self.remoteUnsupportedNote : "")
                 .accessibilityLabel(Text("Open \(manifest.name)"))
         }
         .padding(.vertical, 2)
@@ -95,7 +112,7 @@ struct MiniAppLaunchHost: View {
     /// after a refused write told the user their decision had stuck.
     @State private var saveError: String? = nil
 
-    private enum Phase { case loading, incompatible, review, run }
+    private enum Phase { case loading, incompatible, remoteUnsupported, review, run }
 
     var body: some View {
         Group {
@@ -110,6 +127,17 @@ struct MiniAppLaunchHost: View {
                     CockpitEmptyState(
                         icon: "exclamationmark.triangle",
                         text: "“\(manifest.name)” needs a newer mini-app bridge (requires \(manifest.minBridgeVersion); this Scarf provides \(miniAppBridgeVersion)). Update Scarf to run it."
+                    )
+                    Button("Close") { onClose() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .remoteUnsupported:
+                // Backstop for any route that reaches here on a remote
+                // context: stop before the grant sheet (S12-F1).
+                VStack(spacing: 16) {
+                    CockpitEmptyState(
+                        icon: "network.slash",
+                        text: "Mini-apps run on local projects only. This project is on a remote server, so its mini-apps can't be opened from Scarf yet."
                     )
                     Button("Close") { onClose() }
                 }
@@ -150,6 +178,10 @@ struct MiniAppLaunchHost: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: manifest.id) {
+            guard !serverContext.isRemote else {
+                phase = .remoteUnsupported
+                return
+            }
             // Version gate first: refuse a mini-app built against a newer
             // bridge contract rather than silently half-running it.
             guard MiniAppBridge.satisfiesMinBridgeVersion(manifest.minBridgeVersion) else {
