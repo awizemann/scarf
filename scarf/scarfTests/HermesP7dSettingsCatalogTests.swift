@@ -69,7 +69,11 @@ struct HermesP7dSettingsCatalogTests {
     func floorGatedAliasStaysUnresolvedBelowFloor() {
         let providers = [Self.provider("openai-codex")]
         let caps = HermesCapabilities.parse("Hermes Agent v0.21.3 (2026.1.1)")
-        #expect(ModelPickerSheet.resolveInitialProviderID("chatgpt", in: providers, capabilities: caps) == "chatgpt")
+        // B02b: below its floor `chatgpt` is also a name that host's
+        // resolver rejects ("Unknown provider"), so the sheet selects
+        // nothing rather than restoring a provider Save would write back.
+        // Either way it is NOT redirected to `openai-codex`.
+        #expect(ModelPickerSheet.resolveInitialProviderID("chatgpt", in: providers, capabilities: caps) == "")
     }
 
     /// An empty `initialProvider` (fresh preflight, no model block yet)
