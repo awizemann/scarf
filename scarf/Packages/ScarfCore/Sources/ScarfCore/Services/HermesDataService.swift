@@ -49,6 +49,7 @@ public actor HermesDataService {
     private var hasListableChildSupport = false
     private var hasArchivedColumn = false
     private var hasDisplayKindColumn = false
+    private var hasDisplayMetadataColumn = false
 
     /// Cached `state_meta.fts_tool_full_content_high_water`, read once
     /// per open on the first search that needs it. `.some(nil)` means
@@ -140,6 +141,7 @@ public actor HermesDataService {
         hasListableChildSupport = await backend.hasListableChildSupport
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
+        hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -161,6 +163,7 @@ public actor HermesDataService {
         hasListableChildSupport = await backend.hasListableChildSupport
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
+        hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -372,8 +375,10 @@ public actor HermesDataService {
     /// - `archived = 0` — sessions the user soft-hid with
     ///   `hermes sessions archive` or the Hermes dashboards. Gated on the
     ///   column existing (v0.16+); older hosts emit the same SQL as before.
+    /// - `source NOT IN ('kanban', 'tool', 'oneshot')` — see
+    ///   `internalListingSourcesClause`.
     private var sessionListPredicate: String {
-        var clauses: [String] = []
+        var clauses: [String] = [internalListingSourcesClause]
         if hasListableChildSupport {
             let branch = """
                 \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
@@ -393,6 +398,40 @@ public actor HermesDataService {
         }
         return clauses.joined(separator: " AND ")
     }
+
+    /// Sessions that are not human conversations, which every Hermes
+    /// session picker leaves out: kanban workers, third-party tool
+    /// integrations (`hermes chat --source tool`) and one-shot runs.
+    ///
+    /// The list is `INTERNAL_LISTING_SOURCES`
+    /// (hermes_state_sessions.py:173-177 @ v2026.9.24), applied as
+    /// `s.source NOT IN (…)` by `_session_filter_where` (:117) for the
+    /// console `sessions list` (hermes_cli/console_engine.py:602-605), the
+    /// CLI `/sessions` picker (hermes_cli/cli_session_mixin.py:319-324) and
+    /// the TUI/Desktop lists (tui_gateway/methods_session.py:126-129).
+    /// `hermes sessions list` hides `tool` only
+    /// (`_default_exclude`, hermes_cli/sessions_cmd.py:259-261); Scarf
+    /// follows the desktop pickers, the GUIs it sits beside.
+    ///
+    /// Not gated (charter C1): each source is hidden by Hermes's pickers
+    /// from the release that first writes it — `tool` since v2026.3.28
+    /// (below Scarf's supported floor), `kanban` since v2026.8.3 (tagged in
+    /// the kanban dispatcher and denied by the TUI/CLI pickers in the same
+    /// tag), `oneshot` since v2026.9.21 — so an older host has no such rows
+    /// and lists exactly what it did. `COALESCE` keeps a NULL source (never
+    /// written by Hermes; `source` is NOT NULL) listed rather than dropped.
+    ///
+    /// Also bounds the Dashboard's session count, which counts listed
+    /// conversations. Usage sums still cover every session row.
+    private var internalListingSourcesClause: String {
+        let column = hasListableChildSupport ? "s.source" : "source"
+        let sources = Self.internalListingSources.map { "'\($0)'" }.joined(separator: ", ")
+        return "COALESCE(\(column), '') NOT IN (\(sources))"
+    }
+
+    /// Hermes's `INTERNAL_LISTING_SOURCES` (see
+    /// `internalListingSourcesClause`).
+    public static let internalListingSources = ["kanban", "tool", "oneshot"]
 
     /// Hermes's non-throwing JSON marker lookup (`_sql_json_extract`,
     /// hermes_state_common.py:67-74 @ v2026.9.24): `json_extract` over the
@@ -547,6 +586,71 @@ public actor HermesDataService {
             Self.logger.warning("fetchSessions failed: \(error.localizedDescription, privacy: .public)")
             throw queryFailure(error)
         }
+    }
+
+    /// The listed sessions that own any of `sessionIds`, newest first —
+    /// the per-project Sessions tab's query.
+    ///
+    /// Queries the ids directly instead of filtering the host's newest
+    /// sessions: a project's chats are a handful among every cron run and
+    /// gateway conversation on the host, so a global top-N window dropped
+    /// them within days on a busy one. Same list predicate and compression
+    /// tip projection as `fetchSessionsChecked`, so a row looks exactly as
+    /// it does in the Sessions list.
+    ///
+    /// An id may name a rotated compression continuation (a chat resumed
+    /// after its session rotated) while the list shows the chain under its
+    /// root; the recursive step climbs `end_reason = 'compression'` parents
+    /// so that root is found too. That step reads `end_reason`, so it rides
+    /// only where the listable-child predicate proved the column exists —
+    /// the same hosts that get tip projection at all.
+    ///
+    /// Ids are sent in chunks of `chunkSize` to stay under SQLite's
+    /// bound-parameter limit (999 before 3.32).
+    public func fetchListedSessionsChecked(
+        owning sessionIds: Set<String>,
+        chunkSize: Int = 200
+    ) async throws -> [HermesSession] {
+        let ids = sessionIds.filter { !$0.isEmpty }.sorted()
+        guard !ids.isEmpty else { return [] }
+        let idColumn = hasListableChildSupport ? "s.id" : "id"
+        var listed: [String: HermesSession] = [:]
+        do {
+            for start in stride(from: 0, to: ids.count, by: max(chunkSize, 1)) {
+                let chunk = Array(ids[start..<min(start + max(chunkSize, 1), ids.count)])
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                let sql: String
+                if hasListableChildSupport {
+                    sql = """
+                        WITH RECURSIVE owned(id) AS (
+                            SELECT id FROM sessions WHERE id IN (\(placeholders))
+                            UNION
+                            SELECT parent.id FROM owned
+                            JOIN sessions child ON child.id = owned.id
+                            JOIN sessions parent ON parent.id = child.parent_session_id
+                            WHERE parent.end_reason = 'compression'
+                        )
+                        SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) IN (SELECT id FROM owned)
+                        """
+                } else {
+                    sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND \(idColumn) IN (\(placeholders))"
+                }
+                let rows = try await backend.query(sql, params: chunk.map { .text($0) })
+                for row in rows {
+                    let session = sessionFromRow(row)
+                    listed[session.id] = session
+                }
+            }
+        } catch {
+            Self.logger.warning("fetchListedSessions failed: \(error.localizedDescription, privacy: .public)")
+            throw queryFailure(error)
+        }
+        let ordered = listed.values.sorted {
+            let l = $0.startedAt ?? .distantPast
+            let r = $1.startedAt ?? .distantPast
+            return l != r ? l > r : $0.id > $1.id
+        }
+        return await projectCompressionTips(ordered, columns: sessionListColumns).sessions
     }
 
     /// Every listable session started at or after `since`, newest first,
@@ -871,6 +975,27 @@ public actor HermesDataService {
         if ids.count == 1 { return ("session_id = ?", [.text(ids[0])]) }
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
         return ("session_id IN (\(placeholders))", ids.map { .text($0) })
+    }
+
+    /// Whether any of `sessionIds` holds turns an in-place compaction
+    /// archived (`active = 0, compacted = 1`). One indexed probe, `LIMIT 1`.
+    ///
+    /// Sessions export uses it to say when a file leaves those turns out:
+    /// Hermes's JSONL export reads the live rows only (`include_compacted`
+    /// is set just for `SAVE_TRANSCRIPT_FORMATS` = md/html,
+    /// hermes_cli/session_export.py:212, sessions_cmd.py:335 @ v2026.9.24)
+    /// and Trace reads `get_messages_as_conversation` without it. False on
+    /// a host without the column, before `open()`, and on any failure.
+    public func hasArchivedTurns(sessionIds: [String]) async -> Bool {
+        guard hasMessagesActiveColumn, hasCompactedColumn else { return false }
+        let owner = Self.sessionIdPredicate(sessionIds)
+        guard !owner.params.isEmpty else { return false }
+        let sql = "SELECT 1 FROM messages WHERE \(owner.sql) AND active = 0 AND compacted = 1 LIMIT 1"
+        do {
+            return !(try await backend.query(sql, params: owner.params)).isEmpty
+        } catch {
+            return false
+        }
     }
 
     /// The newest `limit` transcript rows across several sessions, oldest
@@ -1198,8 +1323,9 @@ public actor HermesDataService {
         // (`active = 1 OR compacted = 1`), while rewind/undo rows
         // (active=0, compacted=0) stay hidden. Mirror that so Scarf
         // searches the same ROW SET as `hermes sessions search` on the
-        // same DB. Transcript/activity fetches above stay active-only
-        // — Hermes reloads only the active set there too.
+        // same DB. Transcript reads use the same row set (plus Hermes's
+        // generation dedupe — see `transcriptVisibleClause`); the
+        // Activity feeds stay active-only.
         //
         // The QUERY TEXT deliberately does NOT match Hermes's: Hermes
         // strips FTS5's special characters
@@ -1349,11 +1475,112 @@ public actor HermesDataService {
         hasDisplayKindColumn ? " AND COALESCE(\(alias)display_kind, '') <> 'hidden'" : ""
     }
 
-    /// Row filter for transcript reads over bare `messages`: the active
-    /// set (see the O1 decision in `fetchMessagesOutcome`), minus rows
-    /// Hermes hides from every display.
+    /// Row filter for transcript reads over bare `messages` (chat resume,
+    /// "Load earlier", tool-result hydration, reconnect reconcile, polling
+    /// and the Sessions detail): the rows Hermes itself DISPLAYS for a
+    /// conversation, minus rows it hides from every display.
+    ///
+    /// Hermes 0.21.5 compacts in place by default (`compression.in_place:
+    /// True`, hermes_cli/config_defaults.py:658-663 @ v2026.9.24): earlier
+    /// turns are soft-archived under the same session id as `active = 0,
+    /// compacted = 1` (`_ARCHIVE_ACTIVE_SQL`, hermes_state_messages.py:63).
+    /// Its display projection keeps them — `get_resume_conversations`
+    /// reads `active = 1 OR compacted = 1` (:1273-1293, #92080) — while
+    /// only the MODEL projection stays active-only. Reading the active set
+    /// alone made every reopened compacted chat look as if its earlier
+    /// turns had been deleted.
+    ///
+    /// With `messages.compacted` present this mirrors that projection:
+    /// - `(active = 1 OR compacted = 1)`: live rows plus archived history;
+    ///   rewind/undo rows (`active = 0, compacted = 0`) stay out.
+    /// - `compactionGenerationDedupeClause`: one row per logical message.
+    /// - `modelOnlyClause`: micro-compaction's merged rows stay out.
+    /// - `display_kind = 'hidden'` rows stay out, as before.
+    ///
+    /// A host without the column (pre-v0.18) gets exactly the SQL it got
+    /// before (charter C1/C4).
     private var transcriptVisibleClause: String {
-        (hasMessagesActiveColumn ? " AND active = 1" : "") + displayVisibleClause()
+        guard hasMessagesActiveColumn else { return displayVisibleClause() }
+        guard hasCompactedColumn else { return " AND active = 1" + displayVisibleClause() }
+        return " AND (active = 1 OR compacted = 1)"
+            + compactionGenerationDedupeClause
+            + modelOnlyClause()
+            + displayVisibleClause()
+    }
+
+    /// Drops a row when an EARLIER compaction-archived row of the same
+    /// session carries the same logical message.
+    ///
+    /// Each in-place compaction re-inserts what it keeps (the protected
+    /// head, the verbatim tail, turns that arrived mid-compaction) as
+    /// fresh rows, so the display set can hold the same message once per
+    /// generation. Hermes collapses them with `_dedupe_display_generations`
+    /// (hermes_state_messages.py:892-908 @ v2026.9.24), keyed on
+    /// `(role, content, timestamp, tool_call_id, tool_calls, tool_name)`
+    /// (`_display_dedupe_key`, :866-878), and orders each group by its
+    /// FIRST row's id. Scarf keeps that first row as the group's
+    /// representative, so ordering by id — which every transcript page,
+    /// the "Load earlier" cursor and the reconcile window rely on — matches
+    /// Hermes's display order within a session. The key columns are
+    /// identical across a group, so the text shown is what Hermes shows;
+    /// only columns outside the key (reasoning, token_count,
+    /// finish_reason) come from the archived row rather than the live one.
+    ///
+    /// Only an archived (`active = 0, compacted = 1`) row can be the
+    /// earlier copy: a compaction archives every active row before it
+    /// inserts the new generation (`archive_and_compact`, :735-795), so
+    /// within one session the older copy is always archived. That keeps
+    /// the probe on `(session_id, active, timestamp)`
+    /// (`idx_messages_session_active`, hermes_state_common.py:585-586).
+    ///
+    /// Known differences:
+    /// - Hermes also folds a user row whose live text sits inside a handoff
+    ///   carrier (`split_user_originated_turn`); that needs Python-side
+    ///   parsing and is not reproduced here.
+    /// - Hermes's key has no session id and runs over a whole rotated
+    ///   lineage, so it also folds a tail a ROTATION copied into its
+    ///   continuation (the parent's copies stay `active = 1`). This clause
+    ///   is per session, so a lineage read still shows those twice, as it
+    ///   did before in-place compaction was handled.
+    /// - Hermes before v2026.9.21 could give a carried steer turn a fresh
+    ///   timestamp per generation (fixed by bb9058d7e8); such copies do not
+    ///   match on timestamp and show once per generation — as they did in
+    ///   Hermes's own display on those hosts.
+    private var compactionGenerationDedupeClause: String {
+        let key = ["content", "tool_call_id", "tool_calls", "tool_name"]
+            .map { " AND _gen.\($0) IS messages.\($0)" }
+            .joined()
+        return " AND NOT EXISTS (SELECT 1 FROM messages _gen"
+            + " WHERE _gen.session_id = messages.session_id"
+            + " AND _gen.active = 0 AND _gen.compacted = 1"
+            + " AND _gen.timestamp = messages.timestamp"
+            + " AND _gen.id < messages.id"
+            + " AND _gen.role = messages.role"
+            + key
+            + modelOnlyClause(alias: "_gen.")
+            + displayVisibleClause(alias: "_gen.")
+            + ")"
+    }
+
+    /// ` AND <alias>display_metadata NOT LIKE '%"model_only": true%'` when
+    /// `messages.display_metadata` exists, else `""`.
+    ///
+    /// Micro-compaction merges adjacent user turns into one row the model
+    /// reads and flags it `display_metadata.model_only`; the original turns
+    /// stay in display history as compacted rows, so Hermes keeps the
+    /// merged row out of every display (`DISPLAY_VISIBLE_SQL`,
+    /// hermes_state_messages.py:48-51; agent/micro_compaction.py:428-432 @
+    /// v2026.9.24). Without this the merged text would show next to the
+    /// turns it was made from.
+    ///
+    /// Matched as text rather than with `json_extract` so it needs no JSON1
+    /// in the remote host's sqlite3: Hermes writes the column only through
+    /// `json.dumps` (`_encode_display_metadata`, :162-177), whose default
+    /// spelling is exactly `"model_only": true`.
+    private func modelOnlyClause(alias: String = "") -> String {
+        hasDisplayMetadataColumn
+            ? " AND COALESCE(\(alias)display_metadata, '') NOT LIKE '%\"model_only\": true%'"
+            : ""
     }
 
     private func deepToolContentMatches(

@@ -50,6 +50,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasListableChildSupport = false
     private(set) public var hasArchivedColumn = false
     private(set) public var hasDisplayKindColumn = false
+    private(set) public var hasDisplayMetadataColumn = false
     private(set) public var lastOpenError: String?
 
     /// True when `open()` had to fall back to a READWRITE handle guarded by
@@ -295,6 +296,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         hasListableChildSupport = false
         hasArchivedColumn = false
         hasDisplayKindColumn = false
+        hasDisplayMetadataColumn = false
     }
 
     private func detectSchema() {
@@ -406,6 +408,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     case "compacted": hasCompactedColumn = true
                     case "_compressed_summary": hasCompressedSummaryColumn = true
                     case "display_kind": hasDisplayKindColumn = true
+                    case "display_metadata": hasDisplayMetadataColumn = true
                     default:          break
                     }
                 }
