@@ -147,7 +147,10 @@ final class MCPServersViewModel {
         editingServer = selectedServer
     }
 
-    func finishEdit(reload: Bool) {
+    /// `restartNeeded: false` is for a Clear Token with no saved edit: the
+    /// list must drop the oauth badge, but a restart before the user signs
+    /// in again would only disconnect the server sooner.
+    func finishEdit(reload: Bool, restartNeeded: Bool = true) {
         editingServer = nil
         if reload {
             // `force: true` is required, not cosmetic: `hasLoaded` is
@@ -155,7 +158,7 @@ final class MCPServersViewModel {
             // plain `load()` returns immediately and the list keeps
             // rendering the pre-edit values until the next section switch.
             load(force: true)
-            showRestartBanner = true
+            if restartNeeded { showRestartBanner = true }
         }
     }
 

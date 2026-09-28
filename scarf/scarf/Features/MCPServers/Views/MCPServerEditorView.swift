@@ -5,7 +5,8 @@ import ScarfDesign
 struct MCPServerEditorView: View {
     @State var viewModel: MCPServerEditorViewModel
     let onSave: (Bool) -> Void
-    let onCancel: () -> Void
+    /// `true` when Clear Token removed the token, so the list has changed.
+    let onCancel: (Bool) -> Void
     /// Close the editor and open `hermes mcp login` for this server. Nil
     /// when the host has no `mcp login` (pre-v0.18, `hasMCPReauth`).
     var onSignIn: (() -> Void)? = nil
@@ -24,7 +25,7 @@ struct MCPServerEditorView: View {
                 Spacer()
                 // A cleared token changed what the list shows (the oauth
                 // badge), so leaving must reload it even without a save.
-                Button("Cancel") { viewModel.tokenCleared ? onSave(true) : onCancel() }
+                Button("Cancel") { onCancel(viewModel.tokenCleared) }
                     .keyboardShortcut(.cancelAction)
                 Button {
                     viewModel.save { changed in

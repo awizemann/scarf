@@ -92,14 +92,16 @@ struct MCPServersView: View {
                     // editing the wrong machine.
                     viewModel: MCPServerEditorViewModel(server: server, context: viewModel.context),
                     onSave: { changed in viewModel.finishEdit(reload: changed) },
-                    onCancel: { viewModel.finishEdit(reload: false) },
+                    onCancel: { tokenCleared in
+                        viewModel.finishEdit(reload: tokenCleared, restartNeeded: false)
+                    },
                     // After Clear Token (S09-F1). The login sheet opens from
                     // this sheet's onDismiss: two sheets can't be up at once.
                     onSignIn: capabilitiesStore?.capabilities.hasMCPReauth == true
                         && server.auth == "oauth" && server.transport != .stdio
                         ? {
                             signInAfterEdit = server
-                            viewModel.finishEdit(reload: true)
+                            viewModel.finishEdit(reload: true, restartNeeded: false)
                         }
                         : nil
                 )
