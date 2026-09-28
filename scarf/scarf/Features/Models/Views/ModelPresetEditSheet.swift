@@ -8,6 +8,9 @@ import ScarfDesign
 /// picker, same callback shape as Settings → General.
 struct ModelPresetEditSheet: View {
     let initial: ModelPreset?
+    /// The main profile's config.yaml custom providers (presets bind to
+    /// projects that chat on the main profile), as Settings → General passes.
+    var customProviders: ModelPreflight.CustomProviders = .none
     let onSave: (ModelPreset) -> Void
     let onCancel: () -> Void
 
@@ -18,10 +21,12 @@ struct ModelPresetEditSheet: View {
 
     init(
         initial: ModelPreset?,
+        customProviders: ModelPreflight.CustomProviders = .none,
         onSave: @escaping (ModelPreset) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.initial = initial
+        self.customProviders = customProviders
         self.onSave = onSave
         self.onCancel = onCancel
         _name = State(initialValue: initial?.name ?? "")
@@ -52,6 +57,7 @@ struct ModelPresetEditSheet: View {
                             label: "",
                             currentModel: modelID,
                             currentProvider: providerID,
+                            customProviders: customProviders,
                             onChange: { newModel, newProvider in
                                 modelID = newModel
                                 providerID = newProvider

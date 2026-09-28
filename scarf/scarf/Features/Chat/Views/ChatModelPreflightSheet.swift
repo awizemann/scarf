@@ -16,6 +16,8 @@ import ScarfDesign
 struct ChatModelPreflightSheet: View {
     let reason: String
     let serverDisplayName: String
+    /// config.yaml's custom providers, so the picker routes them like Settings does.
+    var customProviders: ModelPreflight.CustomProviders = .none
     let onSelect: (_ model: String, _ provider: String) -> Void
     /// Local-tab selection (Ollama, LM Studio, …) — carries the base
     /// URL / key / mode payload the plain (model, provider) pair can't.
@@ -31,6 +33,7 @@ struct ChatModelPreflightSheet: View {
             ModelPickerSheet(
                 initialProvider: "",
                 initialModel: "",
+                customProviders: customProviders,
                 onSelect: { modelID, providerID in
                     onSelect(modelID, providerID)
                     dismiss()
