@@ -71,7 +71,7 @@ final class RemoteDiagnosticsViewModel {
             case .hermesHomeConfigured:
                 return nil
             case .hermesDirExists:
-                return "Scarf is looking at the default `~/.hermes`. If Hermes is installed elsewhere (e.g. `/var/lib/hermes/.hermes` for systemd installs), set the Hermes home directory in Manage Servers → this server → Edit."
+                return "Scarf is looking at the default `~/.hermes`. If Hermes is installed elsewhere (e.g. `/var/lib/hermes/.hermes` for systemd installs), remove this server in Manage Servers and add it again with that path as its Hermes data directory (saved servers can't be edited yet)."
             case .hermesDirReadable:
                 return "The SSH user can see `~/.hermes` but can't list it. Check permissions: `ls -ld ~/.hermes` on the remote — the SSH user needs at least `r-x`."
             case .configYAMLReadable, .configYAMLContents:
@@ -87,9 +87,9 @@ final class RemoteDiagnosticsViewModel {
             case .sqlite3CanOpenStateDB:
                 return "sqlite3 exists but can't open state.db. Could be a permission issue, a corrupt DB, or a version skew."
             case .hermesBinaryNonLogin:
-                return "Scarf's runtime calls use non-login SSH shells (no .bashrc), with `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `~/.hermes/bin` added to PATH. When this server has a saved Hermes binary, that is what this check looks for. If `hermes` lives somewhere else and only appears via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`, or set the Hermes binary in Manage Servers → this server → Edit."
+                return "Scarf's runtime calls use non-login SSH shells (no .bashrc), with `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `~/.hermes/bin` added to PATH. When this server has a saved Hermes binary, that is what this check looks for. If `hermes` lives somewhere else and only appears via the login path, runtime CLI calls will fail. Move your PATH export from `.bashrc` to `.zshenv` or `.profile`, or remove this server in Manage Servers and add it again with the path under Advanced → Hermes binary (saved servers can't be edited yet)."
             case .hermesBinaryLogin:
-                return "hermes couldn't be located on your login shell's PATH or in the standard install directories. If this server has a saved Hermes binary, check that it still exists; otherwise set the Hermes binary in Manage Servers → this server → Edit."
+                return "hermes couldn't be located on your login shell's PATH or in the standard install directories. If this server has a saved Hermes binary, check that it still exists; otherwise remove this server in Manage Servers and add it again with the path under Advanced → Hermes binary (saved servers can't be edited yet)."
             case .pgrepAvailable:
                 return "pgrep not found on remote. Dashboard can't determine whether Hermes is running. Install procps: `apt install procps` (most distros have it by default)."
             }

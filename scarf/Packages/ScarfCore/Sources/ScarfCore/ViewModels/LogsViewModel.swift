@@ -81,15 +81,28 @@ public final class LogsViewModel {
         }
         #endif
 
-        public var loggerPrefix: String? {
+        /// Logger-name prefixes for this component, copied from Hermes's
+        /// own `COMPONENT_PREFIXES` (hermes_logging.py:159-169 @ v2026.9.24)
+        /// and matched the way Hermes's `_ComponentFilter` does, with a plain
+        /// `startswith`. Every earlier tag's map is a subset of this one
+        /// (v2026.5.16 had only `gateway` for the gateway), so a name that
+        /// did not exist on an older host simply matches nothing there.
+        /// `nil` means no filter.
+        public var loggerPrefixes: [String]? {
             switch self {
             case .all: return nil
-            case .gateway: return "gateway"
-            case .agent: return "agent"
-            case .tools: return "tools"
-            case .cli: return "cli"
-            case .cron: return "cron"
+            case .gateway: return ["gateway", "hermes_plugins", "plugins.platforms"]
+            case .agent: return ["agent", "run_agent", "model_tools", "batch_runner"]
+            case .tools: return ["tools"]
+            case .cli: return ["hermes_cli", "cli"]
+            case .cron: return ["cron"]
             }
+        }
+
+        /// Whether a line from `logger` belongs to this component.
+        public func matches(logger: String) -> Bool {
+            guard let prefixes = loggerPrefixes else { return true }
+            return prefixes.contains { logger.hasPrefix($0) }
         }
     }
 
@@ -104,11 +117,11 @@ public final class LogsViewModel {
     private func recomputeFilteredEntries() {
         let level = filterLevel
         let search = searchText
-        let prefix = selectedComponent.loggerPrefix
+        let component = selectedComponent
         filteredEntries = entries.filter { entry in
             let levelOk = level == nil || entry.level == level
             let searchOk = search.isEmpty || entry.raw.localizedCaseInsensitiveContains(search)
-            let componentOk = prefix.map { entry.logger.hasPrefix($0) } ?? true
+            let componentOk = component.matches(logger: entry.logger)
             return levelOk && searchOk && componentOk
         }
     }

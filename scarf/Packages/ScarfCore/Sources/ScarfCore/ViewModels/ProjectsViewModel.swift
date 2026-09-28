@@ -436,8 +436,16 @@ public final class ProjectsViewModel {
         // so `/a/b` and `/a/b/` are the same folder. A second row at a path
         // splits the project's identity and is the state the Doctor reports
         // as `duplicatePath`.
+        //
+        // On this Mac the same folder can also be spelled differently —
+        // `/Work/App` and `/work/app` on a case-insensitive volume, or a
+        // symlinked parent — so a local add also compares file identity.
+        // Never for a remote context: the local disk says nothing about it.
         let normalized = ProjectIdentity.normalizedPath(path)
-        if let existing = registry.projects.first(where: { ProjectIdentity.normalizedPath($0.path) == normalized }) {
+        if let existing = registry.projects.first(where: {
+            ProjectIdentity.normalizedPath($0.path) == normalized
+                || (!context.isRemote && ProjectIdentity.mayBeSameLocalItem($0.path, path))
+        }) {
             fail("Couldn't add “\(name)”", reason: "That folder is already in the list as “\(existing.name)”.")
             return false
         }

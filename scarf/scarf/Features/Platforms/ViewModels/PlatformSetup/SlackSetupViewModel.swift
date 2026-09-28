@@ -27,7 +27,13 @@ final class SlackSetupViewModel: PlatformSetupForm {
     var homeChannel: String = ""
     var homeChannelName: String = ""
 
-    var replyToMode: String = "first"
+    // No "Reply Mode" (`reply_to_mode`) field (S07-F1). `PlatformConfig`
+    // parses `platforms.slack.reply_to_mode` (`gateway/config.py:422,477` @
+    // `v2026.9.24`) but no Slack code reads it back: the only readers are the
+    // Discord and Telegram adapters and Buzz's progress threading
+    // (`gateway/run_turn.py:3145`). Slack threading is `extra.reply_in_thread`
+    // / `reply_broadcast`, the two toggles below, so a picker for it was a
+    // control that saved and did nothing.
     var requireMention: Bool = true
     var replyInThread: Bool = true
     var replyBroadcast: Bool = false
@@ -38,8 +44,6 @@ final class SlackSetupViewModel: PlatformSetupForm {
     var messageIsFailure = false
     /// P54b: the third seal state — an exit-0 run that proved nothing.
     var messageIsUnconfirmed = false
-
-    let replyToModeOptions = ["off", "first", "all"]
 
     /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
@@ -53,7 +57,6 @@ final class SlackSetupViewModel: PlatformSetupForm {
             homeChannelName = env["SLACK_HOME_CHANNEL_NAME"] ?? ""
 
             guard let cfg = snapshot.config?.slack else { return }
-            replyToMode = cfg.replyToMode
             requireMention = cfg.requireMention
             replyInThread = cfg.replyInThread
             replyBroadcast = cfg.replyBroadcast
@@ -70,7 +73,6 @@ final class SlackSetupViewModel: PlatformSetupForm {
         ]
         // Slack uses the modern `platforms.slack.*` schema.
         let configKV: [String: String] = [
-            "platforms.slack.reply_to_mode": replyToMode,
             "platforms.slack.require_mention": PlatformSetupHelpers.envBool(requireMention),
             "platforms.slack.extra.reply_in_thread": PlatformSetupHelpers.envBool(replyInThread),
             "platforms.slack.extra.reply_broadcast": PlatformSetupHelpers.envBool(replyBroadcast)

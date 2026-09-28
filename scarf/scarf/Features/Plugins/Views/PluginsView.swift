@@ -14,7 +14,7 @@ struct PluginsView: View {
     /// answers "no" to on a non-tty.
     @State private var enableOnInstall = true
     /// Set when the user asks to enable a plugin that declares
-    /// `tool_override` — the grant is confirmed explicitly before any
+    /// the `tools.override` capability — the grant is confirmed explicitly before any
     /// `--allow-tool-override` reaches the CLI.
     @State private var pendingToolOverride: HermesPlugin?
     /// v0.16 Spotify sign-in sheet state. Only rendered when the spotify
@@ -89,7 +89,7 @@ struct PluginsView: View {
             }
             Button("Cancel", role: .cancel) { pendingToolOverride = nil }
         } message: {
-            Text("This plugin declares `tool_override`. Granting it lets the plugin take over built-in tools such as `shell_exec` and `write_file` for every session on this host.")
+            Text("This plugin declares the `tools.override` capability. Granting it lets the plugin take over built-in tools such as `shell_exec` and `write_file` for every session on this host.")
         }
         .sheet(item: Binding(
             get: { viewModel.installReport },
@@ -306,7 +306,7 @@ struct PluginsView: View {
                     // v0.14 — surface plugins that replace a built-in
                     // tool with a visible badge so users notice
                     // overridden behavior. The flag comes from the
-                    // plugin's manifest (`tool_override: true`).
+                    // plugin manifest's `capabilities: [tools.override]`.
                     if plugin.toolOverride {
                         ScarfBadge("tool-override", kind: .info)
                     }

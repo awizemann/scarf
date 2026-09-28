@@ -88,6 +88,7 @@ struct KanbanBoardView: View {
     @State private var blockSheetDestination: KanbanBoardColumn = .blocked
     @State private var completeSheetTaskId: String?
     @State private var completeSheetTitle: String = ""
+    @State private var completeSheetResultRequired = false
 
     /// Cached gating state — refreshed on appear + after a successful
     /// `Enable now` click. `.disabled` triggers the toolset-off hint
@@ -150,8 +151,16 @@ struct KanbanBoardView: View {
         .onChange(of: supportsKanbanDiagnostics) { _, isOn in
             viewModel.supportsDiagnostics = isOn
         }
-        .onChange(of: hostCapabilities) { _, caps in
+        .onChange(of: hostCapabilities) { old, caps in
             viewModel.capabilities = caps
+            // The banner's answer depends on the host's version (unknown,
+            // unavailable below 0.21.5, or the acp list), so re-check once
+            // it resolves or changes.
+            if old.detected != caps.detected
+                || KanbanToolsetDetector.chatPlatform(for: old)
+                    != KanbanToolsetDetector.chatPlatform(for: caps) {
+                Task { await refreshToolsetState() }
+            }
         }
         // Pause every poll loop while the window is not the active scene.
         // A backgrounded Scarf window kept spawning `hermes kanban list`
@@ -188,7 +197,10 @@ struct KanbanBoardView: View {
             }
         }
         .sheet(isPresented: completeSheetBinding) {
-            KanbanCompleteResultSheet(taskTitle: completeSheetTitle) { result in
+            KanbanCompleteResultSheet(
+                taskTitle: completeSheetTitle,
+                resultRequired: completeSheetResultRequired
+            ) { result in
                 if let taskId = completeSheetTaskId {
                     viewModel.attemptMove(
                         taskId: taskId,
@@ -471,6 +483,7 @@ struct KanbanBoardView: View {
                     inspectorTaskId = nil
                 },
                 onComplete: {
+                    completeSheetResultRequired = viewModel.completionNeedsResult(taskId: taskId)
                     completeSheetTaskId = taskId
                     completeSheetTitle = task.title
                 },
@@ -505,10 +518,13 @@ struct KanbanBoardView: View {
             blockSheetTitle = task.title
             blockSheetDestination = .blocked
         case .done:
-            // Manual checkoffs from running don't strictly need a result,
-            // but we offer the sheet anyway so users can record one
-            // when relevant. The move fires regardless on submit.
-            if KanbanStatus.from(task.status) == .running {
+            // The sheet opens whenever Hermes needs a result for this drop
+            // (0.21.4+ refuses evidence-less completions from every column
+            // but Review — see `completionNeedsResult`). From Running it
+            // opens on older hosts too, where the result stays optional.
+            let needsResult = viewModel.completionNeedsResult(taskId: taskId)
+            if needsResult || KanbanStatus.from(task.status) == .running {
+                completeSheetResultRequired = needsResult
                 completeSheetTaskId = taskId
                 completeSheetTitle = task.title
             } else {
@@ -581,8 +597,14 @@ struct KanbanBoardView: View {
     /// since the user can clearly see kanban activity is happening
     /// somewhere — the gating is a teaching moment for the empty case.
     private var shouldShowToolsetDisabledHint: Bool {
-        guard case .disabled = toolsetState else { return false }
+        guard toolsetPrompt != nil else { return false }
         return viewModel.tasks.isEmpty
+    }
+
+    /// `.offerEnable` on 0.21.5+ hosts whose chats lack kanban;
+    /// `.unavailableInChat` below 0.21.5, where no config can add it.
+    private var toolsetPrompt: KanbanChatToolsetPrompt? {
+        toolsetState.flatMap(KanbanChatToolsetPrompt.forState)
     }
 
     private var toolsetDisabledBanner: some View {
@@ -593,11 +615,18 @@ struct KanbanBoardView: View {
                 Text("Agents in chat can't create Kanban tasks")
                     .scarfStyle(.captionStrong)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
-                Text("The `kanban` toolset isn't enabled for the chat platform, so the agent has zero kanban tools in its schema.")
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
+                if toolsetPrompt == .unavailableInChat {
+                    Text("Kanban tools in Scarf's rich chat need Hermes 0.21.5 or later. The board itself works as usual.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                } else {
+                    Text("The `kanban` toolset isn't enabled for the chat platform, so the agent has zero kanban tools in its schema.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
             }
             Spacer(minLength: ScarfSpace.s2)
+            if case .offerEnable = toolsetPrompt {
             Button {
                 Task { await enableToolsetFromBanner() }
             } label: {
@@ -609,6 +638,7 @@ struct KanbanBoardView: View {
             }
             .buttonStyle(ScarfSecondaryButton())
             .disabled(isEnablingToolset)
+            }
         }
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, ScarfSpace.s2)
@@ -618,16 +648,18 @@ struct KanbanBoardView: View {
 
     private func refreshToolsetState() async {
         let detector = KanbanToolsetDetector(context: viewModel.context)
-        let state = await detector.detect()
+        let state = await detector.detectForChat(capabilities: viewModel.capabilities)
         await MainActor.run {
             self.toolsetState = state
         }
     }
 
     private func enableToolsetFromBanner() async {
+        // Only offered on 0.21.5+; below that there is nothing to write.
+        guard case .offerEnable(let platform) = toolsetPrompt else { return }
         await MainActor.run { isEnablingToolset = true }
         let enabler = KanbanToolsetEnabler(context: viewModel.context)
-        let result = await enabler.enable()
+        let result = await enabler.enable(platform: platform)
         await MainActor.run {
             isEnablingToolset = false
             switch result {

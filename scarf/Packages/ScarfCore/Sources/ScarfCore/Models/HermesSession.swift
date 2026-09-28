@@ -222,6 +222,51 @@ public struct HermesSession: Identifiable, Sendable {
         )
     }
 
+    /// This row with the token and cost counters of `others` added — the
+    /// continuation rows of a rotating compression, which carry every call
+    /// booked after the split. A cost adds only where a row has one; the
+    /// rest of the row (id, title, model, times) is this row's.
+    public func addingUsage(of others: [HermesSession]) -> HermesSession {
+        func sum(_ key: KeyPath<HermesSession, Double?>) -> Double? {
+            let values = ([self] + others).compactMap { $0[keyPath: key] }
+            return values.isEmpty ? nil : values.reduce(0, +)
+        }
+        func sum(_ key: KeyPath<HermesSession, Int>) -> Int {
+            ([self] + others).reduce(0) { $0 + $1[keyPath: key] }
+        }
+        return HermesSession(
+            id: id,
+            source: source,
+            userId: userId,
+            model: model,
+            title: title,
+            parentSessionId: parentSessionId,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            endReason: endReason,
+            messageCount: messageCount,
+            toolCallCount: toolCallCount,
+            inputTokens: sum(\.inputTokens),
+            outputTokens: sum(\.outputTokens),
+            cacheReadTokens: sum(\.cacheReadTokens),
+            cacheWriteTokens: sum(\.cacheWriteTokens),
+            estimatedCostUSD: sum(\.estimatedCostUSD),
+            reasoningTokens: sum(\.reasoningTokens),
+            actualCostUSD: sum(\.actualCostUSD),
+            costStatus: others.last?.costStatus ?? costStatus,
+            billingProvider: billingProvider,
+            hasCostStatusColumn: hasCostStatusColumn,
+            apiCallCount: sum(\.apiCallCount),
+            rewindCount: rewindCount,
+            pinned: pinned,
+            lastActivityAt: lastActivityAt,
+            lastActivityDescription: lastActivityDescription,
+            lastReadAt: lastReadAt,
+            lastActive: lastActive,
+            lineageIds: lineageIds
+        )
+    }
+
     public var isSubagent: Bool { parentSessionId != nil }
 
     /// Whether this conversation has activity the user hasn't seen.

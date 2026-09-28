@@ -101,6 +101,14 @@ public final class IOSMemoryViewModel {
 
     public var hasUnsavedChanges: Bool { isLoaded && text != originalText }
 
+    /// Set when a Save found the file changed on the server since this
+    /// editor loaded it (the agent writes MEMORY.md / USER.md itself,
+    /// tools/memory_tool_store.py:526 @ v2026.9.24). Holds the on-disk text.
+    /// Nothing was written; the view asks the user to reload (take the new
+    /// text, dropping the draft) or overwrite (``save(force:)`` with `true`).
+    /// Mirrors the Mac editor's `.conflict` path.
+    public private(set) var conflictOnDisk: String?
+
     public init(kind: Kind, context: ServerContext) {
         self.kind = kind
         self.context = context
@@ -137,6 +145,7 @@ public final class IOSMemoryViewModel {
             originalText = loaded
             isLoaded = true
             lastError = nil
+            conflictOnDisk = nil
         case .success(.none):
             // Genuinely absent file — treat as empty (first-time
             // create). Distinguished from transport error by the
@@ -145,6 +154,7 @@ public final class IOSMemoryViewModel {
             originalText = ""
             isLoaded = true
             lastError = nil
+            conflictOnDisk = nil
         case .failure(let error):
             // Transport error (SSH timeout, auth failure, SFTP protocol
             // issue). The buffer is NOT blanked and the editor is NOT armed
@@ -159,7 +169,10 @@ public final class IOSMemoryViewModel {
         isLoading = false
     }
 
-    public func save() async -> Bool {
+    /// Save the buffer. The write is refused when the file no longer holds
+    /// the text this editor loaded (see ``conflictOnDisk``); `force: true` is
+    /// the user's explicit "overwrite" answer to that conflict.
+    public func save(force: Bool = false) async -> Bool {
         guard !isSaving else { return false }
         // No proof, no save. The UI disables the button on `canSave`; this is
         // the model-level enforcement so a programmatic caller cannot get
@@ -173,6 +186,7 @@ public final class IOSMemoryViewModel {
         let ctx = context
         let path = kind.path(on: context)
         let snapshot = text
+        let baseline: String? = force ? nil : originalText
         let label = kind.displayName
         // GUARDED — the second of two defences, the first being `isLoaded`
         // above. An EMPTY memory file is a legal state, so only a
@@ -185,18 +199,33 @@ public final class IOSMemoryViewModel {
         // already deliberate; the lock is what makes it MEAN something —
         // without it, "read the current bytes, then write" is the same
         // read-modify-write window the Mac side had, just narrower.
-        let result: Result<Void, Error> = await Task.detached {
+        // CONFLICT-CHECKED (S14-F2): the comparison runs against the read
+        // taken under the lock, so a memory entry the agent wrote while the
+        // editor sat open is never published away. An absent file loads as
+        // "" on both sides, so a first-time create still saves.
+        let result: Result<String?, Error> = await Task.detached {
             do {
                 let file = GuardedTextFile(context: ctx, label: label)
-                try file.mutate(path) { _ in snapshot }
-                return .success(())
+                var conflict: String?
+                try file.mutate(path) { loaded in
+                    if let baseline, loaded.text != baseline {
+                        conflict = loaded.text
+                        return nil
+                    }
+                    return snapshot
+                }
+                return .success(conflict)
             } catch {
                 return .failure(error)
             }
         }.value
         isSaving = false
         switch result {
-        case .success:
+        case .success(.some(let onDisk)):
+            conflictOnDisk = onDisk
+            return false
+        case .success(.none):
+            conflictOnDisk = nil
             originalText = snapshot
             return true
         case .failure(let error):
@@ -209,5 +238,20 @@ public final class IOSMemoryViewModel {
     /// at last load.
     public func revert() {
         text = originalText
+    }
+
+    /// The user's "reload" answer to a conflict: take the server's text
+    /// and drop the draft.
+    public func acceptOnDiskVersion() {
+        guard let onDisk = conflictOnDisk else { return }
+        text = onDisk
+        originalText = onDisk
+        conflictOnDisk = nil
+    }
+
+    /// The user's "keep editing" answer: keep the draft, save nothing yet.
+    /// The next Save checks again against the same loaded baseline.
+    public func dismissConflict() {
+        conflictOnDisk = nil
     }
 }

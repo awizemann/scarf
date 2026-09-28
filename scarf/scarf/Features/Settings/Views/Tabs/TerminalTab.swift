@@ -14,7 +14,14 @@ struct TerminalTab: View {
 
     var body: some View {
         SettingsSection(title: "Backend", icon: "terminal") {
-            PickerRow(label: "Backend", selection: viewModel.config.terminalBackend, options: viewModel.terminalBackends) { viewModel.setTerminalBackend($0) }
+            PickerRow(
+                label: "Backend",
+                selection: viewModel.config.terminalBackend,
+                options: SettingsViewModel.terminalBackends(
+                    capabilities: capabilitiesStore?.capabilities ?? .empty,
+                    current: viewModel.config.terminalBackend
+                )
+            ) { viewModel.setTerminalBackend($0) }
             EditableTextField(label: "Working Dir", value: viewModel.config.terminal.cwd) { viewModel.setTerminalCwd($0) }
             StepperRow(label: "Command Timeout (s)", value: viewModel.config.terminal.timeout, range: 10...3600, step: 10) { viewModel.setTerminalTimeout($0) }
             ToggleRow(label: "Persistent Shell", isOn: viewModel.config.terminal.persistentShell) { viewModel.setPersistentShell($0) }
@@ -59,7 +66,7 @@ struct TerminalTab: View {
         if viewModel.config.terminalBackend == "modal" {
             SettingsSection(title: "Modal", icon: "cloud") {
                 EditableTextField(label: "Image", value: viewModel.config.terminal.modalImage) { viewModel.setModalImage($0) }
-                PickerRow(label: "Mode", selection: viewModel.config.terminal.modalMode, options: ["auto", "always", "never"]) { viewModel.setModalMode($0) }
+                PickerRow(label: "Mode", selection: viewModel.config.terminal.modalMode, options: SettingsViewModel.modalModes(current: viewModel.config.terminal.modalMode)) { viewModel.setModalMode($0) }
             }
         }
 
@@ -77,6 +84,8 @@ struct TerminalTab: View {
     }
 
     private var isContainerBackend: Bool {
-        ["docker", "modal", "daytona", "singularity"].contains(viewModel.config.terminalBackend)
+        // Hermes applies the container limits to vercel_sandbox too
+        // (hermes_cli/config_defaults.py:337-338 @ v2026.9.24).
+        ["docker", "modal", "daytona", "singularity", "vercel_sandbox"].contains(viewModel.config.terminalBackend)
     }
 }

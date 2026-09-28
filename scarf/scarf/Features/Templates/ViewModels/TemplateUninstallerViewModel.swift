@@ -65,7 +65,10 @@ final class TemplateUninstallerViewModel {
         let uninstaller = uninstaller
         Task.detached { [weak self] in
             do {
-                let plan = try uninstaller.loadUninstallPlan(for: project)
+                // A remote install records `~`-rooted paths; the plan's
+                // containment checks need them expanded against the host's
+                // real home (probed once per server, cached).
+                let plan = try await uninstaller.resolvingUserHome().loadUninstallPlan(for: project)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.plan = plan
@@ -83,18 +86,21 @@ final class TemplateUninstallerViewModel {
         guard let plan else { return }
         stage = .uninstalling
         let uninstaller = uninstaller
-        // Capture the preservation shape before executing — the plan
-        // itself gets nil'd on success and we want the banner to show
-        // whatever was true at the moment of removal.
-        let preserved = PreservedOutcome(
-            projectDirRemoved: plan.projectDirBecomesEmpty,
-            preservedPaths: plan.extraProjectEntries,
-            projectDir: plan.project.path
-        )
+        // Capture the preserved paths before executing — the plan itself
+        // gets nil'd on success and we want the banner to show whatever was
+        // true at the moment of removal.
+        let preservedPaths = plan.extraProjectEntries
+        let projectDir = plan.project.path
         Task.detached { [weak self] in
             do {
-                let result = try uninstaller.uninstall(plan: plan)
-                var outcome = preserved
+                let result = try await uninstaller.resolvingUserHome().uninstall(plan: plan)
+                // Whether the folder went is what the run observed, not what
+                // the plan predicted.
+                var outcome = PreservedOutcome(
+                    projectDirRemoved: result.projectDirRemoved,
+                    preservedPaths: preservedPaths,
+                    projectDir: projectDir
+                )
                 outcome.leftovers = result.leftovers
                 await MainActor.run { [weak self, outcome] in
                     guard let self else { return }

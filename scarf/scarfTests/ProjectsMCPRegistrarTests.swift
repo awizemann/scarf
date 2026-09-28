@@ -25,11 +25,14 @@ struct ProjectsMCPRegistrarTests {
         return url
     }
 
-    private static func config(command: String) -> String {
-        """
+    /// `pinnedTo` writes the `--hermes-home` args a current registration
+    /// carries; `nil` is an entry from before the pin existed.
+    private static func config(command: String, pinnedTo home: String? = nil) -> String {
+        let args = home.map { "\n    args:\n      - --hermes-home\n      - \($0)" } ?? ""
+        return """
         mcp_servers:
           scarf-projects:
-            command: \(command)
+            command: \(command)\(args)
             timeout: 180
             tools:
               exclude:
@@ -46,7 +49,8 @@ struct ProjectsMCPRegistrarTests {
             named: "scarf-projects-mcp",
             in: home.url.appendingPathComponent("bundle", isDirectory: true)
         )
-        try Self.config(command: helper.path)
+        // Updated for S12-F2: "nothing moved" now includes the profile pin.
+        try Self.config(command: helper.path, pinnedTo: home.context.paths.home)
             .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
         let before = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
 
@@ -82,6 +86,8 @@ struct ProjectsMCPRegistrarTests {
         let servers = HermesFileService(context: home.context).loadMCPServers()
         let entry = servers.first { $0.name == "scarf-projects" }
         #expect(entry?.command == helper.path)
+        // The re-point also pins the entry to this profile's home (S12-F2).
+        #expect(entry?.args == ["--hermes-home", home.context.paths.home])
         // Remove-and-re-add would have discarded these; patching keeps them.
         #expect(entry?.timeout == 180)
         #expect(entry?.toolsExclude == ["project_validate"])
@@ -280,5 +286,114 @@ struct ProjectsMCPRegistrarTests {
             return
         }
         #expect(!FileManager.default.fileExists(atPath: home.context.paths.configYAML))
+    }
+
+    // MARK: - S12-F2: the entry is pinned to its own profile's home
+
+    @Test("an entry from before the pin gets --hermes-home added in place, once")
+    func unpinnedEntryIsRepinnedInPlace() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let helper = try Self.makeHelper(
+            named: "scarf-projects-mcp",
+            in: home.url.appendingPathComponent("bundle", isDirectory: true)
+        )
+        try Self.config(command: helper.path)
+            .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let registrar = ProjectsMCPRegistrar(context: home.context, binaryURL: helper)
+
+        #expect(registrar.ensureRegistered() == .repinned(home: home.context.paths.home))
+        let servers = HermesFileService(context: home.context).loadMCPServers()
+        let entry = servers.first { $0.name == "scarf-projects" }
+        #expect(entry?.command == helper.path)
+        #expect(entry?.args == ["--hermes-home", home.context.paths.home])
+        #expect(entry?.timeout == 180)
+        #expect(entry?.toolsExclude == ["project_validate"])
+        #expect(servers.contains { $0.name == "other_server" })
+
+        let afterFirst = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        #expect(registrar.ensureRegistered() == .unchanged(path: helper.path))
+        #expect(try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8) == afterFirst)
+    }
+
+    /// `hermes profile create --clone` copies config.yaml, pin included
+    /// (`hermes_cli/profiles.py:35` @ v2026.9.24), so a cloned profile's
+    /// entry points at its SOURCE's home. The launch pass re-pins entries in
+    /// the other profiles — and never adds one where there was none, and
+    /// never touches a server that only borrows the name.
+    @Test("entries in other local profiles are re-pinned to their own homes, never added")
+    func otherProfilesAreRepinnedNotAdded() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let helper = try Self.makeHelper(
+            named: "scarf-projects-mcp",
+            in: home.url.appendingPathComponent("bundle", isDirectory: true)
+        )
+        try Self.config(command: helper.path, pinnedTo: home.context.paths.home)
+            .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+
+        let profiles = home.url.appendingPathComponent("profiles", isDirectory: true)
+        let work = profiles.appendingPathComponent("work", isDirectory: true)
+        let bare = profiles.appendingPathComponent("bare", isDirectory: true)
+        let squat = profiles.appendingPathComponent("squat", isDirectory: true)
+        for dir in [work, bare, squat] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        // A clone of the root: same entry, pinned to the ROOT's home.
+        try Self.config(command: "/old/place/scarf-projects-mcp", pinnedTo: home.context.paths.home)
+            .write(to: work.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        // No entry at all.
+        let bareConfig = "model:\n  default: x\n"
+        try bareConfig.write(to: bare.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        // Someone else's stdio server under our name.
+        let squatConfig = Self.config(command: "/usr/local/bin/their-server")
+        try squatConfig.write(to: squat.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+
+        #expect(ProjectsMCPRegistrar(context: home.context, binaryURL: helper).ensureRegistered()
+            == .unchanged(path: helper.path))
+
+        let workContext = ServerContext.local(home: work)
+        let workEntry = HermesFileService(context: workContext)
+            .loadMCPServers().first { $0.name == "scarf-projects" }
+        #expect(workEntry?.command == helper.path)
+        #expect(workEntry?.args == ["--hermes-home", workContext.paths.home])
+        #expect(workEntry?.timeout == 180)
+        #expect(try String(contentsOf: bare.appendingPathComponent("config.yaml"), encoding: .utf8) == bareConfig)
+        #expect(try String(contentsOf: squat.appendingPathComponent("config.yaml"), encoding: .utf8) == squatConfig)
+    }
+
+    @Test("the args patcher swaps block and inline lists and keeps every other key")
+    func argsPatcherReplacesEitherListShape() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let service = HermesFileService(context: home.context)
+        for shape in [
+            "    args:\n    - old\n    - list\n",          // PyYAML's default block style
+            "    args:\n      - old\n      - list\n",      // indented block style
+            "    args: [old, list]\n",                   // inline flow
+            "",                                         // absent
+        ] {
+            try """
+            mcp_servers:
+              scarf-projects:
+                command: /x/scarf-projects-mcp
+            \(shape)    timeout: 180
+                env:
+                  A: b
+              other:
+                command: /y
+                args:
+                  - keep
+            """.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+
+            #expect(service.setMCPServerArgs(
+                name: "scarf-projects", args: ["--hermes-home", "/Users/me/Hermes: Homes/.hermes/profiles/work"]))
+            let servers = service.loadMCPServers()
+            let ours = servers.first { $0.name == "scarf-projects" }
+            #expect(ours?.args == ["--hermes-home", "/Users/me/Hermes: Homes/.hermes/profiles/work"], "shape: \(shape)")
+            #expect(ours?.timeout == 180)
+            #expect(ours?.env == ["A": "b"])
+            #expect(servers.first { $0.name == "other" }?.args == ["keep"])
+        }
     }
 }

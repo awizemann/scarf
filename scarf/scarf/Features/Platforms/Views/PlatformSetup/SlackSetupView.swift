@@ -30,7 +30,6 @@ struct SlackSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
-                PickerRow(label: "Reply Mode", selection: viewModel.replyToMode, options: viewModel.replyToModeOptions) { viewModel.replyToMode = $0 }
                 ToggleRow(label: "Reply in thread", isOn: viewModel.replyInThread) { viewModel.replyInThread = $0 }
                 ToggleRow(label: "Reply broadcast", isOn: viewModel.replyBroadcast) { viewModel.replyBroadcast = $0 }
             }

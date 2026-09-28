@@ -37,6 +37,11 @@ struct RichChatInputBar: View {
     /// that isn't `VoiceLiveReadiness`-ready (older Hermes, chained mode)
     /// sees the composer exactly as before (charter C1).
     var voiceLive: VoiceLiveComposerEntry? = nil
+    /// Stop the running turn (S01-F2). Shown next to Send while
+    /// `canStop` — a turn Scarf started is running — so a message typed
+    /// mid-turn can still be sent (Hermes steers or queues it).
+    var canStop: Bool = false
+    var onStop: (() -> Void)? = nil
 
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(\.serverContext) private var serverContext
@@ -267,6 +272,26 @@ struct RichChatInputBar: View {
 
                 if let voiceLive {
                     VoiceLiveComposerButton(entry: voiceLive)
+                }
+
+                if canStop, let onStop {
+                    Button {
+                        onStop()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(ScarfColor.onAccent)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                    .fill(ScarfColor.danger)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help("Stop the running turn (⌘.)")
+                    .accessibilityIdentifier("chat.composer.stop")
+                    .accessibilityLabel(Text("Stop"))
                 }
 
                 Button {

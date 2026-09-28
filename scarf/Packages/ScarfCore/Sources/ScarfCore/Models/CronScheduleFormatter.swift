@@ -108,10 +108,20 @@ public enum CronScheduleFormatter {
     /// same in any whole-hour zone and are left alone.
     nonisolated static func namesTimeOfDay(_ schedule: CronSchedule) -> Bool {
         guard !isOneShot(schedule.kind), schedule.kind.lowercased() != "interval" else { return false }
-        // A label the user set (`display` that isn't raw cron) is shown
-        // verbatim; don't bolt a zone onto their words.
-        if let display = schedule.display, !display.isEmpty, !looksLikeCron(display) { return false }
-        let expr = (schedule.expression ?? schedule.display ?? "").trimmingCharacters(in: .whitespaces)
+        // Decide from the stored expression, not the label. A natural phrase
+        // such as "every monday 9am" is stored as `{"kind": "cron", "expr":
+        // "0 9 * * 1", "display": "every monday 9am"}` and fired by croniter in
+        // Hermes's zone exactly like a typed cron expression (`cron/jobs.py:
+        // 780-791` @ v2026.9.24). `display` is always derived by
+        // `parse_schedule`; no CLI verb sets a free label.
+        let storedExpr = schedule.expression?.trimmingCharacters(in: .whitespaces) ?? ""
+        if schedule.kind.lowercased() != "cron" || storedExpr.isEmpty,
+           let display = schedule.display, !display.isEmpty, !looksLikeCron(display) {
+            return false
+        }
+        let expr = storedExpr.isEmpty
+            ? (schedule.display ?? "").trimmingCharacters(in: .whitespaces)
+            : storedExpr
         switch expr.lowercased() {
         case "@daily", "@midnight", "@weekly", "@monthly", "@yearly", "@annually": return true
         case "@hourly": return false
@@ -137,9 +147,9 @@ public enum CronScheduleFormatter {
             return onceDescription(schedule)
         }
 
-        // Trust `display` when it doesn't look like raw cron. Users
-        // CAN set descriptive labels via `hermes cron set-display`;
-        // we don't want to overwrite that.
+        // Trust `display` when it doesn't look like raw cron: Hermes keeps
+        // the phrase the job was created with ("every monday 9am") there,
+        // which reads better than our translation of its expression.
         if let display = schedule.display,
            !display.isEmpty,
            !looksLikeCron(display)

@@ -105,7 +105,8 @@ struct AdvancedTab: View {
                     ModelPickerRow(
                         label: "Model",
                         currentModel: viewModel.config.delegation.model,
-                        currentProvider: viewModel.config.delegation.provider
+                        currentProvider: viewModel.config.delegation.provider,
+                        customProviders: ModelPreflight.CustomProviders(viewModel.config)
                     ) { modelID, providerID in
                         viewModel.setDelegationModel(modelID)
                         if !providerID.isEmpty {

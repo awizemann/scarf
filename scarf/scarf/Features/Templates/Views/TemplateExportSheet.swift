@@ -62,6 +62,11 @@ struct TemplateExportSheet: View {
         .frame(minWidth: 620, minHeight: 560)
         .padding()
         .task { viewModel.load() }
+        // Files added in Finder or an editor while the sheet was open —
+        // re-check when the user comes back to Scarf.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            viewModel.rescanFiles()
+        }
     }
 
     @ViewBuilder
@@ -135,26 +140,46 @@ struct TemplateExportSheet: View {
         }
     }
 
+    // Both groups read the scan `rescanFiles()` ran off the main actor — a
+    // plan recomputed in `body` did transport I/O on every keystroke.
     private var requiredFilesGroup: some View {
-        let plan = viewModel.previewPlan()
+        let dir = viewModel.project.path
+        let scan = viewModel.fileScan
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Required Files").scarfStyle(.headline)
-            check(label: "dashboard.json (\(plan.projectDir)/.scarf/dashboard.json)", ok: plan.dashboardPresent)
-            check(label: "README.md (\(plan.projectDir)/README.md)", ok: plan.readmePresent)
-            check(label: "AGENTS.md (\(plan.projectDir)/AGENTS.md)", ok: plan.agentsMdPresent)
+            HStack {
+                Text("Required Files").scarfStyle(.headline)
+                Spacer()
+                Button("Check Again") { viewModel.rescanFiles() }
+                    .buttonStyle(.link)
+                    .controlSize(.small)
+                    .disabled(viewModel.isRescanning)
+                    .accessibilityIdentifier("templates.export.checkAgain")
+            }
+            if let scan {
+                check(label: "dashboard.json (\(dir)/.scarf/dashboard.json)", ok: scan.dashboardPresent)
+                check(label: "README.md (\(dir)/README.md)", ok: scan.readmePresent)
+                check(label: "AGENTS.md (\(dir)/AGENTS.md)", ok: scan.agentsMdPresent)
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking the project folder…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
     private var instructionsGroup: some View {
-        let plan = viewModel.previewPlan()
+        let instructionFiles = viewModel.fileScan?.instructionFiles ?? []
         return VStack(alignment: .leading, spacing: 4) {
             Text("Agent-specific instructions (optional)").scarfStyle(.headline)
-            if plan.instructionFiles.isEmpty {
+            if instructionFiles.isEmpty {
                 Text("No per-agent instruction files found in the project root.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(plan.instructionFiles, id: \.self) { file in
+                ForEach(instructionFiles, id: \.self) { file in
                     Label(file, systemImage: "doc.plaintext")
                         .font(.callout)
                 }
@@ -240,10 +265,7 @@ struct TemplateExportSheet: View {
     }
 
     private var canExport: Bool {
-        let plan = viewModel.previewPlan()
-        return plan.dashboardPresent
-            && plan.readmePresent
-            && plan.agentsMdPresent
+        return viewModel.requiredFilesPresent
             && !viewModel.templateId.trimmingCharacters(in: .whitespaces).isEmpty
             && !viewModel.templateName.trimmingCharacters(in: .whitespaces).isEmpty
             && !viewModel.templateVersion.trimmingCharacters(in: .whitespaces).isEmpty

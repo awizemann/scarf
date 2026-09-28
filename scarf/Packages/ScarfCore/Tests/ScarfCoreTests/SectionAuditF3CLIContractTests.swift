@@ -299,7 +299,13 @@ struct SectionAuditF3CLIContractTests {
         #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.tar.gz") == "/Users/a/dev.tar.gz")
         #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.zip") == "/Users/a/dev.tar.gz")
         #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev") == "/Users/a/dev.tar.gz")
-        #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.tgz") == "/Users/a/dev.tgz")
+        // `.tgz` is stripped by export_profile but make_targz always writes
+        // `.tar.gz` (profiles.py:2120, archive_safe.py:35 @ v2026.9.24), so
+        // the file never lands at `.tgz` (S13-F6; this line used to pin the
+        // wrong path).
+        #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.tgz") == "/Users/a/dev.tar.gz")
+        #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.TGZ") == "/Users/a/dev.tar.gz")
+        #expect(HermesProfileArchive.normalizedOutputPath("/Users/a/dev.TAR.GZ") == "/Users/a/dev.tar.gz")
         #expect(HermesProfileArchive.suggestedFilename(for: "dev") == "dev-profile.tar.gz")
     }
 

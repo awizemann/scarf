@@ -321,19 +321,42 @@ public struct SSHTransport: ServerTransport {
         return "\"\(p)\""
     }
 
-    /// Quote the path half of an `scp` `host:path` argument.
+    /// The path half of an `scp` `host:path` argument, passed as-is.
     ///
-    /// `scp`'s remote spec is expanded by a shell on the far side, so an
-    /// unquoted path containing a space (`~/My Projects/…`) is split into
-    /// two arguments and the transfer either fails or lands somewhere
-    /// unintended. A leading `~/` is deliberately left OUTSIDE the quotes:
-    /// tilde expansion doesn't happen inside them, and every remote path
-    /// Scarf writes is home-relative.
+    /// `scp` runs in SFTP mode (pinned with `-s` in ``scpUploadArgs``), and
+    /// SFTP mode starts no remote shell: the path goes to the server as one
+    /// literal file name. Shell quoting here used to become part of the name,
+    /// so `~/'My Projects/a.json'` failed with "dest open ... No such file"
+    /// and every remote write under a spaced folder failed (S15-F1, checked
+    /// against OpenSSH 10.3's scp and `sftp-server`). With no shell there is
+    /// also nothing to inject into: `$(…)`, quotes and backticks are just
+    /// characters in the name. A leading `~/` still lands in the remote
+    /// home: scp resolves it (as a home-relative path, or through the
+    /// server's `expand-path` extension), as it did before.
     nonisolated static func scpRemoteSpec(_ path: String) -> String {
-        if path.hasPrefix("~/") {
-            return "~/" + shellQuote(String(path.dropFirst(2)))
-        }
-        return shellQuote(path)
+        path
+    }
+
+    /// The argv for `scp <local> <host>:<remote>`. `-s` pins the SFTP
+    /// protocol, which is what makes the unquoted ``scpRemoteSpec`` safe:
+    /// it is already the default on the OpenSSH that ships with the macOS
+    /// versions Scarf supports, and pinning it means a legacy-mode `scp`
+    /// (which would hand the path to a remote shell) can never be used.
+    nonisolated func scpUploadArgs(localPath: String, remotePath: String) -> [String] {
+        var args: [String] = [
+            "-s",
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=\(controlDir)/%C",
+            "-o", "ControlPersist=600",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "LogLevel=QUIET",
+            "-o", "BatchMode=yes"
+        ]
+        if let port = config.port { args += ["-P", String(port)] }
+        if let id = config.identityFile, !id.isEmpty { args += ["-i", id] }
+        args.append(localPath)
+        args.append("\(hostSpec):\(Self.scpRemoteSpec(remotePath))")
+        return args
     }
 
     /// Run a remote shell command. Wraps in `sh -c '<command>'` and uses
@@ -407,18 +430,7 @@ public struct SSHTransport: ServerTransport {
         defer { try? FileManager.default.removeItem(at: localTmpURL) }
 
         ensureControlDir()
-        var scpArgs: [String] = [
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPath=\(controlDir)/%C",
-            "-o", "ControlPersist=600",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "LogLevel=QUIET",
-            "-o", "BatchMode=yes"
-        ]
-        if let port = config.port { scpArgs += ["-P", String(port)] }
-        if let id = config.identityFile, !id.isEmpty { scpArgs += ["-i", id] }
-        scpArgs.append(localTmpURL.path)
-        scpArgs.append("\(hostSpec):\(Self.scpRemoteSpec(tmp))")
+        let scpArgs = scpUploadArgs(localPath: localTmpURL.path, remotePath: tmp)
 
         var scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60, gate: .admitOnly)
         if scpResult.exitCode != 0 {

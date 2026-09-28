@@ -51,6 +51,10 @@ enum PlatformSetupHelpers {
     /// - `configKV`: scalar config.yaml paths to set via `hermes config set`.
     ///   Empty strings still produce a `config set <key> ""` call because
     ///   some fields accept an explicit empty string (e.g., `display.skin: ""`).
+    /// - `envUnsetAfterConfig`: `.env` keys to unset only once every config
+    ///   write has succeeded — for a value being MOVED from `.env` into
+    ///   config.yaml, where dropping the line first would lose the only copy
+    ///   if the config write fails (Mattermost `require_mention`).
     ///
     /// Returns a user-facing summary message and whether it is a failure.
     /// `nonisolated`: the body is pure transport I/O (env writes + one
@@ -62,6 +66,7 @@ enum PlatformSetupHelpers {
         context: ServerContext,
         envPairs: [String: String],
         configKV: [String: String],
+        envUnsetAfterConfig: [String] = [],
         runner: HermesCLIRunner? = nil
     ) -> SaveOutcome {
         let envService = HermesEnvService(context: context)
@@ -148,6 +153,11 @@ enum PlatformSetupHelpers {
         // the exact misreport GW-F4 exists to end.
         if !configFailures.isEmpty {
             return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
+        }
+        // The moved values are in config.yaml now — only now is it safe to
+        // drop their `.env` copies.
+        for key in envUnsetAfterConfig where !envService.unset(key) {
+            return .failure(String(localized: "Saved to config.yaml, but couldn't remove \(key) from .env"))
         }
         return .success(String(localized: "Saved — restart gateway to apply"))
     }
@@ -246,11 +256,11 @@ enum PlatformSetupHelpers {
 
     /// Bool <-> "true"/"false" round-trip for env vars. Hermes accepts both
     /// "true"/"false" and "1"/"0"; we emit the string form for readability.
-    static func envBool(_ on: Bool) -> String { on ? "true" : "false" }
+    nonisolated static func envBool(_ on: Bool) -> String { on ? "true" : "false" }
 
     /// Parse an env string as a bool. Treats missing/empty as `false`.
     /// "true", "1", "yes", "on" (case-insensitive) are true.
-    static func parseEnvBool(_ s: String?) -> Bool {
+    nonisolated static func parseEnvBool(_ s: String?) -> Bool {
         guard let s else { return false }
         switch s.lowercased() {
         case "true", "1", "yes", "on": return true
@@ -281,6 +291,10 @@ enum PlatformSetupHelpers {
         /// `HermesConfig` does not model (see `EmailSetupViewModel.load`).
         /// `nil` (never `""`) when the read was refused, for the same reason.
         var rawConfigText: String?
+        /// The host's capabilities, only for a form whose reading RULE
+        /// changed across releases (`MattermostSetupViewModel`: `.env` over
+        /// config.yaml from v0.21.3). `nil` when not asked for.
+        var capabilities: HermesCapabilities?
 
         /// The first refusal either half produced, or `nil` when both reads
         /// are proven. This is what gates a save.
@@ -321,10 +335,16 @@ enum PlatformSetupHelpers {
         includeEnv: Bool = true,
         includeConfig: Bool = true,
         includeRawConfigText: Bool = false,
+        includeCapabilities: Bool = false,
         then commit: @escaping @MainActor (FormSnapshot) -> Void
     ) {
         detached({
             var snapshot = FormSnapshot()
+            if includeCapabilities {
+                // May probe `hermes --version` on a cold cache — off the main
+                // actor here, like the reads below (C10).
+                snapshot.capabilities = HermesVersionCache.shared.capabilitiesSync(for: context)
+            }
             if includeEnv {
                 let (env, failure) = loadEnv(context: context)
                 snapshot.env = env
@@ -354,11 +374,13 @@ enum PlatformSetupHelpers {
         context: ServerContext,
         envPairs: [String: String],
         configKV: [String: String],
+        envUnsetAfterConfig: [String] = [],
         runner: HermesCLIRunner? = nil,
         then commit: @escaping @MainActor (SaveOutcome) -> Void
     ) {
         detached({
-            saveForm(context: context, envPairs: envPairs, configKV: configKV, runner: runner)
+            saveForm(context: context, envPairs: envPairs, configKV: configKV,
+                     envUnsetAfterConfig: envUnsetAfterConfig, runner: runner)
         }, then: commit)
     }
 
@@ -442,6 +464,7 @@ extension PlatformSetupForm {
         includeEnv: Bool = true,
         includeConfig: Bool = true,
         includeRawConfigText: Bool = false,
+        includeCapabilities: Bool = false,
         apply: @escaping @MainActor (PlatformSetupHelpers.FormSnapshot) -> Void
     ) {
         // One load at a time, and never one on top of a save: two overlapping
@@ -453,7 +476,8 @@ extension PlatformSetupForm {
             context: context,
             includeEnv: includeEnv,
             includeConfig: includeConfig,
-            includeRawConfigText: includeRawConfigText
+            includeRawConfigText: includeRawConfigText,
+            includeCapabilities: includeCapabilities
         ) { [weak self] snapshot in
             guard let self else { return }
             self.isLoading = false
@@ -493,7 +517,8 @@ extension PlatformSetupForm {
     }
 
     /// Write this form off the main actor and put the outcome on the save bar.
-    func commitSave(envPairs: [String: String], configKV: [String: String]) {
+    func commitSave(envPairs: [String: String], configKV: [String: String],
+                    envUnsetAfterConfig: [String] = []) {
         guard !isBusy else { return }
         // The load landed but could not prove one of its two files, so the
         // fields below may be blanks over live values. Re-state the reason
@@ -541,6 +566,7 @@ extension PlatformSetupForm {
             context: context,
             envPairs: envPairs,
             configKV: configKV,
+            envUnsetAfterConfig: envUnsetAfterConfig,
             runner: cliRunner
         ) { [weak self] outcome in
             guard let self else { return }

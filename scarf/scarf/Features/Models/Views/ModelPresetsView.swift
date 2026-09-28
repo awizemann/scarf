@@ -47,10 +47,14 @@ struct ModelPresetsView: View {
         }
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Models")
-        .onAppear { viewModel.load() }
+        .onAppear {
+            viewModel.load()
+            viewModel.refreshCustomProviders()
+        }
         .sheet(isPresented: $isCreating) {
             ModelPresetEditSheet(
                 initial: nil,
+                customProviders: viewModel.customProviders,
                 onSave: { preset in
                     viewModel.upsert(preset)
                     isCreating = false
@@ -61,6 +65,7 @@ struct ModelPresetsView: View {
         .sheet(item: $editingPreset) { preset in
             ModelPresetEditSheet(
                 initial: preset,
+                customProviders: viewModel.customProviders,
                 onSave: { updated in
                     viewModel.upsert(updated)
                     editingPreset = nil

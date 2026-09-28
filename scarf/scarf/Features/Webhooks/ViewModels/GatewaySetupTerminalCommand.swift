@@ -19,14 +19,23 @@ import ScarfCore
 enum GatewaySetupTerminalCommand {
 
     static func argv(for context: ServerContext) -> [String] {
+        argv(for: context, hermesArgs: ["gateway", "setup"])
+    }
+
+    /// The same shape for any interactive `hermes` verb. `localForwards` are
+    /// `ssh -L` specs (`<local port>:<host>:<remote port>`), used only for a
+    /// remote window — S07-F6's Spotify sign-in forwards Hermes's loopback
+    /// OAuth callback port so the Mac's browser can reach it.
+    static func argv(for context: ServerContext, hermesArgs: [String], localForwards: [String] = []) -> [String] {
         let home = context.paths.home
         let hermes = context.paths.hermesBinary
         if case .ssh(let cfg) = context.kind,
-           let remote = context.remoteLoginShellHermesWords(args: ["gateway", "setup"]) {
+           let remote = context.remoteLoginShellHermesWords(args: hermesArgs) {
             let host = cfg.user.map { "\($0)@\(cfg.host)" } ?? cfg.host
             var args: [String] = ["/usr/bin/ssh", "-t"]
             if let port = cfg.port { args += ["-p", String(port)] }
             if let id = cfg.identityFile, !id.isEmpty { args += ["-i", id] }
+            for forward in localForwards { args += ["-L", forward] }
             args += ["-o", "StrictHostKeyChecking=accept-new", host, "--"] + remote
             return args
         }
@@ -37,18 +46,27 @@ enum GatewaySetupTerminalCommand {
         if HermesProfileScope.isProfileHome(home) { args += ["/usr/bin/env", "HERMES_HOME=" + home] }
         args.append(hermes)
         args += HermesProfileScope.pinnedRemoteArguments(
-            executable: hermes, args: ["gateway", "setup"], home: home)
+            executable: hermes, args: hermesArgs, home: home)
         return args
     }
 
     /// `argv` as one line for the local shell.
     static func shellLine(for context: ServerContext) -> String {
-        argv(for: context).map(singleQuote).joined(separator: " ")
+        shellLine(for: context, hermesArgs: ["gateway", "setup"])
+    }
+
+    static func shellLine(for context: ServerContext, hermesArgs: [String], localForwards: [String] = []) -> String {
+        argv(for: context, hermesArgs: hermesArgs, localForwards: localForwards)
+            .map(singleQuote).joined(separator: " ")
     }
 
     /// An AppleScript that opens Terminal and runs `shellLine`.
     static func appleScript(for context: ServerContext) -> String {
-        let line = shellLine(for: context)
+        appleScript(forShellLine: shellLine(for: context))
+    }
+
+    static func appleScript(forShellLine shellLine: String) -> String {
+        let line = shellLine
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "tell application \"Terminal\"\n  activate\n  do script \"\(line)\"\nend tell"

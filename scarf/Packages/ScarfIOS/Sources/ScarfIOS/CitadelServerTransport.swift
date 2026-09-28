@@ -891,10 +891,30 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
     /// `SSHTransport.composedRemoteCommand` (S15-F3). `fragment` is
     /// `SSHConfig.hermesBinaryHintFragment`: nil for a path Test Connection
     /// found, which is quoted as one word even with a space in it.
+    ///
+    /// A home-relative token (`~/projects/x`) goes in as `"$HOME/projects/x"`
+    /// rather than single-quoted: a quoted `~` is never expanded, so
+    /// `git -C '~/projects/x'` failed and ScarfGo showed no branch chip for
+    /// a project installed under the default `~/projects` (S15-F4). Same
+    /// rewrite as the Mac's `SSHTransport.remotePathArg`.
     nonisolated static func commandLine(executable: String, args: [String], fragment: String?) -> String {
         ([executable] + args).map { token in
-            token == fragment ? token : shellJoin([token])
+            if token == fragment { return token }
+            if token == "~" || token.hasPrefix("~/") { return homeRelativeWord(token) }
+            return shellJoin([token])
         }.joined(separator: " ")
+    }
+
+    /// `~/rest` as one double-quoted shell word with a live `$HOME`. The
+    /// rest is escaped FIRST (`\`, `"`, `$`, backtick), so nothing in the
+    /// path itself can expand or run; only the `$HOME` added afterwards does.
+    nonisolated static func homeRelativeWord(_ token: String) -> String {
+        let escaped = token
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
+        return "\"" + rewriteHomeRelative(escaped) + "\""
     }
 
     /// `cmd` as ONE `/bin/sh -c` word.

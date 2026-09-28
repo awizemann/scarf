@@ -303,6 +303,38 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
+        } else if let provider = viewModel.unroutableProvider, !viewModel.hasActiveProcess {
+            // S06-F1: config.yaml names a provider this Hermes can't route
+            // (older Scarf pickers offered every models.dev provider).
+            // Warn and offer the picker; never rewrite config silently.
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hermes can't use provider \(provider)")
+                        .font(.callout)
+                    Text("`model.provider` is `\(provider)`, which this version of Hermes doesn't recognize. Chats will fail with \"Unknown provider\" (or use another provider) until you choose a supported one.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button("Choose model…") {
+                        viewModel.chooseModelForUnroutableProvider(provider)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Pick a model and provider Hermes supports — Scarf saves both to config.yaml.")
+                    .padding(.top, 2)
+                }
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .fill(Color.orange.opacity(0.25))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
         } else if let mismatch = viewModel.modelProviderMismatch, !viewModel.hasActiveProcess {
             // Provider/model mismatch — `model.default` carries one
             // provider prefix while `model.provider` names another.
@@ -661,6 +693,7 @@ struct ChatView: View {
             ChatModelPreflightSheet(
                 reason: viewModel.modelPreflightReason ?? "",
                 serverDisplayName: viewModel.context.displayName,
+                customProviders: viewModel.customProviders,
                 onSelect: { model, provider in
                     viewModel.confirmModelPreflight(model: model, provider: provider)
                 },
@@ -678,11 +711,13 @@ struct ChatView: View {
             .environment(\.serverContext, viewModel.context)
         }
         // Kanban toolset onboarding — fires on the user's first `/goal`
-        // against a host whose `cli` platform_toolsets list lacks
-        // `kanban`. ChatViewModel sets the trigger flag; this sheet
-        // explains the gating + offers one-click enable.
+        // when Scarf's chats lack kanban tools. On 0.21.5+ it offers to add
+        // `kanban` to `platform_toolsets.acp`; below that it explains that
+        // chat kanban tools need Hermes 0.21.5 (no Enable button).
         .sheet(isPresented: kanbanOnboardingBinding) {
+            if let prompt = viewModel.kanbanOnboardingPrompt {
             ChatKanbanOnboardingSheet(
+                prompt: prompt,
                 onEnable: {
                     await viewModel.enableKanbanToolset()
                 },
@@ -694,6 +729,7 @@ struct ChatView: View {
                     viewModel.dismissKanbanToolsetOnboarding()
                 }
             )
+            }
         }
     }
 

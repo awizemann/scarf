@@ -333,7 +333,7 @@ struct SkillsView: View {
                         }
                         Label("\(skill.files.count) files", systemImage: "doc")
                         if !skill.requiredConfig.isEmpty {
-                            Label("\(skill.requiredConfig.count) required config", systemImage: "gearshape")
+                            Label("^[\(skill.requiredConfig.count) setting](inflect: true)", systemImage: "gearshape")
                         }
                     }
                     .font(.caption)
@@ -342,9 +342,11 @@ struct SkillsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle")
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Missing required config:")
+                                // Hermes stores skill settings under
+                                // `skills.config.<key>` (hermes_cli/config.py:897-899).
+                                Text("Settings not set in config.yaml:")
                                     .font(.caption.bold())
-                                Text(viewModel.missingConfig.joined(separator: ", "))
+                                Text(viewModel.missingConfig.map { "skills.config.\($0)" }.joined(separator: ", "))
                                     .font(.caption.monospaced())
                             }
                         }

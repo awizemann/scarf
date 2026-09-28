@@ -2,8 +2,8 @@ import Foundation
 import os
 
 /// Drives the per-project Sessions tab introduced in v2.3 and reused
-/// by the iOS Project Detail view in v2.5. Pulls the global session
-/// list from `HermesDataService`, filters by the attribution sidecar,
+/// by the iOS Project Detail view in v2.5. Reads the attribution
+/// sidecar, then asks `HermesDataService` for exactly those sessions,
 /// and exposes a minimal surface for the view: the filtered sessions
 /// array, loading state, and a refresh entry point that the view can
 /// call on appearance + on file-watcher change.
@@ -26,8 +26,7 @@ public final class ProjectSessionsViewModel {
         self.project = project
     }
 
-    /// Sessions attributed to the owning project, in the order
-    /// `HermesDataService.fetchSessions` returns them (newest first).
+    /// Sessions attributed to the owning project, newest first.
     public var sessions: [HermesSession] = []
 
     /// True from `load()` start to its completion. The view renders
@@ -53,7 +52,7 @@ public final class ProjectSessionsViewModel {
     /// Single in-flight load handle — the coalescing guard `load()` needs
     /// because `ProjectSessionsView` drives it from `.task` AND from
     /// `.onChange(fileWatcher.lastChangeDate)`, which during an active stream
-    /// fires far faster than a full attribution read + 200-row query
+    /// fires far faster than a full attribution read + session query
     /// completes. Without this, overlapping loads walked over `sessions` in
     /// completion order rather than issue order. Same shape as
     /// `DashboardViewModel` / `SessionsViewModel` (F4): correct here because
@@ -112,16 +111,13 @@ public final class ProjectSessionsViewModel {
             return
         }
 
-        // Fetch a generous page; we filter client-side by attribution
-        // map membership. The 200 ceiling matches other feature VMs
-        // (ActivityViewModel, InsightsViewModel). HermesDataService
-        // is an actor so this crosses the isolation boundary — the
-        // SQLite read happens off the MainActor. If a single project
-        // accumulates more than 200 attributed sessions, we'll need
-        // a paged query; roadmap item, not a v2.3 problem.
-        let all: [HermesSession]
+        // Ask for the attributed sessions themselves. Filtering the host's
+        // newest 200 sessions instead lost a project's chats as soon as
+        // cron runs and gateway traffic pushed them out of that window,
+        // and then called them deleted.
+        let owned: [HermesSession]
         do {
-            all = try await dataService.fetchSessionsChecked(limit: 200)
+            owned = try await dataService.fetchListedSessionsChecked(owning: attributed)
         } catch {
             loadError = error.localizedDescription
             return
@@ -130,19 +126,26 @@ public final class ProjectSessionsViewModel {
         // `allSessionIds`: a rotated compression chain is listed under its
         // tip id, while attribution was recorded against the id the chat
         // started with.
-        let filtered = all.filter { $0.allSessionIds.contains(where: attributed.contains) }
+        let filtered = owned.filter { $0.allSessionIds.contains(where: attributed.contains) }
         sessions = filtered
 
         if filtered.isEmpty {
-            // Attribution map has entries but none appear in the
-            // recent session fetch — likely stale sidecar entries
-            // for sessions Hermes has since deleted. The view shows
-            // an informational empty state; pruning stale entries
-            // is a roadmap follow-up, not a blocker.
-            emptyStateHint = "This project has \(attributed.count) attributed session\(attributed.count == 1 ? "" : "s"), but none are in the recent history. They may have been deleted from Hermes."
+            // Every attributed id was looked up directly, so none of them
+            // is a session Hermes lists any more: deleted, archived or
+            // hidden in Hermes, or never a listed conversation (a
+            // subagent run). Stale sidecar entries are not pruned here.
+            emptyStateHint = Self.noListedSessionsHint(attributedCount: attributed.count)
         } else {
             emptyStateHint = nil
         }
+    }
+
+    /// Empty-state text when the project has attributed session ids but
+    /// Hermes lists none of them.
+    nonisolated static func noListedSessionsHint(attributedCount: Int) -> String {
+        attributedCount == 1
+            ? String(localized: "This project has 1 attributed session, but Hermes no longer lists it. It may have been deleted, archived or hidden in Hermes.")
+            : String(localized: "This project has \(attributedCount) attributed sessions, but Hermes no longer lists any of them. They may have been deleted, archived or hidden in Hermes.")
     }
 
     /// Release the underlying DB handle. Safe to call repeatedly; the

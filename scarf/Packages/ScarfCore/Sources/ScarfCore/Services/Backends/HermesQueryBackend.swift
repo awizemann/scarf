@@ -143,6 +143,13 @@ public protocol HermesQueryBackend: Sendable {
     /// transcripts, search and previews when the column exists.
     var hasDisplayKindColumn: Bool { get async }
 
+    /// True iff `messages.display_metadata` exists (Hermes v0.19.1+,
+    /// the same DDL change as `display_kind`, probed on its own per
+    /// charter C4). Transcript reads use it to leave out micro-compaction's
+    /// merged "model only" rows, which Hermes keeps out of every display
+    /// (`DISPLAY_VISIBLE_SQL`, hermes_state_messages.py:48-51 @ v2026.9.24).
+    var hasDisplayMetadataColumn: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.

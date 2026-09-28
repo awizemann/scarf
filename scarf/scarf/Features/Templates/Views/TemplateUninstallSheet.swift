@@ -93,6 +93,9 @@ struct TemplateUninstallSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Remove") { viewModel.confirmUninstall() }
+                    // A refused root removes nothing; the button would only
+                    // lead to an error screen.
+                    .disabled(plan.rootRefused)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(ScarfPrimaryButton())
                     .tint(.red)
@@ -168,8 +171,10 @@ struct TemplateUninstallSheet: View {
     /// badly stale, and the user should know before confirming.
     private func refusedSection(plan: TemplateUninstallPlan) -> some View {
         section(
-            title: "Skipped — outside this project",
-            subtitle: "The lock file lists these, but they aren't inside the project. Scarf won't touch them."
+            title: plan.rootRefused ? "Nothing will be removed" : "Skipped — outside this project",
+            subtitle: plan.rootRefused
+                ? String(localized: "Scarf can't safely check which files belong to this project. The first line says why; the rest is what the template installed.")
+                : String(localized: "The lock file lists these, but they aren't inside the project. Scarf won't touch them.")
         ) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(plan.refusedEntries, id: \.self) { entry in

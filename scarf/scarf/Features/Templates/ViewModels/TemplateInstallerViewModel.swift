@@ -204,9 +204,18 @@ final class TemplateInstallerViewModel {
         guard let inspection else { return }
         chosenParentDirectory = parentDir
         let service = templateService
+        let context = context
         Task.detached { [weak self] in
             do {
-                let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+                // A remote host's default parent is `~/projects`. Recording
+                // that spelling puts `~` into the registry row, the lock, the
+                // cron `workdir` and `{{PROJECT_DIR}}` — and every check that
+                // compares paths (uninstall containment, the doctor, Hermes's
+                // own resolved `workdir`) then can't match it. Expand it once
+                // against the host's probed home; if the probe fails the
+                // path is kept as typed (the transport still expands it).
+                let parent = await Self.absoluteParent(parentDir, context: context)
+                let plan = try service.buildPlan(inspection: inspection, parentDir: parent)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.plan = plan
@@ -225,6 +234,15 @@ final class TemplateInstallerViewModel {
                 }
             }
         }
+    }
+
+    /// `parentDir` with a leading `~` expanded against the target host's
+    /// home. Local paths come from an open panel or `~/Projects` and are
+    /// already absolute; only a remote `~` needs the probe.
+    nonisolated static func absoluteParent(_ parentDir: String, context: ServerContext) async -> String {
+        guard parentDir == "~" || parentDir.hasPrefix("~/") else { return parentDir }
+        let home = await context.resolvedUserHome()
+        return ServerContext.expandingTilde(parentDir, home: home)
     }
 
     /// Called by `TemplateInstallSheet` once the user has filled in

@@ -105,11 +105,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasPiperTTS: Bool { atLeastSemver(0, 12, 0) }
 
-    /// `terminal.backend = vercel` Vercel Sandbox option (v0.12+).
-    ///
-    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
-    /// floor is source-verified and rediscovering it costs a tag walk.
-    public var hasVercelTerminal: Bool { atLeastSemver(0, 12, 0) }
+    /// `terminal.backend = vercel_sandbox` (Vercel Sandbox). Two bands:
+    /// added in v0.12.0 (tools/terminal_tool.py:14 @ v2026.4.30), removed in
+    /// v0.15.0 (absent at v2026.5.28 through v0.19.0 / v2026.7.20), restored
+    /// in v0.19.1 (Hermes commit ad12df6ba4, present at v2026.7.30 and at
+    /// v2026.9.24: tools/terminal_tool.py:5, hermes_cli/doctor_tools.py:146).
+    /// Gates the Settings ▸ Terminal backend option.
+    public var hasVercelTerminal: Bool {
+        guard let s = semver else { return false }
+        if s >= SemVer(major: 0, minor: 19, patch: 1) { return true }
+        return s >= SemVer(major: 0, minor: 12, patch: 0) && s < SemVer(major: 0, minor: 15, patch: 0)
+    }
 
     /// `auxiliary.flush_memories` config row was removed in v0.12.
     /// Inverse semantics — `true` means the row should still be shown.
@@ -1342,6 +1348,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `"shared_metrics": {`, `:2629` `"enabled": False,`.
     public var hasSharedMetricsTelemetry: Bool { isV0191OrLater }
 
+    /// After an ACP `session/cancel`, Hermes keeps the stopped prompt and
+    /// prepends it to the next plain-text prompt as "User
+    /// correction/guidance after interrupt" (`acp_adapter/server.py:643-644`,
+    /// `:721-722`, `:201-202` @ v2026.9.24). The plain-text branch (commit
+    /// 34d0de80e6) is first at v2026.7.30; v2026.7.20 only did it for
+    /// `/steer`. Floor v0.19.1 (v2026.7.30 `pyproject.toml` = `0.19.1`).
+    /// Drives the wording of Scarf's "you stopped this turn" note.
+    public var hasACPStoppedPromptCarriedForward: Bool { isV0191OrLater }
+
     /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
     /// SQLite journal mode + WAL sizing pragmas applied by every Hermes
     /// database opener (`journal_mode` via commit 91351b7b7
@@ -1686,8 +1701,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.20.5+ it means not managed at all. Scarf's probe has to branch, or
     /// it locks a Homebrew install out of its own Settings on a new host — or
     /// leaves a genuinely managed old host writable. See
-    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:)``.
+    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:honoursFalseOptOut:)``.
     public var hasManagedMarkerContents: Bool { isV0205OrLater }
+
+    /// `get_managed_system` treats a marker (or `HERMES_MANAGED`) holding
+    /// `false`/`0`/`no`/`off` as an explicit opt-out — NOT managed.
+    /// `_MANAGED_FALSE_VALUES` first appears at v2026.9.14 = 0.21.3
+    /// (`hermes_cli/config.py:251,265` there; Hermes commit 92a8398087,
+    /// #12864) and sits at `hermes_constants.py:1089,1108` @ v2026.9.24.
+    /// Below it (0.20.5–0.21.2) such a marker names a package manager
+    /// literally called "false" and the host IS managed, so Scarf keeps
+    /// reading it that way there.
+    public var hasManagedMarkerFalseOptOut: Bool { isV0213OrLater }
 
     /// The bare `hermes version` subcommand was removed (dropped from
     /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:2595` — no `"version"`
@@ -1776,6 +1801,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// identical to the last release.
     public var hasBotChatCreationCLI: Bool { isV0205OrLater }
 
+    /// `hermes profile rename default <text>` sets the default profile's
+    /// display name (free text, at most 64 characters) and keeps the id
+    /// `default` — `rename_profile` @ `v2026.8.19` onward
+    /// (`hermes_cli/profiles.py:2255-2260` @ `v2026.9.24`). At `v2026.8.18`
+    /// (0.20.4) the same call raises "Cannot rename the default profile."
+    public var hasDefaultProfileDisplayNameRename: Bool { isV0205OrLater }
+
     // MARK: v0.21 (v2026.8.31) flags
     //
     // v0.21 ("Pantheon") is an additive cycle. Note the intermediate
@@ -1796,6 +1828,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// subparser stops at `add`/`list`/`remove`/`dm` — so older hosts fail
     /// argparse outright on these verbs.
     public var hasPeerRunCommands: Bool { isV021OrLater }
+
+    /// `launchd_restart` restarts IN BAND: SIGUSR1, then launchd's KeepAlive
+    /// starts the replacement (`hermes_cli/gateway.py:5954` @ v2026.8.31;
+    /// `gateway_launchd.py:744-790` @ v2026.9.24). Below it (v2026.8.27 =
+    /// 0.20.6, `gateway.py:5537-5584`) the CLI SIGTERMs the gateway, waits
+    /// `agent.restart_drain_timeout` and only THEN runs `launchctl kickstart
+    /// -k` itself — so a spawn cut short mid-wait never restarts it. Scarf
+    /// gives the restart spawn a ceiling that covers that wait on those
+    /// hosts (``HermesGatewayRestartDrain/restartSpawnTimeout(capabilities:configYAML:)``,
+    /// B05 / S07-F3 on older hosts).
+    public var hasLaunchdInBandRestart: Bool { isV021OrLater }
 
     /// `hermes cron doctor` — check scheduled jobs for common health
     /// issues (v0.21+, `hermes_cli/subcommands/cron.py:184`
@@ -2313,6 +2356,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// before anything is billed.
     public var hasGPTLiveVoice: Bool { isV0213OrLater }
 
+    /// A profile route applies only to messages received by the bot of its
+    /// `bot_profile` (absent, blank or `default` = the default profile's
+    /// shared bot) — `ProfileRoute.bot_profile` and `_bot_profile_key`
+    /// (`gateway/profile_routing.py:64`, `:86-88`, `:101-104` @
+    /// `v2026.9.24`). First at `v2026.9.14`; `git show
+    /// v2026.9.11:gateway/profile_routing.py` has no `bot_profile`.
+    public var hasProfileRouteBotScope: Bool { isV0213OrLater }
+
     // MARK: v0.21.4 (v2026.9.21) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
@@ -2389,6 +2440,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// unknown provider verbatim rather than resolving to `openai-codex`.
     public var hasChatGPTCodexAliases: Bool { isV0214OrLater }
 
+    /// Whether Scarf has a table of provider names this Hermes can route
+    /// (``HermesRoutableProviders``, S06-F1). The bug it guards against — a
+    /// models.dev-only provider such as `mistral` saved as `model.provider`
+    /// and failing with "Unknown provider" — exists at every tag Scarf
+    /// supports: `auth.resolve_provider` raises for any name outside its
+    /// registry and aliases from v2026.3.30 (`hermes_cli/auth.py`) through
+    /// `v2026.9.24` (`:1500-1509`). The accepted set differs by version, so
+    /// the table is banded (``HermesRoutableProviders/olderBands``), each
+    /// band measured against that tag's own resolver. Floor v0.6.0
+    /// (v2026.3.30), Scarf's oldest supported Hermes; older and undetected
+    /// hosts keep the unfiltered roster.
+    public var hasRoutableProviderTable: Bool { atLeastSemver(0, 6, 0) }
+
+    /// Whether Hermes rewrites DeepSeek's retired `deepseek-chat` /
+    /// `deepseek-reasoner` to `deepseek-flash` (`_DEEPSEEK_RETIRED_ALIASES`,
+    /// `hermes_cli/model_normalize.py:94-95` @ `v2026.9.24`). Commit
+    /// `6964eebd35` introduced it; `git tag --contains` puts it first in
+    /// `v2026.9.11` (0.21.2). At `v2026.9.7` (0.21.1) `_normalize_for_deepseek`
+    /// sent both, and every other non-V-series id, to `deepseek-v4-flash`.
+    /// Picks the target of ``ModelCatalogService/resolveModelAlias(providerID:modelID:capabilities:)``
+    /// (S06-F4).
+    public var hasDeepSeekFlashRetiredAlias: Bool { isV0212OrLater }
+
     /// Whether `web.search_backend: openai-native` is a selectable Web
     /// Tools search backend. `plugins/web/openai_native/` (a new plugin
     /// directory, `provider.py:68` `NAME = "openai-native"`) first appears
@@ -2459,6 +2533,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `--state` choices (`:185`) have no `resolved` — an argparse error there.
     public var hasCronIncidentResolvedState: Bool { isV0214OrLater }
 
+    /// `hermes skills search` asks the external registries when the
+    /// centralized index has no match for a non-empty query
+    /// (`parallel_search_sources` → `_index_miss_fallback_sources`,
+    /// `tools/skills_hub_search.py:156,234-257` @ v2026.9.24; commit
+    /// 13dcfc112b, first tagged v2026.9.21). Before it an all-source search
+    /// missed skills only browse surfaced (Scarf issue #79), so the Hub
+    /// filtered its browse page instead.
+    public var hasSkillsSearchRegistryFallback: Bool { isV0214OrLater }
+
     /// `hermes peer dm` no-resend outcomes — `hermes_cli/subcommands/peer.py:358-375`
     /// @ v2026.9.21: a timeout AFTER the Bot Chat resolved exits 1 with
     /// "accepted the message … Do NOT resend.", and a `hermes.session.chat.queued`
@@ -2479,6 +2562,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// gateway. See ``HermesGatewayRestartGuard``.
     public var hasSupervisedGatewayRestart: Bool { isV0214OrLater }
 
+    /// `hermes kanban complete` refuses an evidence-less completion:
+    /// `_gate_empty_completion` (`hermes_cli/kanban_db.py:2860-2891` @
+    /// `v2026.9.24`) raises `EmptyCompletionError` unless the task is in
+    /// `review`, or a non-blank `--result`/`--summary` is passed, or the task
+    /// already has a stored result; `_cmd_complete` turns that into
+    /// "cannot complete … Pass --result/--summary …" and exit 1
+    /// (`hermes_cli/kanban.py:932-935`). First at `v2026.9.21` (0.21.4):
+    /// `git grep _gate_empty_completion v2026.9.14 -- hermes_cli` is empty, and
+    /// there a blank completion succeeds. Gates whether Scarf's Complete sheet
+    /// requires a result (``KanbanService/plan(for:caps:)``).
+    public var hasKanbanEmptyCompletionGate: Bool { isV0214OrLater }
+
+    /// Profile routes match on the sender: a rule's `user_id` adds 16 to its
+    /// specificity, and a rule whose `user_id` is null or blank is skipped
+    /// (`gateway/profile_routing.py:65-70`, `:140-143` @ `v2026.9.24`). First
+    /// at `v2026.9.21`; at `v2026.9.14` `ProfileRoute` has no `user_id`, so
+    /// the key is ignored.
+    public var hasProfileRouteUserID: Bool { isV0214OrLater }
+
     // MARK: v0.21.5 (v2026.9.24) flags
     //
     // Verified at the tag: `git -C ~/.hermes/hermes-agent show
@@ -2494,6 +2596,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// where a retired `false` is only logged and ignored — so the copy Scarf
     /// shows for it differs between the two releases.
     public var hasMultiplexOptOutRewrite: Bool { isV0215OrLater }
+
+    /// `hermes sessions export` Markdown/Quarto/HTML include the turns an
+    /// in-place compaction archived: `_cmd_export` passes
+    /// `include_compacted=shown` with `shown` true for
+    /// `SAVE_TRANSCRIPT_FORMATS` = md/html (hermes_cli/sessions_cmd.py:335,
+    /// hermes_cli/session_export.py:212 @ v2026.9.24), and `_export_markdown`
+    /// passes `include_compacted=True`. Neither exists at v2026.9.21, where
+    /// every format exports the live rows only. JSONL and Trace never
+    /// include them. Drives the Sessions export note. (fe8b643db6 also sits
+    /// in late 0.21.4 canary builds, which this gate treats as 0.21.4, like
+    /// every other `isV0215OrLater` flag.)
+    public var hasSessionsExportArchivedTurns: Bool { isV0215OrLater }
 
     /// `gateway.standalone: true` — the temporary per-profile shim that keeps
     /// a NAMED profile's gateway out of the host multiplexer.
@@ -2551,6 +2665,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// audit's guess of "absent" (P7e re-walk; charter C2): v0.21.4 already
     /// warns, just not in the box `HermesGatewayStandaloneWarning` parses.
     public var hasGatewayStandaloneStatusBox: Bool { isV0215OrLater }
+
+    /// ACP chats (every Scarf chat) take their toolsets from
+    /// `platform_toolsets.acp`, else the `hermes-acp` default:
+    /// `acp_adapter/session.py:480-486` @ `v2026.9.24` calls
+    /// `_get_platform_tools(config, "acp")`. At `v2026.9.21` and every
+    /// earlier tag the ACP session hard-codes `["hermes-acp"]`
+    /// (`acp_adapter/session.py:484-485` @ `v2026.9.21`) and ignores the
+    /// config. Gates which platform the Kanban toolset onboarding reads and
+    /// writes (``KanbanToolsetDetector/chatPlatform(for:)``).
+    public var hasACPPlatformToolsets: Bool { isV0215OrLater }
 
     // MARK: Convenience predicates
 

@@ -44,9 +44,21 @@ public enum HermesProfileArchive {
     /// `~/dev.tar.gz` → unchanged. `~/dev.zip` → `~/dev.tar.gz` (the zip
     /// extension is replaced, not appended to, so the user does not end
     /// up with `dev.zip.tar.gz`). `~/dev` → `~/dev.tar.gz`.
+    ///
+    /// `~/dev.tgz` → `~/dev.tar.gz` too. `export_profile` strips `.tgz`
+    /// but `make_targz` then ALWAYS writes `f"{base}.tar.gz"`
+    /// (`hermes_cli/profiles.py:2120`, `hermes_cli/archive_safe.py:35` @
+    /// `v2026.9.24`), so a `.tgz` destination was never where the file
+    /// landed. The strip is case-sensitive, so `.TAR.GZ` / `.TGZ` are
+    /// rewritten to the exact `.tar.gz` spelling as well.
     public static func normalizedOutputPath(_ path: String) -> String {
-        if isRecognized(path) { return path }
+        if path.hasSuffix("." + preferredExtension) { return path }
         var base = path
+        for recognized in recognizedExtensions
+        where base.lowercased().hasSuffix("." + recognized) {
+            base = String(base.dropLast(recognized.count + 1))
+            return base + "." + preferredExtension
+        }
         // Strip one misleading archive-ish extension if present.
         for wrong in [".zip", ".tar", ".gz", ".gzip"] where base.lowercased().hasSuffix(wrong) {
             base = String(base.dropLast(wrong.count))

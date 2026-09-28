@@ -33,7 +33,9 @@ import os
 /// sidecars — each classified from a single read), one `listDirectory` per
 /// scan root, and one or two per orphan candidate. That is seconds over SSH
 /// on a large home, which is why it is user-initiated or once-per-project,
-/// never per file-watcher tick.
+/// never per file-watcher tick. On an SSH host add one shell round trip
+/// that resolves every row root and the Hermes home (`physicalRootSpellings`),
+/// paid even with no rows.
 public struct ProjectDoctorService: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectDoctor")
@@ -79,6 +81,22 @@ public struct ProjectDoctorService: Sendable {
         let rawInvalidUUIDPaths = rawInvalidUUIDPaths()
 
         let cronJobs = loadCronJobs()
+        // Where each row's folder physically is. Hermes stores a cron
+        // `workdir` symlink-resolved, so a textual compare against a row
+        // registered through a symlink (or as `~/…` on a remote) reports
+        // the project's own jobs as "running elsewhere" and its own folder
+        // as an unlisted orphan.
+        //
+        // The Hermes home rides the same probe: on an SSH host `paths.home`
+        // is the literal `~/.hermes`, which no absolute (Hermes-resolved)
+        // `workdir` can equal, so the orphan scan's home exclusion needs the
+        // spelling the host actually has.
+        let homeKey = ProjectIdentity.normalizedPath(context.paths.home)
+        var physicalRoots = physicalRootSpellings(rows.map(\.path) + [context.paths.home])
+        let hermesHomeSpellings = Set([homeKey]).union(physicalRoots[homeKey] ?? [])
+        if !rows.contains(where: { ProjectIdentity.normalizedPath($0.path) == homeKey }) {
+            physicalRoots.removeValue(forKey: homeKey)
+        }
 
         // Paths more than one row claims. Identity repairs are withheld for
         // these: every writer underneath addresses a row BY PATH and stops at
@@ -96,12 +114,16 @@ public struct ProjectDoctorService: Sendable {
                 store: store,
                 rawInvalidUUIDPaths: rawInvalidUUIDPaths,
                 cronJobs: cronJobs,
-                rowsAtSamePath: group
+                rowsAtSamePath: group,
+                physicalRoots: physicalRoots
             )
         }
 
         findings += duplicateFindings(rows: rows)
-        findings += orphanFindings(rows: rows, cronJobs: cronJobs)
+        findings += orphanFindings(
+            rows: rows, cronJobs: cronJobs, physicalRoots: physicalRoots,
+            hermesHomeSpellings: hermesHomeSpellings
+        )
         findings += salvagedFieldFindings(loaded: loaded, alreadyReported: findings)
         findings += historyFindings(loaded: loaded)
 
@@ -135,7 +157,8 @@ public struct ProjectDoctorService: Sendable {
         store: ProjectStore,
         rawInvalidUUIDPaths: Set<String>,
         cronJobs: [HermesCronJob],
-        rowsAtSamePath: [ProjectEntry]
+        rowsAtSamePath: [ProjectEntry],
+        physicalRoots: [String: Set<String>] = [:]
     ) -> [ProjectDoctorFinding] {
         var out: [ProjectDoctorFinding] = []
         let pathIsDuplicated = rowsAtSamePath.count > 1
@@ -361,11 +384,17 @@ public struct ProjectDoctorService: Sendable {
         // install's `[tmpl:<id>] [proj:<uuid>] …`. A legacy `[tmpl:<id>] …`
         // job with no project tag is shared by every install of that
         // template, so running elsewhere says nothing about this path.
+        //
+        // "Elsewhere" is judged against every spelling of the root: as
+        // registered, and as it physically resolves (Hermes resolves the
+        // `workdir` it stores, `cron/jobs.py:1580-1590` @ v2026.9.24).
         let normalizedRoot = ProjectIdentity.normalizedPath(row.path)
+        var rootSpellings: Set<String> = [normalizedRoot]
+        rootSpellings.formUnion(physicalRoots[normalizedRoot] ?? [])
         let strays = cronJobs.filter { job in
             guard ProjectCronAttribution.namesProject(jobName: job.name, projectID: effectiveID),
                   let workdir = job.workdir, !workdir.isEmpty else { return false }
-            return ProjectIdentity.normalizedPath(workdir) != normalizedRoot
+            return rootSpellings.isDisjoint(with: localSpellings(of: workdir))
         }
         if !strays.isEmpty {
             out.append(ProjectDoctorFinding(
@@ -442,13 +471,24 @@ public struct ProjectDoctorService: Sendable {
     /// SQL surface and two more file formats for a small recall gain.
     private nonisolated func orphanFindings(
         rows: [ProjectEntry],
-        cronJobs: [HermesCronJob]
+        cronJobs: [HermesCronJob],
+        physicalRoots: [String: Set<String>] = [:],
+        hermesHomeSpellings: Set<String> = []
     ) -> [ProjectDoctorFinding] {
+        // A listed project is known by its registered spelling AND its
+        // physical one: a cron `workdir` (resolved by Hermes) naming a
+        // listed project's real folder is that project, not an orphan.
         let known = Set(rows.map { ProjectIdentity.normalizedPath($0.path) })
+            .union(physicalRoots.values.flatMap { $0 })
         let home = ProjectIdentity.normalizedPath(context.paths.home)
 
+        // The Hermes home in every spelling a (resolved) cron `workdir` could
+        // use for it: locally `~/.hermes` under a symlinked parent (`/var` →
+        // `/private/var`), remotely the probed absolute path for the literal
+        // `~/.hermes`. Supplied by `diagnose` from the same probe as the rows.
+        let homeSpellings = hermesHomeSpellings.union([home])
         func isExcluded(_ normalized: String) -> Bool {
-            Self.isExcludedFromScan(normalized, home: home)
+            homeSpellings.contains { Self.isExcludedFromScan(normalized, home: $0) }
         }
         func isComparable(_ normalized: String) -> Bool { normalized.hasPrefix("/") }
 
@@ -1034,6 +1074,76 @@ public struct ProjectDoctorService: Sendable {
         guard let data = try? transport.readFile(path) else { return .absent }
         guard data.count <= ProjectDashboardService.maxJSONBytes else { return .malformed }
         return (try? JSONDecoder().decode(ScarfProject.self, from: data)) != nil ? .ok : .malformed
+    }
+
+    // MARK: - Physical spellings (S11-F4)
+
+    /// Normalized registered root → the other spellings its folder has on
+    /// disk (a symlinked parent, `/tmp` → `/private/tmp`, a remote `~/…`).
+    /// Rows with no other spelling, or that can't be resolved, are absent —
+    /// callers then compare textually, exactly as before.
+    ///
+    /// Local: `realpath(3)` — the spelling Python's `Path.resolve()` gives
+    /// Hermes, `/private` prefix included — plus
+    /// `ProjectRootPolicy.physicalPath` (which tolerates a missing leaf).
+    /// Remote: ONE shell round trip that `cd -P`s into each root (the
+    /// transport already turns a leading `~/` into `$HOME/`) and prints
+    /// `pwd -P`; any failure or a mismatched line count falls back to "no
+    /// mapping".
+    nonisolated func physicalRootSpellings(_ paths: [String]) -> [String: Set<String>] {
+        let normalized = Array(Set(paths.map { ProjectIdentity.normalizedPath($0) })).sorted()
+        guard !normalized.isEmpty else { return [:] }
+        var out: [String: Set<String>] = [:]
+        if !context.isRemote {
+            for path in normalized where path.hasPrefix("/") {
+                let others = localSpellings(of: path).subtracting([path])
+                if !others.isEmpty { out[path] = others }
+            }
+            return out
+        }
+        let script = #"""
+        for p in "$@"; do
+          case "$p" in
+            "~") p="$HOME" ;;
+            "~/"*) p="$HOME/${p#\~/}" ;;
+          esac
+          r=$(cd -P -- "$p" 2>/dev/null && pwd -P) || r=""
+          printf '%s\n' "$r"
+        done
+        """#
+        guard let result = try? transport.runProcess(
+            executable: "/bin/sh",
+            args: ["-c", script, "sh"] + normalized,
+            stdin: nil,
+            timeout: 20
+        ), result.exitCode == 0 else { return [:] }
+        var lines = result.stdoutString.components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        guard lines.count == normalized.count else { return [:] }
+        for (path, line) in zip(normalized, lines) {
+            let physical = ProjectIdentity.normalizedPath(line)
+            if physical.hasPrefix("/"), physical != path { out[path] = [physical] }
+        }
+        return out
+    }
+
+    /// Every spelling of `path` this Mac can vouch for: as written, as
+    /// `realpath(3)` resolves it, and as `ProjectRootPolicy.physicalPath`
+    /// does. A remote context gets the written spelling only — resolving it
+    /// here would describe this Mac's disk. A cron `workdir` is compared in
+    /// all of them, because a hand-edited `jobs.json` needn't be resolved.
+    private nonisolated func localSpellings(of path: String) -> Set<String> {
+        let normalized = ProjectIdentity.normalizedPath(path)
+        guard !context.isRemote, normalized.hasPrefix("/") else { return [normalized] }
+        var out: Set<String> = [
+            normalized,
+            ProjectIdentity.normalizedPath(ProjectRootPolicy.physicalPath(normalized)),
+        ]
+        if let resolved = realpath(normalized, nil) {
+            out.insert(ProjectIdentity.normalizedPath(String(cString: resolved)))
+            free(resolved)
+        }
+        return out
     }
 
     private nonisolated func loadCronJobs() -> [HermesCronJob] {

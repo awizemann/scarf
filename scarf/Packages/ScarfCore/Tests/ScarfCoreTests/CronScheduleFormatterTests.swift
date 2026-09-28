@@ -78,7 +78,7 @@ struct CronScheduleFormatterTests {
         #expect(CronScheduleFormatter.humanReadable(from: cron("30 14 15 * *")) == "Monthly on day 15 at 2:30 PM")
     }
 
-    // MARK: - Display override (user-set label)
+    // MARK: - Display phrase (what the job was created with)
 
     @Test func displayOverrideWinsWhenNonCron() {
         let s = CronSchedule(
@@ -161,8 +161,34 @@ struct CronScheduleFormatterTests {
         #expect(CronScheduleFormatter.withZoneNote("*/15 * * * *", for: cron("*/15 * * * *"), zoneNote: note)
                 == "*/15 * * * *")
         #expect(CronScheduleFormatter.withZoneNote("0 9 * * *", for: cron("0 9 * * *"), zoneNote: nil) == "0 9 * * *")
-        #expect(CronScheduleFormatter.withZoneNote("Morning digest", for: cron("0 9 * * *", display: "Morning digest"), zoneNote: note)
-                == "Morning digest")
+        // A natural phrase is still a host-zone time (S08-F2, blind re-audit).
+        #expect(CronScheduleFormatter.withZoneNote("every monday 9am", for: cron("0 9 * * 1", display: "every monday 9am"), zoneNote: note)
+                == "every monday 9am (host time)")
+    }
+
+    /// S08-F2 (blind re-audit): Hermes turns "every monday 9am" / "weekdays
+    /// at 9am" into `{"kind": "cron", "expr": "0 9 * * 1", "display": "every
+    /// monday 9am"}` (`cron/jobs.py:780-791` @ v2026.9.24) and fires it in its
+    /// own zone, so the phrase gets the zone note like the raw expression.
+    /// These used to be treated as user labels and left bare; there is no
+    /// Hermes verb that sets a free label.
+    @Test func naturalLanguagePhrasesGetTheZoneNote() {
+        let note = "UTC"
+        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * 1", display: "every monday 9am"), zoneNote: note)
+                == "every monday 9am (UTC)")
+        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * 1-5", display: "weekdays at 9am"), zoneNote: note)
+                == "weekdays at 9am (UTC)")
+        #expect(CronScheduleFormatter.humanReadable(from: cron("30 19 * * *", display: "every day at 7:30pm"), zoneNote: note)
+                == "every day at 7:30pm (UTC)")
+        // The expression decides: a step schedule under a phrase stays bare.
+        #expect(CronScheduleFormatter.humanReadable(from: cron("*/15 * * * *", display: "quarter-hourly"), zoneNote: note)
+                == "quarter-hourly")
+        // No note (the Mac's own zone): the phrase is unchanged.
+        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * 1", display: "every monday 9am"), zoneNote: nil)
+                == "every monday 9am")
+        // A non-cron kind with a phrase display is still left alone.
+        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * *", display: "every 2h", kind: "interval"), zoneNote: note)
+                == "every 2h")
     }
 
     @Test func zoneNoteIsAppendedOnlyToTimeOfDayPhrases() {
@@ -177,11 +203,12 @@ struct CronScheduleFormatterTests {
         #expect(CronScheduleFormatter.humanReadable(from: cron("*/15 * * * *"), zoneNote: note) == "Every 15 minutes")
         #expect(CronScheduleFormatter.humanReadable(from: cron("0 */2 * * *"), zoneNote: note) == "Every 2 hours")
         #expect(CronScheduleFormatter.humanReadable(from: cron("@hourly"), zoneNote: note) == "Every hour")
-        // Intervals, one-shots and user labels are not touched.
+        // Intervals and one-shots are not touched; a phrase over a fixed-hour
+        // expression is (S08-F2).
         #expect(CronScheduleFormatter.humanReadable(from: cron("every 30m", display: "every 30m", kind: "interval"), zoneNote: note)
                 == "every 30m")
-        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * *", display: "Morning digest"), zoneNote: note)
-                == "Morning digest")
+        #expect(CronScheduleFormatter.humanReadable(from: cron("0 9 * * *", display: "every day at 9am"), zoneNote: note)
+                == "every day at 9am (UTC)")
         let once = CronSchedule(kind: "once", runAt: "2026-02-03T14:00:00+00:00", display: "once at 2026-02-03 14:00", expression: nil)
         #expect(CronScheduleFormatter.humanReadable(from: once, zoneNote: note)
                 == CronScheduleFormatter.humanReadable(from: once))

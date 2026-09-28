@@ -68,6 +68,66 @@ public enum ModelPreflight: Sendable {
         return trimmed.isEmpty || trimmed == "unknown"
     }
 
+    /// The configured `model.provider` when this Hermes can't route it, else
+    /// nil (S06-F1). Hermes resolves the provider before looking up any key
+    /// and fails with "Unknown provider '<id>'"
+    /// (`hermes_cli/auth.py:1500-1509` @ v2026.9.24), so a config saved from
+    /// an older Scarf picker (which offered every models.dev provider) chats
+    /// into an error, or onto some other provider. Nil — no warning — when
+    /// the provider is unset, when the host is not one
+    /// ``HermesRoutableProviders`` has a band for (older than v0.6, or
+    /// undetected), and
+    /// when config.yaml defines a custom endpoint under that name, or has
+    /// custom-provider entries Scarf can't read (Hermes may route the name
+    /// through them). A warning, not a block: a user plugin on the
+    /// host can register names Scarf can't see.
+    public static func unroutableProvider(
+        _ config: HermesConfig, capabilities: HermesCapabilities
+    ) -> String? {
+        let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isUnroutable(provider, customProviders: CustomProviders(config),
+                           capabilities: capabilities)
+        else { return nil }
+        return provider
+    }
+
+    /// The custom-provider names a config.yaml defines, which Hermes routes
+    /// even when they aren't built-in providers. Carried separately so the
+    /// model picker can apply the same exemptions as the preflight warning
+    /// without holding the whole config.
+    public struct CustomProviders: Sendable, Equatable {
+        public var names: Set<String>
+        public var hasUnread: Bool
+
+        public static let none = CustomProviders(names: [], hasUnread: false)
+
+        public init(names: Set<String>, hasUnread: Bool) {
+            self.names = names
+            self.hasUnread = hasUnread
+        }
+
+        public init(_ config: HermesConfig) {
+            self.init(names: config.namedCustomProviders,
+                      hasUnread: config.hasUnreadCustomProviders)
+        }
+    }
+
+    /// True only when this Hermes is known not to route `provider`: it is
+    /// set, not a custom endpoint in config.yaml (or config.yaml has custom
+    /// entries Scarf can't read), and missing from the host's band. The one
+    /// rule behind both the preflight warning and the model picker (S06-F1).
+    public static func isUnroutable(
+        _ provider: String, customProviders: CustomProviders,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isUnset(provider), !customProviders.hasUnread,
+              !customProviders.names.contains(
+                  provider.lowercased().replacingOccurrences(of: " ", with: "-"))
+        else { return false }
+        return HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
+    }
+
     /// Result of a `model.default` ↔ `model.provider` mismatch check.
     /// Captures the case where `model.default` carries a `<provider>/...`
     /// prefix that doesn't match the standalone `model.provider` key —

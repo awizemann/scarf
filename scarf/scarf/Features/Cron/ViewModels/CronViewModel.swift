@@ -955,6 +955,9 @@ final class CronViewModel {
                     self.logger.warning("cron run failed: \(runResult.output)")
                 }
                 self.load(force: true)
+                // A run sets or clears `last_error` and can open an incident,
+                // so the doctor rows and incident badges change too (S08-F3).
+                self.refreshDiagnosticsAfterMutation()
                 return verdict
             }
             guard Self.shouldTickAfterRunNow(verdict, output: runResult.output, hostNeedsTick: hostNeedsTick) else {
@@ -974,6 +977,7 @@ final class CronViewModel {
                     self.logger.warning("cron tick exited non-zero (job may still complete via scheduler): \(tickResult.output)")
                 }
                 self.load(force: true)
+                self.refreshDiagnosticsAfterMutation()
             }
         }
     }
@@ -1289,6 +1293,10 @@ final class CronViewModel {
 
     // MARK: - Private
 
+    /// How many times a mutation asked for the diagnostics refresh, gated
+    /// or not. Lets a test see that a code path asked, without spawning.
+    @ObservationIgnored private(set) var diagnosticsRefreshRequests = 0
+
     /// Re-run the two diagnostic verbs after a job mutation.
     ///
     /// `load(force:)` only re-reads `jobs.json`, so before this the
@@ -1304,6 +1312,7 @@ final class CronViewModel {
     /// changed run state (`cron run` prints a green line and then
     /// `Ran now: failed.`).
     func refreshDiagnosticsAfterMutation() {
+        diagnosticsRefreshRequests += 1
         // `|| isLoading…`: a probe in flight is a probe this host ALREADY
         // received, so refreshing behind it adds no spawn a pre-target host
         // would not have made (C1) — and on a cold launch the in-flight run
@@ -1331,9 +1340,14 @@ final class CronViewModel {
             // `OffPool.run`: the blocking spawn gets a thread of its own,
             // not one of the cooperative pool's (C10).
             let result = await OffPool.run { mutationRunner(arguments, 60) }
+            // Up to v2026.8.31 a refused mutation still exited 0; its
+            // `Failed to … job:` line is the only signal on those hosts.
+            let exitZeroRefusal = result.exitCode == 0
+                ? HermesCronMutationVerdict.exitZeroRefusal(output: result.output) : nil
+            let succeeded = result.exitCode == 0 && exitZeroRefusal == nil
             await MainActor.run {
-                onOutcome?(result.exitCode == 0)
-                if result.exitCode == 0 {
+                onOutcome?(succeeded)
+                if succeeded {
                     self.post(success, outcome: .success)
                     // Armed only when `--pin` was actually sent, which only a
                     // v0.21.4+ host is ever sent (`hasCronModelPin`), so an
@@ -1345,6 +1359,7 @@ final class CronViewModel {
                 } else {
                     self.post(
                         Self.friendlyCronFailure(result.output, offer: offer)
+                            ?? exitZeroRefusal
                             ?? "Failed: \(result.output.prefix(200))",
                         outcome: .failure
                     )

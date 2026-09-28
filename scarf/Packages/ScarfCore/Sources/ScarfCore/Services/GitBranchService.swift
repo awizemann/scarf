@@ -42,9 +42,24 @@ public struct GitBranchService: Sendable {
         let ctx = context
         return await Task.detached {
             let transport = ctx.makeTransport()
+            // A remote shell finds `git` on its PATH. Locally the transport
+            // launches the executable path as given, so a bare "git" became
+            // `/git` and the Mac never showed the chip (S11-F3).
+            let git: String
+            if ctx.isRemote {
+                git = "git"
+            } else {
+                #if os(macOS)
+                let path = LocalTransport.subprocessEnvironment(forExecutable: "git")["PATH"]
+                guard let found = Self.localGitExecutable(searchPath: path) else { return nil }
+                git = found
+                #else
+                return nil
+                #endif
+            }
             do {
                 let result = try transport.runProcess(
-                    executable: "git",
+                    executable: git,
                     args: ["-C", projectPath, "rev-parse", "--abbrev-ref", "HEAD"],
                     stdin: nil,
                     timeout: 5
@@ -64,5 +79,42 @@ public struct GitBranchService: Sendable {
                 return nil
             }
         }.value
+    }
+
+    /// The local `git` to run: the first one on `searchPath` (the login
+    /// shell's PATH), then the Homebrew and system locations.
+    ///
+    /// `/usr/bin/git` is only a stub until Apple's developer tools are
+    /// installed, and running it without them pops the "install command
+    /// line developer tools" dialog. The chip is looked up for every project
+    /// chat, git repo or not, so the stub is skipped unless the tools are
+    /// there; without any git the chip is simply hidden.
+    nonisolated static func localGitExecutable(
+        searchPath: String?,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        developerToolsInstalled: () -> Bool = GitBranchService.developerToolsInstalled
+    ) -> String? {
+        let dirs = (searchPath ?? "").split(separator: ":").map(String.init)
+            + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+        for dir in dirs where !dir.isEmpty {
+            let candidate = (dir as NSString).appendingPathComponent("git")
+            guard isExecutable(candidate) else { continue }
+            if candidate == "/usr/bin/git", !developerToolsInstalled() { continue }
+            return candidate
+        }
+        return nil
+    }
+
+    /// True when `/usr/bin/git` has real tools behind it: a developer
+    /// directory chosen with `xcode-select`, the Command Line Tools, or
+    /// Xcode in its default place.
+    nonisolated static func developerToolsInstalled() -> Bool {
+        let fm = FileManager.default
+        if let dir = ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !dir.isEmpty,
+           fm.fileExists(atPath: dir) { return true }
+        if let link = try? fm.destinationOfSymbolicLink(atPath: "/var/db/xcode_select_link"),
+           fm.fileExists(atPath: link) { return true }
+        return fm.isExecutableFile(atPath: "/Library/Developer/CommandLineTools/usr/bin/git")
+            || fm.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer")
     }
 }

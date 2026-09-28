@@ -110,6 +110,9 @@ public enum HermesPluginDirectoryScanner {
     /// Reads `plugin.yaml` / `plugin.yml`, then `plugin.json`. YAML takes
     /// precedence, matching `_read_manifest_info` and
     /// `_is_portable_plugin_dir`.
+    /// The capability id a plugin declares to replace built-in tools.
+    static let toolOverrideCapability = "tools.override"
+
     public static func readManifest(path: String, context: ServerContext) -> HermesPluginManifest {
         for yamlPath in [path + "/plugin.yaml", path + "/plugin.yml"] {
             guard let yaml = context.readText(yamlPath) else { continue }
@@ -117,15 +120,15 @@ public enum HermesPluginDirectoryScanner {
             let name = HermesYAML.stripYAMLQuotes(parsed.values["name"] ?? "")
             let source = HermesYAML.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
             let version = HermesYAML.stripYAMLQuotes(parsed.values["version"] ?? "")
-            // Same boolish helper as every other YAML flag read (P18): a
-            // manifest author writing `tool_override: yes` meant the same
-            // thing as `true`, and the literal comparison read it as false.
-            // (Scarf's own display read — Hermes gates an override on
-            // `plugins.entries.<id>.allow_tool_override` in config.yaml,
-            // `hermes_cli/plugins.py:568-578` @ v2026.9.7 — so this decides a
-            // badge, not behaviour. It should still agree with the `plugin.json`
-            // arm below, which uses a real `Bool`.)
-            let toolOverride = HermesYAML.boolishValue(parsed.values["tool_override"]) ?? false
+            // A plugin asks to replace built-in tools by declaring the
+            // `tools.override` capability (`hermes_cli/plugin_capabilities.py:29`
+            // @ v2026.9.24, from v2026.8.13). No Hermes version reads a
+            // manifest `tool_override` key, which Scarf used to (S10-F3).
+            let declared = parsed.lists["capabilities"] ?? []
+            let toolOverride = declared.contains {
+                HermesYAML.stripYAMLQuotes($0.trimmingCharacters(in: .whitespaces))
+                    == Self.toolOverrideCapability
+            }
             return HermesPluginManifest(
                 name: name, source: source, version: version,
                 toolOverride: toolOverride, hasManifest: true
@@ -136,9 +139,9 @@ public enum HermesPluginDirectoryScanner {
             let name = (obj["name"] as? String) ?? ""
             let source = (obj["source"] as? String) ?? (obj["repository"] as? String) ?? (obj["url"] as? String) ?? ""
             let version = (obj["version"] as? String) ?? ""
-            // v0.14 — `tool_override: true` opt-in. Accept both spellings
-            // because plugin authors might use camelCase.
-            let toolOverride = (obj["tool_override"] as? Bool) ?? (obj["toolOverride"] as? Bool) ?? false
+            let toolOverride = ((obj["capabilities"] as? [Any]) ?? []).contains {
+                ($0 as? String)?.trimmingCharacters(in: .whitespaces) == Self.toolOverrideCapability
+            }
             return HermesPluginManifest(
                 name: name, source: source, version: version,
                 toolOverride: toolOverride, hasManifest: true

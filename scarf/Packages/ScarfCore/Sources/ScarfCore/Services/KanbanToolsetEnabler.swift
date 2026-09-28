@@ -66,9 +66,10 @@ public actor KanbanToolsetEnabler {
     }
 
     /// Add `kanban` to the platform's toolset list, write the file
-    /// atomically, then confirm the detector sees the change. Default
-    /// `cli` matches what ACP chats run under, so the common path is
-    /// `enabler.enable()` with no args.
+    /// atomically, then confirm the detector sees the change. Chat
+    /// surfaces pass `KanbanToolsetDetector.chatPlatform(for:)` (`acp`,
+    /// 0.21.5+ only) and never call this below 0.21.5, where no config
+    /// reaches Scarf's chats.
     ///
     /// Idempotent: if `kanban` is already in the right place (either
     /// the platform's list or the top-level `toolsets:`), returns
@@ -97,7 +98,9 @@ public actor KanbanToolsetEnabler {
         // THREAD-LOCAL, so a hold taken on the load's thread could not have
         // covered a write running on another.
         let outcome = await Self.applyPlan(context: context, path: path) {
-            Self.planEnable(yaml: $0, platform: platform)
+            platform == KanbanToolsetDetector.acpPlatform
+                ? Self.planEnableACP(yaml: $0)
+                : Self.planEnable(yaml: $0, platform: platform)
         }
         switch outcome {
         case .failed(let message):
@@ -224,7 +227,16 @@ public actor KanbanToolsetEnabler {
         if topLevel.contains("kanban") {
             return .alreadyPresent
         }
+        return planInsert(yaml: yaml, platform: platform)
+    }
 
+    /// Insert `kanban` into the platform's existing block list. Shared by
+    /// `planEnable` and `planEnableACP`; the caller has already decided that
+    /// the top-level `toolsets:` does not settle the question.
+    private static func planInsert(
+        yaml: String,
+        platform: String
+    ) -> MutationPlan {
         let lines = yaml.components(separatedBy: "\n")
         guard let blockIdx = lines.firstIndex(of: "platform_toolsets:") else {
             return .refuse(reason:
@@ -261,7 +273,8 @@ public actor KanbanToolsetEnabler {
         if let colonIdx = platformLine.firstIndex(of: ":") {
             let afterColon = platformLine[platformLine.index(after: colonIdx)...]
                 .trimmingCharacters(in: .whitespaces)
-            if !afterColon.isEmpty {
+            // A trailing comment (`acp:  # notes`) is not a value.
+            if !afterColon.isEmpty, !afterColon.hasPrefix("#") {
                 return .refuse(reason:
                     "`platform_toolsets.\(platform)` has a scalar value `\(afterColon)` instead of a list. This usually means `hermes config set` was run against it and clobbered the original list. Open ~/.hermes/config.yaml and convert it back to a list of toolset names."
                 )
@@ -314,7 +327,11 @@ public actor KanbanToolsetEnabler {
         // first position whose existing value is > "kanban" lexically,
         // falling back to the end. The detector doesn't care about
         // order, so worst case the file just has one out-of-order item.
-        var insertAt = scan  // default: end of the list
+        // Default: right after the last item. Not `scan`, which has also
+        // walked past blank lines: at the end of a file that ends in "\n"
+        // it pointed after the final empty line, splitting the list with a
+        // blank line and dropping the file's trailing newline.
+        var insertAt = listItems.last.map { $0.line + 1 } ?? platformIdx + 1
         for item in listItems where item.value > "kanban" {
             insertAt = item.line
             break
@@ -323,6 +340,110 @@ public actor KanbanToolsetEnabler {
         var newLines = lines
         newLines.insert(newItem, at: insertAt)
         return .rewrite(newLines.joined(separator: "\n"))
+    }
+
+    /// Plan for turning kanban on for Scarf's chats on a 0.21.5+ host, where
+    /// ACP reads `platform_toolsets.acp` (see
+    /// `KanbanToolsetDetector.classifyACP` for Hermes's rule).
+    ///
+    /// Unlike `planEnable`, a missing key is the NORMAL case here: most
+    /// hosts have never saved an `acp` list and run on the `hermes-acp`
+    /// default. Writing a bare `acp: [kanban]` would replace that default
+    /// with kanban alone and strip the chat of its file, terminal, web and
+    /// other tools. So a new list is seeded with `hermes-acp` first:
+    /// `_get_platform_tools` expands a saved composite name to the same
+    /// toolsets as the default (checked against the `v2026.9.24` venv: the
+    /// resolved set for `[hermes-acp, kanban]` is the default set plus
+    /// `kanban`, nothing removed).
+    ///
+    /// Cases:
+    /// - a saved `acp` list naming `kanban` → `.alreadyPresent`;
+    /// - a saved block list without it → `- kanban` inserted;
+    /// - a saved flow list `[a, b]` → rewritten as `[a, b, kanban]`;
+    /// - no list and the top-level `toolsets:` names kanban → `.alreadyPresent`
+    ///   (Hermes's legacy fallback already turns it on);
+    /// - key present but null → `- hermes-acp` and `- kanban` added under it;
+    /// - key absent → `acp:` with those two items added to the block, or a
+    ///   new `platform_toolsets:` block appended when there is none;
+    /// - a non-list scalar, a quoted list string, or an inline
+    ///   `platform_toolsets: {…}` → `.refuse` (not safe to rewrite by line).
+    static func planEnableACP(yaml: String) -> MutationPlan {
+        let platform = KanbanToolsetDetector.acpPlatform
+        if case .enabled = KanbanToolsetDetector.classifyACP(yaml: yaml) {
+            return .alreadyPresent
+        }
+
+        var lines = yaml.components(separatedBy: "\n")
+        let location = KanbanToolsetDetector.locatePlatformToolsets(
+            lines: lines, platform: platform)
+
+        switch location.entry {
+        case .list:
+            guard let keyLine = location.keyLine else { break }
+            let keyText = lines[keyLine]
+            // The key's own value, with any trailing comment set aside: a
+            // `[` inside `# see [docs]` must not read as a flow list.
+            let afterKey = keyText.trimmingCharacters(in: .whitespaces)
+                .dropFirst("\(platform):".count)
+                .trimmingCharacters(in: .whitespaces)
+            let value = KanbanToolsetDetector.stripTrailingComment(afterKey)
+            guard !value.isEmpty else {
+                // Block list: the existing insertion keeps the file's indent
+                // and alphabetical order.
+                return planInsert(yaml: yaml, platform: platform)
+            }
+            // Flow list. Only an unquoted one-line `[...]` is rewritten.
+            guard value.hasPrefix("["), value.hasSuffix("]"),
+                  let items = KanbanToolsetDetector.parseFlowList(value)
+            else {
+                return .refuse(reason:
+                    "`platform_toolsets.acp` is written in a form Scarf can't safely edit. Open ~/.hermes/config.yaml and add `kanban` to the `acp:` list under `platform_toolsets:`."
+                )
+            }
+            let comment = afterKey.dropFirst(value.count).trimmingCharacters(in: .whitespaces)
+            let indent = String(repeating: " ", count: location.keyIndent)
+            var rebuilt = "\(indent)\(platform): [\((items + ["kanban"]).joined(separator: ", "))]"
+            if !comment.isEmpty { rebuilt += " \(comment)" }
+            lines[keyLine] = rebuilt
+            return .rewrite(lines.joined(separator: "\n"))
+        case .scalar(let value):
+            return .refuse(reason:
+                "`platform_toolsets.acp` has a value `\(value)` instead of a list. Open ~/.hermes/config.yaml and turn it into a list of toolset names that includes `hermes-acp` and `kanban`."
+            )
+        case .null:
+            guard let keyLine = location.keyLine else { break }
+            let item = String(repeating: " ", count: location.itemIndent ?? location.keyIndent)
+            // `acp: null` / `acp: ~` must lose its value, or the items below
+            // it would make the YAML invalid.
+            lines[keyLine] = String(repeating: " ", count: location.keyIndent) + "acp:"
+            lines.insert(contentsOf: ["\(item)- hermes-acp", "\(item)- kanban"], at: keyLine + 1)
+            return .rewrite(lines.joined(separator: "\n"))
+        case .absent:
+            break
+        }
+
+        guard location.entry == .absent else {
+            return .refuse(reason: String(localized: "Couldn't locate `platform_toolsets.acp` in config.yaml."))
+        }
+        if let blockEnd = location.blockEnd {
+            let key = String(repeating: " ", count: location.keyIndent)
+            let item = String(repeating: " ", count: location.itemIndent ?? location.keyIndent)
+            lines.insert(
+                contentsOf: ["\(key)acp:", "\(item)- hermes-acp", "\(item)- kanban"],
+                at: blockEnd)
+            return .rewrite(lines.joined(separator: "\n"))
+        }
+        // No block-style section. An inline `platform_toolsets: {…}` (or any
+        // other value on that line) must not get a second key appended.
+        if lines.contains(where: { $0.hasPrefix("platform_toolsets:") }) {
+            return .refuse(reason:
+                "`platform_toolsets:` is written inline in config.yaml, which Scarf can't safely edit. Open ~/.hermes/config.yaml and add an `acp:` list containing `hermes-acp` and `kanban` under it."
+            )
+        }
+        var text = yaml
+        if !text.isEmpty, !text.hasSuffix("\n") { text += "\n" }
+        text += "platform_toolsets:\n  acp:\n  - hermes-acp\n  - kanban\n"
+        return .rewrite(text)
     }
 
     /// Disable mirror of `planEnable` — removes `kanban` from the

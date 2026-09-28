@@ -141,6 +141,9 @@ struct GatewayView: View {
                 }
             }
 
+            // S07-F3: a restart Hermes is holding for the current turn.
+            GatewayRestartDrainBanner(watcher: viewModel.drainWatcher)
+
             HStack(spacing: ScarfSpace.s3) {
                 // `isRunning` is the live `hermes gateway status` verdict —
                 // the stored `gateway_state` alone stays "running" forever

@@ -1944,6 +1944,22 @@ public struct HermesConfig: Sendable {
     /// from model pickers and built-in resolution (inventory.py:100,
     /// case-insensitive on the Hermes side). List — direct-YAML writes.
     public var excludedProviders: [String]
+    /// Names config.yaml's keyed `providers:` map defines as custom
+    /// endpoints — an entry with `api`/`url`/`base_url` (`_entry_url`,
+    /// `hermes_cli/runtime_provider_custom.py:69-70` @ v2026.9.24) — by key
+    /// and by its `name:` field, lowercased with spaces as `-`
+    /// (`custom_provider_aliases`, `hermes_cli/providers.py:420-432`).
+    /// Hermes routes a `model.provider` matching one through its
+    /// named-custom rung (`runtime_provider_custom.py:191-207`) even when the
+    /// name is not a built-in, so ``ModelPreflight/unroutableProvider(_:capabilities:)``
+    /// doesn't warn about it. Per-provider knobs without an endpoint
+    /// (`providers.anthropic.request_timeout_seconds`) don't count.
+    public var namedCustomProviders: Set<String>
+    /// config.yaml has custom-provider entries whose names Scarf's flat parse
+    /// can't read: a non-empty legacy `custom_providers:` list, or a `providers:`
+    /// map written in flow form. The warning then stays quiet rather than
+    /// guess.
+    public var hasUnreadCustomProviders: Bool
     /// `approvals.smart_policy` (v0.20+, hermes_cli/config_defaults.py:2053
     /// — landed at commit bd1db5460a, first released v2026.7.30; the next
     /// numbered Hermes minor after that calendar tag is v0.20.0 =
@@ -2064,6 +2080,8 @@ public struct HermesConfig: Sendable {
         modelContextLength: String = "",
         reasoningOverrides: [String: String] = [:],
         excludedProviders: [String] = [],
+        namedCustomProviders: Set<String> = [],
+        hasUnreadCustomProviders: Bool = false,
         approvalSmartPolicy: String = "",
         commandSecrets: CommandSecretsSettings = .empty,
         telemetry: TelemetrySettings = .empty,
@@ -2154,6 +2172,8 @@ public struct HermesConfig: Sendable {
         self.modelContextLength = modelContextLength
         self.reasoningOverrides = reasoningOverrides
         self.excludedProviders = excludedProviders
+        self.namedCustomProviders = namedCustomProviders
+        self.hasUnreadCustomProviders = hasUnreadCustomProviders
         self.approvalSmartPolicy = approvalSmartPolicy
         self.commandSecrets = commandSecrets
         self.telemetry = telemetry

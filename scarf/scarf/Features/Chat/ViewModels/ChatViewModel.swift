@@ -310,6 +310,12 @@ final class ChatViewModel {
     /// chat header reads this to render the active-model badge.
     private(set) var currentModelPreset: ModelPreset?
 
+    /// The name typed with `/new <name>`, waiting for the new session's
+    /// first completed turn (see `sendViaACP`). Cleared on any session
+    /// switch.
+    @ObservationIgnored
+    private(set) var pendingSessionTitle: String?
+
     /// True when the user just sent `/goal` against a host whose `cli`
     /// platform_toolsets list lacks `kanban`. The view binds a `.sheet`
     /// to this flag and surfaces the one-time onboarding explanation
@@ -425,6 +431,14 @@ final class ChatViewModel {
     /// banner with a one-click switch to `custom`. Never migrated silently.
     var llamaCppBaseURLIgnored: Bool = false
 
+    /// `model.provider` from config.yaml when this Hermes can't route it
+    /// (`ModelPreflight.unroutableProvider`, S06-F1) — e.g. `mistral` saved
+    /// by an older Scarf picker that listed every models.dev provider.
+    /// Drives a warning banner with a "Choose model…" button. Nil when the
+    /// provider routes, is unset, or Scarf has no table for the host
+    /// (older than v0.6, or undetected).
+    var unroutableProvider: String?
+
     /// The `approvals.mode` stored in config.yaml, read the way Hermes
     /// reads it (`HermesConfig.storedApprovalMode`: bare `false`/`no`/`off`
     /// are the `off` mode, unknown strings are `manual`), or nil when the
@@ -441,6 +455,10 @@ final class ChatViewModel {
     /// the original `startACPSession` call from `pendingStartArgs`.
     /// Nil when no preflight is pending.
     var modelPreflightReason: String?
+    /// config.yaml's custom providers, from the last off-main config read —
+    /// handed to the preflight sheet's picker so it doesn't treat a custom
+    /// endpoint as unroutable.
+    private(set) var customProviders: ModelPreflight.CustomProviders = .none
 
     /// Stash of the original `startACPSession` arguments while we wait
     /// for the user to pick a model. Replayed verbatim once
@@ -524,7 +542,14 @@ final class ChatViewModel {
     /// resets the transcript VM at click time, long before
     /// `startACPSession` reaches `stopACP()`.
     @ObservationIgnored
-    private var promptTurns: [Int: PromptTurn] = [:]
+    private var promptTurns: [Int: PromptTurn] = [:] {
+        didSet { promptTurnsRevision &+= 1 }
+    }
+
+    /// Observed stand-in for `promptTurns` (which is not observed), so the
+    /// composer's Stop button appears when a held or autostarted prompt
+    /// actually starts, not only when `isAgentWorking` flips.
+    private var promptTurnsRevision = 0
 
     /// Last token handed out by `launchPromptTask`.
     @ObservationIgnored
@@ -595,6 +620,13 @@ final class ChatViewModel {
     /// that nothing re-verifies. Unlike `sendRouter` it leaves connected
     /// sends (and voice turns) alone.
     var autoStartInterceptor: ((String, [ChatImageAttachment]) -> Bool)?
+
+    /// Consulted first by `stopCurrentTurn`. Bot Chat sets it while it
+    /// converses over the CLI transport, where the running turn is a
+    /// `hermes chat -Q` process, not an ACP prompt; returning true means
+    /// the owner stopped it. `canStop` says whether a turn is running there.
+    @ObservationIgnored
+    var stopRouter: (canStop: () -> Bool, stop: () -> Bool)?
 
     /// Test seam for the model-config write shared by the preflight
     /// sheet and the mismatch banner's "Choose model…" flow
@@ -735,8 +767,11 @@ final class ChatViewModel {
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
+            let unroutable = ModelPreflight.unroutableProvider(config, capabilities: capabilities)
+            self?.customProviders = ModelPreflight.CustomProviders(config)
             self?.modelProviderMismatch = resolvedMismatch
             self?.llamaCppBaseURLIgnored = llamaIgnored
+            self?.unroutableProvider = unroutable
             self?.approvalMode = mode
             self?.voiceChatModeRaw = voiceChatMode
             self?.voiceTTSProviderRaw = ttsProvider
@@ -877,6 +912,14 @@ final class ChatViewModel {
     /// diagnostics so this banner re-evaluates (and clears). No start
     /// args are stashed: unlike the preflight bail there's no
     /// interrupted chat-start to replay.
+    @MainActor
+    func chooseModelForUnroutableProvider(_ provider: String) {
+        pendingStartArgs = nil
+        modelPreflightReason = String(localized: "This version of Hermes can't route the configured provider (\(provider)).")
+    }
+
+    /// Same escape hatch as `chooseModelForUnroutableProvider`, for the
+    /// model/provider mismatch banner.
     @MainActor
     func chooseModelForMismatch(_ mismatch: ModelPreflight.Mismatch) {
         pendingStartArgs = nil
@@ -1024,6 +1067,10 @@ final class ChatViewModel {
         // A voice session belongs to the chat it was started in.
         voiceLive.endImmediately()
         richChatViewModel.reset()
+        // A new session boundary: the badge must not carry the last
+        // chat's model (S03-F2). The start sets it from the session.
+        currentModelPreset = nil
+        pendingSessionTitle = nil
 
         if displayMode == .richChat {
             startACPSession(resume: nil, projectPath: projectPath, initialPrompt: initialPrompt)
@@ -1077,6 +1124,10 @@ final class ChatViewModel {
         // A voice session belongs to the chat it was started in.
         voiceLive.endImmediately()
         richChatViewModel.reset()
+        // A new session boundary: the badge must not carry the last
+        // chat's model (S03-F2). The start sets it from the session.
+        currentModelPreset = nil
+        pendingSessionTitle = nil
 
         if displayMode == .richChat {
             // Bound the pre-spawn stage (the attribution read below is a
@@ -1118,6 +1169,10 @@ final class ChatViewModel {
         // A voice session belongs to the chat it was started in.
         voiceLive.endImmediately()
         richChatViewModel.reset()
+        // A new session boundary: the badge must not carry the last
+        // chat's model (S03-F2). The start sets it from the session.
+        currentModelPreset = nil
+        pendingSessionTitle = nil
 
         if displayMode == .richChat {
             // Bound the pre-spawn stage (DB open + attribution reads
@@ -1401,13 +1456,10 @@ final class ChatViewModel {
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
 
-                let cwd: String
-                if let projectPath {
-                    cwd = projectPath
-                } else {
-                    cwd = await context.resolvedUserHome()
-                    guard startStillCurrent(intent, client: client) else { return }
-                }
+                // A remote project path can be `~`-rooted; Hermes takes the
+                // session cwd literally, so expand it (B03 handoff).
+                let cwd = await context.acpSessionCwd(projectPath: projectPath)
+                guard startStillCurrent(intent, client: client) else { return }
 
                 hasActiveProcess = true
 
@@ -1429,6 +1481,11 @@ final class ChatViewModel {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
                 }
+                guard startStillCurrent(intent, client: client) else { return }
+
+                // Header mode chip and model badge follow the session the
+                // load or new returned (S01-F1, S03-F2).
+                await adoptSessionState(from: client, configModel: nil)
                 guard startStillCurrent(intent, client: client) else { return }
 
                 // The mode is scoped to the ACP session, and this path
@@ -1541,8 +1598,14 @@ final class ChatViewModel {
                 // it silently for v1 — the slash menu's argument hint
                 // still discoverably advertises the syntax for when
                 // Mac's startNewSession gains support.
-                _ = name
                 startNewSession()
+                // `/new <name>` (S03-F5): the name is applied with the same
+                // `hermes sessions rename` the sidebar uses, once Hermes
+                // has stored the session — its row only exists after the
+                // first turn (session.py:329-331 @ v2026.9.24 keeps an
+                // empty ACP session unsaved), so a rename now would fail.
+                let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                pendingSessionTitle = title.isEmpty ? nil : title
             }
             return
         }
@@ -1756,8 +1819,13 @@ final class ChatViewModel {
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
                 )
+                if Self.isModelSwitchCommand(wireText),
+                   let reply = richChatViewModel.messages.last(where: { $0.isAssistant })?.content {
+                    await followTypedModelSwitch(reply: reply)
+                }
                 // Re-fetch session from DB to pick up cost/token data Hermes may have written
                 await richChatViewModel.refreshSessionFromDB()
+                await applyPendingSessionTitle(sessionId: sessionId)
                 // Issue #64 — notify the user that Hermes has
                 // finished if Scarf isn't the foreground app. The
                 // notifier handles the foreground/disabled gating;
@@ -1879,6 +1947,101 @@ final class ChatViewModel {
         }
     }
 
+    /// Point the header's approval-mode chip and model badge at what the
+    /// session just opened by `session/new` / `session/load` reports
+    /// (`modes.currentModeId`, `models.currentModelId`). Hermes keeps a mode
+    /// picked in the header in memory only, so a reconnect or autostart
+    /// comes back at `default` (S01-F1); the model is the session's saved
+    /// one on a resume, the config default on a new chat (S03-F2). A host
+    /// without these fields: the mode chip keeps its value (as before) and
+    /// the badge shows the global default.
+    ///
+    /// `keepModelWhenUnreported`: the reconnect ladder reloads the SAME
+    /// session, so a host that sends no `models` keeps the badge it had
+    /// (as before); a new start clears it. Every write is dropped when a
+    /// newer start replaced `client` while this awaited.
+    private func adoptSessionState(
+        from client: ACPClient,
+        configModel: String?,
+        keepModelWhenUnreported: Bool = false
+    ) async {
+        let state = await client.lastSessionState
+        guard acpClient === client else { return }
+        if let modeId = state.currentModeId {
+            richChatViewModel.activeApprovalMode = ACPApprovalMode(rawValue: modeId) ?? .default
+        }
+        guard let pickerId = state.currentModelId else {
+            if !keepModelWhenUnreported { currentModelPreset = nil }
+            return
+        }
+        let presets = (try? await ModelPresetService.shared(for: context).list()) ?? []
+        var defaultModel = configModel
+        if defaultModel == nil,
+           Self.presetMatching(pickerId: pickerId, in: presets) == nil {
+            let svc = fileService
+            defaultModel = await OffPool.run { svc.loadConfig().model }
+        }
+        guard acpClient === client else { return }
+        currentModelPreset = Self.badgePreset(pickerId: pickerId, presets: presets, configModel: defaultModel)
+    }
+
+    /// The saved preset for Hermes's picker id (`provider:model`): same
+    /// model, and the same provider unless the preset leaves it blank.
+    nonisolated static func presetMatching(pickerId: String, in presets: [ModelPreset]) -> ModelPreset? {
+        let model = ACPSessionState.modelName(fromPickerId: pickerId)
+        let provider = ACPSessionState.providerID(fromPickerId: pickerId)
+        return presets.first { preset in
+            guard preset.modelID == model || preset.modelID == pickerId else { return false }
+            let presetProvider = preset.providerID.trimmingCharacters(in: .whitespaces).lowercased()
+            return presetProvider.isEmpty || provider == nil || presetProvider == provider
+        }
+    }
+
+    /// What the badge shows for a session running `pickerId`: the matching
+    /// preset; `nil` ("Default") when it is the config.yaml model; else
+    /// the running model itself, as an unsaved entry no preset row checks.
+    nonisolated static func badgePreset(pickerId: String, presets: [ModelPreset], configModel: String?) -> ModelPreset? {
+        if let match = presetMatching(pickerId: pickerId, in: presets) { return match }
+        let model = ACPSessionState.modelName(fromPickerId: pickerId)
+        if let configModel, !configModel.isEmpty, configModel == model || configModel == pickerId { return nil }
+        return ModelPreset(name: model, modelID: model, providerID: ACPSessionState.providerID(fromPickerId: pickerId) ?? "")
+    }
+
+    /// A typed `/model <name>` switched the session: Hermes answers with
+    /// `Model switched to: <model>\nProvider: <provider>` and nothing else
+    /// (`_cmd_model`, acp_adapter/commands.py:142-151 @ v2026.9.24), so the
+    /// badge follows that reply. Any other reply (an error, `/model` with
+    /// no argument) leaves the badge alone.
+    private func followTypedModelSwitch(reply: String) async {
+        guard let pickerId = Self.modelSwitchPickerId(fromReply: reply) else { return }
+        let presets = (try? await ModelPresetService.shared(for: context).list()) ?? []
+        // Never "Default" here: the user asked for this model by name.
+        currentModelPreset = Self.badgePreset(pickerId: pickerId, presets: presets, configModel: nil)
+    }
+
+    /// `provider:model` from Hermes's `/model` success reply, or nil.
+    nonisolated static func modelSwitchPickerId(fromReply reply: String) -> String? {
+        let lines = reply.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let first = lines.first, first.hasPrefix("Model switched to: ") else { return nil }
+        let model = first.dropFirst("Model switched to: ".count).trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty else { return nil }
+        if let providerLine = lines.dropFirst().first(where: { $0.hasPrefix("Provider: ") }) {
+            let provider = providerLine.dropFirst("Provider: ".count).trimmingCharacters(in: .whitespaces).lowercased()
+            if !provider.isEmpty { return "\(provider):\(model)" }
+        }
+        return model
+    }
+
+    /// Whether a prompt's wire text is `/model` with a model to switch to.
+    nonisolated static func isModelSwitchCommand(_ wireText: String) -> Bool {
+        let trimmed = wireText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/model") else { return false }
+        let rest = trimmed.dropFirst("/model".count)
+        guard let first = rest.first, first.isWhitespace else { return false }
+        return !rest.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     /// Switch the per-session edit auto-approval mode on the live ACP
     /// session via `session/set_mode` (Hermes v0.15+). Mirrors
     /// `switchModelPreset` — optimistic update flips the header chip
@@ -1941,7 +2104,9 @@ final class ChatViewModel {
             projectPath: projectPath,
             context: context
         )
-        currentModelPreset = outcome.appliedPreset
+        // No binding (or a rejected one) leaves the badge on what the
+        // session reported it runs.
+        if let applied = outcome.appliedPreset { currentModelPreset = applied }
         switch outcome {
         case .noBinding:
             break
@@ -2074,6 +2239,7 @@ final class ChatViewModel {
             Analytics.record(.modelPreflightResult(outcome: .passed))
         } else {
             pendingStartArgs = (sessionId, projectPath, initialPrompt)
+            customProviders = ModelPreflight.CustomProviders(config)
             modelPreflightReason = preflight.reason
             acpStatus = ""
             hasActiveProcess = false
@@ -2159,13 +2325,10 @@ final class ChatViewModel {
                 // when the caller didn't request a project scope.
                 // `??` can't wrap an async autoclosure, so we
                 // materialize the fallback with an if-let.
-                let cwd: String
-                if let projectPath {
-                    cwd = projectPath
-                } else {
-                    cwd = await context.resolvedUserHome()
-                    guard startStillCurrent(intent, client: client) else { return }
-                }
+                // A remote project path can be `~`-rooted; Hermes takes the
+                // session cwd literally, so expand it (B03 handoff).
+                let cwd = await context.acpSessionCwd(projectPath: projectPath)
+                guard startStillCurrent(intent, client: client) else { return }
 
                 // Mark active BEFORE setting session ID so .task(id:) sees isACPMode=true
                 // and doesn't wipe messages with a DB refresh
@@ -2218,6 +2381,12 @@ final class ChatViewModel {
                     resolvedSessionId = try await client.newSession(cwd: cwd)
                     guard startStillCurrent(intent, client: client) else { return }
                 }
+
+                // Header mode chip and model badge follow what the session
+                // reports it runs (S01-F1, S03-F2); a project preset below
+                // then overrides the badge.
+                await adoptSessionState(from: client, configModel: config.model)
+                guard startStillCurrent(intent, client: client) else { return }
 
                 // Apply the project's bound model preset before unlocking
                 // the prompt. Non-fatal — falls back to the config.yaml
@@ -2549,12 +2718,7 @@ final class ChatViewModel {
                 do {
                     try await client.start()
 
-                    let cwd: String
-                    if let projectPath {
-                        cwd = projectPath
-                    } else {
-                        cwd = await context.resolvedUserHome()
-                    }
+                    let cwd = await context.acpSessionCwd(projectPath: projectPath)
                     // session/load ONLY (t-217da62b). NEVER session/resume:
                     // Hermes's resume_session restores through the exact same
                     // path as load_session but silently CREATES a fresh
@@ -2598,6 +2762,11 @@ final class ChatViewModel {
 
                     // Reconcile in-memory messages with what Hermes persisted to DB
                     await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
+
+                    // The header shows what the reloaded session runs: a
+                    // fresh `hermes acp` restores it at the `default` mode
+                    // (S01-F1) and on its saved model (S03-F2).
+                    await adoptSessionState(from: client, configModel: nil, keepModelWhenUnreported: true)
 
                     // A reconnect is a fresh ACP session, so the
                     // session-scoped edit-approval mode is back at the
@@ -2836,6 +3005,7 @@ final class ChatViewModel {
                     // Clear eagerly, then re-read config.yaml for
                     // truth (t-79569a15).
                     self.modelProviderMismatch = nil
+                    self.unroutableProvider = nil
                     self.refreshConfigDiagnostics()
                     if let pending {
                         self.startACPSession(
@@ -3061,6 +3231,20 @@ final class ChatViewModel {
             ]
         )
         return true
+    }
+
+    /// Name the session typed with `/new <name>` once Hermes has stored
+    /// it (the row read after the turn found it). A failure says so in the
+    /// chat; the name is not retried.
+    private func applyPendingSessionTitle(sessionId: String) async {
+        guard let title = pendingSessionTitle,
+              richChatViewModel.sessionId == sessionId,
+              richChatViewModel.currentSession?.id == sessionId else { return }
+        pendingSessionTitle = nil
+        if !(await renameSession(sessionId, to: title)) {
+            richChatViewModel.transientHint = String(localized: "Couldn't name this chat “\(title)”. Rename it from the chat list.")
+            scheduleHintClear()
+        }
     }
 
     /// Push a confirmed rename into the live transcript header: the
@@ -3334,6 +3518,14 @@ final class ChatViewModel {
         "scarf.kanbanOnboarding.dismissed.\(context.id.uuidString)"
     }
 
+    /// The dismissal key for what the sheet showed. The Enable offer keeps
+    /// the original key; the pre-0.21.5 explanation has its own.
+    private func kanbanOnboardingDismissedKey(for prompt: KanbanChatToolsetPrompt?) -> String {
+        prompt == .unavailableInChat
+            ? kanbanOnboardingDismissedKey + ".pre0215"
+            : kanbanOnboardingDismissedKey
+    }
+
     /// Whether a `/goal` argument tail reads as "here is my target" rather
     /// than a clear. The only surviving reader of a `/goal` argument: it
     /// decides whether the kanban teaching sheet is worth raising, never
@@ -3346,15 +3538,11 @@ final class ChatViewModel {
     /// The version + dismissal half of the decision, pure so it can be tested
     /// without a host (the detector half needs a live config.yaml).
     ///
-    /// **`hasKanban`, not "has a version".** The sheet's button runs
-    /// `hermes tools enable kanban --platform cli`
-    /// (`KanbanToolsetEnabler`), and on a host below the flag's floor
-    /// `kanban` is not a toolset — Hermes routes the unknown argv to the
-    /// AGENT and exits 0, which charter C5 exists to stop. The detector
-    /// cannot save us: it reads `config.yaml`, and a 0.12 config has no
-    /// `kanban` in its toolsets for exactly the reason the sheet must not
-    /// offer to add one, so `.disabled` is precisely the answer a pre-floor
-    /// host gives.
+    /// **`hasKanban`, not "has a version".** Below the flag's floor there is
+    /// no kanban at all, so the sheet has nothing to teach. (Its Enable
+    /// button writes `platform_toolsets.acp` via `KanbanToolsetEnabler`, and
+    /// only on 0.21.5+; below that the sheet explains instead — see
+    /// `KanbanChatToolsetPrompt`.)
     ///
     /// `.empty` capabilities (not yet detected, or detection failed) are
     /// `false` on every flag, so an unwired window stays quiet rather than
@@ -3381,33 +3569,45 @@ final class ChatViewModel {
     ///   detector couldn't classify, in which case we silently skip
     ///   rather than nag with a misleading banner).
     private func maybeTriggerKanbanOnboarding() {
-        let dismissedKey = kanbanOnboardingDismissedKey
-        guard Self.shouldOfferKanbanOnboarding(
-            capabilities: capabilitiesStore?.capabilities ?? .empty,
-            dismissed: UserDefaults.standard.bool(forKey: dismissedKey)
-        ) else { return }
+        let capabilities = capabilitiesStore?.capabilities ?? .empty
+        // Dismissal is recorded per prompt: acknowledging "needs 0.21.5" on
+        // an older host must not suppress the Enable offer after an upgrade.
+        guard Self.shouldOfferKanbanOnboarding(capabilities: capabilities, dismissed: false) else { return }
         let context = self.context
+        let enableKey = kanbanOnboardingDismissedKey
+        let unavailableKey = kanbanOnboardingDismissedKey(for: .unavailableInChat)
         Task { [weak self] in
-            let detector = KanbanToolsetDetector(context: context)
-            let state = await detector.detect()
-            guard case .disabled = state else {
-                return
-            }
+            // Rich chat runs over ACP: on 0.21.5+ it reads
+            // `platform_toolsets.acp`; below that no config gives it kanban
+            // tools, and the sheet says so instead of offering Enable.
+            let state = await KanbanToolsetDetector(context: context)
+                .detectForChat(capabilities: capabilities)
+            guard let prompt = KanbanChatToolsetPrompt.forState(state) else { return }
+            let key = prompt == .unavailableInChat ? unavailableKey : enableKey
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
             await MainActor.run {
                 guard let self else { return }
+                self.kanbanOnboardingPrompt = prompt
                 self.showKanbanOnboardingSheet = true
             }
         }
     }
 
-    /// Called from the sheet's "Enable kanban tools" button. Runs the
-    /// `hermes tools enable kanban --platform cli` shellout and sets a
+    /// What the onboarding sheet shows; set with `showKanbanOnboardingSheet`.
+    var kanbanOnboardingPrompt: KanbanChatToolsetPrompt?
+
+    /// Called from the sheet's "Enable kanban tools" button. Adds `kanban`
+    /// to the chat platform's list in config.yaml (`KanbanToolsetEnabler`
+    /// writes the YAML; `hermes tools enable` refuses kanban) and sets a
     /// transient hint either way so the user gets a confirmation toast
     /// without having to re-open the sheet.
     func enableKanbanToolset() async {
         UserDefaults.standard.set(true, forKey: kanbanOnboardingDismissedKey)
+        // Only the offer-to-enable prompt carries a platform; below 0.21.5
+        // there is nothing to write.
+        guard case .offerEnable(let platform) = kanbanOnboardingPrompt else { return }
         let enabler = KanbanToolsetEnabler(context: context)
-        let result = await enabler.enable()
+        let result = await enabler.enable(platform: platform)
         await MainActor.run {
             switch result {
             case .enabled:
@@ -3427,7 +3627,8 @@ final class ChatViewModel {
     /// `AppCoordinator` via `@Environment`); the VM only persists the
     /// per-host suppression flag.
     func dismissKanbanToolsetOnboarding() {
-        UserDefaults.standard.set(true, forKey: kanbanOnboardingDismissedKey)
+        UserDefaults.standard.set(
+            true, forKey: kanbanOnboardingDismissedKey(for: kanbanOnboardingPrompt))
     }
 
     // MARK: - Voice (terminal mode only)
@@ -3785,6 +3986,41 @@ extension ChatViewModel: VoiceTurnHost {
         Task { try? await client.cancel(sessionId: sessionId) }
         let all = Task { for task in tasks { await task.value } }
         await Self.boundedWait(for: all, seconds: Self.voiceCancelWaitSeconds)
+    }
+
+    // MARK: - Stop
+
+    /// Whether the composer offers Stop: a turn Scarf started is running on
+    /// the live ACP client (or on the owner's transport, via `stopRouter`).
+    var canStopCurrentTurn: Bool {
+        if let stopRouter { return stopRouter.canStop() }
+        _ = promptTurnsRevision
+        return acpClient != nil && inFlightPromptSessionId != nil
+    }
+
+    /// Stop the running turn and keep the session (S01-F2). Sends
+    /// `session/cancel` — a notification — for the session of the turn in
+    /// flight; Hermes interrupts the agent and answers the pending
+    /// `session/prompt` with `stopReason: "cancelled"`
+    /// (acp_adapter/server.py:636-657, :999 @ v2026.9.24), which is what
+    /// ends the turn here. `noteTurnStopRequestedByUser` makes that end
+    /// quiet but visible ("You stopped this turn") and answers any
+    /// permission request still on screen. The `hermes acp` process stays
+    /// up: this is not `stopACP`.
+    func stopCurrentTurn() {
+        if let stopRouter {
+            _ = stopRouter.stop()
+            return
+        }
+        guard let client = acpClient, let sessionId = inFlightPromptSessionId else { return }
+        richChatViewModel.noteTurnStopRequestedByUser()
+        Task { [logger] in
+            do {
+                try await client.cancel(sessionId: sessionId)
+            } catch {
+                logger.warning("session/cancel for Stop failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func voiceTurnReply(for requestID: String) -> VoiceTurnReply? {

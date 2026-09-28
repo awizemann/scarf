@@ -105,8 +105,8 @@ import Foundation
         for c in LogsViewModel.LogComponent.allCases {
             #expect(c.id == c.rawValue)
         }
-        #expect(LogsViewModel.LogComponent.all.loggerPrefix == nil)
-        #expect(LogsViewModel.LogComponent.gateway.loggerPrefix == "gateway")
+        #expect(LogsViewModel.LogComponent.all.loggerPrefixes == nil)
+        #expect(LogsViewModel.LogComponent.gateway.loggerPrefixes == ["gateway", "hermes_plugins", "plugins.platforms"])
     }
 
     // MARK: - ProjectsViewModel (ProjectDashboardService dep — portable)

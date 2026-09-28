@@ -89,6 +89,26 @@ struct WhatsAppSetupView: View {
                     .help("Applies to every platform's decline reply, not just WhatsApp's. Empty uses Hermes's own default reply.")
                 }
                 EditableTextField(label: "Reply Prefix", value: viewModel.replyPrefix) { viewModel.replyPrefix = $0 }
+                // What a blank field means depends on whether config.yaml
+                // carries the key (S07-F2) — say which, and offer the one
+                // gesture that makes it absent again.
+                HStack(spacing: 8) {
+                    Text(viewModel.replyPrefixCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if viewModel.replyPrefixInConfig {
+                        Button("Use Hermes Default") {
+                            viewModel.useDefaultReplyPrefix(
+                                capabilities: capabilitiesStore?.capabilities ?? .empty)
+                        }
+                        .controlSize(.small)
+                        .disabled(viewModel.isBusy)
+                    }
+                }
+                .padding(.horizontal, ScarfSpace.s3)
+                .padding(.vertical, 6)
             }
 
             saveBar

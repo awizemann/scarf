@@ -41,6 +41,12 @@ struct SessionsView: View {
         capabilitiesStore?.capabilities.hasSessionsExportNoRedact ?? false
     }
 
+    /// Whether this host's Markdown/HTML export includes compaction-archived
+    /// turns (`hasSessionsExportArchivedTurns`, v0.21.5).
+    private var hasExportArchivedTurns: Bool {
+        capabilitiesStore?.capabilities.hasSessionsExportArchivedTurns ?? false
+    }
+
     /// Top-of-list filter pills. `today` filters by `startedAt` falling
     /// within the current calendar day; `starred` filters on
     /// `HermesSession.pinned` — Hermes v0.20's `sessions.pinned` column,
@@ -147,10 +153,13 @@ struct SessionsView: View {
                     .textSelection(.enabled)
             }
             if let message = viewModel.exportMessage {
+                // Up to six lines: a success can carry a caveat (compressed
+                // segments, archived turns) after the full destination path.
                 Label(message, systemImage: "info.circle")
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.foregroundMuted)
-                    .lineLimit(2)
+                    .lineLimit(6)
+                    .help(message)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 320, alignment: .trailing)
                     .textSelection(.enabled)
@@ -376,7 +385,7 @@ struct SessionsView: View {
                     )
                     .contextMenu {
                         Button("Rename…") { viewModel.beginRename(session) }
-                        Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact) }
+                        Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact, archivedTurnsInMarkdown: hasExportArchivedTurns) }
                         Divider()
                         Button("Delete…", role: .destructive) { viewModel.beginDelete(session) }
                     }
@@ -557,7 +566,7 @@ struct SessionsView: View {
                     subagentSessions: viewModel.subagentSessions,
                     preview: viewModel.previewFor(session),
                     onRename: { viewModel.beginRename(session) },
-                    onExport: { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact) },
+                    onExport: { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact, archivedTurnsInMarkdown: hasExportArchivedTurns) },
                     onDelete: { viewModel.beginDelete(session) },
                     onSelectSubagent: { sub in
                         Task { await viewModel.selectSession(sub) }

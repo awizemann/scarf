@@ -47,6 +47,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasListableChildSupport = false
     private(set) public var hasArchivedColumn = false
     private(set) public var hasDisplayKindColumn = false
+    private(set) public var hasDisplayMetadataColumn = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Latched `true` once a strict `sqlite3 -readonly` invocation has been
@@ -154,8 +155,10 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         //   1. sqlite3 --version  (sanity + capture for diagnostics)
         //   2. PRAGMA table_info(sessions) | sessions schema
         //   3. PRAGMA table_info(messages) | messages schema
-        // sqlite3 -json emits two arrays back-to-back for the two PRAGMA
-        // statements; we parse them as separate result sets.
+        //   4. session_model_usage presence
+        //   5. a JSON1 probe on `:memory:` (see `json1ProbeCommand`)
+        // sqlite3 -json emits one array per statement back-to-back; we
+        // parse them as separate result sets.
         let quotedPath = quoteForRemoteShell(dbPath)
         let preflightSQL = "PRAGMA table_info(sessions); PRAGMA table_info(messages); SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'session_model_usage';"
 
@@ -165,6 +168,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
                 set -e
                 \(Self.fallbackGuards(quotedPath, queryOnly: queryOnly))sqlite3 --version
                 sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) "\(Self.sqlPrefix(queryOnly: queryOnly))\(preflightSQL)"
+                \(Self.json1ProbeCommand)
                 """
             }
             if result.exitCode != 0 {
@@ -370,13 +374,15 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         // v0.16: soft-hide flag. v0.19.1: messages.display_kind.
         hasArchivedColumn = sessionsTable.contains("archived")
         hasDisplayKindColumn = messagesTable.contains("display_kind")
+        hasDisplayMetadataColumn = messagesTable.contains("display_metadata")
         hasLastReadAtColumn = sessionsTable.contains("last_read_at")
         // v0.20.4: Hermes's listable/ephemeral child predicates. Same
         // gate as the local backend — v0.20.4 marker columns, the
         // columns the predicates read, and a JSON1-capable SQLite. The
-        // remote's `json_extract` runs in the REMOTE sqlite3 CLI, so
-        // availability is inferred from the version line the preflight
-        // already captures (JSON1 is built in from 3.38 onward).
+        // remote's `json_extract` runs in the REMOTE sqlite3 CLI, so the
+        // preflight asks that CLI directly (`json1ProbeCommand`, the
+        // fourth array). Only output without that array — a preflight
+        // shape from before the probe — falls back to the version rule.
         let predicateColumns = sessionsTable.contains("model_config")
             && sessionsTable.contains("session_key")
             && sessionsTable.contains("end_reason")
@@ -384,7 +390,8 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             && sessionsTable.contains("ended_at")
         hasListableChildSupport = hasHiddenColumn && hasLastReadAtColumn
             && predicateColumns
-            && Self.sqliteHasJSON1(versionLine: sqliteVersion)
+            && (Self.json1ProbeResult(arrays.count >= 4 ? arrays[3] : nil)
+                ?? Self.sqliteHasJSON1(versionLine: sqliteVersion))
         // v0.20: `session_model_usage` table. The preflight's third
         // statement is a COUNT(*) over sqlite_master, so it always
         // emits exactly one array — arrays[2] when present. Older
@@ -400,7 +407,37 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         }
     }
 
-    /// JSON1 (`json_extract`) is compiled into SQLite by default from
+    /// Shell line that asks the host's own sqlite3 whether it has the JSON
+    /// functions, printing `[{"json1":1}]` when it does and
+    /// `[{"json1":0}]` when it does not.
+    ///
+    /// Before 3.38 JSON1 was a compile-time option, and the distribution
+    /// builds most VPS hosts run turn it on (Ubuntu 22.04 ships 3.37.2,
+    /// RHEL/Rocky 9 ship 3.34), so the version number alone hid reset
+    /// children and compression tips on hosts that could evaluate them.
+    /// Hermes itself calls `json_extract` unconditionally
+    /// (`_sql_json_extract`, hermes_state_common.py:67-74 @ v2026.9.24).
+    ///
+    /// Runs against `:memory:`, so it never touches `state.db` (charter
+    /// C3), and a build without JSON1 ("no such function: json_valid",
+    /// non-zero exit) takes the `||` branch instead of tripping the
+    /// preflight's `set -e`. `-json` needs 3.33+, which the preflight's
+    /// own query already requires.
+    static let json1ProbeCommand =
+        #"sqlite3 -json :memory: "SELECT json_valid('{}') AS json1;" 2>/dev/null || echo '[{"json1":0}]'"#
+
+    /// Reads `json1ProbeCommand`'s result array: `true`/`false` from its
+    /// `json1` value, `nil` when there is no array or it does not parse
+    /// (the caller then falls back to `sqliteHasJSON1(versionLine:)`).
+    static func json1ProbeResult(_ array: String?) -> Bool? {
+        guard let data = array?.data(using: .utf8),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let value = rows.first?["json1"] as? Int else { return nil }
+        return value == 1
+    }
+
+    /// Fallback for output without the JSON1 probe array. JSON1
+    /// (`json_extract`) is compiled into SQLite by default from
     /// 3.38.0 onward. Parse the leading `major.minor` out of the
     /// `sqlite3 --version` line the preflight captured; an
     /// unparseable line is treated as "no JSON1" so the session list

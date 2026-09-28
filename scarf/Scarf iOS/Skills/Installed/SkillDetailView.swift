@@ -37,7 +37,7 @@ struct SkillDetailView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Disabled").font(.callout.weight(.medium))
-                            Text("This skill is in `skills.disabled` in `~/.hermes/config.yaml`. Hermes won't load it. Re-enable from the Mac app's Skills config UI or with `hermes skills config`.")
+                            Text("This skill is in `skills.disabled` in `~/.hermes/config.yaml`. Hermes won't load it. Re-enable it with `hermes skills config` in a terminal on that host.")
                                 .font(.caption)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -140,14 +140,17 @@ struct SkillDetailView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Required config not set")
+                            Text("Skill settings not set")
                                 .font(.callout)
                                 .fontWeight(.semibold)
-                            Text("Add these keys to ~/.hermes/config.yaml:")
+                            // Hermes stores them under `skills.config.<key>`
+                            // (hermes_cli/config.py:897-899) and
+                            // `hermes config migrate` prompts for them.
+                            Text("Set these in config.yaml, or run `hermes config migrate` on that host:")
                                 .font(.caption)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                             ForEach(vm.missingConfig, id: \.self) { key in
-                                Text("• \(key)")
+                                Text("• skills.config.\(key)")
                                     .font(.caption.monospaced())
                             }
                         }

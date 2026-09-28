@@ -7,7 +7,7 @@ import os
 /// anything older without trying to migrate. Stored next to the
 /// projects registry so a Hermes wipe takes it with the rest of the
 /// Scarf-owned state.
-struct CatalogCache: Codable, Sendable {
+nonisolated struct CatalogCache: Codable, Sendable {
     static let currentVersion = 1
     let version: Int
     let fetchedAt: Date
@@ -48,7 +48,14 @@ enum CatalogServiceError: LocalizedError, Sendable {
 /// shape: cache-first, 24h TTL, fallback when both cache and fetch
 /// fail. The catalog is unauthenticated (a public static file on
 /// GitHub Pages), so no bearer-token plumbing.
-struct CatalogService: Sendable {
+///
+/// `nonisolated` on the whole type: the app target defaults to MainActor
+/// isolation, which made the cache's transport I/O (SSH on a remote host)
+/// run on the main actor. The cache read and write inside `loadCatalog`
+/// additionally hop to a detached task, because with approachable
+/// concurrency a `nonisolated async` function still runs on its caller's
+/// actor — and the caller is the `@MainActor` catalog view model.
+nonisolated struct CatalogService: Sendable {
 
     /// Where the catalog lives in production. The static-site builder
     /// publishes here on `./scripts/catalog.sh publish`. **Versioned
@@ -201,7 +208,8 @@ struct CatalogService: Sendable {
     /// renders based on the case so it can show a "could not refresh"
     /// hint next to a stale-but-still-useful list.
     func loadCatalog(forceRefresh: Bool = false) async -> CatalogLoadResult {
-        let cached = readCache()
+        let service = self
+        let cached = await Task.detached(priority: .userInitiated) { service.readCache() }.value
 
         if let cached, !forceRefresh, !isCacheStale(cached) {
             return .cache(catalog: cached.catalog, fetchedAt: cached.fetchedAt, refreshError: nil)
@@ -210,7 +218,8 @@ struct CatalogService: Sendable {
         do {
             let catalog = try await fetchCatalog()
             let now = Date()
-            writeCache(CatalogCache(fetchedAt: now, catalog: catalog))
+            let cache = CatalogCache(fetchedAt: now, catalog: catalog)
+            await Task.detached(priority: .utility) { service.writeCache(cache) }.value
             return .fresh(catalog: catalog, fetchedAt: now)
         } catch let error as CatalogServiceError {
             if let cached {

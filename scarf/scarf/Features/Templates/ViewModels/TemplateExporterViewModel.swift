@@ -47,11 +47,23 @@ final class TemplateExporterViewModel {
     // Derived: what the author can pick from
     var availableSkills: [HermesSkill] = []
     var availableCronJobs: [HermesCronJob] = []
+    /// The project-folder half of the preview, scanned by `rescanFiles()` off
+    /// the main actor. `nil` while the scan is running. The sheet reads this
+    /// instead of recomputing a plan in `body` — which ran seven transport
+    /// `fileExists`, a `jobs.json` read and a directory listing, three times
+    /// per keystroke, on the main actor (SSH round trips on a remote host).
+    var fileScan: ProjectTemplateExporter.ProjectFileScan?
+    /// True while a re-check of the project folder is in flight. The last
+    /// scan stays on screen meanwhile, so the list doesn't flicker.
+    private(set) var isRescanning = false
 
     var stage: Stage = .idle
 
     func load() {
         let ctx = context
+        let exporter = exporter
+        let projectDir = project.path
+        rescanFiles()
         Task.detached { [weak self] in
             let service = HermesFileService(context: ctx)
             let skills = service.loadSkills().flatMap(\.skills)
@@ -63,8 +75,38 @@ final class TemplateExporterViewModel {
         }
     }
 
-    func previewPlan() -> ProjectTemplateExporter.ExportPlan {
-        exporter.previewPlan(for: currentInputs)
+    /// Re-check the project folder off the main actor (C10) — the author may
+    /// add README.md / AGENTS.md while the sheet is open. The sheet calls
+    /// this when the app regains focus and from its "Check Again" button.
+    /// A call while one is already running queues one more pass, so a file
+    /// that lands after the running scan read the folder isn't missed.
+    @discardableResult
+    func rescanFiles() -> Task<Void, Never>? {
+        guard !isRescanning else {
+            rescanQueued = true
+            return nil
+        }
+        isRescanning = true
+        let exporter = exporter
+        let projectDir = project.path
+        return Task { [weak self] in
+            repeat {
+                self?.rescanQueued = false
+                let scan = await Task.detached {
+                    exporter.scanProjectFiles(projectDir: projectDir)
+                }.value
+                self?.fileScan = scan
+            } while self?.rescanQueued == true
+            self?.isRescanning = false
+        }
+    }
+    @ObservationIgnored private var rescanQueued = false
+
+    /// Whether the required files are present, as of the last scan. `false`
+    /// until the scan lands — Export stays disabled rather than guessing.
+    var requiredFilesPresent: Bool {
+        guard let fileScan else { return false }
+        return fileScan.dashboardPresent && fileScan.readmePresent && fileScan.agentsMdPresent
     }
 
     /// Kick off the export, writing to `outputPath`. The caller is

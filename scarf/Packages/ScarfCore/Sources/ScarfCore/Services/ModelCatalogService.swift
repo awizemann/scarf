@@ -129,10 +129,19 @@ public struct ModelCatalogService: Sendable {
     /// cache with `Self.overlayOnlyProviders` so Hermes-injected providers
     /// (Nous Portal, OpenAI Codex, …) appear in the picker even when
     /// they're absent from `models_dev_cache.json`.
+    ///
+    /// On hosts with ``HermesCapabilities/hasRoutableProviderTable`` the
+    /// roster is limited to providers Hermes can route
+    /// (``HermesRoutableProviders``): most models.dev providers (`mistral`,
+    /// `groq`, `cerebras`, …) fail at `auth.resolve_provider` with "Unknown
+    /// provider", so offering them only produces a config that can't chat
+    /// (S06-F1). The set is banded by Hermes version back to v0.6; hosts older
+    /// than that and undetected hosts get the full list, as before.
     public func loadProviders(capabilities: HermesCapabilities = .empty) -> [HermesProviderInfo] {
         let catalog = loadCatalog() ?? [:]
         var byID: [String: HermesProviderInfo] = [:]
         for (id, p) in catalog {
+            if HermesRoutableProviders.isRoutable(id, capabilities: capabilities) == false { continue }
             let resolvedName = Self.providerDisplayNameOverrides[id] ?? p.name ?? id
             byID[id] = HermesProviderInfo(
                 providerID: id,
@@ -150,7 +159,8 @@ public struct ModelCatalogService: Sendable {
         if capabilities.hasOpenCodeFreeProvider {
             overlays.merge(Self.legacyOverlayOnlyProviders) { current, _ in current }
         }
-        for (id, overlay) in overlays where byID[id] == nil {
+        for (id, overlay) in overlays where byID[id] == nil
+            && HermesRoutableProviders.isRoutable(id, capabilities: capabilities) != false {
             let resolvedName = Self.providerDisplayNameOverrides[id] ?? overlay.displayName
             byID[id] = HermesProviderInfo(
                 providerID: id,
@@ -451,7 +461,9 @@ public struct ModelCatalogService: Sendable {
         let trimmedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !canonical.isEmpty, !trimmedModel.isEmpty else { return .unknown }
 
-        let cacheKey = "\(path)|\(canonical)|\(trimmedModel)"
+        // The DeepSeek alias target depends on the host version, so the
+        // memo key carries it too.
+        let cacheKey = "\(path)|\(canonical)|\(trimmedModel)|\(capabilities.hasDeepSeekFlashRetiredAlias)"
         Self.visionCacheLock.lock()
         let cached = Self.visionCache[cacheKey]
         Self.visionCacheLock.unlock()
@@ -476,7 +488,8 @@ public struct ModelCatalogService: Sendable {
             // overlay-only providers, missing cache file) — no signal.
             return .unknown
         }
-        let resolved = resolveModelAlias(providerID: canonical, modelID: modelID)
+        let resolved = resolveModelAlias(
+            providerID: canonical, modelID: modelID, capabilities: capabilities)
         if let entry = provider.models?[resolved] {
             return Self.visionCapability(of: entry)
         }
@@ -489,7 +502,8 @@ public struct ModelCatalogService: Sendable {
             let bare = String(resolved[resolved.index(after: slash)...])
             if !bare.isEmpty,
                Self.modelsDevProviderKey(for: prefix, capabilities: capabilities) == canonical,
-               let entry = provider.models?[resolveModelAlias(providerID: canonical, modelID: bare)] {
+               let entry = provider.models?[resolveModelAlias(
+                   providerID: canonical, modelID: bare, capabilities: capabilities)] {
                 return Self.visionCapability(of: entry)
             }
         }
@@ -634,7 +648,8 @@ public struct ModelCatalogService: Sendable {
             // Resolve any model-rename alias before lookup so configs
             // referencing a deprecated ID (e.g. `x-ai/grok-4.20-beta`)
             // validate against the canonical successor.
-            let trimmed = resolveModelAlias(providerID: providerID, modelID: raw)
+            let trimmed = resolveModelAlias(
+                providerID: providerID, modelID: raw, capabilities: capabilities)
 
             // Overlay-only providers (Nous Portal, OpenAI Codex, Qwen
             // OAuth, …) serve their own catalogs that aren't mirrored to
@@ -757,9 +772,11 @@ public struct ModelCatalogService: Sendable {
         "xai/grok-4.20-beta": "grok-4.20",
 
         // v0.20: DeepSeek retired `deepseek-chat`/`deepseek-reasoner` on
-        // 2026-07-24; Hermes's model_normalize.py wire-remaps both to
-        // `deepseek-v4-flash` (chat = non-thinking, reasoner = thinking —
-        // thinking mode is controlled separately via extra_body.thinking).
+        // 2026-07-24. Through v0.21.1 Hermes's model_normalize.py sent both
+        // to `deepseek-v4-flash` (`_normalize_for_deepseek` @ v2026.9.7);
+        // from v0.21.2 it sends them to `deepseek-flash` instead — see
+        // `deepseekRetiredAliasesV0212`, which overrides these two entries
+        // on those hosts.
         "deepseek/deepseek-chat": "deepseek-v4-flash",
         "deepseek/deepseek-reasoner": "deepseek-v4-flash",
 
@@ -787,12 +804,31 @@ public struct ModelCatalogService: Sendable {
         "xai-oauth/grok-3": "grok-4.3",
     ]
 
+    /// DeepSeek's retired ids as v0.21.2+ Hermes rewrites them:
+    /// `_DEEPSEEK_RETIRED_ALIASES` sends both to `deepseek-flash`
+    /// (`hermes_cli/model_normalize.py:94-95` @ v2026.9.24; commit
+    /// `6964eebd35`, first tag v2026.9.11 = 0.21.2). Consulted before
+    /// `modelAliases` on hosts with
+    /// ``HermesCapabilities/hasDeepSeekFlashRetiredAlias`` (S06-F4).
+    static let deepseekRetiredAliasesV0212: [String: String] = [
+        "deepseek/deepseek-chat": "deepseek-flash",
+        "deepseek/deepseek-reasoner": "deepseek-flash",
+    ]
+
     /// Resolve a stored model identifier through the alias map. Returns
     /// the input unchanged when no alias exists. Pure function — used at
     /// read time everywhere a config'd model ID is rendered, validated,
-    /// or sent to Hermes.
-    public func resolveModelAlias(providerID: String, modelID: String) -> String {
-        if let hit = Self.modelAliases["\(providerID)/\(modelID)"] { return hit }
+    /// or sent to Hermes. `capabilities` picks the DeepSeek target the
+    /// connected Hermes uses; `.empty` resolves as before.
+    public func resolveModelAlias(
+        providerID: String, modelID: String, capabilities: HermesCapabilities = .empty
+    ) -> String {
+        func lookup(_ key: String) -> String? {
+            if capabilities.hasDeepSeekFlashRetiredAlias,
+               let hit = Self.deepseekRetiredAliasesV0212[key] { return hit }
+            return Self.modelAliases[key]
+        }
+        if let hit = lookup("\(providerID)/\(modelID)") { return hit }
         // The alias table is keyed by CANONICAL provider ids (`xai/...`,
         // `xai-oauth/...`), so a config that spells the provider `grok` or
         // `x-ai` — both legal, both resolved by Hermes — missed every entry.
@@ -800,7 +836,7 @@ public struct ModelCatalogService: Sendable {
         // reinterpreted by aliasing (see `catalogKey`).
         let canonical = Self.canonicalProviderID(providerID)
         guard canonical != providerID else { return modelID }
-        return Self.modelAliases["\(canonical)/\(modelID)"] ?? modelID
+        return lookup("\(canonical)/\(modelID)") ?? modelID
     }
 
     // MARK: - Demoted providers (sort tail)

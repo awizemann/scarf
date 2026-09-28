@@ -125,7 +125,11 @@ struct NousSubscriptionService: Sendable {
 
             let updatedAt: Date? = {
                 guard let raw = root["updated_at"] as? String else { return nil }
-                return ISO8601DateFormatter().date(from: raw)
+                // Hermes writes `datetime.now(timezone.utc).isoformat()`
+                // (`hermes_cli/auth.py:723` @ v2026.9.24) — microseconds and
+                // a `+00:00` offset, which a default ISO8601DateFormatter
+                // rejects, so the keepalive nudge could never show (S06-F2).
+                return NousModelCatalogService.parseISODate(raw)
             }()
 
             return NousSubscriptionState(
