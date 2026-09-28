@@ -309,7 +309,7 @@ struct SkillsPluginsR06Tests {
         try Self.put("plugins/idle/plugin.yaml", in: home, "name: idle\n")
         // The iOS view used to read this marker; Hermes never writes it.
         try Self.put("plugins/idle/.disabled", in: home, "")
-        try Self.put("plugins/marked/plugin.json", in: home, #"{"name": "marked", "tool_override": true}"#)
+        try Self.put("plugins/marked/plugin.json", in: home, #"{"name": "marked", "capabilities": ["tools.override"]}"#)
         try Self.put("plugins/marked/.disabled", in: home, "")
         // Nested one level, enabled by its registry key.
         try Self.put("plugins/observability/langfuse/plugin.yaml", in: home, "name: langfuse\n")

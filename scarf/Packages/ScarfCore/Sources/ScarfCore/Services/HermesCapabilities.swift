@@ -2497,6 +2497,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `--state` choices (`:185`) have no `resolved` — an argparse error there.
     public var hasCronIncidentResolvedState: Bool { isV0214OrLater }
 
+    /// `hermes skills search` asks the external registries when the
+    /// centralized index has no match for a non-empty query
+    /// (`parallel_search_sources` → `_index_miss_fallback_sources`,
+    /// `tools/skills_hub_search.py:156,234-257` @ v2026.9.24; commit
+    /// 13dcfc112b, first tagged v2026.9.21). Before it an all-source search
+    /// missed skills only browse surfaced (Scarf issue #79), so the Hub
+    /// filtered its browse page instead.
+    public var hasSkillsSearchRegistryFallback: Bool { isV0214OrLater }
+
     /// `hermes peer dm` no-resend outcomes — `hermes_cli/subcommands/peer.py:358-375`
     /// @ v2026.9.21: a timeout AFTER the Bot Chat resolved exits 1 with
     /// "accepted the message … Do NOT resend.", and a `hermes.session.chat.queued`

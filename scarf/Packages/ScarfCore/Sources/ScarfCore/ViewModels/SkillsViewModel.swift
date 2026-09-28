@@ -358,13 +358,23 @@ public final class SkillsViewModel {
         }
     }
 
-    /// An unreadable config.yaml means "we cannot prove any key is present",
-    /// so every required key is reported missing — the same answer as before.
+    /// The declared keys with no value at `skills.config.<key>` in
+    /// config.yaml — Hermes's own "missing or empty" test
+    /// (`get_missing_skill_config_vars`, `hermes_cli/config.py:881-900` @
+    /// v2026.9.24). A declared default doesn't count: Hermes still lists the
+    /// key as unconfigured. An unreadable config.yaml means "we cannot prove
+    /// any key is present", so every key is reported missing.
     nonisolated static func computeMissingConfig(for skill: HermesSkill, yaml: String?) -> [String] {
         guard !skill.requiredConfig.isEmpty else { return [] }
         guard let yaml else { return skill.requiredConfig }
+        let parsed = HermesYAML.parseNestedYAML(yaml)
         return skill.requiredConfig.filter { key in
-            !yaml.contains(key)
+            let path = "skills.config." + key
+            if let list = parsed.lists[path], !list.isEmpty { return false }
+            if let map = parsed.maps[path], !map.isEmpty { return false }
+            let value = HermesYAML.stripYAMLQuotes(parsed.values[path] ?? "")
+                .trimmingCharacters(in: .whitespaces)
+            return value.isEmpty || value == "null" || value == "~"
         }
     }
 
@@ -454,27 +464,56 @@ public final class SkillsViewModel {
         }
         let source = hubSource
         let query = hubQuery
-        // Issue #79 — for "All Sources", filter the cached browse list
-        // client-side instead of shelling out. Hermes's all-source
-        // search routes through its centralized index which can miss
-        // skills (e.g. honcho) that browse surfaces from non-indexed
-        // registries. Specific-source searches keep the CLI path so
-        // power users still get full upstream search semantics.
-        if source == "all" {
-            if lastBrowseResults.isEmpty {
-                // No cache yet — kick off a browse, then filter on
-                // completion. The chained call lets the user type a
-                // query before ever clicking Browse.
-                browseHubThenFilter(query: query)
+        guard source == "all" else {
+            runHubCLISearch(source: source, query: query)
+            return
+        }
+        // "All Sources" depends on the host. From v0.21.4 Hermes's own
+        // search asks the registries when its index has no match
+        // (`tools/skills_hub_search.py:234-257` @ v2026.9.24), so the CLI
+        // searches the whole hub. Older hosts keep the issue #79 filter
+        // below: their all-source search missed skills (e.g. honcho) that
+        // only browse surfaced. An undetected host is resolved first.
+        if capabilities.detected {
+            if capabilities.hasSkillsSearchRegistryFallback {
+                runHubCLISearch(source: source, query: query)
             } else {
-                // Pure in-memory filter — runs synchronously on the
-                // calling actor (UI invocations are already on
-                // MainActor) so the user sees the narrowed list
-                // without a render-tick gap.
-                applyClientSideFilter(query: query, against: lastBrowseResults)
+                filterAllSourcesLocally(query: query)
             }
             return
         }
+        isHubLoading = true
+        Task { [weak self] in
+            guard let self else { return }
+            let caps = await self.resolvedCapabilities()
+            if caps.hasSkillsSearchRegistryFallback {
+                self.runHubCLISearch(source: source, query: query)
+            } else {
+                self.filterAllSourcesLocally(query: query)
+            }
+        }
+    }
+
+    /// Issue #79, for hosts before v0.21.4: filter the cached browse list
+    /// client-side instead of shelling out, because the host's all-source
+    /// search routed through its centralized index and missed skills that
+    /// browse surfaced from non-indexed registries.
+    private func filterAllSourcesLocally(query: String) {
+        if lastBrowseResults.isEmpty {
+            // No cache yet — kick off a browse, then filter on
+            // completion. The chained call lets the user type a
+            // query before ever clicking Browse.
+            browseHubThenFilter(query: query)
+        } else {
+            // Pure in-memory filter — runs synchronously on the
+            // calling actor (UI invocations are already on
+            // MainActor) so the user sees the narrowed list
+            // without a render-tick gap.
+            applyClientSideFilter(query: query, against: lastBrowseResults)
+        }
+    }
+
+    private func runHubCLISearch(source: String, query: String) {
         isHubLoading = true
         let bin = context.paths.hermesBinary
         let xport = transport
@@ -613,7 +652,7 @@ public final class SkillsViewModel {
     }
 
     /// v0.12: install a skill from a direct HTTPS URL pointing at a
-    /// SKILL.md (or a tarball). Hermes pulls + installs without going
+    /// URL ending in `.md` (no tarballs). Hermes pulls + installs without going
     /// through the registry indirection. The Mac UI gates this on
     /// `HermesCapabilities.hasSkillURLInstall` so a v0.11 host doesn't
     /// see a button that errors out with "unrecognized argument".

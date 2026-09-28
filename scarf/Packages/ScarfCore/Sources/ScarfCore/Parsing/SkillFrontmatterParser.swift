@@ -1,13 +1,12 @@
 import Foundation
 
-/// Pure-Swift YAML parsers for skill manifests + SKILL.md frontmatter.
+/// Pure-Swift YAML readers for SKILL.md frontmatter.
 ///
-/// Two readers ship here:
-///
-/// - `parseRequiredConfig(_:)` — the original v2.5 reader. Pulls the
-///   `required_config:` list out of a skill's `skill.yaml`. Extracted
-///   from `HermesFileService.parseSkillRequiredConfig` in v2.5 so iOS
-///   can flag missing config keys without depending on the Mac target.
+/// - `parseConfigKeys(_:)` — the config settings a skill declares under
+///   `metadata.hermes.config` (`agent/skill_utils.py:666-689` @ v2026.9.24).
+///   Hermes stores their values under `skills.config.<key>` in config.yaml.
+///   It replaces the old `skill.yaml` → `required_config:` reader: no Hermes
+///   version reads `skill.yaml` (S10-F3, blind re-audit).
 /// - `parseV011Fields(_:)` — Hermes v2026.4.23+ SKILL.md frontmatter
 ///   reader. Extracts `allowed_tools`, `related_skills`, and
 ///   `dependencies` lists from the YAML block between `---` markers
@@ -17,34 +16,80 @@ import Foundation
 ///   empty (callers treat nil as "don't show this section").
 ///
 /// Intentionally not a full YAML parser — Hermes skill manifests use a
-/// very narrow subset of YAML. `parseV011Fields` reuses `HermesYAML`;
-/// `parseRequiredConfig` stays inline because tests pin its behaviour.
+/// very narrow subset of YAML. `parseV011Fields` reuses `HermesYAML`.
 public enum SkillFrontmatterParser: Sendable {
 
-    /// Parse the `required_config:` list from a skill.yaml's text. Empty
-    /// result on any kind of malformation — callers treat it as "no
-    /// required config, proceed".
-    public static func parseRequiredConfig(_ content: String) -> [String] {
-        var result: [String] = []
-        var inRequiredConfig = false
-        for line in content.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            let indent = line.prefix(while: { $0 == " " }).count
-            if trimmed == "required_config:" || trimmed.hasPrefix("required_config:") {
-                inRequiredConfig = true
-                continue
-            }
-            if inRequiredConfig {
-                if indent < 2 && !trimmed.isEmpty {
-                    break
-                }
-                if trimmed.hasPrefix("- ") {
-                    result.append(String(trimmed.dropFirst(2)))
-                }
-            }
+    /// The lines between the leading `---` and the next `---`, or nil when
+    /// the file has no frontmatter.
+    static func frontmatterLines(_ content: String) -> [String]? {
+        let lines = content.components(separatedBy: "\n")
+            .map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        guard lines.first == "---",
+              let endIdx = lines.dropFirst().firstIndex(of: "---")
+        else { return nil }
+        return Array(lines[1..<endIdx])
+    }
+
+    /// The `key`s declared under `metadata.hermes.config` in SKILL.md
+    /// frontmatter, in order, without duplicates. Mirrors
+    /// `extract_skill_config_vars`: the value may be a list of maps or a
+    /// single map, and an entry without both `key` and `description` is
+    /// skipped. Empty on any malformation.
+    public static func parseConfigKeys(_ content: String) -> [String] {
+        guard let lines = frontmatterLines(content) else { return [] }
+        var path: [(indent: Int, key: String)] = []
+        var configIndent: Int?
+        var entries: [[String: String]] = []
+        var current: [String: String]?
+        var itemIndent = -1
+
+        func field(_ text: Substring) -> (String, String)? {
+            guard let colon = text.firstIndex(of: ":") else { return nil }
+            let key = text[..<colon].trimmingCharacters(in: .whitespaces)
+            let value = HermesYAML.stripYAMLQuotes(
+                text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+            return key.isEmpty ? nil : (key, value)
         }
-        return result
+
+        for raw in lines {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let indent = raw.prefix(while: { $0 == " " }).count
+            if let base = configIndent {
+                let isItem = trimmed.hasPrefix("- ") || trimmed == "-"
+                if indent > base || (indent == base && isItem) {
+                    if isItem {
+                        if let current { entries.append(current) }
+                        current = [:]
+                        itemIndent = indent
+                        if let (k, v) = field(trimmed.dropFirst(1)) { current?[k] = v }
+                    } else if current != nil, indent > itemIndent {
+                        if let (k, v) = field(Substring(trimmed)) { current?[k] = v }
+                    } else if current == nil {
+                        // A single map rather than a list.
+                        if entries.isEmpty { entries.append([:]) }
+                        if let (k, v) = field(Substring(trimmed)) { entries[0][k] = v }
+                    }
+                    continue
+                }
+                break
+            }
+            guard let (key, value) = field(Substring(trimmed)), !trimmed.hasPrefix("- ") else { continue }
+            while let last = path.last, last.indent >= indent { path.removeLast() }
+            guard value.isEmpty else { continue }
+            path.append((indent, key))
+            if path.map(\.key) == ["metadata", "hermes", "config"] { configIndent = indent }
+        }
+        if let current { entries.append(current) }
+
+        var keys: [String] = []
+        for entry in entries {
+            guard let key = entry["key"], !key.isEmpty,
+                  let description = entry["description"], !description.isEmpty,
+                  !keys.contains(key) else { continue }
+            keys.append(key)
+        }
+        return keys
     }
 
     /// Parse Hermes v2026.4.23+ SKILL.md frontmatter for the v0.11
@@ -60,19 +105,31 @@ public enum SkillFrontmatterParser: Sendable {
     public static func parseV011Fields(
         _ content: String
     ) -> (allowedTools: [String]?, relatedSkills: [String]?, dependencies: [String]?) {
-        let lines = content.components(separatedBy: "\n")
-        guard lines.first == "---",
-              let endIdx = lines.dropFirst().firstIndex(of: "---")
-        else { return (nil, nil, nil) }
-        let frontmatter = lines[1..<endIdx].joined(separator: "\n")
-        let parsed = HermesYAML.parseNestedYAML(frontmatter)
+        guard let lines = frontmatterLines(content) else { return (nil, nil, nil) }
+        let parsed = HermesYAML.parseNestedYAML(lines.joined(separator: "\n"))
         let allowed = parsed.lists["allowed_tools"]
-        let related = parsed.lists["related_skills"]
+        // `metadata.hermes.related_skills` first, then top level, as Hermes
+        // reads it (`tools/skills_tool.py:613-617` @ v2026.9.24). Every
+        // bundled skill that declares it uses the nested form.
+        let related = nonEmptyList("metadata.hermes.related_skills", in: parsed)
+            ?? nonEmptyList("related_skills", in: parsed)
         let deps = parsed.lists["dependencies"]
         return (
             allowedTools: (allowed?.isEmpty ?? true) ? nil : allowed,
             relatedSkills: (related?.isEmpty ?? true) ? nil : related,
             dependencies: (deps?.isEmpty ?? true) ? nil : deps
         )
+    }
+
+    /// A list value, or a comma-separated scalar (Hermes's `_parse_tags`
+    /// accepts both); nil when absent or empty.
+    static func nonEmptyList(_ path: String, in parsed: ParsedYAML) -> [String]? {
+        if let list = parsed.lists[path], !list.isEmpty { return list }
+        guard let scalar = parsed.values[path] else { return nil }
+        let items = HermesYAML.stripYAMLQuotes(scalar)
+            .split(separator: ",")
+            .map { HermesYAML.stripYAMLQuotes($0.trimmingCharacters(in: .whitespaces)) }
+            .filter { !$0.isEmpty }
+        return items.isEmpty ? nil : items
     }
 }

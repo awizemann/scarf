@@ -1,62 +1,109 @@
 import Testing
 @testable import ScarfCore
 
-/// Coverage for `SkillFrontmatterParser` — narrow YAML reader for the
-/// `required_config:` list in a skill's `skill.yaml`. The parser was
-/// extracted from the Mac `HermesFileService` in v2.5 so iOS can flag
-/// missing config keys with the same semantics.
+/// Coverage for `SkillFrontmatterParser`. The config-key reader used to
+/// parse `required_config:` out of a `skill.yaml`, a file no Hermes version
+/// reads; it now reads `metadata.hermes.config` from SKILL.md, as
+/// `extract_skill_config_vars` does (`agent/skill_utils.py:666-689` @
+/// v2026.9.24). S10-F3, blind re-audit.
 @Suite("SkillFrontmatterParser")
 struct SkillFrontmatterParserTests {
 
-    @Test func parsesSimpleRequiredConfigList() {
-        let yaml = """
-        name: example
+    @Test func configKeysFromTheDocumentedShape() {
+        // `website/docs/user-guide/features/skills.md:288-296` @ v2026.9.24.
+        let md = """
+        ---
+        name: myplugin
+        description: Example
+        metadata:
+          hermes:
+            tags: [Example]
+            config:
+              - key: myplugin.path
+                description: Path to the plugin data directory
+                default: "~/myplugin-data"
+                prompt: Plugin data directory path
+              - key: myplugin.mode
+                description: "Mode: fast or slow"
+        ---
+
+        Body with `config:` text that is not frontmatter.
+        """
+        #expect(SkillFrontmatterParser.parseConfigKeys(md) == ["myplugin.path", "myplugin.mode"])
+    }
+
+    @Test func configEntriesNeedKeyAndDescriptionAndAreDeduplicated() {
+        let md = """
+        ---
+        metadata:
+          hermes:
+            config:
+            - key: a
+              description: first
+            - key: b
+            - description: no key
+            - key: a
+              description: duplicate
+        ---
+        """
+        #expect(SkillFrontmatterParser.parseConfigKeys(md) == ["a"])
+    }
+
+    @Test func configMayBeASingleMap() {
+        let md = """
+        ---
+        metadata:
+          hermes:
+            config:
+              key: solo.key
+              description: Only one
+        ---
+        """
+        #expect(SkillFrontmatterParser.parseConfigKeys(md) == ["solo.key"])
+    }
+
+    @Test func topLevelOrMisplacedConfigIsIgnored() {
+        let md = """
+        ---
+        config:
+          - key: top
+            description: not under metadata.hermes
         required_config:
-          - api_key
-          - api_secret
-        version: 1.0.0
+          - legacy
+        metadata:
+          other:
+            config:
+              - key: wrong
+                description: wrong parent
+        ---
         """
-        let keys = SkillFrontmatterParser.parseRequiredConfig(yaml)
-        #expect(keys == ["api_key", "api_secret"])
+        #expect(SkillFrontmatterParser.parseConfigKeys(md).isEmpty)
+        #expect(SkillFrontmatterParser.parseConfigKeys("").isEmpty)
+        #expect(SkillFrontmatterParser.parseConfigKeys("# no frontmatter").isEmpty)
     }
 
-    @Test func returnsEmptyWhenSectionMissing() {
-        let yaml = """
-        name: example
-        version: 1.0.0
+    /// Hermes reads `metadata.hermes.related_skills` first, then top level
+    /// (`tools/skills_tool.py:613-617`); the bundled skills use the nested
+    /// flow list.
+    @Test func relatedSkillsFromMetadataHermes() {
+        let md = """
+        ---
+        name: grounded-citations
+        metadata:
+          hermes:
+            tags: [Research, Citations]
+            related_skills: [arxiv, pdf, reddit-reading]
+        related_skills:
+          - ignored-when-nested-present
+        ---
         """
-        #expect(SkillFrontmatterParser.parseRequiredConfig(yaml).isEmpty)
-    }
-
-    @Test func skipsCommentsAndEmptyLines() {
-        let yaml = """
-        # top comment
-        required_config:
-          # in-section comment
-          - first
-
-          - second
+        #expect(SkillFrontmatterParser.parseV011Fields(md).relatedSkills == ["arxiv", "pdf", "reddit-reading"])
+        let flat = """
+        ---
+        related_skills: "timer, deploy"
+        ---
         """
-        let keys = SkillFrontmatterParser.parseRequiredConfig(yaml)
-        #expect(keys == ["first", "second"])
-    }
-
-    @Test func breaksOnNextTopLevelKey() {
-        let yaml = """
-        required_config:
-          - one
-          - two
-        next_key: hello
-          - three
-        """
-        let keys = SkillFrontmatterParser.parseRequiredConfig(yaml)
-        // `next_key:` is at indent 0, terminating the list — `three`
-        // is no longer in scope and shouldn't be picked up.
-        #expect(keys == ["one", "two"])
-    }
-
-    @Test func handlesEmptyInput() {
-        #expect(SkillFrontmatterParser.parseRequiredConfig("").isEmpty)
+        #expect(SkillFrontmatterParser.parseV011Fields(flat).relatedSkills == ["timer", "deploy"])
     }
 
     // MARK: - parseV011Fields (Hermes v2026.4.23 SKILL.md frontmatter)

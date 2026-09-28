@@ -2,8 +2,9 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
-/// v0.12+ direct-URL skill install. Hermes accepts an HTTPS URL pointing
-/// at a SKILL.md (or a tarball) and installs it under
+/// v0.12+ direct-URL skill install. Hermes accepts an HTTP(S) URL whose
+/// path ends in `.md` (`UrlSource._matches`, `tools/skills_hub_sources.py:
+/// 172-184` @ v2026.9.24; no tarball adapter exists) and installs it under
 /// `~/.hermes/skills/<category>/<name>/`. Authors who don't ship via a
 /// registry can use this to share a one-off skill with a single URL.
 ///
@@ -54,7 +55,7 @@ struct InstallFromURLSheet: View {
                 .scarfStyle(.headline)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
 
-            Text("Paste an HTTPS URL pointing at a SKILL.md or a tarball. Hermes downloads, scans, and installs it under `~/.hermes/skills/<category>/<name>/`.")
+            Text("Paste an HTTPS URL ending in `.md`, such as a SKILL.md. Hermes downloads, scans, and installs it under `~/.hermes/skills/<category>/<name>/`.")
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
 

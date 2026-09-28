@@ -800,6 +800,16 @@ public enum HermesCLIMarkers {
         "is already up to date.",
     ]
 
+    /// A plugin installed from the curated catalog is re-pinned instead of
+    /// pulled (`plugins_cmd.py:1057-1059` @ v2026.9.24, from v2026.9.11), and
+    /// `cmd_update_catalog` prints `✓ Plugin <name> updated to <sha8>.` or
+    /// `✓ Plugin <name> is already at catalog pin <sha8>.`
+    /// (`plugins_cmd_catalog.py:405-406`). The tail is matched with the short
+    /// hex sha so a `git pull` body line cannot supply it. Older hosts never
+    /// print it, so accepting it changes nothing there.
+    public static let pluginsUpdateCatalogSuccessPattern =
+        #" (updated to|is already at catalog pin) [0-9a-f]{7,40}\.$"#
+
     /// `cmd_update` (plugins_cmd.py:822) calls `_run_capability_consent(...)`
     /// and DISCARDS its bool exactly as `cmd_enable` does, so the non-TTY arm
     /// (:1092-1098) fires and the update still announces success. That
@@ -2161,12 +2171,15 @@ public enum HermesPluginsUpdateVerdict {
     public static func argv(name: String) -> [String] { ["plugins", "update", "--", name] }
 
     /// `✓ Plugin <name> updated.` (`:828`) /
-    /// `✓ Plugin <name> is already up to date.` (`:826`), matched as the whole
-    /// shape rather than either half.
+    /// `✓ Plugin <name> is already up to date.` (`:826`), or the catalog
+    /// re-pin's `updated to <sha8>.` / `is already at catalog pin <sha8>.`
+    /// (S10-F1), matched as the whole shape rather than either half.
     static func isSuccessLine(_ line: String) -> Bool {
         let head = HermesCLIVerdict.unglyphed(line)
         guard head.hasPrefix("Plugin ") else { return false }
         return HermesCLIMarkers.pluginsUpdateSuccess.contains { head.hasSuffix($0) }
+            || head.range(of: HermesCLIMarkers.pluginsUpdateCatalogSuccessPattern,
+                          options: .regularExpression) != nil
     }
 
     /// `Plugin '<name>' has been disabled.` (`:848-851`). Anchored on the

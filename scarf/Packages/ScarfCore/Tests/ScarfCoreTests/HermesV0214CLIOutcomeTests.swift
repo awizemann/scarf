@@ -18,6 +18,7 @@ import Testing
             #expect(caps.hasBackupPartialExitNonZero)
             #expect(caps.hasCronModelPin)
             #expect(caps.hasCronIncidentResolvedState)
+            #expect(caps.hasSkillsSearchRegistryFallback)
             #expect(caps.hasPeerDMNoResendOutcomes)
         }
         for caps in [Self.v0213, HermesCapabilities.empty] {
@@ -25,6 +26,7 @@ import Testing
             #expect(!caps.hasBackupPartialExitNonZero)
             #expect(!caps.hasCronModelPin)
             #expect(!caps.hasCronIncidentResolvedState)
+            #expect(!caps.hasSkillsSearchRegistryFallback)
             #expect(!caps.hasPeerDMNoResendOutcomes)
         }
     }
