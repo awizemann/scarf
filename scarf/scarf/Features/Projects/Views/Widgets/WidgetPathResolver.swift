@@ -9,10 +9,29 @@ private struct SelectedProjectRootKey: EnvironmentKey {
     static let defaultValue: String? = nil
 }
 
+/// The host's absolute homes, for judging a root the local disk can't:
+/// a remote root. Set by the cockpit from the probed `$HOME`
+/// (`ServerContext.resolvedUserHome()`); `nil` for a local project, or
+/// while it is still unknown.
+struct WidgetHostHomes: Equatable, Sendable {
+    /// The user's home on the host (`$HOME`).
+    let userHome: String
+    /// The Hermes home on the host, `~` already expanded.
+    let hermesHome: String
+}
+
+private struct SelectedProjectHostHomesKey: EnvironmentKey {
+    static let defaultValue: WidgetHostHomes? = nil
+}
+
 extension EnvironmentValues {
     var selectedProjectRoot: String? {
         get { self[SelectedProjectRootKey.self] }
         set { self[SelectedProjectRootKey.self] = newValue }
+    }
+    var selectedProjectHostHomes: WidgetHostHomes? {
+        get { self[SelectedProjectHostHomesKey.self] }
+        set { self[SelectedProjectHostHomesKey.self] = newValue }
     }
 }
 
@@ -34,6 +53,10 @@ enum WidgetPathResolver {
         /// `/`, the user's home, a system directory, or something that
         /// resolves to one. Carries the policy's own message.
         case inadmissibleRoot(String)
+        /// The root is still `~`-rooted: its host's home couldn't be
+        /// resolved, so nothing can be proved inside it — and expanding it
+        /// with this Mac's home would read the wrong machine's files.
+        case unresolvedHome
     }
 
     /// Is this root allowed to anchor a widget's file read AT ALL?
@@ -58,18 +81,68 @@ enum WidgetPathResolver {
     /// sidebar and the widget shows why. Silently dropping projects that
     /// fail a newly-tightened policy would break legitimate users far more
     /// often than it stops an agent that can rewrite the file again anyway.
-    private static func rootRefusal(_ projectRoot: String) -> ProjectRootPolicy.Refusal? {
-        if FileManager.default.fileExists(atPath: (projectRoot as NSString).standardizingPath) {
+    ///
+    /// With `hostHomes` (a remote whose `$HOME` was probed) the remote root
+    /// is also refused when it IS the host's home or contains its Hermes
+    /// home — the rules a local root gets from this Mac's disk.
+    private static func rootRefusal(
+        _ projectRoot: String, hostHomes: WidgetHostHomes?
+    ) -> ProjectRootPolicy.Refusal? {
+        if hostHomes == nil,
+           FileManager.default.fileExists(atPath: (projectRoot as NSString).standardizingPath) {
             return ProjectRootPolicy.refusalAtUse(for: projectRoot, context: .local)
         }
         return ProjectRootPolicy.refusal(
-            for: projectRoot, hermesHome: "", userHome: nil, resolveSymlinks: false
+            for: projectRoot,
+            hermesHome: hostHomes?.hermesHome ?? "",
+            userHome: hostHomes?.userHome,
+            resolveSymlinks: false
         )
     }
 
-    static func resolve(_ relativePath: String?, projectRoot: String?) -> Result<String, ResolveError> {
+    /// - Parameter hostHomes: the remote host's probed homes. The cockpit
+    ///   expands a `~`-rooted registry path with them before it gets here;
+    ///   a root that still starts with `~` is refused (`unresolvedHome`),
+    ///   never expanded against this Mac's home.
+    /// A registry root as the widgets use it, plus the host's homes.
+    struct ResolvedRoot: Equatable, Sendable {
+        /// The registry spelling this was resolved from.
+        let source: String
+        /// The root widgets resolve against: `~` expanded with the HOST's
+        /// home, or left as `~…` when that home couldn't be found (which
+        /// `resolve` then refuses).
+        let root: String
+        let hostHomes: WidgetHostHomes?
+    }
+
+    /// Resolve a registry root for `context`, off the main actor (the remote
+    /// home is an SSH probe, cached per server). Local: this Mac's home
+    /// expands a (rare) `~` row and the local disk judges the root. Remote:
+    /// the probed `$HOME` expands it and supplies the policy's homes; a
+    /// failed probe leaves the `~` in place.
+    nonisolated static func resolveRoot(_ projectRoot: String, context: ServerContext) async -> ResolvedRoot {
+        let home = await context.resolvedUserHome()
+        guard home.hasPrefix("/") else {
+            return ResolvedRoot(source: projectRoot, root: projectRoot, hostHomes: nil)
+        }
+        let homes = context.isRemote
+            ? WidgetHostHomes(
+                userHome: home,
+                hermesHome: ServerContext.expandingTilde(context.paths.home, home: home))
+            : nil
+        return ResolvedRoot(
+            source: projectRoot,
+            root: ServerContext.expandingTilde(projectRoot, home: home),
+            hostHomes: homes
+        )
+    }
+
+    static func resolve(
+        _ relativePath: String?, projectRoot: String?, hostHomes: WidgetHostHomes? = nil
+    ) -> Result<String, ResolveError> {
         guard let projectRoot, !projectRoot.isEmpty else { return .failure(.noProject) }
-        if let refusal = rootRefusal(projectRoot) {
+        if projectRoot.hasPrefix("~") { return .failure(.unresolvedHome) }
+        if let refusal = rootRefusal(projectRoot, hostHomes: hostHomes) {
             return .failure(.inadmissibleRoot(refusal.message))
         }
         guard let relativePath, !relativePath.isEmpty else { return .failure(.missingPath) }
@@ -109,7 +182,7 @@ enum WidgetPathResolver {
         // no way to detect a remote symlink from here), and a missing local
         // file should surface as the widget's read error, not as
         // "escapes the project root".
-        if FileManager.default.fileExists(atPath: rootStd),
+        if hostHomes == nil, FileManager.default.fileExists(atPath: rootStd),
            !MiniAppAssetResolver.isSymlinkContained(path: standardized, baseDirectory: rootStd) {
             return .failure(.escapesProject)
         }
@@ -130,6 +203,8 @@ extension WidgetPathResolver.ResolveError {
         case .inadmissibleRoot(let reason):
             // Already localized by `ProjectRootPolicy.Refusal.message`.
             return reason
+        case .unresolvedHome:
+            return String(localized: "Scarf couldn't find the home folder on this server, so it can't check that this file is inside the project. Check the connection, then try again in a minute.")
         }
     }
 }

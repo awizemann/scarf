@@ -14,6 +14,7 @@ struct ImageWidgetView: View {
 
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
+    @Environment(\.selectedProjectHostHomes) private var hostHomes
     @Environment(HermesFileWatcher.self) private var fileWatcher
     /// Dashboard-wide batched stat — see `WidgetSignatureBatch`. `nil` when
     /// this widget renders outside a panel that installs one.
@@ -148,7 +149,7 @@ struct ImageWidgetView: View {
 
     @ViewBuilder
     private var localContent: some View {
-        switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot) {
+        switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot, hostHomes: hostHomes) {
         case .failure(let err):
             WidgetErrorCard(verbatimReason: err.userMessage, title: "")
         case .success(let resolved):

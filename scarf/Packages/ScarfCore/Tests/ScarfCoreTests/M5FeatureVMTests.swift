@@ -1137,4 +1137,103 @@ import Foundation
             #expect(vm.lastError == nil)
         }
     }
+
+    // MARK: - B03: Project Doctor on a `~`-rooted SSH host
+
+    /// A "remote" whose `~` is a temp dir, the way the remote shell expands
+    /// it: file paths and process arguments starting `~/` are mapped in (the
+    /// real `SSHTransport` rewrites a `~/` argument to `"$HOME/…"`).
+    final class TildeHomeTransport: ServerTransport, @unchecked Sendable {
+        let inner: LocalTransport
+        let home: String
+        init(id: ServerID, home: String) {
+            self.inner = LocalTransport(contextID: id)
+            self.home = home
+        }
+        func map(_ p: String) -> String {
+            if p == "~" { return home }
+            return p.hasPrefix("~/") ? home + p.dropFirst(1) : p
+        }
+        var contextID: ServerID { inner.contextID }
+        var isRemote: Bool { true }
+        func readFile(_ path: String) throws -> Data { try inner.readFile(map(path)) }
+        func unguardedWriteFile(_ path: String, data: Data) throws {
+            try inner.unguardedWriteFile(map(path), data: data)
+        }
+        func fileExists(_ path: String) -> Bool { inner.fileExists(map(path)) }
+        func stat(_ path: String) -> FileStat? { inner.stat(map(path)) }
+        func statAll(_ paths: [String]) -> [String: FileStat]? { nil }
+        func listDirectory(_ path: String) throws -> [String] { try inner.listDirectory(map(path)) }
+        func createDirectory(_ path: String) throws { try inner.createDirectory(map(path)) }
+        func removeFile(_ path: String) throws { try inner.removeFile(map(path)) }
+        func runProcess(
+            executable: String, args: [String], stdin: Data?, timeout: TimeInterval
+        ) throws -> ProcessResult {
+            try inner.runProcess(executable: executable, args: args.map(map), stdin: stdin, timeout: timeout)
+        }
+        func makeProcess(executable: String, args: [String]) -> Process { Process() }
+        func makeProcess(executable: String, args: [String], cwd: String?) -> Process { Process() }
+        func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> { AsyncStream { $0.finish() } }
+        func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
+            try await inner.streamScript(script, timeout: timeout)
+        }
+        func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+    }
+
+    /// S12 follow-up: with the default remote home (`~/.hermes`) the doctor's
+    /// orphan exclusion compared absolute, Hermes-resolved cron workdirs with
+    /// the literal `~/.hermes` and never matched, so a profile folder that
+    /// carried `.scarf/` files was offered as an orphan project. A listed
+    /// `~`-rooted project (an older remote template install) must also be
+    /// recognised in the resolved spelling Hermes stores as its `workdir`.
+    @Test @MainActor func doctorResolvesTheTildeHomeAndTildeRowsOnARemote() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-b03-remote-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let home = tmp.path
+        let ctx = ServerContext(
+            id: UUID(), displayName: "droplet",
+            kind: .ssh(SSHConfig(host: "fake.invalid", hermesBinaryHint: "/nonexistent/scarf-test-hermes"))
+        )
+        #expect(ctx.paths.home == "~/.hermes")
+        let fm = FileManager.default
+        func write(_ text: String, _ rel: String) throws {
+            let url = tmp.appendingPathComponent(rel)
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        func resolved(_ rel: String) -> String {
+            guard let c = realpath(home + "/" + rel, nil) else { return home + "/" + rel }
+            defer { free(c) }
+            return String(cString: c)
+        }
+        let id = UUID()
+        try write(#"{"id":"x","version":"1.0.0"}"#, ".hermes/profiles/p1/.scarf/manifest.json")
+        try write(#"{"id":"y","version":"1.0.0"}"#, "projects/listed/.scarf/manifest.json")
+        try write("""
+        { "projects": [ { "name": "Listed", "path": "~/projects/listed", "uuid": "\(id.uuidString)" } ] }
+        """, ".hermes/scarf/projects.json")
+        try write("""
+        { "jobs": [
+          { "id": "j1", "name": "profile", "prompt": "p",
+            "schedule": {"kind": "cron", "expr": "0 3 * * *"},
+            "enabled": true, "state": "idle", "workdir": "\(resolved(".hermes/profiles/p1"))" },
+          { "id": "j2", "name": "[proj:\(id.uuidString)] nightly", "prompt": "p",
+            "schedule": {"kind": "cron", "expr": "0 3 * * *"},
+            "enabled": true, "state": "idle", "workdir": "\(resolved("projects/listed"))" }
+        ] }
+        """, ".hermes/cron/jobs.json")
+
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = { id, _, _ in TildeHomeTransport(id: id, home: home) }
+
+        let report = await Task.detached { ProjectDoctorService(context: ctx).diagnose() }.value
+        #expect(report.projectCount == 1)
+        #expect(report.findings.filter { $0.kind == .orphanProjectDir }.isEmpty,
+                "\(report.findings.map(\.title))")
+        #expect(report.findings.filter { $0.kind == .pathReuseSuspicion }.isEmpty)
+    }
 }

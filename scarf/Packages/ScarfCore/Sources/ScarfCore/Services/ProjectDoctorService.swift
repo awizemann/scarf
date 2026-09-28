@@ -33,7 +33,9 @@ import os
 /// sidecars — each classified from a single read), one `listDirectory` per
 /// scan root, and one or two per orphan candidate. That is seconds over SSH
 /// on a large home, which is why it is user-initiated or once-per-project,
-/// never per file-watcher tick.
+/// never per file-watcher tick. On an SSH host add one shell round trip
+/// that resolves every row root and the Hermes home (`physicalRootSpellings`),
+/// paid even with no rows.
 public struct ProjectDoctorService: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectDoctor")
@@ -84,7 +86,17 @@ public struct ProjectDoctorService: Sendable {
         // registered through a symlink (or as `~/…` on a remote) reports
         // the project's own jobs as "running elsewhere" and its own folder
         // as an unlisted orphan.
-        let physicalRoots = physicalRootSpellings(rows.map(\.path))
+        //
+        // The Hermes home rides the same probe: on an SSH host `paths.home`
+        // is the literal `~/.hermes`, which no absolute (Hermes-resolved)
+        // `workdir` can equal, so the orphan scan's home exclusion needs the
+        // spelling the host actually has.
+        let homeKey = ProjectIdentity.normalizedPath(context.paths.home)
+        var physicalRoots = physicalRootSpellings(rows.map(\.path) + [context.paths.home])
+        let hermesHomeSpellings = Set([homeKey]).union(physicalRoots[homeKey] ?? [])
+        if !rows.contains(where: { ProjectIdentity.normalizedPath($0.path) == homeKey }) {
+            physicalRoots.removeValue(forKey: homeKey)
+        }
 
         // Paths more than one row claims. Identity repairs are withheld for
         // these: every writer underneath addresses a row BY PATH and stops at
@@ -108,7 +120,10 @@ public struct ProjectDoctorService: Sendable {
         }
 
         findings += duplicateFindings(rows: rows)
-        findings += orphanFindings(rows: rows, cronJobs: cronJobs, physicalRoots: physicalRoots)
+        findings += orphanFindings(
+            rows: rows, cronJobs: cronJobs, physicalRoots: physicalRoots,
+            hermesHomeSpellings: hermesHomeSpellings
+        )
         findings += salvagedFieldFindings(loaded: loaded, alreadyReported: findings)
         findings += historyFindings(loaded: loaded)
 
@@ -457,7 +472,8 @@ public struct ProjectDoctorService: Sendable {
     private nonisolated func orphanFindings(
         rows: [ProjectEntry],
         cronJobs: [HermesCronJob],
-        physicalRoots: [String: Set<String>] = [:]
+        physicalRoots: [String: Set<String>] = [:],
+        hermesHomeSpellings: Set<String> = []
     ) -> [ProjectDoctorFinding] {
         // A listed project is known by its registered spelling AND its
         // physical one: a cron `workdir` (resolved by Hermes) naming a
@@ -467,15 +483,10 @@ public struct ProjectDoctorService: Sendable {
         let home = ProjectIdentity.normalizedPath(context.paths.home)
 
         // The Hermes home in every spelling a (resolved) cron `workdir` could
-        // use for it — locally, `~/.hermes` under a symlinked parent (the
-        // macOS temp dir, `/var` → `/private/var`) is stored resolved.
-        let homeSpellings: Set<String> = {
-            var out: Set<String> = [home]
-            if !context.isRemote, home.hasPrefix("/") {
-                out.insert(ProjectIdentity.normalizedPath(ProjectRootPolicy.physicalPath(home)))
-            }
-            return out
-        }()
+        // use for it: locally `~/.hermes` under a symlinked parent (`/var` →
+        // `/private/var`), remotely the probed absolute path for the literal
+        // `~/.hermes`. Supplied by `diagnose` from the same probe as the rows.
+        let homeSpellings = hermesHomeSpellings.union([home])
         func isExcluded(_ normalized: String) -> Bool {
             homeSpellings.contains { Self.isExcludedFromScan(normalized, home: $0) }
         }

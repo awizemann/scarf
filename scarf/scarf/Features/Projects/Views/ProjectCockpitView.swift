@@ -440,18 +440,37 @@ private struct CockpitDashboardPanel: View {
     let projectRoot: String
     let isLoading: Bool
 
+    @Environment(\.serverContext) private var serverContext
+    /// `projectRoot` as the widgets see it, and the host's homes for the
+    /// root policy — resolved off the main actor by `.task`. A remote
+    /// template install from before B03 is registered as `~/projects/<slug>`;
+    /// the widgets' containment check needs the absolute path on THAT host
+    /// (the probed `$HOME`), never this Mac's `~`.
+    @State private var resolved: WidgetPathResolver.ResolvedRoot?
+
+    /// Until `.task` lands, a `~` root is held back (nothing renders
+    /// against it); an absolute root is used as is, exactly as before.
+    private var current: WidgetPathResolver.ResolvedRoot? {
+        if let resolved, resolved.source == projectRoot { return resolved }
+        return projectRoot.hasPrefix("~")
+            ? nil
+            : WidgetPathResolver.ResolvedRoot(source: projectRoot, root: projectRoot, hostHomes: nil)
+    }
+
     /// ONE stat per tick for every file-reading widget below, instead of one
     /// per widget — see `WidgetSignatureBatch`. Lives here because this is
     /// the view that knows the whole widget set.
     @State private var signatureBatch = WidgetSignatureBatch()
 
     private var widgetFilePaths: [String] {
-        WidgetSignatureBatch.filePaths(in: dashboard, projectRoot: projectRoot)
+        WidgetSignatureBatch.filePaths(
+            in: dashboard, projectRoot: current?.root, hostHomes: current?.hostHomes
+        )
     }
 
     var body: some View {
         Group {
-            if let dashboard {
+            if let dashboard, let current {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         ForEach(dashboard.sections) { section in
@@ -461,12 +480,13 @@ private struct CockpitDashboardPanel: View {
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .environment(\.selectedProjectRoot, projectRoot)
+                .environment(\.selectedProjectRoot, current.root)
+                .environment(\.selectedProjectHostHomes, current.hostHomes)
                 .environment(
                     \.widgetSignatureScope,
                     WidgetSignatureScope(batch: signatureBatch, paths: widgetFilePaths)
                 )
-            } else if isLoading {
+            } else if isLoading || dashboard != nil {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 CockpitEmptyState(
@@ -476,6 +496,16 @@ private struct CockpitDashboardPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Keyed on the server too: the answer depends on its home. A result
+        // that lands after the user moved on (another project, a cancelled
+        // task) is dropped — `.task(id:)` cancels the old task when the id
+        // changes, and an older probe finishing last would otherwise
+        // overwrite the current root's answer.
+        .task(id: "\(serverContext.id.uuidString)|\(projectRoot)") {
+            let result = await WidgetPathResolver.resolveRoot(projectRoot, context: serverContext)
+            guard !Task.isCancelled else { return }
+            resolved = result
+        }
     }
 }
 

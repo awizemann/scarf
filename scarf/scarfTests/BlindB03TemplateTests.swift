@@ -319,4 +319,47 @@ import ScarfCore
         #expect(vm.fileScan?.agentsMdPresent == true)
         #expect(vm.requiredFilesPresent)
     }
+
+    // MARK: - Dashboard widgets on a `~`-rooted remote row
+
+    @Test func widgetRootIsExpandedWithTheHostsHomeNeverTheMacs() async {
+        let context = ServerContext(
+            id: UUID(), displayName: "droplet", kind: .ssh(SSHConfig(host: "fake.invalid"))
+        )
+        await ServerContext.primeResolvedHome("/home/alan", forServerID: context.id)
+        let resolved = await WidgetPathResolver.resolveRoot("~/projects/site", context: context)
+        #expect(resolved.root == "/home/alan/projects/site")
+        #expect(resolved.hostHomes == WidgetHostHomes(userHome: "/home/alan", hermesHome: "/home/alan/.hermes"))
+        #expect(WidgetPathResolver.resolve("reports/weekly.md", projectRoot: resolved.root, hostHomes: resolved.hostHomes)
+            == .success("/home/alan/projects/site/reports/weekly.md"))
+        #expect(WidgetPathResolver.resolve("../other/x.md", projectRoot: resolved.root, hostHomes: resolved.hostHomes)
+            == .failure(.escapesProject))
+
+        // A failed probe: the `~` stays, and the widget refuses rather than
+        // reading `~/projects/site` from this Mac.
+        let down = ServerContext(
+            id: UUID(), displayName: "down", kind: .ssh(SSHConfig(host: "fake.invalid"))
+        )
+        await ServerContext.primeResolvedHome("~", forServerID: down.id)
+        let unresolved = await WidgetPathResolver.resolveRoot("~/projects/site", context: down)
+        #expect(unresolved.root == "~/projects/site")
+        #expect(WidgetPathResolver.resolve("README.md", projectRoot: unresolved.root, hostHomes: unresolved.hostHomes)
+            == .failure(.unresolvedHome))
+    }
+
+    /// Strictness survives the expansion: a row that is (or contains) the
+    /// host's home or Hermes home can't anchor a widget read.
+    @Test(arguments: ["~", "~/", "~/.hermes"])
+    func widgetRefusesARowThatExpandsToTheHostsHomes(row: String) async {
+        let context = ServerContext(
+            id: UUID(), displayName: "droplet", kind: .ssh(SSHConfig(host: "fake.invalid"))
+        )
+        await ServerContext.primeResolvedHome("/home/alan", forServerID: context.id)
+        let resolved = await WidgetPathResolver.resolveRoot(row, context: context)
+        guard case .failure(.inadmissibleRoot) = WidgetPathResolver.resolve(
+            ".env", projectRoot: resolved.root, hostHomes: resolved.hostHomes
+        ) else {
+            Issue.record("\(row) should be refused"); return
+        }
+    }
 }

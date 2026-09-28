@@ -145,7 +145,9 @@ final class WidgetSignatureBatch {
     /// widget was allowed to read. A path that does not resolve is simply
     /// absent from the batch; that widget renders its own refusal card and
     /// never reads anything.
-    static func filePaths(in dashboard: ProjectDashboard?, projectRoot: String?) -> [String] {
+    static func filePaths(
+        in dashboard: ProjectDashboard?, projectRoot: String?, hostHomes: WidgetHostHomes? = nil
+    ) -> [String] {
         guard let dashboard else { return [] }
         var seen = Set<String>()
         var out: [String] = []
@@ -154,7 +156,7 @@ final class WidgetSignatureBatch {
                 // A remote `image` widget (url, no path) reads no file.
                 guard widget.path != nil else { continue }
                 guard case .success(let resolved) =
-                        WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot)
+                        WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot, hostHomes: hostHomes)
                 else { continue }
                 if seen.insert(resolved).inserted { out.append(resolved) }
             }
