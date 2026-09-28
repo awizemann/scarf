@@ -139,6 +139,49 @@ import Foundation
         }
     }
 
+    /// A project inside a repo whose root has AGENTS.md: Hermes loads the
+    /// AGENTS.md chain (root → project), never the project's CLAUDE.md, so
+    /// the block must stay in the project's AGENTS.md and not be "repaired".
+    @Test func gitRootAgentsMdKeepsTheBlockInAgentsMd() throws {
+        try Self.withProject { project, ctx in
+            let repo = project.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+            try "# repo rules\n".write(to: repo.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+            try Self.write("# claude\n", "CLAUDE.md", in: project)
+            try Self.write(Self.block + "\n", "AGENTS.md", in: project)
+            try ProjectContextBlock.writeBlock(Self.block, forProjectAt: project.path, context: ctx)
+            #expect(Self.read("AGENTS.md", in: project)?.contains("SCARF-BLOCK") == true)
+            #expect(Self.read("CLAUDE.md", in: project) == "# claude\n")
+        }
+    }
+
+    /// Without a `.git` above, Hermes ignores parent directories, so a
+    /// parent's AGENTS.md changes nothing.
+    @Test func parentAgentsMdWithoutGitRootIsIgnored() throws {
+        try Self.withProject { project, ctx in
+            let parent = project.deletingLastPathComponent()
+            try "# parent\n".write(to: parent.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+            try Self.write("# claude\n", "CLAUDE.md", in: project)
+            try ProjectContextBlock.writeBlock(Self.block, forProjectAt: project.path, context: ctx)
+            #expect(!Self.exists("AGENTS.md", in: project))
+            #expect(Self.read("CLAUDE.md", in: project)?.contains("SCARF-BLOCK") == true)
+        }
+    }
+
+    /// On the Mac's case-insensitive volume Hermes's `CLAUDE.md` opens a
+    /// `Claude.md`, so that file must count too.
+    @Test func caseVariantClaudeMdCountsOnACaseInsensitiveVolume() throws {
+        try Self.withProject { project, ctx in
+            try Self.write("# mixed case\n", "Claude.md", in: project)
+            let caseInsensitive = FileManager.default.fileExists(atPath: project.appendingPathComponent("CLAUDE.md").path)
+            try #require(caseInsensitive, "needs a case-insensitive volume")
+            try ProjectContextBlock.writeBlock(Self.block, forProjectAt: project.path, context: ctx)
+            let names = try FileManager.default.contentsOfDirectory(atPath: project.path)
+            #expect(!names.contains("AGENTS.md"))
+            #expect(Self.read("Claude.md", in: project)?.contains("SCARF-BLOCK") == true)
+        }
+    }
+
     // MARK: - What Hermes itself loads
 
     static let hermesRef = NSHomeDirectory() + "/.hermes/hermes-agent-v0215"
@@ -178,6 +221,22 @@ import Foundation
             let after = try Self.hermesContextPrompt(cwd: project, home: home)
             #expect(after.contains("USE-MAKE-FOR-BUILDS"))
             #expect(after.contains("SCARF-BLOCK"))
+        }
+    }
+
+    @Test(.enabled(if: hermesRefAvailable, "needs ~/.hermes/hermes-agent-v0215"))
+    func hermesStillLoadsTheBlockUnderAGitRootAgentsMd() throws {
+        try Self.withProject { project, ctx in
+            let repo = project.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+            try "REPO-RULES\n".write(to: repo.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+            try Self.write("# claude\n", "CLAUDE.md", in: project)
+            try ProjectContextBlock.writeBlock(Self.block, forProjectAt: project.path, context: ctx)
+            let home = repo.appendingPathComponent("hermes")
+            try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+            let prompt = try Self.hermesContextPrompt(cwd: project, home: home)
+            #expect(prompt.contains("SCARF-BLOCK"))
+            #expect(prompt.contains("REPO-RULES"))
         }
     }
 }

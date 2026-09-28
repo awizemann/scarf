@@ -164,7 +164,13 @@ public enum ProjectContextBlock {
         // not only AGENTS.md. Without a listing (transport down) fall back to
         // AGENTS.md alone, where every earlier build put it.
         let names = ((try? transport.listDirectory(projectPath)).map { entries in
-            contextFileNames.filter { Set(entries).contains($0) }
+            // Case-insensitively on the Mac, where Hermes's `CLAUDE.md` opens
+            // `Claude.md` too; exact names on a remote host.
+            entries.filter { entry in
+                contextFileNames.contains {
+                    transport.isRemote ? $0 == entry : $0.caseInsensitiveCompare(entry) == .orderedSame
+                }
+            }
         }) ?? ["AGENTS.md"]
         var rewrote = false
         for name in names {
@@ -245,7 +251,16 @@ public enum ProjectContextBlock {
         for file in survey.files where file.name != target && file.hasBlock {
             let path = projectPath + "/" + file.name
             if !file.hasUserContent && agentsMDNames.contains(file.name) {
-                try transport.removeFile(path)
+                // Re-read right before deleting: only a file that still holds
+                // nothing but Scarf's block goes.
+                let now = try GuardedTextFile(transport: transport, label: file.name)
+                    .load(path, maxBytes: maxAgentsBytes)
+                guard now.exists else { continue }
+                if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try transport.removeFile(path)
+                } else {
+                    _ = try removeBlock(fromFileAt: path, transport: transport)
+                }
             } else {
                 _ = try removeBlock(fromFileAt: path, transport: transport)
             }
@@ -285,36 +300,60 @@ public enum ProjectContextBlock {
         /// Non-empty `.cursor/rules/*.mdc` files exist (loaded together
         /// with `.cursorrules`).
         let hasCursorRulesDir: Bool
+        /// A parent directory up to the git root holds an `.hermes.md` /
+        /// `HERMES.md` or an `AGENTS*.md`. Hermes walks up for those
+        /// (`_find_hermes_md`, `_agents_md_candidates`, prompt_builder.py
+        /// :139-148, :1602-1625 @ v2026.9.24), so the project's own
+        /// CLAUDE.md / .cursorrules is not what loads, and moving the block
+        /// there would hide it. Such projects keep the AGENTS.md behaviour.
+        var ancestorContext = false
 
         /// The file the block belongs in: the highest-priority file that
         /// already carries the user's own context, else AGENTS.md.
         var target: String {
+            let agents = files.first(where: { agentsMDNames.contains($0.name) })?.name ?? "AGENTS.md"
+            if ancestorContext {
+                return files.first(where: { hermesMDNames.contains($0.name) && $0.hasUserContent })?.name ?? agents
+            }
             if let owner = files.first(where: \.hasUserContent) { return owner.name }
             if hasCursorRulesDir { return ".cursorrules" }
             // Keep an existing block-only AGENTS.md / agents.md where it is.
-            return files.first(where: { agentsMDNames.contains($0.name) })?.name ?? "AGENTS.md"
+            return agents
         }
     }
 
-    /// Reads the project's context files once. Exact on-disk names come from
-    /// one directory listing, so `AGENTS.md` and `agents.md` on a
+    /// Reads the project's context files once. Names come from one
+    /// directory listing, so `AGENTS.md` and `agents.md` on a
     /// case-insensitive volume are never counted as two files.
     static func surveyContextFiles(
         forProjectAt projectPath: String,
         transport: any ServerTransport
     ) throws -> ContextSurvey {
-        let entries: Set<String>
+        let listing: [String]
         do {
-            entries = Set(try transport.listDirectory(projectPath))
-        } catch {
+            listing = try transport.listDirectory(projectPath)
+        } catch let error as TransportError where error.isNoSuchFile
+                    || (!transport.isRemote && !FileManager.default.fileExists(atPath: projectPath)) {
             // A project directory that isn't there yet has no context files;
-            // the write below creates it. Any other listing failure stops
-            // here, since guessing "no files" could shadow the user's.
-            guard !transport.fileExists(projectPath) else { throw error }
-            entries = []
+            // the write creates it. Any other failure stops here: guessing
+            // "no files" could put a new AGENTS.md over the user's CLAUDE.md.
+            _ = error
+            listing = []
+        }
+        // Hermes opens fixed names (`cwd / "CLAUDE.md"`); on the Mac's
+        // case-insensitive volumes that also opens `Claude.md`. A remote
+        // Linux host is case-sensitive, so there the name must match exactly.
+        func onDisk(_ name: String) -> String? {
+            if listing.contains(name) { return name }
+            guard !transport.isRemote else { return nil }
+            return listing.first { $0.caseInsensitiveCompare(name) == .orderedSame }
         }
         var files: [ContextFile] = []
-        for name in contextFileNames where entries.contains(name) {
+        var seen = Set<String>()
+        for candidate in contextFileNames {
+            guard let name = onDisk(candidate), seen.insert(name.lowercased()).inserted || transport.isRemote,
+                  !files.contains(where: { $0.name == name })
+            else { continue }
             let path = projectPath + "/" + name
             let loaded: GuardedTextFile.Loaded
             do {
@@ -338,12 +377,49 @@ public enum ProjectContextBlock {
             ))
         }
         var hasCursorRulesDir = false
-        if entries.contains(".cursor") {
+        if onDisk(".cursor") != nil {
             let rulesDir = projectPath + "/.cursor/rules"
-            let mdc = ((try? transport.listDirectory(rulesDir)) ?? []).filter { $0.hasSuffix(".mdc") }
+            let mdc: [String]
+            do {
+                mdc = try transport.listDirectory(rulesDir).filter { $0.hasSuffix(".mdc") }
+            } catch let error as TransportError where error.isNoSuchFile
+                        || (!transport.isRemote && !FileManager.default.fileExists(atPath: rulesDir)) {
+                _ = error
+                mdc = []
+            }
             hasCursorRulesDir = mdc.contains { (transport.stat(rulesDir + "/" + $0)?.size ?? 0) > 0 }
         }
-        return ContextSurvey(files: files, hasCursorRulesDir: hasCursorRulesDir)
+        var survey = ContextSurvey(files: files, hasCursorRulesDir: hasCursorRulesDir)
+        survey.ancestorContext = try ancestorHasContext(projectPath: projectPath, transport: transport)
+        return survey
+    }
+
+    /// Whether a parent directory, up to the nearest one holding `.git`,
+    /// has a `.hermes.md`/`HERMES.md` or `AGENTS*.md` Hermes would load
+    /// ahead of the project's CLAUDE.md. One batched stat for the whole
+    /// walk; an untrusted answer refuses rather than guessing.
+    static func ancestorHasContext(projectPath: String, transport: any ServerTransport) throws -> Bool {
+        var dirs: [String] = []
+        var dir = (projectPath as NSString).standardizingPath
+        while true {
+            dirs.append(dir)
+            let parent = (dir as NSString).deletingLastPathComponent
+            if parent == dir || parent.isEmpty { break }
+            dir = parent
+        }
+        let names = hermesMDNames + ["AGENTS.override.md"] + agentsMDNames
+        var paths: [String] = []
+        for d in dirs { paths.append(d + "/.git"); paths += names.map { d + "/" + $0 } }
+        guard let stats = transport.statAll(paths) else {
+            throw WriteError.refusedUnreadable(path: projectPath)
+        }
+        // No git root: Hermes looks at the project directory only.
+        guard let rootIndex = dirs.firstIndex(where: { stats[$0 + "/.git"] != nil }), rootIndex > 0 else {
+            return false
+        }
+        return dirs[1...rootIndex].contains { d in
+            names.contains { (stats[d + "/" + $0]?.size ?? 0) > 0 }
+        }
     }
 
     /// Put the block after a leading `---` YAML frontmatter instead of above
