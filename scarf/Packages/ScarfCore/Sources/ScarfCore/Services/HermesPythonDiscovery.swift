@@ -19,7 +19,9 @@ import Foundation
 /// "$INSTALL_DIR/hermes"`, scripts/install.sh:2156-2171 @ v2026.9.24) names
 /// the venv python directly, and a hand-written shim that execs a venv's
 /// `hermes` console script is followed one level (that script's python
-/// shebang, else the python beside it). Exec targets holding `$` or a
+/// shebang, else — only when it is itself a script — the python beside it;
+/// an exec'd binary such as `uv` or `env` is never paired with a stray
+/// neighbour). Exec targets holding `$` or a
 /// relative path are skipped, never expanded. This runs before the sibling
 /// search so a stray `python3` beside the launcher (e.g. from
 /// `uv python install` into `~/.local/bin`) can't win over the real one.
@@ -89,7 +91,8 @@ enum HermesPythonDiscovery {
                             python*) if [ -x "$c2" ]; then py="$c2"; fi ;;
                           esac ;;
                       esac
-                      if [ -z "$py" ]; then
+                      case "$f2" in '#!'*) ;; *) f2="" ;; esac
+                      if [ -z "$py" ] && [ -n "$f2" ]; then
                         d2=$(dirname -- "$t2")
                         for c in "$d2/python" "$d2/python3"; do
                           if [ -x "$c" ]; then py="$c"; break; fi

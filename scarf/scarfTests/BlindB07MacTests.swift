@@ -67,6 +67,11 @@ import ScarfCore
         #expect(fellBack.help.contains("Scarf couldn't reach the server."))
         #expect(fellBack.accessibilityValue != plain.accessibilityValue)
         #expect(plain.fallbackReason == nil)
+        // Once playback ends the notice is gone from the button.
+        let ended = SpeakMessageButtonState(
+            isPlaying: false, isLoading: false, liveVoiceActive: false, fallbackReason: "x")
+        #expect(!ended.help.contains("system voice"))
+        #expect(fellBack.help.hasPrefix("Stop speaking"))
         #expect(!plain.help.contains("system voice"))
     }
 }

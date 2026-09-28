@@ -748,7 +748,7 @@ private struct SpeakMessageButton: View {
             .help(state.help)
             .accessibilityLabel(state.accessibilityLabel)
             .accessibilityValue(state.accessibilityValue)
-            if state.fallbackReason != nil {
+            if state.fallbackReason != nil, state.isPlaying {
                 // Hermes Voice failed and the system voice is reading
                 // instead: say so rather than switching voices silently.
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -777,11 +777,9 @@ struct SpeakMessageButtonState: Equatable {
     var isEnabled: Bool { isPlaying || !liveVoiceActive }
 
     var help: String {
-        if let fallbackReason {
-            let prefix = isPlaying
-                ? String(localized: "Hermes Voice failed, so the system voice is reading this reply.")
-                : String(localized: "Hermes Voice failed, so the system voice read this reply.")
-            return prefix + " " + fallbackReason
+        if let fallbackReason, isPlaying {
+            return String(localized: "Stop speaking. Hermes Voice failed, so the system voice is reading this reply.")
+                + " " + fallbackReason
         }
         if isLoading { return String(localized: "Preparing Hermes Voice… (click to stop)") }
         if isPlaying { return String(localized: "Stop speaking") }
@@ -795,7 +793,7 @@ struct SpeakMessageButtonState: Equatable {
 
     var accessibilityValue: String {
         if isLoading { return String(localized: "Preparing audio") }
-        if fallbackReason != nil {
+        if fallbackReason != nil, isPlaying {
             return String(localized: "Hermes Voice failed; using the system voice")
         }
         if isPlaying { return String(localized: "Playing") }

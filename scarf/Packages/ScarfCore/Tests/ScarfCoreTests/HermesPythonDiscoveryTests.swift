@@ -80,7 +80,8 @@ import Foundation
                             python*) if [ -x "$c2" ]; then py="$c2"; fi ;;
                           esac ;;
                       esac
-                      if [ -z "$py" ]; then
+                      case "$f2" in '#!'*) ;; *) f2="" ;; esac
+                      if [ -z "$py" ] && [ -n "$f2" ]; then
                         d2=$(dirname -- "$t2")
                         for c in "$d2/python" "$d2/python3"; do
                           if [ -x "$c" ]; then py="$c"; break; fi
@@ -173,7 +174,8 @@ import Foundation
                                 python*) if [ -x "$c2" ]; then py="$c2"; fi ;;
                               esac ;;
                           esac
-                          if [ -z "$py" ]; then
+                          case "$f2" in '#!'*) ;; *) f2="" ;; esac
+                          if [ -z "$py" ] && [ -n "$f2" ]; then
                             d2=$(dirname -- "$t2")
                             for c in "$d2/python" "$d2/python3"; do
                               if [ -x "$c" ]; then py="$c"; break; fi
@@ -330,6 +332,24 @@ import Foundation
         try write(shim, "#!/bin/sh\n# local shim\nexec \(console.path) \"$@\"\n", executable: true)
         let out = try await runDiscovery(binary: shim.path)
         #expect(out.stdout == python.path, "\(out.stderr)")
+    }
+
+    /// A launcher that execs a non-script binary (`uv run …`, `env python3`)
+    /// must not borrow a python that merely sits beside that binary — it
+    /// has none of Hermes's packages. Fail honestly instead.
+    @Test func doesNotPairAnExecdBinaryWithANeighbouringPython() async throws {
+        let dir = try TempDir()
+        let tools = dir.url.appendingPathComponent("uvbin", isDirectory: true)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        let uv = tools.appendingPathComponent("uv")
+        try Data([0xCF, 0xFA, 0xED, 0xFE, 0x07, 0x00]).write(to: uv)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: uv.path)
+        try write(tools.appendingPathComponent("python3"), "#!/bin/sh\n", executable: true)
+        let launcher = dir.url.appendingPathComponent("hermes")
+        try write(launcher, "#!/bin/sh\nexec \(uv.path) run --project /x hermes \"$@\"\n", executable: true)
+        let out = try await runDiscovery(binary: launcher.path)
+        #expect(out.status == 3, "picked \(out.stdout)")
+        #expect(out.stderr.contains("MARK: no Python interpreter found"))
     }
 
     /// An exec target that needs expansion is never evaluated; with nothing

@@ -154,6 +154,7 @@ public final class IOSMemoryViewModel {
             originalText = ""
             isLoaded = true
             lastError = nil
+            conflictOnDisk = nil
         case .failure(let error):
             // Transport error (SSH timeout, auth failure, SFTP protocol
             // issue). The buffer is NOT blanked and the editor is NOT armed

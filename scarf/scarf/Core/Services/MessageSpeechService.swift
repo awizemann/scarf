@@ -65,8 +65,9 @@ final class MessageSpeechService: NSObject {
 
     /// Why the last Hermes Voice attempt fell back to the system voice.
     /// The message's speaker button shows it, so choosing "Hermes Voice"
-    /// and hearing the Mac voice is never silent. Cleared when the next
-    /// message starts.
+    /// and hearing the Mac voice is never silent. Lives only as long as
+    /// that playback: cleared whenever playback ends or stops, so it can't
+    /// resurface on another message that later reuses the same id.
     struct FallbackNotice: Equatable {
         let id: PlaybackID
         let reason: String
@@ -140,6 +141,7 @@ final class MessageSpeechService: NSObject {
         }
         stopFilePlayback()
         playing = nil
+        fallbackNotice = nil
     }
 
     private func speakWithSystemVoice(_ text: String, id: PlaybackID) {
@@ -195,7 +197,7 @@ final class MessageSpeechService: NSObject {
     /// known markers but never shown, since it can echo a provider key (C9).
     nonisolated static func fallbackReason(for error: Error) -> String {
         guard let speech = error as? HermesSpeechService.SpeechError else {
-            return String(localized: "Hermes Voice failed on the server.")
+            return String(localized: "Hermes Voice failed.")
         }
         switch speech {
         case .synthesisFailed(let detail):
@@ -280,6 +282,7 @@ final class MessageSpeechService: NSObject {
         loading = nil
         guard !urls.isEmpty else {
             playing = nil
+            fallbackNotice = nil
             return
         }
         // Open every file BEFORE registering it: `AVAudioFile(forReading:)`
@@ -330,6 +333,7 @@ final class MessageSpeechService: NSObject {
         pendingTempFiles = []
         if playing != nil {
             playing = nil
+            fallbackNotice = nil
         }
     }
 
@@ -349,6 +353,7 @@ final class MessageSpeechService: NSObject {
         guard let current = currentUtterance, ObjectIdentifier(current) == utterance else { return }
         currentUtterance = nil
         playing = nil
+        fallbackNotice = nil
     }
 
     // MARK: - Text cleanup
