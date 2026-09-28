@@ -231,7 +231,7 @@ public actor HermesDataService {
             return "Permission denied reading Hermes state on \(context.displayName). The SSH user may not have read access to ~/.hermes/state.db — try Run Diagnostics."
         }
         if lower.contains("no such file") || lower.contains("unable to open database file") {
-            return "Hermes state not found at ~/.hermes on \(context.displayName). If Hermes is installed elsewhere, set its data directory in Manage Servers."
+            return "Hermes state not found at ~/.hermes on \(context.displayName). If Hermes is installed elsewhere, remove this server and add it again with that path as its Hermes data directory."
         }
         return desc
     }
