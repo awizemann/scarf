@@ -24,7 +24,7 @@ Manage Model Context Protocol servers Hermes connects to. Two ways to add:
 - Tool include / exclude filters (whitelist / blacklist what the server exposes). A non-empty include list is a whitelist and wins over exclude; `include: []` registers **no** tools (shown as "(none — no tools registered)"). The editor rewrites the `tools:` block only when you change a filter.
 - Resources / prompts toggles.
 - Request and connect timeouts, in seconds. Hermes stores them as floats (`connect_timeout: 45.0`); Scarf shows `45` and only rewrites a timeout you edited.
-- OAuth token detection and clearing, and **Sign in** (`hermes mcp login`, Hermes v0.18+).
+- OAuth token detection and clearing, and **Sign in** (`hermes mcp login`, Hermes v0.18+). Hermes does not sign in again by itself after **Clear Token**: a gateway is not interactive, so with no cached token it refuses the server with `OAuthNonInteractiveError` (`tools/mcp_oauth_manager.py:316-319` @ v2026.9.24). After a clear the editor says the server can't reconnect, offers **Sign In…** (v0.18+; older hosts are told to run `hermes mcp login <name>`), and the list drops the oauth badge when the sheet closes.
 - **Test Connection** runs `hermes mcp test` and surfaces the discovered tool list inline. Scarf allows `max(30, connect_timeout) + 20` seconds, above Hermes's own probe budget.
 
 A gateway-restart banner appears after config changes that require a reload.
@@ -56,7 +56,7 @@ Hermes plugins are git-cloned into `~/.hermes/plugins/`. Scarf reads the directo
 **Operations:**
 
 - Install via Git URL or `owner/repo` shorthand.
-- Update (pulls latest).
+- Update (pulls latest; a plugin installed from the curated catalog is re-pinned to the reviewed commit instead, and Hermes reports `Plugin <name> updated to <sha>.` / `is already at catalog pin <sha>.`, which Scarf reads as success).
 - Remove.
 - Enable / disable.
 
@@ -67,6 +67,7 @@ Create, list, test-fire, and remove webhook subscriptions:
 - Endpoint URL, event filter, optional secret.
 - **Test fire** sends a synthetic event so you can verify the receiver before going live.
 - Detects the "platform not enabled" state. `hermes webhook` checks only `platforms.webhook.enabled` in config.yaml, so turn it on in Platforms → Webhook (which writes that key as well as `WEBHOOK_ENABLED`); `hermes gateway setup` writes only the `.env` flag.
+- If `hermes webhook list` fails (SSH down, a timeout, a crash) or prints something Scarf can't read, the tab says so with a Try Again button instead of showing "No webhook subscriptions". Both the Mac and ScarfGo use the same reader.
 - ScarfGo lists subscriptions read-only with the same parser as the Mac.
 
 ## Tools

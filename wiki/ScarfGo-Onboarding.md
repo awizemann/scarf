@@ -106,10 +106,10 @@ Citadel's raw exec channel doesn't source the user's shell rc files (`.bashrc`, 
 **v2.5 inline-prepends** `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"` on every `runProcess` call, so the four common install locations resolve automatically. If you still see "command not found":
 
 1. SSH to the host yourself and run `which hermes`. Note the absolute path.
-2. In ScarfGo: **Servers → tap the server → Edit → Hermes binary hint** → paste the absolute path (e.g. `/opt/scarf-tools/bin/hermes`).
+2. ScarfGo has no per-server Hermes binary setting (and saved servers can't be edited). Link the binary into a directory the inline PATH covers, e.g. `ln -s /opt/scarf-tools/bin/hermes ~/.local/bin/hermes`.
 3. Re-test the connection.
 
-The inline PATH covers `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. Anything else — including `~/.hermes/bin` self-install layouts — needs the binary-hint override.
+The inline PATH covers `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.hermes/bin`, then the host's own PATH. Anything else needs the symlink above.
 
 ### "Connection refused" / "Connection timed out"
 

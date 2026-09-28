@@ -104,7 +104,7 @@ Two helpers prevent shell-expansion breakage:
 ### File I/O over SSH
 
 - `readFile`: `ssh host -- sh -c 'cat <path>'`; classifies "No such file" into typed `fileIO`.
-- `writeFile`: scp to `<path>.scarf.tmp`, then remote `mv` — atomic; cleans the orphan on failure.
+- `writeFile`: scp to `<path>.scarf-<nonce>.tmp`, then remote `mv` — atomic; cleans the orphan on failure. scp runs pinned to SFTP mode (`-s`), which starts no remote shell, so the remote path is passed **unquoted** (`scpRemoteSpec`): shell quotes would become part of the file name and break any path with a space. The `mv` is a shell command and uses `remotePathArg`.
 - `stat`: tries GNU `stat -c "%s %Y %F"`, falls back to BSD `stat -f "%z %m %HT"`.
 - `listDirectory`: `ls -A <path>`. `createDirectory`: `mkdir -p`. `removeFile`: `rm -f`.
 
@@ -153,7 +153,7 @@ The iOS app can't shell out to `/usr/bin/ssh` — there's no such binary in the 
 
 ### What's iOS-specific
 
-- **Pure-Swift exec channel.** Citadel's exec channel does the SSH wire protocol (RFC 4254) directly; there is no shelled-out `ssh -T host -- cmd`. One long-lived `SSHClient` per host, kept warm by `CitadelConnectionHolder`.
+- **Pure-Swift exec channel.** Citadel's exec channel does the SSH wire protocol (RFC 4254) directly; there is no shelled-out `ssh -T host -- cmd`. One long-lived `SSHClient` per host, kept warm by `CitadelConnectionHolder`. Command arguments are single-quoted (`shellJoin`), except a token starting with `~/`, which goes in as a double-quoted `"$HOME/…"` (escaped first, same rule as the Mac's `remotePathArg`) so it expands on the host.
 - **Pure-Swift SFTP.** All `readFile` / `writeFile` / `stat` / `listDirectory` go over SFTP via Citadel's `SFTPClient`. Path resolution rewrites `~/...` to the probed `$HOME` (SFTP doesn't expand tildes per RFC 4254).
 - **Inline PATH prefix on every `runProcess`.** Citadel's raw exec channel doesn't source the user's shell rc files, so non-interactive sessions land with `PATH=/usr/bin:/bin`. v2.5 inlines `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"` on every command so pipx-installed `hermes` resolves and any subprocess hermes spawns can find git/curl/python. Mac's OpenSSH sshd handles this transparently via login-shell init; Citadel does not.
 - **Output preservation on non-zero exit.** Citadel's high-level `executeCommand` API throws `CommandFailed` and discards captured stdout when the remote exits non-zero. v2.5 drives `executeCommandStream` directly — drains stdout + stderr regardless of outcome, recovers the actual exit code from the `CommandFailed` catch. This was the bug behind "Skills Browse failed" on iOS while Mac worked.

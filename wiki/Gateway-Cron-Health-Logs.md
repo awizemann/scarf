@@ -23,6 +23,8 @@ The gateway is what brings Hermes onto Telegram / Discord / Slack / etc. Stop it
 
 **Restart and a gateway you started by hand.** If the gateway isn't installed as a service (you ran `hermes gateway run` in a terminal, tmux or with nohup), Hermes's own restart stops it and runs the new one inside the command Scarf launched, which can't stay running. So Scarf checks `hermes gateway status` first and, in that state, doesn't restart — here, in Platforms, in MCP Servers, in Health or from the menu bar — and says why: restart it where it runs, or install it as a service with `hermes gateway install`. Service-managed gateways (launchd, systemd, Windows, s6 containers), profiles served by the default multiplexer, and (Hermes 0.21.4+) gateways run with `--external-supervisor` restart as before.
 
+**Restart while a turn is running.** A launchd or systemd gateway doesn't restart straight away when an agent turn or cron job is running: Hermes asks it to finish that work first (up to `agent.restart_after_turn_timeout`, 30 minutes by default), then the service manager starts the new one. Scarf's restart command still stops waiting after 60 seconds, but it then reads `gateway_state.json`. If the gateway reports `draining`, the Gateway pane and Platforms show "Waiting for the current turn to finish…" with the work Hermes is waiting on (Hermes 0.19+ reports it), follow the restart until a new gateway is running, and offer **Stop Waiting**. Stop Waiting only stops Scarf watching; Hermes restarts the gateway either way. Without that state, a timed-out restart is still reported as failed.
+
 ## Cron Manager
 
 View and edit Hermes scheduled jobs (`~/.hermes/cron/jobs.json`):
@@ -30,7 +32,7 @@ View and edit Hermes scheduled jobs (`~/.hermes/cron/jobs.json`):
 | Column | What it shows |
 |---|---|
 | Name | The job's display name. |
-| Schedule | **Human-readable phrase** _(v2.5+)_ — "Every 6 hours", "Weekdays at 09:00", "@hourly", etc. — falling back to the raw cron expression for anything the formatter doesn't recognize. Backed by [`CronScheduleFormatter`](Core-Services); ScarfGo renders the same text. |
+| Schedule | **Human-readable phrase** _(v2.5+)_ — "Every 6 hours", "Weekdays at 09:00", "@hourly", etc. — falling back to the raw cron expression for anything the formatter doesn't recognize. A job created from a phrase ("every monday 9am") shows that phrase. Any schedule with a fixed hour gets the host's zone in brackets ("(UTC)", or "(host time)" on a remote host with no configured zone), phrase or raw expression alike, because Hermes fires it in its own zone. Backed by [`CronScheduleFormatter`](Core-Services); ScarfGo renders the same text. |
 | State | `enabled` / `paused` / `failed` / `running` with an icon. |
 | Last run / next run | Timestamps. |
 | Delivery | Channel format like `discord:chat:thread`. |
@@ -43,6 +45,8 @@ View and edit Hermes scheduled jobs (`~/.hermes/cron/jobs.json`):
 - Run-now (one-shot trigger outside the schedule).
 - Delete.
 - Pre-run scripts, delivery-failure tracking, timeout type / seconds, `[SILENT]` indicator for jobs that suppress output.
+
+**Last run output** (and the project Cron Status widget) shows the newest `cron/output/<job>/<timestamp>.md`. A monitor job's `monitor_last_output.txt` snapshot lives in the same folder and is not run output, so it is skipped. Run Now refreshes the doctor findings and incident badges once the run returns. On Hermes up to v2026.8.31 a refused pause/resume/edit/remove still exited 0; Scarf reads its `Failed to … job:` line and reports the failure (Mac and iOS).
 
 Edits go through [`ServerContext.writeText`](Architecture-Overview) — atomic, transport-aware.
 
@@ -105,7 +109,7 @@ Restructured in 1.6 into a 10-tab layout exposing ~60 previously hidden config f
 |---|---|
 | **General** | Updates (Sparkle toggle + manual check), basic preferences. |
 | **Display** | Streaming, reasoning visibility, cost display, verbose mode. |
-| **Agent** | Model picker (backed by models.dev catalog — 111 providers + 6 overlay-only providers from `HERMES_OVERLAYS`), max turns, approval mode, reasoning effort. |
+| **Agent** | Model picker (backed by the models.dev catalog + overlay-only providers from `HERMES_OVERLAYS`; on Hermes v0.6+ only the providers that Hermes version can route are listed), max turns, approval mode, reasoning effort. |
 | **Terminal** | Terminal backend, Docker / container settings, modal options. |
 | **Browser** | Browser backend selection. |
 | **Voice** | TTS / STT providers, PTT, silence threshold (default 200ms). |

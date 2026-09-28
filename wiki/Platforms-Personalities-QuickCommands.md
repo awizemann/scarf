@@ -33,6 +33,14 @@ The dots read the per-platform `state` / `error_message` Hermes writes to `gatew
 
 **WhatsApp Cloud** reads its credentials from both `.env` (`WHATSAPP_CLOUD_*`, where `hermes whatsapp-cloud` puts them) and `platforms.whatsapp_cloud.extra` in config.yaml, and saves new credentials to `.env`. It never writes `enabled: false` because a field is blank, and it leaves the allowlist and DM policy where they already live. **Webhook** writes both `WEBHOOK_ENABLED` and `platforms.webhook.enabled`; the `hermes webhook` commands (and Scarf's Webhooks tab) check only the config key.
 
+A few forms follow Hermes's own defaults and precedence rather than the file layout:
+
+- **Slack** has no "Reply Mode" picker. Hermes's Slack adapter never reads `reply_to_mode` (only Discord and Telegram do); Slack threading is **Reply in thread** and **Reply broadcast**.
+- **WhatsApp** writes `whatsapp.reply_prefix` only when you type a prefix or config.yaml already has the key. A blank field over no key keeps Hermes's built-in "☤ Hermes Agent" header (or `WHATSAPP_REPLY_PREFIX`). An empty value that is already saved turns the header off, and **Use Hermes Default** removes the key (`hermes config unset`, Hermes 0.19+). Mode defaults to `self-chat`, which is Hermes's default.
+- **Mattermost** "Require @mention": from Hermes 0.21.3 a `MATTERMOST_REQUIRE_MENTION` line in `.env` overrides config.yaml. The form shows that value and says so. Saving writes config.yaml and comments the `.env` line out, so the toggle works on both older and newer hosts.
+- **iMessage (BlueBubbles)** "Send read receipts" is on when `.env` has no value (Hermes's default), and turning it off writes `false`.
+- **Feishu** domain defaults to `feishu`, which is Hermes's default.
+
 The platform list is data-driven, so platforms Hermes added after 1.6 — Feishu, Microsoft Teams, Tencent Yuanbao, Google Chat, LINE Messaging API, SimpleX Chat, and now **ntfy** — auto-appear when the connected host advertises them.
 
 ### ntfy _(v2.10.0+, Hermes v0.15+)_
@@ -66,7 +74,7 @@ Custom `/command_name` shell shortcuts. You define a name, a shell command (with
 
 **Safety:** the editor scans for dangerous patterns (`rm -rf`, `mkfs`, fork bombs, sudo, suspicious eval) and warns before saving. The check is heuristic — it's a guard against typos, not a sandbox.
 
-Quick Commands live in `config.yaml` under the `quick_commands` key.
+Quick Commands live in `config.yaml` under the `quick_commands` key. Scarf saves a new command's name in lowercase: every Hermes surface lowercases what you type before looking it up (`cli.py:1213-1222`, `gateway/platforms/event.py:105` @ v2026.9.24), so a key saved as `Deploy` could never run. Editing an existing command keeps its key.
 
 ## Related pages
 
@@ -75,4 +83,4 @@ Quick Commands live in `config.yaml` under the `quick_commands` key.
 - [Hermes Paths](Hermes-Paths) — where `.env`, `config.yaml`, and `personalities/` live.
 
 ---
-_Last updated: 2026-09-26 — Quick Commands run in the Hermes CLI, TUI and gateways, not in Scarf chat. Previously 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_
+_Last updated: 2026-09-28 — new Quick Command names are saved lowercase. Previously 2026-09-26 — Quick Commands run in the Hermes CLI, TUI and gateways, not in Scarf chat. Previously 2026-05-28 — Scarf v2.10.0 (ntfy as 23rd gateway platform + per-platform behavior flags for Telegram / Discord / Signal)_

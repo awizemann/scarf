@@ -37,7 +37,7 @@ When one host is configured the way you want, **Apply to Fleet…** pushes that 
 
 - **Model preset** — rebinds the target's preset (idempotent, keyed by the preset's id, reversible).
 - **Board** — sets the target's Kanban tenant where it doesn't already have one (additive — it never reassigns existing tasks).
-- **Cron** — recreates the source's project cron jobs on the target via `hermes cron create`, rewriting prompt paths from the source root to the target root so relative paths still work. Jobs are created **paused** (mirroring the template installer), and jobs whose name already exists are skipped.
+- **Cron** — recreates the source's project cron jobs (plain `[proj:<id>]` jobs and a template install's `[tmpl:<id>] [proj:<id>]` jobs alike; a legacy `[tmpl:<id>]`-only job is shared by every install of that template and is left out) on the target via `hermes cron create`, rewriting prompt paths from the source root to the target root so relative paths still work. Jobs are created **paused** (mirroring the template installer), and jobs whose name already exists are skipped.
 
 ### It's deliberately conservative
 
