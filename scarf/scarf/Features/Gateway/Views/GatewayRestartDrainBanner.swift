@@ -63,7 +63,7 @@ struct GatewayRestartDrainBanner: View {
     private var symbol: String {
         switch watcher.status {
         case .restarted: "checkmark.circle.fill"
-        case .failed, .gaveUp, .notRevived: "exclamationmark.triangle.fill"
+        case .failed, .gaveUp, .notRevived, .stoppedWithoutRestart: "exclamationmark.triangle.fill"
         default: "info.circle.fill"
         }
     }
@@ -71,7 +71,7 @@ struct GatewayRestartDrainBanner: View {
     private var tint: Color {
         switch watcher.status {
         case .restarted: ScarfColor.success
-        case .failed, .gaveUp, .notRevived: ScarfColor.warning
+        case .failed, .gaveUp, .notRevived, .stoppedWithoutRestart: ScarfColor.warning
         default: .secondary
         }
     }

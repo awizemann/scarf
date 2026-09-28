@@ -181,6 +181,21 @@ import Foundation
             capabilities: v0206, configYAML: "agent:\n  restart_drain_timeout: 600\n") == 720)
     }
 
+    // MARK: - A draining record that outlives its process
+
+    @Test func livenessReadsKillZero() {
+        #expect(HermesGatewayRestartDrain.livenessArgv(pid: 812) == ["-c", "kill -0 812"])
+        #expect(HermesGatewayRestartDrain.liveness(exitCode: 0, stderr: "") == true)
+        #expect(HermesGatewayRestartDrain.liveness(exitCode: 1, stderr: "sh: kill: (812) - No such process") == false)
+        #expect(HermesGatewayRestartDrain.liveness(exitCode: 1, stderr: "kill: 812: Operation not permitted") == nil)
+        #expect(HermesGatewayRestartDrain.heartbeatStaleSeconds == 120)
+    }
+
+    @Test func updatedAtIsCarried() throws {
+        let snap = try #require(HermesGatewayRestartDrain.snapshot(stateJSON: Data(Self.hermesDrainingRecord.utf8)))
+        #expect(snap.updatedAt == "2026-09-27T23:51:48.253063+00:00")
+    }
+
     // MARK: - The announced budget
 
     @Test func budgetIsReadFromEachBackendsAnnouncement() {
