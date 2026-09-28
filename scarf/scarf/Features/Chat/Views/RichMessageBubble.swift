@@ -723,29 +723,41 @@ private struct SpeakMessageButton: View {
         let state = SpeakMessageButtonState(
             isPlaying: speech.isPlaying(id),
             isLoading: speech.loading == id,
-            liveVoiceActive: liveVoice.isAnySessionActive
+            liveVoiceActive: liveVoice.isAnySessionActive,
+            fallbackReason: speech.fallbackNotice?.id == id ? speech.fallbackNotice?.reason : nil
         )
-        Button {
-            speech.toggle(id, content: content, capabilities: capabilitiesStore?.capabilities ?? .empty)
-        } label: {
-            Group {
-                if state.isLoading {
-                    // Hermes Voice is synthesizing (can take seconds); the
-                    // button still stops it.
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: state.isPlaying ? "stop.circle.fill" : "speaker.wave.2")
-                        .font(.system(size: 11))
-                        .foregroundStyle(state.isPlaying ? ScarfColor.accent : ScarfColor.foregroundFaint)
+        HStack(spacing: 2) {
+            Button {
+                speech.toggle(id, content: content, capabilities: capabilitiesStore?.capabilities ?? .empty)
+            } label: {
+                Group {
+                    if state.isLoading {
+                        // Hermes Voice is synthesizing (can take seconds); the
+                        // button still stops it.
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: state.isPlaying ? "stop.circle.fill" : "speaker.wave.2")
+                            .font(.system(size: 11))
+                            .foregroundStyle(state.isPlaying ? ScarfColor.accent : ScarfColor.foregroundFaint)
+                    }
                 }
+                .frame(width: 14, height: 14)
             }
-            .frame(width: 14, height: 14)
+            .buttonStyle(.plain)
+            .disabled(!state.isEnabled)
+            .help(state.help)
+            .accessibilityLabel(state.accessibilityLabel)
+            .accessibilityValue(state.accessibilityValue)
+            if state.fallbackReason != nil {
+                // Hermes Voice failed and the system voice is reading
+                // instead: say so rather than switching voices silently.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(ScarfColor.warning)
+                    .help(state.help)
+                    .accessibilityHidden(true)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!state.isEnabled)
-        .help(state.help)
-        .accessibilityLabel(state.accessibilityLabel)
-        .accessibilityValue(state.accessibilityValue)
     }
 }
 
@@ -756,12 +768,21 @@ struct SpeakMessageButtonState: Equatable {
     let isPlaying: Bool
     let isLoading: Bool
     let liveVoiceActive: Bool
+    /// Set when Hermes Voice failed for this message and the system voice
+    /// took over (``MessageSpeechService/FallbackNotice``).
+    var fallbackReason: String? = nil
 
     /// Off while Live Voice runs, unless something is still playing (so it
     /// can always be stopped).
     var isEnabled: Bool { isPlaying || !liveVoiceActive }
 
     var help: String {
+        if let fallbackReason {
+            let prefix = isPlaying
+                ? String(localized: "Hermes Voice failed, so the system voice is reading this reply.")
+                : String(localized: "Hermes Voice failed, so the system voice read this reply.")
+            return prefix + " " + fallbackReason
+        }
         if isLoading { return String(localized: "Preparing Hermes Voice… (click to stop)") }
         if isPlaying { return String(localized: "Stop speaking") }
         if liveVoiceActive { return String(localized: "Unavailable during Live Voice") }
@@ -774,6 +795,9 @@ struct SpeakMessageButtonState: Equatable {
 
     var accessibilityValue: String {
         if isLoading { return String(localized: "Preparing audio") }
+        if fallbackReason != nil {
+            return String(localized: "Hermes Voice failed; using the system voice")
+        }
         if isPlaying { return String(localized: "Playing") }
         if liveVoiceActive { return String(localized: "Unavailable during Live Voice") }
         return ""

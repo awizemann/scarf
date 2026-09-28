@@ -16,10 +16,11 @@ import Foundation
         #expect(script.contains(fragment))
     }
 
-    /// Golden: the discovery block exactly as it stood in
+    /// Golden: the discovery block as it stood in
     /// `HermesSpeechService.synthesisScript` BEFORE the extraction (P2,
-    /// commit 78d832c0), captured from its output for this input before the
-    /// refactor. Pins the "byte-identical" claim non-circularly.
+    /// commit 78d832c0), plus the one exec-line block B07 inserted before the
+    /// sibling search (S14-F1: the official installer's bash launcher).
+    /// Every other line is unchanged.
     @Test func fragmentMatchesThePreExtractionSpeechScript() {
         let golden = #"""
         hb="$HOME/.local/bin/hermes"
@@ -46,6 +47,51 @@ import Foundation
             esac ;;
         esac
         if [ -z "$py" ]; then
+          case "$first" in
+            '#!'*)
+              dq='"'
+              sq="'"
+              ex=$(sed -n 's/^[[:space:]]*exec[[:space:]][[:space:]]*//p' "$real" 2>/dev/null | head -n 1)
+              case "$ex" in
+                "$dq"*) tgt=${ex#?}; tgt=${tgt%%"$dq"*} ;;
+                "$sq"*) tgt=${ex#?}; tgt=${tgt%%"$sq"*} ;;
+                *) tgt=${ex%% *} ;;
+              esac
+              case "$tgt" in
+                *'$'*) tgt="" ;;
+                /*) ;;
+                *) tgt="" ;;
+              esac
+              if [ -n "$tgt" ] && [ -f "$tgt" ]; then
+                case "${tgt##*/}" in
+                  python*) if [ -x "$tgt" ]; then py="$tgt"; fi ;;
+                  *)
+                    t2=$(readlink -f -- "$tgt" 2>/dev/null) || t2=""
+                    [ -n "$t2" ] || t2="$tgt"
+                    if [ "$t2" != "$real" ]; then
+                      f2=""
+                      IFS= read -r f2 < "$t2" 2>/dev/null || true
+                      case "$f2" in
+                        '#!'*)
+                          c2=${f2#??}
+                          c2=${c2# }
+                          c2=${c2%% *}
+                          case "${c2##*/}" in
+                            python*) if [ -x "$c2" ]; then py="$c2"; fi ;;
+                          esac ;;
+                      esac
+                      if [ -z "$py" ]; then
+                        d2=$(dirname -- "$t2")
+                        for c in "$d2/python" "$d2/python3"; do
+                          if [ -x "$c" ]; then py="$c"; break; fi
+                        done
+                      fi
+                    fi ;;
+                esac
+              fi ;;
+          esac
+        fi
+        if [ -z "$py" ]; then
           pyd=$(dirname -- "$real")
           for c in "$pyd/python" "$pyd/python3"; do
             if [ -x "$c" ]; then py="$c"; break; fi
@@ -62,7 +108,8 @@ import Foundation
     /// The whole Hermes Voice script for a fixed input, pinned: the P2
     /// script captured before this branch touched it, plus exactly ONE new
     /// line — the sys.path guard that stops a `~/tools/` on the host from
-    /// shadowing Hermes's `tools` package. Any other drift fails here.
+    /// shadowing Hermes's `tools` package — and B07's exec-line discovery
+    /// block (S14-F1). Any other drift fails here.
     @Test func speechScriptIsTheP2ScriptPlusOnlyTheShadowingGuard() {
         let options = HermesSpeechService.Options(
             provider: "edge", voiceFingerprint: "v", hermesBinary: "~/.local/bin/hermes", hermesHome: "/Users/x/.hermes")
@@ -92,6 +139,51 @@ import Foundation
                   python*) if [ -x "$cand" ]; then py="$cand"; fi ;;
                 esac ;;
             esac
+            if [ -z "$py" ]; then
+              case "$first" in
+                '#!'*)
+                  dq='"'
+                  sq="'"
+                  ex=$(sed -n 's/^[[:space:]]*exec[[:space:]][[:space:]]*//p' "$real" 2>/dev/null | head -n 1)
+                  case "$ex" in
+                    "$dq"*) tgt=${ex#?}; tgt=${tgt%%"$dq"*} ;;
+                    "$sq"*) tgt=${ex#?}; tgt=${tgt%%"$sq"*} ;;
+                    *) tgt=${ex%% *} ;;
+                  esac
+                  case "$tgt" in
+                    *'$'*) tgt="" ;;
+                    /*) ;;
+                    *) tgt="" ;;
+                  esac
+                  if [ -n "$tgt" ] && [ -f "$tgt" ]; then
+                    case "${tgt##*/}" in
+                      python*) if [ -x "$tgt" ]; then py="$tgt"; fi ;;
+                      *)
+                        t2=$(readlink -f -- "$tgt" 2>/dev/null) || t2=""
+                        [ -n "$t2" ] || t2="$tgt"
+                        if [ "$t2" != "$real" ]; then
+                          f2=""
+                          IFS= read -r f2 < "$t2" 2>/dev/null || true
+                          case "$f2" in
+                            '#!'*)
+                              c2=${f2#??}
+                              c2=${c2# }
+                              c2=${c2%% *}
+                              case "${c2##*/}" in
+                                python*) if [ -x "$c2" ]; then py="$c2"; fi ;;
+                              esac ;;
+                          esac
+                          if [ -z "$py" ]; then
+                            d2=$(dirname -- "$t2")
+                            for c in "$d2/python" "$d2/python3"; do
+                              if [ -x "$c" ]; then py="$c"; break; fi
+                            done
+                          fi
+                        fi ;;
+                    esac
+                  fi ;;
+              esac
+            fi
             if [ -z "$py" ]; then
               pyd=$(dirname -- "$real")
               for c in "$pyd/python" "$pyd/python3"; do
@@ -194,6 +286,71 @@ import Foundation
             "/usr/bin/env", arguments: ["python3", "-c", HermesSpeechService.toolPythonScript],
             stdin: Data(#"{"text":"hi"}"#.utf8), environment: environment, currentDirectory: cwd)
         #expect(out.stdout == "SCARF_TTS_ENV:REAL\n", "\(out.stderr)")
+    }
+
+    /// The official `install.sh` launcher (scripts/install.sh:2156-2171 @
+    /// v2026.9.24): a plain bash file, not a symlink, whose shebang is
+    /// `/usr/bin/env` and whose `exec` line names the venv python. A stray
+    /// `python3` beside the launcher must not win over it.
+    @Test func findsTheVenvPythonNamedByTheInstallerLauncher() async throws {
+        let dir = try TempDir()
+        let venvBin = dir.url.appendingPathComponent("hermes-agent/venv/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: venvBin, withIntermediateDirectories: true)
+        let python = venvBin.appendingPathComponent("python")
+        try write(python, "#!/bin/sh\n", executable: true)
+        try write(dir.url.appendingPathComponent("hermes-agent/hermes"), "print()\n", executable: false)
+        let local = dir.url.appendingPathComponent("local bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: local, withIntermediateDirectories: true)
+        try write(local.appendingPathComponent("python3"), "#!/bin/sh\n", executable: true)
+        let launcher = local.appendingPathComponent("hermes")
+        try write(launcher, """
+            #!/usr/bin/env bash
+            unset PYTHONPATH
+            unset PYTHONHOME
+            exec "\(python.path)" "\(dir.url.path)/hermes-agent/hermes" "$@"
+
+            """, executable: true)
+        let out = try await runDiscovery(binary: launcher.path)
+        #expect(out.status == 0, "\(out.stderr)")
+        #expect(out.stdout == python.path)
+    }
+
+    /// The installer's non-venv arm execs the pip console script, and a
+    /// hand-written `#!/bin/sh` shim may exec a venv's `hermes` the same way:
+    /// follow it one level to that script's python shebang.
+    @Test func followsAShimThatExecsAConsoleScript() async throws {
+        let dir = try TempDir()
+        let venvBin = dir.url.appendingPathComponent(".venv/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: venvBin, withIntermediateDirectories: true)
+        let python = venvBin.appendingPathComponent("python3")
+        try write(python, "#!/bin/sh\n", executable: true)
+        let console = venvBin.appendingPathComponent("hermes")
+        try write(console, "#!\(python.path)\nimport sys\n", executable: true)
+        let shim = dir.url.appendingPathComponent("hermes")
+        try write(shim, "#!/bin/sh\n# local shim\nexec \(console.path) \"$@\"\n", executable: true)
+        let out = try await runDiscovery(binary: shim.path)
+        #expect(out.stdout == python.path, "\(out.stderr)")
+    }
+
+    /// An exec target that needs expansion is never evaluated; with nothing
+    /// else to go on the discovery fails honestly.
+    @Test func ignoresAnExecTargetThatNeedsExpansion() async throws {
+        let dir = try TempDir()
+        let launcher = dir.url.appendingPathComponent("hermes")
+        try write(launcher, "#!/usr/bin/env bash\nexec \"$HOME/venv/bin/python\" \"$@\"\n", executable: true)
+        let out = try await runDiscovery(binary: launcher.path)
+        #expect(out.status == 3)
+        #expect(out.stderr.contains("MARK: no Python interpreter found"))
+    }
+
+    /// A launcher that execs itself (the #21454 self-recursion shape) must
+    /// not loop or pick itself.
+    @Test func aSelfExecingLauncherFailsHonestly() async throws {
+        let dir = try TempDir()
+        let launcher = dir.url.appendingPathComponent("hermes")
+        try write(launcher, "#!/usr/bin/env bash\nexec \"\(launcher.path)\" \"$@\"\n", executable: true)
+        let out = try await runDiscovery(binary: launcher.path)
+        #expect(out.status == 3)
     }
 
     @Test func missingBinaryFailsWithTheCallersMarker() async throws {

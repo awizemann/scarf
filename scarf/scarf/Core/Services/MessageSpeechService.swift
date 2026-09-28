@@ -24,7 +24,8 @@ import ScarfCore
 ///    server round trip) — and `loading` exposes the synth-pending state.
 ///    Any synthesis failure (transport, envelope, path validation,
 ///    provider mismatch) falls back to the system voice rather than going
-///    silent.
+///    silent, and records a ``FallbackNotice`` so the speaker button tells
+///    the user they are hearing the system voice and why.
 ///
 /// There is NO app-wide "current server": every `toggle` carries the
 /// `ServerContext` of the window (or bot conversation) that rendered the
@@ -61,6 +62,16 @@ final class MessageSpeechService: NSObject {
     /// on the system engine, which starts speaking synchronously).
     /// Cleared when audio starts or playback is stopped.
     private(set) var loading: PlaybackID?
+
+    /// Why the last Hermes Voice attempt fell back to the system voice.
+    /// The message's speaker button shows it, so choosing "Hermes Voice"
+    /// and hearing the Mac voice is never silent. Cleared when the next
+    /// message starts.
+    struct FallbackNotice: Equatable {
+        let id: PlaybackID
+        let reason: String
+    }
+    private(set) var fallbackNotice: FallbackNotice?
 
     private let synthesizer = AVSpeechSynthesizer()
     /// The utterance the synthesizer is speaking for `playing`. Delegate
@@ -104,6 +115,7 @@ final class MessageSpeechService: NSObject {
             return
         }
         stop()
+        fallbackNotice = nil
         let cleaned = Self.strippedForSpeech(content)
         guard !cleaned.isEmpty else { return }
         let preference = UserDefaults.standard.string(forKey: Self.engineKey)
@@ -172,8 +184,34 @@ final class MessageSpeechService: NSObject {
                     "Hermes TTS failed (\(summary.publicSummary, privacy: .public)): \(summary.privateDetail, privacy: .private) — falling back to system voice"
                 )
                 self.loading = nil
+                self.fallbackNotice = FallbackNotice(id: id, reason: Self.fallbackReason(for: error))
                 self.speakWithSystemVoice(text, id: id)
             }
+        }
+    }
+
+    /// A short, user-safe reason for a Hermes Voice fallback. Built from the
+    /// error's case only: the host's diagnostic tail is matched for two
+    /// known markers but never shown, since it can echo a provider key (C9).
+    nonisolated static func fallbackReason(for error: Error) -> String {
+        guard let speech = error as? HermesSpeechService.SpeechError else {
+            return String(localized: "Hermes Voice failed on the server.")
+        }
+        switch speech {
+        case .synthesisFailed(let detail):
+            if detail.contains("no Python interpreter found") {
+                return String(localized: "Scarf couldn't find the Python that runs Hermes on the server.")
+            }
+            if detail.contains("hermes binary not found") {
+                return String(localized: "Scarf couldn't find the hermes command on the server.")
+            }
+            return String(localized: "Hermes's text-to-speech failed on the server. Check its tts settings.")
+        case .providerMismatch:
+            return String(localized: "The TTS provider returned audio Scarf can't play.")
+        case .emptyAudio, .unexpectedOutputPath:
+            return String(localized: "Hermes returned no usable audio.")
+        case .transportFailed:
+            return String(localized: "Scarf couldn't reach the server.")
         }
     }
 
