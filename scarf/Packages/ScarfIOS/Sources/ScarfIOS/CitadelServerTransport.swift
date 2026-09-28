@@ -937,10 +937,12 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     /// Minimal shell-argument joiner. Handles spaces + quotes; sufficient
     /// for the commands we actually pass (`echo`, `stat`, `tail`, `sqlite3`).
+    /// `$` is not in the safe set: a bare `Cost$5` or `$FOO` would be
+    /// expanded by the remote shell, so any word with one is single-quoted.
     nonisolated static func shellJoin(_ argv: [String]) -> String {
         argv.map { arg in
             if arg.isEmpty { return "''" }
-            let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+=:,./-_$")
+            let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+=:,./-_")
             if arg.unicodeScalars.allSatisfy({ safe.contains($0) }) { return arg }
             return "'" + arg.replacingOccurrences(of: "'", with: "'\\''") + "'"
         }.joined(separator: " ")
