@@ -39,8 +39,11 @@ struct MatrixSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "MATRIX_REQUIRE_MENTION"))
                 ToggleRow(label: "Auto-thread on mention", isOn: viewModel.autoThread) { viewModel.autoThread = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "MATRIX_AUTO_THREAD"))
                 ToggleRow(label: "DM mention threads", isOn: viewModel.dmMentionThreads) { viewModel.dmMentionThreads = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "MATRIX_DM_MENTION_THREADS"))
             }
 
             SettingsSection(title: "End-to-End Encryption (experimental)", icon: "lock.shield") {

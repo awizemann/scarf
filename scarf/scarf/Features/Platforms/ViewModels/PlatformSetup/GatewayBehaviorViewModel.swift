@@ -71,12 +71,15 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
         let ctx = context
         let platform = platform
         let kind = kind
+        let caps = capabilities
+        let envList = PlatformEnvAllowlist.forPlatform(platform)
         isLoading = true
         // `loadConfig()` is an SFTP read on a remote host. Detached, then
         // committed on MainActor — the same posture `save()` now takes.
         Task { [weak self] in
             let snapshot = await Task.detached {
-                () -> (items: [String], busyAck: Bool, restartNotification: Bool) in
+                () -> (items: [String], busyAck: Bool, restartNotification: Bool,
+                       envLine: EnvAllowlistLine?, envFailure: String?) in
                 let cfg = HermesFileService(context: ctx).loadConfig()
                 let block = cfg.gatewayPlatforms[platform] ?? .empty
                 var items: [String] = []
@@ -87,7 +90,26 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
                     case .rooms:    items = block.allowedRooms
                     }
                 }
-                return (items, cfg.displayBusyAckEnabled, block.gatewayRestartNotification)
+                // B13: the adapter reads the `.env` spelling of this list
+                // too, and it can be the one in force (see
+                // `PlatformEnvAllowlist`). Show the list the gateway uses.
+                var envLine: EnvAllowlistLine?
+                var envFailure: String?
+                if let envList {
+                    let loaded = PlatformSetupHelpers.loadEnv(context: ctx)
+                    envFailure = loaded.failure
+                    if let raw = loaded.env[envList.envKey] {
+                        let resolved = envList.resolve(
+                            envValue: raw, configItems: items.isEmpty ? nil : items, capabilities: caps)
+                        envLine = EnvAllowlistLine(
+                            key: envList.envKey,
+                            entries: PlatformEnvAllowlist.items(fromEnv: raw),
+                            decides: resolved.fromEnv)
+                        items = resolved.items
+                    }
+                }
+                return (items, cfg.displayBusyAckEnabled, block.gatewayRestartNotification,
+                        envLine, envFailure)
             }.value
             guard let self else { return }
             // Never clobber the form under a save in flight — the values the
@@ -97,8 +119,49 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
             self.items = snapshot.items
             self.busyAckEnabled = snapshot.busyAck
             self.gatewayRestartNotification = snapshot.restartNotification
+            self.envLine = snapshot.envLine
+            self.envUnreadable = snapshot.envFailure != nil
+            if let failure = snapshot.envFailure { self.applySaveOutcome(.failure(failure)) }
             self.isLoading = false
         }
+    }
+
+    /// A `.env` line carrying this platform's allowlist.
+    struct EnvAllowlistLine: Sendable, Equatable {
+        let key: String
+        /// The entries on the line (empty for a blank value).
+        let entries: [String]
+        /// The line is what the gateway uses right now.
+        let decides: Bool
+    }
+
+    /// Set by `load` when `.env` carries this platform's allowlist.
+    private(set) var envLine: EnvAllowlistLine?
+    /// `.env` could not be read, so whether it holds the allowlist is unknown.
+    private(set) var envUnreadable = false
+
+    /// Caption under the allowlist while `.env` holds its env var.
+    var allowlistEnvCaption: String? {
+        guard let envLine else { return nil }
+        return PlatformSetupHelpers.envOverrideCaption(
+            envKey: envLine.key, hasLine: true, decides: envLine.decides)
+    }
+
+    /// What a Save does with the `.env` allowlist line, given the list about
+    /// to be written to config.yaml. The line goes only AFTER the config
+    /// write succeeds. When it holds entries and the list being saved is
+    /// empty, the Save refuses: dropping the line would silently open the
+    /// platform to every channel/chat, and keeping it would leave the old
+    /// list in force behind a form that says "none" (never drop the only
+    /// allowlist).
+    nonisolated static func envLinePlan(
+        _ line: EnvAllowlistLine?, savingItems: [String]
+    ) -> (unsetAfter: String?, refusal: String?) {
+        guard let line else { return (nil, nil) }
+        if savingItems.isEmpty, !line.entries.isEmpty {
+            return (nil, String(localized: "\(line.key) in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here."))
+        }
+        return (line.key, nil)
     }
 
     /// True while the initial config read is in flight.
@@ -161,6 +224,24 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let kv = configKV
+        // B13: the `.env` allowlist line moves into config.yaml with this
+        // Save — only for a list this Save actually writes.
+        var envUnsetAfter: [String] = []
+        if listKey != nil {
+            if envUnreadable {
+                isSaving = false
+                applySaveOutcome(.failure(String(localized: "Couldn't read .env, so the allowlist wasn't saved.")))
+                return
+            }
+            let plan = Self.envLinePlan(envLine, savingItems: trimmedItems)
+            if let refusal = plan.refusal {
+                isSaving = false
+                applySaveOutcome(.failure(refusal))
+                return
+            }
+            if let key = plan.unsetAfter { envUnsetAfter = [key] }
+        }
+        let unsetAfter = envUnsetAfter
 
         // BOTH steps are I/O — a direct YAML rewrite (SCP round-trip on
         // remote) and one `hermes config set` process per key. Running them
@@ -185,12 +266,13 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
                         return .failure(String(localized: "Failed to write allowlist to config.yaml"))
                     }
                 }
-                // Step 2: scalar saves via `hermes config set`.
-                if kv.isEmpty {
+                // Step 2: scalar saves via `hermes config set`, then the
+                // moved `.env` allowlist line (after every config write).
+                if kv.isEmpty && unsetAfter.isEmpty {
                     return .success(String(localized: "Allowlist saved — restart gateway to apply"))
                 }
                 return PlatformSetupHelpers.saveForm(
-                    context: ctx, envPairs: [:], configKV: kv
+                    context: ctx, envPairs: [:], configKV: kv, envUnsetAfterConfig: unsetAfter
                 )
             }.value
 
@@ -204,6 +286,7 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
             if outcome.isFailure {
                 Self.logger.warning("Gateway behaviour save failed for \(platform, privacy: .public): \(outcome.text, privacy: .public)")
             }
+            if !outcome.isFailure, !unsetAfter.isEmpty { self.envLine = nil }
             self.applySaveOutcome(outcome)
         }
     }

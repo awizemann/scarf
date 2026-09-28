@@ -52,6 +52,7 @@ struct GatewayBehaviorSection: View {
                         items: $viewModel.items,
                         kind: kind
                     )
+                    EnvOverrideCaption(text: viewModel.allowlistEnvCaption)
                 }
                 if capabilities.hasGatewayBusyAckToggle {
                     // Global setting (`display.busy_ack_enabled`) — Hermes

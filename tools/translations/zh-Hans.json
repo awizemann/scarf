@@ -3299,5 +3299,9 @@
   "cron job %@": "定时任务 %@",
   "display name": "显示名称",
   "• skills.config.%@": "• skills.config.%@",
-  "Saved to config.yaml, but couldn't remove %@ from .env": "已保存到 config.yaml,但无法从 .env 中移除 %@"
+  "Saved to config.yaml, but couldn't remove %@ from .env": "已保存到 config.yaml,但无法从 .env 中移除 %@",
+  "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": ".env 中的 %@ 目前决定此设置。保存会将其移到 config.yaml 并删除 .env 中的该行。",
+  "Saving removes the unused %@ line from .env.": "保存会从 .env 中删除未使用的 %@ 行。",
+  "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": ".env 中的 %@ 仍在限制此平台。要允许全部，请从 .env 中删除该行，或在此至少保留一个条目。",
+  "Couldn't read .env, so the allowlist wasn't saved.": "无法读取 .env,因此未保存允许列表。"
 }

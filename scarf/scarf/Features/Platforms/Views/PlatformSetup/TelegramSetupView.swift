@@ -25,7 +25,9 @@ struct TelegramSetupView: View {
             SettingsSection(title: "Optional", icon: "slider.horizontal.3") {
                 EditableTextField(label: "Home Channel", value: viewModel.homeChannel) { viewModel.homeChannel = $0 }
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "TELEGRAM_REQUIRE_MENTION"))
                 ToggleRow(label: "Reactions", isOn: viewModel.reactions) { viewModel.reactions = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "TELEGRAM_REACTIONS"))
                 ToggleRow(label: "Disable topic auto-rename", isOn: viewModel.disableTopicAutoRename) { viewModel.disableTopicAutoRename = $0 }
                 // v0.15 <= host < v0.21.1: Hermes deleted the reader at
                 // v0.21.1, so on a newer host this toggle would promise a

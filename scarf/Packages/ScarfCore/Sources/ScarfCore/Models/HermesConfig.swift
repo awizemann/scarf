@@ -850,6 +850,12 @@ public struct DiscordSettings: Sendable, Equatable {
     /// When true, the adapter forwards any attachment type to the agent
     /// (not just images). Default `false`. Pre-v0.15 hosts ignore the key.
     public var allowAnyAttachment: Bool
+    /// Which of this block's keys are PRESENT in config.yaml (`require_mention`,
+    /// `reactions`, ...). The Bool fields above collapse an absent key into
+    /// its default; the setup form needs to know the key is missing because
+    /// then an env var decides the value on every Hermes version
+    /// (``PlatformEnvSetting``).
+    public var presentKeys: Set<String> = []
 
 
     public init(
@@ -915,6 +921,12 @@ public struct TelegramSettings: Sendable, Equatable {
     /// the bot advertises an Online/Offline presence label. Default `false`.
     /// Pre-v0.17 hosts ignore the key.
     public var statusIndicator: Bool
+    /// Which of this block's keys are PRESENT in config.yaml (`require_mention`,
+    /// `reactions`, ...). The Bool fields above collapse an absent key into
+    /// its default; the setup form needs to know the key is missing because
+    /// then an env var decides the value on every Hermes version
+    /// (``PlatformEnvSetting``).
+    public var presentKeys: Set<String> = []
 
 
     public init(
@@ -978,6 +990,9 @@ public struct MatrixSettings: Sendable, Equatable {
     public var autoThread: Bool
     public var dmMentionThreads: Bool
 
+
+    /// Keys PRESENT in config.yaml — see ``DiscordSettings/presentKeys``.
+    public var presentKeys: Set<String> = []
 
     public init(
         requireMention: Bool,

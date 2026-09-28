@@ -2834,6 +2834,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV0212OrLater`.
     public var isV0213OrLater: Bool { atLeastSemver(0, 21, 3) }
 
+    /// Whether a NON-BLANK platform env var (`DISCORD_REQUIRE_MENTION`,
+    /// `TELEGRAM_ALLOWED_CHATS`, ...) wins over the same setting in
+    /// config.yaml. From v2026.9.14 (v0.21.3, commit 3dedb71f2f) the adapters
+    /// read these through `extra_or_secret` — env, then `config.extra`, then
+    /// the default (`gateway/platforms/_shared.py:106-128` @ v2026.9.24).
+    /// Before it, config.yaml won when the key was there and the env var was
+    /// only the fallback. A few settings were env-first on every version
+    /// (see ``PlatformEnvSetting/envAlwaysWins``) and ignore this flag.
+    public var hasEnvFirstPlatformSettings: Bool { isV0213OrLater }
+
     /// Whether the connected host is on v0.21.4 or newer. Patch-level floor
     /// for the v0.21.4 group, same rationale as `isV0213OrLater`: a v0.21.3
     /// host satisfies every minor-level check and lacks whatever floors here.

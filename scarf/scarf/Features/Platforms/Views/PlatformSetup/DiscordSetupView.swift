@@ -29,13 +29,17 @@ struct DiscordSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "DISCORD_REQUIRE_MENTION"))
                 EditableTextField(label: "Free-Response Channels", value: viewModel.freeResponseChannels) { viewModel.freeResponseChannels = $0 }
                 ToggleRow(label: "Auto-thread on mention", isOn: viewModel.autoThread) { viewModel.autoThread = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "DISCORD_AUTO_THREAD"))
                 ToggleRow(label: "Reactions", isOn: viewModel.reactions) { viewModel.reactions = $0 }
+                EnvOverrideCaption(text: viewModel.envCaption(for: "DISCORD_REACTIONS"))
                 PickerRow(label: "Allow Other Bots", selection: viewModel.allowBots, options: viewModel.allowBotsOptions) { viewModel.allowBots = $0 }
                 PickerRow(label: "Reply Mode", selection: viewModel.replyToMode, options: viewModel.replyToModeOptions) { viewModel.replyToMode = $0 }
                 if capabilitiesStore?.capabilities.hasDiscordHistoryBackfill == true {
                     ToggleRow(label: "Backfill channel history on join", isOn: viewModel.historyBackfill) { viewModel.historyBackfill = $0 }
+                    EnvOverrideCaption(text: viewModel.envCaption(for: "DISCORD_HISTORY_BACKFILL"))
                 }
                 // A WINDOW, not a floor: the Discord adapter stopped calling
                 // its own `_discord_allow_any_attachment` getter at v2026.7.1

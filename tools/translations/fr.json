@@ -3307,5 +3307,9 @@
   "cron job %@": "tâche cron %@",
   "display name": "nom d’affichage",
   "• skills.config.%@": "• skills.config.%@",
-  "Saved to config.yaml, but couldn't remove %@ from .env": "Enregistré dans config.yaml, mais impossible de retirer %@ de .env"
+  "Saved to config.yaml, but couldn't remove %@ from .env": "Enregistré dans config.yaml, mais impossible de retirer %@ de .env",
+  "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": "%@ dans .env définit actuellement ce réglage. L’enregistrement le déplace dans config.yaml et retire la ligne de .env.",
+  "Saving removes the unused %@ line from .env.": "L’enregistrement retire la ligne %@ inutilisée de .env.",
+  "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": "%@ dans .env limite toujours cette plateforme. Retirez cette ligne de .env pour tout autoriser, ou gardez au moins une entrée ici.",
+  "Couldn't read .env, so the allowlist wasn't saved.": "Impossible de lire .env ; la liste autorisée n’a donc pas été enregistrée."
 }

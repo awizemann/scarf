@@ -511,7 +511,7 @@ public extension HermesConfig {
             compressionThresholdTokens: int("delegation.compression_threshold_tokens", default: 0)
         )
 
-        let discord = DiscordSettings(
+        var discord = DiscordSettings(
             requireMention: boolTrueDefault("discord.require_mention"),
             freeResponseChannels: str("discord.free_response_channels"),
             autoThread: boolTrueDefault("discord.auto_thread"),
@@ -519,8 +519,11 @@ public extension HermesConfig {
             historyBackfill: boolTrueDefault("discord.history_backfill"),
             allowAnyAttachment: boolish("platforms.discord.extra.allow_any_attachment", default: false)
         )
+        discord.presentKeys = Set(
+            ["require_mention", "auto_thread", "reactions", "history_backfill"]
+                .filter { values["discord.\($0)"] != nil })
 
-        let telegram = TelegramSettings(
+        var telegram = TelegramSettings(
             // FALSE by default, matching Hermes's only reader:
             // `telegram.require_mention` has no `config_defaults.py` entry at
             // ANY of the 32 `v2026.*` tags (so P13's "schema layer wins" rule
@@ -545,6 +548,11 @@ public extension HermesConfig {
             richMessages: boolishOpt("platforms.telegram.extra.rich_messages"),
             statusIndicator: boolish("platforms.telegram.extra.status_indicator", default: false)
         )
+        // Presence at the same precedence as the values above.
+        if sharedPlatformScalar("telegram", "require_mention") != nil {
+            telegram.presentKeys.insert("require_mention")
+        }
+        if values["telegram.reactions"] != nil { telegram.presentKeys.insert("reactions") }
 
         // -- v0.15: Signal group-only require_mention + ntfy (23rd platform).
         let signal = SignalSettings(
@@ -671,7 +679,7 @@ public extension HermesConfig {
             replyBroadcast: boolish("platforms.slack.extra.reply_broadcast", default: false)
         )
 
-        let matrix = MatrixSettings(
+        var matrix = MatrixSettings(
             requireMention: boolTrueDefault("matrix.require_mention"),
             // Default TRUE upstream — no `config_defaults.py` entry, the
             // default lives in the reader:
@@ -680,6 +688,8 @@ public extension HermesConfig {
             autoThread: boolTrueDefault("matrix.auto_thread"),
             dmMentionThreads: boolish("matrix.dm_mention_threads", default: false)
         )
+        matrix.presentKeys = Set(
+            ["require_mention", "auto_thread", "dm_mention_threads"].filter { values["matrix.\($0)"] != nil })
 
         let mattermost = MattermostSettings(
             // `require_mention` is a `_SHARED_KEYS` member

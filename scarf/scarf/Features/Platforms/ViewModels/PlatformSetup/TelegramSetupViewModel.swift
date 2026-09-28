@@ -83,9 +83,23 @@ final class TelegramSetupViewModel: PlatformSetupForm {
             webhookPort = env["TELEGRAM_WEBHOOK_PORT"] ?? ""
             webhookSecret = env["TELEGRAM_WEBHOOK_SECRET"] ?? ""
 
+            // Resolved before the config guard: the `.env` half must still
+            // show when config.yaml could not be read (P37 finding 5).
+            let tg = snapshot.config?.telegram
+            let caps = capabilities
+            var fromEnv = Set<String>()
+            envLines = Set(Self.envSettings.map(\.setting.envKey).filter { env[$0] != nil })
+            func resolve(_ spec: PlatformEnvSetting, _ key: String, _ value: Bool?) -> Bool {
+                let configValue = tg?.presentKeys.contains(key) == true ? value : nil
+                let r = spec.resolve(envValue: env[spec.envKey], configValue: configValue, capabilities: caps)
+                if r.fromEnv { fromEnv.insert(spec.envKey) }
+                return r.value
+            }
+            requireMention = resolve(.telegramRequireMention, "require_mention", tg?.requireMention)
+            reactions = resolve(.telegramReactions, "reactions", tg?.reactions)
+            envDecides = fromEnv
+
             guard let cfg = snapshot.config else { return }
-            requireMention = cfg.telegram.requireMention
-            reactions = cfg.telegram.reactions
             disableTopicAutoRename = cfg.telegram.disableTopicAutoRename
             ignoreRootDM = cfg.telegram.ignoreRootDM
             richMessages = cfg.displayTelegramRichMessages(capabilities: capabilities)
@@ -93,7 +107,33 @@ final class TelegramSetupViewModel: PlatformSetupForm {
         }
     }
 
+    /// The two toggles an env var can override, with their config.yaml key.
+    static let envSettings: [(setting: PlatformEnvSetting, configKey: String)] = [
+        (.telegramRequireMention, "telegram.require_mention"),
+        (.telegramReactions, "telegram.reactions")
+    ]
+
+    /// Env keys with a line in `.env` (any value). A Save removes them.
+    private(set) var envLines: Set<String> = []
+    /// Env keys whose `.env` value is what the gateway uses right now.
+    private(set) var envDecides: Set<String> = []
+
+    /// Caption under a toggle while `.env` holds its env var.
+    func envCaption(for envKey: String) -> String? {
+        PlatformSetupHelpers.envOverrideCaption(
+            envKey: envKey, hasLine: envLines.contains(envKey), decides: envDecides.contains(envKey))
+    }
+
     func save() {
+        let plan = savePlan()
+        commitSave(envPairs: plan.env, configKV: plan.config,
+                   envUnsetAfterConfig: plan.envUnsetAfterConfig)
+    }
+
+    /// The `.env` pairs, config.yaml keys and moved `.env` lines a Save
+    /// writes. Both toggles are always written to config.yaml, so both
+    /// `.env` lines go — only after the config writes succeed (`saveForm`).
+    func savePlan() -> (env: [String: String], config: [String: String], envUnsetAfterConfig: [String]) {
         let envPairs: [String: String] = [
             "TELEGRAM_BOT_TOKEN": botToken,
             "TELEGRAM_ALLOWED_USERS": allowedUsers,
@@ -118,6 +158,9 @@ final class TelegramSetupViewModel: PlatformSetupForm {
             configKV["platforms.telegram.extra.rich_messages"] = PlatformSetupHelpers.envBool(richMessages)
             configKV["platforms.telegram.extra.status_indicator"] = PlatformSetupHelpers.envBool(statusIndicator)
         }
-        commitSave(envPairs: envPairs, configKV: configKV)
+        let moved = Self.envSettings
+            .filter { envLines.contains($0.setting.envKey) && configKV.keys.contains($0.configKey) }
+            .map(\.setting.envKey)
+        return (envPairs, configKV, moved)
     }
 }

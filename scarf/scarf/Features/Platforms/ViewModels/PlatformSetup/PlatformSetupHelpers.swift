@@ -162,6 +162,16 @@ enum PlatformSetupHelpers {
         return .success(String(localized: "Saved — restart gateway to apply"))
     }
 
+    /// Caption for a toggle whose env var has a line in `.env`: says when
+    /// that line is what the gateway uses, and that Save moves it into
+    /// config.yaml. `nil` when there is no line.
+    nonisolated static func envOverrideCaption(envKey: String, hasLine: Bool, decides: Bool) -> String? {
+        guard hasLine else { return nil }
+        return decides
+            ? String(localized: "\(envKey) in .env sets this now. Saving moves it to config.yaml and removes the .env line.")
+            : String(localized: "Saving removes the unused \(envKey) line from .env.")
+    }
+
     /// Resolve every `_SHARED_KEYS` member in a save batch onto the section
     /// Hermes bridges it from. See the call site in ``saveForm`` for why.
     ///
