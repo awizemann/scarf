@@ -561,12 +561,20 @@ final class MCPServerEditorViewModel {
         }
     }
 
+    /// Set once Clear Token deleted the files. `server` is the snapshot the
+    /// sheet opened with, so its `hasOAuthToken` stays true; this is what
+    /// the section and the list reload key on afterwards (S09-F1).
+    private(set) var tokenCleared = false
+
     func clearOAuthToken(completion: @escaping (Bool) -> Void) {
         let service = fileService
         let name = server.name
-        Task.detached {
+        Task.detached { [weak self] in
             let ok = service.deleteMCPOAuthToken(name: name)
-            await MainActor.run { completion(ok) }
+            await MainActor.run {
+                if ok { self?.tokenCleared = true }
+                completion(ok)
+            }
         }
     }
 }

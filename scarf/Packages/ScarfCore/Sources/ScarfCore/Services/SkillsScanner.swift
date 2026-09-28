@@ -174,19 +174,14 @@ public enum SkillsScanner: Sendable {
             // (GW-F5 / SEC F5, DI L3).
             .filter { !isGuardArtifact($0) }
             .sorted()
-        // The listing is already in hand, so skip the read (an SSH round
-        // trip) for the common skill that ships no `skill.yaml`.
-        let requiredConfig = entries.contains("skill.yaml")
-            ? readRequiredConfig(yamlPath: path + "/skill.yaml", transport: transport)
-            : []
-        // v2.5 Hermes v0.11 SKILL.md frontmatter
-        // (allowed_tools, related_skills, dependencies).
-        // Opportunistic read — skills without those fields keep nil, and
-        // the chip rows hide themselves.
-        let v011 = readV011Fields(
-            mdPath: path + "/SKILL.md",
-            transport: transport
-        )
+        // One SKILL.md read feeds both the config settings the skill
+        // declares (`metadata.hermes.config`) and the v0.11 chip fields
+        // (allowed_tools, related_skills, dependencies). Skills without
+        // them keep empty/nil, and the rows hide themselves. No Hermes
+        // version reads `skill.yaml`, so it is no longer consulted (S10-F3).
+        let skillMD = readSkillMD(mdPath: path + "/SKILL.md", transport: transport)
+        let requiredConfig = skillMD.map(SkillFrontmatterParser.parseConfigKeys) ?? []
+        let v011 = SkillFrontmatterParser.parseV011Fields(skillMD ?? "")
         return HermesSkill(
             id: relative.joined(separator: "/"),
             name: name,
@@ -214,23 +209,9 @@ public enum SkillsScanner: Sendable {
         name.hasSuffix(".bak") || name.contains(".corrupt-")
     }
 
-    private static func readRequiredConfig(yamlPath: String, transport: any ServerTransport) -> [String] {
-        guard let data = try? transport.readFile(yamlPath),
-              let content = String(data: data, encoding: .utf8)
-        else { return [] }
-        return SkillFrontmatterParser.parseRequiredConfig(content)
-    }
-
-    /// Read SKILL.md (Hermes v2026.4.23+) and parse its YAML frontmatter
-    /// for the v0.11 fields. Nil-everything when the file is absent or
-    /// has no frontmatter — fully back-compatible with older skills.
-    private static func readV011Fields(
-        mdPath: String,
-        transport: any ServerTransport
-    ) -> (allowedTools: [String]?, relatedSkills: [String]?, dependencies: [String]?) {
-        guard let data = try? transport.readFile(mdPath),
-              let content = String(data: data, encoding: .utf8)
-        else { return (nil, nil, nil) }
-        return SkillFrontmatterParser.parseV011Fields(content)
+    /// SKILL.md's text, or nil when it is absent or unreadable.
+    private static func readSkillMD(mdPath: String, transport: any ServerTransport) -> String? {
+        guard let data = try? transport.readFile(mdPath) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }

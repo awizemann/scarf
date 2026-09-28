@@ -19,8 +19,8 @@ struct HermesPlugin: Identifiable, Sendable, Equatable {
     let description: String
     let version: String     // From `plugins list --json`, or the manifest
     let path: String        // Absolute directory path (empty on the JSON path)
-    /// Hermes v0.14 — plugin advertises `tool_override = true` in its
-    /// manifest, meaning it replaces a built-in tool. Rendered as a
+    /// The plugin's manifest declares the `tools.override` capability
+    /// (Hermes v2026.8.13+), meaning it replaces a built-in tool. Rendered as a
     /// "tool-override" badge in PluginsView so the user notices when
     /// installed plugins are intercepting built-in behavior.
     let toolOverride: Bool

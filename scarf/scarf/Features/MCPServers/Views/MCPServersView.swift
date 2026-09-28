@@ -11,6 +11,9 @@ struct MCPServersView: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     /// Non-nil while the `hermes mcp login` sheet is up for that server.
     @State private var loginServer: HermesMCPServer?
+    /// Set by the editor's Sign In after Clear Token; opened once the
+    /// editor sheet has gone.
+    @State private var signInAfterEdit: HermesMCPServer?
 
     init(viewModel: MCPServersViewModel) {
         self.viewModel = viewModel
@@ -75,7 +78,12 @@ struct MCPServersView: View {
         .sheet(isPresented: Binding(
             get: { viewModel.editingServer != nil },
             set: { if !$0 { viewModel.editingServer = nil } }
-        )) {
+        ), onDismiss: {
+            if let server = signInAfterEdit {
+                signInAfterEdit = nil
+                loginServer = server
+            }
+        }) {
             if let server = viewModel.editingServer {
                 MCPServerEditorView(
                     // Without the context the editor defaults to `.local`
@@ -84,7 +92,18 @@ struct MCPServersView: View {
                     // editing the wrong machine.
                     viewModel: MCPServerEditorViewModel(server: server, context: viewModel.context),
                     onSave: { changed in viewModel.finishEdit(reload: changed) },
-                    onCancel: { viewModel.finishEdit(reload: false) }
+                    onCancel: { tokenCleared in
+                        viewModel.finishEdit(reload: tokenCleared, restartNeeded: false)
+                    },
+                    // After Clear Token (S09-F1). The login sheet opens from
+                    // this sheet's onDismiss: two sheets can't be up at once.
+                    onSignIn: capabilitiesStore?.capabilities.hasMCPReauth == true
+                        && server.auth == "oauth" && server.transport != .stdio
+                        ? {
+                            signInAfterEdit = server
+                            viewModel.finishEdit(reload: true, restartNeeded: false)
+                        }
+                        : nil
                 )
             }
         }

@@ -5,7 +5,11 @@ import ScarfDesign
 struct MCPServerEditorView: View {
     @State var viewModel: MCPServerEditorViewModel
     let onSave: (Bool) -> Void
-    let onCancel: () -> Void
+    /// `true` when Clear Token removed the token, so the list has changed.
+    let onCancel: (Bool) -> Void
+    /// Close the editor and open `hermes mcp login` for this server. Nil
+    /// when the host has no `mcp login` (pre-v0.18, `hasMCPReauth`).
+    var onSignIn: (() -> Void)? = nil
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
@@ -19,7 +23,9 @@ struct MCPServerEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Cancel") { onCancel() }
+                // A cleared token changed what the list shows (the oauth
+                // badge), so leaving must reload it even without a save.
+                Button("Cancel") { onCancel(viewModel.tokenCleared) }
                     .keyboardShortcut(.cancelAction)
                 Button {
                     viewModel.save { changed in
@@ -393,23 +399,49 @@ struct MCPServerEditorView: View {
         }
     }
 
+    // Hermes does not sign in again by itself: a gateway or service is not
+    // interactive, so with no cached token it raises OAuthNonInteractiveError
+    // ("Run `hermes mcp login <name>` interactively first",
+    // `tools/mcp_oauth_manager.py:316-319` @ v2026.9.24). The copy says so.
     private var oauthSection: some View {
         sectionBox(title: "OAuth Token") {
-            HStack {
-                Text("Token on disk. Clear to re-authenticate next time the gateway connects.")
+            if viewModel.tokenCleared {
+                HStack {
+                    Group {
+                        if onSignIn == nil {
+                            Text("Token cleared. The server can’t reconnect until you run `hermes mcp login \(viewModel.server.name)` on that host.")
+                        } else {
+                            Text("Token cleared. The server can’t reconnect until you sign in again.")
+                        }
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear Token", role: .destructive) {
-                    // A failed delete leaves the token on disk and the
-                    // gateway silently keeps using it — the one outcome the
-                    // user must be told about. Route it into the same
-                    // `saveError` banner every other write failure uses.
-                    viewModel.clearOAuthToken { ok in
-                        if !ok {
-                            viewModel.saveError = String(
-                                localized: "Could not delete the stored OAuth token. Check permissions on the MCP tokens directory.")
-                        }
+                    Spacer()
+                    if let onSignIn {
+                        Button("Sign In…") { onSignIn() }
+                    }
+                }
+            } else {
+                oauthTokenOnDiskRow
+            }
+        }
+    }
+
+    private var oauthTokenOnDiskRow: some View {
+        HStack {
+            Text("Token on disk. Once it’s cleared, the server can’t reconnect until you sign in again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Clear Token", role: .destructive) {
+                // A failed delete leaves the token on disk and the
+                // gateway silently keeps using it — the one outcome the
+                // user must be told about. Route it into the same
+                // `saveError` banner every other write failure uses.
+                viewModel.clearOAuthToken { ok in
+                    if !ok {
+                        viewModel.saveError = String(
+                            localized: "Could not delete the stored OAuth token. Check permissions on the MCP tokens directory.")
                     }
                 }
             }

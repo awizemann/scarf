@@ -451,7 +451,7 @@ public final class IOSCronViewModel {
     // MARK: - CLI route
 
     enum CLIOutcome: Sendable {
-        /// The command ran and exited 0.
+        /// The command ran, exited 0 and printed no refusal line.
         case succeeded
         /// The command ran and exited non-zero — Hermes refused. Never
         /// fall back to a JSON write on this.
@@ -487,13 +487,29 @@ public final class IOSCronViewModel {
             } catch {
                 return .unavailable
             }
-            if result.exitCode == 0 { return .succeeded }
-            let combined = result.stderrString + "\n" + result.stdoutString
-            if result.exitCode == 127 || Self.looksLikeMissingBinary(combined) {
-                return .unavailable
-            }
-            return .refused(Self.refusalMessage(verb: verb, output: combined, exitCode: result.exitCode))
+            return Self.classify(
+                exitCode: result.exitCode,
+                output: result.stderrString + "\n" + result.stdoutString,
+                verb: verb)
         }()
+    }
+
+    /// One finished `hermes cron <verb>` run as a ``CLIOutcome``. Exit 0 is
+    /// not enough on its own: up to v2026.8.31 Hermes printed
+    /// `Failed to pause job: …` / `Job not found: …` and still exited 0 (see
+    /// ``HermesCronMutationVerdict``), which read as a pause that never
+    /// happened.
+    nonisolated static func classify(exitCode: Int32, output: String, verb: String) -> CLIOutcome {
+        if exitCode == 0 {
+            if let refusal = HermesCronMutationVerdict.exitZeroRefusal(output: output) {
+                return .refused(refusal)
+            }
+            return .succeeded
+        }
+        if exitCode == 127 || Self.looksLikeMissingBinary(output) {
+            return .unavailable
+        }
+        return .refused(Self.refusalMessage(verb: verb, output: output, exitCode: exitCode))
     }
 
     /// A shell that can't find `hermes` is "CLI unavailable", not a

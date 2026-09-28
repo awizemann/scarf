@@ -800,6 +800,16 @@ public enum HermesCLIMarkers {
         "is already up to date.",
     ]
 
+    /// A plugin installed from the curated catalog is re-pinned instead of
+    /// pulled (`plugins_cmd.py:1057-1059` @ v2026.9.24, from v2026.9.11), and
+    /// `cmd_update_catalog` prints `✓ Plugin <name> updated to <sha8>.` or
+    /// `✓ Plugin <name> is already at catalog pin <sha8>.`
+    /// (`plugins_cmd_catalog.py:405-406`). The tail is matched with the short
+    /// hex sha so a `git pull` body line cannot supply it. Older hosts never
+    /// print it, so accepting it changes nothing there.
+    public static let pluginsUpdateCatalogSuccessPattern =
+        #" (updated to|is already at catalog pin) [0-9a-f]{7,40}\.$"#
+
     /// `cmd_update` (plugins_cmd.py:822) calls `_run_capability_consent(...)`
     /// and DISCARDS its bool exactly as `cmd_enable` does, so the non-TTY arm
     /// (:1092-1098) fires and the update still announces success. That
@@ -2176,12 +2186,15 @@ public enum HermesPluginsUpdateVerdict {
     public static func argv(name: String) -> [String] { ["plugins", "update", "--", name] }
 
     /// `✓ Plugin <name> updated.` (`:828`) /
-    /// `✓ Plugin <name> is already up to date.` (`:826`), matched as the whole
-    /// shape rather than either half.
+    /// `✓ Plugin <name> is already up to date.` (`:826`), or the catalog
+    /// re-pin's `updated to <sha8>.` / `is already at catalog pin <sha8>.`
+    /// (S10-F1), matched as the whole shape rather than either half.
     static func isSuccessLine(_ line: String) -> Bool {
         let head = HermesCLIVerdict.unglyphed(line)
         guard head.hasPrefix("Plugin ") else { return false }
         return HermesCLIMarkers.pluginsUpdateSuccess.contains { head.hasSuffix($0) }
+            || head.range(of: HermesCLIMarkers.pluginsUpdateCatalogSuccessPattern,
+                          options: .regularExpression) != nil
     }
 
     /// `Plugin '<name>' has been disabled.` (`:848-851`). Anchored on the
@@ -2235,6 +2248,36 @@ public enum HermesPluginsUpdateVerdict {
             ? String(localized: "Updated, then disabled by the security scan. \(reason)")
             : String(localized: "Updated, but the security scan flagged it. \(reason)")
         return HermesCLIOutcome(succeeded: true, detail: nil, warning: warning)
+    }
+}
+
+// MARK: - cron create/edit/pause/resume/remove — hermes_cli/cron.py
+
+/// The refusal lines `hermes cron` prints for a job mutation that did not
+/// happen. Up to v2026.8.31, `cmd_cron` dropped `cron_command`'s return value
+/// (`hermes_cli/main.py:5626-5630` @ v2026.8.31), so every one of these
+/// exited 0; from v2026.9.7 the return code is forwarded and they exit 1
+/// (`cmd_cron = _forward_command(..., forward_return=True)`). The wording is
+/// the same on every band (`Failed to {action} job:` at `hermes_cli/cron.py:
+/// 788` @ v2026.9.24, v2026.4.16:242), so matching it only ever turns a
+/// refusal into a failure — a successful run prints none of these.
+public enum HermesCronMutationVerdict {
+    static let refusalPrefixes = [
+        "Failed to create job:",
+        "Failed to update job:",
+        "Failed to pause job:",
+        "Failed to resume job:",
+        "Failed to remove job:",
+        "Failed to re-arm job:",
+        "Job not found:",
+        "Use exactly one of --at or --run-now.",
+    ]
+
+    /// The refusal line an exit-0 run printed, or nil when it printed none.
+    public static func exitZeroRefusal(output: String) -> String? {
+        HermesCLIVerdict.significantLines(output).first { line in
+            refusalPrefixes.contains { line.hasPrefix($0) }
+        }
     }
 }
 
