@@ -47,7 +47,7 @@ import ScarfCore
         }
     }
 
-    private static func sessionId(in args: [String]) -> String? {
+    nonisolated private static func sessionId(in args: [String]) -> String? {
         args.firstIndex(of: "--session-id").map { args[$0 + 1] }
     }
 
