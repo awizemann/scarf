@@ -48,7 +48,7 @@ final class NtfySetupViewModel: PlatformSetupForm {
 
     /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        loadSnapshot { [weak self] snapshot in
+        loadSnapshot(includeCapabilities: true) { [weak self] snapshot in
             guard let self else { return }
             let env = snapshot.env
             // NOT a `guard … else { return }`. `loadSnapshot` already bounced
@@ -72,11 +72,23 @@ final class NtfySetupViewModel: PlatformSetupForm {
             // These two have no `.env` spelling at all, so an unreadable
             // config.yaml leaves them at whatever the form already holds
             // rather than at a fabricated default.
+            // B05 sweep: from v0.21.3 `NTFY_PUBLISH_TOPIC` wins over
+            // `platforms.ntfy.extra.publish_topic` (`ntfy/adapter.py:127`).
+            let caps = snapshot.capabilities ?? .empty
+            envFirst = PlatformSetupHelpers.envFirstState(
+                configKeys: ["platforms.ntfy.extra.publish_topic"], env: env, capabilities: caps)
+            if let v = HermesEnvFirstSettings.winningEnvValue(
+                configKey: "platforms.ntfy.extra.publish_topic", env: env, capabilities: caps) {
+                publishTopic = v
+            }
             guard let cfg else { return }
-            publishTopic = cfg.publishTopic
+            if !envFirst.overriding.contains("NTFY_PUBLISH_TOPIC") { publishTopic = cfg.publishTopic }
             markdown = cfg.markdown
         }
     }
+
+    /// B05: what `.env` holds for this form's env-first key.
+    private(set) var envFirst = PlatformSetupHelpers.EnvFirstState()
 
     func save() {
         let envPairs: [String: String] = [
@@ -101,6 +113,6 @@ final class NtfySetupViewModel: PlatformSetupForm {
             "platforms.ntfy.extra.token": "",
             "platforms.ntfy.extra.markdown": PlatformSetupHelpers.envBool(markdown)
         ]
-        commitSave(envPairs: envPairs, configKV: configKV)
+        commitSave(envPairs: PlatformSetupHelpers.removingEnvFirstLines(envPairs, envFirst), configKV: configKV)
     }
 }

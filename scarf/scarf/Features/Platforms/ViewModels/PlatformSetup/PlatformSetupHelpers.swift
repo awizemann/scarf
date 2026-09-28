@@ -258,6 +258,63 @@ enum PlatformSetupHelpers {
         }
     }
 
+    // MARK: - Env-first settings (B05 sweep of S07-F4)
+
+    /// Which of a form's config keys have an `.env` line Hermes reads first
+    /// — see ``HermesEnvFirstSettings``.
+    nonisolated struct EnvFirstState: Equatable, Sendable {
+        /// Variables that decide the setting on THIS host right now.
+        var overriding: [String] = []
+        /// Every managed variable with a line in `.env` — what Save removes.
+        var lines: [String] = []
+    }
+
+    nonisolated static func envFirstState(
+        configKeys: [String], env: [String: String], capabilities: HermesCapabilities
+    ) -> EnvFirstState {
+        let lines = HermesEnvFirstSettings.envLinesToRemove(configKeys: configKeys, env: env)
+        let overriding = configKeys.compactMap { key -> String? in
+            guard let s = HermesEnvFirstSettings.setting(forConfigKey: key),
+                  HermesEnvFirstSettings.envWins(s, envValue: env[s.envVar], capabilities: capabilities)
+            else { return nil }
+            return s.envVar
+        }
+        return EnvFirstState(overriding: Array(Set(overriding)).sorted(), lines: lines)
+    }
+
+    /// The `.env` value that decides `configKey` here, parsed with Hermes's
+    /// own rule for that setting; nil when config.yaml decides.
+    nonisolated static func envFirstBool(
+        _ configKey: String, env: [String: String], capabilities: HermesCapabilities,
+        _ parse: (String) -> Bool
+    ) -> Bool? {
+        HermesEnvFirstSettings.winningEnvValue(configKey: configKey, env: env, capabilities: capabilities)
+            .map(parse)
+    }
+
+    /// `envPairs` plus an unset for every managed `.env` line: once the line
+    /// is gone config.yaml is what every Hermes band reads.
+    nonisolated static func removingEnvFirstLines(
+        _ envPairs: [String: String], _ state: EnvFirstState
+    ) -> [String: String] {
+        var out = envPairs
+        for name in state.lines where out[name] == nil { out[name] = "" }
+        return out
+    }
+
+    /// The caption under a form whose settings `.env` decides or would.
+    nonisolated static func envFirstCaption(_ state: EnvFirstState) -> String? {
+        if !state.overriding.isEmpty {
+            let names = state.overriding.joined(separator: ", ")
+            return String(localized: "\(names) in .env decides this on this host, over config.yaml — the form shows that value. Saving moves it to config.yaml and comments the .env line out.")
+        }
+        if !state.lines.isEmpty {
+            let names = state.lines.joined(separator: ", ")
+            return String(localized: "Saving comments out \(names) in .env, which would override config.yaml on Hermes 0.21.3 and later.")
+        }
+        return nil
+    }
+
     /// Per-key timeout for the `hermes config set` spawns a form save makes.
     nonisolated static let configSetTimeout: TimeInterval = 15
 

@@ -83,15 +83,31 @@ final class TelegramSetupViewModel: PlatformSetupForm {
             webhookPort = env["TELEGRAM_WEBHOOK_PORT"] ?? ""
             webhookSecret = env["TELEGRAM_WEBHOOK_SECRET"] ?? ""
 
-            guard let cfg = snapshot.config else { return }
-            requireMention = cfg.telegram.requireMention
-            reactions = cfg.telegram.reactions
-            disableTopicAutoRename = cfg.telegram.disableTopicAutoRename
-            ignoreRootDM = cfg.telegram.ignoreRootDM
-            richMessages = cfg.displayTelegramRichMessages(capabilities: capabilities)
-            statusIndicator = cfg.telegram.statusIndicator
+            if let cfg = snapshot.config {
+                requireMention = cfg.telegram.requireMention
+                reactions = cfg.telegram.reactions
+                disableTopicAutoRename = cfg.telegram.disableTopicAutoRename
+                ignoreRootDM = cfg.telegram.ignoreRootDM
+                richMessages = cfg.displayTelegramRichMessages(capabilities: capabilities)
+                statusIndicator = cfg.telegram.statusIndicator
+            }
+            // B05 sweep: `.env`-first readers (`HermesEnvFirstSettings`).
+            // require_mention is "on only for true/1/yes/on"
+            // (`telegram/adapter.py:5713-5724`); reactions "on unless
+            // false/0/no" (`:7090-7093`).
+            let caps = self.capabilities
+            if let v = PlatformSetupHelpers.envFirstBool(
+                "telegram.require_mention", env: env, capabilities: caps, HermesEnvFirstSettings.truthy) { requireMention = v }
+            if let v = PlatformSetupHelpers.envFirstBool(
+                "telegram.reactions", env: env, capabilities: caps,
+                { !["false", "0", "no"].contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }) { reactions = v }
+            envFirst = PlatformSetupHelpers.envFirstState(
+                configKeys: ["telegram.require_mention", "telegram.reactions"], env: env, capabilities: caps)
         }
     }
+
+    /// B05: what `.env` holds for this form's env-first keys.
+    private(set) var envFirst = PlatformSetupHelpers.EnvFirstState()
 
     func save() {
         let envPairs: [String: String] = [
@@ -118,6 +134,6 @@ final class TelegramSetupViewModel: PlatformSetupForm {
             configKV["platforms.telegram.extra.rich_messages"] = PlatformSetupHelpers.envBool(richMessages)
             configKV["platforms.telegram.extra.status_indicator"] = PlatformSetupHelpers.envBool(statusIndicator)
         }
-        commitSave(envPairs: envPairs, configKV: configKV)
+        commitSave(envPairs: PlatformSetupHelpers.removingEnvFirstLines(envPairs, envFirst), configKV: configKV)
     }
 }

@@ -39,6 +39,7 @@ struct MatrixSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
+                EnvFirstCaption(state: viewModel.envFirst)
                 ToggleRow(label: "Auto-thread on mention", isOn: viewModel.autoThread) { viewModel.autoThread = $0 }
                 ToggleRow(label: "DM mention threads", isOn: viewModel.dmMentionThreads) { viewModel.dmMentionThreads = $0 }
             }

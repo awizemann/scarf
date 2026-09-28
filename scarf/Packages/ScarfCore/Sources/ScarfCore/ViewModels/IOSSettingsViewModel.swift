@@ -55,6 +55,23 @@ public final class IOSSettingsViewModel {
         self.context = context
     }
 
+    /// `.env` as last read, and the host's capabilities — only for
+    /// ``envFirstBool(_:config:_:)``.
+    public private(set) var envValues: [String: String] = [:]
+    public private(set) var envCapabilities: HermesCapabilities = .empty
+
+    /// A platform setting as the host resolves it: the `.env` value when
+    /// Hermes reads it first on this host (parsed with `parse`), else the
+    /// config.yaml value. `fromEnv` lets the row say so.
+    public func envFirstBool(
+        _ configKey: String, config: Bool, _ parse: (String) -> Bool
+    ) -> (value: Bool, fromEnv: Bool) {
+        guard let raw = HermesEnvFirstSettings.winningEnvValue(
+            configKey: configKey, env: envValues, capabilities: envCapabilities)
+        else { return (config, false) }
+        return (parse(raw), true)
+    }
+
     public func load() async {
         isLoading = true
         lastError = nil
@@ -81,6 +98,13 @@ public final class IOSSettingsViewModel {
         managedInstall = await OffPool.run {
             let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
             return HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
+        }
+        // B05 sweep: platform settings Hermes reads `.env`-first
+        // (`HermesEnvFirstSettings`) — the read-only rows show what decides.
+        // Same pool-thread posture as above: an SFTP read + a cached probe.
+        (envValues, envCapabilities) = await OffPool.run {
+            (HermesEnvFirstSettings.parseEnv(ctx.readText(ctx.paths.envFile)),
+             HermesVersionCache.shared.capabilitiesSync(for: ctx))
         }
 
         guard let text else {

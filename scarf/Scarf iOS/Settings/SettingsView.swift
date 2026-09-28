@@ -632,14 +632,25 @@ struct SettingsView: View {
     @ViewBuilder
     private var platformsSection: some View {
         Section("Platforms") {
-            yesNoRow("Discord: require mention", vm.config.discord.requireMention)
-            yesNoRow("Discord: auto-thread", vm.config.discord.autoThread)
-            yesNoRow("Telegram: require mention", vm.config.telegram.requireMention)
+            // B05 sweep: Hermes reads these `.env`-first (on v0.21.3+ for
+            // require_mention; always for Discord auto-thread), so the row
+            // shows the value that decides and says when `.env` is it.
+            envFirstRow("Discord: require mention",
+                        vm.envFirstBool("discord.require_mention", config: vm.config.discord.requireMention,
+                                        HermesEnvFirstSettings.denyFalse))
+            envFirstRow("Discord: auto-thread",
+                        vm.envFirstBool("discord.auto_thread", config: vm.config.discord.autoThread,
+                                        HermesEnvFirstSettings.truthy))
+            envFirstRow("Telegram: require mention",
+                        vm.envFirstBool("telegram.require_mention", config: vm.config.telegram.requireMention,
+                                        HermesEnvFirstSettings.truthy))
             // `reply_in_thread`, not `reply_to_mode`: the Slack adapter never
             // reads `reply_to_mode` (S07-F1 — only Discord, Telegram and Buzz
             // do @ `v2026.9.24`), so showing it named a setting with no effect.
             yesNoRow("Slack: reply in thread", vm.config.slack.replyInThread)
-            yesNoRow("Matrix: require mention", vm.config.matrix.requireMention)
+            envFirstRow("Matrix: require mention",
+                        vm.envFirstBool("matrix.require_mention", config: vm.config.matrix.requireMention,
+                                        HermesEnvFirstSettings.denyFalse))
 
             // v0.13 additions: each is independently capability-gated
             // and read-only on iOS in v2.8.0. Editing lives on Mac.
@@ -831,6 +842,18 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// A read-only yes/no row whose value may come from `.env` (B05).
+    @ViewBuilder
+    private func envFirstRow(_ label: String, _ resolved: (value: Bool, fromEnv: Bool)) -> some View {
+        if resolved.fromEnv {
+            LabeledContent(label) {
+                Text(resolved.value ? String(localized: "yes (from .env)") : String(localized: "no (from .env)"))
+            }
+        } else {
+            yesNoRow(label, resolved.value)
+        }
+    }
 
     @ViewBuilder
     private func yesNoRow(_ label: String, _ value: Bool) -> some View {
