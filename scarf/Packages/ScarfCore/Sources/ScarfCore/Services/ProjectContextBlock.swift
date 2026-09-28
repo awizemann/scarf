@@ -160,8 +160,30 @@ public enum ProjectContextBlock {
         context: ServerContext
     ) throws -> Bool {
         let transport = context.makeTransport()
-        let agentsMdPath = projectPath + "/AGENTS.md"
-        let guarded = GuardedTextFile(transport: transport, label: "AGENTS.md")
+        // The block may live in whichever context file Hermes loads (S11-F1),
+        // not only AGENTS.md. Without a listing (transport down) fall back to
+        // AGENTS.md alone, where every earlier build put it.
+        let names = ((try? transport.listDirectory(projectPath)).map { entries in
+            // Case-insensitively on the Mac, where Hermes's `CLAUDE.md` opens
+            // `Claude.md` too; exact names on a remote host.
+            entries.filter { entry in
+                contextFileNames.contains {
+                    transport.isRemote ? $0 == entry : $0.caseInsensitiveCompare(entry) == .orderedSame
+                }
+            }
+        }) ?? ["AGENTS.md"]
+        var rewrote = false
+        for name in names {
+            if try removeBlock(fromFileAt: projectPath + "/" + name, transport: transport) {
+                rewrote = true
+            }
+        }
+        return rewrote
+    }
+
+    static func removeBlock(fromFileAt agentsMdPath: String, transport: any ServerTransport) throws -> Bool {
+        let label = (agentsMdPath as NSString).lastPathComponent
+        let guarded = GuardedTextFile(transport: transport, label: label)
         let loaded: GuardedTextFile.Loaded
         do {
             loaded = try guarded.load(agentsMdPath, maxBytes: maxAgentsBytes)
@@ -212,8 +234,218 @@ public enum ProjectContextBlock {
         context: ServerContext
     ) throws {
         let transport = context.makeTransport()
-        let agentsMdPath = projectPath + "/AGENTS.md"
-        let guarded = GuardedJSONStore(transport: transport, label: "AGENTS.md")
+        let survey = try surveyContextFiles(forProjectAt: projectPath, transport: transport)
+        let target = survey.target
+        try writeBlock(
+            block,
+            toFileAt: projectPath + "/" + target,
+            afterFrontmatter: hermesMDNames.contains(target),
+            transport: transport
+        )
+        // S11-F1 repair. Earlier Scarf builds always wrote AGENTS.md, which
+        // shadowed the project's own CLAUDE.md / .cursorrules. A copy of the
+        // block outside the target is now stale: a file that holds nothing
+        // but Scarf's block is Scarf's own and is removed (only AGENTS.md /
+        // agents.md — the names Scarf ever created); any other file just
+        // loses the block and keeps the user's text.
+        for file in survey.files where file.name != target && file.hasBlock {
+            let path = projectPath + "/" + file.name
+            if !file.hasUserContent && agentsMDNames.contains(file.name) {
+                // Re-read right before deleting: only a file that still holds
+                // nothing but Scarf's block goes.
+                let now = try GuardedTextFile(transport: transport, label: file.name)
+                    .load(path, maxBytes: maxAgentsBytes)
+                guard now.exists else { continue }
+                if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try transport.removeFile(path)
+                } else {
+                    _ = try removeBlock(fromFileAt: path, transport: transport)
+                }
+            } else {
+                _ = try removeBlock(fromFileAt: path, transport: transport)
+            }
+        }
+    }
+
+    // MARK: - Which file Hermes loads (S11-F1)
+
+    /// Hermes loads exactly ONE project-context type from the session cwd,
+    /// first non-empty wins: `.hermes.md`/`HERMES.md` → `AGENTS.md`/`agents.md`
+    /// → `CLAUDE.md`/`claude.md` → `.cursorrules` + `.cursor/rules/*.mdc`
+    /// (`agent/prompt_builder.py:1653-1664, 1746-1747` @ v2026.9.24; the same
+    /// `or` chain at `:588-591` @ v2026.3.23, below Scarf's v0.6.0 floor, so
+    /// every supported host behaves this way). Empty or whitespace-only files
+    /// fall through (`_read_context_file` strips, `:1576-1584`).
+    ///
+    /// Writing the block into a fresh AGENTS.md next to a CLAUDE.md therefore
+    /// made Hermes drop the user's CLAUDE.md. The block goes into the file
+    /// Hermes actually loads instead; AGENTS.md is created only when the
+    /// project has no context file of its own.
+    static let hermesMDNames = [".hermes.md", "HERMES.md"]
+    static let agentsMDNames = ["AGENTS.md", "agents.md"]
+    public static let contextFileNames = hermesMDNames + agentsMDNames + ["CLAUDE.md", "claude.md", ".cursorrules"]
+
+    struct ContextFile: Equatable {
+        let name: String
+        let hasBlock: Bool
+        /// Non-blank text outside Scarf's markers — what Hermes would load
+        /// if Scarf's block weren't there.
+        let hasUserContent: Bool
+    }
+
+    struct ContextSurvey: Equatable {
+        /// Context files present in the project directory, in Hermes's
+        /// priority order, under their exact on-disk names.
+        let files: [ContextFile]
+        /// Non-empty `.cursor/rules/*.mdc` files exist (loaded together
+        /// with `.cursorrules`).
+        let hasCursorRulesDir: Bool
+        /// A parent directory up to the git root holds an `.hermes.md` /
+        /// `HERMES.md` or an `AGENTS*.md`. Hermes walks up for those
+        /// (`_find_hermes_md`, `_agents_md_candidates`, prompt_builder.py
+        /// :139-148, :1602-1625 @ v2026.9.24), so the project's own
+        /// CLAUDE.md / .cursorrules is not what loads, and moving the block
+        /// there would hide it. Such projects keep the AGENTS.md behaviour.
+        var ancestorContext = false
+
+        /// The file the block belongs in: the highest-priority file that
+        /// already carries the user's own context, else AGENTS.md.
+        var target: String {
+            let agents = files.first(where: { agentsMDNames.contains($0.name) })?.name ?? "AGENTS.md"
+            if ancestorContext {
+                return files.first(where: { hermesMDNames.contains($0.name) && $0.hasUserContent })?.name ?? agents
+            }
+            if let owner = files.first(where: \.hasUserContent) { return owner.name }
+            if hasCursorRulesDir { return ".cursorrules" }
+            // Keep an existing block-only AGENTS.md / agents.md where it is.
+            return agents
+        }
+    }
+
+    /// Reads the project's context files once. Names come from one
+    /// directory listing, so `AGENTS.md` and `agents.md` on a
+    /// case-insensitive volume are never counted as two files.
+    static func surveyContextFiles(
+        forProjectAt projectPath: String,
+        transport: any ServerTransport
+    ) throws -> ContextSurvey {
+        let listing: [String]
+        do {
+            listing = try transport.listDirectory(projectPath)
+        } catch let error as TransportError where error.isNoSuchFile
+                    || (!transport.isRemote && !FileManager.default.fileExists(atPath: projectPath)) {
+            // A project directory that isn't there yet has no context files;
+            // the write creates it. Any other failure stops here: guessing
+            // "no files" could put a new AGENTS.md over the user's CLAUDE.md.
+            _ = error
+            listing = []
+        }
+        // Hermes opens fixed names (`cwd / "CLAUDE.md"`); on the Mac's
+        // case-insensitive volumes that also opens `Claude.md`. A remote
+        // Linux host is case-sensitive, so there the name must match exactly.
+        func onDisk(_ name: String) -> String? {
+            if listing.contains(name) { return name }
+            guard !transport.isRemote else { return nil }
+            return listing.first { $0.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        var files: [ContextFile] = []
+        var seen = Set<String>()
+        for candidate in contextFileNames {
+            guard let name = onDisk(candidate), seen.insert(name.lowercased()).inserted || transport.isRemote,
+                  !files.contains(where: { $0.name == name })
+            else { continue }
+            let path = projectPath + "/" + name
+            let loaded: GuardedTextFile.Loaded
+            do {
+                loaded = try GuardedTextFile(transport: transport, label: name)
+                    .load(path, maxBytes: maxAgentsBytes)
+            } catch let refusal as GuardedTextFile.Refusal {
+                // Can't tell whether it carries the user's context, so we
+                // can't tell whether writing elsewhere would shadow it.
+                switch refusal {
+                case .unreadable(let damaged, _): throw WriteError.refusedUnreadable(path: damaged)
+                case .notUTF8: throw WriteError.refusedUndecodableText(path: path)
+                }
+            }
+            guard loaded.exists else { continue }
+            let hasBlock = loaded.text.contains(beginMarker)
+            let outside = removeBlock(from: loaded.text)
+            files.append(ContextFile(
+                name: name,
+                hasBlock: hasBlock,
+                hasUserContent: !outside.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ))
+        }
+        var hasCursorRulesDir = false
+        if onDisk(".cursor") != nil {
+            let rulesDir = projectPath + "/.cursor/rules"
+            let mdc: [String]
+            do {
+                mdc = try transport.listDirectory(rulesDir).filter { $0.hasSuffix(".mdc") }
+            } catch let error as TransportError where error.isNoSuchFile
+                        || (!transport.isRemote && !FileManager.default.fileExists(atPath: rulesDir)) {
+                _ = error
+                mdc = []
+            }
+            hasCursorRulesDir = mdc.contains { (transport.stat(rulesDir + "/" + $0)?.size ?? 0) > 0 }
+        }
+        var survey = ContextSurvey(files: files, hasCursorRulesDir: hasCursorRulesDir)
+        survey.ancestorContext = try ancestorHasContext(projectPath: projectPath, transport: transport)
+        return survey
+    }
+
+    /// Whether a parent directory, up to the nearest one holding `.git`,
+    /// has a `.hermes.md`/`HERMES.md` or `AGENTS*.md` Hermes would load
+    /// ahead of the project's CLAUDE.md. One batched stat for the whole
+    /// walk; an untrusted answer refuses rather than guessing.
+    static func ancestorHasContext(projectPath: String, transport: any ServerTransport) throws -> Bool {
+        var dirs: [String] = []
+        var dir = (projectPath as NSString).standardizingPath
+        while true {
+            dirs.append(dir)
+            let parent = (dir as NSString).deletingLastPathComponent
+            if parent == dir || parent.isEmpty { break }
+            dir = parent
+        }
+        let names = hermesMDNames + ["AGENTS.override.md"] + agentsMDNames
+        var paths: [String] = []
+        for d in dirs { paths.append(d + "/.git"); paths += names.map { d + "/" + $0 } }
+        guard let stats = transport.statAll(paths) else {
+            throw WriteError.refusedUnreadable(path: projectPath)
+        }
+        // No git root: Hermes looks at the project directory only.
+        guard let rootIndex = dirs.firstIndex(where: { stats[$0 + "/.git"] != nil }), rootIndex > 0 else {
+            return false
+        }
+        return dirs[1...rootIndex].contains { d in
+            names.contains { (stats[d + "/" + $0]?.size ?? 0) > 0 }
+        }
+    }
+
+    /// Put the block after a leading `---` YAML frontmatter instead of above
+    /// it. Hermes strips frontmatter from `.hermes.md` only when the file
+    /// STARTS with `---` (`_strip_yaml_frontmatter`, prompt_builder.py:151-155
+    /// @ v2026.9.24), so prepending would turn it into prompt text.
+    static func applyBlockAfterFrontmatter(_ block: String, to existing: String) -> String {
+        guard !existing.contains(beginMarker),
+              existing.hasPrefix("---"),
+              let close = existing.range(of: "\n---", range: existing.index(existing.startIndex, offsetBy: 3)..<existing.endIndex)
+        else { return applyBlock(block, to: existing) }
+        let lineEnd = existing[close.upperBound...].firstIndex(of: "\n") ?? existing.endIndex
+        let head = String(existing[existing.startIndex..<lineEnd])
+        let body = String(existing[lineEnd...])
+        return head + "\n\n" + applyBlock(block, to: body)
+    }
+
+    /// The guarded splice into one file (P8 DI-C2 discipline, unchanged).
+    private static func writeBlock(
+        _ block: String,
+        toFileAt agentsMdPath: String,
+        afterFrontmatter: Bool,
+        transport: any ServerTransport
+    ) throws {
+        let label = (agentsMdPath as NSString).lastPathComponent
+        let guarded = GuardedJSONStore(transport: transport, label: label)
         var inspection = guarded.inspect(agentsMdPath, maxBytes: maxAgentsBytes)
 
         // Zero bytes is damage to a JSON sidecar (Scarf never writes an
@@ -246,7 +478,9 @@ public enum ProjectContextBlock {
             guard let existing = String(data: existingData, encoding: .utf8) else {
                 throw WriteError.refusedUndecodableText(path: agentsMdPath)
             }
-            let rewritten = applyBlock(block, to: existing)
+            let rewritten = afterFrontmatter
+                ? applyBlockAfterFrontmatter(block, to: existing)
+                : applyBlock(block, to: existing)
             guard let outData = rewritten.data(using: .utf8) else {
                 throw WriteError.encodingFailed
             }

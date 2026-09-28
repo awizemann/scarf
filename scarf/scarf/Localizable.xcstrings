@@ -130,6 +130,46 @@
         }
       }
     },
+    "%@ is already running as many tasks as kanban.max_in_progress_per_profile allows. Hermes will start it when a slot frees up." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ führt bereits so viele Aufgaben aus, wie kanban.max_in_progress_per_profile erlaubt. Hermes startet sie, sobald ein Platz frei wird."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ya ejecuta tantas tareas como permite kanban.max_in_progress_per_profile. Hermes la iniciará cuando quede un hueco libre."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ exécute déjà autant de tâches que kanban.max_in_progress_per_profile le permet. Hermes la démarrera dès qu'une place se libère."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ は kanban.max_in_progress_per_profile の上限までタスクを実行中です。空きができると Hermes が開始します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ já está executando tantas tarefas quanto kanban.max_in_progress_per_profile permite. O Hermes vai iniciá-la quando uma vaga for liberada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在运行的任务数已达到 kanban.max_in_progress_per_profile 的上限。有空位时 Hermes 会启动它。"
+          }
+        }
+      }
+    },
     "%@ is now the server's active profile. This window keeps showing the profile it is viewing." : {
       "comment" : "Profiles: note after making a profile the server's active profile from a remote window. %@ is the profile name.",
       "localizations" : {
@@ -368,6 +408,446 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : ".env 中的 %@ 目前决定此设置。保存会将其移到 config.yaml 并删除 .env 中的该行。"
+          }
+        }
+      }
+    },
+    "Clear SOUL.md" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md leeren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaciar SOUL.md"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vider SOUL.md"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を空にする"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esvaziar SOUL.md"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空 SOUL.md"
+          }
+        }
+      }
+    },
+    "Clear SOUL.md?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md leeren?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Vaciar SOUL.md?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vider SOUL.md ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を空にしますか？"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esvaziar o SOUL.md?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空 SOUL.md？"
+          }
+        }
+      }
+    },
+    "Couldn’t read SOUL.md, so editing is off until Reload succeeds." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md konnte nicht gelesen werden, daher ist die Bearbeitung aus, bis „Neu laden“ gelingt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo leer SOUL.md, así que la edición queda desactivada hasta que Recargar funcione."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de lire SOUL.md : la modification reste désactivée tant que Recharger n’a pas réussi."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SOUL.md を読み込めなかったため、再読み込みが成功するまで編集できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler o SOUL.md, então a edição fica desativada até Recarregar funcionar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取 SOUL.md，在重新载入成功之前无法编辑。"
+          }
+        }
+      }
+    },
+    "Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown-, Quarto- und Trace-Exporte umfassen jeweils eine Sitzung — verwenden Sie dafür das „Exportieren…“ der jeweiligen Sitzung."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las exportaciones Markdown, Quarto y de traza abarcan una sesión cada vez: usa el Exportar… de cada sesión para ellas."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les exports Markdown, Quarto et trace couvrent une session à la fois — utilisez l’Exporter… propre à chaque session."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown、Quarto、トレースのエクスポートは 1 セッションずつです。各セッションの「書き出す…」を使ってください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As exportações Markdown, Quarto e de trace cobrem uma sessão por vez — use o Exportar… da própria sessão para elas."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown、Quarto 和跟踪导出一次只涵盖一个会话——请使用各会话自己的“导出…”。"
+          }
+        }
+      }
+    },
+    "Another dispatcher was already running on this board. It may start shortly." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Board lief bereits ein anderer Dispatcher. Sie startet möglicherweise in Kürze."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ya había otro despachador en ejecución en este tablero. Puede que se inicie en breve."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un autre répartiteur tournait déjà sur ce tableau. Elle pourrait démarrer sous peu."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このボードでは別のディスパッチャーが実行中でした。まもなく開始される可能性があります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outro despachante já estava em execução neste quadro. Ela pode começar em breve."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此看板上已有另一个调度器在运行。它可能很快就会启动。"
+          }
+        }
+      }
+    },
+    "Hermes held back new workers because memory pressure is %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes hat neue Worker zurückgehalten, weil der Speicherdruck %@ ist."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes retuvo nuevos workers porque la presión de memoria es %@."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes a retenu de nouveaux workers car la pression mémoire est %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メモリ負荷が %@ のため、Hermes は新しいワーカーを保留しました。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes segurou novos workers porque a pressão de memória está %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由于内存压力为 %@，Hermes 暂缓了新的 worker。"
+          }
+        }
+      }
+    },
+    "Hermes's respawn guard held it back (%@)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Respawn-Schutz von Hermes hat sie zurückgehalten (%@)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La protección de reinicio de Hermes la retuvo (%@)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La protection anti-relance de Hermes l'a retenue (%@)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes の再起動ガードにより保留されました（%@）。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A proteção de reinício do Hermes a segurou (%@)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 的重启保护暂缓了它（%@）。"
+          }
+        }
+      }
+    },
+    "It has no assignee." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sie hat keine zuständige Person."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No tiene asignado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elle n'a pas d'assigné."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "担当者が設定されていません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ela não tem responsável."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它没有负责人。"
+          }
+        }
+      }
+    },
+    "It isn't ready yet (it may have unfinished parent tasks), or the board is at its in-progress limit." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sie ist noch nicht bereit (möglicherweise mit unerledigten übergeordneten Aufgaben), oder das Board hat sein Limit für laufende Aufgaben erreicht."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aún no está lista (puede tener tareas padre sin terminar) o el tablero alcanzó su límite de tareas en curso."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elle n'est pas encore prête (elle a peut-être des tâches parentes inachevées), ou le tableau a atteint sa limite de tâches en cours."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ準備ができていない（未完了の親タスクがある可能性があります）か、ボードの実行中上限に達しています。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ela ainda não está pronta (pode ter tarefas-pai não concluídas) ou o quadro atingiu o limite de tarefas em andamento."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它尚未就绪（可能有未完成的父任务），或看板已达到进行中任务的上限。"
+          }
+        }
+      }
+    },
+    "Its assignee isn't a Hermes profile, so the dispatcher can't spawn a worker for it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die zuständige Person ist kein Hermes-Profil, daher kann der Dispatcher keinen Worker dafür starten."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Su asignado no es un perfil de Hermes, así que el despachador no puede iniciar un worker para ella."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Son assigné n'est pas un profil Hermes, le répartiteur ne peut donc pas lancer de worker pour elle."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "担当者が Hermes プロファイルではないため、ディスパッチャーはワーカーを起動できません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O responsável não é um perfil do Hermes, então o despachante não pode iniciar um worker para ela."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的负责人不是 Hermes 配置文件，因此调度器无法为它启动 worker。"
+          }
+        }
+      }
+    },
+    "Mini-apps run on local projects only. This project is on a remote server, so its mini-apps can't be opened from Scarf yet." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mini-Apps laufen nur in lokalen Projekten. Dieses Projekt liegt auf einem entfernten Server, daher können seine Mini-Apps in Scarf noch nicht geöffnet werden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las mini-apps solo funcionan en proyectos locales. Este proyecto está en un servidor remoto, así que sus mini-apps aún no se pueden abrir desde Scarf."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les mini-apps ne fonctionnent que sur les projets locaux. Ce projet est sur un serveur distant, ses mini-apps ne peuvent donc pas encore être ouvertes depuis Scarf."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ミニアプリはローカルプロジェクトでのみ動作します。このプロジェクトはリモートサーバー上にあるため、まだ Scarf からミニアプリを開けません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mini-apps só funcionam em projetos locais. Este projeto está em um servidor remoto, então seus mini-apps ainda não podem ser abertos no Scarf."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "迷你应用仅在本地项目中运行。此项目位于远程服务器上，因此暂时无法在 Scarf 中打开它的迷你应用。"
           }
         }
       }
@@ -3998,6 +4478,46 @@
         }
       }
     },
+    "Sign in first with `%@` if the adapter reports not authenticated." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Melde dich zuerst mit `%@` an, falls der Adapter „nicht authentifiziert“ meldet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia sesión primero con `%@` si el adaptador indica que no hay autenticación."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous d’abord avec `%@` si l’adaptateur signale une absence d’authentification."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アダプタが未認証と報告した場合は、先に `%@` でサインインしてください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entre primeiro com `%@` se o adaptador informar que não está autenticado."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果适配器报告未认证，请先运行 `%@` 登录。"
+          }
+        }
+      }
+    },
     "Sign in to “%@”?" : {
       "localizations" : {
         "de" : {
@@ -4444,6 +4964,46 @@
         }
       }
     },
+    "The editor is empty. Saving replaces the current SOUL.md with an empty file." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Editor ist leer. Beim Sichern wird die aktuelle SOUL.md durch eine leere Datei ersetzt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El editor está vacío. Al guardar, el SOUL.md actual se sustituye por un archivo vacío."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’éditeur est vide. L’enregistrement remplace le SOUL.md actuel par un fichier vide."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エディタが空です。保存すると、現在の SOUL.md が空のファイルに置き換えられます。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O editor está vazio. Salvar substitui o SOUL.md atual por um arquivo vazio."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑器为空。保存会用空文件替换当前的 SOUL.md。"
+          }
+        }
+      }
+    },
     "The gateway is still restarting: Hermes handed it back to its supervisor, which lets in-flight runs finish first and can take longer than Scarf waits. Check its status again in a minute." : {
       "comment" : "ScarfCore HermesGatewayServiceVerdict note: hand-added, no Xcode extractor sees ScarfCore string literals.",
       "localizations" : {
@@ -4684,6 +5244,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "唯一占用者是 Scarf 自己的会话只读视图,它从不写入 — 没有其他程序在使用该数据库。使用“仍然优化”即可立即运行。"
+          }
+        }
+      }
+    },
+    "The task wasn't started." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Aufgabe wurde nicht gestartet."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La tarea no se inició."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La tâche n'a pas été démarrée."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タスクは開始されませんでした。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A tarefa não foi iniciada."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务未启动。"
           }
         }
       }
@@ -98064,48 +98664,6 @@
         }
       }
     },
-    "Sign in first with `hermes login %@` if the adapter reports not authenticated." : {
-      "comment" : "A caption below the usage instructions for the Hermes proxy.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Melde dich zuerst mit `hermes login %@` an, falls der Adapter „nicht authentifiziert“ meldet."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inicia sesión primero con `hermes login %@` si el adaptador informa que no está autenticado."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connectez-vous d'abord avec `hermes login %@` si l'adaptateur signale une absence d'authentification."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アダプターが未認証と報告する場合は、まず `hermes login %@` でサインインしてください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Faça login primeiro com `hermes login %@` se o adaptador reportar que não está autenticado."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "如果适配器报告未认证,请先使用 `hermes login %@` 登录。"
-          }
-        }
-      }
-    },
     "Sign in to Nous Portal" : {
       "localizations" : {
         "de" : {
@@ -130294,46 +130852,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要进行设置，请在 Hermes 主机上："
-          }
-        }
-      }
-    },
-    "Trace exports cover one session at a time — use a session's own Export… for that." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trace-Exporte umfassen jeweils eine Sitzung — verwenden Sie dafür das „Exportieren…“ der jeweiligen Sitzung."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Las exportaciones de trazas cubren una sesión a la vez: usa el «Exportar…» de la propia sesión para eso."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Les exports de traces couvrent une session à la fois — utilisez pour cela l’option « Exporter… » de la session concernée."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トレースのエクスポートは一度に 1 セッションずつです。そのためには各セッションの「書き出す…」を使ってください。"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "As exportações de rastreamento cobrem uma sessão por vez — use o “Exportar…” da própria sessão para isso."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "跟踪导出一次只涵盖一个会话——请使用该会话自己的“导出…”。"
           }
         }
       }

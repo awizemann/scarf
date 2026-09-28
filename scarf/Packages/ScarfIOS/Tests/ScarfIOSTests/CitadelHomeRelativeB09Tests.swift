@@ -45,3 +45,33 @@ import Foundation
             atPath: FileManager.default.temporaryDirectory.appendingPathComponent("pwned").path))
     }
 }
+
+/// S15-F1 — a single-word argument with a `$` in it must reach the command
+/// unchanged. `shellJoin` used to treat `$` as safe, so the remote shell
+/// expanded `Cost$5` to `Cost` and `$FOO` to nothing.
+@Suite struct CitadelDollarQuotingC02Tests {
+
+    @Test func dollarWordsAreQuoted() {
+        #expect(CitadelServerTransport.shellJoin(["Cost$5"]) == "'Cost$5'")
+        #expect(CitadelServerTransport.shellJoin(["$FOO"]) == "'$FOO'")
+        #expect(CitadelServerTransport.shellJoin(["plain-word"]) == "plain-word")
+    }
+
+    /// Through a real `/bin/sh`, wrapped the way the transport runs it.
+    @Test func dollarWordsSurviveARealShell() throws {
+        let args = ["Cost$5", "$FOO", "${HOME}", "a$(echo x)b"]
+        let line = CitadelServerTransport.commandLine(
+            executable: "printf", args: ["%s|"] + args, fragment: nil)
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", CitadelServerTransport.viaPOSIXShell(line)]
+        proc.environment = ["HOME": "/nonexistent-home", "FOO": "expanded", "PATH": "/usr/bin:/bin"]
+        let out = Pipe()
+        proc.standardOutput = out
+        try proc.run()
+        proc.waitUntilExit()
+        let printed = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(proc.terminationStatus == 0)
+        #expect(printed == args.map { $0 + "|" }.joined())
+    }
+}

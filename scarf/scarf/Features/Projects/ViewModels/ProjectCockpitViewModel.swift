@@ -144,8 +144,8 @@ final class ProjectCockpitViewModel {
     private func facetPaths() -> [String] {
         let root = project.path
         return [
-            ProjectStore.recordPath(forProjectPath: root),
-            root + "/AGENTS.md",
+            ProjectStore.recordPath(forProjectPath: root)
+        ] + ProjectContextBlock.contextFileNames.map { root + "/" + $0 } + [
             root + "/.scarf/manifest.json",
             root + "/.scarf/dashboard.json",
             root + "/.scarf/upgrade.json",
@@ -255,6 +255,13 @@ final class ProjectCockpitViewModel {
 
         let context = self.context
         let project = self.project
+        // Which project-context files exist, from the batched stat above, so
+        // the block preview reads only those (one read in the usual case)
+        // instead of probing every candidate name over SSH.
+        let contextFileNames = ["AGENTS.md"] + ProjectContextBlock.contextFileNames.filter { $0 != "AGENTS.md" }
+        let presentContextFiles = freshSignature.map { sig in
+            contextFileNames.filter { sig[project.path + "/" + $0] != "-" }
+        } ?? contextFileNames
 
         // A thread of its own, not `Task.detached`: every read below is a
         // blocking transport call (an SSH round trip on a remote), and a
@@ -289,13 +296,20 @@ final class ProjectCockpitViewModel {
                 sp = derived
             }
 
-            // Context: the AGENTS.md managed block (read-only preview).
-            let agents = context.readText(project.path + "/AGENTS.md")
-            let block = Self.extractBlock(
-                agents,
-                begin: ProjectContextBlock.beginMarker,
-                end: ProjectContextBlock.endMarker
-            )
+            // Context: the managed block (read-only preview). It lives in
+            // whichever context file Hermes loads for the project — AGENTS.md,
+            // or the project's own CLAUDE.md / .cursorrules / .hermes.md (S11-F1).
+            // AGENTS.md first: it is where the block is in most projects.
+            let block = presentContextFiles.lazy
+                .map { context.readText(project.path + "/" + $0) }
+                .compactMap {
+                    Self.extractBlock(
+                        $0,
+                        begin: ProjectContextBlock.beginMarker,
+                        end: ProjectContextBlock.endMarker
+                    )
+                }
+                .first
 
             // Cron: jobs tagged for this project.
             let tmpl = Self.readTemplateInfo(context: context, projectPath: project.path)
