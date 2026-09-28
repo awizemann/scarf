@@ -55,8 +55,7 @@ struct PersonalitiesView: View {
             titleVisibility: .visible
         ) {
             Button("Clear SOUL.md", role: .destructive) {
-                viewModel.saveSOUL(soulDraft, confirmedClearing: true)
-                editingSOUL = false
+                if viewModel.saveSOUL(soulDraft, confirmedClearing: true) { editingSOUL = false }
             }
             Button("Keep Editing", role: .cancel) {}
         } message: {
@@ -146,8 +145,7 @@ struct PersonalitiesView: View {
                             draft: soulDraft, loaded: viewModel.soulLoaded, current: viewModel.soulMarkdown
                         ) {
                         case .save:
-                            viewModel.saveSOUL(soulDraft)
-                            editingSOUL = false
+                            if viewModel.saveSOUL(soulDraft) { editingSOUL = false }
                         case .confirmClearing:
                             confirmingClearSOUL = true
                         case .refuse:
@@ -155,7 +153,7 @@ struct PersonalitiesView: View {
                         }
                     }
                     .controlSize(.small)
-                    .disabled(viewModel.isSaving)
+                    .disabled(viewModel.isSaving || !viewModel.soulLoaded)
                     .keyboardShortcut("s", modifiers: .command)
                 } else {
                     // `load()` is asynchronous: seed the draft from the file

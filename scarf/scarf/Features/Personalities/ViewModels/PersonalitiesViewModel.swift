@@ -68,35 +68,49 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
         let ctx = context
         let path = soulPath
         let inCodeBuiltins = hasBuiltinPersonalitiesInCode
-        Task.detached { [weak self] in
-            // ONE read of config.yaml, not two. `loadConfig()` reads and
-            // parses the file, and the personalities block was then re-read
-            // from disk a second time through `ctx.readText` — two SFTP
-            // round-trips over the identical bytes on every Personalities
-            // visit. Read the text once and derive both from it.
-            let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
-            let config = HermesConfig(yaml: yaml)
-            let parsed = Self.parsePersonalitiesBlock(
-                yaml: yaml,
-                hasBuiltinPersonalitiesInCode: inCodeBuiltins
-            )
-            let soulText = ctx.readText(path)
-            // `readText` is nil both for "absent" and "couldn't read". Only
-            // the first is a real empty SOUL.md; a failed read must not
-            // look like an empty file the editor can then save over.
-            let soulTrusted = soulText != nil || !ctx.fileExists(path)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.activeName = config.personality
-                self.personalities = parsed
-                if soulTrusted {
-                    self.soulMarkdown = soulText ?? ""
-                    self.soulLoaded = true
-                } else {
-                    self.soulLoaded = false
-                    self.showSaveFailure(String(localized: "Couldn’t read SOUL.md, so editing is off until Reload succeeds."))
-                }
+        Task { [weak self] in
+            // Blocking file reads (SFTP round-trips on a remote host) run on
+            // a dedicated thread, not the cooperative pool (C10).
+            let loaded = await OffPool.run { () -> (HermesConfig, [HermesPersonality], String?) in
+                // ONE read of config.yaml, not two. `loadConfig()` reads and
+                // parses the file, and the personalities block was then re-read
+                // from disk a second time through `ctx.readText` — two SFTP
+                // round-trips over the identical bytes on every Personalities
+                // visit. Read the text once and derive both from it.
+                let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
+                let config = HermesConfig(yaml: yaml)
+                let parsed = Self.parsePersonalitiesBlock(
+                    yaml: yaml,
+                    hasBuiltinPersonalitiesInCode: inCodeBuiltins
+                )
+                return (config, parsed, Self.readSOUL(path, context: ctx))
             }
+            guard let self else { return }
+            let (config, parsed, soul) = loaded
+            self.activeName = config.personality
+            self.personalities = parsed
+            if let soul {
+                self.soulMarkdown = soul
+                self.soulLoaded = true
+            } else {
+                self.soulLoaded = false
+                self.showSaveFailure(String(localized: "Couldn’t read SOUL.md, so editing is off until Reload succeeds."))
+            }
+        }
+    }
+
+    /// SOUL.md's text, `""` only when the far end PROVED it absent (ENOENT),
+    /// and `nil` for anything else — a dropped SSH round-trip, a permission
+    /// error, bytes that aren't UTF-8. `readText`'s `nil` can't tell those
+    /// apart, and an editor seeded from a failed read would save "" over
+    /// the real file (S03-F1).
+    nonisolated static func readSOUL(_ path: String, context: ServerContext) -> String? {
+        do {
+            return String(data: try context.makeTransport().readFile(path), encoding: .utf8)
+        } catch let error as TransportError where error.isNoSuchFile {
+            return ""
+        } catch {
+            return nil
         }
     }
 
@@ -168,11 +182,13 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     }
 
     /// `confirmedClearing` is set only by the view's confirmation dialog.
-    func saveSOUL(_ content: String, confirmedClearing: Bool = false) {
-        guard !isSaving else { return }
+    /// Returns whether the write was started.
+    @discardableResult
+    func saveSOUL(_ content: String, confirmedClearing: Bool = false) -> Bool {
+        guard !isSaving else { return false }
         switch Self.soulSaveDecision(draft: content, loaded: soulLoaded, current: soulMarkdown) {
-        case .refuse: return
-        case .confirmClearing where !confirmedClearing: return
+        case .refuse: return false
+        case .confirmClearing where !confirmedClearing: return false
         default: break
         }
         isSaving = true
@@ -195,6 +211,7 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
                 self.showSaveFailure(String(localized: "SOUL.md wasn’t saved — Scarf couldn’t write the file."))
             }
         }
+        return true
     }
 
 

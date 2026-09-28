@@ -86,4 +86,19 @@ struct PersonalitiesSoulEditTests {
         try await Task.sleep(nanoseconds: 200_000_000)
         #expect(try Data(contentsOf: home.appendingPathComponent("SOUL.md")) == Data([0xFF, 0xFE, 0xFD]))
     }
+
+    /// A read that fails for any reason but ENOENT is not "absent" — the
+    /// SSH-blip shape. Only a proven-absent file loads as empty.
+    @Test func readSOULTrustsOnlyAProvenAbsence() throws {
+        let home = try makeHome(soul: "voice")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let ctx = ServerContext.local(home: home)
+        let path = home.appendingPathComponent("SOUL.md").path
+        #expect(PersonalitiesViewModel.readSOUL(path, context: ctx) == "voice")
+        #expect(PersonalitiesViewModel.readSOUL(path + ".missing", context: ctx) == "")
+        guard getuid() != 0 else { return }
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path) }
+        #expect(PersonalitiesViewModel.readSOUL(path, context: ctx) == nil)
+    }
 }
