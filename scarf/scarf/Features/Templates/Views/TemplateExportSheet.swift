@@ -62,6 +62,11 @@ struct TemplateExportSheet: View {
         .frame(minWidth: 620, minHeight: 560)
         .padding()
         .task { viewModel.load() }
+        // Files added in Finder or an editor while the sheet was open —
+        // re-check when the user comes back to Scarf.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            viewModel.rescanFiles()
+        }
     }
 
     @ViewBuilder
@@ -135,13 +140,21 @@ struct TemplateExportSheet: View {
         }
     }
 
-    // Both groups read the scan `load()` ran once off the main actor — a
+    // Both groups read the scan `rescanFiles()` ran off the main actor — a
     // plan recomputed in `body` did transport I/O on every keystroke.
     private var requiredFilesGroup: some View {
         let dir = viewModel.project.path
         let scan = viewModel.fileScan
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Required Files").scarfStyle(.headline)
+            HStack {
+                Text("Required Files").scarfStyle(.headline)
+                Spacer()
+                Button("Check Again") { viewModel.rescanFiles() }
+                    .buttonStyle(.link)
+                    .controlSize(.small)
+                    .disabled(viewModel.isRescanning)
+                    .accessibilityIdentifier("templates.export.checkAgain")
+            }
             if let scan {
                 check(label: "dashboard.json (\(dir)/.scarf/dashboard.json)", ok: scan.dashboardPresent)
                 check(label: "README.md (\(dir)/README.md)", ok: scan.readmePresent)
