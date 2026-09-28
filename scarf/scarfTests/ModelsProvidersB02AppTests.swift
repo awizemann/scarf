@@ -77,6 +77,10 @@ struct ModelsProvidersB02AppTests {
         #expect(sheet.contains("selectedProviderID, customProviders: customProviders,"))
         let general = try String(contentsOf: root.appendingPathComponent("Tabs/GeneralTab.swift"), encoding: .utf8)
         #expect(general.contains("customProviders: ModelPreflight.CustomProviders(viewModel.config)"))
+        // Delegation resolves its provider through the same resolver
+        // (tools/delegate_tool_config.py:375 @ v2026.9.24).
+        let advanced = try String(contentsOf: root.appendingPathComponent("Tabs/AdvancedTab.swift"), encoding: .utf8)
+        #expect(advanced.contains("customProviders: ModelPreflight.CustomProviders(viewModel.config)"))
     }
 
     // MARK: - S06-F2: auth.json updated_at as Hermes writes it

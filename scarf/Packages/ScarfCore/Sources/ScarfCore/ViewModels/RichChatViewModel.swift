@@ -1865,7 +1865,7 @@ public final class RichChatViewModel {
 
     nonisolated static func turnStoppedNoteText(carriesForward: Bool) -> String {
         carriesForward
-            ? String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept. Your next message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.")
+            ? String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept. Your next text message is sent to Hermes as a follow-up to the stopped request; start a new chat to drop it.")
             : String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept.")
     }
 
