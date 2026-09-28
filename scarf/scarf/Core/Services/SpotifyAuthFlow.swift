@@ -74,6 +74,10 @@ final class SpotifyAuthFlow {
     /// replacement run's state.
     private var generation: UInt64 = 0
 
+    /// The Client ID the user typed for a first-time sign-in (S07-F6), or
+    /// nil when Hermes already knows one.
+    private var clientIDArgument: String?
+
     /// Test seam: build the subprocess instead of spawning `hermes auth
     /// spotify` through the transport. Nil in production.
     var makeAuthProcess: (@Sendable () -> Process)?
@@ -128,8 +132,10 @@ final class SpotifyAuthFlow {
     /// A remote context pays nothing: it wraps the command in
     /// `env PYTHONUNBUFFERED=1 …` because ssh forwards no environment, and an
     /// injected `makeAuthProcess` (the tests') brings its own.
-    func start() {
+    func start(clientID: String? = nil) {
         cancel()
+        clientIDArgument = clientID.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
         output = ""
         state = .starting
 
@@ -168,7 +174,7 @@ final class SpotifyAuthFlow {
         } else {
             proc = context.makeTransport().makeProcess(
                 executable: context.paths.hermesBinary,
-                args: ["auth", "spotify"]
+                args: Self.argv(clientID: clientIDArgument)
             )
             if !context.isRemote {
                 var env = localEnvironment ?? [:]
@@ -439,7 +445,9 @@ final class SpotifyAuthFlow {
             // first read; the retries cover NFS / SFTP write barriers.
             for _ in 0..<3 {
                 if Task.isCancelled { return }
-                if Self.authJSONHasSpotifyToken(path: path, transport: transport) {
+                // Off the main actor (C10): on a remote window this read is
+                // an SFTP round-trip.
+                if await OffPool.run({ Self.authJSONHasSpotifyToken(path: path, transport: transport) }) {
                     state = .success
                     return
                 }
@@ -471,5 +479,84 @@ final class SpotifyAuthFlow {
         let parts = s.split(separator: "\n", omittingEmptySubsequences: false)
         let tail = parts.suffix(lines)
         return tail.joined(separator: "\n")
+    }
+
+    // MARK: - Client ID (S07-F6)
+
+    /// `hermes auth spotify`, with `--client-id` for a first-time sign-in.
+    ///
+    /// Without a client ID anywhere, Hermes runs an interactive wizard that
+    /// reads it with `input()` (`hermes_cli/auth_spotify.py:293-299`,
+    /// `:314-326` @ v2026.9.24) — through Scarf's pipe that is an instant
+    /// EOF and "Spotify setup cancelled.". `--client-id` skips the wizard
+    /// (`_spotify_client_id(explicit, …)`, `:55-64`); on success Hermes
+    /// stores it with the token under `providers.spotify.client_id`, so later
+    /// sign-ins and refreshes find it. The flag is in the argparse from the
+    /// v2026.4.30 Spotify floor on (`hermes_cli/main.py:8444` @ v2026.4.30;
+    /// `hermes_cli/subcommands/auth.py:76-77` @ v2026.9.24). `=` form so a
+    /// value can never be read as an option.
+    nonisolated static func argv(clientID: String?) -> [String] {
+        guard let clientID, !clientID.isEmpty else { return ["auth", "spotify"] }
+        return ["auth", "spotify", "--client-id=\(clientID)"]
+    }
+
+    /// Spotify client IDs are 32 hex characters; accept any plain
+    /// alphanumeric run so a format change on Spotify's side does not lock
+    /// the field, while whitespace or punctuation (a pasted secret, a URL)
+    /// is refused before it reaches argv.
+    nonisolated static func isPlausibleClientID(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...128).contains(trimmed.count) else { return false }
+        return trimmed.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) && $0.isASCII }
+    }
+
+    /// Whether Hermes will find a client ID on its own — the same places
+    /// `_spotify_setting` looks (`auth_spotify.py:36-52`): `.env`'s
+    /// `HERMES_SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_ID`, then the stored
+    /// `providers.spotify.client_id`. (A variable exported only in the
+    /// host's shell is invisible here; the field then asks for it once.)
+    nonisolated static func hasKnownClientID(env: [String: String], authJSON: Data?) -> Bool {
+        for key in ["HERMES_SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_ID"] {
+            if let value = env[key], !value.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        }
+        guard let authJSON,
+              let json = (try? JSONSerialization.jsonObject(with: authJSON)) as? [String: Any],
+              let spotify = (json["providers"] as? [String: Any])?["spotify"] as? [String: Any],
+              let id = spotify["client_id"] as? String
+        else { return false }
+        return !id.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Off the main actor (C10): read `.env` and `auth.json` and answer
+    /// ``hasKnownClientID(env:authJSON:)``. An unreadable `.env` answers
+    /// from `auth.json` alone — the worst case is asking for an ID Hermes
+    /// already has, which still signs in.
+    func clientIDIsKnown() async -> Bool {
+        let context = self.context
+        return await OffPool.run {
+            let env = (try? HermesEnvService(context: context).loadProven()) ?? [:]
+            let auth = try? context.makeTransport().readFile(context.paths.authJSON)
+            return Self.hasKnownClientID(env: env, authJSON: auth)
+        }
+    }
+
+    /// Spotify's default loopback callback port
+    /// (`DEFAULT_SPOTIFY_REDIRECT_URI = "http://127.0.0.1:43827/spotify/callback"`,
+    /// `hermes_cli/auth_constants.py:110` @ v2026.9.24).
+    nonisolated static let callbackPort = 43827
+    nonisolated static let redirectURI = "http://127.0.0.1:43827/spotify/callback"
+    nonisolated static let dashboardURL = "https://developer.spotify.com/dashboard"
+
+    /// The command a REMOTE window's user runs on this Mac: ssh to the host
+    /// with the callback port forwarded, then `hermes auth spotify` there.
+    /// Scarf's own spawn cannot finish on a remote host — the browser on
+    /// this Mac is redirected to this Mac's 127.0.0.1:43827, where nothing
+    /// listens, and a first-time wizard needs a terminal (S07-F6).
+    static func remoteCommandLine(for context: ServerContext) -> String {
+        GatewaySetupTerminalCommand.shellLine(
+            for: context,
+            hermesArgs: ["auth", "spotify", "--no-browser"],
+            localForwards: ["\(callbackPort):127.0.0.1:\(callbackPort)"]
+        )
     }
 }

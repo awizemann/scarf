@@ -24,6 +24,19 @@ struct SpotifySignInSheet: View {
 
     @State private var flow: SpotifyAuthFlow?
     @State private var successDismissTask: Task<Void, Never>?
+    /// What the sheet shows before (or instead of) the auth run — S07-F6.
+    @State private var gate: Gate = .checking
+    @State private var clientIDDraft = ""
+
+    /// A first-time LOCAL sign-in needs a Client ID Hermes would otherwise
+    /// ask for on a terminal; a REMOTE window cannot finish the OAuth
+    /// callback from here at all, so it gets the command to run instead.
+    enum Gate: Equatable {
+        case checking
+        case needsClientID
+        case remote
+        case running
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -34,11 +47,19 @@ struct SpotifySignInSheet: View {
         }
         .padding(20)
         .frame(minWidth: 440, idealWidth: 440, minHeight: 320)
-        .onAppear {
-            if flow == nil {
-                let f = SpotifyAuthFlow(context: serverContext)
-                flow = f
+        .task {
+            guard flow == nil else { return }
+            if serverContext.isRemote {
+                gate = .remote
+                return
+            }
+            let f = SpotifyAuthFlow(context: serverContext)
+            flow = f
+            if await f.clientIDIsKnown() {
+                gate = .running
                 f.start()
+            } else {
+                gate = .needsClientID
             }
         }
         .onDisappear {
@@ -88,6 +109,110 @@ struct SpotifySignInSheet: View {
 
     @ViewBuilder
     private var content: some View {
+        switch gate {
+        case .checking:
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .needsClientID:
+            clientIDView
+        case .remote:
+            remoteView
+        case .running:
+            flowContent
+        }
+    }
+
+    /// First-time setup: the steps Hermes's own wizard prints
+    /// (`hermes_cli/auth_spotify.py:270-286` @ v2026.9.24), and a field for
+    /// the Client ID it would have read from a terminal.
+    private var clientIDView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Spotify needs a Client ID from your own Spotify developer app. This is a one-time step.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("1. Open the Spotify developer dashboard and click Create app.")
+                Text("2. Add this Redirect URI and select Web API:")
+                HStack {
+                    Text(verbatim: SpotifyAuthFlow.redirectURI)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(SpotifyAuthFlow.redirectURI, forType: .string)
+                    }
+                    .controlSize(.small)
+                }
+                .padding(.leading, 14)
+                Text("3. Save, open the app's Settings and copy its Client ID here.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Button("Open Spotify Dashboard") {
+                if let url = URL(string: SpotifyAuthFlow.dashboardURL) { NSWorkspace.shared.open(url) }
+            }
+            .controlSize(.small)
+            TextField("Client ID", text: $clientIDDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+                .onSubmit(continueWithClientID)
+            if !clientIDDraft.isEmpty, !SpotifyAuthFlow.isPlausibleClientID(clientIDDraft) {
+                Text("A Client ID is letters and digits only (usually 32 characters).")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("Continue", action: continueWithClientID)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!SpotifyAuthFlow.isPlausibleClientID(clientIDDraft))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func continueWithClientID() {
+        guard SpotifyAuthFlow.isPlausibleClientID(clientIDDraft), let flow else { return }
+        gate = .running
+        flow.start(clientID: clientIDDraft)
+    }
+
+    /// A remote window: the OAuth callback listens on the HOST's loopback,
+    /// so sign-in has to run there, with the port forwarded to this Mac.
+    private var remoteView: some View {
+        let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort)) on that host, so Scarf can't complete it from this window.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: line)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            HStack {
+                Spacer()
+                Button("Copy Command") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(line, forType: .string)
+                }
+                Button("Open in Terminal") {
+                    let script = NSAppleScript(source: GatewaySetupTerminalCommand.appleScript(forShellLine: line))
+                    var err: NSDictionary?
+                    script?.executeAndReturnError(&err)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var flowContent: some View {
         switch flow?.state ?? .idle {
         case .idle, .starting:
             startingView
@@ -185,8 +310,13 @@ struct SpotifySignInSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
+                if !clientIDDraft.isEmpty {
+                    // The typed ID may be the problem (a typo, or the
+                    // Redirect URI missing from that Spotify app).
+                    Button("Change Client ID") { gate = .needsClientID }
+                }
                 Button("Try again") {
-                    flow?.start()
+                    flow?.start(clientID: clientIDDraft.isEmpty ? nil : clientIDDraft)
                 }
                 .buttonStyle(.borderedProminent)
             }
