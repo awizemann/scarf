@@ -3257,9 +3257,32 @@ struct HermesFileService: Sendable {
         // Single source of truth for install-location candidates lives in
         // HermesPathSet.hermesBinaryCandidates — keeps pipx/brew/manual lookups
         // consistent across the app.
-        return HermesPathSet.hermesBinaryCandidates
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        if let fixed = HermesPathSet.hermesBinaryCandidates
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return fixed
+        }
+        // Nix, a dev venv, or anything else the user put on their own PATH
+        // (S15-F5). On the main thread only once the login-shell probe has
+        // finished, so this never waits on it there (C10).
+        let path = Thread.isMainThread ? Self.harvestedPATHIfReady() : Self.enrichedShellEnv["PATH"]
+        return Self.executable(named: "hermes", onPATH: path)
     }
+
+    /// First executable `name` in the colon-separated `path`, or nil.
+    nonisolated static func executable(named name: String, onPATH path: String?) -> String? {
+        for dir in (path ?? "").split(separator: ":") where dir.hasPrefix("/") {
+            let candidate = String(dir) + "/" + name
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return nil
+    }
+
+    /// The harvested PATH if ``enrichedShellEnv`` has already been computed,
+    /// else nil. Reading `enrichedShellEnv` itself would run the probe.
+    nonisolated static func harvestedPATHIfReady() -> String? {
+        harvestedPATHLock.withLock { $0 }
+    }
+    nonisolated private static let harvestedPATHLock = OSAllocatedUnfairLock<String?>(initialState: nil)
 
     /// Keys queried from the user's login shell. PATH is needed because .app
     /// bundles launched from Finder/Dock get a minimal PATH (no Homebrew, no
@@ -3290,17 +3313,26 @@ struct HermesFileService: Sendable {
 
     /// Env vars harvested from the user's login shell. Computed once and cached.
     ///
-    /// Probing strategy — two attempts, best result wins:
-    /// 1. `zsh -l -i` (login + interactive) — sources BOTH `.zprofile` and
-    ///    `.zshrc`, which is required for nvm/asdf/mise PATH on most setups
-    ///    (those tools inject PATH from `.zshrc`, not `.zprofile`).
-    ///    Interactive mode can hang on prompt frameworks (oh-my-zsh,
-    ///    powerlevel10k, starship) so we suppress prompts via env and bound
-    ///    with a 5-second timeout.
+    /// Probing strategy — two attempts, best result wins. The shell is the
+    /// user's own login shell (``loginShell``), not always zsh: a bash or
+    /// fish user keeps their PATH and keys in `.bash_profile` /
+    /// `config.fish`, which zsh never reads (S15-F5).
+    /// 1. `<shell> -l -i` (login + interactive) — for zsh this sources BOTH
+    ///    `.zprofile` and `.zshrc`, which is required for nvm/asdf/mise PATH
+    ///    on most setups (those tools inject PATH from `.zshrc`, not
+    ///    `.zprofile`). Interactive mode can hang on prompt frameworks
+    ///    (oh-my-zsh, powerlevel10k, starship) so we suppress prompts via
+    ///    env and bound with a 5-second timeout.
     /// 2. If that yields no PATH (timed out / prompt framework broke it),
-    ///    fall back to `zsh -l` (login only) with a 3-second timeout.
+    ///    fall back to `<shell> -l` (login only) with a 3-second timeout.
     /// 3. If that also fails, hardcoded sane-default PATH; no credentials.
     nonisolated private static let enrichedShellEnv: [String: String] = {
+        let env = probeLoginShellEnv()
+        harvestedPATHLock.withLock { $0 = env["PATH"] }
+        return env
+    }()
+
+    nonisolated private static func probeLoginShellEnv() -> [String: String] {
         // Build a shell script that prints `KEY\0VALUE\0` for each key.
         // Using printf with \0 as separator lets us unambiguously split the
         // output even if a value contains newlines.
@@ -3309,14 +3341,19 @@ struct HermesFileService: Sendable {
         }.joined(separator: "; ")
 
         // Attempt 1: login + interactive (covers nvm/asdf/mise in .zshrc).
-        if let result = runShellProbe(script: script, interactive: true, timeout: 5.0),
-           result["PATH"] != nil {
-            return result
-        }
-        // Attempt 2: login only (safe fallback if interactive hangs).
-        if let result = runShellProbe(script: script, interactive: false, timeout: 3.0),
-           result["PATH"] != nil {
-            return result
+        // A non-zsh shell that yields nothing falls back to the zsh probe
+        // Scarf always ran, so a shell the script trips on is no worse off.
+        let shell = loginShell()
+        for shell in shell == "/bin/zsh" ? [shell] : [shell, "/bin/zsh"] {
+            if let result = runShellProbe(script: script, interactive: true, timeout: 5.0, shell: shell),
+               result["PATH"] != nil {
+                return result
+            }
+            // Attempt 2: login only (safe fallback if interactive hangs).
+            if let result = runShellProbe(script: script, interactive: false, timeout: 3.0, shell: shell),
+               result["PATH"] != nil {
+                return result
+            }
         }
 
         // Fallback when the login shell can't be queried (zsh missing,
@@ -3334,9 +3371,35 @@ struct HermesFileService: Sendable {
             "/sbin"
         ].joined(separator: ":")
         return ["PATH": fallbackPath]
-    }()
+    }
 
-    /// Runs a zsh probe with the given script and returns the parsed
+    /// The shell to probe: the account's login shell (the one Terminal
+    /// opens), then `$SHELL`, when it is one the probe script and its
+    /// `-l`/`-i`/`-c` flags work in. csh/tcsh (no `-l` with other flags,
+    /// no `"$VAR"` for an unset name) and anything unknown keep the old
+    /// `/bin/zsh`, the macOS default.
+    nonisolated static func loginShell(
+        account: String? = accountLoginShell(),
+        environment: String? = ProcessInfo.processInfo.environment["SHELL"],
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String {
+        let supported: Set<String> = ["zsh", "bash", "fish"]
+        for candidate in [account, environment].compactMap({ $0 }) where candidate.hasPrefix("/") {
+            let name = (candidate as NSString).lastPathComponent
+            if supported.contains(name), isExecutable(candidate) { return candidate }
+        }
+        return "/bin/zsh"
+    }
+
+    /// `pw_shell` from the user database — what Terminal runs. `$SHELL` in
+    /// a GUI app is inherited from launchd and can lag a `chsh`.
+    nonisolated static func accountLoginShell() -> String? {
+        guard let pw = getpwuid(getuid()), let shell = pw.pointee.pw_shell else { return nil }
+        let value = String(cString: shell)
+        return value.isEmpty ? nil : value
+    }
+
+    /// Runs a login-shell probe with the given script and returns the parsed
     /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
     /// When `interactive` is true, injects env vars that suppress common
     /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
@@ -3349,11 +3412,13 @@ struct HermesFileService: Sendable {
     /// synchronous readers, which is a larger change than the hazard: the
     /// budgets here are 5 s and 3 s, not the 300 s the async rule was written
     /// for, and the value is computed exactly once per process.
-    nonisolated static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
+    nonisolated static func runShellProbe(
+        script: String, interactive: Bool, timeout: TimeInterval, shell: String = "/bin/zsh"
+    ) -> [String: String]? {
         let pipe = Pipe()
         let errPipe = Pipe()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = interactive ? ["-l", "-i", "-c", script] : ["-l", "-c", script]
         process.standardOutput = pipe
         process.standardError = errPipe
