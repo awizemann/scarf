@@ -5,9 +5,11 @@ permalink: scarf/architecture/scarf-server-backup-snapshots-state-db-read-only-r
 tags: [backup, restore, state-db, charter-c3, data-safety]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteBackupService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BackupManifest.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDatabaseScripts.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: 617115a44db1d20a6f87b2db698c6f6c549e612f
 created: 2026-09-26
 updated: 2026-09-27
+reviewed: 2026-09-28
+reviewed_by: audit:claude-code (background)
 ---
 Manage Servers → Back Up / Restore (`.scarfbackup`), reworked in R05 (S14-F1/F2/F3 plus orchestrator follow-ups) after the backup ran `PRAGMA wal_checkpoint(TRUNCATE)` on the live state.db (a C3 write), tarred every other database live, and restore tarred over live databases. Scripts live in `HermesDatabaseScripts.swift` (shared by both sides).
 
