@@ -32,10 +32,12 @@ import Foundation
 /// `gateway_state: "draining"` while it waits (`gateway/run_shutdown.py:1577`,
 /// `:1597`) and, while draining, names each unit it is holding for in
 /// `active_work` (`gateway/run.py:4007-4013`, `_describe_active_work`
-/// `run_shutdown.py:1511-1547`). `"draining"` has been written since
-/// v2026.4.13 and `active_work` since v2026.7.20; both are read only when
-/// present, so an older host shows the same wait without the per-unit
-/// lines, and a host that writes neither keeps the old failure verdict.
+/// `run_shutdown.py:1511-1547`). Only a drain with `restart_requested: true`
+/// counts (see ``Snapshot/isDrainingForRestart``): that flag is set only by
+/// the SIGUSR1 in-band restart, the one drain the service manager follows
+/// with a new gateway. `active_work` (v2026.7.20+) is read when present, so
+/// an older host shows the same wait without the per-unit lines, and a host
+/// whose state file says neither keeps the old failure verdict.
 public enum HermesGatewayRestartDrain {
 
     /// What `gateway_state.json` says, reduced to what a drain watch needs.
@@ -46,16 +48,34 @@ public enum HermesGatewayRestartDrain {
         /// One human line per `active_work` unit; `nil` when the gateway did
         /// not publish the key (not draining, or a pre-v2026.7.20 host).
         public var activeWork: [String]?
+        /// `restart_requested` — true only on the SIGUSR1 `request_restart`
+        /// path (`gateway/run_shutdown.py:1609-1617`, written by
+        /// `_update_runtime_status`, `gateway/run.py:4012` @ v2026.9.24).
+        public var restartRequested: Bool
 
-        public init(pid: Int?, state: String?, exitReason: String? = nil, activeWork: [String]? = nil) {
+        public init(pid: Int?, state: String?, exitReason: String? = nil,
+                    activeWork: [String]? = nil, restartRequested: Bool = false) {
             self.pid = pid
             self.state = state
             self.exitReason = exitReason
             self.activeWork = activeWork
+            self.restartRequested = restartRequested
         }
 
-        /// The gateway accepted a restart/stop and is waiting on work.
+        /// The gateway is waiting on work before it stops, for any reason.
         public var isDraining: Bool { state == "draining" }
+
+        /// The gateway accepted an IN-BAND RESTART and is waiting on work —
+        /// the only drain the service manager follows with a new gateway.
+        ///
+        /// `draining` alone is not enough. A SIGTERM stop drains too (the
+        /// pre-v2026.8.31 launchd restart was SIGTERM, then the CLI's own
+        /// `launchctl kickstart -k`, which never runs once Scarf's timer kills
+        /// the CLI), and so do a scale-to-zero suspend (`run_shutdown.py:542`)
+        /// and a dashboard drain request (`:698`). None of those sets
+        /// `restart_requested`, and none of them is a restart Hermes will
+        /// finish by itself.
+        public var isDrainingForRestart: Bool { isDraining && restartRequested }
     }
 
     /// Parse `gateway_state.json`. `nil` for a missing or unreadable file.
@@ -68,7 +88,8 @@ public enum HermesGatewayRestartDrain {
             pid: (json["pid"] as? NSNumber)?.intValue,
             state: json["gateway_state"] as? String,
             exitReason: json["exit_reason"] as? String,
-            activeWork: work
+            activeWork: work,
+            restartRequested: (json["restart_requested"] as? Bool) ?? false
         )
     }
 
@@ -123,6 +144,22 @@ public enum HermesGatewayRestartDrain {
         return .waitingForServiceManager
     }
 
+    /// The one question both restart call sites ask after the CLI returns:
+    /// did the run end at Scarf's timer while the gateway drains FOR A
+    /// RESTART? Then the snapshot to watch from and Hermes's wait budget
+    /// (the announced one when the output got through, else computed from
+    /// config.yaml). The readers are only called on a timeout; both run off
+    /// the main actor at the call sites.
+    public static func afterTimeout(
+        output: String, exitCode: Int32,
+        stateJSON: () -> Data?, configYAML: () -> String?
+    ) -> (snapshot: Snapshot, budgetSeconds: Int)? {
+        guard timedOut(output: output, exitCode: exitCode),
+              let snap = snapshot(stateJSON: stateJSON()), snap.isDrainingForRestart
+        else { return nil }
+        return (snap, budgetSeconds(fromOutput: output) ?? budgetSeconds(configYAML: configYAML()))
+    }
+
     /// True when a `gateway restart` run ended at Scarf's own timer — the
     /// only case the state file is consulted for. A missing binary or an
     /// SSH failure also answers -1, but without the timeout line.
@@ -143,6 +180,25 @@ public enum HermesGatewayRestartDrain {
         guard let match = regex.matches(in: output, range: range).last,
               let r = Range(match.range(at: 1), in: output) else { return nil }
         return Int(output[r])
+    }
+
+    /// Hermes's own wait, computed the way the CLI does
+    /// (`_get_restart_exit_wait_budget`, `hermes_cli/gateway.py:3103-3114`;
+    /// `resolve_restart_exit_wait_budget`, `gateway/restart.py:358-361` @
+    /// v2026.9.24): `agent.restart_drain_timeout` (default 0) +
+    /// `agent.restart_after_turn_timeout` (default 1800) + 15. The
+    /// `HERMES_RESTART_*` env overrides live in the gateway's process
+    /// environment, which Scarf cannot see; config.yaml is the documented
+    /// home for both keys.
+    public static func budgetSeconds(configYAML: String?) -> Int {
+        let values = configYAML.map { HermesYAML.parseNestedYAML($0).values } ?? [:]
+        func seconds(_ key: String, _ fallback: Double) -> Double {
+            guard let raw = values["agent." + key].map(HermesYAML.stripYAMLQuotes),
+                  let value = Double(raw.trimmingCharacters(in: .whitespaces)), value >= 0
+            else { return fallback }
+            return value
+        }
+        return Int(seconds("restart_drain_timeout", 0) + seconds("restart_after_turn_timeout", 1800) + 15)
     }
 
     /// Hermes's default wait: `restart_drain_timeout` (0) +

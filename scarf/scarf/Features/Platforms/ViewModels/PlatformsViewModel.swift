@@ -303,8 +303,14 @@ final class PlatformsViewModel: OutcomeMessageHosting {
                 if let drain = report.drain {
                     self.drainWatcher.onFinished = { [weak self] in
                         guard let self else { return }
+                        // The amber "restart accepted" note is settled here
+                        // whatever the ending: the banner under Restart now
+                        // says what happened, and a note promising a restart
+                        // must not sit beside one saying it didn't come.
                         if case .restarted = self.drainWatcher.status {
                             self.applySaveOutcome(.success(String(localized: "Gateway restarted")))
+                        } else {
+                            self.dismissMessage()
                         }
                         self.load(force: true)
                     }

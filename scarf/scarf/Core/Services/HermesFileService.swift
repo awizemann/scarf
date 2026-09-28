@@ -1510,19 +1510,17 @@ struct HermesFileService: Sendable {
         let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: 60)
         // Only a run Scarf's own timer ended is worth a second look: then the
         // gateway itself says whether it is draining.
-        var drain: HermesGatewayRestartDrain.Snapshot?
-        if HermesGatewayRestartDrain.timedOut(output: result.output, exitCode: result.exitCode),
-           let snap = HermesGatewayRestartDrain.snapshot(
-               stateJSON: gatewayStateData(own: readFileData(context.paths.gatewayStateJSON))),
-           snap.isDraining {
-            drain = snap
-        }
+        let drain = HermesGatewayRestartDrain.afterTimeout(
+            output: result.output, exitCode: result.exitCode,
+            stateJSON: { gatewayStateData(own: readFileData(context.paths.gatewayStateJSON)) },
+            configYAML: { readFileData(context.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) } }
+        )
         let outcome = HermesGatewayServiceVerdict.judge(
             verb: .restart, output: result.output, exitCode: result.exitCode,
             externallySupervised: supervised, drainingAfterTimeout: drain != nil
         )
-        return (outcome, outcome.confidence == .unconfirmed ? drain : nil,
-                HermesGatewayRestartDrain.budgetSeconds(fromOutput: result.output))
+        guard outcome.confidence == .unconfirmed, let drain else { return (outcome, nil, nil) }
+        return (outcome, drain.snapshot, drain.budgetSeconds)
     }
 
     // MARK: - MCP YAML: block extractor + parser

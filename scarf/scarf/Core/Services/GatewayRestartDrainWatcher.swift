@@ -5,9 +5,10 @@ import ScarfCore
 /// until the replacement is running (S07-F3).
 ///
 /// The restart CLI is still capped at 60 s (charter C10); what outlives it
-/// is this watch, which only READS `gateway_state.json` — off the main actor,
-/// every ``interval`` — and never spawns. See ``HermesGatewayRestartDrain``
-/// for why the state file is the source.
+/// is this watch, which reads `gateway_state.json` off the main actor every
+/// ``interval``. (For a named profile the read resolves the multiplexer's
+/// root record, which can run a 5 s-capped `pgrep` — still off-main.) See
+/// ``HermesGatewayRestartDrain`` for why the state file is the source.
 ///
 /// It is bounded by Hermes's own wait (`budgetSeconds`, ~30 min by default)
 /// plus a grace period, after which it stops and says the gateway has not
@@ -24,6 +25,9 @@ final class GatewayRestartDrainWatcher {
         case failed(String?)
         /// Hermes's wait (plus grace) passed with no replacement reported.
         case gaveUp
+        /// The old gateway exited and nothing started a new one within
+        /// ``revivalGraceSeconds`` — the service manager is not going to.
+        case notRevived
         /// The user stopped watching; Hermes carries on.
         case left
     }
@@ -31,13 +35,15 @@ final class GatewayRestartDrainWatcher {
     private(set) var status: Status = .idle
     private(set) var startedAt: Date?
 
-    /// Called once when the watch ends by itself (restarted, failed, gave
-    /// up) — the pane reloads its status there.
+    /// Called once when the watch ends — by itself (restarted, failed, not
+    /// revived, gave up) or by Stop Waiting. The pane reloads its status
+    /// and settles its own message there.
     @ObservationIgnored var onFinished: (() -> Void)?
 
     @ObservationIgnored private let readState: @Sendable () -> Data?
     @ObservationIgnored private let interval: Duration
     @ObservationIgnored private let graceSeconds: Int
+    @ObservationIgnored private let revivalGraceSeconds: Int
     @ObservationIgnored private var task: Task<Void, Never>?
 
     /// - Parameters:
@@ -49,11 +55,13 @@ final class GatewayRestartDrainWatcher {
     init(
         readState: @escaping @Sendable () -> Data?,
         interval: Duration = .seconds(10),
-        graceSeconds: Int = 120
+        graceSeconds: Int = 120,
+        revivalGraceSeconds: Int = 90
     ) {
         self.readState = readState
         self.interval = interval
         self.graceSeconds = graceSeconds
+        self.revivalGraceSeconds = revivalGraceSeconds
     }
 
     /// The production reader for `context`.
@@ -79,7 +87,13 @@ final class GatewayRestartDrainWatcher {
         let deadline = ContinuousClock.now + .seconds(limit)
         let read = readState
         let interval = interval
+        let revivalGrace = Duration.seconds(revivalGraceSeconds)
         task = Task { [weak self] in
+            // When the old gateway was first seen gone with no replacement.
+            // launchd KeepAlive / systemd RestartForceExitStatus relaunch
+            // within seconds; a unit without them relied on the CLI's own
+            // follow-up `start`/`kickstart`, which Scarf's timer killed.
+            var goneSince: ContinuousClock.Instant?
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 if Task.isCancelled { return }
@@ -95,7 +109,16 @@ final class GatewayRestartDrainWatcher {
                 case .failed(let reason):
                     self.finish(.failed(reason))
                     return
+                case .waitingForServiceManager:
+                    let since = goneSince ?? ContinuousClock.now
+                    goneSince = since
+                    if ContinuousClock.now - since >= revivalGrace {
+                        self.finish(.notRevived)
+                        return
+                    }
+                    self.status = .watching(phase)
                 default:
+                    goneSince = nil
                     self.status = .watching(phase)
                 }
                 if ContinuousClock.now >= deadline {
@@ -112,6 +135,7 @@ final class GatewayRestartDrainWatcher {
         task?.cancel()
         task = nil
         status = .left
+        onFinished?()
     }
 
     /// Forget the watch entirely — a new gateway action owns the pane now.
@@ -150,6 +174,8 @@ final class GatewayRestartDrainWatcher {
             return String(localized: "Hermes's restart wait has passed and the gateway hasn't reported back — check its status.")
         case .left:
             return String(localized: "Stopped watching. Hermes still restarts the gateway when the current turn ends.")
+        case .notRevived:
+            return String(localized: "The old gateway stopped, but no new one has started. Start the gateway to bring it back.")
         }
     }
 

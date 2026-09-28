@@ -600,22 +600,23 @@ final class MessagingGatewayViewModel {
                 // is draining is waiting for the current turn, not failed.
                 // The gateway's own state file says so (the CLI's buffered
                 // output usually does not reach us) — read it only then.
-                var drain: HermesGatewayRestartDrain.Snapshot?
-                if verb == .restart,
-                   HermesGatewayRestartDrain.timedOut(output: result.output, exitCode: result.exitCode),
-                   let snap = HermesGatewayRestartDrain.snapshot(stateJSON: HermesFileService(context: ctx)
-                       .gatewayStateData(own: ctx.readData(ctx.paths.gatewayStateJSON))),
-                   snap.isDraining {
-                    drain = snap
-                }
+                let drain = verb == .restart
+                    ? HermesGatewayRestartDrain.afterTimeout(
+                        output: result.output, exitCode: result.exitCode,
+                        stateJSON: {
+                            HermesFileService(context: ctx)
+                                .gatewayStateData(own: ctx.readData(ctx.paths.gatewayStateJSON))
+                        },
+                        configYAML: { ctx.readData(ctx.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) } })
+                    : nil
                 // A supervised hand-back that outlasts the timeout is still
                 // restarting, not failed (see the verdict).
                 let outcome = HermesGatewayServiceVerdict.judge(
                     verb: verb, output: result.output, exitCode: result.exitCode,
                     externallySupervised: supervised, drainingAfterTimeout: drain != nil
                 )
-                return (outcome, false, outcome.confidence == .unconfirmed ? drain : nil,
-                        HermesGatewayRestartDrain.budgetSeconds(fromOutput: result.output))
+                guard outcome.confidence == .unconfirmed, let drain else { return (outcome, false, nil, nil) }
+                return (outcome, false, drain.snapshot, drain.budgetSeconds)
             }.value
             guard let self else { return }
             self.isBusy = false

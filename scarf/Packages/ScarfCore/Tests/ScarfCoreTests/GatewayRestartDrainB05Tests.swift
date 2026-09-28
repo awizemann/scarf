@@ -119,6 +119,48 @@ import Foundation
         #expect(outcome.confidence == .failed)
     }
 
+    // MARK: - Only a drain FOR A RESTART counts (fresh-eyes #1)
+
+    /// A SIGTERM stop, a scale-to-zero suspend and a dashboard drain all write
+    /// `draining` without `restart_requested` — the pre-v2026.8.31 launchd
+    /// restart was SIGTERM + the CLI's own kickstart, which Scarf's timer
+    /// kills. None of them will bring a new gateway by itself.
+    @Test func drainingWithoutRestartRequestedIsNotAWatchedRestart() throws {
+        let plain = try #require(HermesGatewayRestartDrain.snapshot(stateJSON: Self.record(pid: 10, state: "draining")))
+        #expect(plain.isDraining)
+        #expect(!plain.isDrainingForRestart)
+        #expect(HermesGatewayRestartDrain.afterTimeout(
+            output: Self.timedOut, exitCode: -1,
+            stateJSON: { Self.record(pid: 10, state: "draining") }, configYAML: { nil }) == nil)
+
+        let hermes = try #require(HermesGatewayRestartDrain.snapshot(stateJSON: Data(Self.hermesDrainingRecord.utf8)))
+        #expect(hermes.isDrainingForRestart)
+    }
+
+    @Test func afterTimeoutReadsOnlyOnATimeoutAndUsesTheConfigBudget() throws {
+        final class Reads: @unchecked Sendable { var count = 0 }
+        let reads = Reads()
+        let state = { () -> Data? in reads.count += 1; return Data(Self.hermesDrainingRecord.utf8) }
+        #expect(HermesGatewayRestartDrain.afterTimeout(
+            output: "✓ Service restart requested", exitCode: 0, stateJSON: state, configYAML: { nil }) == nil)
+        #expect(reads.count == 0, "a run that finished never reads the state file")
+
+        let hit = try #require(HermesGatewayRestartDrain.afterTimeout(
+            output: Self.timedOut, exitCode: -1, stateJSON: state,
+            configYAML: { "agent:\n  restart_after_turn_timeout: 3600\n  restart_drain_timeout: 60\n" }))
+        #expect(hit.snapshot.pid == 74654)
+        #expect(hit.budgetSeconds == 3675)
+    }
+
+    /// `_get_restart_exit_wait_budget` (`gateway.py:3103-3114`) with the
+    /// `config_defaults.py:89,103` defaults.
+    @Test func configBudgetMatchesHermesDefaults() {
+        #expect(HermesGatewayRestartDrain.budgetSeconds(configYAML: nil) == 1815)
+        #expect(HermesGatewayRestartDrain.budgetSeconds(configYAML: "model:\n  default: x\n") == 1815)
+        #expect(HermesGatewayRestartDrain.budgetSeconds(configYAML: "agent:\n  restart_after_turn_timeout: 0\n") == 15)
+        #expect(HermesGatewayRestartDrain.budgetSeconds(configYAML: "agent:\n  restart_after_turn_timeout: \"120\"\n") == 135)
+    }
+
     // MARK: - The announced budget
 
     @Test func budgetIsReadFromEachBackendsAnnouncement() {
