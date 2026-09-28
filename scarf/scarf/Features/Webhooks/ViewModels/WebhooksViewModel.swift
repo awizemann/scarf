@@ -67,6 +67,9 @@ final class WebhooksViewModel {
     /// subscriptions — the UI should show a "Setup required" panel instead of
     /// trying to parse the output as webhook entries.
     var webhookPlatformNotEnabled: Bool = false
+    /// Non-nil when the last `webhook list` run failed or printed something
+    /// Scarf could not read — shown in place of the empty state (S07-F8).
+    var loadError: String?
 
     /// `hasLoaded` lets a plain section re-entry skip the `webhook list` SSH
     /// call (the VM is cached in `AppCoordinator` and persists across switches);
@@ -88,15 +91,37 @@ final class WebhooksViewModel {
             let result = await OffPool.run {
                 fileService.runHermesCLI(args: ["webhook", "list"], timeout: 30)
             }
-            let notEnabled = Self.detectNotEnabled(result.output)
-            let parsed = notEnabled ? [] : HermesWebhookList.parse(result.output).map(HermesWebhook.init)
+            let outcome = Self.classify(output: result.output, exitCode: result.exitCode)
             await MainActor.run {
                 self.isLoading = false
-                self.webhookPlatformNotEnabled = notEnabled
-                self.webhooks = parsed
+                switch outcome {
+                case .notEnabled:
+                    self.webhookPlatformNotEnabled = true
+                    self.webhooks = []
+                    self.loadError = nil
+                case .entries(let parsed):
+                    self.webhookPlatformNotEnabled = false
+                    self.webhooks = parsed
+                    self.loadError = nil
+                case .failed(let reason):
+                    // S07-F8: a run that failed (SSH down, timeout, crash) is
+                    // not an empty board. Keep whatever was listed before and
+                    // say what happened — the iOS screen already does.
+                    self.webhookPlatformNotEnabled = false
+                    self.loadError = reason
+                    self.pendingSubscribeConfirmation = nil
+                    // The error state replaces only an EMPTY list; over rows
+                    // already shown, the header banner carries it instead.
+                    if !self.webhooks.isEmpty {
+                        self.message = reason
+                        self.messageIsError = true
+                        self.messageIsUnconfirmed = false
+                    }
+                    return
+                }
                 if let pending = self.pendingSubscribeConfirmation {
                     self.pendingSubscribeConfirmation = nil
-                    if !notEnabled, !parsed.contains(where: { $0.name == pending }) {
+                    if case .entries(let parsed) = outcome, !parsed.contains(where: { $0.name == pending }) {
                         self.message = String(
                             localized: "Hermes reported creating /\(pending), but it isn’t in the subscription list. Check `hermes webhook list` on the host.",
                             comment: "Webhook subscribe claimed success but the reload disagrees"
@@ -114,14 +139,46 @@ final class WebhooksViewModel {
         }
     }
 
-    /// Detect the "not enabled" state by the setup-instructions marker hermes emits.
-    /// Checked before parsing so we don't synthesize bogus entries from instructional
-    /// text.
-    nonisolated private static func detectNotEnabled(_ output: String) -> Bool {
-        let lower = output.lowercased()
-        return lower.contains("webhook platform is not enabled")
-            || lower.contains("run the gateway setup wizard")
-            || lower.contains("webhook_enabled=true")
+    /// What one `hermes webhook list` run means for this pane.
+    enum ListOutcome: Equatable {
+        case notEnabled
+        case entries([HermesWebhook])
+        case failed(String)
+    }
+
+    /// Classify a `webhook list` run with the shared ScarfCore reader
+    /// (``HermesWebhookList/listing(_:)`` — the one iOS uses) AND the exit
+    /// code. `parse` alone answered `[]` for anything it did not recognise,
+    /// so an SSH timeout (exit -1, no output) rendered "No webhook
+    /// subscriptions" (S07-F8). A non-zero exit that still printed a real
+    /// listing or the not-enabled hint keeps that answer: the text is the
+    /// proof, not the code.
+    nonisolated static func classify(output: String, exitCode: Int32) -> ListOutcome {
+        switch HermesWebhookList.listing(output) {
+        case .notEnabled:
+            return .notEnabled
+        case .entries(let entries) where !entries.isEmpty:
+            return .entries(entries.map(HermesWebhook.init))
+        case .entries:
+            // Empty: only believable from a run that exited cleanly. The
+            // empty-state sentinel or no output at all from a failed run is
+            // a failure, not "none".
+            if exitCode == 0 { return .entries([]) }
+            return .failed(failureReason(output: output, exitCode: exitCode))
+        case .unparsed:
+            return .failed(failureReason(output: output, exitCode: exitCode))
+        }
+    }
+
+    nonisolated private static func failureReason(output: String, exitCode: Int32) -> String {
+        let last = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+        guard let last, exitCode != -1 else {
+            return String(localized: "Couldn't run hermes webhook list on this server.")
+                + (last.map { " \($0)" } ?? "")
+        }
+        return String(localized: "Couldn't read the webhook list: \(last)")
     }
 
     /// The HMAC secret and URL a just-created subscription reported.

@@ -1879,7 +1879,8 @@ public enum HermesGatewayServiceVerdict {
     ///   the CLI does not stop it (the signal was already sent). A timeout
     ///   there is "still restarting", not a failure.
     public static func judge(
-        verb: Verb, output: String, exitCode: Int32, externallySupervised: Bool = false
+        verb: Verb, output: String, exitCode: Int32, externallySupervised: Bool = false,
+        drainingAfterTimeout: Bool = false
     ) -> HermesCLIOutcome {
         let successMarkers: [String]
         switch verb {
@@ -1906,6 +1907,20 @@ public enum HermesGatewayServiceVerdict {
            lines.last?.hasPrefix(transportTimeoutPrefix) == true, !sawServiceRefusal(lines) {
             return HermesCLIOutcome(
                 succeeded: false, detail: supervisedRestartPendingNote, warning: nil, confidence: .unconfirmed)
+        }
+        // S07-F3: a launchd/systemd restart that outlived Scarf's timer while
+        // `gateway_state.json` says the gateway is draining. Hermes has sent
+        // SIGUSR1 and is waiting for the current turn (up to ~30 min by
+        // default); the service manager starts the replacement afterwards.
+        // The caller reads the state file after the timeout and passes what
+        // it saw — see ``HermesGatewayRestartDrain``. A run that printed a
+        // real refusal keeps it.
+        if verb == .restart, drainingAfterTimeout, !verdict.succeeded,
+           HermesGatewayRestartDrain.timedOut(output: output, exitCode: exitCode),
+           !sawServiceRefusal(lines) {
+            return HermesCLIOutcome(
+                succeeded: false, detail: HermesGatewayRestartDrain.pendingNote,
+                warning: nil, confidence: .unconfirmed)
         }
         if verb == .restart, !verdict.succeeded, !sawServiceRefusal(lines),
            lines.contains(where: {

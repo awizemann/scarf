@@ -31,6 +31,8 @@ struct WebhooksView: View {
                 ProgressView().padding()
             } else if viewModel.webhookPlatformNotEnabled {
                 setupRequiredState
+            } else if let error = viewModel.loadError, viewModel.webhooks.isEmpty {
+                loadErrorState(error)
             } else if viewModel.webhooks.isEmpty {
                 emptyState
             } else {
@@ -143,6 +145,27 @@ struct WebhooksView: View {
         let appleScript = NSAppleScript(source: GatewaySetupTerminalCommand.appleScript(for: viewModel.context))
         var err: NSDictionary?
         appleScript?.executeAndReturnError(&err)
+    }
+
+    /// S07-F8: a `webhook list` that failed to run is not "no subscriptions".
+    private func loadErrorState(_ error: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Couldn't load webhook subscriptions")
+                .foregroundStyle(.secondary)
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+                .textSelection(.enabled)
+            Button("Try Again") { viewModel.load(force: true) }
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private var emptyState: some View {

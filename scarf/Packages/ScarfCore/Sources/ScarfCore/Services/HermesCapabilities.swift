@@ -1804,6 +1804,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// argparse outright on these verbs.
     public var hasPeerRunCommands: Bool { isV021OrLater }
 
+    /// `launchd_restart` restarts IN BAND: SIGUSR1, then launchd's KeepAlive
+    /// starts the replacement (`hermes_cli/gateway.py:5954` @ v2026.8.31;
+    /// `gateway_launchd.py:744-790` @ v2026.9.24). Below it (v2026.8.27 =
+    /// 0.20.6, `gateway.py:5537-5584`) the CLI SIGTERMs the gateway, waits
+    /// `agent.restart_drain_timeout` and only THEN runs `launchctl kickstart
+    /// -k` itself — so a spawn cut short mid-wait never restarts it. Scarf
+    /// gives the restart spawn a ceiling that covers that wait on those
+    /// hosts (``HermesGatewayRestartDrain/restartSpawnTimeout(capabilities:configYAML:)``,
+    /// B05 / S07-F3 on older hosts).
+    public var hasLaunchdInBandRestart: Bool { isV021OrLater }
+
     /// `hermes cron doctor` — check scheduled jobs for common health
     /// issues (v0.21+, `hermes_cli/subcommands/cron.py:184`
     /// `cron_subparsers.add_parser("doctor", ...)`). Unlike its

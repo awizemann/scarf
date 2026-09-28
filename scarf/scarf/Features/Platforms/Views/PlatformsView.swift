@@ -124,6 +124,8 @@ struct PlatformsView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(viewModel.restartInProgress)
+                // S07-F3: a restart Hermes is holding for the current turn.
+                GatewayRestartDrainBanner(watcher: viewModel.drainWatcher)
             }
             .font(.caption)
             .padding(.horizontal, 12)
