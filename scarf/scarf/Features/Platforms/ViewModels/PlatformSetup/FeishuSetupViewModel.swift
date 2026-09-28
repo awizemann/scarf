@@ -23,7 +23,11 @@ final class FeishuSetupViewModel: PlatformSetupForm {
 
     var appID: String = ""
     var appSecret: String = ""
-    var domain: String = "lark"
+    /// Hermes's own default when `FEISHU_DOMAIN` is absent is `feishu`
+    /// (`gateway/config_env.py:578`, `plugins/platforms/feishu/adapter.py:1387`
+    /// @ `v2026.9.24`, unchanged since v2026.4.30). Defaulting to `lark` here
+    /// switched a China bot to the Lark endpoint on an untouched Save (S07-F7).
+    var domain: String = "feishu"
     var encryptKey: String = ""
     var verificationToken: String = ""
     var allowedUsers: String = ""
@@ -46,7 +50,7 @@ final class FeishuSetupViewModel: PlatformSetupForm {
             let env = snapshot.env
             appID = env["FEISHU_APP_ID"] ?? ""
             appSecret = env["FEISHU_APP_SECRET"] ?? ""
-            domain = env["FEISHU_DOMAIN"] ?? "lark"
+            domain = Self.domain(fromEnv: env["FEISHU_DOMAIN"])
             encryptKey = env["FEISHU_ENCRYPT_KEY"] ?? ""
             verificationToken = env["FEISHU_VERIFICATION_TOKEN"] ?? ""
             allowedUsers = env["FEISHU_ALLOWED_USERS"] ?? ""
@@ -65,5 +69,12 @@ final class FeishuSetupViewModel: PlatformSetupForm {
             "FEISHU_CONNECTION_MODE": connectionMode == "websocket" ? "" : connectionMode
         ]
         commitSave(envPairs: envPairs, configKV: [:])
+    }
+
+    /// `FEISHU_DOMAIN` as the gateway resolves it: absent or blank is
+    /// `feishu`, and the value is lower-cased (`.lower()` at the adapter).
+    nonisolated static func domain(fromEnv raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        return value.isEmpty ? "feishu" : value
     }
 }
