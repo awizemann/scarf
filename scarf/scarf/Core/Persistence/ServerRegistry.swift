@@ -230,7 +230,10 @@ final class ServerRegistry: GuardedSidecarStore {
 
         if let removed, case .ssh(let config) = removed.kind {
             let transport = SSHTransport(contextID: id, config: config, displayName: removed.displayName)
-            transport.closeControlMaster()
+            // `ssh -O exit` blocks for up to 10 s on a wedged master (after
+            // sleep or a network change), and this runs on the main actor
+            // from the Remove confirmation (C10). Nothing waits on it.
+            Task.detached { await OffPool.run { transport.closeControlMaster() } }
             // Drop any circuit-breaker state (gh#138) so a future re-add of
             // the same host starts clean.
             SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: config.host, port: config.port))
@@ -300,8 +303,9 @@ final class ServerRegistry: GuardedSidecarStore {
     /// and the entry's stable UUID travel. **No secrets** ride along —
     /// SSH private keys live at the path referenced by `identityFile`,
     /// not in `servers.json`. Importing on a different Mac requires the
-    /// user to copy their `~/.ssh/` keys separately (or re-point each
-    /// entry's identityFile in Edit Server).
+    /// user to copy their `~/.ssh/` keys separately (or remove and re-add
+    /// an entry with a new identity file — saved servers can't be edited
+    /// yet, t-83d2fe).
     func exportFile() throws -> Data {
         let payload = ExportFile(
             schemaVersion: Self.currentSchemaVersion,
