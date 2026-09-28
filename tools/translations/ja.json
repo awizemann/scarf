@@ -2051,7 +2051,6 @@
   "Sign In": "サインイン",
   "Sign each request body with HMAC-SHA256 using this secret.": "このシークレットを使い、各リクエストのボディを HMAC-SHA256 で署名します。",
   "Sign in first": "先にサインインしてください",
-  "Sign in first with `hermes login %@` if the adapter reports not authenticated.": "アダプターが未認証と報告する場合は、まず `hermes login %@` でサインインしてください。",
   "Sign in to Nous Portal": "Nous Portal にサインイン",
   "Sign in to Nous Portal to load the catalog, or enter a model ID manually.": "カタログを読み込むには Nous Portal にサインインするか、モデル ID を手動で入力してください。",
   "Sign in to Spotify": "Spotify にサインイン",
@@ -2933,7 +2932,6 @@
   "This profile has no gateway process of its own — the default profile's multiplexer carries its traffic. Manage it from the default profile.": "このプロファイルには独自のゲートウェイプロセスがありません。既定のプロファイルのマルチプレクサーがトラフィックを処理します。既定のプロファイルから管理してください。",
   "This server's Hermes can't run Live Voice.": "このサーバーの Hermes では Live Voice を実行できません。",
   "To set it up, on the Hermes host:": "設定するには、Hermes ホストで次を行います:",
-  "Trace exports cover one session at a time — use a session's own Export… for that.": "トレースのエクスポートは一度に 1 セッションずつです。そのためには各セッションの「書き出す…」を使ってください。",
   "Transcribing…": "文字起こし中…",
   "Transcription failed. Try again.": "文字起こしに失敗しました。もう一度お試しください。",
   "Turn on Shared usage metrics first — Hermes refuses to send without local collection enabled.": "先に「共有する利用メトリクス」をオンにしてください。ローカルでの収集が有効でない限り、Hermes は送信しません。",
@@ -3308,5 +3306,11 @@
   "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": ".env の %@ が現在この設定を決めています。保存すると値を config.yaml に移し、.env の行を削除します。",
   "Saving removes the unused %@ line from .env.": "保存すると、使われていない %@ の行を .env から削除します。",
   "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": ".env の %@ がまだこのプラットフォームを制限しています。すべて許可するには .env からその行を削除するか、ここに少なくとも 1 件のエントリを残してください。",
-  "Couldn't read .env, so the allowlist wasn't saved.": ".env を読み取れなかったため、許可リストは保存されませんでした。"
+  "Couldn't read .env, so the allowlist wasn't saved.": ".env を読み取れなかったため、許可リストは保存されませんでした。",
+  "Couldn’t read SOUL.md, so editing is off until Reload succeeds.": "SOUL.md を読み込めなかったため、再読み込みが成功するまで編集できません。",
+  "Clear SOUL.md?": "SOUL.md を空にしますか？",
+  "Clear SOUL.md": "SOUL.md を空にする",
+  "The editor is empty. Saving replaces the current SOUL.md with an empty file.": "エディタが空です。保存すると、現在の SOUL.md が空のファイルに置き換えられます。",
+  "Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those.": "Markdown、Quarto、トレースのエクスポートは 1 セッションずつです。各セッションの「書き出す…」を使ってください。",
+  "Sign in first with `%@` if the adapter reports not authenticated.": "アダプタが未認証と報告した場合は、先に `%@` でサインインしてください。"
 }

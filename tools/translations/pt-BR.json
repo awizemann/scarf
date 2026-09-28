@@ -2063,7 +2063,6 @@
   "Sign In": "Entrar",
   "Sign each request body with HMAC-SHA256 using this secret.": "Assine o corpo de cada requisição com HMAC-SHA256 usando este segredo.",
   "Sign in first": "Faça login primeiro",
-  "Sign in first with `hermes login %@` if the adapter reports not authenticated.": "Faça login primeiro com `hermes login %@` se o adaptador reportar que não está autenticado.",
   "Sign in to Nous Portal": "Fazer login no Nous Portal",
   "Sign in to Nous Portal to load the catalog, or enter a model ID manually.": "Faça login no Nous Portal para carregar o catálogo, ou digite um ID de modelo manualmente.",
   "Sign in to Spotify": "Fazer login no Spotify",
@@ -2957,7 +2956,6 @@
   "This profile has no gateway process of its own — the default profile's multiplexer carries its traffic. Manage it from the default profile.": "Este perfil não tem um processo de gateway próprio — o multiplexador do perfil padrão carrega o tráfego dele. Gerencie pelo perfil padrão.",
   "This server's Hermes can't run Live Voice.": "O Hermes deste servidor não consegue executar o Live Voice.",
   "To set it up, on the Hermes host:": "Para configurar, no host do Hermes:",
-  "Trace exports cover one session at a time — use a session's own Export… for that.": "As exportações de rastreamento cobrem uma sessão por vez — use o “Exportar…” da própria sessão para isso.",
   "Transcribing…": "Transcrevendo…",
   "Transcription failed. Try again.": "A transcrição falhou. Tente novamente.",
   "Turn on Shared usage metrics first — Hermes refuses to send without local collection enabled.": "Ative primeiro Métricas de uso compartilhadas — o Hermes se recusa a enviar sem a coleta local habilitada.",
@@ -3332,5 +3330,11 @@
   "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": "%@ no .env define isto agora. Salvar move o valor para config.yaml e remove a linha do .env.",
   "Saving removes the unused %@ line from .env.": "Salvar remove a linha %@ não usada do .env.",
   "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": "%@ no .env ainda limita esta plataforma. Remova essa linha do .env para permitir tudo, ou mantenha pelo menos uma entrada aqui.",
-  "Couldn't read .env, so the allowlist wasn't saved.": "Não foi possível ler o .env, então a lista de permissões não foi salva."
+  "Couldn't read .env, so the allowlist wasn't saved.": "Não foi possível ler o .env, então a lista de permissões não foi salva.",
+  "Couldn’t read SOUL.md, so editing is off until Reload succeeds.": "Não foi possível ler o SOUL.md, então a edição fica desativada até Recarregar funcionar.",
+  "Clear SOUL.md?": "Esvaziar o SOUL.md?",
+  "Clear SOUL.md": "Esvaziar SOUL.md",
+  "The editor is empty. Saving replaces the current SOUL.md with an empty file.": "O editor está vazio. Salvar substitui o SOUL.md atual por um arquivo vazio.",
+  "Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those.": "As exportações Markdown, Quarto e de trace cobrem uma sessão por vez — use o Exportar… da própria sessão para elas.",
+  "Sign in first with `%@` if the adapter reports not authenticated.": "Entre primeiro com `%@` se o adaptador informar que não está autenticado."
 }

@@ -2047,7 +2047,6 @@
   "Sign In": "登录",
   "Sign each request body with HMAC-SHA256 using this secret.": "使用此密钥以 HMAC-SHA256 对每个请求体签名。",
   "Sign in first": "请先登录",
-  "Sign in first with `hermes login %@` if the adapter reports not authenticated.": "如果适配器报告未认证,请先使用 `hermes login %@` 登录。",
   "Sign in to Nous Portal": "登录 Nous Portal",
   "Sign in to Nous Portal to load the catalog, or enter a model ID manually.": "登录 Nous Portal 以加载目录,或手动输入模型 ID。",
   "Sign in to Spotify": "登录 Spotify",
@@ -2928,7 +2927,6 @@
   "This profile has no gateway process of its own — the default profile's multiplexer carries its traffic. Manage it from the default profile.": "此配置档没有自己的网关进程——其流量由默认配置档的多路复用器承载。请从默认配置档进行管理。",
   "This server's Hermes can't run Live Voice.": "此服务器上的 Hermes 无法运行 Live Voice。",
   "To set it up, on the Hermes host:": "要进行设置，请在 Hermes 主机上：",
-  "Trace exports cover one session at a time — use a session's own Export… for that.": "跟踪导出一次只涵盖一个会话——请使用该会话自己的“导出…”。",
   "Transcribing…": "正在转写…",
   "Transcription failed. Try again.": "转写失败。请重试。",
   "Turn on Shared usage metrics first — Hermes refuses to send without local collection enabled.": "请先开启“共享使用指标”——未启用本地收集时，Hermes 拒绝发送。",
@@ -3303,5 +3301,11 @@
   "%@ in .env sets this now. Saving moves it to config.yaml and removes the .env line.": ".env 中的 %@ 目前决定此设置。保存会将其移到 config.yaml 并删除 .env 中的该行。",
   "Saving removes the unused %@ line from .env.": "保存会从 .env 中删除未使用的 %@ 行。",
   "%@ in .env still limits this platform. Remove that line from .env to allow everything, or keep at least one entry here.": ".env 中的 %@ 仍在限制此平台。要允许全部，请从 .env 中删除该行，或在此至少保留一个条目。",
-  "Couldn't read .env, so the allowlist wasn't saved.": "无法读取 .env,因此未保存允许列表。"
+  "Couldn't read .env, so the allowlist wasn't saved.": "无法读取 .env,因此未保存允许列表。",
+  "Couldn’t read SOUL.md, so editing is off until Reload succeeds.": "无法读取 SOUL.md，在重新载入成功之前无法编辑。",
+  "Clear SOUL.md?": "清空 SOUL.md？",
+  "Clear SOUL.md": "清空 SOUL.md",
+  "The editor is empty. Saving replaces the current SOUL.md with an empty file.": "编辑器为空。保存会用空文件替换当前的 SOUL.md。",
+  "Markdown, Quarto, and trace exports cover one session at a time — use a session's own Export… for those.": "Markdown、Quarto 和跟踪导出一次只涵盖一个会话——请使用各会话自己的“导出…”。",
+  "Sign in first with `%@` if the adapter reports not authenticated.": "如果适配器报告未认证，请先运行 `%@` 登录。"
 }
