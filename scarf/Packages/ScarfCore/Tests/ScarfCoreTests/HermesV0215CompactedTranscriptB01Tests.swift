@@ -185,6 +185,29 @@ import SQLite3
         #expect(contents.count == 10 + 2 + 198)
     }
 
+    // MARK: - Export note probe
+
+    @Test func archivedTurnsProbeFindsCompactionArchivedRowsOnly() async throws {
+        let home = try HermesV0215R18bTests.makeHome(seed: Self.seedSQL + """
+
+            INSERT INTO sessions (id, source, started_at) VALUES ('fresh', 'cli', 1700000000);
+            INSERT INTO messages (session_id, role, content, timestamp) VALUES ('fresh', 'user', 'hi', 1700000001);
+            INSERT INTO messages (session_id, role, content, timestamp, active, compacted)
+                VALUES ('fresh', 'assistant', 'undone', 1700000002, 0, 0);
+            """)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let service = HermesDataService(context: .local(home: home))
+        // Before open() the schema flags are unset: false, no query.
+        #expect(await service.hasArchivedTurns(sessionIds: ["s1"]) == false)
+        #expect(await service.open())
+        #expect(await service.hasArchivedTurns(sessionIds: ["s1"]))
+        #expect(await service.hasArchivedTurns(sessionIds: ["fresh", "s2"]))
+        // A rewound row is not an archived turn.
+        #expect(await service.hasArchivedTurns(sessionIds: ["fresh"]) == false)
+        #expect(await service.hasArchivedTurns(sessionIds: []) == false)
+        await service.close()
+    }
+
     // MARK: - SQL gating (charter C1/C4)
 
     @Test func transcriptSQLIsUnchangedWithoutTheCompactedColumn() async throws {

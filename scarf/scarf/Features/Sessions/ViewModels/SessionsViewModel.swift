@@ -146,6 +146,18 @@ final class SessionsViewModel {
         ctx.runHermesCapturingStdout(args, timeout: 300)
     }
 
+    /// Test seam for "does this export's session hold compaction-archived
+    /// turns" (see `archivedTurnsNote`). `nil` asks `HermesDataService`.
+    @ObservationIgnored
+    var archivedTurnsProbe: (@Sendable ([String]) async -> Bool)?
+
+    private func hasArchivedTurns(_ sessionIds: [String]) async -> Bool {
+        if let probe = archivedTurnsProbe { return await probe(sessionIds) }
+        // `load()` leaves the service open; before any load its schema
+        // flags are unset and this answers false without touching the host.
+        return await dataService.hasArchivedTurns(sessionIds: sessionIds)
+    }
+
 
     /// True while `load()` runs so the view can show a `.loadingOverlay`
     /// instead of a blank table on first open / refresh. (t-aud07)
@@ -258,6 +270,10 @@ final class SessionsViewModel {
     /// flow starts (same environment-read-stays-in-SwiftUI split as
     /// `formatsAvailable`).
     private(set) var traceNoRedactAvailable = false
+    /// `HermesCapabilities.hasSessionsExportArchivedTurns`, captured when
+    /// the flow starts: whether this host's Markdown/HTML export includes
+    /// compaction-archived turns (see `archivedTurnsNote`).
+    var exportIncludesArchivedTurns = false
 
     // MARK: - Project attribution (v2.5)
     //
@@ -777,7 +793,13 @@ final class SessionsViewModel {
     ///   view model has no capability store of its own — same split as
     ///   `PlatformsView`/`GatewayBehaviorViewModel`, where the environment
     ///   read stays in SwiftUI and the flag crosses in as a plain `Bool`.
-    func exportSession(_ session: HermesSession, formatsAvailable: Bool, traceNoRedactAvailable: Bool = false) {
+    func exportSession(
+        _ session: HermesSession,
+        formatsAvailable: Bool,
+        traceNoRedactAvailable: Bool = false,
+        archivedTurnsInMarkdown: Bool = false
+    ) {
+        exportIncludesArchivedTurns = archivedTurnsInMarkdown
         pendingExportLineageIds = session.lineageIds.count > 1 ? session.lineageIds : []
         beginExportFlow(
             sessionId: session.id,
@@ -1012,6 +1034,34 @@ final class SessionsViewModel {
         return (combined, stderr, 0)
     }
 
+    /// Suffix for a success banner when the exported session has turns an
+    /// in-place compaction archived (`HermesDataService.hasArchivedTurns`)
+    /// and the chosen format leaves them out, or nil when it includes them.
+    ///
+    /// JSONL and Trace always export the live rows only. Markdown, Quarto
+    /// and HTML include the archived turns from v0.21.5
+    /// (`hasSessionsExportArchivedTurns`); before that every format left
+    /// them out, so the note names no remedy there. Markdown is a picker
+    /// choice locally; a remote host gets the command to run there, since
+    /// Scarf offers only the stdout formats remotely (charter C6).
+    nonisolated static func archivedTurnsNote(
+        format: SessionExportFormat,
+        sessionId: String,
+        markdownAvailable: Bool,
+        markdownIncludesArchived: Bool
+    ) -> String? {
+        if format.isDirectoryOutput || format == .html {
+            return markdownIncludesArchived ? nil
+                : String(localized: " This conversation has earlier turns that compaction archived; this Hermes version leaves them out of every export format.")
+        }
+        guard markdownIncludesArchived else {
+            return String(localized: " This conversation has earlier turns that compaction archived; this Hermes version leaves them out of every export format.")
+        }
+        return markdownAvailable
+            ? String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Export as Markdown for the full history.")
+            : String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Run hermes sessions export <folder> --format md --session-id \(sessionId) on the host for the full history.")
+    }
+
     /// Suffix for a success banner when `latestSegmentOnly` applied.
     ///
     /// Points at Markdown where it is offered (local hosts): it is the
@@ -1064,12 +1114,24 @@ final class SessionsViewModel {
                     : runner(ctx, args)
                 return Self.writeExport(result: result, to: url, format: format)
             }
+            let plainSuccess = outcome.message
             if outcome.succeeded, !chain.isEmpty, mode == .latestSegmentOnly {
                 outcome.message += Self.latestSegmentNote(
                     segmentCount: chain.count, format: format, markdownAvailable: markdownAvailable)
             }
+            // Trace of a chain exports only the tip, so only the tip counts.
+            if outcome.succeeded, let sessionId,
+               await self.hasArchivedTurns(
+                   chain.isEmpty ? [sessionId] : (mode == .latestSegmentOnly ? [sessionId] : chain)),
+               let note = Self.archivedTurnsNote(
+                   format: format, sessionId: sessionId,
+                   markdownAvailable: markdownAvailable,
+                   markdownIncludesArchived: self.exportIncludesArchivedTurns) {
+                outcome.message += note
+            }
             self.exportMessage = outcome.message
-            guard outcome.succeeded else { return }
+            // A banner carrying a caveat stays until the next export.
+            guard outcome.succeeded, outcome.message == plainSuccess else { return }
             let banner = outcome.message
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(5))
@@ -1110,8 +1172,19 @@ final class SessionsViewModel {
             let result = await OffPool.run { runner(ctx, args) }
             let outcome = Self.pathExportOutcome(result: result)
             if outcome.succeeded {
-                let banner = "Exported to \(url.path)" + note
+                var banner = "Exported to \(url.path)" + note
+                // md/qmd with `--lineage logical` cover the whole chain.
+                if let sessionId,
+                   await self.hasArchivedTurns(chain.isEmpty || mode == .latestSegmentOnly ? [sessionId] : chain),
+                   let archived = Self.archivedTurnsNote(
+                       format: format, sessionId: sessionId,
+                       markdownAvailable: !ctx.isRemote,
+                       markdownIncludesArchived: self.exportIncludesArchivedTurns) {
+                    banner += archived
+                }
                 self.exportMessage = banner
+                // A banner carrying a caveat stays until the next export.
+                guard banner == "Exported to \(url.path)" else { return }
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(5))
                     if self?.exportMessage == banner { self?.exportMessage = nil }

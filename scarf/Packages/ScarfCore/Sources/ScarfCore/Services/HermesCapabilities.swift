@@ -2495,6 +2495,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// shows for it differs between the two releases.
     public var hasMultiplexOptOutRewrite: Bool { isV0215OrLater }
 
+    /// `hermes sessions export` Markdown/Quarto/HTML include the turns an
+    /// in-place compaction archived: `_cmd_export` passes
+    /// `include_compacted=shown` with `shown` true for
+    /// `SAVE_TRANSCRIPT_FORMATS` = md/html (hermes_cli/sessions_cmd.py:335,
+    /// hermes_cli/session_export.py:212 @ v2026.9.24), and `_export_markdown`
+    /// passes `include_compacted=True`. Neither exists at v2026.9.21, where
+    /// every format exports the live rows only. JSONL and Trace never
+    /// include them. Drives the Sessions export note.
+    public var hasSessionsExportArchivedTurns: Bool { isV0215OrLater }
+
     /// `gateway.standalone: true` — the temporary per-profile shim that keeps
     /// a NAMED profile's gateway out of the host multiplexer.
     /// `profile_is_standalone` (`hermes_cli/profiles.py:979-1027` @

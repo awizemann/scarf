@@ -144,6 +144,96 @@ import ScarfCore
         #expect(vm.exportMessage?.contains("choose JSONL to export every segment") == true)
     }
 
+    /// Hermes's JSONL export writes live rows only, so a session with
+    /// compaction-archived turns gets a note pointing at Markdown; the
+    /// probe is asked about every segment of a chain.
+    @Test func jsonlOfASessionWithArchivedTurnsSaysMarkdownHasTheFullHistory() async {
+        final class Asked: @unchecked Sendable { var ids: [String] = [] }
+        let asked = Asked()
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vm = SessionsViewModel(context: .local)
+        vm.exportIncludesArchivedTurns = true
+        vm.archivedTurnsProbe = { ids in asked.ids = ids; return true }
+        vm.sessionExportRunner = { _, args in (Data("{\"id\":\"\(Self.sessionId(in: args) ?? "")\"}\n".utf8), "", 0) }
+        vm.performExport(to: url, sessionId: "tip", format: .jsonl, lineageIds: Self.chain)
+        await Self.settle(until: { vm.exportMessage != nil })
+        #expect(asked.ids == Self.chain)
+        #expect(vm.exportMessage?.hasPrefix("Exported") == true)
+        #expect(vm.exportMessage?.contains("Export as Markdown for the full history") == true)
+    }
+
+    @Test func remoteJSONLNoteNamesTheHostCommand() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let remote = ServerContext(
+            id: ServerID(), displayName: "build-box",
+            kind: .ssh(SSHConfig(host: "build-box", user: "jon")))
+        let vm = SessionsViewModel(context: remote)
+        vm.exportIncludesArchivedTurns = true
+        vm.archivedTurnsProbe = { _ in true }
+        vm.sessionExportRunner = { _, _ in (Data(#"{"id":"solo"}"#.utf8), "", 0) }
+        vm.performExport(to: url, sessionId: "solo", format: .jsonl)
+        await Self.settle(until: { vm.exportMessage != nil })
+        #expect(vm.exportMessage?.contains("hermes sessions export <folder> --format md --session-id solo") == true)
+    }
+
+    /// Before v0.21.5 no format includes archived turns, so the note names
+    /// no remedy — for JSONL and for Markdown alike.
+    @Test func olderHostsGetTheNoteWithoutAMarkdownRemedy() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vm = SessionsViewModel(context: .local)
+        vm.exportIncludesArchivedTurns = false
+        vm.archivedTurnsProbe = { _ in true }
+        vm.sessionExportRunner = { _, _ in (Data(#"{"id":"solo"}"#.utf8), "", 0) }
+        vm.performExport(to: url, sessionId: "solo", format: .jsonl)
+        await Self.settle(until: { vm.exportMessage != nil })
+        #expect(vm.exportMessage?.contains("leaves them out of every export format") == true)
+        #expect(vm.exportMessage?.contains("Markdown") == false)
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-b01-md-old-\(UUID().uuidString)", isDirectory: true)
+        let md = SessionsViewModel(context: .local)
+        md.exportIncludesArchivedTurns = false
+        md.archivedTurnsProbe = { _ in true }
+        md.sessionExportRunner = { _, _ in (Data("Exported 1 session (3 messages) to \(dir.path)/solo.md\n".utf8), "", 0) }
+        md.performPathExport(to: dir, sessionId: "solo", format: .markdown, redact: false)
+        await Self.settle(until: { md.exportMessage != nil })
+        #expect(md.exportMessage?.contains("leaves them out of every export format") == true)
+    }
+
+    /// On v0.21.5 Markdown includes the archived turns: no note.
+    @Test func currentMarkdownExportHasNoArchivedNote() async {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-b01-md-new-\(UUID().uuidString)", isDirectory: true)
+        let md = SessionsViewModel(context: .local)
+        md.exportIncludesArchivedTurns = true
+        md.archivedTurnsProbe = { _ in true }
+        md.sessionExportRunner = { _, _ in (Data("Exported 1 session (3 messages) to \(dir.path)/solo.md\n".utf8), "", 0) }
+        md.performPathExport(to: dir, sessionId: "solo", format: .markdown, redact: false)
+        await Self.settle(until: { md.exportMessage != nil })
+        #expect(md.exportMessage == "Exported to \(dir.path)")
+    }
+
+    @Test func noNoteWithoutArchivedTurnsOrForExportAll() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vm = SessionsViewModel(context: .local)
+        vm.archivedTurnsProbe = { _ in false }
+        vm.sessionExportRunner = { _, _ in (Data(#"{"id":"solo"}"#.utf8), "", 0) }
+        vm.performExport(to: url, sessionId: "solo", format: .jsonl)
+        await Self.settle(until: { vm.exportMessage != nil })
+        #expect(vm.exportMessage?.contains("compaction") == false)
+
+        let all = SessionsViewModel(context: .local)
+        all.archivedTurnsProbe = { _ in true }
+        all.sessionExportRunner = { _, _ in (Data(#"{"id":"a"}"#.utf8), "", 0) }
+        all.performExport(to: url, sessionId: nil, format: .jsonl)
+        await Self.settle(until: { all.exportMessage != nil })
+        #expect(all.exportMessage?.contains("compaction") == false)
+    }
+
     @Test func searchOpenedInternalSessionsSayWhyTheyAreUnlisted() {
         for source in HermesDataService.internalListingSources {
             let note = SessionsViewModel.listingNote(isArchived: false, isListed: false, source: source)

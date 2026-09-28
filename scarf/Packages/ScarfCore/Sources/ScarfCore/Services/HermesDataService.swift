@@ -977,6 +977,27 @@ public actor HermesDataService {
         return ("session_id IN (\(placeholders))", ids.map { .text($0) })
     }
 
+    /// Whether any of `sessionIds` holds turns an in-place compaction
+    /// archived (`active = 0, compacted = 1`). One indexed probe, `LIMIT 1`.
+    ///
+    /// Sessions export uses it to say when a file leaves those turns out:
+    /// Hermes's JSONL export reads the live rows only (`include_compacted`
+    /// is set just for `SAVE_TRANSCRIPT_FORMATS` = md/html,
+    /// hermes_cli/session_export.py:212, sessions_cmd.py:335 @ v2026.9.24)
+    /// and Trace reads `get_messages_as_conversation` without it. False on
+    /// a host without the column, before `open()`, and on any failure.
+    public func hasArchivedTurns(sessionIds: [String]) async -> Bool {
+        guard hasMessagesActiveColumn, hasCompactedColumn else { return false }
+        let owner = Self.sessionIdPredicate(sessionIds)
+        guard !owner.params.isEmpty else { return false }
+        let sql = "SELECT 1 FROM messages WHERE \(owner.sql) AND active = 0 AND compacted = 1 LIMIT 1"
+        do {
+            return !(try await backend.query(sql, params: owner.params)).isEmpty
+        } catch {
+            return false
+        }
+    }
+
     /// The newest `limit` transcript rows across several sessions, oldest
     /// first — see `fetchMessagesOutcome(sessionIds:limit:before:)`.
     public func fetchMessages(sessionIds: [String], limit: Int, before: Int? = nil) async -> [HermesMessage] {
