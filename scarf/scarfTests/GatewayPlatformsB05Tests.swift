@@ -487,3 +487,111 @@ struct GatewayRestartDrainWatchB05Tests {
         #expect(!vm.drainWatcher.isWatching)
     }
 }
+
+// MARK: - B05 follow-up: env-first sweep (S07-F4's class)
+
+@Suite("B05 · env-first settings show what decides and Save removes the shadow")
+@MainActor
+struct EnvFirstFormsB05Tests {
+    static let v0212 = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.11)")
+    static let v0215 = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+
+    private func discord(caps: HermesCapabilities) async -> (DiscordSetupViewModel, ServerContext, ScriptedCLI) {
+        let ctx = scratchContext("dc")
+        try? "DISCORD_BOT_TOKEN=t\nDISCORD_REQUIRE_MENTION=false\nDISCORD_REACTIONS=false\n"
+            .write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
+        try? "discord:\n  require_mention: true\n  reactions: true\n"
+            .write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
+        let cli = ScriptedCLI { args in args.starts(with: ["config", "set"]) ? ("✓ Set \(args[3])", 0) : ("", 0) }
+        let vm = DiscordSetupViewModel(context: ctx, cliRunner: cli.runner)
+        vm.load(capabilities: caps)
+        await until(timeout: 10) { !vm.isLoading }
+        return (vm, ctx, cli)
+    }
+
+    /// v0.21.3+: both env lines win. Below: only the always-env one does.
+    @Test func discordShowsTheValueThatDecides() async {
+        let (new, _, _) = await discord(caps: Self.v0215)
+        #expect(new.requireMention == false)
+        #expect(new.reactions == false)
+        #expect(new.envFirst.overriding == ["DISCORD_REACTIONS", "DISCORD_REQUIRE_MENTION"])
+
+        let (old, _, _) = await discord(caps: Self.v0212)
+        #expect(old.requireMention == true, "config.yaml wins below v0.21.3")
+        #expect(old.reactions == false, "DISCORD_REACTIONS has always won")
+        #expect(old.envFirst.lines == ["DISCORD_REACTIONS", "DISCORD_REQUIRE_MENTION"])
+    }
+
+    @Test func discordSaveCommentsTheLinesOut() async {
+        let (vm, ctx, cli) = await discord(caps: Self.v0215)
+        vm.requireMention = true
+        vm.save()
+        await until(timeout: 10) { !vm.isSaving }
+        let env = (try? String(contentsOfFile: ctx.paths.envFile, encoding: .utf8)) ?? ""
+        #expect(env.contains("# DISCORD_REQUIRE_MENTION=false"), "\(env)")
+        #expect(env.contains("# DISCORD_REACTIONS=false"), "\(env)")
+        #expect(env.contains("DISCORD_BOT_TOKEN=t"))
+        #expect(cli.calls.contains { $0.starts(with: ["config", "set"]) && $0.contains("discord.require_mention") })
+    }
+
+    /// Allowlist: `MATRIX_ALLOWED_ROOMS` beats `matrix.allowed_rooms` on
+    /// v0.21.3+, and saving the list comments the variable out.
+    @Test func allowlistFollowsTheEnvVariable() async {
+        let ctx = scratchContext("allow")
+        try? "MATRIX_ALLOWED_ROOMS=!env:x\n".write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
+        try? "matrix:\n  allowed_rooms:\n  - '!cfg:x'\n".write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
+        let vm = GatewayBehaviorViewModel(platform: "matrix", capabilities: Self.v0215, context: ctx)
+        vm.load()
+        await until(timeout: 10) { !vm.isLoading }
+        #expect(vm.items == ["!env:x"])
+        #expect(vm.envFirst.overriding == ["MATRIX_ALLOWED_ROOMS"])
+        vm.save()
+        await until(timeout: 10) { !vm.isSaving }
+        let env = (try? String(contentsOfFile: ctx.paths.envFile, encoding: .utf8)) ?? ""
+        #expect(env.contains("# MATRIX_ALLOWED_ROOMS=!env:x"), "\(env)")
+    }
+
+    @Test func captionWording() {
+        #expect(PlatformSetupHelpers.envFirstCaption(.init()) == nil)
+        #expect(PlatformSetupHelpers.envFirstCaption(.init(overriding: ["X"], lines: ["X"]))?.contains("X in .env decides") == true)
+        #expect(PlatformSetupHelpers.envFirstCaption(.init(overriding: [], lines: ["X"]))?.contains("0.21.3") == true)
+    }
+}
+
+// MARK: - B05 follow-up: a draining record whose process died
+
+@Suite("B05 · a crashed draining gateway ends the watch")
+@MainActor
+struct DrainLivenessB05Tests {
+    nonisolated static func draining(_ stamp: String) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "pid": 100, "gateway_state": "draining", "restart_requested": true, "updated_at": stamp])
+    }
+
+    @Test func aDeadPidEndsItAtOnce() async {
+        let watcher = GatewayRestartDrainWatcher(
+            readState: { Self.draining("t1") }, isAlive: { _ in false }, interval: .milliseconds(20))
+        watcher.start(from: .init(pid: 100, state: "draining", restartRequested: true, updatedAt: "t1"), budgetSeconds: 600)
+        await until(timeout: 5) { watcher.status == .stoppedWithoutRestart }
+        #expect(watcher.status == .stoppedWithoutRestart)
+    }
+
+    /// A stale heartbeat alone is not death (Hermes's own rule): a live PID
+    /// keeps the watch; only unknown liveness + stale ends it.
+    @Test func staleHeartbeatNeedsUnknownLiveness() async {
+        let alive = GatewayRestartDrainWatcher(
+            readState: { Self.draining("frozen") }, isAlive: { _ in true },
+            interval: .milliseconds(20), heartbeatStaleSeconds: 0)
+        alive.start(from: .init(pid: 100, state: "draining", restartRequested: true, updatedAt: "frozen"), budgetSeconds: 600)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(alive.isWatching)
+        alive.reset()
+
+        let unknown = GatewayRestartDrainWatcher(
+            readState: { Self.draining("frozen") }, isAlive: { _ in nil },
+            interval: .milliseconds(20), heartbeatStaleSeconds: 0)
+        unknown.start(from: .init(pid: 100, state: "draining", restartRequested: true, updatedAt: "frozen"), budgetSeconds: 600)
+        await until(timeout: 5) { unknown.status == .stoppedWithoutRestart }
+        #expect(unknown.status == .stoppedWithoutRestart)
+    }
+}
