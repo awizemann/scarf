@@ -635,7 +635,10 @@ struct SettingsView: View {
             yesNoRow("Discord: require mention", vm.config.discord.requireMention)
             yesNoRow("Discord: auto-thread", vm.config.discord.autoThread)
             yesNoRow("Telegram: require mention", vm.config.telegram.requireMention)
-            LabeledContent("Slack: reply mode", value: vm.config.slack.replyToMode)
+            // `reply_in_thread`, not `reply_to_mode`: the Slack adapter never
+            // reads `reply_to_mode` (S07-F1 — only Discord, Telegram and Buzz
+            // do @ `v2026.9.24`), so showing it named a setting with no effect.
+            yesNoRow("Slack: reply in thread", vm.config.slack.replyInThread)
             yesNoRow("Matrix: require mention", vm.config.matrix.requireMention)
 
             // v0.13 additions: each is independently capability-gated
