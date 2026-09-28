@@ -30,6 +30,15 @@ struct MattermostSetupView: View {
 
             SettingsSection(title: "Behavior", icon: "slider.horizontal.3") {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
+                // S07-F4: say when `.env` — not config.yaml — is the source.
+                if let caption = viewModel.requireMentionCaption {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, ScarfSpace.s3)
+                        .padding(.vertical, 6)
+                }
                 PickerRow(label: "Reply Mode", selection: viewModel.replyMode, options: viewModel.replyModeOptions) { viewModel.replyMode = $0 }
             }
 

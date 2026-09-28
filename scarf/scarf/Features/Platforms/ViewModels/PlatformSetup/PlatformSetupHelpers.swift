@@ -246,11 +246,11 @@ enum PlatformSetupHelpers {
 
     /// Bool <-> "true"/"false" round-trip for env vars. Hermes accepts both
     /// "true"/"false" and "1"/"0"; we emit the string form for readability.
-    static func envBool(_ on: Bool) -> String { on ? "true" : "false" }
+    nonisolated static func envBool(_ on: Bool) -> String { on ? "true" : "false" }
 
     /// Parse an env string as a bool. Treats missing/empty as `false`.
     /// "true", "1", "yes", "on" (case-insensitive) are true.
-    static func parseEnvBool(_ s: String?) -> Bool {
+    nonisolated static func parseEnvBool(_ s: String?) -> Bool {
         guard let s else { return false }
         switch s.lowercased() {
         case "true", "1", "yes", "on": return true
@@ -281,6 +281,10 @@ enum PlatformSetupHelpers {
         /// `HermesConfig` does not model (see `EmailSetupViewModel.load`).
         /// `nil` (never `""`) when the read was refused, for the same reason.
         var rawConfigText: String?
+        /// The host's capabilities, only for a form whose reading RULE
+        /// changed across releases (`MattermostSetupViewModel`: `.env` over
+        /// config.yaml from v0.21.3). `nil` when not asked for.
+        var capabilities: HermesCapabilities?
 
         /// The first refusal either half produced, or `nil` when both reads
         /// are proven. This is what gates a save.
@@ -321,10 +325,16 @@ enum PlatformSetupHelpers {
         includeEnv: Bool = true,
         includeConfig: Bool = true,
         includeRawConfigText: Bool = false,
+        includeCapabilities: Bool = false,
         then commit: @escaping @MainActor (FormSnapshot) -> Void
     ) {
         detached({
             var snapshot = FormSnapshot()
+            if includeCapabilities {
+                // May probe `hermes --version` on a cold cache — off the main
+                // actor here, like the reads below (C10).
+                snapshot.capabilities = HermesVersionCache.shared.capabilitiesSync(for: context)
+            }
             if includeEnv {
                 let (env, failure) = loadEnv(context: context)
                 snapshot.env = env
@@ -442,6 +452,7 @@ extension PlatformSetupForm {
         includeEnv: Bool = true,
         includeConfig: Bool = true,
         includeRawConfigText: Bool = false,
+        includeCapabilities: Bool = false,
         apply: @escaping @MainActor (PlatformSetupHelpers.FormSnapshot) -> Void
     ) {
         // One load at a time, and never one on top of a save: two overlapping
@@ -453,7 +464,8 @@ extension PlatformSetupForm {
             context: context,
             includeEnv: includeEnv,
             includeConfig: includeConfig,
-            includeRawConfigText: includeRawConfigText
+            includeRawConfigText: includeRawConfigText,
+            includeCapabilities: includeCapabilities
         ) { [weak self] snapshot in
             guard let self else { return }
             self.isLoading = false

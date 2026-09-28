@@ -30,7 +30,7 @@ final class IMessageSetupViewModel: PlatformSetupForm {
     var allowedUsers: String = ""
     var homeChannel: String = ""
     var allowAllUsers: Bool = false
-    var sendReadReceipts: Bool = false
+    var sendReadReceipts: Bool = true   // Hermes default when the variable is absent
 
     var message: String?
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
@@ -52,7 +52,7 @@ final class IMessageSetupViewModel: PlatformSetupForm {
             allowedUsers = env["BLUEBUBBLES_ALLOWED_USERS"] ?? ""
             homeChannel = env["BLUEBUBBLES_HOME_CHANNEL"] ?? ""
             allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_ALLOW_ALL_USERS"])
-            sendReadReceipts = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_SEND_READ_RECEIPTS"])
+            sendReadReceipts = Self.sendReadReceipts(fromEnv: env["BLUEBUBBLES_SEND_READ_RECEIPTS"])
         }
     }
 
@@ -66,8 +66,20 @@ final class IMessageSetupViewModel: PlatformSetupForm {
             "BLUEBUBBLES_ALLOWED_USERS": allowAllUsers ? "" : allowedUsers,
             "BLUEBUBBLES_HOME_CHANNEL": homeChannel,
             "BLUEBUBBLES_ALLOW_ALL_USERS": allowAllUsers ? "true" : "",
-            "BLUEBUBBLES_SEND_READ_RECEIPTS": sendReadReceipts ? "true" : ""
+            // Explicit both ways (S07-F5): an unset variable means "true" to
+            // Hermes, so unsetting it to mean "off" never turned receipts off.
+            "BLUEBUBBLES_SEND_READ_RECEIPTS": PlatformSetupHelpers.envBool(sendReadReceipts)
         ]
         commitSave(envPairs: envPairs, configKV: [:])
+    }
+
+    /// `BLUEBUBBLES_SEND_READ_RECEIPTS` as the gateway resolves it:
+    /// `getenv(env, "true")` then `is_truthy_value`
+    /// (`gateway/config_env.py:619`, `utils.py:22-31` @ `v2026.9.24`). An
+    /// ABSENT variable is on; a present one is on only for 1/true/yes/on —
+    /// so a present-but-empty line is off, exactly as Hermes reads it.
+    nonisolated static func sendReadReceipts(fromEnv raw: String?) -> Bool {
+        guard let raw else { return true }
+        return PlatformSetupHelpers.parseEnvBool(raw.trimmingCharacters(in: .whitespaces))
     }
 }
