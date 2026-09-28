@@ -69,6 +69,12 @@ public struct HermesManagedInstall: Sendable, Equatable {
     /// a `brew`-installed Hermes out of its own Settings.
     static let ignoredValues: Set<String> = ["brew", "homebrew"]
 
+    /// `_MANAGED_FALSE_VALUES` — `frozenset({"false", "0", "no", "off"})`,
+    /// `hermes_constants.py:1089` @ v2026.9.24: an explicit opt-out, so the
+    /// host is NOT managed. Honoured only where the host honours it
+    /// (``HermesCapabilities/hasManagedMarkerFalseOptOut``, v0.21.3+).
+    static let falseValues: Set<String> = ["false", "0", "no", "off"]
+
     /// Mirror of `get_managed_system`'s marker-file half
     /// (`hermes_cli/config.py:276-290` @ v2026.9.7), given the file's raw
     /// contents (`nil` when the file is absent or unreadable — Hermes treats
@@ -85,11 +91,18 @@ public struct HermesManagedInstall: Sendable, Equatable {
     ///   managed, and the system name is that tag's literal `"NixOS"`.
     ///   Reading the contents on such a host would leave a genuinely managed
     ///   install writable.
-    public static func system(fromMarker raw: String?, readsMarkerContents: Bool) -> String? {
+    /// - Parameter honoursFalseOptOut: ``HermesCapabilities/hasManagedMarkerFalseOptOut``
+    ///   — whether this host reads `false`/`0`/`no`/`off` as "not managed".
+    public static func system(
+        fromMarker raw: String?,
+        readsMarkerContents: Bool,
+        honoursFalseOptOut: Bool = false
+    ) -> String? {
         guard let raw else { return nil }
         guard readsMarkerContents else { return preContentsSystem }
         let marker = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if ignoredValues.contains(marker) { return nil }
+        if honoursFalseOptOut, falseValues.contains(marker) { return nil }
         if marker.isEmpty || trueValues.contains(marker) { return legacySystem }
         return marker
     }
@@ -213,7 +226,8 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
 
         let result = HermesManagedInstall(system: HermesManagedInstall.system(
             fromMarker: marker,
-            readsMarkerContents: capabilities.hasManagedMarkerContents
+            readsMarkerContents: capabilities.hasManagedMarkerContents,
+            honoursFalseOptOut: capabilities.hasManagedMarkerFalseOptOut
         ))
 
         lock.lock()
@@ -292,7 +306,8 @@ public final class HermesManagedInstallCache: @unchecked Sendable {
         guard let entry else { return .notManaged }
         return HermesManagedInstall(system: HermesManagedInstall.system(
             fromMarker: entry.marker,
-            readsMarkerContents: capabilities.hasManagedMarkerContents
+            readsMarkerContents: capabilities.hasManagedMarkerContents,
+            honoursFalseOptOut: capabilities.hasManagedMarkerFalseOptOut
         ))
     }
 

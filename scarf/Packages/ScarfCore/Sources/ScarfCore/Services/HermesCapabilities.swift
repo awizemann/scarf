@@ -105,11 +105,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasPiperTTS: Bool { atLeastSemver(0, 12, 0) }
 
-    /// `terminal.backend = vercel` Vercel Sandbox option (v0.12+).
-    ///
-    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
-    /// floor is source-verified and rediscovering it costs a tag walk.
-    public var hasVercelTerminal: Bool { atLeastSemver(0, 12, 0) }
+    /// `terminal.backend = vercel_sandbox` (Vercel Sandbox). Two bands:
+    /// added in v0.12.0 (tools/terminal_tool.py:14 @ v2026.4.30), removed in
+    /// v0.15.0 (absent at v2026.5.28 through v0.19.0 / v2026.7.20), restored
+    /// in v0.19.1 (Hermes commit ad12df6ba4, present at v2026.7.30 and at
+    /// v2026.9.24: tools/terminal_tool.py:5, hermes_cli/doctor_tools.py:146).
+    /// Gates the Settings ▸ Terminal backend option.
+    public var hasVercelTerminal: Bool {
+        guard let s = semver else { return false }
+        if s >= SemVer(major: 0, minor: 19, patch: 1) { return true }
+        return s >= SemVer(major: 0, minor: 12, patch: 0) && s < SemVer(major: 0, minor: 15, patch: 0)
+    }
 
     /// `auxiliary.flush_memories` config row was removed in v0.12.
     /// Inverse semantics — `true` means the row should still be shown.
@@ -1686,8 +1692,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.20.5+ it means not managed at all. Scarf's probe has to branch, or
     /// it locks a Homebrew install out of its own Settings on a new host — or
     /// leaves a genuinely managed old host writable. See
-    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:)``.
+    /// ``HermesManagedInstall/system(fromMarker:readsMarkerContents:honoursFalseOptOut:)``.
     public var hasManagedMarkerContents: Bool { isV0205OrLater }
+
+    /// `get_managed_system` treats a marker (or `HERMES_MANAGED`) holding
+    /// `false`/`0`/`no`/`off` as an explicit opt-out — NOT managed.
+    /// `_MANAGED_FALSE_VALUES` first appears at v2026.9.14 = 0.21.3
+    /// (`hermes_cli/config.py:251,265` there; Hermes commit 92a8398087,
+    /// #12864) and sits at `hermes_constants.py:1089,1108` @ v2026.9.24.
+    /// Below it (0.20.5–0.21.2) such a marker names a package manager
+    /// literally called "false" and the host IS managed, so Scarf keeps
+    /// reading it that way there.
+    public var hasManagedMarkerFalseOptOut: Bool { isV0213OrLater }
 
     /// The bare `hermes version` subcommand was removed (dropped from
     /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:2595` — no `"version"`
