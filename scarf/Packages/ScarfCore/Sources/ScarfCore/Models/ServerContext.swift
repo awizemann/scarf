@@ -469,6 +469,19 @@ extension ServerContext {
         return path
     }
 
+    /// The `cwd` for an ACP `session/new` / `session/load`: the project's
+    /// folder with a leading `~` expanded against the probed home, or the
+    /// home itself for a chat with no project. Hermes stores and uses the
+    /// value as given — `create_session` / `update_cwd` never expand `~`
+    /// (acp_adapter/session.py:176-178, :252-259 @ v2026.9.24) — so a remote
+    /// project registered as `~/projects/x` was attached with a literal `~`
+    /// path. A failed home probe leaves the path as it was.
+    public func acpSessionCwd(projectPath: String?) async -> String {
+        let home = await resolvedUserHome()
+        guard let projectPath else { return home }
+        return Self.expandingTilde(projectPath, home: home)
+    }
+
     /// Called when a server is removed from the registry, so the process-wide
     /// caches keyed by `ServerID` don't hold stale entries forever.
     public static func invalidateCaches(for contextID: ServerID) async {

@@ -519,6 +519,14 @@ public final class RichChatViewModel {
     /// Hosts before v0.21.4 never send this close, so nothing changes
     /// for them (C1). Only reached for ids that never had a tool-call
     /// start, so a real tool's completion can never pop a request.
+    /// Whether `update` is Hermes's close for a permission request Scarf
+    /// queued or answered (its `perm-check-N` / `edit-approval-N` id).
+    func closesQueuedPermission(_ update: ACPToolCallUpdateEvent) -> Bool {
+        guard !update.toolCallId.isEmpty else { return false }
+        return answeredPermissionAllowed[update.toolCallId] != nil
+            || permissionQueue.contains { $0.toolCallId == update.toolCallId }
+    }
+
     func closePermissionHermesSettled(_ update: ACPToolCallUpdateEvent) {
         guard !update.toolCallId.isEmpty else { return }
         // Answered by the user: Hermes closes it `completed` for an allow
@@ -1813,6 +1821,44 @@ public final class RichChatViewModel {
         turnCancelRequested = true
     }
 
+    /// The user pressed Stop on the running turn (S01-F2). Like
+    /// `noteTurnCancelRequested` the `cancelled` return raises no failure,
+    /// but the transcript then says the turn was stopped — the reply is
+    /// cut short, and the user should be able to see why. Answers any
+    /// permission request still on screen with `cancelled` right away: a
+    /// turn blocked on approval would otherwise sit until Hermes's own
+    /// approval timeout before the cancel could end it.
+    public func noteTurnStopRequestedByUser() {
+        turnCancelRequested = true
+        turnStoppedByUser = true
+        clearPendingPermissions()
+    }
+
+    /// Set by `noteTurnStopRequestedByUser`; consumed by the turn's
+    /// `promptComplete`, cleared by `reset()`.
+    @ObservationIgnored
+    private var turnStoppedByUser = false
+
+    /// Append the local "stopped" note for a turn the user ended.
+    public func appendTurnStoppedNote() {
+        let id = nextLocalId
+        nextLocalId -= 1
+        messages.append(HermesMessage(
+            id: id,
+            sessionId: sessionId ?? "",
+            role: "system",
+            content: String(localized: "You stopped this turn. Anything Hermes finished before the stop is kept."),
+            toolCallId: nil,
+            toolCalls: [],
+            toolName: nil,
+            timestamp: Date(),
+            tokenCount: nil,
+            finishReason: "cancelled",
+            reasoning: nil
+        ))
+        buildMessageGroups()
+    }
+
     nonisolated static func isCancelledStopReason(_ stopReason: String) -> Bool {
         switch stopReason.lowercased() {
         case "cancelled", "canceled": return true
@@ -2023,6 +2069,7 @@ public final class RichChatViewModel {
         finalizedReplyMessageIds = [:]
         openToolCallIds = []
         turnCancelRequested = false
+        turnStoppedByUser = false
         cancelStreamingFlush()
         setLiveActivityStatus(nil)
         acpInputTokens = 0
@@ -2094,8 +2141,19 @@ public final class RichChatViewModel {
             guard let sessionId else { return }
             let opened = await dataService.open()
             guard opened else { return }
+            let lineage = transcriptSessionIds
             if let session = await dataService.fetchSession(id: sessionId) {
-                currentSession = session
+                // After a rotating compression (`compression.in_place:
+                // false`) Hermes books every later call's tokens and cost
+                // on the continuation row (`agent.session_id` moves,
+                // agent/conversation_compression.py:1692; deltas go to it,
+                // agent/turn_usage.py:249-256 @ v2026.9.24). Add those rows
+                // so the header keeps counting (S02-F4). One row: unchanged.
+                var continuations: [HermesSession] = []
+                for id in lineage where id != sessionId {
+                    if let row = await dataService.fetchSession(id: id) { continuations.append(row) }
+                }
+                currentSession = continuations.isEmpty ? session : session.addingUsage(of: continuations)
             }
             await dataService.close()
         }
@@ -2497,6 +2555,13 @@ public final class RichChatViewModel {
             // styling flags there, so letting the replay copies through
             // would only double-render (or be clobbered by the
             // subsequent `loadSessionHistory` wholesale replace).
+            case .toolCallUpdate(_, let update) where closesQueuedPermission(update):
+                // Hermes closing a permission request that is on screen
+                // (it stopped waiting). The request itself is processed
+                // before engagement, so its close must be too, or the
+                // sheet stays up for an answer nobody reads (t-14157321).
+                closePermissionHermesSettled(update)
+                return
             case .messageChunk, .userMessageChunk, .thoughtChunk, .toolCallStart,
                  .toolCallUpdate:
                 ScarfMon.event(.chatStream, "mac.handleACPEvent.preEngagementDropped", count: 1)
@@ -2898,6 +2963,8 @@ public final class RichChatViewModel {
         // outcome — it belongs to this turn only.
         let cancelWasRequested = turnCancelRequested
         turnCancelRequested = false
+        let stoppedByUser = turnStoppedByUser
+        turnStoppedByUser = false
         // The turn these belong to is over. An unanswered request that
         // outlived its turn (agent cancelled, tool abandoned, the turn
         // errored out from under a parallel tool call) must be DROPPED,
@@ -2956,6 +3023,10 @@ public final class RichChatViewModel {
             }
         }
 
+        if isCancelled && stoppedByUser {
+            appendTurnStoppedNote()
+        }
+
         // Accumulate token usage from this prompt
         acpInputTokens += response.inputTokens
         acpOutputTokens += response.outputTokens
@@ -2973,14 +3044,15 @@ public final class RichChatViewModel {
         endAnalyticsTurn(errorKind: Self.analyticsTurnErrorKind(stopReason: response.stopReason))
         isAgentWorking = false
         setLiveActivityStatus(nil)
-        // v2.8 / Hermes v0.13 — Hermes runs the next `/queue`-deferred
-        // prompt server-side now that this turn has settled. Drain the
-        // local mirror FIFO so the header chip count matches what the
-        // user staged. Best-effort: if Hermes' authoritative queue
-        // diverged (deferred prompt aborted, dropped on disconnect),
-        // the chip is one tick stale until the user's next interaction.
+        // v2.8 / Hermes v0.13 — `/queue`-deferred prompts. Hermes runs
+        // EVERY queued prompt inside the owning turn's `session/prompt`
+        // before it answers (`_finish_turn` drains in its `finally`,
+        // `_drain_queued_prompts` loops until empty — acp_adapter/
+        // server.py:985-1011 @ v2026.9.24), so by the time this turn
+        // completes nothing is left queued. Clear the whole mirror, not one
+        // entry (S02-F3). A cancelled turn drains the same way.
         if !queuedPrompts.isEmpty {
-            popQueuedPrompt()
+            queuedPrompts = []
         }
         // TODO(v2.8.1): when this completes after an auto-resumed
         // checkpoint (Hermes v0.13's "Auto-resume interrupted sessions
@@ -3002,6 +3074,7 @@ public final class RichChatViewModel {
         // arrive over a new one (see `handlePromptComplete`).
         openToolCallIds.removeAll()
         turnCancelRequested = false
+        turnStoppedByUser = false
         let id = nextLocalId
         nextLocalId -= 1
         messages.append(HermesMessage(
@@ -3201,6 +3274,7 @@ public final class RichChatViewModel {
         // is a fresh process, whose updates never close these calls.
         openToolCallIds.removeAll()
         turnCancelRequested = false
+        turnStoppedByUser = false
         isAgentWorking = false
         setLiveActivityStatus(nil)
         clearPendingPermissions()
@@ -3631,14 +3705,19 @@ public final class RichChatViewModel {
     @MainActor
     public func loadToolResultIfMissing(callId: String) async {
         guard let sessionForLoad = sessionId else { return }
-        // Already in the transcript? Done.
-        if messages.contains(where: { $0.toolCallId == callId && $0.isToolResult }) {
+        // Already in the transcript with its output? Done. A live result
+        // with EMPTY content doesn't count: Hermes sends none for a
+        // successful `web_extract` (`content=None`, `raw_output=None` —
+        // acp_adapter/tools.py:825-834 @ v2026.9.24), and the stored row
+        // has the real output (S02-F2).
+        if messages.contains(where: { $0.toolCallId == callId && $0.isToolResult && !$0.content.isEmpty }) {
             return
         }
-        guard let content = await dataService.fetchToolResult(callId: callId) else {
+        guard let content = await dataService.fetchToolResult(callId: callId), !content.isEmpty else {
             return
         }
         guard self.sessionId == sessionForLoad else { return }
+        messages.removeAll { $0.toolCallId == callId && $0.isToolResult && $0.content.isEmpty }
         // Build a synthetic tool result row. We don't have the original
         // row id (would need a second SELECT) so we use a negative
         // local id that won't collide with persisted rows. The bubble
@@ -3762,7 +3841,20 @@ public final class RichChatViewModel {
         userSendPending = false
         isAgentWorking = false
         stopActivePolling()
+        workingEpoch &+= 1
     }
+
+    /// Bumped by `cancelPendingSend`. A poll tick that was already awaiting
+    /// the database when the send was unwound must not set "working" again
+    /// from the snapshot it started with (t-14157321): the timer is gone,
+    /// so nothing would ever clear it.
+    @ObservationIgnored
+    private var workingEpoch = 0
+
+    /// Poll ticks begun, so a test can interleave an unwind with a tick
+    /// that is already awaiting the database.
+    @ObservationIgnored
+    var pollTicksStarted = 0
 
     public func scheduleRefresh() {
         debounceTask?.cancel()
@@ -3774,6 +3866,8 @@ public final class RichChatViewModel {
     }
 
     public func refreshMessages() async {
+        let epoch = workingEpoch
+        pollTicksStarted &+= 1
         // Polling tick (terminal mode): pull a fresh snapshot so remote
         // reflects Hermes writes since the last tick. On local this is a
         // cheap reopen of the live DB.
@@ -3804,6 +3898,10 @@ public final class RichChatViewModel {
             messages = Self.mergedAfterPoll(fetched: fetched, currentLocal: messages)
             currentSession = session
             buildMessageGroups()
+
+            // The send was unwound while this tick awaited the database:
+            // show the rows, but leave the working state alone.
+            guard epoch == workingEpoch else { return }
 
             let derivedWorking = deriveAgentWorking(from: fetched)
             if userSendPending {

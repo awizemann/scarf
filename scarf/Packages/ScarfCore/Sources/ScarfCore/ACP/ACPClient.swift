@@ -107,6 +107,14 @@ public actor ACPClient {
 
     public private(set) var isConnected = false
     public private(set) var currentSessionId: String?
+    /// `modes.currentModeId` / `models.currentModelId` from the last
+    /// `session/new` or `session/load` response — the mode and model the
+    /// session is actually in. Hermes keeps the mode in memory only
+    /// (`set_session_mode`, acp_adapter/server.py:1053-1065, never written by
+    /// `_persist`, session.py:314-323 @ v2026.9.24), so a fresh `hermes acp`
+    /// that restores a session reports `default` here. `nil` when the host
+    /// sent no such field (C1: callers then keep what they had).
+    public private(set) var lastSessionState = ACPSessionState()
     public private(set) var statusMessage = ""
 
     public let context: ServerContext
@@ -455,6 +463,7 @@ public actor ACPClient {
             throw ACPClientError.invalidResponse("Missing sessionId in session/new response")
         }
         currentSessionId = sessionId
+        lastSessionState = ACPSessionState(response: dict)
         statusMessage = "Session ready"
         #if canImport(os)
         logger.info("Created new ACP session: \(sessionId)")
@@ -521,6 +530,7 @@ public actor ACPClient {
         }
         let loadedId = (dict["sessionId"] as? String) ?? sessionId
         currentSessionId = loadedId
+        lastSessionState = ACPSessionState(response: dict)
         statusMessage = "Session loaded"
         #if canImport(os)
         logger.info("Loaded ACP session: \(loadedId)")
