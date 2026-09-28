@@ -367,13 +367,59 @@ import Foundation
         #expect(paused == 0)
     }
 
-    // MARK: - SSHTransport: scp spec quoting
+    // MARK: - SSHTransport: scp spec (S15-F1)
 
-    @Test func scpRemoteSpecQuotesSpacesButLeavesTildeExpandable() {
+    /// scp runs in SFTP mode, which starts no remote shell, so the remote
+    /// path must go through untouched. The old test pinned the shell-quoted
+    /// form (`~/'My Projects/a.json'`), which SFTP treats as a literal name.
+    @Test func scpRemoteSpecPassesThePathThroughUnquoted() {
         #expect(SSHTransport.scpRemoteSpec("~/.hermes/scarf/projects.json") == "~/.hermes/scarf/projects.json")
-        #expect(SSHTransport.scpRemoteSpec("~/My Projects/a.json") == "~/'My Projects/a.json'")
-        #expect(SSHTransport.scpRemoteSpec("/tmp/a b") == "'/tmp/a b'")
-        // A path that would otherwise run a command on the far side.
-        #expect(SSHTransport.scpRemoteSpec("/tmp/$(rm -rf ~)") == "'/tmp/$(rm -rf ~)'")
+        #expect(SSHTransport.scpRemoteSpec("~/My Projects/a.json") == "~/My Projects/a.json")
+        #expect(SSHTransport.scpRemoteSpec("/tmp/a b") == "/tmp/a b")
+        #expect(SSHTransport.scpRemoteSpec("/tmp/$(rm -rf ~)") == "/tmp/$(rm -rf ~)")
+    }
+
+    @Test func scpUploadArgsPinSFTPAndEndWithSourceThenTarget() {
+        let cfg = SSHConfig(host: "box", user: "alan", port: 2222, identityFile: "/k/id")
+        let t = SSHTransport(contextID: UUID(), config: cfg, displayName: "box")
+        let args = t.scpUploadArgs(localPath: "/tmp/src", remotePath: "~/My Projects/a.json")
+        #expect(args.first == "-s")
+        #expect(!args.contains("-O"))
+        #expect(args.suffix(2) == ["/tmp/src", "alan@box:~/My Projects/a.json"])
+        #expect(args.contains("-P") && args.contains("2222"))
+        #expect(args.contains("-i") && args.contains("/k/id"))
+    }
+
+    /// The real client against the real SFTP server, with no network: `-S`
+    /// swaps ssh for a script that runs `/usr/libexec/sftp-server` in a temp
+    /// dir. The argv is Scarf's own. Absolute paths only, so nothing can
+    /// land in the real home directory.
+    @Test func scpUploadLandsAtASpacedQuotedNonASCIIPath() throws {
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: "/usr/bin/scp"),
+              fm.isExecutableFile(atPath: "/usr/libexec/sftp-server") else { return }
+        let root = fm.temporaryDirectory.appendingPathComponent("scarf-scp-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let dir = root.appendingPathComponent("My Projects/it's é")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fake = root.appendingPathComponent("fake-ssh")
+        try "#!/bin/sh\nexec /usr/libexec/sftp-server\n".write(to: fake, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let src = root.appendingPathComponent("src")
+        try Data("hello".utf8).write(to: src)
+
+        let target = dir.path + "/a $(x) \"q\".json"
+        let t = SSHTransport(contextID: UUID(), config: SSHConfig(host: "h"), displayName: "h")
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+        proc.arguments = ["-S", fake.path] + t.scpUploadArgs(localPath: src.path, remotePath: target)
+        proc.standardError = FileHandle.nullDevice
+        proc.standardOutput = FileHandle.nullDevice
+        try proc.run()
+        let deadline = Date().addingTimeInterval(20)
+        while proc.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if proc.isRunning { proc.terminate() }
+        #expect(proc.terminationStatus == 0)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: target)) == Data("hello".utf8))
     }
 }
