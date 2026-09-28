@@ -2502,7 +2502,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// hermes_cli/session_export.py:212 @ v2026.9.24), and `_export_markdown`
     /// passes `include_compacted=True`. Neither exists at v2026.9.21, where
     /// every format exports the live rows only. JSONL and Trace never
-    /// include them. Drives the Sessions export note.
+    /// include them. Drives the Sessions export note. (fe8b643db6 also sits
+    /// in late 0.21.4 canary builds, which this gate treats as 0.21.4, like
+    /// every other `isV0215OrLater` flag.)
     public var hasSessionsExportArchivedTurns: Bool { isV0215OrLater }
 
     /// `gateway.standalone: true` — the temporary per-profile shim that keeps

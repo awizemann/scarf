@@ -175,7 +175,16 @@ import ScarfCore
         vm.sessionExportRunner = { _, _ in (Data(#"{"id":"solo"}"#.utf8), "", 0) }
         vm.performExport(to: url, sessionId: "solo", format: .jsonl)
         await Self.settle(until: { vm.exportMessage != nil })
-        #expect(vm.exportMessage?.contains("hermes sessions export <folder> --format md --session-id solo") == true)
+        #expect(vm.exportMessage?.contains("hermes sessions export <folder> --format md --session-id solo on the host") == true)
+
+        // A chain's earlier segments need --lineage logical.
+        let chainVM = SessionsViewModel(context: remote)
+        chainVM.exportIncludesArchivedTurns = true
+        chainVM.archivedTurnsProbe = { _ in true }
+        chainVM.sessionExportRunner = { _, args in (Data("{\"id\":\"\(Self.sessionId(in: args) ?? "")\"}\n".utf8), "", 0) }
+        chainVM.performExport(to: url, sessionId: "tip", format: .jsonl, lineageIds: Self.chain)
+        await Self.settle(until: { chainVM.exportMessage != nil })
+        #expect(chainVM.exportMessage?.contains("--session-id tip --lineage logical") == true)
     }
 
     /// Before v0.21.5 no format includes archived turns, so the note names

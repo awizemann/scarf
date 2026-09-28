@@ -1047,19 +1047,23 @@ final class SessionsViewModel {
     nonisolated static func archivedTurnsNote(
         format: SessionExportFormat,
         sessionId: String,
+        isChain: Bool = false,
         markdownAvailable: Bool,
         markdownIncludesArchived: Bool
     ) -> String? {
+        let everyFormat = String(localized: " This conversation has earlier turns that compaction archived; this Hermes version leaves them out of every export format.")
         if format.isDirectoryOutput || format == .html {
-            return markdownIncludesArchived ? nil
-                : String(localized: " This conversation has earlier turns that compaction archived; this Hermes version leaves them out of every export format.")
+            return markdownIncludesArchived ? nil : everyFormat
         }
-        guard markdownIncludesArchived else {
-            return String(localized: " This conversation has earlier turns that compaction archived; this Hermes version leaves them out of every export format.")
+        guard markdownIncludesArchived else { return everyFormat }
+        if markdownAvailable {
+            return String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Export as Markdown for the full history.")
         }
-        return markdownAvailable
-            ? String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Export as Markdown for the full history.")
-            : String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Run hermes sessions export <folder> --format md --session-id \(sessionId) on the host for the full history.")
+        // A chain needs `--lineage logical` for the earlier segments too
+        // (hermes_cli/subcommands/sessions.py:95-96 @ v2026.9.24).
+        let command = "hermes sessions export <folder> --format md --session-id \(sessionId)"
+            + (isChain ? " --lineage logical" : "")
+        return String(localized: " This conversation has earlier turns that compaction archived; Hermes leaves them out of \(format.displayName) exports. Run \(command) on the host for the full history.")
     }
 
     /// Suffix for a success banner when `latestSegmentOnly` applied.
@@ -1124,7 +1128,7 @@ final class SessionsViewModel {
                await self.hasArchivedTurns(
                    chain.isEmpty ? [sessionId] : (mode == .latestSegmentOnly ? [sessionId] : chain)),
                let note = Self.archivedTurnsNote(
-                   format: format, sessionId: sessionId,
+                   format: format, sessionId: sessionId, isChain: !chain.isEmpty,
                    markdownAvailable: markdownAvailable,
                    markdownIncludesArchived: self.exportIncludesArchivedTurns) {
                 outcome.message += note
