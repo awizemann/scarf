@@ -35,9 +35,35 @@ final class SettingsViewModel {
     var personalities: [String] = []
     // tts.provider gained `piper` (native local TTS via the Piper engine)
     // in v0.12. Shows up unconditionally — Hermes silently ignores unknown
-    // values on older hosts. (Vercel Sandbox was removed as a terminal
-    // backend in v0.15 alongside the Vercel AI Gateway provider removal.)
-    var terminalBackends = ["local", "docker", "singularity", "modal", "daytona", "ssh"]
+    // values on older hosts.
+    static let terminalBackendsBase = ["local", "docker", "singularity", "modal", "daytona", "ssh"]
+
+    /// `terminal.backend` picker options. `vercel_sandbox` is added only on a
+    /// host that runs it (`HermesCapabilities.hasVercelTerminal`: v0.12–v0.14,
+    /// then again from v0.19.1 — it was removed in v0.15.0 and restored,
+    /// tools/terminal_tool.py:5 @ v2026.9.24). A stored value outside the
+    /// list (a plugin backend, `_build_plugin_env`) is APPENDED, the same rule
+    /// `DisplayTab.busyInputModeOptions` applies, so the picker never renders
+    /// blank over a config Scarf did not expect.
+    static func terminalBackends(capabilities: HermesCapabilities, current: String = "") -> [String] {
+        var out = terminalBackendsBase
+        if capabilities.hasVercelTerminal { out.append("vercel_sandbox") }
+        if !current.isEmpty, !out.contains(current) { out.append(current) }
+        return out
+    }
+
+    /// `terminal.modal_mode` picker options — Hermes's own set,
+    /// `_VALID_MODAL_MODES = {"auto", "direct", "managed"}`
+    /// (tools/tool_backend_helpers.py:14-15 @ v2026.9.24, unchanged since the
+    /// key appeared in v0.7.0). Anything else is coerced to `auto` by
+    /// `coerce_modal_mode` (:54-57), so the `always`/`never` Scarf used to
+    /// offer never did anything. A stored value outside the set is appended
+    /// so it stays visible.
+    static func modalModes(current: String = "") -> [String] {
+        var out = ["auto", "direct", "managed"]
+        if !current.isEmpty, !out.contains(current) { out.append(current) }
+        return out
+    }
     /// `browser.cloud_provider` options. The ids are Hermes' own provider
     /// names: `local` and `camofox` are hardcoded rows in
     /// `hermes_cli/tools_config.py`'s Browser Automation section, while
