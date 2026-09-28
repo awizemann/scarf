@@ -902,6 +902,28 @@ struct ChatView: View {
                 liveVoiceButton
             }
 
+            // Stop for the running turn (S01-F2). Shown next to Send, not
+            // in its place: a message typed mid-turn can still be sent
+            // (Hermes steers or queues it).
+            if controller.canStopCurrentTurn {
+                Button {
+                    controller.stopCurrentTurn()
+                } label: {
+                    ZStack {
+                        Circle().fill(ScarfColor.danger)
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(ScarfColor.onAccent)
+                    }
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop")
+                .accessibilityHint("Stops the running turn. The chat stays open.")
+                .transition(.opacity)
+            }
+
             // Big circular send button. Filled with the brand accent when
             // ready, swapped to a flat gray when disabled — opacity dims
             // alone read as "not quite tappable" (issue #69), the explicit
@@ -1723,7 +1745,42 @@ final class ChatController {
     init(context: ServerContext) {
         self.context = context
         self.vm = RichChatViewModel(context: context)
+        // Answer, rather than silently drop, every permission request the
+        // transcript clears (a Stop, a turn end): each is an open
+        // `session/request_permission` call Hermes is blocked on. Read
+        // through `self` at call time — `client` is replaced per session.
+        // Same wiring as the Mac `ChatViewModel`.
+        vm.permissionCanceller = { [weak self] requestId in
+            guard let client = self?.client else { return }
+            Task { await client.cancelPermission(requestId: requestId) }
+        }
     }
+
+    // MARK: - Stop
+
+    /// A turn this controller started is running, so the composer offers
+    /// Stop (S01-F2).
+    var canStopCurrentTurn: Bool {
+        state == .ready && client != nil && promptsInFlight > 0
+    }
+
+    /// Stop the running turn and keep the session: `session/cancel` (a
+    /// notification) for the attached session. Hermes interrupts the agent
+    /// and answers the pending `session/prompt` with `stopReason:
+    /// "cancelled"` (acp_adapter/server.py:636-657, :999 @ v2026.9.24);
+    /// `runPrompt` then ends the turn, and the transcript says it was
+    /// stopped. Mac twin: `ChatViewModel.stopCurrentTurn`.
+    func stopCurrentTurn() {
+        guard canStopCurrentTurn, let client, let sessionId = vm.sessionId, !sessionId.isEmpty else { return }
+        vm.noteTurnStopRequestedByUser()
+        Task { try? await client.cancel(sessionId: sessionId) }
+    }
+
+    /// The name typed with `/new <name>`, applied once the new session's
+    /// first turn has stored it (S03-F5). Cleared by any other start.
+    /// Keyed by the session it was typed for, so a later resume of
+    /// another chat can never receive it.
+    @ObservationIgnored private var pendingSessionTitle: (title: String, sessionId: String)?
 
     /// Pre-flight: returns true when `config.yaml` has both
     /// `model.default` and `model.provider`. Returns false and stashes
@@ -1859,6 +1916,52 @@ final class ChatController {
     /// so a non-interactive remote shell finds `hermes`; everything after it
     /// is `HermesConfigSet.argv` shell-escaped word by word, which is where
     /// the `--` comes from.
+    /// Name the session typed with `/new <name>`: one `hermes sessions
+    /// rename` over the same shell hop `runConfigSet` uses. A failure says
+    /// so in the chat; the name is not retried.
+    private func applyPendingSessionTitle(sessionId: String) async {
+        guard let pending = pendingSessionTitle, pending.sessionId == sessionId,
+              vm.sessionId == sessionId else { return }
+        pendingSessionTitle = nil
+        let title = pending.title
+        let ctx = context
+        let ok = await Self.runSessionRename(ctx, hermes: ctx.paths.hermesBinary, sessionId: sessionId, title: title)
+        guard vm.sessionId == sessionId else { return }
+        if ok {
+            if let current = vm.currentSession, current.id == sessionId {
+                vm.currentSession = current.withTitle(title)
+            }
+        } else {
+            vm.transientHint = String(localized: "Couldn't name this chat “\(title)”.")
+            scheduleTransientHintClear(snapshot: vm.transientHint)
+        }
+    }
+
+    nonisolated private static func runSessionRename(
+        _ ctx: ServerContext,
+        hermes: String,
+        sessionId: String,
+        title: String
+    ) async -> Bool {
+        let argv = HermesSessionRenameCommand.argv(sessionId: sessionId, title: title)
+            .map(escapeShellArg)
+            .map { "'\($0)'" }
+            .joined(separator: " ")
+        let pin = HermesProfileScope.rootPinShellFragment(forHome: ctx.paths.home)
+        let script = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermes) \(pin)\(argv)"
+        do {
+            let result = try await ctx.makeTransport().asyncRunProcess(
+                executable: "/bin/sh",
+                args: ["-c", script],
+                stdin: nil,
+                timeout: 15
+            )
+            return result.exitCode == 0
+        } catch {
+            return false
+        }
+    }
+
     nonisolated private static func runConfigSet(
         _ ctx: ServerContext,
         hermes: String,
@@ -2075,12 +2178,14 @@ final class ChatController {
             attachments = []
             switch intercept {
             case .newSession(let name):
-                // iOS fresh-chat path doesn't accept a session name yet
-                // (Hermes v0.13 `hasNewWithSessionName` lands later in
-                // the iOS catch-up). Drop the name silently and start
-                // a clean session.
-                _ = name
                 await resetAndStartNewSession()
+                // `/new <name>` (S03-F5): Hermes stores an ACP session
+                // only after its first turn, so the name is applied then
+                // (`applyPendingSessionTitle`).
+                let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !title.isEmpty, let newId = vm.sessionId, !newId.isEmpty {
+                    pendingSessionTitle = (title, newId)
+                }
             }
             return
         }
@@ -2384,6 +2489,11 @@ final class ChatController {
             vm.handleACPEvent(
                 .promptComplete(sessionId: sessionId, response: result)
             )
+            // A real turn (not an ACP slash command, which stores nothing)
+            // has stored the session: apply a pending `/new <name>`.
+            if result.stopReason == "end_turn", !wireText.hasPrefix("/") {
+                await applyPendingSessionTitle(sessionId: sessionId)
+            }
         } catch {
             // gh#108: a send in flight when the user switches apps
             // gets cancelled by pauseInBackground tearing down the
@@ -2809,12 +2919,9 @@ final class ChatController {
                     // Project-scoped sessions reconnect with their
                     // project path as cwd; everything else uses the
                     // remote user's home directory.
-                    let cwd: String
-                    if let path = lastProjectPath {
-                        cwd = path
-                    } else {
-                        cwd = await context.resolvedUserHome()
-                    }
+                    // `~`-rooted project paths are expanded: Hermes takes
+                    // the session cwd literally.
+                    let cwd = await context.acpSessionCwd(projectPath: lastProjectPath)
 
                     // load-only — see the doc comment above for why
                     // resume must never come back here.
@@ -2920,6 +3027,7 @@ final class ChatController {
     func resetAndStartNewSession() async {
         await stop()
         vm.reset()
+        pendingSessionTitle = nil
         currentProjectName = nil
         currentGitBranch = nil
         // Quick-chat sessions don't have a project; clear any leftover
@@ -2938,6 +3046,7 @@ final class ChatController {
     func resetAndStartInProject(_ project: ProjectEntry) async {
         await stop()
         vm.reset()
+        pendingSessionTitle = nil
         currentProjectName = project.name
         currentGitBranch = nil
         // Pull any project-authored slash commands at
@@ -3062,12 +3171,7 @@ final class ChatController {
         do {
             // Use the project's path as cwd when provided; else the
             // remote user's home, matching the pre-M9 default.
-            let cwd: String
-            if let projectPath {
-                cwd = projectPath
-            } else {
-                cwd = await context.resolvedUserHome()
-            }
+            let cwd = await context.acpSessionCwd(projectPath: projectPath)
             let sessionId = try await client.newSession(cwd: cwd)
             // The project's bound model preset, before the composer
             // unlocks — the Mac does the same (S11-F3).
@@ -3206,12 +3310,7 @@ final class ChatController {
             // cwd (matching the reconnect path); others use the remote
             // user's home. Hermes loads project context from the process
             // cwd set at spawn (forIOSApp projectCwd), not from this.
-            let cwd: String
-            if let projectPath = resolved?.path {
-                cwd = projectPath
-            } else {
-                cwd = await context.resolvedUserHome()
-            }
+            let cwd = await context.acpSessionCwd(projectPath: resolved?.path)
             // `session/load` only — `session/resume` restores through
             // the same server path but CREATES an orphan session when
             // the id isn't restorable (t-217da62b; see
