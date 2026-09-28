@@ -107,7 +107,6 @@
 
 ## Doing
 
-- [ ] B13 Env-first platform settings: forms show/write values Hermes reads from .env first (id: t-d83fc37d) (added: 2026-09-27)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
@@ -115,6 +114,7 @@
 
 ## Done
 
+- [x] B13 Env-first platform settings: forms show/write values Hermes reads from .env first (id: t-d83fc37d) (added: 2026-09-27)
 - [x] Blind re-audit remediation (B01–B12) (id: t-f54a80d5) (added: 2026-09-27) (priority: high)
 - [x] B12 Touched-surface audit + follow-ups (blind remediation) (id: t-f9da0584) (added: 2026-09-27)
 - [x] B11 Orchestrator audit: plan conformance, memory audit, fresh-eyes (blind remediation) (id: t-50748d49) (added: 2026-09-27)

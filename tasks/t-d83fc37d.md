@@ -1,7 +1,7 @@
 ---
 id: t-d83fc37d
 title: B13 Env-first platform settings: forms show/write values Hermes reads from .env first
-status: doing
+status: done
 added: 2026-09-27
 ---
 
@@ -15,5 +15,5 @@ After B12 (current phases done). Same bug as S07-F4 Mattermost (fixed in B05) ac
 
 ## Artifacts
 
-Branch fix/hermes-v0215-blind-b13: 05f9c54f (Discord+Telegram env-first forms, allowlist, iOS rows, strings), 2563ae91 (JSON-list env allowlist). Tests: ScarfCore PlatformEnvSettingB13Tests (8), scarfTests DiscordEnvFirstB13Tests/TelegramEnvFirstB13Tests/AllowlistEnvFirstB13Tests (8, incl. round trip through Hermes v0.21.5 loader). Memory: B13 section appended to architecture/a-platform-s-shared-keys-are-bridged-from-one-section-so. Remaining: Matrix, Ntfy, Slack/Mattermost allowlists.
+Step 0: Hermes docs + pre-v2026.7.30 wizards put these in .env (DingTalk dropped). Fixed Discord, Telegram, Matrix, Ntfy, Slack/Mattermost allowlists + iOS rows; per-band flags; .env line removed only after config set succeeds; allowlist never emptied while .env holds entries. Round-trip through Hermes loader. scarfTests 1917 pass (B13 branch). Merged to main locally.
 
