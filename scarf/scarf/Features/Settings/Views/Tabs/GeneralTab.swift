@@ -19,6 +19,7 @@ struct GeneralTab: View {
                 currentBaseURL: viewModel.config.modelBaseURL,
                 currentAPIKey: viewModel.config.modelAPIKey,
                 currentAPIMode: viewModel.config.modelAPIMode,
+                customProviders: ModelPreflight.CustomProviders(viewModel.config),
                 onChange: { modelID, providerID in
                     // Selecting a model auto-syncs the provider so the two
                     // stay in lockstep (an empty provider — custom entry

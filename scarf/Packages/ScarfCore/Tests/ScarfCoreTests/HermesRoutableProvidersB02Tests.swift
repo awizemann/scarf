@@ -232,6 +232,19 @@ struct HermesRoutableProvidersB02Tests {
         #expect(ModelPreflight.unroutableProvider(tts, capabilities: Self.v0215) == "groq")
     }
 
+    /// The shared rule the model picker uses (B11): same exemptions as the
+    /// preflight warning, from the carried custom-provider names.
+    @Test func isUnroutableHonoursCustomProviders() {
+        let none = ModelPreflight.CustomProviders.none
+        #expect(ModelPreflight.isUnroutable("my-lab", customProviders: none, capabilities: Self.v0215))
+        #expect(!ModelPreflight.isUnroutable("my-lab", customProviders: .init(names: ["my-lab"], hasUnread: false), capabilities: Self.v0215))
+        #expect(!ModelPreflight.isUnroutable("My Lab", customProviders: .init(names: ["my-lab"], hasUnread: false), capabilities: Self.v0215))
+        #expect(!ModelPreflight.isUnroutable("my-lab", customProviders: .init(names: [], hasUnread: true), capabilities: Self.v0215))
+        #expect(!ModelPreflight.isUnroutable("my-lab", customProviders: none, capabilities: .empty))
+        #expect(!ModelPreflight.isUnroutable("", customProviders: none, capabilities: Self.v0215))
+        #expect(!ModelPreflight.isUnroutable("anthropic", customProviders: none, capabilities: Self.v0215))
+    }
+
     /// Per-provider knobs under `providers:` (a timeout for a built-in) are
     /// not custom endpoints; they must not silence the warning for a
     /// DIFFERENT, unroutable provider (review finding). An entry matched by

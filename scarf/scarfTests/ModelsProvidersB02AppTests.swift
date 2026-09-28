@@ -31,6 +31,54 @@ struct ModelsProvidersB02AppTests {
         #expect(ModelPickerSheet.resolveInitialProviderID("anthropic", in: providers, capabilities: v0215) == "anthropic")
     }
 
+    /// B11 regression: a provider named by a config.yaml custom endpoint
+    /// routes through Hermes's named-custom rung, so the sheet must restore
+    /// it (and Save must accept it) like the preflight already does. Config
+    /// written as YAML and read back by Scarf, for both custom-provider forms.
+    @Test func customProviderNamedInConfigIsRestored() {
+        let providers = [Self.provider("anthropic"), Self.provider("openai")]
+        let v0215 = HermesCapabilities.parse("Hermes Agent v0.21.5 (2026.9.24)")
+        let legacy = HermesConfig(yaml: """
+        model:
+          provider: my-lab
+          default: lab-7b
+        custom_providers:
+          - name: my-lab
+            base_url: http://10.0.0.5:8000/v1
+        """)
+        let keyed = HermesConfig(yaml: """
+        model:
+          provider: my-lab
+          default: lab-7b
+        providers:
+          my-lab:
+            base_url: http://10.0.0.5:8000/v1
+        """)
+        for cfg in [legacy, keyed] {
+            let custom = ModelPreflight.CustomProviders(cfg)
+            #expect(ModelPickerSheet.resolveInitialProviderID(
+                cfg.provider, in: providers, capabilities: v0215, customProviders: custom) == "my-lab")
+            // Same rule the Save gate uses.
+            #expect(!ModelPreflight.isUnroutable(cfg.provider, customProviders: custom, capabilities: v0215))
+        }
+        // Without custom entries the S06-F1 behaviour stays.
+        #expect(ModelPickerSheet.resolveInitialProviderID(
+            "my-lab", in: providers, capabilities: v0215,
+            customProviders: ModelPreflight.CustomProviders(HermesConfig(yaml: "model:\n  provider: my-lab\n"))) == "")
+    }
+
+    /// Source pins: the Save gate uses the shared rule with the sheet's
+    /// custom providers, and Settings passes config.yaml's names through.
+    @Test func saveGateAndSettingsUseCustomProviders() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scarf/Features/Settings/Views")
+        let sheet = try String(contentsOf: root.appendingPathComponent("Components/ModelPickerSheet.swift"), encoding: .utf8)
+        #expect(!sheet.contains("HermesRoutableProviders.isRoutable("))
+        #expect(sheet.contains("selectedProviderID, customProviders: customProviders,"))
+        let general = try String(contentsOf: root.appendingPathComponent("Tabs/GeneralTab.swift"), encoding: .utf8)
+        #expect(general.contains("customProviders: ModelPreflight.CustomProviders(viewModel.config)"))
+    }
+
     // MARK: - S06-F2: auth.json updated_at as Hermes writes it
 
     private static func state(updatedAt: String) throws -> NousSubscriptionState {

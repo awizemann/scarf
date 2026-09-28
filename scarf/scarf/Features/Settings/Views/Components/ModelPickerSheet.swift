@@ -29,6 +29,10 @@ struct ModelPickerSheet: View {
     var initialBaseURL: String = ""
     var initialAPIKey: String = ""
     var initialAPIMode: String = ""
+    /// config.yaml's custom-provider names. Hermes routes a saved provider
+    /// matching one even though it isn't built in, so the sheet must not
+    /// treat it as unroutable.
+    var customProviders: ModelPreflight.CustomProviders = .none
     let onSelect: (_ modelID: String, _ providerID: String) -> Void
     /// Local-tab save path. The Remote | Local source filter is only
     /// offered when this is non-nil — hosts that can't persist the
@@ -164,7 +168,8 @@ struct ModelPickerSheet: View {
             let capabilities = capabilitiesStore?.capabilities ?? .empty
             providers = await catalog.loadProvidersAsync(capabilities: capabilities)
             selectedProviderID = Self.resolveInitialProviderID(
-                initialProvider, in: providers, capabilities: capabilities
+                initialProvider, in: providers, capabilities: capabilities,
+                customProviders: customProviders
             )
             selectedModelID = initialModel
             overlayModelID = initialModel
@@ -1239,9 +1244,10 @@ struct ModelPickerSheet: View {
         }
         // A provider Hermes can't route (S06-F1) — e.g. the unlisted one a
         // saved config restored — must not be saved back.
-        if HermesRoutableProviders.isRoutable(
-            selectedProviderID, capabilities: capabilitiesStore?.capabilities ?? .empty
-        ) == false {
+        if ModelPreflight.isUnroutable(
+            selectedProviderID, customProviders: customProviders,
+            capabilities: capabilitiesStore?.capabilities ?? .empty
+        ) {
             return false
         }
         return !selectedModelID.isEmpty
@@ -1360,7 +1366,8 @@ struct ModelPickerSheet: View {
     static func resolveInitialProviderID(
         _ initialProvider: String,
         in providers: [HermesProviderInfo],
-        capabilities: HermesCapabilities
+        capabilities: HermesCapabilities,
+        customProviders: ModelPreflight.CustomProviders = .none
     ) -> String {
         guard !initialProvider.isEmpty else { return providers.first?.providerID ?? "" }
         if providers.contains(where: { $0.providerID == initialProvider }) { return initialProvider }
@@ -1368,7 +1375,9 @@ struct ModelPickerSheet: View {
         if providers.contains(where: { $0.providerID == canonical }) { return canonical }
         // A saved provider this Hermes can't route (S06-F1) has no row by
         // design — select nothing, so Save can't write it straight back.
-        if HermesRoutableProviders.isRoutable(initialProvider, capabilities: capabilities) == false {
+        if ModelPreflight.isUnroutable(
+            initialProvider, customProviders: customProviders, capabilities: capabilities
+        ) {
             return ""
         }
         // Neither matched — leave it unchanged rather than silently

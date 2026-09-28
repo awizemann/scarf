@@ -85,12 +85,47 @@ public enum ModelPreflight: Sendable {
         _ config: HermesConfig, capabilities: HermesCapabilities
     ) -> String? {
         let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !isUnset(provider), !config.hasUnreadCustomProviders,
-              !config.namedCustomProviders.contains(
-                  provider.lowercased().replacingOccurrences(of: " ", with: "-")),
-              HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
+        guard isUnroutable(provider, customProviders: CustomProviders(config),
+                           capabilities: capabilities)
         else { return nil }
         return provider
+    }
+
+    /// The custom-provider names a config.yaml defines, which Hermes routes
+    /// even when they aren't built-in providers. Carried separately so the
+    /// model picker can apply the same exemptions as the preflight warning
+    /// without holding the whole config.
+    public struct CustomProviders: Sendable, Equatable {
+        public var names: Set<String>
+        public var hasUnread: Bool
+
+        public static let none = CustomProviders(names: [], hasUnread: false)
+
+        public init(names: Set<String>, hasUnread: Bool) {
+            self.names = names
+            self.hasUnread = hasUnread
+        }
+
+        public init(_ config: HermesConfig) {
+            self.init(names: config.namedCustomProviders,
+                      hasUnread: config.hasUnreadCustomProviders)
+        }
+    }
+
+    /// True only when this Hermes is known not to route `provider`: it is
+    /// set, not a custom endpoint in config.yaml (or config.yaml has custom
+    /// entries Scarf can't read), and missing from the host's band. The one
+    /// rule behind both the preflight warning and the model picker (S06-F1).
+    public static func isUnroutable(
+        _ provider: String, customProviders: CustomProviders,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isUnset(provider), !customProviders.hasUnread,
+              !customProviders.names.contains(
+                  provider.lowercased().replacingOccurrences(of: " ", with: "-"))
+        else { return false }
+        return HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
     }
 
     /// Result of a `model.default` ↔ `model.provider` mismatch check.
