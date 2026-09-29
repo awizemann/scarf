@@ -121,6 +121,19 @@ public protocol ServerTransport: Sendable {
     /// A default impl (below) ignores `cwd`, so transports that don't need
     /// it require no change.
     nonisolated func makeProcess(executable: String, args: [String], cwd: String?) -> Process
+
+    /// As `makeProcess(executable:args:cwd:)` but also delivers a Scarf
+    /// `HERMES_ENVIRONMENT_HINT` (gh#142), composed with — never replacing —
+    /// the hint the target host already has (see ``EnvironmentHintComposer``).
+    /// `SSHTransport` embeds it in the remote command (the local
+    /// `Process.environment` never reaches the remote); `LocalTransport`
+    /// sets it on the returned process's environment, which a caller that
+    /// replaces `environment` afterwards must compose again itself
+    /// (`ACPClient.forMacApp` does). A nil `environmentHint` is exactly the
+    /// 3-arg spawn. The default impl ignores the hint.
+    nonisolated func makeProcess(
+        executable: String, args: [String], cwd: String?, environmentHint: EnvironmentHintRequest?
+    ) -> Process
     #endif
 
     /// Platform-neutral streaming exec. Runs `executable args…` on the target
@@ -361,6 +374,14 @@ public extension ServerTransport {
     /// this; test fakes + iOS inherit the no-op.
     nonisolated func makeProcess(executable: String, args: [String], cwd: String?) -> Process {
         makeProcess(executable: executable, args: args)
+    }
+
+    /// Default: ignore the hint and fall back to the 3-arg spawn. Local and
+    /// SSH override; test fakes + iOS inherit the no-op.
+    nonisolated func makeProcess(
+        executable: String, args: [String], cwd: String?, environmentHint: EnvironmentHintRequest?
+    ) -> Process {
+        makeProcess(executable: executable, args: args, cwd: cwd)
     }
     #endif
 }

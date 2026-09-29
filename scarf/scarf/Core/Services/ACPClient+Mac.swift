@@ -19,13 +19,19 @@ extension ACPClient {
     /// `profile` (when set) pins the agent to that Hermes profile — the
     /// Bot Mode path, where the ACP process must run as the *bot*, not as
     /// the user's active profile. See `acpArguments(profile:)`.
+    /// `environmentHint` (gh#142) delivers Scarf's `HERMES_ENVIRONMENT_HINT`
+    /// composed with the user's own hint (env, else config), never replacing
+    /// it — see `EnvironmentHintComposer`. Nil = today's spawn.
     public static func forMacApp(
         context: ServerContext = .local,
         projectCwd: String? = nil,
-        profile: String? = nil
+        profile: String? = nil,
+        environmentHint: EnvironmentHintRequest? = nil
     ) -> ACPClient {
         ACPClient(context: context) { ctx in
-            try await makeProcessChannel(for: ctx, projectCwd: projectCwd, profile: profile)
+            try await makeProcessChannel(
+                for: ctx, projectCwd: projectCwd, profile: profile,
+                environmentHint: environmentHint)
         }
     }
 
@@ -78,7 +84,8 @@ extension ACPClient {
     nonisolated private static func makeProcessChannel(
         for context: ServerContext,
         projectCwd: String? = nil,
-        profile: String? = nil
+        profile: String? = nil,
+        environmentHint: EnvironmentHintRequest? = nil
     ) async throws -> any ACPChannel {
         let transport = context.makeTransport()
         // Remote takes the SAME argv: `SSHTransport.makeProcess` composes
@@ -88,7 +95,8 @@ extension ACPClient {
         let proc = transport.makeProcess(
             executable: context.paths.hermesBinary,
             args: acpArguments(profile: profile),
-            cwd: projectCwd
+            cwd: projectCwd,
+            environmentHint: environmentHint
         )
 
         if context.isRemote {
@@ -110,11 +118,27 @@ extension ACPClient {
             // Local: enriched env so any tools hermes spawns (MCP
             // servers, shell commands) can find brew/nvm/asdf binaries
             // on PATH.
-            var env = HermesFileService.enrichedEnvironment()
-            env.removeValue(forKey: "TERM")
+            // The hint composes against THIS env (the user's shell
+            // exports included), since it replaces what LocalTransport set.
+            let env = localACPEnvironment(
+                enriched: HermesFileService.enrichedEnvironment(),
+                environmentHint: environmentHint)
             proc.environment = env
         }
 
         return try await ProcessACPChannel(process: proc)
+    }
+
+    /// The local `hermes acp` environment: the enriched shell env minus
+    /// `TERM`, plus the composed hint when one is given. Pure so a nil hint
+    /// is testably identical to the pre-gh#142 env.
+    nonisolated static func localACPEnvironment(
+        enriched: [String: String], environmentHint: EnvironmentHintRequest?
+    ) -> [String: String] {
+        var env = enriched
+        env.removeValue(forKey: "TERM")
+        return EnvironmentHintComposer.applying(
+            scarfHint: environmentHint?.scarfHint,
+            configHint: environmentHint?.configHint, to: env)
     }
 }
