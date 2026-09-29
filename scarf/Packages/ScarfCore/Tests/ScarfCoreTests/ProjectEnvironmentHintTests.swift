@@ -66,6 +66,48 @@ import Foundation
         #expect(block?.contains("max_turns") == false)
     }
 
+    /// #142 P6. Every expected value is PyYAML 6.0.3's
+    /// `str(yaml.safe_load(doc)["agent"]["environment_hint"]).strip()` —
+    /// the string Hermes reads (`agent/prompt_builder.py:1057-1058`).
+    @Test(arguments: [
+        // `>` folds single breaks to spaces, keeps a blank line as a break,
+        // and a `#` inside the body is text, not a comment.
+        ("agent:\n  environment_hint: >\n    Runs in a devcontainer.\n    Use /workspace for files.\n\n    GPU is # not available.\n  max_turns: 60\n",
+         "Runs in a devcontainer. Use /workspace for files.\nGPU is # not available."),
+        ("agent:\n  environment_hint: >-\n    One\n    two\n", "One two"),
+        // More-indented lines inside `>` keep their breaks and indent.
+        ("agent:\n  environment_hint: >\n    Intro\n      - item a\n      - item b\n    Outro\n",
+         "Intro\n  - item a\n  - item b\nOutro"),
+        // A literal body that starts with a quote and holds ` #` is verbatim.
+        ("agent:\n  environment_hint: |\n    'quoted' start # keep\n    second\n",
+         "'quoted' start # keep\nsecond"),
+        // Odd indentation: 4-space section, body deeper still; 1-space.
+        ("agent:\n    max_turns: 3\n    environment_hint: >-\n          deep body\n          continues\n",
+         "deep body continues"),
+        ("agent:\n environment_hint: >\n  a\n  b\n", "a b"),
+        // Explicit indentation indicator.
+        ("agent:\n  environment_hint: >2-\n      lead spaces\n    next\n", "lead spaces\nnext"),
+        // A long plain scalar PyYAML wrapped onto a continuation line.
+        ("agent:\n  environment_hint: first part of a long\n    plain hint that wraps\n",
+         "first part of a long plain hint that wraps"),
+        ("agent:\n  environment_hint: \"line1\\nline2\"\n", "line1\nline2"),
+        ("agent:\n  environment_hint: plain # comment\n", "plain"),
+        ("agent: {environment_hint: flow hint}\n", "flow hint"),
+        ("agent:\n  environment_hint:\n    - a\n    - b\n", "['a', 'b']"),
+        ("agent:\n  environment_hint: [a, b]\n", "['a', 'b']"),
+    ])
+    func configHintMatchesWhatHermesReads(yaml: String, expected: String) {
+        #expect(ProjectEnvironmentHint.configHint(fromConfigYAML: yaml) == expected)
+    }
+
+    /// A value the parser cannot render exactly still comes back non-nil:
+    /// nil would let Scarf's env hint silently replace the user's.
+    @Test func configHintNeverDropsASetButOddValue() {
+        let map = ProjectEnvironmentHint.configHint(fromConfigYAML: "agent:\n  environment_hint:\n    where: devcontainer\n")
+        #expect(map == "{'where': 'devcontainer'}")
+        #expect(ProjectEnvironmentHint.configHint(fromConfigYAML: "agent:\n  environment_hint: yes\n") == "yes")
+    }
+
     @Test func configHintIsNilWhenAbsentBlankOrElsewhere() {
         #expect(ProjectEnvironmentHint.configHint(fromConfigYAML: "agent:\n  max_turns: 60\n") == nil)
         #expect(ProjectEnvironmentHint.configHint(fromConfigYAML: "agent:\n  environment_hint: \"  \"\n") == nil)

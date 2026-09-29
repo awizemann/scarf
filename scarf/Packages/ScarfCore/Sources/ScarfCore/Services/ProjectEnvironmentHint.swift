@@ -69,13 +69,59 @@ public enum ProjectEnvironmentHint {
         return configHint(fromConfigYAML: yaml)
     }
 
-    /// Pure: the `agent.environment_hint` scalar from config.yaml text,
-    /// quotes and block scalars resolved the way the config parser does.
+    /// Pure: `agent.environment_hint` from config.yaml text, as the string
+    /// Hermes reads — `str(value).strip()` over what PyYAML loaded
+    /// (`agent/prompt_builder.py:1057-1058` @ v0.21.4). Nil only when the key
+    /// is absent or blank.
+    ///
+    /// Why the care: Scarf's `HERMES_ENVIRONMENT_HINT` REPLACES the config
+    /// hint, so the composer has to carry this value forward. A misread
+    /// value silently rewrites the user's hint; a MISSING one (nil for a key
+    /// that is set) silently drops it. So where the exact string is out of
+    /// reach this errs towards returning an approximation, never nil:
+    ///
+    /// - `|` / `>` block scalars (any chomping, explicit indent or odd
+    ///   indentation): the parser's rendering is already PyYAML's string, so
+    ///   it is only trimmed — never comment-stripped (a `#` in a block body
+    ///   is text) or unquoted (a leading `'` is a character).
+    /// - Plain and quoted scalars: comment and quotes resolved, and a
+    ///   double-quoted body's escapes decoded (`"a\nb"` is two lines).
+    /// - A flow map (`agent: {environment_hint: …}`): read from the map.
+    /// - A list (block or flow): rendered like Python's `str(list)`,
+    ///   `['a', 'b']`. A nested map: `{'k': 'v'}` with keys sorted (the
+    ///   parser does not keep map order, so this one is approximate).
+    /// - Typed plain scalars stay as written: `yes` is `yes` here where
+    ///   Hermes says `True`. Close enough — the user's intent survives.
     public static func configHint(fromConfigYAML yaml: String) -> String? {
         let parsed = HermesYAML.parseNestedYAML(yaml)
-        guard let raw = parsed.values["agent.environment_hint"] else { return nil }
-        let value = HermesYAML.normalizedScalar(raw)
-        return EnvironmentHintComposer.isBlank(value) ? nil : value
+        let path = "agent.environment_hint"
+        // A flow list or flow map leaves `values[path] == ""` beside its
+        // `lists` / `maps` entry, so those are asked first.
+        let value: String?
+        if let items = parsed.lists[path] {
+            value = "[" + items.map { pythonRepr(HermesYAML.unquotedScalar($0)) }
+                .joined(separator: ", ") + "]"
+        } else if let map = parsed.maps[path], !map.isEmpty {
+            value = "{" + map.keys.sorted().map {
+                pythonRepr($0) + ": " + pythonRepr(HermesYAML.unquotedScalar(map[$0] ?? ""))
+            }.joined(separator: ", ") + "}"
+        } else if let raw = parsed.values[path] {
+            value = parsed.blockScalarPaths.contains(path) ? raw : HermesYAML.unquotedScalar(raw)
+        } else if let raw = parsed.maps["agent"]?["environment_hint"] {
+            value = HermesYAML.unquotedScalar(raw)
+        } else {
+            value = nil
+        }
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return EnvironmentHintComposer.isBlank(trimmed) ? nil : trimmed
+    }
+
+    /// A string as Python's `repr` quotes it for the common case (single
+    /// quotes; backslash and `'` escaped). Only for the list/map
+    /// approximation above.
+    private static func pythonRepr(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'") + "'"
     }
 }
 

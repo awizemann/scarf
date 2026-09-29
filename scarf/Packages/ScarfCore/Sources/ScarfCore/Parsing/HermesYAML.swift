@@ -51,18 +51,30 @@ public struct ParsedYAML: Sendable {
     /// alone knows. Round-6 P57b.
     public var dottedLiteralParentDepths: [String: Int]
 
+    /// The ``values`` paths whose FINAL value came from a `|` / `>` block
+    /// scalar. Such a value is already the string PyYAML loaded — the body
+    /// is taken verbatim, so a `#` in it is text, not a comment, and a
+    /// leading quote is a character, not a quoting style. A reader that
+    /// would otherwise run ``HermesYAML/normalizedScalar(_:)`` over the raw
+    /// value (which strips ` # …` and unquotes) checks this first (#142 P6,
+    /// `ProjectEnvironmentHint.configHint`). A path a later plain scalar
+    /// overwrote, or a duplicate-key purge removed, is not in here.
+    public var blockScalarPaths: Set<String>
+
     public init(
         values: [String: String] = [:],
         lists: [String: [String]] = [:],
         maps: [String: [String: String]] = [:],
         dottedLiteralPaths: Set<String> = [],
-        dottedLiteralParentDepths: [String: Int] = [:]
+        dottedLiteralParentDepths: [String: Int] = [:],
+        blockScalarPaths: Set<String> = []
     ) {
         self.values = values
         self.lists = lists
         self.maps = maps
         self.dottedLiteralPaths = dottedLiteralPaths
         self.dottedLiteralParentDepths = dottedLiteralParentDepths
+        self.blockScalarPaths = blockScalarPaths
     }
 }
 
@@ -246,11 +258,15 @@ public enum HermesYAML {
         // shape. The value was lost entirely and the body left phantom
         // `lists[…]` / `values[…]` entries behind it.
         var pendingBlock: PendingBlockScalar?
+        /// Every block scalar's rendering by path; filtered at the end to
+        /// the ones still standing (see `ParsedYAML.blockScalarPaths`).
+        var blockRenderings: [String: String] = [:]
         func closePendingBlock() {
             guard let pending = pendingBlock else { return }
             pendingBlock = nil
             let rendered = pending.rendered
             values[pending.path] = rendered
+            blockRenderings[pending.path] = rendered
             if let parentPath = pending.parentPath {
                 // A block scalar is never quoted and never carries a trailing
                 // comment, so neither decoder runs on it — the body IS the
@@ -586,9 +602,13 @@ public enum HermesYAML {
             }
         }
         closePendingBlock()
+        let blockScalarPaths = Set(blockRenderings.compactMap { path, rendered in
+            values[path] == rendered ? path : nil
+        })
         return ParsedYAML(values: values, lists: lists, maps: maps,
                           dottedLiteralPaths: dottedLiteralPaths,
-                          dottedLiteralParentDepths: dottedLiteralParentDepths)
+                          dottedLiteralParentDepths: dottedLiteralParentDepths,
+                          blockScalarPaths: blockScalarPaths)
     }
 
     /// True when `text` opens a quoted scalar that has not closed yet — the
