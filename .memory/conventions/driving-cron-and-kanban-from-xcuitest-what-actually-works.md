@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/ContentView.swift, scarf/scarf/Features/Cron/Views/Cr
 source_paths_inferred: false
 source_sha: 617115a44db1d20a6f87b2db698c6f6c549e612f
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-29
 reviewed: 2026-09-28
 reviewed_by: audit:claude-code (background)
 ---
@@ -25,3 +25,6 @@ Learned building the P2b write-path journeys (t-cd7d1c11, 2026-09-08), measured 
 ## Relations
 - relates_to [[XCUITest runner gotchas: env vars need TEST_RUNNER_, identifiers propagate, ⌘1 keystrokes get dropped]]
 - relates_to [[UI gate: section root identifiers and the Smoke/Full/Live test plans]]
+
+
+- [gotcha] macOS window tiling (Desktop & Dock ▸ Windows) overrides the pinned `{{40,140},{1800,1300}}` launch frame and squeezes Scarf into a tile (~1492x890, 2026-09-29). Symptoms: "Models.root never appeared" (Models row clipped behind the sidebar footer), "Window is only 1492pt wide", Kanban inspector never opens — alternating between tests, so it looks flaky. `launchAndSurface` now fails up front via `requireTestWindowSize` (min 1500x1200); turn tiling off for Scarf before a UI run. `revealSidebarRow` scrolls the `sidebar.nav` ScrollView and requires the row inside its frame, because a row clipped behind the footer still reports `isHittable`. #xcuitest

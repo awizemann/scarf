@@ -5,10 +5,10 @@ permalink: scarf/architecture/project-mutations-report-failure-registry-damage-b
 tags: [projects, registry, error-surfacing, phase-2, swiftui]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift, scarf/scarf/Features/Projects/Views/ProjectsView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift]
 source_paths_inferred: false
-source_sha: ea1b355f596541f6b247b2809a4c3cf15ec06961
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-03
 updated: 2026-09-03
-reviewed: 2026-09-08
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

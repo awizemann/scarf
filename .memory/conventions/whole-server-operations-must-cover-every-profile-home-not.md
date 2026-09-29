@@ -5,10 +5,10 @@ permalink: scarf/conventions/whole-server-operations-must-cover-every-profile-ho
 tags: [profiles, backup, restore, cron]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteBackupService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-27
 updated: 2026-09-27
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,11 +5,11 @@ permalink: scarf/operations/mac-scarftests-run-green-only-serially-and-an-unsign
 tags: [testing, xcodebuild, keychain, gotcha]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/scarfTests/ProjectTemplateTests.swift, scarf/scarfTests/SpawnDisciplineP43Tests.swift, scarf/Full.xctestplan]
 source_paths_inferred: false
-source_sha: 37fdae474237aebc693c7ad2fd34dbfc3d928209
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-18
-updated: 2026-09-27
-reviewed: 2026-09-19
-reviewed_by: claude-fable-5-1
+updated: 2026-09-29
+reviewed: 2026-09-29
+reviewed_by: audit:claude-code (background)
 ---
 
 Measured 2026-09-18 while making feat/voice pass the Mac suite (t-30667749), with a throwaway worktree of main for comparison. Flags were `-skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO` and each tree had its own DerivedData.
@@ -50,3 +50,9 @@ Measured 2026-09-18 while making feat/voice pass the Mac suite (t-30667749), wit
 
 
 - [gotcha] Shared Mac (2026-09-27): other projects (Herald, Orchestric) run app-hosted `xcodebuild test` on the same machine; run only one at a time. Wait with `pgrep -f "[x]codebuild.* test"` — the brackets matter: `until ! pgrep -f "xcodebuild.* test"` matches its own shell command line and never exits. When the console is locked (`ioreg -n Root -d1 -a | grep -A1 IOConsoleLocked` → true), app-hosted tests hang indefinitely: defer them and run ScarfCore/ScarfIOS `swift test` + `build-for-testing` instead. #testing
+
+
+- [gotcha] Release treats Swift warnings as errors (`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`), Debug doesn't. A gate that only builds/tests Debug can pass while `./scripts/build-detached.sh` (Release) fails — happened 2026-09-28 after the pre-release fixes (isolated Equatable conformance used off-main, a captured weak self in `Task.detached`+`MainActor.run`, unused lets). Every release gate must include one Release build (`./scripts/build-detached.sh` or `-configuration Release build`). #testing #release
+
+
+- [gotcha] `ChatSessionsR16bMacTests/secondSendDuringAutostartWaitsForTheReplayToDrain()` flakes on main as well as on feature branches, even run alone and serially (2026-09-29, #142 P6: 5 isolated `test-without-building -only-testing` runs each; main@2b1f8da3 4/5 pass, feat/142-environment-hint 3/5; every failure at ChatSessionsR16bMacTests.swift:254 `promptTexts == ["first", "second"]`). Not a branch regression. `SessionDeletedSignalTests/sessionsTabDeleteOfAttachedSessionMidTurnTearsDownChatClient()` passed 5/5 on both trees #testing #flake

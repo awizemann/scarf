@@ -4,10 +4,10 @@ type: note
 permalink: scarf/decisions/phase-1-milestone-1-first-class-project-object-implementation-decisions
 tags: [projects, phase-1, milestone-1, decision, scarfproject, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ScarfProject.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift]
-source_sha: 63ecbc5391ebfd3f148936573307de7877b9b95c
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-06-15
 updated: 2026-09-21
-reviewed: 2026-09-08
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -17,7 +17,7 @@ reviewed_by: audit:claude-code (background)
 - [rule] Subsystem naming: Cross-platform `ScarfCore` / `ScarfDesign` use subsystem `"com.scarf"`; `"com.scarf.app"` is macOS-app-only and `"com.scarf.ios"` is iOS-only. Performance/monitoring diagnostics use `"com.scarf.mon"` (e.g., `ScarfMon` phase metrics, caller attribution). #rule
 - [pattern] Expected/transient failures (decode errors, WebView nav/load failures, SSH/auth/network 4xx–5xx, path-rejection probes) log at `.warning`/`.notice`, NOT `.error`. `.error` is for programmer-invariant violations. Apply `\(value, privacy: .public)` redaction and never log secrets.
 - [check] Quick audit: `grep -rn 'print(' --include="*.swift" scarf | grep -v /Tests/ | grep -vi preview`
-- [done] Violations from 2026-06-13 Cycle 1 audit have been resolved: no raw `print()` found in HermesFileService.swift, HermesProfileResolver.swift, or WebviewWidgetView.swift. All Logger calls use correct subsystems. #history
+- [done] Violations from 2026-06-13 Cycle 1 audit have been resolved: no raw `print()` found in HermesFileService.swift, HermesProfileResolver.swift, or WebviewWidgetView.swift. All Logger calls use correct subsystems. Code reviewed 2026-09-29 post-304-line diff; violations remain resolved. #history
 
 ## Relations
 - relates_to [[Scarf Architecture Rules]]

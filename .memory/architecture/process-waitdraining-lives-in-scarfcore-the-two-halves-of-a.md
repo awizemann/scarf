@@ -5,10 +5,10 @@ permalink: scarf/architecture/process-waitdraining-lives-in-scarfcore-the-two-ha
 tags: [c10, process, spawn-discipline, scarfcore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProcessTimeout.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteBackupService.swift, scarf/scarf/Core/Services/ProjectTemplateService.swift, scarf/scarfTests/MainActorSpawnDisciplineP22Tests.swift]
 source_paths_inferred: false
-source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-11
 updated: 2026-09-18
-reviewed: 2026-09-18
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

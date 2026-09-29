@@ -5,11 +5,11 @@ permalink: scarf/architecture/a-platform-s-shared-keys-are-bridged-from-one-sect
 tags: [hermes, gateway, config, platforms, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPlatformSharedKeys.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift]
 source_paths_inferred: false
-source_sha: 720dbdc26d8e55d9c470297b4108454262ab4d45
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-11
 updated: 2026-09-28
-reviewed: 2026-09-13
-reviewed_by: claude-opus-5
+reviewed: 2026-09-29
+reviewed_by: audit:claude-code (background)
 ---
 
 `platform_section` (`gateway/config_loader.py:171-180` @ v2026.9.7) picks ONE section per platform to bridge `_SHARED_KEYS` (`:197-213`) from: "a top-level `<name>:` block wins; otherwise the block under `gateway.platforms` / `platforms`". `_bridged_keys` (`:224-239`) copies that section's members into the platform's `extra` with `extra.update(bridged)`, and the adapters read them from `extra` (`_slack_require_mention`, `plugins/platforms/slack/adapter.py:5917-5926`).

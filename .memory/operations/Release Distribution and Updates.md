@@ -3,12 +3,12 @@ title: Release Distribution and Updates
 type: note
 permalink: scarf/ops/release-distribution-and-updates
 tags: [release, sparkle, distribution]
-source_paths: [scripts/release.sh, README.md]
+source_paths: [scripts/release.sh]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-05-29
 updated: 2026-06-06
-reviewed: 2026-09-26
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

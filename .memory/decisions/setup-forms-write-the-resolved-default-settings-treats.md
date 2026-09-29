@@ -5,11 +5,11 @@ permalink: scarf/decisions/setup-forms-write-the-resolved-default-settings-treat
 tags: [platforms, settings, config, hermes]
 source_paths: [scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: 698bee2966bf21228c03b00df7fe0105d7e61781
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-10
 updated: 2026-09-27
-reviewed: 2026-09-12
-reviewed_by: claude-opus-5
+reviewed: 2026-09-29
+reviewed_by: audit:claude-code (background)
 ---
 
 Round-3 product decision 9 (Alan, 2026-09-10), shipped in P33 as a doc comment on `PlatformSetupForm` plus this note. No behaviour change — the two surfaces already differed, and the difference was intentional and undocumented.

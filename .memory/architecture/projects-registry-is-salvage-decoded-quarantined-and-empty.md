@@ -5,10 +5,10 @@ permalink: scarf/architecture/projects-registry-is-salvage-decoded-quarantined-a
 tags: [projects, registry, resilience, phase-1, codable]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectRegistrySalvage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift]
 source_paths_inferred: false
-source_sha: 3cf372605b3a8a51ec7ed5ac1238e41fed825678
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-03
 updated: 2026-09-04
-reviewed: 2026-09-08
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,10 +5,10 @@ permalink: scarf/conventions/validate-untrusted-names-with-a-z-anchors-and-gate-
 tags: [security, validation, regex, consent]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectSlashCommand.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppPermission.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift]
 source_paths_inferred: false
-source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-04
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

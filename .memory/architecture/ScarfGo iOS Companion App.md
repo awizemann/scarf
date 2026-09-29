@@ -3,18 +3,19 @@ title: ScarfGo iOS Companion App
 type: note
 permalink: scarf/architecture/scarf-go-i-os-companion-app
 tags: [ios, scarfgo, ssh]
-source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfDesign, scarf/Packages/ScarfIOS]
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift]
+source_paths_inferred: false
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-05-29
-updated: 2026-09-26
-reviewed: 2026-09-27
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-29
+reviewed: 2026-09-29
+reviewed_by: claude-sonnet-5
 ---
 
 ## Observations
 - [structure] ScarfGo is a separate iOS target (`scarf mobile`) in the same Xcode project. Both `scarf` (Mac) and `scarf mobile` import the shared `ScarfDesign` and `ScarfCore` Swift packages under `scarf/Packages/`. #targets
 - [design] ScarfGo uses pure-Swift SSH via Citadel — no `ssh` binary on iOS. Generates Ed25519 keypair on device; private key stored in iOS Keychain. Key resolution per-server via `SSHKeyResolver` maps `SSHConfig` to its server entry's stored key, with fallback to legacy singleton for pre-M9 installs (gh#133). Both transport + chat ACP channel use per-server resolution to avoid loading the lexicographically-first key when multiple servers are registered. #security
-- [scope] Feature surface: multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, Kanban board, Curator, settings (read-only), **on-device dictation + Live Voice**. All sessions are scoped to a project via the same Scarf-managed AGENTS.md block the Mac app writes. **Voice playback** speaks assistant replies through the host's configured text-to-speech provider (Hermes v0.20.1+). **Live Voice** (Hermes v0.21.3+ GPT-Live mode) streams voice directly to OpenAI ($0.05/min). #features #voice
+- [scope] Feature surface: multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, Kanban board, Curator, settings (read-only), **on-device dictation + Live Voice**. All sessions are scoped to a project: on a pre-0.16 or unconfirmed Hermes host, via the same Scarf-managed AGENTS.md block the Mac app writes; on a confirmed Hermes v0.16+ host (#142), instead via a HERMES_ENVIRONMENT_HINT passed to the hermes acp spawn, with the managed block stripped. **Voice playback** speaks assistant replies through the host's configured text-to-speech provider (Hermes v0.20.1+). **Live Voice** (Hermes v0.21.3+ GPT-Live mode) streams voice directly to OpenAI ($0.05/min). #features #voice
 - [profiles] Profile switching (#120, Design B): ScarfGo switches WHICH Hermes profile it views per-server WITHOUT mutating the host's `active_profile` (Mac app/terminal undisturbed). File layer scopes via `IOSServerConfig.remoteHome` → `HermesPathSet`; process layer (chat ACP + every hermes CLI) prepends `HERMES_HOME=<root>/profiles/<name>` in `CitadelServerTransport`/`ACPClient+iOS`, and pins the Default selection with `-p default` (a root `HERMES_HOME` is ignored by Hermes; R02/S13-F1). The profile picker parses `profile list` with the shared `ScarfCore.HermesProfileList` (display-name rows, exit code checked; S13-F4). Profile selection is persisted per-server via `UserDefaultsProfileSelectionStore` (shared between ScarfCore and iOS/Mac); UI rebuilds on profile switch and ACP session tears down/restarts to load profile-scoped state. #profiles #ios
 - [resilience] SSH connect resilience via `SSHConnectPolicy` — retries up to 3x on channel connect timeout only (hard-coded 10s window in Citadel). Actionable error text replaces bridged "error N" strings in transport / chat / onboarding funnels. Cold cellular Tailscale paths (DERP-relayed) exceed the 10s login window; warm tunnel fits easily. (gh#133) #resilience
 - [transport-security] Script execution via `streamScript` passes the script directly on stdin using `head -c N | /bin/sh` rather than base64-encoding it into the command line, keeping sensitive script content (e.g. Live Voice SDP offers) out of remote process argv where it would be visible in `ps`. #security
@@ -26,3 +27,4 @@ reviewed_by: audit:claude-code (background)
 - relates_to [[Multi-Server Architecture (Scarf 2.0+)]]
 - shares_with [[Scarf Design System (ScarfDesign)]]
 - documents_fix gh#133
+- relates_to [[HERMES_ENVIRONMENT_HINT replaces the AGENTS.md managed block on Hermes 0.16+]]

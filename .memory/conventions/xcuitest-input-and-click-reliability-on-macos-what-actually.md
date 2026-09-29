@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Features/Settings/Views/SettingsView.swift, scarf/sca
 source_paths_inferred: false
 source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-29
 reviewed: 2026-09-27
 reviewed_by: audit:claude-code (background)
 ---
@@ -39,3 +39,12 @@ Learned building the Live chat journey (`ChatJourneyUITests`). Both items cost a
 - [gotcha] Do NOT poll a streaming surface with a closure that ENUMERATES matches (`allElementsBoundByIndex`): resolving every match against a tree being rebuilt underneath raises "Failed to resolve remote element … (Underlying Error: Interrupted by waiter)", which XCTest records as a FAILURE at the query line and masks the real assertion. Use a lazy `firstMatch` + `waitForExistence`, and spend a long budget as N short chunks (9×10 s for 90 s) so the "one long idle wait leaves the app with no window" rule still holds. Keep the expensive enumeration for the failure branch only #testing #gotcha
 - [gotcha] A freshly minted isolated home has NO `state.db`, so `SessionsViewModel.loadImpl` returns at its `guard opened` and `storeStats` stays nil — the Sessions header renders its static tagline instead of "0 sessions · …". A journey that reads a baseline off that header must treat "no stats line" as zero, not as a broken read #testing
 - [convention] A Live journey that needs a provider must PROBE before touching the UI — one `hermes -z` with `HERMES_HOME` at the test's own isolated home, bounded (60 s), skipping with the CLI's stderr quoted. Otherwise a credential problem presents as "no reply bubble" 90 s into the run and reads as a product bug. Note the probe itself creates a session in that home, so read any session baseline AFTER it #testing
+
+
+
+## Chat-surface findings from the 3.5.0 issue tests (Issues35UITests, 2026-09-29)
+
+- [gotcha] A row with `.accessibilityElement(children: .combine)` over a `.textSelection(.enabled)` Text exposed NO text at all — screenshot showed `ResumeContinuityNoticeRow`, but no element matched `label/value CONTAINS` anywhere in the tree, and with an identifier added its label was empty. Fix: `.accessibilityElement(children: .ignore)` + an explicit `.accessibilityLabel(Text(verbatim: text))` (also what VoiceOver needed). When a query misses something a screenshot proves is rendered, export attachments (`xcrun xcresulttool export attachments --path <xcresult> --output-path <dir>`, names in manifest.json) before assuming a product bug #testing #a11y #gotcha
+- [gotcha] Badges inside a session row Button (`sessions.row.<id>`, `chat.session.<id>`) lose their own identifier (container rewrite); assert the Branch badge via the row's composed label ("Branch of “Parent”"), which both rows carry #testing
+- [convention] Chat journeys that only need `hermes acp` running (resume, /title, history rendering) spend NO tokens: clicking a seeded chat row spawns ACP and loads/creates a session without a provider turn. There is still no fake ACP agent, so a LIVE turn (e.g. the live duration stopwatch) cannot be asserted deterministically; prove history-derived behaviour on seeded `messages` rows instead #testing
+- [gotcha] Revert-proofing a slash intercept: ChatViewModel intercepts client-side slash commands in TWO places (no-client branch in `sendText`, and `sendViaACP`'s switch). Sabotaging only one left `/title` on a bound chat working — disable both when checking a test fails on revert #testing

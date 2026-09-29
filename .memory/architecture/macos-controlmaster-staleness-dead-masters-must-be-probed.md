@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/macos-controlmaster-staleness-dead-masters-must-be-probed
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: 4beace9d6d71c2aae455ed7eae5b600642f0f3b0
 created: 2026-07-12
 updated: 2026-07-12
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

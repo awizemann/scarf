@@ -3,12 +3,12 @@ title: Phase-1 Milestone 2: Mini-apps — implementation decisions
 type: note
 permalink: scarf/decisions/phase-1-milestone-2-mini-apps-implementation-decisions
 tags: [projects, phase-1, milestone-2, miniapps, decision, security, webkit, acp]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppBridge.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppSchemeHandler.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppBridge.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppRateLimiter.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppSchemeHandler.swift, scarf/scarfTests/MiniAppAgentSessionTests.swift]
 source_paths_inferred: false
-source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
+source_sha: 8b3e25c8c07a7e7f66cee4afc434992c4934b415
 created: 2026-06-16
 updated: 2026-06-16
-reviewed: 2026-09-08
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

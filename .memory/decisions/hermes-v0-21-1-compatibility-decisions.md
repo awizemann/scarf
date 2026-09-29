@@ -5,10 +5,10 @@ permalink: scarf/decisions/hermes-v0-21-1-compatibility-decisions
 tags: [hermes, capability-gating, versioning, settings, hermes-v0-21-1]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/WebToolsBackendRoster.swift, scarf/scarf/Features/Settings/Views/Tabs/WebToolsTab.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: e1e77724e4056341f29165bef3a5874528ee4174
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-08
 updated: 2026-09-28
-reviewed: 2026-09-26
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 The decision record for the v0.21.1 ("v2026.9.7") parity cycle, Phases 0–7.

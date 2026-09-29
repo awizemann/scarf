@@ -4,11 +4,11 @@ type: note
 permalink: scarf/decisions/unified-agents-md-project-context-renderer-in-scarfcore-mac
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-06-28
-updated: 2026-09-10
-reviewed: 2026-09-27
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-29
+reviewed: 2026-09-29
+reviewed_by: claude-sonnet-5
 ---
 
 ## Decision (2026-06-28, chosen by Alan)
@@ -28,6 +28,10 @@ Before: the Mac had a rich renderer (`ProjectAgentContextService.renderBlock`) w
 
 ## Invariant going forward
 
+## Update (2026-09-29, #142 P3)
+
+`renderManagedBlock` is unchanged and still the single AGENTS.md-block renderer, but it is no longer the only per-chat context path: on a confirmed Hermes >= v0.16 host, `ProjectContextBlock.renderEnvironmentHint(ManagedBlockInput)` renders a short, marker-free sibling that rides `HERMES_ENVIRONMENT_HINT` instead, and the managed block is stripped rather than written (`ProjectEnvironmentHint.delivery(for:)`). The "one renderer, byte-identical Mac/iOS" invariant still holds for the block path; `renderEnvironmentHint` is a second, deliberately separate renderer for the new path, not a violation of it. See [[HERMES_ENVIRONMENT_HINT replaces the AGENTS.md managed block on Hermes 0.16+]].
+
 Do NOT add a second/divergent block renderer. Any change to block content goes in `renderManagedBlock` (+ formatters) so Mac and iOS stay byte-identical. The cron/config/template/kanban field SOURCES are the lightweight transport-based readers in `ProjectStore` — keep them the single gather path.
 
 ## Verification
@@ -44,3 +48,4 @@ ScarfCore 775/775; new `ProjectContextBlockManagedTests` (cron filter/format, co
 ## Relations
 - (no relation: the planned "ScarfGo iOS does not load project context (process cwd gap)" note was never written; the gap it named is closed by this note's iOS renderer)
 - relates_to [[scarf/architecture/project-scoped-chat-and-agents-md-context]]
+- relates_to [[HERMES_ENVIRONMENT_HINT replaces the AGENTS.md managed block on Hermes 0.16+]]
