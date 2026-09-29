@@ -1273,6 +1273,11 @@ final class ChatViewModel {
         // prevented: a stray untitled `session/new` in the bot's profile.
         if let sendRouter, sendRouter(text, images) { return }
         if displayMode == .richChat {
+            // gh#147: `/title` and `/retry`/`/undo` never touch the wire,
+            // so answer them here — before the no-client branch would
+            // auto-start a session just to deliver them.
+            if let intercept = RichChatViewModel.clientSideSlashCommand(for: text),
+               handleLocalSlashCommand(intercept) { return }
             if let client = acpClient {
                 if holdSendIfReplayPending(client: client, text: text, images: images) { return }
                 sendViaACP(client: client, text: text, images: images)
@@ -1606,6 +1611,8 @@ final class ChatViewModel {
                 // empty ACP session unsaved), so a rename now would fail.
                 let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 pendingSessionTitle = title.isEmpty ? nil : title
+            case .renameSession, .cliOnly:
+                _ = handleLocalSlashCommand(intercept)
             }
             return
         }
@@ -3231,6 +3238,51 @@ final class ChatViewModel {
             ]
         )
         return true
+    }
+
+    /// `/title` and the CLI-only `/retry`/`/undo` (gh#147): handled
+    /// entirely here, never sent. Returns false for `/new`, which keeps its
+    /// `sendViaACP` path.
+    private func handleLocalSlashCommand(_ intercept: RichChatViewModel.ClientSideSlashCommand) -> Bool {
+        switch intercept {
+        case .newSession:
+            return false
+        case .cliOnly(let name):
+            showHint(RichChatViewModel.cliOnlySlashNotice(name: name))
+        case .renameSession(let title):
+            guard let title else {
+                showHint(RichChatViewModel.titleUsageNotice)
+                return true
+            }
+            guard let sessionId = richChatViewModel.sessionId, !sessionId.isEmpty else {
+                showHint(RichChatViewModel.titleNeedsSessionNotice)
+                return true
+            }
+            // Hermes stores an ACP session only after its first turn; until
+            // `currentSession` is that row a rename would fail, so the name
+            // waits like `/new <name>`'s (`applyPendingSessionTitle`).
+            guard richChatViewModel.currentSession?.id == sessionId else {
+                pendingSessionTitle = title
+                showHint(RichChatViewModel.titlePendingNotice(title))
+                return true
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                if await self.renameSession(sessionId, to: title) {
+                    self.showHint(RichChatViewModel.titleAppliedNotice(title))
+                } else {
+                    self.showHint(self.renameError
+                        ?? String(localized: "Couldn't name this chat “\(title)”. Rename it from the chat list."))
+                }
+            }
+        }
+        return true
+    }
+
+    private func showHint(_ text: String?) {
+        guard let text else { return }
+        richChatViewModel.transientHint = text
+        scheduleHintClear()
     }
 
     /// Name the session typed with `/new <name>` once Hermes has stored

@@ -1937,6 +1937,42 @@ final class ChatController {
         }
     }
 
+    /// `/title <name>` (gh#147, Mac twin `ChatViewModel.handleLocalSlashCommand`):
+    /// rename the current chat now if Hermes has stored it, else apply the
+    /// name after the first turn like `/new <name>`.
+    private func applyTitleSlash(_ title: String?) async {
+        guard let title else {
+            showHint(RichChatViewModel.titleUsageNotice)
+            return
+        }
+        guard let sessionId = vm.sessionId, !sessionId.isEmpty else {
+            showHint(RichChatViewModel.titleNeedsSessionNotice)
+            return
+        }
+        guard vm.currentSession?.id == sessionId else {
+            pendingSessionTitle = (title, sessionId)
+            showHint(RichChatViewModel.titlePendingNotice(title))
+            return
+        }
+        let ctx = context
+        let ok = await Self.runSessionRename(ctx, hermes: ctx.paths.hermesBinary, sessionId: sessionId, title: title)
+        guard vm.sessionId == sessionId else { return }
+        if ok {
+            if let current = vm.currentSession, current.id == sessionId {
+                vm.currentSession = current.withTitle(title)
+            }
+            showHint(RichChatViewModel.titleAppliedNotice(title))
+        } else {
+            showHint(String(localized: "Couldn't name this chat “\(title)”."))
+        }
+    }
+
+    private func showHint(_ text: String?) {
+        guard let text else { return }
+        vm.transientHint = text
+        scheduleTransientHintClear(snapshot: vm.transientHint)
+    }
+
     nonisolated private static func runSessionRename(
         _ ctx: ServerContext,
         hermes: String,
@@ -2186,6 +2222,11 @@ final class ChatController {
                 if !title.isEmpty, let newId = vm.sessionId, !newId.isEmpty {
                     pendingSessionTitle = (title, newId)
                 }
+            case .cliOnly(let name):
+                // gh#147: never sent — the model would get the literal text.
+                showHint(RichChatViewModel.cliOnlySlashNotice(name: name))
+            case .renameSession(let title):
+                await applyTitleSlash(title)
             }
             return
         }
