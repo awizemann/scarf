@@ -3137,6 +3137,18 @@ public final class HermesCapabilitiesStore {
         await load(force: true)
     }
 
+    /// The capabilities a probe in this session CONFIRMED, waiting for the
+    /// in-flight load first. `.empty` when the probe failed — including
+    /// when the published value is only the remembered last-known version
+    /// (`isProvisional`), which may predate a downgrade. For decisions that
+    /// change what Scarf writes to the host, where guessing "newer" is the
+    /// unsafe direction (#142: the environment hint strips the AGENTS.md
+    /// block).
+    public func confirmedCapabilities() async -> HermesCapabilities {
+        await refreshTask?.value
+        return isProvisional ? .empty : capabilities
+    }
+
     private func load(force: Bool) async {
         generation += 1
         let gen = generation

@@ -249,22 +249,55 @@ public enum ProjectContextBlock {
         // agents.md — the names Scarf ever created); any other file just
         // loses the block and keeps the user's text.
         for file in survey.files where file.name != target && file.hasBlock {
-            let path = projectPath + "/" + file.name
-            if !file.hasUserContent && agentsMDNames.contains(file.name) {
-                // Re-read right before deleting: only a file that still holds
-                // nothing but Scarf's block goes.
-                let now = try GuardedTextFile(transport: transport, label: file.name)
-                    .load(path, maxBytes: maxAgentsBytes)
-                guard now.exists else { continue }
-                if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try transport.removeFile(path)
-                } else {
-                    _ = try removeBlock(fromFileAt: path, transport: transport)
-                }
-            } else {
-                _ = try removeBlock(fromFileAt: path, transport: transport)
+            _ = try stripBlock(from: file, projectPath: projectPath, transport: transport)
+        }
+    }
+
+    /// Take Scarf's block out of one surveyed context file: an AGENTS.md /
+    /// agents.md that holds nothing but the block is Scarf's own and is
+    /// deleted; any other file just loses the block and keeps the user's
+    /// text. Returns whether anything on disk changed.
+    static func stripBlock(
+        from file: ContextFile, projectPath: String, transport: any ServerTransport
+    ) throws -> Bool {
+        let path = projectPath + "/" + file.name
+        if !file.hasUserContent && agentsMDNames.contains(file.name) {
+            // Re-read right before deleting: only a file that still holds
+            // nothing but Scarf's block goes.
+            let now = try GuardedTextFile(transport: transport, label: file.name)
+                .load(path, maxBytes: maxAgentsBytes)
+            guard now.exists else { return false }
+            if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try transport.removeFile(path)
+                return true
             }
         }
+        return try removeBlock(fromFileAt: path, transport: transport)
+    }
+
+    /// The migration for hosts that take the project context as
+    /// `HERMES_ENVIRONMENT_HINT` (Hermes >= v0.16, #142): strip Scarf's
+    /// managed block from EVERY context file that carries one. A file that
+    /// held only the block (the AGENTS.md Scarf created) is deleted rather
+    /// than left as an empty stub; the user's own text is kept byte-for-byte
+    /// outside the markers. Idempotent — a project with no block is a no-op.
+    ///
+    /// Throws on an unreadable context file (never guesses); callers treat
+    /// that as non-fatal and log it.
+    @discardableResult
+    public static func stripForEnvironmentHint(
+        forProjectAt projectPath: String,
+        context: ServerContext
+    ) throws -> Bool {
+        let transport = context.makeTransport()
+        let survey = try surveyContextFiles(forProjectAt: projectPath, transport: transport)
+        var changed = false
+        for file in survey.files where file.hasBlock {
+            if try stripBlock(from: file, projectPath: projectPath, transport: transport) {
+                changed = true
+            }
+        }
+        return changed
     }
 
     // MARK: - Which file Hermes loads (S11-F1)
