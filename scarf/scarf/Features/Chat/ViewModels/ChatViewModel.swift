@@ -3344,7 +3344,12 @@ final class ChatViewModel {
             }
             Task { [weak self] in
                 guard let self else { return }
-                if await self.renameSession(sessionId, to: title) {
+                let renamed = await self.renameSession(sessionId, to: title)
+                // The user may have moved to another chat while the rename
+                // ran: its outcome is not that chat's news (iOS twin:
+                // `applyTitleSlash`'s `vm.sessionId == sessionId` guard).
+                guard self.richChatViewModel.sessionId == sessionId else { return }
+                if renamed {
                     self.showHint(RichChatViewModel.titleAppliedNotice(title))
                 } else {
                     self.showHint(self.renameError
