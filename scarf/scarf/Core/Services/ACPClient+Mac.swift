@@ -28,10 +28,29 @@ extension ACPClient {
         profile: String? = nil,
         environmentHint: EnvironmentHintRequest? = nil
     ) -> ACPClient {
+        forMacApp(
+            context: context, projectCwd: projectCwd, profile: profile,
+            environmentHintSlot: nil, environmentHint: environmentHint)
+    }
+
+    /// `forMacApp` whose hint is read from `environmentHintSlot` when the
+    /// channel is opened (`start()`), not when the client is built. The
+    /// chat builds its client before the project prep that decides the
+    /// hint has run (#142 P3); the slot only answers for `projectCwd`.
+    /// A nil slot, or one holding nothing for this cwd, falls back to
+    /// `environmentHint` (nil = today's spawn).
+    public static func forMacApp(
+        context: ServerContext = .local,
+        projectCwd: String? = nil,
+        profile: String? = nil,
+        environmentHintSlot: EnvironmentHintSlot?,
+        environmentHint: EnvironmentHintRequest? = nil
+    ) -> ACPClient {
         ACPClient(context: context) { ctx in
-            try await makeProcessChannel(
+            let hint = environmentHintSlot?.request(forProjectCwd: projectCwd) ?? environmentHint
+            return try await makeProcessChannel(
                 for: ctx, projectCwd: projectCwd, profile: profile,
-                environmentHint: environmentHint)
+                environmentHint: hint)
         }
     }
 
