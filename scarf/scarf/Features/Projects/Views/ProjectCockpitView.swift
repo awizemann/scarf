@@ -73,6 +73,7 @@ struct ProjectCockpitView: View {
             // projects); otherwise stay on Sessions.
             selectedPanel = .sessions
             let vm = ProjectCockpitViewModel(context: serverContext, project: project)
+            vm.capabilitiesStore = capabilitiesStore
             viewModel = vm
             await vm.load()
             if vm.dashboard != nil { selectedPanel = .dashboard }
@@ -341,7 +342,11 @@ struct ProjectCockpitView: View {
                 CockpitEmptyState(icon: "globe", text: "No site widget in this project's dashboard.")
             }
         case .context:
-            CockpitContextPanel(block: viewModel?.contextBlock, isLoading: viewModel?.isLoading ?? true)
+            CockpitContextPanel(
+                block: viewModel?.contextBlock,
+                isEnvironmentHint: viewModel?.contextIsEnvironmentHint ?? false,
+                isLoading: viewModel?.isLoading ?? true
+            )
         case .cron:
             CockpitCronPanel(
                 jobs: viewModel?.cronJobs ?? [],
@@ -510,20 +515,36 @@ private struct CockpitDashboardPanel: View {
 }
 
 /// Read-only preview of the Scarf-managed AGENTS.md block — the
-/// projection of the `ScarfProject` the agent actually sees.
+/// projection of the `ScarfProject` the agent actually sees. On a host that
+/// takes `HERMES_ENVIRONMENT_HINT` (#142) it is the hint text instead,
+/// labelled so, since no file carries it.
 private struct CockpitContextPanel: View {
     let block: String?
+    let isEnvironmentHint: Bool
     let isLoading: Bool
 
     var body: some View {
         Group {
             if let block, !block.isEmpty {
                 ScrollView {
-                    Text(block)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
+                    if isEnvironmentHint {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Environment hint — sent to Hermes with each project chat (HERMES_ENVIRONMENT_HINT), not written to AGENTS.md.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(block)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
+                    } else {
+                        Text(block)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
                 }
             } else if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)

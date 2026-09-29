@@ -34,8 +34,17 @@ final class ProjectCockpitViewModel {
     /// none is bound / it no longer resolves.
     var modelPresetName: String?
     /// The Scarf-managed AGENTS.md block (inclusive of markers), for the
-    /// read-only Context panel.
+    /// read-only Context panel — or, when `contextIsEnvironmentHint`, the
+    /// `HERMES_ENVIRONMENT_HINT` text a project chat on this host carries
+    /// instead (#142).
     var contextBlock: String?
+    /// Whether `contextBlock` is the environment hint rather than a block
+    /// read from the project's files. Same gate as the chat start.
+    var contextIsEnvironmentHint = false
+
+    /// The window's capability store, set by the view. Only a probe it
+    /// confirmed switches the Context panel to the hint (nil → block).
+    @ObservationIgnored var capabilitiesStore: HermesCapabilitiesStore?
     /// Cron jobs attributed to this project (`[proj:<id>]` or `[tmpl:]`).
     var cronJobs: [HermesCronJob] = []
     /// The host zone to name next to time-of-day schedules (S08-F3).
@@ -255,6 +264,8 @@ final class ProjectCockpitViewModel {
 
         let context = self.context
         let project = self.project
+        let delivery = ProjectEnvironmentHint.delivery(
+            for: await capabilitiesStore?.confirmedCapabilities() ?? .empty)
         // Which project-context files exist, from the batched stat above, so
         // the block preview reads only those (one read in the usual case)
         // instead of probing every candidate name over SSH.
@@ -300,7 +311,11 @@ final class ProjectCockpitViewModel {
             // whichever context file Hermes loads for the project — AGENTS.md,
             // or the project's own CLAUDE.md / .cursorrules / .hermes.md (S11-F1).
             // AGENTS.md first: it is where the block is in most projects.
-            let block = presentContextFiles.lazy
+            // A host that takes the environment hint has no block to read;
+            // show the hint a chat started now would carry (#142).
+            let block = delivery == .environmentHint
+                ? ProjectContextBlock.renderEnvironmentHint(store.agentContextBlockInput(for: sp))
+                : presentContextFiles.lazy
                 .map { context.readText(project.path + "/" + $0) }
                 .compactMap {
                     Self.extractBlock(
@@ -364,6 +379,7 @@ final class ProjectCockpitViewModel {
 
         scarfProject = result.project
         contextBlock = result.block
+        contextIsEnvironmentHint = delivery == .environmentHint
         cronJobs = result.jobs
         cronZoneNote = result.zoneNote
         memoryBlock = result.memory
